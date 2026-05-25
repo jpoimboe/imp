@@ -22,21 +22,35 @@ def parse_output_schema(raw: dict[str, Any], source: SourceLoc) -> OutputSchema:
     fields: list[OutputField] = []
     for name, spec in raw.items():
         if not isinstance(spec, dict):
-            raise LoadError(f"field '{name}' must be a mapping", source)
+            raise LoadError(f"field {name!r} must be a mapping", source)
         if "type" not in spec:
-            raise LoadError(f"field '{name}' missing 'type'", source)
+            raise LoadError(f"field {name!r} missing 'type'", source)
         ftype = spec["type"]
         if ftype not in _TYPES:
             raise LoadError(
-                f"field '{name}' has unknown type {ftype!r}",
+                f"field {name!r} has unknown type {ftype!r}",
                 source,
-                hint=f"valid types: {sorted(_TYPES)}",
+                hint=f"valid types: {', '.join(sorted(_TYPES))}",
             )
         values: tuple[str, ...] = ()
         if ftype == "enum":
             if "values" not in spec:
-                raise LoadError(f"enum field '{name}' requires 'values'", source)
-            values = tuple(str(v) for v in spec["values"])
+                raise LoadError(f"enum field {name!r} requires 'values'", source)
+            raw_values = spec["values"]
+            if not isinstance(raw_values, list) or not raw_values:
+                raise LoadError(
+                    f"enum field {name!r} 'values' must be a non-empty list",
+                    source,
+                )
+            for v in raw_values:
+                if not isinstance(v, str):
+                    raise LoadError(
+                        f"enum field {name!r} values must be strings; "
+                        f"got {type(v).__name__} {v!r}",
+                        source,
+                        hint="quote numeric/boolean values: [\"1\", \"2\"]",
+                    )
+            values = tuple(raw_values)
         fields.append(
             OutputField(
                 name=name,
@@ -70,7 +84,8 @@ def validate_agent_output(output: dict[str, Any], schema: OutputSchema) -> None:
                 )
             continue
         pytype = _PY_TYPECHECK[field.type]
-        if not isinstance(value, pytype):
+        # bool is a subclass of int — explicitly reject bool when int is required
+        if not isinstance(value, pytype) or (field.type == "int" and isinstance(value, bool)):
             raise LoadError(
                 f"field {field.name!r} expected {field.type}, got {type(value).__name__}",
                 schema.source,

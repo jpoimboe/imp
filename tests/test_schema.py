@@ -78,3 +78,51 @@ def test_validate_wrong_type() -> None:
     with pytest.raises(LoadError) as ei:
         validate_agent_output({"status": "Success", "count": "nope"}, schema)
     assert "expected int" in str(ei.value)
+
+
+def test_parse_field_spec_must_be_mapping() -> None:
+    raw = {"status": "not a mapping"}
+    with pytest.raises(LoadError) as ei:
+        parse_output_schema(raw, source=loc())
+    assert "must be a mapping" in str(ei.value)
+
+
+def test_parse_unknown_type_with_hint() -> None:
+    raw = {"x": {"type": "tuple"}}
+    with pytest.raises(LoadError) as ei:
+        parse_output_schema(raw, source=loc())
+    msg = str(ei.value)
+    assert "unknown type" in msg
+    assert "valid types:" in msg
+    # Stable hint format: comma-separated, not Python list repr
+    assert "[" not in msg.split("valid types:")[1]
+
+
+def test_parse_empty_enum_values_rejected() -> None:
+    raw = {"status": {"type": "enum", "values": []}}
+    with pytest.raises(LoadError) as ei:
+        parse_output_schema(raw, source=loc())
+    assert "non-empty" in str(ei.value)
+
+
+def test_parse_non_string_enum_values_rejected() -> None:
+    raw = {"code": {"type": "enum", "values": [200, 404]}}
+    with pytest.raises(LoadError) as ei:
+        parse_output_schema(raw, source=loc())
+    assert "values must be strings" in str(ei.value)
+
+
+def test_validate_bool_rejected_for_int_field() -> None:
+    schema = parse_output_schema(
+        {"count": {"type": "int"}}, source=loc()
+    )
+    with pytest.raises(LoadError) as ei:
+        validate_agent_output({"count": True}, schema)
+    assert "expected int" in str(ei.value)
+
+
+def test_validate_int_passes_int_field() -> None:
+    schema = parse_output_schema(
+        {"count": {"type": "int"}}, source=loc()
+    )
+    validate_agent_output({"count": 42}, schema)  # no raise
