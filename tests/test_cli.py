@@ -133,3 +133,66 @@ def test_status_with_stray_files(
     assert code == 0
     out = capsys.readouterr().out
     assert "1" in out  # the real change shows up
+
+
+def test_new_reports_loaderror_cleanly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Missing config.yaml should produce a friendly error, not a traceback."""
+    # Seed workflow but NOT config.yaml
+    src = tmp_path / ".imp" / "workflows" / "default"
+    (src / "agents").mkdir(parents=True)
+    write_agent_md(
+        src / "agents" / "context-loader.md",
+        frontmatter=(
+            "name: context-loader\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}\n"
+            "  notes: {type: string, required: false}"
+        ),
+    )
+    (src / "workflow.yaml").write_text(
+        "name: t\ndescription: \"\"\nphases: [p]\n"
+        "p:\n  steps: [{name: context-loader, file: agents/context-loader.md}]\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IMP_STUB_CANNED",
+                       str(FIXTURES / "canned" / "stub_outputs.yaml"))
+    code = main(["new", "x"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "imp:" in err
+    assert "config.yaml" in err
+
+
+def test_log_no_id_falls_back_to_latest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`imp log` with no ID should default to the most recent Change."""
+    _seed_default_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IMP_STUB_CANNED",
+                       str(FIXTURES / "canned" / "stub_outputs.yaml"))
+    main(["new", "first"])
+    main(["new", "second"])
+    capsys.readouterr()
+    code = main(["log"])
+    assert code == 0
+    out = capsys.readouterr().out
+    # The most recent change is #2, so events for it (change_created) should appear.
+    # Each change has its own log; verify we got events.
+    assert "phase_started" in out or "change_created" in out
+
+
+def test_log_no_id_no_changes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """`imp log` with no ID and no Changes yet should error cleanly."""
+    (tmp_path / ".imp").mkdir()
+    monkeypatch.chdir(tmp_path)
+    code = main(["log"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "no Changes" in err

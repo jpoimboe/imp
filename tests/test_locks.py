@@ -26,6 +26,7 @@ def _hold_lock(path: str, sync_path: str, ready: str) -> None:
 
 
 def test_contention_blocks(tmp_path: Path) -> None:
+    import time
     lock_path = tmp_path / ".imp" / "lock"
     lock_path.parent.mkdir(parents=True)
     sync = tmp_path / "release.flag"
@@ -34,8 +35,10 @@ def test_contention_blocks(tmp_path: Path) -> None:
     p = mp.Process(target=_hold_lock, args=(str(lock_path), str(sync), str(ready)))
     p.start()
     try:
+        deadline = time.monotonic() + 10.0
         while not ready.exists():
-            import time
+            if time.monotonic() > deadline:
+                pytest.fail("child process never signaled ready within 10s")
             time.sleep(0.05)
         with pytest.raises(LockHeld), ProjectLock(lock_path).acquire(timeout=0.5):
             pass

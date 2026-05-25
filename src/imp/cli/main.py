@@ -17,7 +17,7 @@ from typing import Any
 from imp.agents.runner import AgentRunner
 from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
-from imp.engine.errors import LoadError
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run
 from imp.engine.state import LockHeld, ProjectLock, State
 
@@ -59,11 +59,19 @@ def _cmd_new(args: argparse.Namespace) -> int:
     lock = ProjectLock(project / ".imp" / "lock")
     try:
         with lock.acquire():
-            change = Change.create(project, title=args.title)
+            try:
+                change = Change.create(project, title=args.title)
+            except (LoadError, LoadErrors) as e:
+                print(f"imp: {e}", file=sys.stderr)
+                return 2
             _write_change_lock(change)
             try:
                 print(f"Created Change {change.id}: {change.title!r}")
-                result = run(change, _agent_runner())
+                try:
+                    result = run(change, _agent_runner())
+                except (LoadError, LoadErrors) as e:
+                    print(f"imp: {e}", file=sys.stderr)
+                    return 2
                 print(f"Change {change.id}: {result.value}")
                 return 0 if result is RunResult.COMPLETED else 1
             finally:
@@ -107,7 +115,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         with lock.acquire():
             try:
                 change = Change.load(project, args.change_id)
-            except LoadError as err:
+            except (LoadError, LoadErrors) as err:
                 print(f"imp: {err}", file=sys.stderr)
                 return 2
             state = State.load(change.state_dir)
@@ -126,7 +134,11 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 _replay_current_step(change, state)
                 state.status = "running"
                 state.save(change.state_dir)
-                result = run(change, _agent_runner())
+                try:
+                    result = run(change, _agent_runner())
+                except (LoadError, LoadErrors) as e:
+                    print(f"imp: {e}", file=sys.stderr)
+                    return 2
                 print(f"Change {change.id}: {result.value}")
                 return 0 if result is RunResult.COMPLETED else 1
             finally:
@@ -141,8 +153,22 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 def _cmd_log(args: argparse.Namespace) -> int:
     project = _project_root()
+    change_id = args.change_id
+    if change_id is None:
+        changes_root = project / ".imp" / "changes"
+        if not changes_root.is_dir():
+            print("imp: no Changes yet", file=sys.stderr)
+            return 2
+        ids = sorted(
+            int(d.name) for d in changes_root.iterdir()
+            if d.is_dir() and d.name.isdigit()
+        )
+        if not ids:
+            print("imp: no Changes yet", file=sys.stderr)
+            return 2
+        change_id = ids[-1]
     try:
-        change = Change.load(project, args.change_id)
+        change = Change.load(project, change_id)
     except LoadError as err:
         print(f"imp: {err}", file=sys.stderr)
         return 2
@@ -213,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser("log")
-    p_log.add_argument("change_id", type=int)
+    p_log.add_argument("change_id", type=int, nargs="?")
     p_log.add_argument("--full", action="store_true")
     p_log.set_defaults(func=_cmd_log)
 
