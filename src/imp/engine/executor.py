@@ -1,0 +1,304 @@
+"""Workflow executor: step, phase, top-level loops; action handling."""
+
+from __future__ import annotations
+
+from enum import Enum
+from typing import Any
+
+from imp.agents.runner import AgentInvocation, AgentRunner
+from imp.engine.change import Change
+from imp.engine.gates import run_human_gate, run_script_gate
+from imp.engine.loader import load_workflow
+from imp.engine.schema import validate_agent_output
+from imp.engine.state import EventLog, State
+from imp.engine.types import (
+    Action,
+    AgentDef,
+    AgentGate,
+    Continue,
+    Goto,
+    HumanGate,
+    Pause,
+    Phase,
+    Retry,
+    ScriptGate,
+    Step,
+    StubGate,
+    Workflow,
+)
+from imp.providers.config import load_config
+
+
+class RunResult(Enum):
+    COMPLETED = "completed"
+    PAUSED = "paused"
+    ERRORED = "errored"
+
+
+def execute_step(
+    step: Step,
+    agent_def: AgentDef,
+    change: Change,
+    runner: AgentRunner,
+    state: State,
+) -> tuple[Action, dict[str, Any] | None]:
+    """Run one step. Returns (action, agent_output_or_None).
+
+    Caller supplies `agent_def` (looked up from `workflow.agents`) — execute_step
+    does not re-parse the agent file. V14 guarantees workflow.agents[step.file.stem]
+    is the right def.
+    """
+    log = change.event_log()
+    log.append("step_started", {
+        "step": step.name,
+        "phase": state.phase,
+        "model_role": step.model_role,
+        "interactive": step.interactive,
+    })
+
+    invocation = AgentInvocation(
+        agent_def=agent_def,
+        model_role=step.model_role,
+        change_id=change.id,
+        change_artifacts_dir=change.artifacts_dir,
+        project_root=change.project_root,
+        interactive=step.interactive,
+    )
+
+    agent_output: dict[str, Any] | None = None
+    runner_failed = False
+    # Runner crashes become an `error` event + Retry instead of propagating up.
+    try:
+        for event in runner.run(invocation):
+            log.append(event["type"], event["payload"])
+            if event["type"] == "agent_output":
+                agent_output = event["payload"]
+            if event["type"] == "error":
+                runner_failed = True
+    except Exception as e:
+        log.append(
+            "error",
+            {"message": f"agent runner crashed: {type(e).__name__}: {e}"},
+        )
+        runner_failed = True
+
+    if runner_failed or agent_output is None:
+        log.append("step_completed", {
+            "step": step.name, "action": "retry",
+            "reason": "agent did not produce valid output",
+        })
+        return Retry(), None
+    try:
+        validate_agent_output(agent_output, agent_def.output_schema)
+    except Exception as e:
+        log.append(
+            "error",
+            {"message": f"agent output failed schema validation: {e}"},
+        )
+        log.append("step_completed", {
+            "step": step.name, "action": "retry",
+            "reason": "schema validation failed",
+        })
+        return Retry(), None
+
+    action = _run_step_gates(step, change, log, agent_output)
+    log.append("step_completed", {"step": step.name, "action": _action_name(action)})
+    return action, agent_output
+
+
+def execute_phase(
+    phase: Phase,
+    workflow: Workflow,
+    change: Change,
+    runner: AgentRunner,
+    state: State,
+) -> Action:
+    """Walk phase steps, then phase gates. `workflow` is needed for AgentDef
+    lookup keyed by `step.file.stem` (V14 ensures the stem == agent name).
+    """
+    log = change.event_log()
+    log.append("phase_started", {"phase": phase.name})
+
+    # Resume support: skip steps before the cursor.
+    start_idx = 0
+    if state.step:
+        for i, st in enumerate(phase.steps):
+            if st.name == state.step:
+                start_idx = i
+                break
+
+    i = start_idx
+    while i < len(phase.steps):
+        step = phase.steps[i]
+        state.step = step.name
+        state.save(change.state_dir)
+        action, _ = execute_step(
+            step=step,
+            agent_def=workflow.agents[step.file.stem],
+            change=change,
+            runner=runner,
+            state=state,
+        )
+        if isinstance(action, Continue):
+            i += 1
+            state.step_attempt = 0
+        elif isinstance(action, Retry):
+            state.step_attempt += 1
+            if state.step_attempt > step.max_retries:
+                log.append("step_exhausted", {
+                    "step": step.name, "attempts": state.step_attempt,
+                })
+                state.step_attempt = 0
+                return step.on_max_retries
+            continue
+        else:
+            log.append("phase_completed", {
+                "phase": phase.name, "action": _action_name(action),
+            })
+            return action
+
+    # All steps done; now run phase gates.
+    for gate in phase.gates:
+        action = _run_one_gate(gate, change, log, agent_output={})
+        log.append("gate_evaluated", {
+            "phase": phase.name, "gate_type": type(gate).__name__,
+            "action": _action_name(action),
+        })
+        if not isinstance(action, Continue):
+            log.append("phase_completed", {
+                "phase": phase.name, "action": _action_name(action),
+            })
+            return action
+
+    log.append("phase_completed", {"phase": phase.name, "action": "continue"})
+    return Continue()
+
+
+def run(change: Change, runner: AgentRunner) -> RunResult:
+    """Top-level executor: walk phases until done, paused, or errored.
+
+    Retry-counter semantics:
+      `max_retries: N` allows 1 + N total attempts (1 initial + N retries).
+      The comparison is `attempt > max_retries`, so for max_retries=2, attempts
+      run 1, 2, 3 before `on_max_retries` fires.
+    """
+    # Load config so V12 (model_role configured) fires for the snapshotted workflow.
+    configured_roles = load_config(change.project_root).role_names()
+    workflow = load_workflow(
+        change.workflow_dir, configured_roles=configured_roles
+    )
+    state = State.load(change.state_dir)
+    log = change.event_log()
+    log.append(
+        "workflow_started",
+        {"name": workflow.name, "from_phase": state.phase},
+    )
+
+    while True:
+        if state.phase is None:
+            state.status = "completed"
+            state.save(change.state_dir)
+            log.append("workflow_completed", {})
+            return RunResult.COMPLETED
+
+        phase_idx = workflow.phase_index(state.phase)
+        if phase_idx is None:
+            log.append(
+                "error",
+                {"message": f"unknown phase {state.phase!r} in state"},
+            )
+            state.status = "errored"
+            state.save(change.state_dir)
+            return RunResult.ERRORED
+        phase = workflow.phases[phase_idx]
+
+        action = execute_phase(
+            phase=phase, workflow=workflow, change=change,
+            runner=runner, state=state,
+        )
+
+        if isinstance(action, Continue):
+            next_name = workflow.next_phase(phase.name)
+            state.phase = next_name
+            state.step = None
+            state.phase_attempt = 0
+            state.save(change.state_dir)
+        elif isinstance(action, Goto):
+            state.phase = action.target
+            state.step = None
+            state.phase_attempt = 0
+            state.save(change.state_dir)
+        elif isinstance(action, Retry):
+            state.phase_attempt += 1
+            if state.phase_attempt > phase.max_retries:
+                log.append("phase_exhausted", {
+                    "phase": phase.name, "attempts": state.phase_attempt,
+                })
+                state.phase_attempt = 0
+                on_max = phase.on_max_retries
+                if isinstance(on_max, Pause):
+                    state.status = "paused"
+                    state.save(change.state_dir)
+                    log.append(
+                        "workflow_paused",
+                        {"reason": "phase_exhausted"},
+                    )
+                    return RunResult.PAUSED
+                elif isinstance(on_max, Goto):
+                    state.phase = on_max.target
+                    state.step = None
+                    state.save(change.state_dir)
+                elif isinstance(on_max, Continue):
+                    state.phase = workflow.next_phase(phase.name)
+                    state.step = None
+                    state.save(change.state_dir)
+            else:
+                state.step = None
+                state.save(change.state_dir)
+        elif isinstance(action, Pause):
+            state.status = "paused"
+            state.save(change.state_dir)
+            log.append("workflow_paused", {"reason": "explicit"})
+            return RunResult.PAUSED
+
+
+def _run_step_gates(
+    step: Step, change: Change, log: EventLog, agent_output: dict[str, Any]
+) -> Action:
+    if not step.gates:
+        # Implicit: continue if status: Success, retry on anything else.
+        return Continue() if agent_output.get("status") == "Success" else Retry()
+    for gate in step.gates:
+        action = _run_one_gate(gate, change, log, agent_output)
+        log.append("gate_evaluated", {
+            "step": step.name, "gate_type": type(gate).__name__,
+            "action": _action_name(action),
+        })
+        if not isinstance(action, Continue):
+            return action
+    return Continue()
+
+
+def _run_one_gate(
+    gate: Any,
+    change: Change,
+    log: EventLog,
+    agent_output: dict[str, Any],
+) -> Action:
+    if isinstance(gate, ScriptGate):
+        action, context = run_script_gate(gate, cwd=change.project_root)
+        log.append("script_gate_result", context)
+        return action
+    if isinstance(gate, HumanGate):
+        return run_human_gate(gate, input_fn=input, output_fn=print)
+    if isinstance(gate, AgentGate):
+        raise NotImplementedError(
+            "agent gates land in Plan 2 with the real agent runtime"
+        )
+    if isinstance(gate, StubGate):
+        return gate.action
+    raise AssertionError(f"unknown gate type {type(gate).__name__}")
+
+
+def _action_name(action: Action) -> str:
+    return type(action).__name__.lower()

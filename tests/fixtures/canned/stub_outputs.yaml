@@ -12,3 +12,15 @@ failing-stub:
 crashing-stub:
   events:
     - {type: error, payload: {message: "intentional crash"}}
+
+context-loader:
+  events:
+    - {type: agent_output, payload: {status: Success, notes: "loaded"}}
+
+intent-clarifier:
+  events:
+    - {type: agent_output, payload: {status: Success, summary: "captured"}}
+
+coder:
+  events:
+    - {type: agent_output, payload: {status: Success}}
