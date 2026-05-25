@@ -40,6 +40,12 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["imp"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_types.py" = ["F401"]  # imports verify public API surface, not all are used inline
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
