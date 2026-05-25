@@ -200,8 +200,8 @@ def test_log_no_id_no_changes(
 
 def test_default_runner_is_deepagent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("IMP_STUB_CANNED", raising=False)
-    from imp.cli.main import _agent_runner
     from imp.agents.deepagent_runner import DeepAgentRunner
+    from imp.cli.main import _agent_runner
 
     runner = _agent_runner()
     assert isinstance(runner, DeepAgentRunner)
@@ -215,8 +215,8 @@ def test_stub_runner_honored_when_env_set(
         "stub:\n  events:\n  - {type: agent_output, payload: {status: Success}}\n"
     )
     monkeypatch.setenv("IMP_STUB_CANNED", str(canned))
-    from imp.cli.main import _agent_runner
     from imp.agents.stub_runner import StubAgentRunner
+    from imp.cli.main import _agent_runner
 
     runner = _agent_runner()
     assert isinstance(runner, StubAgentRunner)

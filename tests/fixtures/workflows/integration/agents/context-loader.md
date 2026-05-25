@@ -1,6 +1,6 @@
 ---
 name: context-loader
-tools: [complete_step]
+tools: []
 output:
   status: {type: enum, values: [Success, Error]}
   notes: {type: string, required: false}

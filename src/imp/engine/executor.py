@@ -505,16 +505,26 @@ def _run_agent_gate(
         "model_role": gate.model_role, "interactive": False,
     })
     output: dict[str, Any] | None = None
-    for event in runner.run(invocation):
-        log.append(event["type"], event["payload"])
-        if event["type"] == "agent_output":
-            output = event["payload"]
-        if event["type"] == "error":
-            log.append("step_completed", {
-                "step": f"gate:{stem}", "action": "pause",
-                "reason": "gate errored",
-            })
-            return Pause()
+    try:
+        for event in runner.run(invocation):
+            log.append(event["type"], event["payload"])
+            if event["type"] == "agent_output":
+                output = event["payload"]
+            if event["type"] == "error":
+                log.append("step_completed", {
+                    "step": f"gate:{stem}", "action": "pause",
+                    "reason": "gate errored",
+                })
+                return Pause()
+    except Exception as e:
+        log.append("error", {
+            "message": f"gate runner crashed: {type(e).__name__}: {e}",
+        })
+        log.append("step_completed", {
+            "step": f"gate:{stem}", "action": "pause",
+            "reason": "gate runner crashed",
+        })
+        return Pause()
     if output is None:
         log.append("step_completed", {
             "step": f"gate:{stem}", "action": "pause",

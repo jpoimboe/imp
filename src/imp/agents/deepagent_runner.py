@@ -23,6 +23,7 @@ Built-in tool exclusion is a Plan 3 follow-up.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Iterator
 from typing import Any
 
@@ -36,7 +37,9 @@ from imp.agents.output_schema import schema_to_pydantic_model
 from imp.agents.runner import AgentInvocation
 from imp.agents.subagents import compile_subagent_specs
 from imp.agents.tools import (
-    build_git_diff_tool, build_query_events_tool, build_web_fetch_tool,
+    build_git_diff_tool,
+    build_query_events_tool,
+    build_web_fetch_tool,
 )
 
 
@@ -129,10 +132,8 @@ def _translate_message(
         text = msg.content if isinstance(msg.content, str) else ""
         # Suppress bootstrap messages we injected ourselves (review minor)
         if text in suppress_initial:
-            try:
+            with contextlib.suppress(ValueError):
                 suppress_initial.remove(text)
-            except ValueError:
-                pass
             return out
         out.append({"type": "user_input", "payload": {"text": text}})
     return out
@@ -215,13 +216,12 @@ class DeepAgentRunner:
 
         structured: BaseModel | None = None
         try:
-            for chunk in agent.stream(
+            for chunk in agent.stream(  # type: ignore[call-overload]
                 {"messages": initial_messages},
                 **stream_kwargs,
             ):
                 for msg in _extract_messages(chunk):
-                    for event in _translate_message(msg, suppress):
-                        yield event
+                    yield from _translate_message(msg, suppress)
                 sr = _extract_structured_response(chunk)
                 if sr is not None:
                     structured = sr

@@ -1,6 +1,6 @@
 ---
 name: reviewer
-tools: [complete_step]
+tools: []
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: string, required: false}

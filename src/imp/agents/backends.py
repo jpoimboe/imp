@@ -19,8 +19,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from deepagents.backends import (  # type: ignore[import-untyped]
-    CompositeBackend, FilesystemBackend, StateBackend,
+from deepagents.backends import (
+    CompositeBackend,
+    FilesystemBackend,
+    StateBackend,
 )
 
 from imp.agents.runner import AgentInvocation

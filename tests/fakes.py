@@ -11,7 +11,7 @@ than there are canned responses, raises IndexError (test author's bug).
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, ClassVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
@@ -23,7 +23,9 @@ class FakeToolCallingChatModel(BaseChatModel):
     responses: list[AIMessage]
     _i: int = PrivateAttr(default=0)
 
-    model_config = {"extra": "allow", "arbitrary_types_allowed": True}
+    model_config: ClassVar[dict[str, Any]] = {
+        "extra": "allow", "arbitrary_types_allowed": True,
+    }
 
     @property
     def _llm_type(self) -> str:
@@ -57,10 +59,10 @@ class FakeToolCallingChatModel(BaseChatModel):
     ) -> ChatResult:
         return self._generate(messages, stop, run_manager, **kwargs)
 
-    def bind_tools(self, tools: Any, **kwargs: Any) -> "FakeToolCallingChatModel":
+    def bind_tools(self, tools: Any, **kwargs: Any) -> FakeToolCallingChatModel:
         return self
 
     def with_structured_output(
         self, schema: Any, **kwargs: Any,
-    ) -> "FakeToolCallingChatModel":
+    ) -> FakeToolCallingChatModel:
         return self

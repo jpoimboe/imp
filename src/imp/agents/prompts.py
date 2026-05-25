@@ -74,7 +74,7 @@ class _EventsNamespace:
     def __getitem__(self, step: str) -> _StepEvents | _EmptyOnMissing:
         if step in self._outputs:
             return _StepEvents(self._outputs[step])
-        return _EmptyOnMissing()  # type: ignore[return-value]
+        return _EmptyOnMissing()
 
 
 @dataclass(frozen=True, slots=True)

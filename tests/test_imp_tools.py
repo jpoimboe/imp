@@ -6,11 +6,13 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
 import httpx
+import pytest
 
 from imp.agents.tools import (
-    build_git_diff_tool, build_query_events_tool, build_web_fetch_tool,
+    build_git_diff_tool,
+    build_query_events_tool,
+    build_web_fetch_tool,
 )
 from imp.engine.state import EventLog
 

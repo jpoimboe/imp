@@ -33,7 +33,6 @@ def validate(
 
     _v1_step_files_exist_and_parsed(workflow, errors)
     _v2_status_enum_present(workflow, errors)
-    _v3_complete_step_in_tools(workflow, errors)
     _v4_decide_when_keys_match_schema(workflow, errors)
     _v5_goto_targets_valid(workflow, errors)
     _v7_human_gate_options(workflow, errors)
@@ -93,17 +92,6 @@ def _v2_status_enum_present(workflow: Workflow, errors: list[LoadError]) -> None
             errors.append(
                 LoadError(
                     f"agent {agent.name!r}: status enum missing {sorted(missing)}",
-                    agent.source,
-                )
-            )
-
-
-def _v3_complete_step_in_tools(workflow: Workflow, errors: list[LoadError]) -> None:
-    for agent in workflow.agents.values():
-        if "complete_step" not in agent.tools:
-            errors.append(
-                LoadError(
-                    f"agent {agent.name!r}: 'complete_step' must be in tools:",
                     agent.source,
                 )
             )

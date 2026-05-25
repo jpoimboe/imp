@@ -1,6 +1,6 @@
 ---
 name: coder
-tools: [complete_step]
+tools: []
 output:
   status: {type: enum, values: [Success, Error]}
 ---

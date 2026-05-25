@@ -63,25 +63,6 @@ def test_v2_status_missing(tmp_path: Path) -> None:
     assert any("must declare 'status' as enum" in str(e) for e in ei.value.errors)
 
 
-def test_v3_complete_step_missing(tmp_path: Path) -> None:
-    bad = (
-        "---\nname: bad\ntools: [read_file]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"bad.md": bad},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps:\n    - {name: s, file: agents/bad.md}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("'complete_step' must be in tools" in str(e) for e in ei.value.errors)
-
-
 def test_v4_decide_when_unknown_field(tmp_path: Path) -> None:
     agent_md = (
         "---\nname: reviewer\ntools: [complete_step]\n"

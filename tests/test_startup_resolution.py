@@ -9,7 +9,7 @@ import pytest
 
 from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
-from imp.engine.executor import RunResult, run
+from imp.engine.executor import run
 from imp.providers.resolve import ProviderUnavailable
 
 FIXTURES = Path(__file__).parent / "fixtures"

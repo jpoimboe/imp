@@ -20,9 +20,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 
 try:
-    from langchain.agents.middleware.types import (  # type: ignore[import-untyped]
-        AgentMiddleware,
-    )
+    from langchain.agents.middleware.types import AgentMiddleware
 except ImportError:  # pragma: no cover
     class AgentMiddleware:  # type: ignore[no-redef]
         pass

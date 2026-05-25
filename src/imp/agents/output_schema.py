@@ -29,7 +29,7 @@ def _field_type(field: OutputField) -> Any:
     if field.type == "enum":
         if not field.values:
             return str
-        return Literal[tuple(field.values)]  # type: ignore[return-value, valid-type]
+        return Literal[tuple(field.values)]
     if field.type == "object":
         return dict
     raise ValueError(f"unknown OutputField type {field.type!r}")
@@ -58,7 +58,7 @@ def schema_to_pydantic_model(schema: OutputSchema) -> type[BaseModel]:
             field_defs[f.name] = (py_type | None, Field(default=None))
 
     model_name = f"StepOutput_{_schema_signature(schema)}"
-    model: type[BaseModel] = create_model(  # type: ignore[call-overload]
+    model: type[BaseModel] = create_model(
         model_name,
         __config__=ConfigDict(extra="forbid"),
         **field_defs,

@@ -1,6 +1,6 @@
 ---
 name: sample
-tools: [complete_step]
+tools: []
 output:
   status: {type: enum, values: [Success, Error]}
   message: {type: string, required: false}
