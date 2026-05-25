@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models import BaseChatModel
 
@@ -31,6 +32,9 @@ from imp.engine.types import (
 from imp.providers.config import Config, load_config
 from imp.providers.resolve import ProviderUnavailable, resolve_role
 
+if TYPE_CHECKING:
+    from langgraph.checkpoint.base import BaseCheckpointSaver
+
 
 class RunResult(Enum):
     COMPLETED = "completed"
@@ -44,6 +48,10 @@ def execute_step(
     change: Change,
     runner: AgentRunner,
     state: State,
+    *,
+    model: BaseChatModel | None = None,
+    events_path: Path | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
 ) -> tuple[Action, dict[str, Any] | None]:
     """Run one step. Returns (action, agent_output_or_None).
 
@@ -66,6 +74,10 @@ def execute_step(
         change_artifacts_dir=change.artifacts_dir,
         project_root=change.project_root,
         interactive=step.interactive,
+        model=model,
+        events_path=events_path or change.events_path,
+        checkpointer=checkpointer,
+        # system_prompt + initial_messages computed in Task 18
     )
 
     agent_output: dict[str, Any] | None = None
@@ -115,6 +127,9 @@ def execute_phase(
     change: Change,
     runner: AgentRunner,
     state: State,
+    *,
+    resolved_models: dict[str, BaseChatModel] | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
 ) -> Action:
     """Walk phase steps, then phase gates. `workflow` is needed for AgentDef
     lookup keyed by `step.file.stem` (V14 ensures the stem == agent name).
@@ -141,6 +156,9 @@ def execute_phase(
             change=change,
             runner=runner,
             state=state,
+            model=(resolved_models.get(step.model_role) if resolved_models else None),
+            events_path=change.events_path,
+            checkpointer=checkpointer,
         )
         if isinstance(action, Continue):
             i += 1
@@ -227,8 +245,6 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
         change.workflow_dir, configured_roles=configured_roles
     )
     resolved_models = _resolve_all_referenced_roles(workflow, config)
-    if resolved_models:
-        pass  # Task 9 threads this into AgentInvocation
     state = State.load(change.state_dir)
     log = change.event_log()
     log.append(
@@ -257,6 +273,7 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
         action = execute_phase(
             phase=phase, workflow=workflow, change=change,
             runner=runner, state=state,
+            resolved_models=resolved_models,
         )
 
         if isinstance(action, Continue):

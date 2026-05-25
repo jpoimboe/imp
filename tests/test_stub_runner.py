@@ -58,3 +58,40 @@ def test_stub_runner_unknown_agent_raises(tmp_path: Path) -> None:
     inv = _make_invocation(tmp_path, "no-such-agent")
     with pytest.raises(KeyError):
         list(runner.run(inv))
+
+
+def test_invocation_carries_plan2_fields(tmp_path: Path) -> None:
+    from langchain_core.language_models.fake_chat_models import FakeListChatModel
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from imp.agents.runner import AgentInvocation
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+
+    agent_def = AgentDef(
+        name="x",
+        description="",
+        tools=frozenset(),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum", values=("Success",)),),
+            source=SourceLoc(file=tmp_path / "x.md", line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=tmp_path / "x.md",
+        source=SourceLoc(file=tmp_path / "x.md", line=1),
+    )
+    inv = AgentInvocation(
+        agent_def=agent_def,
+        model_role="default",
+        change_id=1,
+        change_artifacts_dir=tmp_path / "artifacts",
+        project_root=tmp_path,
+        interactive=False,
+        model=FakeListChatModel(responses=["ok"]),
+        system_prompt="you are x",
+        initial_messages=({"role": "user", "content": "go"},),
+        events_path=tmp_path / "events.jsonl",
+        checkpointer=MemorySaver(),
+    )
+    assert inv.system_prompt == "you are x"
+    assert inv.model is not None
