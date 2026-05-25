@@ -245,3 +245,125 @@ def test_v13_warning_decide_no_else(tmp_path: Path, capsys: pytest.CaptureFixtur
     load_workflow(wf)  # should not raise — warning only
     captured = capsys.readouterr()
     assert "no terminal 'else: true'" in captured.err
+
+
+def test_v1_step_gate_agent_file_missing(tmp_path: Path) -> None:
+    """AgentGate inside a step's gates should also have its file checked."""
+    wf = _make_workflow(
+        tmp_path,
+        agents={"stub.md": _OK_AGENT},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n  steps:\n"
+            "    - name: s\n"
+            "      file: agents/stub.md\n"
+            "      gates:\n"
+            "        - type: agent\n"
+            "          file: agents/missing.md\n"
+            "          decide:\n"
+            "            - {else: true, action: {kind: continue}}\n"
+        ),
+    )
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf)
+    assert any("agent gate file not found" in str(e) for e in ei.value.errors)
+
+
+def test_v11_step_gate_agent_fs_permissions(tmp_path: Path) -> None:
+    """AgentGate's fs_permissions inside step.gates should be validated."""
+    reviewer = (
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n"
+    )
+    wf = _make_workflow(
+        tmp_path,
+        agents={"stub.md": _OK_AGENT, "reviewer.md": reviewer},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n  steps:\n"
+            "    - name: s\n"
+            "      file: agents/stub.md\n"
+            "      gates:\n"
+            "        - type: agent\n"
+            "          file: agents/reviewer.md\n"
+            "          fs_permissions:\n"
+            "            - {operations: [read], paths: ['../escape'], mode: allow}\n"
+            "          decide:\n"
+            "            - {else: true, action: {kind: continue}}\n"
+        ),
+    )
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf)
+    assert any("'..'" in str(e) for e in ei.value.errors)
+
+
+def test_v11_dotted_filename_allowed(tmp_path: Path) -> None:
+    """Paths with '..' inside a filename (not as a path component) should not be flagged."""
+    wf = _make_workflow(
+        tmp_path,
+        agents={"stub.md": _OK_AGENT},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n  steps:\n"
+            "    - name: s\n"
+            "      file: agents/stub.md\n"
+            "      fs_permissions:\n"
+            "        - {operations: [read], paths: ['/var/log/app..log'], mode: allow}\n"
+        ),
+    )
+    load_workflow(wf)  # no raise
+
+
+def test_v12_step_gate_agent_model_role_unconfigured(tmp_path: Path) -> None:
+    reviewer = (
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n"
+    )
+    wf = _make_workflow(
+        tmp_path,
+        agents={"stub.md": _OK_AGENT, "reviewer.md": reviewer},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n  steps:\n"
+            "    - name: s\n"
+            "      file: agents/stub.md\n"
+            "      gates:\n"
+            "        - type: agent\n"
+            "          file: agents/reviewer.md\n"
+            "          model_role: missing-role\n"
+            "          decide:\n"
+            "            - {else: true, action: {kind: continue}}\n"
+        ),
+    )
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf, configured_roles=frozenset({"default"}))
+    assert any("'missing-role'" in str(e) for e in ei.value.errors)
+
+
+def test_v14_step_gate_agent_name_mismatch(tmp_path: Path) -> None:
+    """An agent gate in a step referencing a misnamed agent file should fire V14."""
+    mismatched = (
+        "---\nname: not-reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n"
+    )
+    wf = _make_workflow(
+        tmp_path,
+        agents={"stub.md": _OK_AGENT, "reviewer.md": mismatched},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n  steps:\n"
+            "    - name: s\n"
+            "      file: agents/stub.md\n"
+            "      gates:\n"
+            "        - type: agent\n"
+            "          file: agents/reviewer.md\n"
+            "          decide:\n"
+            "            - {else: true, action: {kind: continue}}\n"
+        ),
+    )
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf)
+    assert any("filename stem is 'reviewer'" in str(e) for e in ei.value.errors)

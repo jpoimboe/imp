@@ -59,6 +59,14 @@ def _v1_step_files_exist_and_parsed(workflow: Workflow, errors: list[LoadError])
                         step.source,
                     )
                 )
+            for gate in step.gates:
+                if isinstance(gate, AgentGate) and not gate.file.exists():
+                    errors.append(
+                        LoadError(
+                            f"agent gate file not found: {gate.file}",
+                            gate.source,
+                        )
+                    )
         for gate in phase.gates:
             if isinstance(gate, AgentGate) and not gate.file.exists():
                 errors.append(
@@ -224,6 +232,10 @@ def _v11_fs_permissions_paths(workflow: Workflow, errors: list[LoadError]) -> No
         for step in phase.steps:
             for rule in step.fs_permissions:
                 _v11_check_paths(rule, errors)
+            for gate in step.gates:
+                if isinstance(gate, AgentGate):
+                    for rule in gate.fs_permissions:
+                        _v11_check_paths(rule, errors)
         for gate in phase.gates:
             if isinstance(gate, AgentGate):
                 for rule in gate.fs_permissions:
@@ -231,15 +243,25 @@ def _v11_fs_permissions_paths(workflow: Workflow, errors: list[LoadError]) -> No
 
 
 def _v11_check_paths(rule: FsRule, errors: list[LoadError]) -> None:
+    from pathlib import PurePosixPath
     for p in rule.paths:
         if not p.startswith("/"):
             errors.append(
                 LoadError(f"fs_permissions path must start with '/': {p!r}", rule.source)
             )
-        if ".." in p or p.startswith("~"):
+        # Use path components so e.g. "/var/log/app..log" is not flagged.
+        parts = PurePosixPath(p).parts
+        if any(part == ".." for part in parts):
             errors.append(
                 LoadError(
-                    f"fs_permissions path may not contain '..' or '~': {p!r}",
+                    f"fs_permissions path may not contain '..' segment: {p!r}",
+                    rule.source,
+                )
+            )
+        if p.startswith("~"):
+            errors.append(
+                LoadError(
+                    f"fs_permissions path may not start with '~': {p!r}",
                     rule.source,
                 )
             )
@@ -268,6 +290,9 @@ def _v12_model_role_configured(
     for phase in workflow.phases:
         for step in phase.steps:
             check(step.model_role, step.source)
+            for gate in step.gates:
+                if isinstance(gate, AgentGate):
+                    check(gate.model_role, gate.source)
         for gate in phase.gates:
             if isinstance(gate, AgentGate):
                 check(gate.model_role, gate.source)
@@ -318,6 +343,9 @@ def _v14_filename_matches_agent_name(
     for phase in workflow.phases:
         for step in phase.steps:
             check(step.file, step.source)
+            for gate in step.gates:
+                if isinstance(gate, AgentGate):
+                    check(gate.file, gate.source)
         for gate in phase.gates:
             if isinstance(gate, AgentGate):
                 check(gate.file, gate.source)

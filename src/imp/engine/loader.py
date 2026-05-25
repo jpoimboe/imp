@@ -252,11 +252,11 @@ def load_workflow(
     # Run validators and print warnings; raise on errors.
     from imp.engine.validators import validate
     errors, warnings = validate(workflow, configured_roles=configured_roles)
-    for w in warnings:
-        print(str(w), file=sys.stderr)
     if errors:
         raise LoadErrors(errors=errors, warnings=warnings)
-
+    # success path: print warnings only when no errors
+    for w in warnings:
+        print(str(w), file=sys.stderr)
     return workflow
 
 
