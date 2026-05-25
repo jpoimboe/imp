@@ -1,0 +1,11 @@
+name: live-e2e
+description: one-step workflow that calls real Anthropic
+phases: [step1]
+
+defaults:
+  max_retries: 0
+  on_max_retries: {kind: pause}
+
+step1:
+  steps:
+    - {name: sample, file: agents/sample.md}
