@@ -118,6 +118,25 @@ def _parse_action(raw: dict[str, Any] | None, source: SourceLoc) -> Action:
     )
 
 
+def _resolve_max_retries(
+    raw: dict[str, Any], default: int, source: SourceLoc, where: str
+) -> int:
+    """Resolve max_retries with null tolerance; reject non-int values cleanly."""
+    if "max_retries" not in raw:
+        return default
+    val = raw["max_retries"]
+    if val is None:
+        return default
+    if not isinstance(val, int) or isinstance(val, bool):
+        raise LoadError(
+            f"{where}: 'max_retries' must be an integer, got {type(val).__name__}",
+            source,
+        )
+    if val < 0:
+        raise LoadError(f"{where}: 'max_retries' must be >= 0", source)
+    return val
+
+
 def _parse_defaults(
     raw: dict[str, Any] | None, source: SourceLoc
 ) -> WorkflowDefaults:
@@ -125,7 +144,7 @@ def _parse_defaults(
         return WorkflowDefaults(
             max_retries=DEFAULT_MAX_RETRIES, on_max_retries=DEFAULT_ON_MAX_RETRIES
         )
-    max_retries = int(raw.get("max_retries", DEFAULT_MAX_RETRIES))
+    max_retries = _resolve_max_retries(raw, DEFAULT_MAX_RETRIES, source, "defaults")
     on_max = (
         _parse_action(raw["on_max_retries"], source)
         if "on_max_retries" in raw
@@ -172,11 +191,23 @@ def load_workflow(workflow_dir: Path) -> Workflow:
     if agents_dir.is_dir():
         for md in sorted(agents_dir.glob("*.md")):
             agent = parse_agent_file(md)
+            if agent.name in agents:
+                raise LoadError(
+                    f"duplicate agent name {agent.name!r} "
+                    f"(also declared in {agents[agent.name].source_path})",
+                    agent.source,
+                )
             agents[agent.name] = agent
 
+    seen_phases: set[str] = set()
     phase_objs: list[Phase] = []
     for pname in raw["phases"]:
+        if pname is None:
+            raise LoadError("phases list contains a null entry", root_source)
         pname = str(pname)
+        if pname in seen_phases:
+            raise LoadError(f"duplicate phase {pname!r} in phases: list", root_source)
+        seen_phases.add(pname)
         if pname not in raw:
             raise LoadError(
                 f"phase {pname!r} listed in phases: but no '{pname}:' section",
@@ -211,14 +242,20 @@ def _parse_phase(
     if "steps" not in raw:
         raise LoadError(f"phase {name!r} missing 'steps'", source)
 
+    steps_raw = raw["steps"]
+    if not isinstance(steps_raw, list):
+        raise LoadError(
+            f"phase {name!r}: 'steps' must be a list, got {type(steps_raw).__name__}",
+            source,
+        )
     steps = tuple(
-        _parse_step_minimal(s, workflow_dir, defaults, yaml_path) for s in raw["steps"]
+        _parse_step_minimal(s, workflow_dir, defaults, yaml_path) for s in steps_raw
     )
     return Phase(
         name=name,
         steps=steps,
         gates=(),  # Task 7 wires phase-level gates
-        max_retries=int(raw.get("max_retries", defaults.max_retries)),
+        max_retries=_resolve_max_retries(raw, defaults.max_retries, source, f"phase {name!r}"),
         on_max_retries=(
             _parse_action(raw["on_max_retries"], source)
             if "on_max_retries" in raw
@@ -238,18 +275,31 @@ def _parse_step_minimal(
     source = SourceLoc(file=yaml_path, line=1)
     if not isinstance(raw, dict):
         raise LoadError(f"step must be a mapping, got {type(raw).__name__}", source)
-    if "name" not in raw:
+    if "name" not in raw or raw["name"] is None:
         raise LoadError("step missing 'name'", source)
-    if "file" not in raw:
+    if not isinstance(raw["name"], str):
+        raise LoadError(
+            f"step 'name' must be a string, got {type(raw['name']).__name__}",
+            source,
+        )
+    if "file" not in raw or raw["file"] is None:
         raise LoadError(f"step {raw['name']!r} missing 'file'", source)
+    if not isinstance(raw["file"], str):
+        raise LoadError(
+            f"step {raw['name']!r}: 'file' must be a string", source,
+        )
+    model_role_raw = raw.get("model_role")
+    model_role = "default" if model_role_raw is None else str(model_role_raw)
     return Step(
-        name=str(raw["name"]),
-        file=workflow_dir / str(raw["file"]),
+        name=raw["name"],
+        file=workflow_dir / raw["file"],
         interactive=bool(raw.get("interactive", False)),
-        model_role=str(raw.get("model_role", "default")),
+        model_role=model_role,
         fs_permissions=(),
         gates=(),
-        max_retries=int(raw.get("max_retries", defaults.max_retries)),
+        max_retries=_resolve_max_retries(
+            raw, defaults.max_retries, source, f"step {raw['name']!r}"
+        ),
         on_max_retries=(
             _parse_action(raw["on_max_retries"], source)
             if "on_max_retries" in raw

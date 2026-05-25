@@ -251,3 +251,155 @@ p2:
     wf = load_workflow(wf_dir)
     assert isinstance(wf.defaults.on_max_retries, Goto)
     assert wf.defaults.on_max_retries.target == "p1"
+
+
+def test_load_workflow_max_retries_null(tmp_path: Path) -> None:
+    """max_retries: null should fall back to default, not crash."""
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [p]\n"
+        "defaults: {max_retries: null}\n"
+        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
+    )
+    wf = load_workflow(wf_dir)
+    assert wf.defaults.max_retries == 3  # built-in default
+
+
+def test_load_workflow_max_retries_string(tmp_path: Path) -> None:
+    """max_retries: 'three' should raise LoadError, not TypeError."""
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [p]\n"
+        "defaults: {max_retries: \"three\"}\n"
+        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "max_retries" in str(ei.value) and "must be an integer" in str(ei.value)
+
+
+def test_load_workflow_steps_null(tmp_path: Path) -> None:
+    """steps: null should raise LoadError, not TypeError."""
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [p]\np:\n  steps: null\n"
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "'steps' must be a list" in str(ei.value)
+
+
+def test_load_workflow_step_name_null(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [p]\n"
+        "p:\n  steps:\n    - {name: null, file: agents/stub.md}\n"
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "missing 'name'" in str(ei.value)
+
+
+def test_load_workflow_step_file_null(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [p]\n"
+        "p:\n  steps:\n    - {name: s, file: null}\n"
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "missing 'file'" in str(ei.value)
+
+
+def test_load_workflow_step_model_role_null(tmp_path: Path) -> None:
+    """model_role: null should fall back to 'default', not the string 'None'."""
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [p]\n"
+        "p:\n  steps:\n    - {name: s, file: agents/stub.md, model_role: null}\n"
+    )
+    wf = load_workflow(wf_dir)
+    assert wf.phases[0].steps[0].model_role == "default"
+
+
+def test_load_workflow_duplicate_phase_name(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [p, p]\n"
+        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "duplicate phase" in str(ei.value)
+
+
+def test_load_workflow_phases_null_entry(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [null]\n"
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "null entry" in str(ei.value)
+
+
+def test_load_workflow_duplicate_agent_name(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "alpha.md",
+        frontmatter=(
+            "name: reviewer\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    write_agent_md(
+        wf_dir / "agents" / "beta.md",
+        frontmatter=(
+            "name: reviewer\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: \"\"\nphases: [p]\n"
+        "p:\n  steps:\n    - {name: s, file: agents/reviewer.md}\n"
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "duplicate agent name" in str(ei.value)
