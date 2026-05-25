@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models import BaseChatModel
 
+from imp.agents.prompts import PromptRenderError, build_context, render_prompt
 from imp.agents.runner import AgentInvocation, AgentRunner
 from imp.engine.change import Change
 from imp.engine.gates import run_human_gate, run_script_gate
@@ -60,6 +61,27 @@ def execute_step(
     is the right def.
     """
     log = change.event_log()
+    try:
+        rendered_prompt = render_prompt(
+            agent_def.prompt_template_source,
+            build_context(
+                change_id=change.id, change_title=change.title,
+                artifacts_dir=change.artifacts_dir,
+                event_log=log,
+            ),
+        )
+    except PromptRenderError as e:
+        log.append("error", {"message": f"prompt render failed: {e}"})
+        log.append("step_started", {
+            "step": step.name, "phase": state.phase,
+            "model_role": step.model_role, "interactive": step.interactive,
+        })
+        log.append("step_completed", {
+            "step": step.name, "action": "retry",
+            "reason": "prompt render failed",
+        })
+        return Retry(), None
+
     log.append("step_started", {
         "step": step.name,
         "phase": state.phase,
@@ -75,9 +97,10 @@ def execute_step(
         project_root=change.project_root,
         interactive=step.interactive,
         model=model,
+        system_prompt=rendered_prompt,
+        initial_messages=({"role": "user", "content": "begin"},),
         events_path=events_path or change.events_path,
         checkpointer=checkpointer,
-        # system_prompt + initial_messages computed in Task 18
     )
 
     agent_output: dict[str, Any] | None = None
