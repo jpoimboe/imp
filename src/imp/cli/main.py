@@ -40,18 +40,12 @@ def _clear_change_lock(change: Change) -> None:
 
 
 def _agent_runner() -> AgentRunner:
-    """Plan 1 ships only StubAgentRunner. Plan 2 wires the real adapter and
-    selects via config; IMP_STUB_CANNED is honored for testing.
-    """
+    """Default: DeepAgentRunner. Test escape hatch: IMP_STUB_CANNED."""
     canned = os.environ.get("IMP_STUB_CANNED")
     if canned:
         return StubAgentRunner(canned_path=Path(canned))
-    print(
-        "imp: no agent runner available "
-        "(Plan 1 supports stub only — set IMP_STUB_CANNED).",
-        file=sys.stderr,
-    )
-    raise SystemExit(2)
+    from imp.agents.deepagent_runner import DeepAgentRunner
+    return DeepAgentRunner()
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
