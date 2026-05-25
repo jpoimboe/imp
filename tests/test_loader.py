@@ -4,7 +4,7 @@ import pytest
 
 from imp.engine.errors import LoadError
 from imp.engine.loader import load_workflow, parse_agent_file
-from imp.engine.types import Goto, Pause
+from imp.engine.types import Goto, Pause, ScriptGate
 from tests.conftest import write_agent_md
 
 
@@ -403,3 +403,73 @@ def test_load_workflow_duplicate_agent_name(tmp_path: Path) -> None:
     with pytest.raises(LoadError) as ei:
         load_workflow(wf_dir)
     assert "duplicate agent name" in str(ei.value)
+
+
+# ── Task 6: Step gates + fs_permissions ───────────────────────────────────
+
+
+def test_load_step_with_script_gate(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        """
+name: t
+description: ""
+phases: [p]
+p:
+  steps:
+    - name: s
+      file: agents/stub.md
+      gates:
+        - type: script
+          command: "make test"
+          decide:
+            - {when: {exit: 0}, action: {kind: continue}}
+            - {else: true, action: {kind: retry}}
+""".strip()
+    )
+    wf = load_workflow(wf_dir)
+    step = wf.phases[0].steps[0]
+    assert len(step.gates) == 1
+    g = step.gates[0]
+    assert isinstance(g, ScriptGate)
+    assert g.command == "make test"
+
+
+def test_load_step_with_fs_permissions(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        """
+name: t
+description: ""
+phases: [p]
+p:
+  steps:
+    - name: s
+      file: agents/stub.md
+      fs_permissions:
+        - {operations: [read],  paths: ["/project/**"], mode: allow}
+        - {operations: [write], paths: ["/scratch/**"], mode: allow}
+        - {operations: [write], paths: ["/**"], mode: deny}
+""".strip()
+    )
+    wf = load_workflow(wf_dir)
+    step = wf.phases[0].steps[0]
+    assert len(step.fs_permissions) == 3
+    assert step.fs_permissions[0].operations == ("read",)
+    assert step.fs_permissions[2].mode == "deny"

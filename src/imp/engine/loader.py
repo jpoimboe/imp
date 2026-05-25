@@ -19,11 +19,19 @@ from imp.engine.schema import parse_output_schema
 from imp.engine.types import (
     Action,
     AgentDef,
+    AgentGate,
     Continue,
+    Decide,
+    FsRule,
+    Gate,
     Goto,
+    HumanGate,
+    HumanOption,
     Pause,
     Phase,
     Retry,
+    Rule,
+    ScriptGate,
     SourceLoc,
     Step,
     Workflow,
@@ -228,6 +236,156 @@ def load_workflow(workflow_dir: Path) -> Workflow:
     )
 
 
+def _parse_decide(
+    raw: list[dict[str, Any]] | None, source: SourceLoc
+) -> Decide:
+    if not raw:
+        raise LoadError("decide block is empty", source)
+    if not isinstance(raw, list):
+        raise LoadError(
+            f"decide block must be a list, got {type(raw).__name__}", source
+        )
+    rules: list[Rule] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            raise LoadError("decide rule must be a mapping", source)
+        if "action" not in entry:
+            raise LoadError("decide rule missing 'action'", source)
+        action = _parse_action(entry["action"], source)
+        if entry.get("else") is True:
+            rules.append(Rule(when=(), is_else=True, action=action, source=source))
+            continue
+        if "when" not in entry:
+            raise LoadError(
+                "decide rule needs 'when:' map or 'else: true'", source
+            )
+        when_map = entry["when"]
+        if not isinstance(when_map, dict):
+            raise LoadError("'when' must be a mapping", source)
+        if not when_map:
+            raise LoadError(
+                "decide rule 'when' is empty — use 'else: true' for catch-all",
+                source,
+            )
+        rules.append(
+            Rule(
+                when=tuple((str(k), v) for k, v in when_map.items()),
+                is_else=False,
+                action=action,
+                source=source,
+            )
+        )
+    return Decide(rules=tuple(rules), source=source)
+
+
+def _default_script_decide(source: SourceLoc) -> Decide:
+    """Default for script gates without explicit decide: exit 0 → continue,
+    else → retry."""
+    return Decide(
+        rules=(
+            Rule(when=(("exit", 0),), is_else=False, action=Continue(), source=source),
+            Rule(when=(), is_else=True, action=Retry(), source=source),
+        ),
+        source=source,
+    )
+
+
+def _parse_fs_rule(raw: dict[str, Any], source: SourceLoc) -> FsRule:
+    if not isinstance(raw, dict):
+        raise LoadError("fs_permissions entry must be a mapping", source)
+    ops_raw = raw.get("operations") or []
+    paths_raw = raw.get("paths") or []
+    if not isinstance(ops_raw, list) or not isinstance(paths_raw, list):
+        raise LoadError(
+            "fs_permissions 'operations' and 'paths' must be lists", source
+        )
+    ops = tuple(ops_raw)
+    paths = tuple(paths_raw)
+    mode = str(raw.get("mode") or "allow")
+    if mode not in ("allow", "deny"):
+        raise LoadError(
+            f"fs_permissions mode must be 'allow' or 'deny', got {mode!r}", source
+        )
+    if not ops or not paths:
+        raise LoadError("fs_permissions entry needs operations and paths", source)
+    for op in ops:
+        if op not in ("read", "write"):
+            raise LoadError(
+                f"fs_permissions operation must be 'read' or 'write', got {op!r}",
+                source,
+            )
+    return FsRule(operations=ops, paths=paths, mode=mode, source=source)  # type: ignore[arg-type]
+
+
+def _parse_gate(
+    raw: dict[str, Any], workflow_dir: Path, source: SourceLoc
+) -> Gate:
+    if not isinstance(raw, dict) or "type" not in raw:
+        raise LoadError("gate must be a mapping with 'type'", source)
+    gtype = raw["type"]
+    if gtype == "human":
+        prompt = str(raw.get("prompt") or "")
+        opts_raw = raw.get("options") or []
+        if not isinstance(opts_raw, list):
+            raise LoadError("human gate 'options' must be a list", source)
+        options: list[HumanOption] = []
+        for opt in opts_raw:
+            if not isinstance(opt, dict) or "label" not in opt or "action" not in opt:
+                raise LoadError(
+                    "human gate option needs 'label' and 'action'", source
+                )
+            options.append(
+                HumanOption(
+                    label=str(opt["label"]),
+                    action=_parse_action(opt["action"], source),
+                    source=source,
+                )
+            )
+        return HumanGate(prompt=prompt, options=tuple(options), source=source)
+    if gtype == "script":
+        if "command" not in raw or raw["command"] is None:
+            raise LoadError("script gate missing 'command'", source)
+        decide = (
+            _parse_decide(raw["decide"], source)
+            if "decide" in raw
+            else _default_script_decide(source)
+        )
+        timeout_raw = raw.get("timeout")
+        timeout_seconds: int | None = None
+        if timeout_raw is not None:
+            if not isinstance(timeout_raw, int) or isinstance(timeout_raw, bool):
+                raise LoadError(
+                    "script gate 'timeout' must be an integer", source
+                )
+            timeout_seconds = timeout_raw
+        return ScriptGate(
+            command=str(raw["command"]),
+            cwd=str(raw["cwd"]) if raw.get("cwd") is not None else None,
+            timeout_seconds=timeout_seconds,
+            decide=decide,
+            source=source,
+        )
+    if gtype == "agent":
+        if "file" not in raw or raw["file"] is None:
+            raise LoadError("agent gate missing 'file'", source)
+        if "decide" not in raw:
+            raise LoadError("agent gate missing 'decide'", source)
+        return AgentGate(
+            file=workflow_dir / str(raw["file"]),
+            model_role=str(raw.get("model_role") or "default"),
+            fs_permissions=tuple(
+                _parse_fs_rule(r, source) for r in (raw.get("fs_permissions") or [])
+            ),
+            decide=_parse_decide(raw["decide"], source),
+            source=source,
+        )
+    raise LoadError(
+        f"unknown gate type {gtype!r}",
+        source,
+        hint="valid types: human, script, agent",
+    )
+
+
 def _parse_phase(
     name: str,
     raw: dict[str, Any],
@@ -235,7 +393,6 @@ def _parse_phase(
     defaults: WorkflowDefaults,
     yaml_path: Path,
 ) -> Phase:
-    """Task 5 stub: builds an empty-gates phase. Steps + gates filled in Tasks 6-7."""
     source = SourceLoc(file=yaml_path, line=1)
     if not isinstance(raw, dict):
         raise LoadError(f"phase {name!r} must be a mapping", source)
@@ -249,7 +406,7 @@ def _parse_phase(
             source,
         )
     steps = tuple(
-        _parse_step_minimal(s, workflow_dir, defaults, yaml_path) for s in steps_raw
+        _parse_step(s, workflow_dir, defaults, yaml_path) for s in steps_raw
     )
     return Phase(
         name=name,
@@ -265,13 +422,12 @@ def _parse_phase(
     )
 
 
-def _parse_step_minimal(
+def _parse_step(
     raw: dict[str, Any],
     workflow_dir: Path,
     defaults: WorkflowDefaults,
     yaml_path: Path,
 ) -> Step:
-    """Task 5 stub: name + file only. Gates + fs_permissions land in Task 6."""
     source = SourceLoc(file=yaml_path, line=1)
     if not isinstance(raw, dict):
         raise LoadError(f"step must be a mapping, got {type(raw).__name__}", source)
@@ -290,13 +446,28 @@ def _parse_step_minimal(
         )
     model_role_raw = raw.get("model_role")
     model_role = "default" if model_role_raw is None else str(model_role_raw)
+
+    fs_perms_raw = raw.get("fs_permissions") or []
+    if not isinstance(fs_perms_raw, list):
+        raise LoadError(
+            f"step {raw['name']!r}: 'fs_permissions' must be a list", source,
+        )
+    fs_perms = tuple(_parse_fs_rule(r, source) for r in fs_perms_raw)
+
+    gates_raw = raw.get("gates") or []
+    if not isinstance(gates_raw, list):
+        raise LoadError(
+            f"step {raw['name']!r}: 'gates' must be a list", source,
+        )
+    gates = tuple(_parse_gate(g, workflow_dir, source) for g in gates_raw)
+
     return Step(
         name=raw["name"],
         file=workflow_dir / raw["file"],
         interactive=bool(raw.get("interactive", False)),
         model_role=model_role,
-        fs_permissions=(),
-        gates=(),
+        fs_permissions=fs_perms,
+        gates=gates,
         max_retries=_resolve_max_retries(
             raw, defaults.max_retries, source, f"step {raw['name']!r}"
         ),
