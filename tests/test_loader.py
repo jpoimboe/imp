@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 
 from imp.engine.errors import LoadError
-from imp.engine.loader import parse_agent_file
+from imp.engine.loader import load_workflow, parse_agent_file
+from imp.engine.types import Goto, Pause
 from tests.conftest import write_agent_md
 
 
@@ -137,3 +138,116 @@ def test_parse_agent_crlf_line_endings(tmp_path: Path) -> None:
     assert agent.name == "stub"
     assert "\r" not in agent.prompt_template_source
     assert "Hello {{ change.id }}" in agent.prompt_template_source
+
+
+# ── Workflow tests (Task 5) ────────────────────────────────────────────────
+
+
+def _write_min_workflow(root: Path) -> Path:
+    """Writes a minimal workflow with one empty phase 'onboard'."""
+    wf_dir = root / ".imp" / "workflows" / "default"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        """
+name: test
+description: a minimal workflow
+phases: [onboard]
+
+defaults:
+  max_retries: 5
+  on_max_retries: {kind: pause}
+
+onboard:
+  steps:
+    - {name: s1, file: agents/stub.md}
+""".strip()
+    )
+    return wf_dir
+
+
+def test_load_workflow_basic(tmp_path: Path) -> None:
+    wf_dir = _write_min_workflow(tmp_path)
+    wf = load_workflow(wf_dir)
+    assert wf.name == "test"
+    assert tuple(p.name for p in wf.phases) == ("onboard",)
+    assert wf.defaults.max_retries == 5
+    assert isinstance(wf.defaults.on_max_retries, Pause)
+
+
+def test_load_workflow_missing_phases_key(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "workflow.yaml").write_text("name: x\ndescription: y\n")
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "missing 'phases'" in str(ei.value)
+
+
+def test_load_workflow_phase_not_defined(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: y\nphases: [a, b]\n\na:\n  steps: []\n"
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert "phase 'b' listed in phases: but no 'b:' section" in str(ei.value)
+
+
+def test_load_defaults_fallback(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: x\ndescription: y\nphases: [p]\n"
+        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
+    )
+    wf = load_workflow(wf_dir)
+    assert wf.defaults.max_retries == 3       # built-in default
+    assert isinstance(wf.defaults.on_max_retries, Pause)
+
+
+def test_load_defaults_goto(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        """
+name: x
+description: y
+phases: [p1, p2]
+
+defaults:
+  max_retries: 2
+  on_max_retries: {kind: goto, target: p1}
+
+p1:
+  steps:
+    - {name: s, file: agents/stub.md}
+p2:
+  steps:
+    - {name: s, file: agents/stub.md}
+""".strip()
+    )
+    wf = load_workflow(wf_dir)
+    assert isinstance(wf.defaults.on_max_retries, Goto)
+    assert wf.defaults.on_max_retries.target == "p1"
