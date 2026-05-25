@@ -31,6 +31,15 @@ def _anthropic_factory(model: str) -> BaseChatModel:
 _register("anthropic", "ANTHROPIC_API_KEY", _anthropic_factory)
 
 
+def _openai_factory(model: str) -> BaseChatModel:
+    from langchain_openai import ChatOpenAI
+
+    return ChatOpenAI(model=model)  # type: ignore[call-arg]
+
+
+_register("openai", "OPENAI_API_KEY", _openai_factory)
+
+
 class UnknownProvider(Exception):
     """prefer: lists a provider name we don't know how to instantiate."""
 

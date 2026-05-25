@@ -51,3 +51,39 @@ def test_first_entry_wins(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     # First listed entry wins when available
     assert getattr(model, "model", "") == "claude-opus-4-7"
+
+
+def test_openai_resolves_when_env_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    model = resolve_role(_role(("openai", "gpt-5")))
+    assert isinstance(model, BaseChatModel)
+    assert model.__class__.__name__ == "ChatOpenAI"
+
+
+def test_falls_through_anthropic_to_openai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    model = resolve_role(
+        _role(
+            ("anthropic", "claude-opus-4-7"),
+            ("openai", "gpt-5"),
+        )
+    )
+    assert model.__class__.__name__ == "ChatOpenAI"
+
+
+def test_both_missing_lists_both_envs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(ProviderUnavailable) as exc:
+        resolve_role(
+            _role(
+                ("anthropic", "claude-opus-4-7"),
+                ("openai", "gpt-5"),
+            )
+        )
+    msg = str(exc.value)
+    assert "ANTHROPIC_API_KEY" in msg
+    assert "OPENAI_API_KEY" in msg
