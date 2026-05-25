@@ -27,6 +27,7 @@ def _split_frontmatter(text: str, source_path: Path) -> tuple[str, str, int]:
     body_start_line is the 1-indexed line in the file where the body begins,
     used so prompt-template error tracebacks can be correct later.
     """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     m = _FRONTMATTER_RE.match(text)
     if not m:
         raise LoadError(
@@ -55,9 +56,14 @@ def parse_agent_file(path: Path) -> AgentDef:
     if "output" not in fm:
         raise LoadError("missing 'output' in agent frontmatter", SourceLoc(file=path, line=1))
 
-    schema = parse_output_schema(fm["output"], SourceLoc(file=path, line=1))
-    tools = frozenset(fm.get("tools", []))
-    subagents = tuple(fm.get("subagents", []))
+    output_raw = fm["output"]
+    if not isinstance(output_raw, dict):
+        raise LoadError(
+            "'output' must be a mapping", SourceLoc(file=path, line=1)
+        )
+    schema = parse_output_schema(output_raw, SourceLoc(file=path, line=1))
+    tools = frozenset(fm.get("tools") or [])
+    subagents = tuple(fm.get("subagents") or [])
 
     return AgentDef(
         name=str(fm["name"]),
