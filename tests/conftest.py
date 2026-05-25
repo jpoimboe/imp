@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def _stub_provider_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub provider env vars only if not already set. Live-API tests get
+    the real key through; ordinary tests get the stub."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    if not os.environ.get("OPENAI_API_KEY"):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
 
 @pytest.fixture

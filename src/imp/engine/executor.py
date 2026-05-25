@@ -5,6 +5,8 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
+
 from imp.agents.runner import AgentInvocation, AgentRunner
 from imp.engine.change import Change
 from imp.engine.gates import run_human_gate, run_script_gate
@@ -26,7 +28,8 @@ from imp.engine.types import (
     StubGate,
     Workflow,
 )
-from imp.providers.config import load_config
+from imp.providers.config import Config, load_config
+from imp.providers.resolve import ProviderUnavailable, resolve_role
 
 
 class RunResult(Enum):
@@ -174,6 +177,41 @@ def execute_phase(
     return Continue()
 
 
+def _resolve_all_referenced_roles(
+    workflow: Workflow, config: Config,
+) -> dict[str, BaseChatModel]:
+    """Walk every step + agent gate, collect model_role refs, resolve each.
+    All failures surfaced together."""
+    referenced: set[str] = set()
+    for phase in workflow.phases:
+        for step in phase.steps:
+            referenced.add(step.model_role)
+        for gate in phase.gates:
+            if isinstance(gate, AgentGate):
+                referenced.add(gate.model_role)
+
+    resolved: dict[str, BaseChatModel] = {}
+    failures: list[str] = []
+    for role_name in sorted(referenced):
+        if role_name not in config.roles:
+            failures.append(
+                f"role {role_name!r} referenced by workflow but not in "
+                f"config.yaml (configured: {sorted(config.roles)})"
+            )
+            continue
+        try:
+            resolved[role_name] = resolve_role(config.roles[role_name])
+        except Exception as e:
+            failures.append(str(e))
+
+    if failures:
+        raise ProviderUnavailable(
+            "startup model resolution failed:\n  - "
+            + "\n  - ".join(failures)
+        )
+    return resolved
+
+
 def run(change: Change, runner: AgentRunner) -> RunResult:
     """Top-level executor: walk phases until done, paused, or errored.
 
@@ -183,10 +221,14 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
       run 1, 2, 3 before `on_max_retries` fires.
     """
     # Load config so V12 (model_role configured) fires for the snapshotted workflow.
-    configured_roles = load_config(change.project_root).role_names()
+    config = load_config(change.project_root)
+    configured_roles = config.role_names()
     workflow = load_workflow(
         change.workflow_dir, configured_roles=configured_roles
     )
+    resolved_models = _resolve_all_referenced_roles(workflow, config)
+    if resolved_models:
+        pass  # Task 9 threads this into AgentInvocation
     state = State.load(change.state_dir)
     log = change.event_log()
     log.append(
