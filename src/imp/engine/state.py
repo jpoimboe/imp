@@ -13,10 +13,13 @@ import json
 import os
 import tempfile
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+
+import filelock
 
 Status = Literal["running", "paused", "completed", "errored"]
 
@@ -110,3 +113,50 @@ class EventLog:
                 break
 
         return events[last_start:end]
+
+
+class LockHeld(Exception):
+    """Raised when a lock could not be acquired before the timeout."""
+
+    def __init__(self, path: Path, held_by_pid: int | None) -> None:
+        self.path = path
+        self.held_by_pid = held_by_pid
+        super().__init__(
+            f"lock at {path} held by pid {held_by_pid}"
+            if held_by_pid
+            else f"lock at {path} is held"
+        )
+
+
+class ProjectLock:
+    """File-backed advisory lock for single-Change-running enforcement.
+
+    The lock file's content is the holder's PID so `imp status` can display it.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._fl = filelock.FileLock(str(path) + ".filelock")
+
+    @contextmanager
+    def acquire(self, timeout: float = 0.0):  # type: ignore[no-untyped-def]
+        try:
+            self._fl.acquire(timeout=timeout)
+        except filelock.Timeout as e:
+            held_pid = self._read_pid()
+            raise LockHeld(self.path, held_pid) from e
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(str(os.getpid()))
+            yield self
+        finally:
+            try:
+                self.path.unlink(missing_ok=True)
+            finally:
+                self._fl.release()
+
+    def _read_pid(self) -> int | None:
+        try:
+            return int(self.path.read_text().strip())
+        except (FileNotFoundError, ValueError):
+            return None
