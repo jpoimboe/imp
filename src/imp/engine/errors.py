@@ -29,8 +29,14 @@ class LoadError(Exception):
 
 @dataclass
 class LoadErrors(Exception):
-    """Aggregated LoadErrors reported together at end of load."""
+    """Aggregated errors + warnings reported together at end of load."""
     errors: list[LoadError]
+    warnings: list[LoadError]
 
     def __str__(self) -> str:
-        return "\n\n".join(str(e) for e in self.errors)
+        chunks = []
+        if self.errors:
+            chunks.append("errors:\n" + "\n\n".join(str(e) for e in self.errors))
+        if self.warnings:
+            chunks.append("warnings:\n" + "\n\n".join(str(w) for w in self.warnings))
+        return "\n\n".join(chunks)

@@ -9,6 +9,7 @@ Build order in this file:
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ import yaml
 
 from imp.engine._yaml import LineLoader, loc
 from imp.engine._yaml import items as _items
-from imp.engine.errors import LoadError
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.schema import parse_output_schema
 from imp.engine.types import (
     Action,
@@ -171,7 +172,10 @@ def _parse_defaults(
     return WorkflowDefaults(max_retries=max_retries, on_max_retries=on_max)
 
 
-def load_workflow(workflow_dir: Path) -> Workflow:
+def load_workflow(
+    workflow_dir: Path,
+    configured_roles: frozenset[str] | None = None,
+) -> Workflow:
     """Parse <workflow_dir>/workflow.yaml + agents/*.md into a Workflow.
 
     Task 5 wires phases/defaults only. Step gates + fs_permissions land in
@@ -235,7 +239,7 @@ def load_workflow(workflow_dir: Path) -> Workflow:
             _parse_phase(pname, raw[pname], workflow_dir, defaults, yaml_path)
         )
 
-    return Workflow(
+    workflow = Workflow(
         name=str(raw.get("name", workflow_dir.name)),
         description=str(raw.get("description", "")),
         phases=tuple(phase_objs),
@@ -244,6 +248,16 @@ def load_workflow(workflow_dir: Path) -> Workflow:
         workflow_dir=workflow_dir,
         source=root_source,
     )
+
+    # Run validators and print warnings; raise on errors.
+    from imp.engine.validators import validate
+    errors, warnings = validate(workflow, configured_roles=configured_roles)
+    for w in warnings:
+        print(str(w), file=sys.stderr)
+    if errors:
+        raise LoadErrors(errors=errors, warnings=warnings)
+
+    return workflow
 
 
 def _parse_decide(
