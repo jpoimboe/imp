@@ -53,13 +53,21 @@ class Goto(Action):
 class Rule:
     """One rule inside a decide: block.
 
-    Exactly one of `when` (dict of field→value to match) or `is_else` (catch-all)
-    is set. The action fires when the rule matches.
+    Exactly one of `when` (non-empty dict of field→value to match) or `is_else`
+    (catch-all) must be set.
     """
     when: tuple[tuple[str, object], ...]  # immutable dict-as-pairs; () for else
     is_else: bool
     action: Action
     source: SourceLoc
+
+    def __post_init__(self) -> None:
+        if self.is_else and self.when:
+            raise ValueError("Rule: is_else=True must have empty when")
+        if not self.is_else and not self.when:
+            raise ValueError(
+                "Rule: empty when without is_else=True is a black hole"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +208,9 @@ class WorkflowDefaults:
 
 @dataclass(frozen=True, slots=True)
 class Workflow:
+    """`agents` is a plain dict for V0; callers must treat it as immutable.
+    Plan 2 will wrap it in `MappingProxyType` for runtime enforcement.
+    """
     name: str
     description: str
     phases: tuple[Phase, ...]
