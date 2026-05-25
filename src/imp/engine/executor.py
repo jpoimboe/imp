@@ -37,6 +37,18 @@ if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
 
 
+def _open_checkpointer(state_dir: Path) -> Any:
+    """Return a SqliteSaver context manager for state_dir/checkpoint.db.
+
+    Returns whatever shape SqliteSaver.from_conn_string returns (context
+    manager in current versions). Caller uses `with ... as checkpointer:`.
+    """
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return SqliteSaver.from_conn_string(str(state_dir / "checkpoint.db"))
+
+
 class RunResult(Enum):
     COMPLETED = "completed"
     PAUSED = "paused"
@@ -275,73 +287,75 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
         {"name": workflow.name, "from_phase": state.phase},
     )
 
-    while True:
-        if state.phase is None:
-            state.status = "completed"
-            state.save(change.state_dir)
-            log.append("workflow_completed", {})
-            return RunResult.COMPLETED
-
-        phase_idx = workflow.phase_index(state.phase)
-        if phase_idx is None:
-            log.append(
-                "error",
-                {"message": f"unknown phase {state.phase!r} in state"},
-            )
-            state.status = "errored"
-            state.save(change.state_dir)
-            return RunResult.ERRORED
-        phase = workflow.phases[phase_idx]
-
-        action = execute_phase(
-            phase=phase, workflow=workflow, change=change,
-            runner=runner, state=state,
-            resolved_models=resolved_models,
-        )
-
-        if isinstance(action, Continue):
-            next_name = workflow.next_phase(phase.name)
-            state.phase = next_name
-            state.step = None
-            state.phase_attempt = 0
-            state.save(change.state_dir)
-        elif isinstance(action, Goto):
-            state.phase = action.target
-            state.step = None
-            state.phase_attempt = 0
-            state.save(change.state_dir)
-        elif isinstance(action, Retry):
-            state.phase_attempt += 1
-            if state.phase_attempt > phase.max_retries:
-                log.append("phase_exhausted", {
-                    "phase": phase.name, "attempts": state.phase_attempt,
-                })
-                state.phase_attempt = 0
-                on_max = phase.on_max_retries
-                if isinstance(on_max, Pause):
-                    state.status = "paused"
-                    state.save(change.state_dir)
-                    log.append(
-                        "workflow_paused",
-                        {"reason": "phase_exhausted"},
-                    )
-                    return RunResult.PAUSED
-                elif isinstance(on_max, Goto):
-                    state.phase = on_max.target
-                    state.step = None
-                    state.save(change.state_dir)
-                elif isinstance(on_max, Continue):
-                    state.phase = workflow.next_phase(phase.name)
-                    state.step = None
-                    state.save(change.state_dir)
-            else:
-                state.step = None
+    with _open_checkpointer(change.state_dir) as checkpointer:
+        while True:
+            if state.phase is None:
+                state.status = "completed"
                 state.save(change.state_dir)
-        elif isinstance(action, Pause):
-            state.status = "paused"
-            state.save(change.state_dir)
-            log.append("workflow_paused", {"reason": "explicit"})
-            return RunResult.PAUSED
+                log.append("workflow_completed", {})
+                return RunResult.COMPLETED
+
+            phase_idx = workflow.phase_index(state.phase)
+            if phase_idx is None:
+                log.append(
+                    "error",
+                    {"message": f"unknown phase {state.phase!r} in state"},
+                )
+                state.status = "errored"
+                state.save(change.state_dir)
+                return RunResult.ERRORED
+            phase = workflow.phases[phase_idx]
+
+            action = execute_phase(
+                phase=phase, workflow=workflow, change=change,
+                runner=runner, state=state,
+                resolved_models=resolved_models,
+                checkpointer=checkpointer,
+            )
+
+            if isinstance(action, Continue):
+                next_name = workflow.next_phase(phase.name)
+                state.phase = next_name
+                state.step = None
+                state.phase_attempt = 0
+                state.save(change.state_dir)
+            elif isinstance(action, Goto):
+                state.phase = action.target
+                state.step = None
+                state.phase_attempt = 0
+                state.save(change.state_dir)
+            elif isinstance(action, Retry):
+                state.phase_attempt += 1
+                if state.phase_attempt > phase.max_retries:
+                    log.append("phase_exhausted", {
+                        "phase": phase.name, "attempts": state.phase_attempt,
+                    })
+                    state.phase_attempt = 0
+                    on_max = phase.on_max_retries
+                    if isinstance(on_max, Pause):
+                        state.status = "paused"
+                        state.save(change.state_dir)
+                        log.append(
+                            "workflow_paused",
+                            {"reason": "phase_exhausted"},
+                        )
+                        return RunResult.PAUSED
+                    elif isinstance(on_max, Goto):
+                        state.phase = on_max.target
+                        state.step = None
+                        state.save(change.state_dir)
+                    elif isinstance(on_max, Continue):
+                        state.phase = workflow.next_phase(phase.name)
+                        state.step = None
+                        state.save(change.state_dir)
+                else:
+                    state.step = None
+                    state.save(change.state_dir)
+            elif isinstance(action, Pause):
+                state.status = "paused"
+                state.save(change.state_dir)
+                log.append("workflow_paused", {"reason": "explicit"})
+                return RunResult.PAUSED
 
 
 def _run_step_gates(
