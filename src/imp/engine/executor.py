@@ -73,6 +73,42 @@ def execute_step(
     is the right def.
     """
     log = change.event_log()
+
+    # Resume-skip-step (Plan 1 review #3 + Plan 2 reviews #7 #8):
+    # If we have a cached agent_output for this (phase, step) from a prior
+    # run, skip the runner and re-evaluate gates against the cached output.
+    # Guarded by step_attempt == 0 so a Retry from a gate doesn't loop
+    # forever against the same cache.
+    cached = (
+        log.cached_output_for(state.phase, step.name)
+        if state.step_attempt == 0 else None
+    )
+    if cached is not None:
+        log.append("step_resumed_with_cached_output", {
+            "step": step.name, "phase": state.phase,
+        })
+        # Schema-validate the cache (defense in depth)
+        try:
+            validate_agent_output(cached, agent_def.output_schema)
+        except Exception as e:
+            log.append("error", {
+                "message": f"cached output failed schema validation: {e}",
+            })
+            log.append("step_completed", {
+                "step": step.name, "action": "retry",
+                "reason": "cached output invalid; rerunning",
+            })
+            return Retry(), None
+        action = _run_step_gates(
+            step, change, log, cached,
+            runner=runner, resolved_models=None,
+            checkpointer=checkpointer, workflow=None,
+        )
+        log.append("step_completed", {
+            "step": step.name, "action": _action_name(action),
+        })
+        return action, cached
+
     try:
         rendered_prompt = render_prompt(
             agent_def.prompt_template_source,

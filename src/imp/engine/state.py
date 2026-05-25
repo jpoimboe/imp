@@ -86,6 +86,37 @@ class EventLog:
                 if line:
                     yield json.loads(line)
 
+    def cached_output_for(
+        self, phase: str | None, step_name: str,
+    ) -> dict[str, Any] | None:
+        """Return the agent_output payload if the LAST step_started for
+        (phase, step_name) is followed by an agent_output before any other
+        step_started. Otherwise None.
+
+        Keys on (phase, step_name) per Plan 2 review #8: a workflow can
+        have the same step name in different phases (e.g., context-loader
+        in load and verify); without the phase key, phase B would erroneously
+        skip its invocation using phase A's cached output.
+        """
+        events = list(self.read())
+        last_start = -1
+        for i, e in enumerate(events):
+            if e["type"] != "step_started":
+                continue
+            p = e["payload"]
+            if p.get("step") == step_name and p.get("phase") == phase:
+                last_start = i
+        if last_start == -1:
+            return None
+        for i in range(last_start + 1, len(events)):
+            t = events[i]["type"]
+            if t == "agent_output":
+                p = events[i]["payload"]
+                return p if isinstance(p, dict) else None
+            if t == "step_started":
+                return None
+        return None
+
     def events_for_current_step(self, step_name: str) -> Iterable[dict[str, Any]]:
         """Replay-helper for `imp resume`: yield events from the last
         `step_started` for `step_name` until the next different step starts.
