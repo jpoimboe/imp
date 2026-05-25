@@ -17,6 +17,7 @@ from typing import Any
 from imp.agents.runner import AgentRunner
 from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
+from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run
 from imp.engine.state import LockHeld, ProjectLock, State
 
@@ -67,9 +68,9 @@ def _cmd_new(args: argparse.Namespace) -> int:
                 return 0 if result is RunResult.COMPLETED else 1
             finally:
                 _clear_change_lock(change)
-    except LockHeld as e:
+    except LockHeld as lock_err:
         print(
-            f"imp: another Change is running (lock held by pid {e.held_by_pid})",
+            f"imp: another Change is running (lock held by pid {lock_err.held_by_pid})",
             file=sys.stderr,
         )
         return 2
@@ -104,7 +105,11 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     lock = ProjectLock(project / ".imp" / "lock")
     try:
         with lock.acquire():
-            change = Change.load(project, args.change_id)
+            try:
+                change = Change.load(project, args.change_id)
+            except LoadError as err:
+                print(f"imp: {err}", file=sys.stderr)
+                return 2
             state = State.load(change.state_dir)
             if state.status not in ("paused", "errored"):
                 print(
@@ -126,9 +131,9 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 return 0 if result is RunResult.COMPLETED else 1
             finally:
                 _clear_change_lock(change)
-    except LockHeld as e:
+    except LockHeld as lock_err:
         print(
-            f"imp: another Change is running (lock held by pid {e.held_by_pid})",
+            f"imp: another Change is running (lock held by pid {lock_err.held_by_pid})",
             file=sys.stderr,
         )
         return 2
@@ -136,7 +141,11 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 def _cmd_log(args: argparse.Namespace) -> int:
     project = _project_root()
-    change = Change.load(project, args.change_id)
+    try:
+        change = Change.load(project, args.change_id)
+    except LoadError as err:
+        print(f"imp: {err}", file=sys.stderr)
+        return 2
     for e in change.event_log().read():
         ts = e["timestamp"][:19].replace("T", " ")
         if args.full:
@@ -172,10 +181,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
     if not changes_root.is_dir():
         print("No Changes yet.")
         return 0
+    valid_dirs = [
+        d for d in changes_root.iterdir()
+        if d.is_dir() and d.name.isdigit()
+    ]
     rows = []
-    for d in sorted(changes_root.iterdir(), key=lambda p: int(p.name)):
-        if not d.is_dir() or not d.name.isdigit():
-            continue
+    for d in sorted(valid_dirs, key=lambda p: int(p.name)):
         meta = json.loads((d / "change.json").read_text())
         state = State.load(d / "state")
         rows.append(

@@ -88,3 +88,48 @@ def test_resume_paused_change(
     assert code == 0
     out = capsys.readouterr().out
     assert "replaying" in out.lower()
+
+
+def test_resume_unknown_id_returns_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    _seed_default_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IMP_STUB_CANNED",
+                       str(FIXTURES / "canned" / "stub_outputs.yaml"))
+    code = main(["resume", "999"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "no such Change" in err
+
+
+def test_log_unknown_id_returns_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    _seed_default_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    code = main(["log", "999"])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "no such Change" in err
+
+
+def test_status_with_stray_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    _seed_default_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IMP_STUB_CANNED",
+                       str(FIXTURES / "canned" / "stub_outputs.yaml"))
+    main(["new", "a"])
+    capsys.readouterr()
+    # Stray non-numeric file in .imp/changes/ shouldn't crash status.
+    (tmp_path / ".imp" / "changes" / "stray.txt").write_text("hi")
+    (tmp_path / ".imp" / "changes" / "not-a-number").mkdir()
+    code = main(["status"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "1" in out  # the real change shows up
