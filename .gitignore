@@ -12,3 +12,7 @@ build/
 .imp/changes/
 .imp/config.yaml
 .imp/lock
+
+# Plan 2 additions
+spikes/
+**/checkpoint.db
