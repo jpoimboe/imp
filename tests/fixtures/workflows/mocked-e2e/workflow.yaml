@@ -1,0 +1,15 @@
+name: mocked-e2e
+description: real DeepAgentRunner with FakeToolCallingChatModel
+phases: [code, review]
+
+defaults:
+  max_retries: 1
+  on_max_retries: {kind: pause}
+
+code:
+  steps:
+    - {name: coder, file: agents/coder.md}
+
+review:
+  steps:
+    - {name: reviewer, file: agents/reviewer.md}
