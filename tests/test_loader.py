@@ -4,7 +4,7 @@ import pytest
 
 from imp.engine.errors import LoadError
 from imp.engine.loader import load_workflow, parse_agent_file
-from imp.engine.types import Goto, Pause, ScriptGate
+from imp.engine.types import Goto, HumanGate, Pause, ScriptGate
 from tests.conftest import write_agent_md
 
 
@@ -473,3 +473,44 @@ p:
     assert len(step.fs_permissions) == 3
     assert step.fs_permissions[0].operations == ("read",)
     assert step.fs_permissions[2].mode == "deny"
+
+
+# ── Task 7: Phase-level gates ───────────────────────────────────────────────
+
+
+def test_load_phase_with_human_gate(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        """
+name: t
+description: ""
+phases: [onboard, spec]
+onboard:
+  steps:
+    - {name: s, file: agents/stub.md}
+  gates:
+    - type: human
+      prompt: "Continue?"
+      options:
+        - {label: Yes, action: {kind: continue}}
+        - {label: No,  action: {kind: pause}}
+spec:
+  steps:
+    - {name: s, file: agents/stub.md}
+""".strip()
+    )
+    wf = load_workflow(wf_dir)
+    onboard = wf.phases[0]
+    assert len(onboard.gates) == 1
+    g = onboard.gates[0]
+    assert isinstance(g, HumanGate)
+    assert g.prompt == "Continue?"
+    assert len(g.options) == 2

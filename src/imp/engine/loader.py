@@ -408,10 +408,19 @@ def _parse_phase(
     steps = tuple(
         _parse_step(s, workflow_dir, defaults, yaml_path) for s in steps_raw
     )
+
+    gates_raw = raw.get("gates") or []
+    if not isinstance(gates_raw, list):
+        raise LoadError(
+            f"phase {name!r}: 'gates' must be a list, got {type(gates_raw).__name__}",
+            source,
+        )
+    gates = tuple(_parse_gate(g, workflow_dir, source) for g in gates_raw)
+
     return Phase(
         name=name,
         steps=steps,
-        gates=(),  # Task 7 wires phase-level gates
+        gates=gates,
         max_retries=_resolve_max_retries(raw, defaults.max_retries, source, f"phase {name!r}"),
         on_max_retries=(
             _parse_action(raw["on_max_retries"], source)
