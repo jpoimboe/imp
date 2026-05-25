@@ -201,11 +201,23 @@ class DeepAgentRunner:
             if isinstance(m, dict) and isinstance(m.get("content"), str)
         ]
 
+        # langgraph requires a `thread_id` in the config whenever a
+        # checkpointer is attached. We derive a per-step thread id from
+        # change_id + agent name so each step gets its own checkpoint scope.
+        stream_kwargs: dict[str, Any] = {"stream_mode": "updates"}
+        if invocation.checkpointer is not None:
+            stream_kwargs["config"] = {
+                "configurable": {
+                    "thread_id": f"change-{invocation.change_id}-"
+                                 f"{invocation.agent_def.name}",
+                },
+            }
+
         structured: BaseModel | None = None
         try:
             for chunk in agent.stream(
                 {"messages": initial_messages},
-                stream_mode="updates",
+                **stream_kwargs,
             ):
                 for msg in _extract_messages(chunk):
                     for event in _translate_message(msg, suppress):
