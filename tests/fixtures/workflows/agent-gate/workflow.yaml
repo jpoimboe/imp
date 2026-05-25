@@ -1,0 +1,18 @@
+name: agent-gate-test
+description: phase ending in an agent gate that decides continue/retry
+phases: [implement]
+
+defaults:
+  max_retries: 1
+  on_max_retries: {kind: pause}
+
+implement:
+  steps:
+    - {name: coder, file: agents/coder.md}
+  gates:
+    - type: agent
+      file: agents/reviewer.md
+      decide:
+        - {when: {verdict: ok}, action: {kind: continue}}
+        - {when: {verdict: bad}, action: {kind: retry}}
+        - {else: true, action: {kind: pause}}

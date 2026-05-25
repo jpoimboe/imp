@@ -151,7 +151,11 @@ def execute_step(
         })
         return Retry(), None
 
-    action = _run_step_gates(step, change, log, agent_output)
+    action = _run_step_gates(
+        step, change, log, agent_output,
+        runner=None, resolved_models=None,
+        checkpointer=checkpointer, workflow=None,
+    )
     log.append("step_completed", {"step": step.name, "action": _action_name(action)})
     return action, agent_output
 
@@ -215,7 +219,11 @@ def execute_phase(
 
     # All steps done; now run phase gates.
     for gate in phase.gates:
-        action = _run_one_gate(gate, change, log, agent_output={})
+        action = _run_one_gate(
+            gate, change, log, agent_output={},
+            runner=runner, resolved_models=resolved_models,
+            checkpointer=checkpointer, workflow=workflow,
+        )
         log.append("gate_evaluated", {
             "phase": phase.name, "gate_type": type(gate).__name__,
             "action": _action_name(action),
@@ -359,13 +367,22 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
 
 
 def _run_step_gates(
-    step: Step, change: Change, log: EventLog, agent_output: dict[str, Any]
+    step: Step, change: Change, log: EventLog, agent_output: dict[str, Any],
+    *,
+    runner: AgentRunner | None = None,
+    resolved_models: dict[str, BaseChatModel] | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
+    workflow: Workflow | None = None,
 ) -> Action:
     if not step.gates:
         # Implicit: continue if status: Success, retry on anything else.
         return Continue() if agent_output.get("status") == "Success" else Retry()
     for gate in step.gates:
-        action = _run_one_gate(gate, change, log, agent_output)
+        action = _run_one_gate(
+            gate, change, log, agent_output,
+            runner=runner, resolved_models=resolved_models,
+            checkpointer=checkpointer, workflow=workflow,
+        )
         log.append("gate_evaluated", {
             "step": step.name, "gate_type": type(gate).__name__,
             "action": _action_name(action),
@@ -380,6 +397,11 @@ def _run_one_gate(
     change: Change,
     log: EventLog,
     agent_output: dict[str, Any],
+    *,
+    runner: AgentRunner | None = None,
+    resolved_models: dict[str, BaseChatModel] | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
+    workflow: Workflow | None = None,
 ) -> Action:
     if isinstance(gate, ScriptGate):
         action, context = run_script_gate(gate, cwd=change.project_root)
@@ -388,12 +410,100 @@ def _run_one_gate(
     if isinstance(gate, HumanGate):
         return run_human_gate(gate, input_fn=input, output_fn=print)
     if isinstance(gate, AgentGate):
-        raise NotImplementedError(
-            "agent gates land in Plan 2 with the real agent runtime"
+        return _run_agent_gate(
+            gate, change, log,
+            runner=runner, resolved_models=resolved_models,
+            checkpointer=checkpointer, workflow=workflow,
         )
     if isinstance(gate, StubGate):
         return gate.action
     raise AssertionError(f"unknown gate type {type(gate).__name__}")
+
+
+def _run_agent_gate(
+    gate: AgentGate,
+    change: Change,
+    log: EventLog,
+    *,
+    runner: AgentRunner | None,
+    resolved_models: dict[str, BaseChatModel] | None,
+    checkpointer: BaseCheckpointSaver[Any] | None,
+    workflow: Workflow | None,
+) -> Action:
+    """Run an agent as a gate. Output is schema-validated, then fed to decide."""
+    from imp.engine.gates import evaluate_decide
+
+    assert runner is not None and resolved_models is not None and workflow is not None
+
+    stem = gate.file.stem
+    agent_def = workflow.agents[stem]  # loader pre-parses every agents/*.md
+
+    try:
+        rendered_prompt = render_prompt(
+            agent_def.prompt_template_source,
+            build_context(
+                change_id=change.id, change_title=change.title,
+                artifacts_dir=change.artifacts_dir,
+                event_log=change.event_log(),
+            ),
+        )
+    except PromptRenderError as e:
+        log.append("error", {"message": f"gate prompt render failed: {e}"})
+        return Pause()
+
+    invocation = AgentInvocation(
+        agent_def=agent_def,
+        model_role=gate.model_role,
+        change_id=change.id,
+        change_artifacts_dir=change.artifacts_dir,
+        project_root=change.project_root,
+        interactive=False,
+        model=resolved_models.get(gate.model_role),
+        system_prompt=rendered_prompt,
+        initial_messages=({"role": "user", "content": "begin"},),
+        events_path=change.events_path,
+        checkpointer=checkpointer,
+    )
+    log.append("step_started", {
+        "step": f"gate:{stem}", "phase": None,
+        "model_role": gate.model_role, "interactive": False,
+    })
+    output: dict[str, Any] | None = None
+    for event in runner.run(invocation):
+        log.append(event["type"], event["payload"])
+        if event["type"] == "agent_output":
+            output = event["payload"]
+        if event["type"] == "error":
+            log.append("step_completed", {
+                "step": f"gate:{stem}", "action": "pause",
+                "reason": "gate errored",
+            })
+            return Pause()
+    if output is None:
+        log.append("step_completed", {
+            "step": f"gate:{stem}", "action": "pause",
+            "reason": "gate produced no output",
+        })
+        return Pause()
+
+    # Per review #9: schema-validate before evaluating decide.
+    try:
+        validate_agent_output(output, agent_def.output_schema)
+    except Exception as e:
+        log.append("error", {
+            "message": f"gate output failed schema validation: {e}",
+        })
+        log.append("step_completed", {
+            "step": f"gate:{stem}", "action": "pause",
+            "reason": "schema validation failed",
+        })
+        return Pause()
+
+    action = evaluate_decide(gate.decide, output)
+    log.append("step_completed", {
+        "step": f"gate:{stem}", "action": _action_name(action),
+    })
+    return action
 
 
 def _action_name(action: Action) -> str:

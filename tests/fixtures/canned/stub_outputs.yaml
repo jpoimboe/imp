@@ -24,3 +24,11 @@ intent-clarifier:
 coder:
   events:
     - {type: agent_output, payload: {status: Success}}
+
+reviewer:
+  events:
+    - {type: agent_output, payload: {status: Success, verdict: ok}}
+
+reviewer-bad:
+  events:
+    - {type: agent_output, payload: {status: Success, verdict: bad}}
