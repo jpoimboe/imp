@@ -367,3 +367,20 @@ def test_v14_step_gate_agent_name_mismatch(tmp_path: Path) -> None:
     with pytest.raises(LoadErrors) as ei:
         load_workflow(wf)
     assert any("filename stem is 'reviewer'" in str(e) for e in ei.value.errors)
+
+
+def test_v12_model_role_unconfigured(tmp_path: Path) -> None:
+    """When configured_roles is supplied, V12 flags references to unconfigured roles."""
+    wf = _make_workflow(
+        tmp_path,
+        agents={"stub.md": _OK_AGENT},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n"
+            "  steps:\n"
+            "    - {name: s, file: agents/stub.md, model_role: missing-role}\n"
+        ),
+    )
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf, configured_roles=frozenset({"default"}))
+    assert any("'missing-role'" in str(e) for e in ei.value.errors)
