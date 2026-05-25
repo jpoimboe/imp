@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
+from imp.engine._yaml import items
 from imp.engine.errors import LoadError
 from imp.engine.types import OutputField, OutputSchema, SourceLoc
 
@@ -20,7 +21,7 @@ _PY_TYPECHECK = {
 
 def parse_output_schema(raw: dict[str, Any], source: SourceLoc) -> OutputSchema:
     fields: list[OutputField] = []
-    for name, spec in raw.items():
+    for name, spec in items(raw):
         if not isinstance(spec, dict):
             raise LoadError(f"field {name!r} must be a mapping", source)
         if "type" not in spec:

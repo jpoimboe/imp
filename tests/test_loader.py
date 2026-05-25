@@ -514,3 +514,80 @@ spec:
     assert isinstance(g, HumanGate)
     assert g.prompt == "Continue?"
     assert len(g.options) == 2
+
+
+# ── Task 8: Source line tracking ───────────────────────────────────────────
+
+
+def test_step_source_line_is_accurate(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    wf_yaml = wf_dir / "workflow.yaml"
+    wf_yaml.write_text(
+        "name: t\n"            # line 1
+        "description: \"\"\n"  # line 2
+        "phases: [p]\n"        # line 3
+        "p:\n"                 # line 4
+        "  steps:\n"           # line 5
+        "    - name: s1\n"     # line 6
+        "      file: agents/stub.md\n"  # line 7
+    )
+    wf = load_workflow(wf_dir)
+    step = wf.phases[0].steps[0]
+    assert step.source.line == 6
+
+
+def test_error_includes_source_line(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    wf_yaml = wf_dir / "workflow.yaml"
+    wf_yaml.write_text(
+        "name: t\n"
+        "description: \"\"\n"
+        "phases: [p]\n"
+        "p:\n"
+        "  steps:\n"
+        "    - file: agents/missing.md\n"  # no 'name' — line 6
+    )
+    with pytest.raises(LoadError) as ei:
+        load_workflow(wf_dir)
+    assert ":6" in str(ei.value)
+
+
+def test_decide_when_no_line_pollution(tmp_path: Path) -> None:
+    """Regression for review #1: `__line__` must not pollute decide.when.
+    (The matcher test using evaluate_decide is in Task 16; this test only
+    verifies the parsed data shape.)"""
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    write_agent_md(
+        wf_dir / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: t\ndescription: \"\"\nphases: [p]\n"
+        "p:\n"
+        "  steps:\n"
+        "    - name: s\n"
+        "      file: agents/stub.md\n"
+        "      gates:\n"
+        "        - type: script\n"
+        "          command: \"true\"\n"
+        "          decide:\n"
+        "            - {when: {exit: 0}, action: {kind: continue}}\n"
+        "            - {else: true, action: {kind: retry}}\n"
+    )
+    wf = load_workflow(wf_dir)
+    gate = wf.phases[0].steps[0].gates[0]
+    # decide.rules[0].when should be exactly (("exit", 0),) — no "__line__" pair.
+    assert gate.decide.rules[0].when == (("exit", 0),)
