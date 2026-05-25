@@ -1,0 +1,25 @@
+name: integration
+description: end-to-end test workflow with pause + resume
+phases: [load, write, verify]
+
+defaults:
+  max_retries: 2
+  on_max_retries: {kind: pause}
+
+load:
+  steps:
+    - {name: context-loader, file: agents/context-loader.md}
+
+write:
+  steps:
+    - {name: coder, file: agents/coder.md}
+  gates:
+    - type: script
+      command: "false"   # mutated to "true" mid-test to allow resume past
+      decide:
+        - {when: {exit: 0}, action: {kind: continue}}
+        - {else: true, action: {kind: pause}}
+
+verify:
+  steps:
+    - {name: context-loader, file: agents/context-loader.md}
