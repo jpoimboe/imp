@@ -145,6 +145,10 @@ class ChatRenderer:
             finally:
                 self._stop_spinner = None
 
+    def line(self, text: str) -> None:
+        """Public entrypoint for printing a labeled or plain line."""
+        self._line(text)
+
     def _line(self, text: str) -> None:
         self._out.write(text + "\n")
         self._out.flush()

@@ -69,6 +69,8 @@ def execute_step(
     events_path: Path | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     on_event: EventCallback | None = None,
+    human_input_fn: Callable[[], str] | None = None,
+    human_output_fn: Callable[[str], None] | None = None,
 ) -> tuple[Action, dict[str, Any] | None]:
     """Run one step. Returns (action, agent_output_or_None).
 
@@ -108,6 +110,8 @@ def execute_step(
             runner=runner, resolved_models=None,
             checkpointer=checkpointer, workflow=None,
             on_event=on_event,
+            human_input_fn=human_input_fn,
+            human_output_fn=human_output_fn,
         )
         _emit(on_event, log, "step_completed", {
             "step": step.name, "action": _action_name(action),
@@ -197,6 +201,8 @@ def execute_step(
         runner=None, resolved_models=None,
         checkpointer=checkpointer, workflow=None,
         on_event=on_event,
+        human_input_fn=human_input_fn,
+        human_output_fn=human_output_fn,
     )
     _emit(on_event, log, "step_completed", {"step": step.name, "action": _action_name(action)})
     return action, agent_output
@@ -212,6 +218,8 @@ def execute_phase(
     resolved_models: dict[str, BaseChatModel] | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     on_event: EventCallback | None = None,
+    human_input_fn: Callable[[], str] | None = None,
+    human_output_fn: Callable[[str], None] | None = None,
 ) -> Action:
     """Walk phase steps, then phase gates. `workflow` is needed for AgentDef
     lookup keyed by `step.file.stem` (V14 ensures the stem == agent name).
@@ -242,6 +250,8 @@ def execute_phase(
             events_path=change.events_path,
             checkpointer=checkpointer,
             on_event=on_event,
+            human_input_fn=human_input_fn,
+            human_output_fn=human_output_fn,
         )
         if isinstance(action, Continue):
             i += 1
@@ -268,6 +278,8 @@ def execute_phase(
             runner=runner, resolved_models=resolved_models,
             checkpointer=checkpointer, workflow=workflow,
             on_event=on_event,
+            human_input_fn=human_input_fn,
+            human_output_fn=human_output_fn,
         )
         _emit(on_event, log, "gate_evaluated", {
             "phase": phase.name, "gate_type": type(gate).__name__,
@@ -323,6 +335,8 @@ def run(
     runner: AgentRunner,
     *,
     on_event: EventCallback | None = None,
+    human_input_fn: Callable[[], str] | None = None,
+    human_output_fn: Callable[[str], None] | None = None,
 ) -> RunResult:
     """Top-level executor: walk phases until done, paused, or errored.
 
@@ -331,6 +345,8 @@ def run(
       The comparison is `attempt > max_retries`, so for max_retries=2, attempts
       run 1, 2, 3 before `on_max_retries` fires.
     """
+    human_input_fn = human_input_fn or input
+    human_output_fn = human_output_fn or print
     # Load config so V12 (model_role configured) fires for the snapshotted workflow.
     config = load_config(change.project_root)
     configured_roles = config.role_names()
@@ -366,6 +382,8 @@ def run(
                 resolved_models=resolved_models,
                 checkpointer=checkpointer,
                 on_event=on_event,
+                human_input_fn=human_input_fn,
+                human_output_fn=human_output_fn,
             )
 
             if isinstance(action, Continue):
@@ -431,6 +449,8 @@ def _run_step_gates(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     workflow: Workflow | None = None,
     on_event: EventCallback | None = None,
+    human_input_fn: Callable[[], str] | None = None,
+    human_output_fn: Callable[[str], None] | None = None,
 ) -> Action:
     if not step.gates:
         # Implicit: continue if status: Success, retry on anything else.
@@ -441,6 +461,8 @@ def _run_step_gates(
             runner=runner, resolved_models=resolved_models,
             checkpointer=checkpointer, workflow=workflow,
             on_event=on_event,
+            human_input_fn=human_input_fn,
+            human_output_fn=human_output_fn,
         )
         _emit(on_event, log, "gate_evaluated", {
             "step": step.name, "gate_type": type(gate).__name__,
@@ -462,6 +484,8 @@ def _run_one_gate(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     workflow: Workflow | None = None,
     on_event: EventCallback | None = None,
+    human_input_fn: Callable[[], str] | None = None,
+    human_output_fn: Callable[[str], None] | None = None,
 ) -> Action:
     if isinstance(gate, ScriptGate):
         env_extra = {
@@ -473,7 +497,9 @@ def _run_one_gate(
         _emit(on_event, log, "script_gate_result", context)
         return action
     if isinstance(gate, HumanGate):
-        return run_human_gate(gate, input_fn=input, output_fn=print)
+        _input_fn = human_input_fn or input
+        _output_fn = human_output_fn or print
+        return run_human_gate(gate, input_fn=_input_fn, output_fn=_output_fn)
     if isinstance(gate, AgentGate):
         return _run_agent_gate(
             gate, change, log,

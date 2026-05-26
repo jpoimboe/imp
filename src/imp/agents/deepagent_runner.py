@@ -23,7 +23,7 @@ implemented via stub shadowing in builtin_filter.build_filtered_builtin_override
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from deepagents import create_deep_agent
@@ -165,10 +165,14 @@ def _process_stream_chunk(
 
 
 class DeepAgentRunner:
-    def __init__(self, model_factory: Any = None) -> None:
+    def __init__(
+        self, model_factory: Any = None,
+        *, input_fn: Callable[[], str] | None = None,
+    ) -> None:
         """model_factory is a test escape hatch (review minor): if set,
         called as model_factory(invocation) to override invocation.model."""
         self._model_factory = model_factory
+        self._input_fn = input_fn or input
 
     def run(self, invocation: AgentInvocation) -> Iterator[dict[str, Any]]:
         model = (
@@ -196,7 +200,7 @@ class DeepAgentRunner:
 
         middleware: list[Any] = []
         if invocation.interactive:
-            middleware.append(ChatMiddleware(input_fn=input))
+            middleware.append(ChatMiddleware(input_fn=self._input_fn))
 
         kwargs: dict[str, Any] = {
             "model": model,

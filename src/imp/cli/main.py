@@ -17,6 +17,7 @@ from typing import Any
 from imp.agents.runner import AgentRunner
 from imp.cli.chat import ChatRenderer
 from imp.cli.init import run_init
+from imp.cli.prompt import Prompt
 from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
@@ -41,13 +42,15 @@ def _clear_change_lock(change: Change) -> None:
         (change.change_dir / "lock").unlink()
 
 
-def _agent_runner() -> AgentRunner:
+def _agent_runner(prompt: Prompt | None = None) -> AgentRunner:
     """Default: DeepAgentRunner. Test escape hatch: IMP_STUB_CANNED."""
     canned = os.environ.get("IMP_STUB_CANNED")
     if canned:
         return StubAgentRunner(canned_path=Path(canned))
     from imp.agents.deepagent_runner import DeepAgentRunner
-    return DeepAgentRunner()
+    if prompt is None:
+        return DeepAgentRunner()
+    return DeepAgentRunner(input_fn=lambda: prompt.ask("you> "))
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -73,9 +76,16 @@ def _cmd_new(args: argparse.Namespace) -> int:
             _write_change_lock(change)
             try:
                 print(f"Created Change {change.id}: {change.title!r}")
+                prompt = Prompt()
+                runner = _agent_runner(prompt)
                 renderer = ChatRenderer()
                 try:
-                    result = run(change, _agent_runner(), on_event=renderer.handle)
+                    result = run(
+                        change, runner,
+                        on_event=renderer.handle,
+                        human_input_fn=lambda: prompt.ask("> "),
+                        human_output_fn=renderer.line,
+                    )
                 except (LoadError, LoadErrors) as e:
                     print(f"imp: {e}", file=sys.stderr)
                     return 2
@@ -127,6 +137,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             try:
                 print(f"Resuming Change {change.id}: {change.title!r}")
                 print(f"Phase: {state.phase}, step: {state.step}")
+                prompt = Prompt()
+                runner = _agent_runner(prompt)
                 renderer = ChatRenderer()
                 try:
                     renderer.handle({"type": "workflow_resumed", "payload": {}})
@@ -135,7 +147,12 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                     state.status = "running"
                     state.save(change.state_dir)
                     try:
-                        result = run(change, _agent_runner(), on_event=renderer.handle)
+                        result = run(
+                            change, runner,
+                            on_event=renderer.handle,
+                            human_input_fn=lambda: prompt.ask("> "),
+                            human_output_fn=renderer.line,
+                        )
                     except (LoadError, LoadErrors) as e:
                         print(f"imp: {e}", file=sys.stderr)
                         return 2
