@@ -1,7 +1,7 @@
 # tests/test_classify.py
 from __future__ import annotations
 
-from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 
 
@@ -40,9 +40,6 @@ def test_system_message_recurses() -> None:
     sys_msg = Message(role="system", content=(TextBlock(text="(replay)"),))
     user_msg = Message(role="user", content=(TextBlock(text="hi"),))
     assert classify_resume([user_msg, sys_msg], interactive=False) is ResumeState.SEND_TO_LLM
-
-
-from imp.agents.classify import count_tool_uses
 
 
 def test_count_tool_uses_across_assistant_messages() -> None:

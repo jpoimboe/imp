@@ -17,7 +17,13 @@ from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 
 
-@imp_tool(name="bash", description="Run a shell command. Returns JSON {stdout, stderr, returncode}. No permission gate (shell access is total at OS-user level).")
+@imp_tool(
+    name="bash",
+    description=(
+        "Run a shell command. Returns JSON {stdout, stderr, returncode}. "
+        "No permission gate (shell access is total at OS-user level)."
+    ),
+)
 def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
     proc = subprocess.run(
         command,

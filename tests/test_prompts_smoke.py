@@ -11,7 +11,10 @@ from tests.conftest import write_agent_md
 def test_render_uses_change_namespace(tmp_path: Path) -> None:
     p = write_agent_md(
         tmp_path / "a.md",
-        frontmatter="name: a\ntools: [complete_step]\noutput:\n  status: {type: enum, values: [Success, Error]}",
+        frontmatter=(
+            "name: a\ntools: [complete_step]\noutput:\n"
+            "  status: {type: enum, values: [Success, Error]}"
+        ),
         body="Change {{ change.id }}: {{ change.title }}",
     )
     agent = parse_agent_file(p)

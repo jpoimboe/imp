@@ -11,8 +11,14 @@ from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 
 
-@imp_tool(name="ask_user", description="Ask the user a question and return their answer. Only available in interactive steps.")
+@imp_tool(
+    name="ask_user",
+    description=(
+        "Ask the user a question and return their answer. "
+        "Only available in interactive steps."
+    ),
+)
 def ask_user(ctx: ToolContext, question: str) -> str:
     if ctx.user_input_fn is None:
         raise RuntimeError("ask_user not available in non-interactive step")
-    return ctx.user_input_fn(question)
+    return str(ctx.user_input_fn(question))

@@ -8,7 +8,7 @@ inside `run()`. Transcripts on disk are JSONL of these types.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -68,7 +68,8 @@ class AgentInvocation:
     fs_permissions: tuple[FsRule, ...]
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
-    max_tool_calls: int | None = None      # resolved by engine (Task 27a/28); None means "use executor default of 50"
+    # resolved by engine (Task 27a/28); None means "use executor default of 50"
+    max_tool_calls: int | None = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}
@@ -77,7 +78,7 @@ Event = dict[str, Any]                     # {"type": str, "payload": dict}
 class AgentRunner(Protocol):
     """Each provider's runner implements this. Engine consumes the event stream."""
 
-    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+    def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         """Yield events. Terminal event is `agent_output` (success) or `error`."""
         ...
 

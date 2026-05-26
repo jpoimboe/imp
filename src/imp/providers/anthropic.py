@@ -11,15 +11,20 @@ Loop:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any
 
 from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import (
-    AgentInvocation, Event, Message, TextBlock, ToolResultBlock, ToolUseBlock,
+    AgentInvocation,
+    AgentRunner,
+    Event,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
 )
 from imp.agents.subagents import dispatch_task, make_task_tool
 from imp.agents.tools import Tool, get_registry
@@ -27,6 +32,7 @@ from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.transcript import Transcript
 from imp.engine.schema import validate_agent_output
+from imp.providers.base import Provider
 
 
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
@@ -95,7 +101,8 @@ def _anthropic_to_message(response: Any) -> tuple[Message, list[str]]:
             content.append(ToolUseBlock(id=block.id, name=block.name, input=block.input))
         elif kind == "thinking":
             # Extended-thinking output — not part of the visible transcript.
-            warnings.append(f"skipped thinking block ({len(getattr(block, 'thinking', '') or '')} chars)")
+            thinking_len = len(getattr(block, "thinking", "") or "")
+            warnings.append(f"skipped thinking block ({thinking_len} chars)")
         else:
             warnings.append(f"skipped unknown block type {kind!r}")
     return Message(role="assistant", content=tuple(content)), warnings
@@ -106,15 +113,17 @@ def _serialize(msg: Message) -> dict[str, Any]:
         "role": msg.role,
         "content": [
             {"type": "text", "text": b.text} if isinstance(b, TextBlock)
-            else {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input} if isinstance(b, ToolUseBlock)
-            else {"type": "tool_result", "tool_use_id": b.tool_use_id, "content": b.content, "is_error": b.is_error}
+            else {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
+            if isinstance(b, ToolUseBlock)
+            else {"type": "tool_result", "tool_use_id": b.tool_use_id,
+                  "content": b.content, "is_error": b.is_error}
             for b in msg.content
         ],
     }
 
 
 class AnthropicAgentRunner:
-    def __init__(self, model_name: str, *, client_factory=None) -> None:
+    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
         self.model = model_name                     # public per Provider protocol
         self._client_factory = client_factory
         self._client: Any = None
@@ -129,7 +138,7 @@ class AnthropicAgentRunner:
                 self._client = anthropic.AsyncAnthropic()
         return self._client
 
-    def _make_spawn_subagent(self):
+    def _make_spawn_subagent(self) -> Any:
         """Closure that creates a same-class child runner for the task tool.
 
         Returns an async callable that takes a sub_invocation and returns the
@@ -138,7 +147,7 @@ class AnthropicAgentRunner:
         """
         client_factory = self._client_factory
 
-        async def _spawn(sub_invocation: AgentInvocation):
+        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
             child = AnthropicAgentRunner(
                 model_name=sub_invocation.model_name, client_factory=client_factory,
             )
@@ -146,7 +155,7 @@ class AnthropicAgentRunner:
 
         return _spawn
 
-    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+    async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(
@@ -221,7 +230,8 @@ class AnthropicAgentRunner:
                 if invocation.interactive and ctx.user_input_fn is not None:
                     user_text = ctx.user_input_fn("")
                     user_msg = Message(role="user", content=(TextBlock(text=user_text),))
-                    messages.append(user_msg); transcript.append(user_msg)
+                    messages.append(user_msg)
+                    transcript.append(user_msg)
                     yield {"type": "user_input", "payload": {"text": user_text}}
                     continue
                 yield {"type": "error", "payload": {
@@ -325,11 +335,11 @@ class AnthropicAgentRunner:
 class AnthropicProvider:
     name = "anthropic"
 
-    def __init__(self, model_name: str, *, client_factory=None) -> None:
+    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
         self.model = model_name                     # public per Provider protocol
         self._client_factory = client_factory
 
-    def create_runner(self, invocation: AgentInvocation) -> AnthropicAgentRunner:
+    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
         return AnthropicAgentRunner(
             model_name=self.model, client_factory=self._client_factory,
         )
@@ -339,5 +349,5 @@ def _env_check() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
-def _factory(model: str) -> AnthropicProvider:
+def _factory(model: str) -> Provider:
     return AnthropicProvider(model_name=model)

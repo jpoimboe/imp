@@ -47,8 +47,9 @@ def _build_input_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     if not fields:
         return {"type": "object", "properties": {}, "required": []}
 
-    model = create_model(f"{fn.__name__}_args", **fields)  # type: ignore[call-overload]
-    return model.model_json_schema()
+    model = create_model(f"{fn.__name__}_args", **fields)
+    schema: dict[str, Any] = model.model_json_schema()
+    return schema
 
 
 def imp_tool(*, name: str, description: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:

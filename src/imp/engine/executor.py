@@ -14,18 +14,32 @@ from typing import Any
 
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import (
-    AgentInvocation, ChangeContext, Message, TextBlock,
+    AgentInvocation,
+    ChangeContext,
+    Message,
+    TextBlock,
 )
 from imp.engine.change import Change
 from imp.engine.gates import (
-    run_human_gate, run_script_gate,
+    run_human_gate,
+    run_script_gate,
 )
 from imp.engine.loader import load_workflow
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import CurrentStep, EventLog, State
 from imp.engine.types import (
-    Action, AgentGate, Continue, Goto, HumanGate,
-    Pause, Phase, Retry, ScriptGate, Step, StubGate, Workflow,
+    Action,
+    AgentGate,
+    Continue,
+    Goto,
+    HumanGate,
+    Pause,
+    Phase,
+    Retry,
+    ScriptGate,
+    Step,
+    StubGate,
+    Workflow,
 )
 from imp.providers.config import Config, load_config
 from imp.providers.resolve import resolve_role
@@ -131,7 +145,8 @@ async def _execute_phase(
         if state.step is not None:
             for i, s in enumerate(steps_iter):
                 if s.name == state.step:
-                    start_idx = i; break
+                    start_idx = i
+                    break
 
         retry_from_top = False
         for step in steps_iter[start_idx:]:
@@ -207,6 +222,7 @@ async def _execute_step(
 
     artifacts_dir = change.artifacts_dir
     artifacts_dir.mkdir(parents=True, exist_ok=True)
+    assert state.phase is not None, "phase must be set before executing a step"
     transcript_dir = change.change_dir / "steps" / state.phase / step.name
     transcript_dir.mkdir(parents=True, exist_ok=True)
 
@@ -319,13 +335,15 @@ async def _run_gate(
         return action
     if isinstance(gate, ScriptGate):
         action, ctx = run_script_gate(gate, cwd=change.project_root)
-        _emit(log, on_event, "gate_evaluated", {"kind": "script", "context": ctx, "action": _action_dict(action)})
+        _emit(log, on_event, "gate_evaluated",
+              {"kind": "script", "context": ctx, "action": _action_dict(action)})
         return action
     if isinstance(gate, AgentGate):
         # Agent gates land in Plan 3.
         raise NotImplementedError("agent gates land in Plan 3")
     if isinstance(gate, StubGate):
-        _emit(log, on_event, "gate_evaluated", {"kind": "stub", "action": _action_dict(gate.action)})
+        _emit(log, on_event, "gate_evaluated",
+              {"kind": "stub", "action": _action_dict(gate.action)})
         return gate.action
     raise AssertionError(f"unknown gate type {type(gate).__name__}")
 

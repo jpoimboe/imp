@@ -9,7 +9,10 @@ from imp.agents.tools.context import ToolContext
 from imp.engine.state import EventLog
 
 
-@imp_tool(name="query_events", description="Return events.jsonl as JSON. Optionally filter by type, limit to last N.")
+@imp_tool(
+    name="query_events",
+    description="Return events.jsonl as JSON. Optionally filter by type, limit to last N.",
+)
 def query_events(ctx: ToolContext, type: str | None = None, limit: int | None = None) -> str:
     events = list(EventLog(ctx.events_path).read())
     if type:

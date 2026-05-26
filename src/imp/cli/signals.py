@@ -18,6 +18,7 @@ import contextlib
 import os
 import signal
 import time
+from typing import Any
 
 from imp.engine.change import Change
 from imp.engine.state import State
@@ -82,7 +83,7 @@ class InterruptCoordinator:
         self._runner_interrupt = None
         self._should_pause = False
 
-    def attach_runner(self, interrupt_fn) -> None:
+    def attach_runner(self, interrupt_fn: Any) -> None:
         self._runner_interrupt = interrupt_fn
 
     def detach_runner(self) -> None:

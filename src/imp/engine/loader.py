@@ -91,7 +91,9 @@ def parse_agent_file(path: Path) -> AgentDef:
     subagents = tuple(fm.get("subagents") or [])
 
     mtc_raw = fm.get("max_tool_calls")
-    if mtc_raw is not None and (not isinstance(mtc_raw, int) or isinstance(mtc_raw, bool) or mtc_raw <= 0):
+    if mtc_raw is not None and (
+        not isinstance(mtc_raw, int) or isinstance(mtc_raw, bool) or mtc_raw <= 0
+    ):
         raise LoadError(
             f"'max_tool_calls' must be a positive integer; got {mtc_raw!r}",
             source,
@@ -178,7 +180,9 @@ def _parse_defaults(
         else DEFAULT_ON_MAX_RETRIES
     )
     mtc_raw = raw.get("max_tool_calls")
-    if mtc_raw is not None and (not isinstance(mtc_raw, int) or isinstance(mtc_raw, bool) or mtc_raw <= 0):
+    if mtc_raw is not None and (
+        not isinstance(mtc_raw, int) or isinstance(mtc_raw, bool) or mtc_raw <= 0
+    ):
         raise LoadError(
             f"'max_tool_calls' must be a positive integer; got {mtc_raw!r}",
             defaults_source,

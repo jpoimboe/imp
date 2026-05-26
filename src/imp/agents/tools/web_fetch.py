@@ -8,7 +8,13 @@ from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 
 
-@imp_tool(name="web_fetch", description="HTTP GET a URL, return the response body. Returns 'error: …' on HTTP/network failure.")
+@imp_tool(
+    name="web_fetch",
+    description=(
+        "HTTP GET a URL, return the response body. "
+        "Returns 'error: …' on HTTP/network failure."
+    ),
+)
 def web_fetch(ctx: ToolContext, url: str, timeout: float = 30.0) -> str:
     try:
         with httpx.Client() as c:

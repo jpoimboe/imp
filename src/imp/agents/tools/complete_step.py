@@ -30,7 +30,7 @@ def _py_type(f: OutputField) -> Any:
     if f.type == "enum":
         if not f.values:
             return str
-        return Literal[tuple(f.values)]  # type: ignore[valid-type]
+        return Literal[tuple(f.values)]
     raise ValueError(f"unknown field type {f.type!r}")
 
 
@@ -42,7 +42,7 @@ def _build_schema(output: OutputSchema) -> dict[str, Any]:
             fields[f.name] = (t, Field(...))
         else:
             fields[f.name] = (t | None, Field(default=None))
-    model = create_model("CompleteStepArgs", **fields)  # type: ignore[call-overload]
+    model = create_model("CompleteStepArgs", **fields)
     return _normalize_anthropic_schema(model.model_json_schema())
 
 
@@ -53,8 +53,6 @@ def _normalize_anthropic_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
     Recursive — covers nested object properties.
     """
-    if not isinstance(schema, dict):
-        return schema
     out = {k: v for k, v in schema.items() if k not in ("title", "$defs")}
     if out.get("type") == "object":
         out["additionalProperties"] = False
@@ -71,7 +69,10 @@ def make_complete_step_tool(output_schema: OutputSchema) -> Tool:
 
     return Tool(
         name="complete_step",
-        description="Terminate this step with the structured output. Args correspond to the agent's declared output schema.",
+        description=(
+            "Terminate this step with the structured output. "
+            "Args correspond to the agent's declared output schema."
+        ),
         input_schema=schema,
         fn=_invoke,
     )

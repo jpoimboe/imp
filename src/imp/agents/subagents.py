@@ -16,7 +16,6 @@ from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 
-
 TASK_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -40,7 +39,10 @@ def make_task_tool() -> Tool:
 
     return Tool(
         name="task",
-        description="Dispatch a subtask to a named subagent. Returns the subagent's structured output as a JSON string.",
+        description=(
+            "Dispatch a subtask to a named subagent. "
+            "Returns the subagent's structured output as a JSON string."
+        ),
         input_schema=TASK_TOOL_SCHEMA,
         fn=_invoke,
     )

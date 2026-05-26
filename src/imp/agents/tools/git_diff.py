@@ -8,7 +8,10 @@ from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 
 
-@imp_tool(name="git_diff", description="Run `git diff` (or `git diff --staged`) in the project root.")
+@imp_tool(
+    name="git_diff",
+    description="Run `git diff` (or `git diff --staged`) in the project root.",
+)
 def git_diff(ctx: ToolContext, staged: bool = False) -> str:
     cmd = ["git", "diff"]
     if staged:

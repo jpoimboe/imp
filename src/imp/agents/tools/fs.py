@@ -10,7 +10,13 @@ from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 
 
-@imp_tool(name="read_file", description="Read a file's contents. Paths use /project/, /artifacts/, or /scratch/ prefixes.")
+@imp_tool(
+    name="read_file",
+    description=(
+        "Read a file's contents. "
+        "Paths use /project/, /artifacts/, or /scratch/ prefixes."
+    ),
+)
 def read_file(ctx: ToolContext, path: str) -> str:
     ctx.check_fs_permission("read", path)
     resolved = ctx.resolve_path(path)
@@ -33,7 +39,13 @@ def write_file(ctx: ToolContext, path: str, content: str) -> str:
     return f"wrote {len(content)} bytes to {path}"
 
 
-@imp_tool(name="edit_file", description="Replace a single unique occurrence of `old` with `new` in `path`. Raises if `old` not found or not unique.")
+@imp_tool(
+    name="edit_file",
+    description=(
+        "Replace a single unique occurrence of `old` with `new` in `path`. "
+        "Raises if `old` not found or not unique."
+    ),
+)
 def edit_file(ctx: ToolContext, path: str, old: str, new: str) -> str:
     ctx.check_fs_permission("read", path)
     ctx.check_fs_permission("write", path)

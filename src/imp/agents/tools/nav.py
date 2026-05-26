@@ -29,7 +29,10 @@ def _real_root(ctx: ToolContext, prefix: str) -> Path:
     return ctx.artifacts_dir
 
 
-@imp_tool(name="glob", description="List file paths matching a virtual-prefixed glob (e.g. /project/**/*.py).")
+@imp_tool(
+    name="glob",
+    description="List file paths matching a virtual-prefixed glob (e.g. /project/**/*.py).",
+)
 def glob(ctx: ToolContext, pattern: str) -> str:
     prefix, rel = _virtual_prefix(pattern)
     ctx.check_fs_permission("read", prefix + "/")
@@ -43,7 +46,13 @@ def glob(ctx: ToolContext, pattern: str) -> str:
     return "\n".join(out)
 
 
-@imp_tool(name="grep", description="Search for a regex pattern in files under a virtual path. Returns matching lines with file paths.")
+@imp_tool(
+    name="grep",
+    description=(
+        "Search for a regex pattern in files under a virtual path. "
+        "Returns matching lines with file paths."
+    ),
+)
 def grep(ctx: ToolContext, pattern: str, path: str = "/project") -> str:
     prefix, rel = _virtual_prefix(path)
     ctx.check_fs_permission("read", prefix + "/")
@@ -51,10 +60,7 @@ def grep(ctx: ToolContext, pattern: str, path: str = "/project") -> str:
     target = root / rel if rel else root
     rgx = re.compile(pattern)
     out: list[str] = []
-    if target.is_file():
-        files = [target]
-    else:
-        files = [p for p in target.rglob("*") if p.is_file()]
+    files = [target] if target.is_file() else [p for p in target.rglob("*") if p.is_file()]
     for f in files:
         try:
             text = f.read_text(errors="replace")
