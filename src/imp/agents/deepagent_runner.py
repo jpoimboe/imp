@@ -27,7 +27,13 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from deepagents import create_deep_agent
-from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+)
 from pydantic import BaseModel
 
 from imp.agents.backends import build_backend
@@ -257,8 +263,7 @@ class DeepAgentRunner:
                     mode, payload = item
                 else:
                     mode, payload = "updates", item
-                for event in _process_stream_chunk(mode, payload, suppress):
-                    yield event
+                yield from _process_stream_chunk(mode, payload, suppress)
                 if mode == "updates" and isinstance(payload, dict):
                     sr = _extract_structured_response(payload)
                     if sr is not None:

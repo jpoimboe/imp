@@ -31,11 +31,11 @@ from imp.agents.runner import AgentInvocation
 
 def build_backend(invocation: AgentInvocation) -> Any:
     rules = invocation.fs_permissions
-    artifacts = FilesystemBackend(
+    artifacts: Any = FilesystemBackend(
         root_dir=str(invocation.change_artifacts_dir),
         virtual_mode=True,
     )
-    project = FilesystemBackend(
+    project: Any = FilesystemBackend(
         root_dir=str(invocation.project_root),
         virtual_mode=True,
     )

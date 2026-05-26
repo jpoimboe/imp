@@ -5,12 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from deepagents.backends import FilesystemBackend  # type: ignore[import-untyped]
 
 from imp.agents.permission_backend import PermissionFilteringBackend
 from imp.agents.permissions import PermissionDenied
 from imp.engine.types import FsRule, SourceLoc
-
-from deepagents.backends import FilesystemBackend  # type: ignore[import-untyped]
 
 
 def _rule(ops: tuple[str, ...], paths: tuple[str, ...], mode: str) -> FsRule:

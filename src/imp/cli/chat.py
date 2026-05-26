@@ -18,7 +18,6 @@ import sys
 from collections.abc import Callable
 from typing import Any, TextIO
 
-
 # Spinner is a no-op factory by default; the real implementation comes from
 # prompt_toolkit in Task 10. Factory returns a stop-callable.
 SpinnerFactory = Callable[[str], Callable[[], None]]
@@ -94,7 +93,9 @@ class ChatRenderer:
             self._line(f"=== {p.get('phase', '?')} -> {p.get('action', '?')} ===\n")
             return
         if t == "gate_evaluated":
-            self._line(f"[gate ] {p.get('rule', p.get('gate_type', '?'))} -> {p.get('action', '?')}")
+            rule = p.get("rule", p.get("gate_type", "?"))
+            action = p.get("action", "?")
+            self._line(f"[gate ] {rule} -> {action}")
             return
         if t == "script_gate_result":
             exit_code = p.get("exit", "?")

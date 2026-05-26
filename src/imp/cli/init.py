@@ -128,7 +128,7 @@ def run_init(
     project_gi = project_root / ".gitignore"
     add_lines = [".imp/config.yaml", ".imp/changes/", ".imp/lock"]
     existing = project_gi.read_text() if project_gi.exists() else ""
-    needs_append = [l for l in add_lines if l not in existing]
+    needs_append = [line for line in add_lines if line not in existing]
     if needs_append:
         sep = "" if existing.endswith("\n") or not existing else "\n"
         project_gi.write_text(

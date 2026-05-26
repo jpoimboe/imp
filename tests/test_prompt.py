@@ -52,7 +52,7 @@ class _FakeSession:
         return answer
 
     @property
-    def history(self) -> "_FakeHistory":
+    def history(self) -> _FakeHistory:
         return _FakeHistory(self._history)
 
 

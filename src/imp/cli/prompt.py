@@ -25,7 +25,7 @@ def _build_session() -> Any:
     kb = KeyBindings()
 
     @kb.add("escape", eager=True)
-    def _esc(event):
+    def _esc(event: Any) -> None:
         event.app.exit(result=ESC_SENTINEL)
 
     return PromptSession(history=history, key_bindings=kb)
@@ -43,10 +43,11 @@ class Prompt:
     def ask(self, prompt_text: str = "> ") -> str:
         """Read a single line. Returns user text, or ESC_SENTINEL.
         Raises KeyboardInterrupt (Ctrl+C) or EOFError (Ctrl+D) up to caller."""
-        return self._session.prompt(prompt_text)
+        result = self._session.prompt(prompt_text)
+        return str(result) if result is not None else ""
 
     def history_strings(self) -> list[str]:
         try:
-            return list(self._session.history.get_strings())  # type: ignore[attr-defined]
+            return list(self._session.history.get_strings())
         except AttributeError:
             return []

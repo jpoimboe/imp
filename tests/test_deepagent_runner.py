@@ -15,11 +15,8 @@ def test_runner_emits_agent_token_events_in_order(monkeypatch) -> None:
     """A fake stream that yields message-mode token chunks should produce
     agent_token events in arrival order, with a final agent_message
     aggregating them."""
-    from collections.abc import Iterator
-    from typing import Any
 
     from langchain_core.messages import AIMessage, AIMessageChunk
-    from langchain_core.outputs import ChatGeneration, ChatResult
 
     from imp.agents.deepagent_runner import _process_stream_chunk
 
@@ -46,6 +43,7 @@ def test_runner_emits_agent_token_events_in_order(monkeypatch) -> None:
 def test_process_stream_chunk_filters_empty_token() -> None:
     """Empty-content message chunks produce no agent_token event."""
     from langchain_core.messages import AIMessageChunk
+
     from imp.agents.deepagent_runner import _process_stream_chunk
 
     events = list(_process_stream_chunk("messages", (AIMessageChunk(content=""), {}), []))

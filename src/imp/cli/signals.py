@@ -45,11 +45,8 @@ def pause_and_exit(change: Change, *, reason: str) -> None:
 def install_process_group() -> None:
     """Become process-group leader so child subprocesses can be killed en
     masse on Ctrl+C. POSIX-only; no-op on Windows."""
-    try:
+    with contextlib.suppress(AttributeError, OSError):
         os.setpgrp()
-    except (AttributeError, OSError):
-        # Windows or already a leader; non-fatal
-        pass
 
 
 def tool_kill_escalation(

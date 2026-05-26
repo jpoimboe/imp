@@ -15,11 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from imp.agents.runner import AgentRunner
+from imp.agents.stub_runner import StubAgentRunner
 from imp.cli.chat import ChatRenderer
 from imp.cli.init import run_init
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit, tool_kill_escalation
-from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run
