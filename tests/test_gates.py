@@ -238,3 +238,25 @@ def test_script_gate_receives_env_extra(tmp_path: Path) -> None:
     )
     assert ctx["exit"] == 0  # test command passed → env var was set correctly
     assert isinstance(action, Continue)
+
+
+def test_script_gate_resolves_relative_command_against_cwd(tmp_path: Path) -> None:
+    """Bug L: when workflow.yaml says `command: ./scripts/lint.sh`, the
+    engine passes cwd=change.workflow_dir so the relative path resolves
+    against the workflow snapshot (where scripts live), not project_root.
+    Without this, the gate would crash with exit 127 (command not found)."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "lint.sh").write_text("#!/usr/bin/env bash\necho ok\n")
+    (scripts / "lint.sh").chmod(0o755)
+    decide = Decide(
+        rules=(
+            Rule(when=(("exit", 0),), is_else=False, action=Continue(), source=loc()),
+            Rule(when=(), is_else=True, action=Retry(), source=loc()),
+        ),
+        source=loc(),
+    )
+    gate = _script_gate("./scripts/lint.sh", decide)
+    action, ctx = run_script_gate(gate, cwd=tmp_path)
+    assert ctx["exit"] == 0, f"got exit {ctx['exit']}; stderr={ctx['stderr']!r}"
+    assert isinstance(action, Continue)

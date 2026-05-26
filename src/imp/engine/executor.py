@@ -491,9 +491,16 @@ def _run_one_gate(
         env_extra = {
             "IMP_ARTIFACTS_DIR": str(change.artifacts_dir),
             "IMP_PROJECT_ROOT": str(change.project_root),
+            "IMP_WORKFLOW_DIR": str(change.workflow_dir),
             "IMP_CHANGE_ID": str(change.id),
         }
-        action, context = run_script_gate(gate, cwd=change.project_root, env_extra=env_extra)
+        # cwd defaults to the workflow snapshot dir so `./scripts/foo.sh`
+        # references resolve (scripts live alongside workflow.yaml in the
+        # snapshot). Scripts that need the project tree should `cd
+        # "$IMP_PROJECT_ROOT"` first.
+        action, context = run_script_gate(
+            gate, cwd=change.workflow_dir, env_extra=env_extra,
+        )
         _emit(on_event, log, "script_gate_result", context)
         return action
     if isinstance(gate, HumanGate):
