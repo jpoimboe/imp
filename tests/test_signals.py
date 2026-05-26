@@ -42,7 +42,8 @@ def test_pause_writes_state_and_event(tmp_path: Path) -> None:
 
 
 def test_pause_is_idempotent(tmp_path: Path) -> None:
-    """Calling twice shouldn't crash or double-append (last write wins)."""
+    """Calling twice doesn't crash. State is overwritten (last wins);
+    events accumulate (two workflow_paused entries in the log)."""
     change = _seed_change(tmp_path)
     State(
         change_id=change.id, phase="p", step=None,
@@ -52,3 +53,26 @@ def test_pause_is_idempotent(tmp_path: Path) -> None:
     pause_and_exit(change, reason="y")
     state = State.load(change.state_dir)
     assert state.status == "paused"
+    # Events accumulate — confirm two workflow_paused entries with the
+    # correct reasons in order.
+    events = list(change.event_log().read())
+    paused_events = [e for e in events if e["type"] == "workflow_paused"]
+    assert len(paused_events) == 2
+    assert paused_events[0]["payload"]["reason"] == "x"
+    assert paused_events[1]["payload"]["reason"] == "y"
+
+
+def test_pause_when_no_state_file(tmp_path: Path) -> None:
+    """If state.json doesn't exist yet, pause_and_exit still appends the
+    workflow_paused event (defensive: always record the pause)."""
+    change = _seed_change(tmp_path)
+    # Delete state.json to simulate pre-state-save interrupt
+    (change.state_dir / "state.json").unlink()
+
+    pause_and_exit(change, reason="early")
+
+    events = list(change.event_log().read())
+    assert any(
+        e["type"] == "workflow_paused" and e["payload"].get("reason") == "early"
+        for e in events
+    )
