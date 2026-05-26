@@ -23,6 +23,7 @@ implemented via stub shadowing in builtin_filter.build_filtered_builtin_override
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -107,6 +108,24 @@ def _extract_structured_response(chunk: dict[str, Any]) -> BaseModel | None:
     return _walk(chunk)
 
 
+def _looks_like_structured_response(text: str) -> bool:
+    """Detect whether an AIMessage's text content is the response_format
+    JSON envelope rather than a real agent text turn.
+
+    Every output schema requires `status`, so a JSON object with that key
+    is almost certainly the structured response carrier — emit only the
+    parsed agent_output event for it, not a duplicate agent_message line.
+    """
+    stripped = text.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return False
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(parsed, dict) and "status" in parsed
+
+
 def _extract_text(content: Any) -> str:
     """Pull plain text out of a BaseMessage.content value.
 
@@ -147,7 +166,7 @@ def _translate_message(
                 },
             })
         text = _extract_text(msg.content)
-        if text:
+        if text and not _looks_like_structured_response(text):
             out.append({"type": "agent_message", "payload": {"text": text}})
     elif isinstance(msg, ToolMessage):
         result = msg.content if isinstance(msg.content, str) else str(msg.content)

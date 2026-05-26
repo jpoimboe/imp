@@ -17,8 +17,8 @@ onboard:
     - type: human
       prompt: "Captured intent look right?"
       options:
-        - {label: Yes,  action: {kind: continue}}
-        - {label: Redo, action: {kind: retry}}
+        - {label: "Yes",  action: {kind: continue}}
+        - {label: "Redo", action: {kind: retry}}
 
 spec:
   steps:

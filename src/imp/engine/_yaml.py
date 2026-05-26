@@ -16,6 +16,11 @@ class LineLoader(yaml.SafeLoader):
 
     PyYAML exposes the line on the parsing event but discards it after building
     the Python object. We monkey-add it back via construct_mapping.
+
+    Also disables YAML 1.1's "Norway problem" implicit-bool resolution for
+    Yes/No/On/Off so workflow authors don't have to quote those labels.
+    True/False/true/false still resolve as booleans (those rarely show up as
+    intended-string labels).
     """
 
 
@@ -28,6 +33,35 @@ def _construct_mapping(loader: LineLoader, node: yaml.MappingNode) -> dict[str, 
 LineLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
 )
+
+# Strip Yes/No/On/Off from the implicit-bool resolver so they parse as the
+# strings the workflow author wrote. SafeLoader inherits Resolver's class-level
+# yaml_implicit_resolvers dict; we replace the bool entry for the affected
+# first characters with a filtered list that excludes the Yes/No/On/Off regex.
+def _disable_norway_problem() -> None:
+    import re
+    bool_re = re.compile(
+        r"^(?:true|True|TRUE|false|False|FALSE)$"
+    )
+    for ch in "yYnNoO":
+        existing = LineLoader.yaml_implicit_resolvers.get(ch, [])
+        filtered = [
+            (tag, regex) for tag, regex in existing
+            if tag != "tag:yaml.org,2002:bool"
+        ]
+        LineLoader.yaml_implicit_resolvers[ch] = filtered
+    # Replace the bool resolver on remaining chars with our stricter regex
+    for ch in "tTfF":
+        existing = LineLoader.yaml_implicit_resolvers.get(ch, [])
+        new_entries = [
+            (tag, regex) for tag, regex in existing
+            if tag != "tag:yaml.org,2002:bool"
+        ]
+        new_entries.append(("tag:yaml.org,2002:bool", bool_re))
+        LineLoader.yaml_implicit_resolvers[ch] = new_entries
+
+
+_disable_norway_problem()
 
 
 def loc(yaml_path: Path, node: dict[str, Any] | None) -> SourceLoc:
