@@ -9,6 +9,7 @@ import pytest
 from imp.agents.runner import (
     AgentInvocation, ChangeContext, Message, TextBlock, ToolResultBlock, ToolUseBlock,
 )
+from imp.agents.transcript import Transcript
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
@@ -120,6 +121,35 @@ async def test_transcript_persists_each_turn(tmp_path: Path) -> None:
     lines = (inv.transcript_dir / "transcript.jsonl").read_text().splitlines()
     # at least: initial user + assistant
     assert len(lines) >= 2
+
+
+@pytest.mark.anyio
+async def test_resume_uses_existing_transcript(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    # Seed a transcript with: user msg → assistant tool_use → user tool_result
+    inv = _inv(tmp_path)
+    transcript = Transcript(inv.transcript_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="resume me"),)))
+    transcript.append(Message(role="assistant", content=(
+        ToolUseBlock(id="u1", name="read_file", input={"path": "/project/x"}),
+    )))
+    transcript.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="u1", content="prior contents"),
+    )))
+
+    fake = FakeAsyncAnthropic([
+        response(tool_use("c1", "complete_step", {"status": "Success", "note": "resumed"})),
+    ])
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake,
+    )
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["payload"]["note"] == "resumed"
+
+    # The single LLM call should have been issued with all three prior messages.
+    only_call = fake.messages.calls[0]
+    assert len(only_call["messages"]) == 3
 
 
 @pytest.fixture
