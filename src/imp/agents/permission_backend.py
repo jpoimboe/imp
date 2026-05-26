@@ -11,6 +11,7 @@ rules, so workflow authors write rules in the agent-facing path namespace.
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Sequence
 from typing import Any
 
@@ -34,9 +35,12 @@ class PermissionFilteringBackend:
     def _abs(self, path: str) -> str:
         if path.startswith("/"):
             path = path[1:]
-        return self._prefix + path
+        combined = self._prefix + path
+        # Normalize ../ and ./ before rule evaluation. Use posixpath so the
+        # behavior is OS-independent (paths in our rules are always POSIX).
+        return posixpath.normpath(combined)
 
-    def read(self, path: str) -> str:
+    def read(self, path: str) -> Any:
         check_permission(self._rules, "read", self._abs(path))
         return self._inner.read(path)
 
@@ -47,6 +51,18 @@ class PermissionFilteringBackend:
     def edit(self, path: str, *args: Any, **kwargs: Any) -> Any:
         check_permission(self._rules, "write", self._abs(path))
         return self._inner.edit(path, *args, **kwargs)
+
+    async def aread(self, path: str) -> Any:
+        check_permission(self._rules, "read", self._abs(path))
+        return await self._inner.aread(path)
+
+    async def awrite(self, path: str, content: str) -> Any:
+        check_permission(self._rules, "write", self._abs(path))
+        return await self._inner.awrite(path, content)
+
+    async def aedit(self, path: str, *args: Any, **kwargs: Any) -> Any:
+        check_permission(self._rules, "write", self._abs(path))
+        return await self._inner.aedit(path, *args, **kwargs)
 
     # Untouched passthroughs — read/write are the only gated ops in V0
     def __getattr__(self, name: str) -> Any:

@@ -63,3 +63,25 @@ def test_unaffected_operations_pass(tmp_path: Path) -> None:
     wrapped = PermissionFilteringBackend(inner, rules, prefix="/")
     listing = wrapped.ls("/")
     assert listing  # got something
+
+
+def test_traversal_normalized_before_rule_check(tmp_path: Path) -> None:
+    """A path with .. is normalized before evaluating against rules."""
+    inner = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    rules = (
+        _rule(("write",), ("/project/scratch/**",), "allow"),
+        _rule(("write",), ("/project/**",), "deny"),
+    )
+    wrapped = PermissionFilteringBackend(inner, rules, prefix="/project/")
+    # /scratch/../other.txt normalizes to /other.txt → matches the deny rule
+    with pytest.raises(PermissionDenied):
+        wrapped.write("/scratch/../other.txt", "nope")
+
+
+def test_denied_edit_raises(tmp_path: Path) -> None:
+    """edit() uses the write permission — denied paths raise."""
+    inner = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    rules = (_rule(("write",), ("/**",), "deny"),)
+    wrapped = PermissionFilteringBackend(inner, rules, prefix="/")
+    with pytest.raises(PermissionDenied):
+        wrapped.edit("/a.txt", "old", "new")
