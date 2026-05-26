@@ -149,6 +149,7 @@ def execute_step(
         initial_messages=({"role": "user", "content": "begin"},),
         events_path=events_path or change.events_path,
         checkpointer=checkpointer,
+        fs_permissions=step.fs_permissions,
     )
 
     agent_output: dict[str, Any] | None = None
@@ -504,6 +505,7 @@ def _run_agent_gate(
         initial_messages=({"role": "user", "content": "begin"},),
         events_path=change.events_path,
         checkpointer=checkpointer,
+        fs_permissions=(),
     )
     log.append("step_started", {
         "step": f"gate:{stem}", "phase": None,

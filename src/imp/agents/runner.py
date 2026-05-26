@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from imp.engine.types import AgentDef
+from imp.engine.types import AgentDef, FsRule
 
 if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
@@ -47,6 +47,7 @@ class AgentInvocation:
     initial_messages: tuple[dict[str, Any], ...] = ()
     events_path: Path | None = None
     checkpointer: BaseCheckpointSaver[Any] | None = None
+    fs_permissions: tuple[FsRule, ...] = ()
 
 
 class AgentRunner(Protocol):

@@ -25,20 +25,28 @@ from deepagents.backends import (
     StateBackend,
 )
 
+from imp.agents.permission_backend import PermissionFilteringBackend
 from imp.agents.runner import AgentInvocation
 
 
 def build_backend(invocation: AgentInvocation) -> Any:
+    rules = invocation.fs_permissions
+    artifacts = FilesystemBackend(
+        root_dir=str(invocation.change_artifacts_dir),
+        virtual_mode=True,
+    )
+    project = FilesystemBackend(
+        root_dir=str(invocation.project_root),
+        virtual_mode=True,
+    )
+    if rules:
+        artifacts = PermissionFilteringBackend(
+            artifacts, rules, prefix="/artifacts/",
+        )
+        project = PermissionFilteringBackend(
+            project, rules, prefix="/project/",
+        )
     return CompositeBackend(
         default=StateBackend(),
-        routes={
-            "/artifacts/": FilesystemBackend(
-                root_dir=str(invocation.change_artifacts_dir),
-                virtual_mode=True,
-            ),
-            "/project/": FilesystemBackend(
-                root_dir=str(invocation.project_root),
-                virtual_mode=True,
-            ),
-        },
+        routes={"/artifacts/": artifacts, "/project/": project},
     )
