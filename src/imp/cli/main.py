@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.agents.runner import AgentRunner
+from imp.cli.chat import ChatRenderer
 from imp.cli.init import run_init
 from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
@@ -72,11 +73,14 @@ def _cmd_new(args: argparse.Namespace) -> int:
             _write_change_lock(change)
             try:
                 print(f"Created Change {change.id}: {change.title!r}")
+                renderer = ChatRenderer()
                 try:
-                    result = run(change, _agent_runner())
+                    result = run(change, _agent_runner(), on_event=renderer.handle)
                 except (LoadError, LoadErrors) as e:
                     print(f"imp: {e}", file=sys.stderr)
                     return 2
+                finally:
+                    renderer.close()
                 print(f"Change {change.id}: {result.value}")
                 return 0 if result is RunResult.COMPLETED else 1
             finally:
@@ -89,7 +93,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
         return 2
 
 
-def _replay_current_step(change: Change, state: State) -> None:
+def _replay_current_step(change: Change, state: State, renderer: ChatRenderer) -> None:
     if state.step is None:
         return
     events = list(change.event_log().events_for_current_step(state.step))
@@ -97,19 +101,7 @@ def _replay_current_step(change: Change, state: State) -> None:
         return
     print("── replaying current step context ──")
     for e in events:
-        t = e["type"]
-        p = e["payload"]
-        if t == "agent_message":
-            print(f"[agent] {p.get('text', '')}")
-        elif t == "tool_call":
-            print(f"[tool ] {p.get('name', '')} {p.get('args', '')}")
-        elif t == "tool_result":
-            result = p.get("result", "")
-            print(f"[tool ] → {result[:80] if isinstance(result, str) else result}")
-        elif t == "user_input":
-            print(f"[user ] {p.get('text', '')}")
-        elif t == "agent_output":
-            print(f"[out  ] {p}")
+        renderer.handle(e)
     print("── end replay ──")
 
 
@@ -136,14 +128,17 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 print(f"Resuming Change {change.id}: {change.title!r}")
                 print(f"Phase: {state.phase}, step: {state.step}")
                 change.event_log().append("workflow_resumed", {})
-                _replay_current_step(change, state)
+                renderer = ChatRenderer()
+                _replay_current_step(change, state, renderer)
                 state.status = "running"
                 state.save(change.state_dir)
                 try:
-                    result = run(change, _agent_runner())
+                    result = run(change, _agent_runner(), on_event=renderer.handle)
                 except (LoadError, LoadErrors) as e:
                     print(f"imp: {e}", file=sys.stderr)
                     return 2
+                finally:
+                    renderer.close()
                 print(f"Change {change.id}: {result.value}")
                 return 0 if result is RunResult.COMPLETED else 1
             finally:

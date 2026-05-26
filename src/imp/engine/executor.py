@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -36,6 +37,8 @@ from imp.providers.resolve import ProviderUnavailable, resolve_role
 if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
 
+EventCallback = Callable[[dict[str, Any]], None]
+
 
 def _open_checkpointer(state_dir: Path) -> Any:
     """Return a SqliteSaver context manager for state_dir/checkpoint.db.
@@ -65,6 +68,7 @@ def execute_step(
     model: BaseChatModel | None = None,
     events_path: Path | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
+    on_event: EventCallback | None = None,
 ) -> tuple[Action, dict[str, Any] | None]:
     """Run one step. Returns (action, agent_output_or_None).
 
@@ -84,17 +88,17 @@ def execute_step(
         if state.step_attempt == 0 else None
     )
     if cached is not None:
-        log.append("step_resumed_with_cached_output", {
+        _emit(on_event, log, "step_resumed_with_cached_output", {
             "step": step.name, "phase": state.phase,
         })
         # Schema-validate the cache (defense in depth)
         try:
             validate_agent_output(cached, agent_def.output_schema)
         except Exception as e:
-            log.append("error", {
+            _emit(on_event, log, "error", {
                 "message": f"cached output failed schema validation: {e}",
             })
-            log.append("step_completed", {
+            _emit(on_event, log, "step_completed", {
                 "step": step.name, "action": "retry",
                 "reason": "cached output invalid; rerunning",
             })
@@ -103,8 +107,9 @@ def execute_step(
             step, change, log, cached,
             runner=runner, resolved_models=None,
             checkpointer=checkpointer, workflow=None,
+            on_event=on_event,
         )
-        log.append("step_completed", {
+        _emit(on_event, log, "step_completed", {
             "step": step.name, "action": _action_name(action),
         })
         return action, cached
@@ -119,18 +124,18 @@ def execute_step(
             ),
         )
     except PromptRenderError as e:
-        log.append("error", {"message": f"prompt render failed: {e}"})
-        log.append("step_started", {
+        _emit(on_event, log, "error", {"message": f"prompt render failed: {e}"})
+        _emit(on_event, log, "step_started", {
             "step": step.name, "phase": state.phase,
             "model_role": step.model_role, "interactive": step.interactive,
         })
-        log.append("step_completed", {
+        _emit(on_event, log, "step_completed", {
             "step": step.name, "action": "retry",
             "reason": "prompt render failed",
         })
         return Retry(), None
 
-    log.append("step_started", {
+    _emit(on_event, log, "step_started", {
         "step": step.name,
         "phase": state.phase,
         "model_role": step.model_role,
@@ -157,6 +162,8 @@ def execute_step(
     # Runner crashes become an `error` event + Retry instead of propagating up.
     try:
         for event in runner.run(invocation):
+            if on_event:
+                on_event(event)
             if event["type"] != "agent_token":
                 log.append(event["type"], event["payload"])
             if event["type"] == "agent_output":
@@ -164,14 +171,12 @@ def execute_step(
             if event["type"] == "error":
                 runner_failed = True
     except Exception as e:
-        log.append(
-            "error",
-            {"message": f"agent runner crashed: {type(e).__name__}: {e}"},
-        )
+        _emit(on_event, log, "error",
+              {"message": f"agent runner crashed: {type(e).__name__}: {e}"})
         runner_failed = True
 
     if runner_failed or agent_output is None:
-        log.append("step_completed", {
+        _emit(on_event, log, "step_completed", {
             "step": step.name, "action": "retry",
             "reason": "agent did not produce valid output",
         })
@@ -179,11 +184,9 @@ def execute_step(
     try:
         validate_agent_output(agent_output, agent_def.output_schema)
     except Exception as e:
-        log.append(
-            "error",
-            {"message": f"agent output failed schema validation: {e}"},
-        )
-        log.append("step_completed", {
+        _emit(on_event, log, "error",
+              {"message": f"agent output failed schema validation: {e}"})
+        _emit(on_event, log, "step_completed", {
             "step": step.name, "action": "retry",
             "reason": "schema validation failed",
         })
@@ -193,8 +196,9 @@ def execute_step(
         step, change, log, agent_output,
         runner=None, resolved_models=None,
         checkpointer=checkpointer, workflow=None,
+        on_event=on_event,
     )
-    log.append("step_completed", {"step": step.name, "action": _action_name(action)})
+    _emit(on_event, log, "step_completed", {"step": step.name, "action": _action_name(action)})
     return action, agent_output
 
 
@@ -207,12 +211,13 @@ def execute_phase(
     *,
     resolved_models: dict[str, BaseChatModel] | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
+    on_event: EventCallback | None = None,
 ) -> Action:
     """Walk phase steps, then phase gates. `workflow` is needed for AgentDef
     lookup keyed by `step.file.stem` (V14 ensures the stem == agent name).
     """
     log = change.event_log()
-    log.append("phase_started", {"phase": phase.name})
+    _emit(on_event, log, "phase_started", {"phase": phase.name})
 
     # Resume support: skip steps before the cursor.
     start_idx = 0
@@ -236,6 +241,7 @@ def execute_phase(
             model=(resolved_models.get(step.model_role) if resolved_models else None),
             events_path=change.events_path,
             checkpointer=checkpointer,
+            on_event=on_event,
         )
         if isinstance(action, Continue):
             i += 1
@@ -243,14 +249,14 @@ def execute_phase(
         elif isinstance(action, Retry):
             state.step_attempt += 1
             if state.step_attempt > step.max_retries:
-                log.append("step_exhausted", {
+                _emit(on_event, log, "step_exhausted", {
                     "step": step.name, "attempts": state.step_attempt,
                 })
                 state.step_attempt = 0
                 return step.on_max_retries
             continue
         else:
-            log.append("phase_completed", {
+            _emit(on_event, log, "phase_completed", {
                 "phase": phase.name, "action": _action_name(action),
             })
             return action
@@ -261,18 +267,19 @@ def execute_phase(
             gate, change, log, agent_output={},
             runner=runner, resolved_models=resolved_models,
             checkpointer=checkpointer, workflow=workflow,
+            on_event=on_event,
         )
-        log.append("gate_evaluated", {
+        _emit(on_event, log, "gate_evaluated", {
             "phase": phase.name, "gate_type": type(gate).__name__,
             "action": _action_name(action),
         })
         if not isinstance(action, Continue):
-            log.append("phase_completed", {
+            _emit(on_event, log, "phase_completed", {
                 "phase": phase.name, "action": _action_name(action),
             })
             return action
 
-    log.append("phase_completed", {"phase": phase.name, "action": "continue"})
+    _emit(on_event, log, "phase_completed", {"phase": phase.name, "action": "continue"})
     return Continue()
 
 
@@ -311,7 +318,12 @@ def _resolve_all_referenced_roles(
     return resolved
 
 
-def run(change: Change, runner: AgentRunner) -> RunResult:
+def run(
+    change: Change,
+    runner: AgentRunner,
+    *,
+    on_event: EventCallback | None = None,
+) -> RunResult:
     """Top-level executor: walk phases until done, paused, or errored.
 
     Retry-counter semantics:
@@ -328,25 +340,21 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
     resolved_models = _resolve_all_referenced_roles(workflow, config)
     state = State.load(change.state_dir)
     log = change.event_log()
-    log.append(
-        "workflow_started",
-        {"name": workflow.name, "from_phase": state.phase},
-    )
+    _emit(on_event, log, "workflow_started",
+          {"name": workflow.name, "from_phase": state.phase})
 
     with _open_checkpointer(change.state_dir) as checkpointer:
         while True:
             if state.phase is None:
                 state.status = "completed"
                 state.save(change.state_dir)
-                log.append("workflow_completed", {})
+                _emit(on_event, log, "workflow_completed", {})
                 return RunResult.COMPLETED
 
             phase_idx = workflow.phase_index(state.phase)
             if phase_idx is None:
-                log.append(
-                    "error",
-                    {"message": f"unknown phase {state.phase!r} in state"},
-                )
+                _emit(on_event, log, "error",
+                      {"message": f"unknown phase {state.phase!r} in state"})
                 state.status = "errored"
                 state.save(change.state_dir)
                 return RunResult.ERRORED
@@ -357,6 +365,7 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
                 runner=runner, state=state,
                 resolved_models=resolved_models,
                 checkpointer=checkpointer,
+                on_event=on_event,
             )
 
             if isinstance(action, Continue):
@@ -373,7 +382,7 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
             elif isinstance(action, Retry):
                 state.phase_attempt += 1
                 if state.phase_attempt > phase.max_retries:
-                    log.append("phase_exhausted", {
+                    _emit(on_event, log, "phase_exhausted", {
                         "phase": phase.name, "attempts": state.phase_attempt,
                     })
                     state.phase_attempt = 0
@@ -381,10 +390,8 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
                     if isinstance(on_max, Pause):
                         state.status = "paused"
                         state.save(change.state_dir)
-                        log.append(
-                            "workflow_paused",
-                            {"reason": "phase_exhausted"},
-                        )
+                        _emit(on_event, log, "workflow_paused",
+                              {"reason": "phase_exhausted"})
                         return RunResult.PAUSED
                     elif isinstance(on_max, Goto):
                         state.phase = on_max.target
@@ -400,8 +407,20 @@ def run(change: Change, runner: AgentRunner) -> RunResult:
             elif isinstance(action, Pause):
                 state.status = "paused"
                 state.save(change.state_dir)
-                log.append("workflow_paused", {"reason": "explicit"})
+                _emit(on_event, log, "workflow_paused", {"reason": "explicit"})
                 return RunResult.PAUSED
+
+
+def _emit(
+    on_event: EventCallback | None,
+    log: EventLog,
+    event_type: str,
+    payload: dict[str, Any],
+) -> None:
+    """Fire on_event callback then append to the log."""
+    if on_event:
+        on_event({"type": event_type, "payload": payload})
+    log.append(event_type, payload)
 
 
 def _run_step_gates(
@@ -411,6 +430,7 @@ def _run_step_gates(
     resolved_models: dict[str, BaseChatModel] | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     workflow: Workflow | None = None,
+    on_event: EventCallback | None = None,
 ) -> Action:
     if not step.gates:
         # Implicit: continue if status: Success, retry on anything else.
@@ -420,8 +440,9 @@ def _run_step_gates(
             gate, change, log, agent_output,
             runner=runner, resolved_models=resolved_models,
             checkpointer=checkpointer, workflow=workflow,
+            on_event=on_event,
         )
-        log.append("gate_evaluated", {
+        _emit(on_event, log, "gate_evaluated", {
             "step": step.name, "gate_type": type(gate).__name__,
             "action": _action_name(action),
         })
@@ -440,6 +461,7 @@ def _run_one_gate(
     resolved_models: dict[str, BaseChatModel] | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     workflow: Workflow | None = None,
+    on_event: EventCallback | None = None,
 ) -> Action:
     if isinstance(gate, ScriptGate):
         env_extra = {
@@ -448,7 +470,7 @@ def _run_one_gate(
             "IMP_CHANGE_ID": str(change.id),
         }
         action, context = run_script_gate(gate, cwd=change.project_root, env_extra=env_extra)
-        log.append("script_gate_result", context)
+        _emit(on_event, log, "script_gate_result", context)
         return action
     if isinstance(gate, HumanGate):
         return run_human_gate(gate, input_fn=input, output_fn=print)
@@ -457,6 +479,7 @@ def _run_one_gate(
             gate, change, log,
             runner=runner, resolved_models=resolved_models,
             checkpointer=checkpointer, workflow=workflow,
+            on_event=on_event,
         )
     if isinstance(gate, StubGate):
         return gate.action
@@ -472,6 +495,7 @@ def _run_agent_gate(
     resolved_models: dict[str, BaseChatModel] | None,
     checkpointer: BaseCheckpointSaver[Any] | None,
     workflow: Workflow | None,
+    on_event: EventCallback | None = None,
 ) -> Action:
     """Run an agent as a gate. Output is schema-validated, then fed to decide."""
     from imp.engine.gates import evaluate_decide
@@ -491,7 +515,7 @@ def _run_agent_gate(
             ),
         )
     except PromptRenderError as e:
-        log.append("error", {"message": f"gate prompt render failed: {e}"})
+        _emit(on_event, log, "error", {"message": f"gate prompt render failed: {e}"})
         return Pause()
 
     invocation = AgentInvocation(
@@ -508,34 +532,36 @@ def _run_agent_gate(
         checkpointer=checkpointer,
         fs_permissions=(),
     )
-    log.append("step_started", {
+    _emit(on_event, log, "step_started", {
         "step": f"gate:{stem}", "phase": None,
         "model_role": gate.model_role, "interactive": False,
     })
     output: dict[str, Any] | None = None
     try:
         for event in runner.run(invocation):
+            if on_event:
+                on_event(event)
             if event["type"] != "agent_token":
                 log.append(event["type"], event["payload"])
             if event["type"] == "agent_output":
                 output = event["payload"]
             if event["type"] == "error":
-                log.append("step_completed", {
+                _emit(on_event, log, "step_completed", {
                     "step": f"gate:{stem}", "action": "pause",
                     "reason": "gate errored",
                 })
                 return Pause()
     except Exception as e:
-        log.append("error", {
+        _emit(on_event, log, "error", {
             "message": f"gate runner crashed: {type(e).__name__}: {e}",
         })
-        log.append("step_completed", {
+        _emit(on_event, log, "step_completed", {
             "step": f"gate:{stem}", "action": "pause",
             "reason": "gate runner crashed",
         })
         return Pause()
     if output is None:
-        log.append("step_completed", {
+        _emit(on_event, log, "step_completed", {
             "step": f"gate:{stem}", "action": "pause",
             "reason": "gate produced no output",
         })
@@ -545,17 +571,17 @@ def _run_agent_gate(
     try:
         validate_agent_output(output, agent_def.output_schema)
     except Exception as e:
-        log.append("error", {
+        _emit(on_event, log, "error", {
             "message": f"gate output failed schema validation: {e}",
         })
-        log.append("step_completed", {
+        _emit(on_event, log, "step_completed", {
             "step": f"gate:{stem}", "action": "pause",
             "reason": "schema validation failed",
         })
         return Pause()
 
     action = evaluate_decide(gate.decide, output)
-    log.append("step_completed", {
+    _emit(on_event, log, "step_completed", {
         "step": f"gate:{stem}", "action": _action_name(action),
     })
     return action
