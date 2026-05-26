@@ -129,3 +129,30 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
     loaded = t.load()
     # Original 3 + new assistant turn = 4 messages.
     assert len(loaded) == 4
+
+
+@pytest.mark.anyio
+async def test_refusal_emits_runner_warning(tmp_path: Path) -> None:
+    """OpenAI's `refusal` field is not part of imp Message; should warn, not fail."""
+    (tmp_path / "art").mkdir()
+
+    fake = FakeAsyncOpenAI([
+        # First response: only a refusal. No tool_calls → runner falls through
+        # to "agent finished without complete_step" error (autonomous mode).
+        completion(message(content=None, refusal="I can't help with that.")),
+    ])
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini",
+        client_factory=lambda: fake,
+    )
+    events = []
+    async for ev in runner.run(_inv(tmp_path)):
+        events.append(ev)
+
+    warnings = [e for e in events if e["type"] == "runner_warning"]
+    assert any("refusal" in w["payload"]["message"] for w in warnings)
+    # No fatal — the final event is `error` (no complete_step), not `error` for
+    # an unknown block.
+    final = events[-1]
+    assert final["type"] == "error"
+    assert final["payload"]["kind"] == "no_complete_step"
