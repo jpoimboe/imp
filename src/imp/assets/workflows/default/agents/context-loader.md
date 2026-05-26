@@ -1,7 +1,7 @@
 ---
 name: context-loader
 description: Survey the repo, capture what already exists, write a context note.
-tools: [ls, glob, grep, read_file, query_events]
+tools: [ls, glob, grep, read_file, write_file, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   summary: {type: string, required: false}

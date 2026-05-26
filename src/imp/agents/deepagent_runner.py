@@ -107,6 +107,30 @@ def _extract_structured_response(chunk: dict[str, Any]) -> BaseModel | None:
     return _walk(chunk)
 
 
+def _extract_text(content: Any) -> str:
+    """Pull plain text out of a BaseMessage.content value.
+
+    Anthropic content is a list of blocks like
+    [{"type": "text", "text": "..."}, {"type": "tool_use", ...}].
+    OpenAI typically returns a plain str. Streamed AIMessageChunks from
+    Anthropic also use the list-of-blocks shape mid-token.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    t = block.get("text", "")
+                    if isinstance(t, str):
+                        parts.append(t)
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return ""
+
+
 def _translate_message(
     msg: BaseMessage, suppress_initial: list[str],
 ) -> list[dict[str, Any]]:
@@ -122,7 +146,7 @@ def _translate_message(
                     "args": tc.get("args", {}),
                 },
             })
-        text = msg.content if isinstance(msg.content, str) else ""
+        text = _extract_text(msg.content)
         if text:
             out.append({"type": "agent_message", "payload": {"text": text}})
     elif isinstance(msg, ToolMessage):
@@ -158,9 +182,9 @@ def _process_stream_chunk(
     if mode == "messages":
         chunk, _meta = payload if isinstance(payload, tuple) else (payload, {})
         if isinstance(chunk, AIMessageChunk):
-            # Text-only path. Multimodal content (list of dicts) is dropped here;
-            # V0 agents are text-only so this is intentional.
-            text = chunk.content if isinstance(chunk.content, str) else ""
+            # Anthropic streams content as list-of-dicts blocks even mid-token;
+            # extract any text fragment from either str or list[dict] shape.
+            text = _extract_text(chunk.content)
             if text:
                 yield {"type": "agent_token", "payload": {"text": text}}
         return

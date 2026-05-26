@@ -39,12 +39,18 @@ class ChatRenderer:
         self._spinner_factory = spinner
         self._stop_spinner: Callable[[], None] | None = None
         self._token_line_open = False
+        # Tracks whether tokens streamed for the upcoming agent_message.
+        # If they did, suppress the message (already on screen). If they
+        # didn't (e.g., providers that don't stream tokens for tool turns),
+        # render the message as a labeled line so the user sees it.
+        self._streamed_text_since_last_message = False
 
     def handle(self, event: dict[str, Any]) -> None:
         t = event["type"]
         p = event.get("payload", {})
         if t == "agent_token":
             self._write_token(p.get("text", ""))
+            self._streamed_text_since_last_message = True
             return
         # Any non-token event closes the in-flight token line
         self._close_token_line()
@@ -53,7 +59,11 @@ class ChatRenderer:
             self._stop_active_spinner()
 
         if t == "agent_message":
-            # Already streamed via tokens; suppress duplicate
+            if not self._streamed_text_since_last_message:
+                text = str(p.get("text", "")).strip()
+                if text:
+                    self._line(f"[agent] {text}")
+            self._streamed_text_since_last_message = False
             return
         if t == "tool_call":
             name = p.get("name", "?")
