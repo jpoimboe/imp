@@ -24,9 +24,13 @@ def test_returns_cwd_when_no_imp_dir(tmp_path: Path) -> None:
     assert find_project_root(start=tmp_path) == tmp_path
 
 
-def test_stops_at_filesystem_root(tmp_path: Path) -> None:
-    # Sanity: walk doesn't loop or escape into the user's actual /
-    # Verified by asserting we get back start when no .imp/ found.
-    deep = tmp_path / "x" / "y"
-    deep.mkdir(parents=True)
-    assert find_project_root(start=deep) == deep
+def test_terminates_at_filesystem_root() -> None:
+    """Walking up from / must return / without looping. Verifies the
+    cur.parent == cur termination."""
+    root = Path("/")
+    # In practice / has no .imp/, but even if it did the test would still
+    # validate termination. We just need this call to return, not hang.
+    result = find_project_root(start=root)
+    # Whether it returns root or some ancestor doesn't matter — only that
+    # it returned at all (no infinite loop).
+    assert isinstance(result, Path)
