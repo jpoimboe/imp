@@ -1,7 +1,7 @@
 ---
 name: coder
 description: Implement the plan.
-tools: [read_file, write_file, edit_file, glob, grep, execute, ls, query_events, git_diff]
+tools: [read_file, write_file, edit_file, glob, grep, execute, ls, write_todos, query_events, git_diff]
 output:
   status: {type: enum, values: [Success, Error]}
   summary: {type: string, required: false}
