@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.agents.runner import AgentRunner
+from imp.cli.init import run_init
 from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
@@ -46,6 +47,16 @@ def _agent_runner() -> AgentRunner:
         return StubAgentRunner(canned_path=Path(canned))
     from imp.agents.deepagent_runner import DeepAgentRunner
     return DeepAgentRunner()
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    project = _project_root()
+    try:
+        run_init(project, input_fn=input, output_fn=print)
+    except FileExistsError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -223,6 +234,9 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(prog="imp")
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_init = sub.add_parser("init")
+    p_init.set_defaults(func=_cmd_init)
 
     p_new = sub.add_parser("new")
     p_new.add_argument("title", nargs="?")
