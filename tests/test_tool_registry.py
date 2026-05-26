@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 
 from imp.agents.tools import (
-    Tool,
     _REGISTRY,
+    Tool,
     get_registry,
     imp_tool,
 )

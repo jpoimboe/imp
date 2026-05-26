@@ -1,16 +1,14 @@
 # tests/test_resolve.py
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
-from imp.providers.base import Provider
 from imp.providers.config import ProviderModel, RoleConfig
 from imp.providers.resolve import (
-    ProviderUnavailable, UnknownProvider,
-    register_provider, resolve_role,
+    ProviderUnavailable,
+    UnknownProvider,
+    register_provider,
+    resolve_role,
 )
 
 
@@ -70,6 +68,7 @@ def test_anthropic_registered_when_imported(monkeypatch):
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
     import importlib
+
     import imp.providers as pkg
     importlib.reload(pkg)  # triggers eager registrations
 

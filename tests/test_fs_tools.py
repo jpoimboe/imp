@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
+import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
 from imp.agents.permissions import PermissionDenied
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
 from imp.engine.types import FsRule, SourceLoc
 
 

@@ -1,7 +1,6 @@
 # tests/test_executor.py
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -10,9 +9,7 @@ import pytest
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
-from imp.engine.loader import load_workflow
 from imp.engine.state import State
-from imp.providers.base import Provider
 
 
 class _FakeRunner:

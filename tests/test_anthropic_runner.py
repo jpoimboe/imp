@@ -1,17 +1,21 @@
 # tests/test_anthropic_runner.py
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import (
-    AgentInvocation, ChangeContext, Message, TextBlock, ToolResultBlock, ToolUseBlock,
+    AgentInvocation,
+    ChangeContext,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
 )
-from imp.agents.transcript import Transcript
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
+from imp.agents.transcript import Transcript
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, thinking, tool_use
@@ -235,7 +239,7 @@ async def test_ceiling_trip_mid_batch_preserves_transcript_invariant(tmp_path: P
     (tmp_path / "x").write_text("")
     (tmp_path / "y").write_text("")
     # One assistant turn with TWO tool_uses; ceiling = 1.
-    from tests.anthropic_fakes import FakeResponse, FakeTextBlock, FakeToolUseBlock
+    from tests.anthropic_fakes import FakeResponse, FakeToolUseBlock
     one_turn = FakeResponse(content=[
         FakeToolUseBlock(type="tool_use", id="u1", name="read_file",
                          input={"path": "/project/x"}),

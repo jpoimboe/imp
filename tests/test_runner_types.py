@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 
 from imp.agents.runner import (
-    ContentBlock,
     Message,
     TextBlock,
     ToolResultBlock,

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import imp.agents.tools.todos  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-import imp.agents.tools.todos  # noqa: F401
 
 
 def _ctx(tmp_path: Path) -> ToolContext:

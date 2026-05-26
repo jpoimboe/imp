@@ -4,11 +4,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
+import imp.agents.tools.bash  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-import imp.agents.tools.bash  # noqa: F401
 
 
 def _ctx(tmp_path: Path) -> ToolContext:

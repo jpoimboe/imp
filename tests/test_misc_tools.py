@@ -5,12 +5,12 @@ import json
 import subprocess
 from pathlib import Path
 
+import imp.agents.tools.git_diff
+import imp.agents.tools.query_events
+import imp.agents.tools.web_fetch  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.engine.state import EventLog
-import imp.agents.tools.git_diff  # noqa: F401
-import imp.agents.tools.query_events  # noqa: F401
-import imp.agents.tools.web_fetch  # noqa: F401
 
 
 def _ctx(tmp_path: Path) -> ToolContext:

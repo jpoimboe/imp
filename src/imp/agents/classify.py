@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from imp.agents.runner import Message, ToolResultBlock, ToolUseBlock
+from imp.agents.runner import Message, ToolUseBlock
 
 
 class ResumeState(Enum):
