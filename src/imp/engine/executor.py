@@ -157,7 +157,8 @@ def execute_step(
     # Runner crashes become an `error` event + Retry instead of propagating up.
     try:
         for event in runner.run(invocation):
-            log.append(event["type"], event["payload"])
+            if event["type"] != "agent_token":
+                log.append(event["type"], event["payload"])
             if event["type"] == "agent_output":
                 agent_output = event["payload"]
             if event["type"] == "error":
@@ -514,7 +515,8 @@ def _run_agent_gate(
     output: dict[str, Any] | None = None
     try:
         for event in runner.run(invocation):
-            log.append(event["type"], event["payload"])
+            if event["type"] != "agent_token":
+                log.append(event["type"], event["payload"])
             if event["type"] == "agent_output":
                 output = event["payload"]
             if event["type"] == "error":
