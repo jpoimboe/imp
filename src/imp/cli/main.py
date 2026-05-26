@@ -18,6 +18,7 @@ from imp.agents.runner import AgentRunner
 from imp.cli.chat import ChatRenderer
 from imp.cli.init import run_init
 from imp.cli.prompt import Prompt
+from imp.cli.signals import pause_and_exit
 from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
@@ -89,6 +90,14 @@ def _cmd_new(args: argparse.Namespace) -> int:
                 except (LoadError, LoadErrors) as e:
                     print(f"imp: {e}", file=sys.stderr)
                     return 2
+                except KeyboardInterrupt:
+                    pause_and_exit(change, reason="ctrl-c")
+                    print(f"\nChange {change.id}: paused (ctrl-c)")
+                    return 130
+                except EOFError:
+                    pause_and_exit(change, reason="ctrl-d")
+                    print(f"\nChange {change.id}: paused (ctrl-d)")
+                    return 130
                 finally:
                     renderer.close()
                 print(f"Change {change.id}: {result.value}")
@@ -156,6 +165,14 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                     except (LoadError, LoadErrors) as e:
                         print(f"imp: {e}", file=sys.stderr)
                         return 2
+                    except KeyboardInterrupt:
+                        pause_and_exit(change, reason="ctrl-c")
+                        print(f"\nChange {change.id}: paused (ctrl-c)")
+                        return 130
+                    except EOFError:
+                        pause_and_exit(change, reason="ctrl-d")
+                        print(f"\nChange {change.id}: paused (ctrl-d)")
+                        return 130
                     print(f"Change {change.id}: {result.value}")
                     return 0 if result is RunResult.COMPLETED else 1
                 finally:
