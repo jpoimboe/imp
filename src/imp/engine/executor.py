@@ -83,11 +83,14 @@ def execute_step(
     # Resume-skip-step (Plan 1 review #3 + Plan 2 reviews #7 #8):
     # If we have a cached agent_output for this (phase, step) from a prior
     # run, skip the runner and re-evaluate gates against the cached output.
-    # Guarded by step_attempt == 0 so a Retry from a gate doesn't loop
-    # forever against the same cache.
+    # Guarded by BOTH step_attempt == 0 AND phase_attempt == 0 so that
+    # neither a step-level Retry nor a phase-level Retry (which resets
+    # step_attempt) loops forever against the same stale cache (Bug O
+    # from dogfood: design-writer lied about writing the artifact and
+    # the phase retry just re-used the cached "Success" output).
     cached = (
         log.cached_output_for(state.phase, step.name)
-        if state.step_attempt == 0 else None
+        if state.step_attempt == 0 and state.phase_attempt == 0 else None
     )
     if cached is not None:
         _emit(on_event, log, "step_resumed_with_cached_output", {

@@ -103,3 +103,42 @@ def test_resume_skip_disabled_on_retry(
     # step_attempt > 0 → cache ignored → coder runs again.
     # Then verify.context-loader runs.
     assert runner.calls >= 2
+
+
+def test_resume_skip_disabled_on_phase_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Bug O from dogfood: phase-level Retry resets step_attempt to 0,
+    but a stale cached agent_output from the prior phase attempt was
+    still being reused — agents that lied about writing artifacts kept
+    looping. Cache must also check phase_attempt == 0."""
+    shutil.copytree(
+        FIXTURES / "workflows" / "integration",
+        tmp_path / ".imp" / "workflows" / "default",
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    change = Change.create(tmp_path, title="t")
+
+    # Seed events as if write/coder ran once and produced output.
+    log = change.event_log()
+    log.append("phase_started", {"phase": "write"})
+    log.append("step_started", {"step": "coder", "phase": "write"})
+    log.append("agent_output", {"status": "Success"})
+    # Simulate a phase-level retry: step_attempt back to 0, but
+    # phase_attempt incremented — the cache must NOT fire.
+    state = State(
+        change_id=1, phase="write", step="coder", step_attempt=0,
+        phase_attempt=1, status="running",
+    )
+    state.save(change.state_dir)
+
+    runner = _Counter({"status": "Success"})
+    snap = change.workflow_dir / "workflow.yaml"
+    snap.write_text(snap.read_text().replace('"false"', '"true"'))
+    run(change, runner)  # type: ignore[arg-type]
+    # phase_attempt > 0 → cache ignored → coder runs fresh.
+    # Plus verify.context-loader runs. So calls >= 2.
+    assert runner.calls >= 2

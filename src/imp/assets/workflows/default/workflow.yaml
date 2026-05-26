@@ -30,7 +30,7 @@ spec:
         - {operations: [write], paths: ["/**"], mode: deny}
       gates:
         - type: script
-          command: ./scripts/lint-spec.sh
+          command: ./scripts/check-artifact.sh spec
           decide:
             - {when: {exit: 0}, action: {kind: continue}}
             - {else: true, action: {kind: retry}}
@@ -58,6 +58,12 @@ design:
         - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
         - {operations: [write], paths: ["/artifacts/**"], mode: allow}
         - {operations: [write], paths: ["/**"], mode: deny}
+      gates:
+        - type: script
+          command: ./scripts/check-artifact.sh design
+          decide:
+            - {when: {exit: 0}, action: {kind: continue}}
+            - {else: true, action: {kind: retry}}
   gates:
     - type: agent
       file: agents/design-reviewer.md
@@ -82,6 +88,12 @@ plan:
         - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
         - {operations: [write], paths: ["/artifacts/**"], mode: allow}
         - {operations: [write], paths: ["/**"], mode: deny}
+      gates:
+        - type: script
+          command: ./scripts/check-artifact.sh plan
+          decide:
+            - {when: {exit: 0}, action: {kind: continue}}
+            - {else: true, action: {kind: retry}}
   gates:
     - type: human
       prompt: "Approve plan?"
