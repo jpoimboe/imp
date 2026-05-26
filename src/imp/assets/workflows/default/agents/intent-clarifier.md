@@ -1,7 +1,7 @@
 ---
 name: intent-clarifier
 description: Chat with the user to capture what change they want to make.
-tools: [read_file, query_events]
+tools: [ls, glob, grep, read_file, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   intent: {type: string}

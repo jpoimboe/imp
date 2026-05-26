@@ -14,6 +14,7 @@ what arrives.
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Callable
 from typing import Any, TextIO
@@ -28,6 +29,23 @@ def _default_spinner_factory(_msg: str) -> Callable[[], None]:
     return lambda: None
 
 
+def _is_structured_response(text: str) -> bool:
+    """Detect a response_format JSON envelope so the renderer doesn't show
+    `[agent] {"status":...}` next to the prettier `[out  ] status=...` line.
+
+    Every output schema requires `status`, so a JSON object with that key
+    is almost certainly the structured response carrier.
+    """
+    stripped = text.strip()
+    if not (stripped.startswith("{") and stripped.endswith("}")):
+        return False
+    try:
+        parsed = json.loads(stripped)
+    except (ValueError, TypeError):
+        return False
+    return isinstance(parsed, dict) and "status" in parsed
+
+
 class ChatRenderer:
     def __init__(
         self,
@@ -38,32 +56,34 @@ class ChatRenderer:
         self._out = out or sys.stdout
         self._spinner_factory = spinner
         self._stop_spinner: Callable[[], None] | None = None
-        self._token_line_open = False
-        # Tracks whether tokens streamed for the upcoming agent_message.
-        # If they did, suppress the message (already on screen). If they
-        # didn't (e.g., providers that don't stream tokens for tool turns),
-        # render the message as a labeled line so the user sees it.
-        self._streamed_text_since_last_message = False
+        # Tokens accumulate in this buffer until the segment closes (a non-token
+        # event arrives). On close we decide whether to flush (real agent text)
+        # or discard (response_format JSON envelope — appears as agent_token
+        # because Anthropic streams structured output as text tokens).
+        self._token_buffer: list[str] = []
+        # Tracks whether the current segment is the structured response;
+        # set when we render it to suppress the duplicate agent_message.
+        self._suppress_next_agent_message = False
 
     def handle(self, event: dict[str, Any]) -> None:
         t = event["type"]
         p = event.get("payload", {})
         if t == "agent_token":
-            self._write_token(p.get("text", ""))
-            self._streamed_text_since_last_message = True
+            self._token_buffer.append(p.get("text", ""))
             return
-        # Any non-token event closes the in-flight token line
-        self._close_token_line()
+        # Any non-token event closes the in-flight token segment
+        self._flush_token_buffer()
         # Stop a spinner if a tool result arrived
         if t == "tool_result":
             self._stop_active_spinner()
 
         if t == "agent_message":
-            if not self._streamed_text_since_last_message:
-                text = str(p.get("text", "")).strip()
-                if text:
-                    self._line(f"[agent] {text}")
-            self._streamed_text_since_last_message = False
+            if self._suppress_next_agent_message:
+                self._suppress_next_agent_message = False
+                return
+            text = str(p.get("text", "")).strip()
+            if text and not _is_structured_response(text):
+                self._line(f"[agent] {text}")
             return
         if t == "tool_call":
             name = p.get("name", "?")
@@ -129,25 +149,31 @@ class ChatRenderer:
         self._line(f"[{t}] {p}")
 
     def close(self) -> None:
-        self._close_token_line()
+        self._flush_token_buffer()
         self._stop_active_spinner()
 
     # --- helpers ---
 
-    def _write_token(self, text: str) -> None:
-        if not text:
+    def _flush_token_buffer(self) -> None:
+        """Render the accumulated token segment, unless it's the
+        response_format JSON envelope (in which case discard — the engine
+        will emit a clean agent_output line for the parsed form)."""
+        if not self._token_buffer:
             return
-        if not self._token_line_open:
-            self._out.write("[agent] ")
-            self._token_line_open = True
-        self._out.write(text)
-        self._out.flush()
-
-    def _close_token_line(self) -> None:
-        if self._token_line_open:
-            self._out.write("\n")
+        text = "".join(self._token_buffer)
+        self._token_buffer.clear()
+        if _is_structured_response(text):
+            # Suppress the matching agent_message that will arrive in
+            # updates-mode for this same content.
+            self._suppress_next_agent_message = True
+            return
+        # Real agent text. Emit as one line so tools+text interleave cleanly,
+        # and suppress the duplicate agent_message we'll get from updates-mode.
+        stripped = text.strip()
+        if stripped:
+            self._out.write(f"[agent] {stripped}\n")
             self._out.flush()
-            self._token_line_open = False
+            self._suppress_next_agent_message = True
 
     def _stop_active_spinner(self) -> None:
         if self._stop_spinner is not None:
