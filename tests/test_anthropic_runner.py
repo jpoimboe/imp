@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import (
     AgentInvocation, ChangeContext, Message, TextBlock, ToolResultBlock, ToolUseBlock,
 )
@@ -197,6 +198,67 @@ async def test_unknown_block_type_emits_warning_not_error(tmp_path: Path) -> Non
     events = [e async for e in runner.run(_inv(tmp_path))]
     assert any(e["type"] == "runner_warning" for e in events)
     assert events[-1]["type"] == "agent_output"
+
+
+@pytest.mark.anyio
+async def test_tool_call_ceiling_emits_error(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    # Ceiling = 2; LLM tries 3 read_file calls
+    fake = FakeAsyncAnthropic([
+        response(tool_use("u1", "read_file", {"path": "/project/x"})),
+        response(tool_use("u2", "read_file", {"path": "/project/y"})),
+        response(tool_use("u3", "read_file", {"path": "/project/z"})),
+    ])
+    (tmp_path / "x").write_text("")
+    (tmp_path / "y").write_text("")
+    import dataclasses
+    inv = _inv(tmp_path)
+    inv_lo = dataclasses.replace(inv, max_tool_calls=2)
+
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake,
+    )
+    events = [e async for e in runner.run(inv_lo)]
+    kinds = [e["type"] for e in events]
+    assert kinds[-1] == "error"
+    assert events[-1]["payload"]["kind"] == "tool_call_ceiling_exceeded"
+
+
+@pytest.mark.anyio
+async def test_ceiling_trip_mid_batch_preserves_transcript_invariant(tmp_path: Path) -> None:
+    """Spec §6.8 rule 2: every tool_use has a matching tool_result before the
+    next assistant turn. If the ceiling trips on the Kth of N tool_uses in
+    one assistant message, the remaining N-K must be backfilled with error
+    tool_results so resume's classify_resume doesn't see DANGLING_TOOL_USE.
+    """
+    (tmp_path / "art").mkdir()
+    (tmp_path / "x").write_text("")
+    (tmp_path / "y").write_text("")
+    # One assistant turn with TWO tool_uses; ceiling = 1.
+    from tests.anthropic_fakes import FakeResponse, FakeTextBlock, FakeToolUseBlock
+    one_turn = FakeResponse(content=[
+        FakeToolUseBlock(type="tool_use", id="u1", name="read_file",
+                         input={"path": "/project/x"}),
+        FakeToolUseBlock(type="tool_use", id="u2", name="read_file",
+                         input={"path": "/project/y"}),
+    ], stop_reason="tool_use")
+    fake = FakeAsyncAnthropic([one_turn])
+
+    import dataclasses
+    inv = _inv(tmp_path)
+    inv_lo = dataclasses.replace(inv, max_tool_calls=1)
+
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake,
+    )
+    events = [e async for e in runner.run(inv_lo)]
+    assert events[-1]["payload"]["kind"] == "tool_call_ceiling_exceeded"
+
+    # Transcript invariant: classify_resume should NOT report DANGLING_TOOL_USE.
+    transcript_path = inv_lo.transcript_dir / "transcript.jsonl"
+    msgs = Transcript(transcript_path).load()
+    state = classify_resume(msgs, interactive=False)
+    assert state is not ResumeState.DANGLING_TOOL_USE
 
 
 @pytest.fixture
