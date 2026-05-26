@@ -79,3 +79,36 @@ def test_anthropic_registered_when_imported(monkeypatch):
     )
     p = resolve_role(role)
     assert p.name == "anthropic"
+
+
+def test_anthropic_and_openai_both_registered_after_import() -> None:
+    """providers/__init__ must register both new V1 providers eagerly."""
+    import importlib
+    import os
+
+    import imp.providers
+    from imp.providers import resolve
+
+    # Reload to flush any test-time mutation, then RE-EXECUTE the package's
+    # top-level code so register_provider(...) calls fire again. NOTE:
+    # importlib.import_module returns the cached module without re-running
+    # top-level — must use importlib.reload here.
+    resolve.reset_providers_for_tests()
+    importlib.reload(imp.providers)
+
+    # Both providers should be registered now.
+    role_anthropic = RoleConfig(
+        name="r",
+        prefer=(ProviderModel(provider="anthropic", model="claude-sonnet-4-6"),),
+    )
+    role_openai = RoleConfig(
+        name="r",
+        prefer=(ProviderModel(provider="openai", model="gpt-4o-mini"),),
+    )
+
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        provider = resolve_role(role_anthropic)
+        assert provider.name == "anthropic"
+    if os.environ.get("OPENAI_API_KEY"):
+        provider = resolve_role(role_openai)
+        assert provider.name == "openai"
