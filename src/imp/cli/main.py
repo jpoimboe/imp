@@ -15,15 +15,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from imp.agents.runner import AgentRunner
-from imp.agents.stub_runner import StubAgentRunner
+import anyio
+
 from imp.cli.chat import ChatRenderer
 from imp.cli.init import run_init
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit, tool_kill_escalation
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
-from imp.engine.executor import RunResult, run
+from imp.engine.executor import RunResult, run_change
 from imp.engine.project_root import find_project_root
 from imp.engine.state import LockHeld, ProjectLock, State
 
@@ -44,17 +44,6 @@ def _clear_change_lock(change: Change) -> None:
         (change.change_dir / "lock").unlink()
 
 
-def _agent_runner(prompt: Prompt | None = None) -> AgentRunner:
-    """Default: DeepAgentRunner. Test escape hatch: IMP_STUB_CANNED."""
-    canned = os.environ.get("IMP_STUB_CANNED")
-    if canned:
-        return StubAgentRunner(canned_path=Path(canned))
-    from imp.agents.deepagent_runner import DeepAgentRunner
-    if prompt is None:
-        return DeepAgentRunner()
-    return DeepAgentRunner(input_fn=lambda: prompt.ask("you> "))
-
-
 def _cmd_init(args: argparse.Namespace) -> int:
     project = _project_root()
     try:
@@ -65,7 +54,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_new(args: argparse.Namespace) -> int:
+async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     project = _project_root()
     lock = ProjectLock(project / ".imp" / "lock")
@@ -80,11 +69,10 @@ def _cmd_new(args: argparse.Namespace) -> int:
             try:
                 print(f"Created Change {change.id}: {change.title!r}")
                 prompt = Prompt()
-                runner = _agent_runner(prompt)
                 renderer = ChatRenderer()
                 try:
-                    result = run(
-                        change, runner,
+                    result = await run_change(
+                        change,
                         on_event=renderer.handle,
                         human_input_fn=lambda: prompt.ask("> "),
                         human_output_fn=renderer.line,
@@ -117,6 +105,10 @@ def _cmd_new(args: argparse.Namespace) -> int:
         return 2
 
 
+def _cmd_new(args: argparse.Namespace) -> int:
+    return anyio.run(_async_cmd_new, args)
+
+
 def _replay_current_step(change: Change, state: State, renderer: ChatRenderer) -> None:
     if state.step is None:
         return
@@ -129,7 +121,7 @@ def _replay_current_step(change: Change, state: State, renderer: ChatRenderer) -
     print("── end replay ──")
 
 
-def _cmd_resume(args: argparse.Namespace) -> int:
+async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     project = _project_root()
     lock = ProjectLock(project / ".imp" / "lock")
@@ -153,7 +145,6 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 print(f"Resuming Change {change.id}: {change.title!r}")
                 print(f"Phase: {state.phase}, step: {state.step}")
                 prompt = Prompt()
-                runner = _agent_runner(prompt)
                 renderer = ChatRenderer()
                 try:
                     renderer.handle({"type": "workflow_resumed", "payload": {}})
@@ -162,8 +153,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                     state.status = "running"
                     state.save(change.state_dir)
                     try:
-                        result = run(
-                            change, runner,
+                        result = await run_change(
+                            change,
                             on_event=renderer.handle,
                             human_input_fn=lambda: prompt.ask("> "),
                             human_output_fn=renderer.line,
@@ -194,6 +185,10 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    return anyio.run(_async_cmd_resume, args)
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
