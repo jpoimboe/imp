@@ -244,11 +244,13 @@ async def _execute_step(
     state.save(change.state_dir)
 
     # Spec §6.5 ceiling resolution: agent.max_tool_calls → defaults → 50.
-    resolved_max_tool_calls = (
-        agent_def.max_tool_calls
-        or workflow.defaults.max_tool_calls
-        or 50
-    )
+    # Use `is not None` (not `or`) so a literal 0 doesn't silently fall through.
+    if agent_def.max_tool_calls is not None:
+        resolved_max_tool_calls = agent_def.max_tool_calls
+    elif workflow.defaults.max_tool_calls is not None:
+        resolved_max_tool_calls = workflow.defaults.max_tool_calls
+    else:
+        resolved_max_tool_calls = 50
 
     invocation = AgentInvocation(
         agent_def=agent_def,

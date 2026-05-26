@@ -226,7 +226,7 @@ def _summarize_event(e: dict[str, Any]) -> str:
     t = e["type"]
     p = e["payload"]
     if t == "step_started":
-        return f"{p.get('step', '')} [model_role={p.get('model_role', '')}]"
+        return f"{p.get('step', '')} [model={p.get('model', '')}]"
     if t == "step_completed":
         return f"{p.get('step', '')}  → {p.get('action', '')}"
     if t == "agent_output":
