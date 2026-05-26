@@ -34,8 +34,6 @@ def to_openai_strict(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _walk(node: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(node, dict):
-        return node
     if node.get("type") == "object":
         return _walk_object(node)
     # Non-object types: recurse into items / anyOf / oneOf in case they
