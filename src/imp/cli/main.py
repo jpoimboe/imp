@@ -11,6 +11,7 @@ import contextlib
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -245,6 +246,26 @@ def _summarize_event(e: dict[str, Any]) -> str:
     return json.dumps(p)[:80]
 
 
+def _last_event_timestamp(events_path: Path) -> str:
+    """Return the timestamp of the last event in events.jsonl as local-time
+    ``YYYY-MM-DD HH:MM:SS``, or ``'-'`` if the file is missing, empty, or
+    has a malformed trailing line.
+    """
+    try:
+        text = events_path.read_text()
+    except FileNotFoundError:
+        return "-"
+    lines = [line for line in text.splitlines() if line.strip()]
+    if not lines:
+        return "-"
+    try:
+        record = json.loads(lines[-1])
+        ts = datetime.fromisoformat(record["timestamp"]).astimezone()
+        return ts.strftime("%Y-%m-%d %H:%M:%S")
+    except (json.JSONDecodeError, KeyError, ValueError):
+        return "-"
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     project = _project_root()
     changes_root = project / ".imp" / "changes"
@@ -259,13 +280,14 @@ def _cmd_status(args: argparse.Namespace) -> int:
     for d in sorted(valid_dirs, key=lambda p: int(p.name)):
         meta = json.loads((d / "change.json").read_text())
         state = State.load(d / "state")
+        last_activity = _last_event_timestamp(d / "events.jsonl")
         rows.append(
             (meta["id"], state.status, state.phase or "-",
-             state.step or "-", meta["title"])
+             state.step or "-", last_activity, meta["title"])
         )
-    print(f"{'ID':<4} {'STATUS':<10} {'PHASE':<12} {'STEP':<20} TITLE")
+    print(f"{'ID':<4} {'STATUS':<10} {'PHASE':<12} {'STEP':<20} {'LAST_ACTIVITY':<20} TITLE")
     for row in rows:
-        print(f"{row[0]:<4} {row[1]:<10} {row[2]:<12} {row[3]:<20} {row[4]}")
+        print(f"{row[0]:<4} {row[1]:<10} {row[2]:<12} {row[3]:<20} {row[4]:<20} {row[5]}")
     return 0
 
 

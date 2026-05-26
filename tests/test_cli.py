@@ -1,9 +1,10 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
 
-from imp.cli.main import main
+from imp.cli.main import _last_event_timestamp, main
 from tests.conftest import write_agent_md
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -196,6 +197,110 @@ def test_log_no_id_no_changes(
     assert code == 2
     err = capsys.readouterr().err
     assert "no Changes" in err
+
+
+# ---------------------------------------------------------------------------
+# _last_event_timestamp unit tests
+# ---------------------------------------------------------------------------
+
+def test_last_event_timestamp_with_events(tmp_path: Path) -> None:
+    """A valid events.jsonl yields a formatted local-time timestamp."""
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        '{"timestamp": "2024-03-15T10:30:00+00:00", "type": "change_created", "payload": {}}\n'
+        '{"timestamp": "2024-03-15T11:45:00+00:00", "type": "step_started", "payload": {}}\n'
+    )
+    result = _last_event_timestamp(events_path)
+    # Result must be a 19-char YYYY-MM-DD HH:MM:SS string (exact time depends on local tz).
+    assert len(result) == 19
+    assert result[4] == "-" and result[7] == "-" and result[10] == " "
+    assert result[13] == ":" and result[16] == ":"
+    # Must not be the sentinel value.
+    assert result != "-"
+
+
+def test_last_event_timestamp_missing_file(tmp_path: Path) -> None:
+    """Missing events.jsonl returns '-'."""
+    result = _last_event_timestamp(tmp_path / "events.jsonl")
+    assert result == "-"
+
+
+def test_last_event_timestamp_empty_file(tmp_path: Path) -> None:
+    """Empty events.jsonl returns '-'."""
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text("")
+    assert _last_event_timestamp(events_path) == "-"
+
+
+def test_last_event_timestamp_malformed_last_line(tmp_path: Path) -> None:
+    """Malformed trailing line returns '-' without raising."""
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        '{"timestamp": "2024-03-15T10:00:00+00:00", "type": "ok", "payload": {}}\n'
+        "not valid json\n"
+    )
+    assert _last_event_timestamp(events_path) == "-"
+
+
+def test_status_header_contains_last_activity(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Header row of `imp status` must include LAST_ACTIVITY column."""
+    _seed_default_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IMP_STUB_CANNED",
+                       str(FIXTURES / "canned" / "stub_outputs.yaml"))
+    main(["new", "my-change"])
+    capsys.readouterr()
+    code = main(["status"])
+    assert code == 0
+    out = capsys.readouterr().out
+    header = out.splitlines()[0]
+    assert "LAST_ACTIVITY" in header
+    # Column order: STEP must come before LAST_ACTIVITY, which must precede TITLE.
+    assert header.index("STEP") < header.index("LAST_ACTIVITY") < header.index("TITLE")
+
+
+def test_status_data_row_shows_timestamp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Data rows show a real timestamp after running a Change."""
+    _seed_default_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IMP_STUB_CANNED",
+                       str(FIXTURES / "canned" / "stub_outputs.yaml"))
+    main(["new", "ts-test"])
+    capsys.readouterr()
+    code = main(["status"])
+    assert code == 0
+    out = capsys.readouterr().out
+    data_row = out.splitlines()[1]
+    # A timestamp looks like YYYY-MM-DD HH:MM:SS — check at least the date part.
+    assert re.search(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", data_row)
+
+
+def test_status_no_events_shows_dash(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """A Change whose events.jsonl is missing renders '-' in LAST_ACTIVITY."""
+    _seed_default_workflow(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IMP_STUB_CANNED",
+                       str(FIXTURES / "canned" / "stub_outputs.yaml"))
+    main(["new", "no-events"])
+    capsys.readouterr()
+    # Remove events.jsonl to simulate missing file.
+    events_path = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
+    events_path.unlink(missing_ok=True)
+    code = main(["status"])
+    assert code == 0
+    out = capsys.readouterr().out
+    data_row = out.splitlines()[1]
+    # The LAST_ACTIVITY column should be "-".
+    assert " - " in data_row or data_row.strip().endswith("-")
 
 
 def test_default_runner_is_deepagent(monkeypatch: pytest.MonkeyPatch) -> None:
