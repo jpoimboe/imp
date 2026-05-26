@@ -219,3 +219,22 @@ def test_human_gate_renders_prompt_and_options() -> None:
     assert "continue?" in rendered.lower() or "human gate" in rendered.lower()
     assert "1) Approve" in rendered
     assert "2) Retry" in rendered
+
+
+# ── Issue 2 Part C: env_extra injection ───────────────────────────────────────
+
+def test_script_gate_receives_env_extra(tmp_path: Path) -> None:
+    """env_extra is merged into the subprocess environment."""
+    decide = Decide(
+        rules=(
+            Rule(when=(("exit", 0),), is_else=False, action=Continue(), source=loc()),
+            Rule(when=(), is_else=True, action=Retry(), source=loc()),
+        ),
+        source=loc(),
+    )
+    gate = _script_gate('test "$IMP_ARTIFACTS_DIR" = "/tmp/probe"', decide)
+    action, ctx = run_script_gate(
+        gate, cwd=tmp_path, env_extra={"IMP_ARTIFACTS_DIR": "/tmp/probe"},
+    )
+    assert ctx["exit"] == 0  # test command passed → env var was set correctly
+    assert isinstance(action, Continue)

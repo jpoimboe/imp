@@ -440,7 +440,12 @@ def _run_one_gate(
     workflow: Workflow | None = None,
 ) -> Action:
     if isinstance(gate, ScriptGate):
-        action, context = run_script_gate(gate, cwd=change.project_root)
+        env_extra = {
+            "IMP_ARTIFACTS_DIR": str(change.artifacts_dir),
+            "IMP_PROJECT_ROOT": str(change.project_root),
+            "IMP_CHANGE_ID": str(change.id),
+        }
+        action, context = run_script_gate(gate, cwd=change.project_root, env_extra=env_extra)
         log.append("script_gate_result", context)
         return action
     if isinstance(gate, HumanGate):

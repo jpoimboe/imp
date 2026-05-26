@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from imp.assets import default_workflow_dir
+from imp.engine.errors import LoadErrors
 from imp.engine.loader import load_workflow
 
 
@@ -37,7 +38,7 @@ def test_default_workflow_loads_with_default_roles(tmp_path: Path) -> None:
 def test_default_workflow_fails_with_missing_role(tmp_path: Path) -> None:
     staged = tmp_path / "wf"
     shutil.copytree(default_workflow_dir(), staged)
-    with pytest.raises(Exception) as exc:
-        load_workflow(staged, configured_roles={"default"})
+    with pytest.raises(LoadErrors) as exc:
+        load_workflow(staged, configured_roles=frozenset({"default"}))
     msg = str(exc.value)
     assert "spec" in msg or "code" in msg  # at least one undefined role surfaces

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -33,7 +34,7 @@ def evaluate_decide(decide: Decide, context: dict[str, Any]) -> Action:
 
 
 def run_script_gate(
-    gate: ScriptGate, *, cwd: Path
+    gate: ScriptGate, *, cwd: Path, env_extra: dict[str, str] | None = None,
 ) -> tuple[Action, dict[str, Any]]:
     """Run the script, capture exit/stdout/stderr, evaluate decide.
 
@@ -44,7 +45,13 @@ def run_script_gate(
     of the trusted code base (snapshotted at imp new, gitted, peer-reviewed)
     and `command:` strings are explicit shell expressions. The Change author
     and the workflow author are the same trust principal in V0.
+
+    `env_extra` is merged on top of the current process environment so that
+    engine-level variables (e.g. IMP_ARTIFACTS_DIR) are visible to scripts.
     """
+    env = os.environ.copy()
+    if env_extra:
+        env.update(env_extra)
     proc = subprocess.run(
         gate.command,
         shell=True,
@@ -53,6 +60,7 @@ def run_script_gate(
         text=True,
         timeout=gate.timeout_seconds,
         check=False,
+        env=env,
     )
     context = {
         "exit": proc.returncode,
