@@ -76,3 +76,50 @@ def test_pause_when_no_state_file(tmp_path: Path) -> None:
         e["type"] == "workflow_paused" and e["payload"].get("reason") == "early"
         for e in events
     )
+
+
+import os
+import signal
+import subprocess
+import sys
+import time
+import contextlib
+
+import pytest
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX only")
+def test_install_process_group_makes_us_leader() -> None:
+    """After install_process_group, our PID == our PGID."""
+    from imp.cli.signals import install_process_group
+
+    install_process_group()
+    assert os.getpid() == os.getpgid(0)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX only")
+@pytest.mark.skipif(sys.platform == "darwin", reason="POSIX /proc-walk not available on macOS")
+def test_tool_kill_escalation_terminates_child(tmp_path: Path) -> None:
+    """Spawn a child in our PG, call escalation, child must be dead."""
+    from imp.cli.signals import install_process_group, tool_kill_escalation
+
+    install_process_group()
+    # Child sleeps; we expect it to be killed
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+    )
+    # Brief settle so /proc/<child_pid>/stat is available
+    time.sleep(0.1)
+    try:
+        # Send SIGTERM-then-SIGKILL to the PG (which includes us — pytest
+        # would die — so we exclude self by passing kill_self=False)
+        tool_kill_escalation(timeout=0.5, kill_self=False)
+        # Child should be gone in well under our 5s test budget
+        for _ in range(50):
+            if child.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert child.poll() is not None, "child wasn't killed"
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            child.kill()
