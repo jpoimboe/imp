@@ -45,6 +45,23 @@ def _last_ai_message(response: Any) -> AIMessage | None:
     return None
 
 
+def _has_visible_text(msg: AIMessage) -> bool:
+    """Whether the agent's message had any plain-text content the user
+    would have seen. Anthropic returns thinking blocks (`type: thinking`)
+    and tool_use blocks; only `type: text` blocks are user-visible."""
+    content = msg.content
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                if str(block.get("text", "")).strip():
+                    return True
+            elif isinstance(block, str) and block.strip():
+                return True
+    return False
+
+
 class ChatMiddleware(AgentMiddleware):
     def __init__(self, input_fn: Callable[[], str]) -> None:
         self._input = input_fn
@@ -56,6 +73,9 @@ class ChatMiddleware(AgentMiddleware):
         ai = _last_ai_message(response)
         if ai is None or ai.tool_calls:
             return response
+        if not _has_visible_text(ai):
+            # User would otherwise stare at a bare `you>` with no context.
+            print("[chat ] (agent had no visible text this turn — your turn)")
         while True:
             user_text = self._input()
             if user_text == ESC_SENTINEL:
@@ -74,6 +94,8 @@ class ChatMiddleware(AgentMiddleware):
         ai = _last_ai_message(response)
         if ai is None or ai.tool_calls:
             return response
+        if not _has_visible_text(ai):
+            print("[chat ] (agent had no visible text this turn — your turn)")
         while True:
             user_text = await asyncio.to_thread(self._input)
             if user_text == ESC_SENTINEL:

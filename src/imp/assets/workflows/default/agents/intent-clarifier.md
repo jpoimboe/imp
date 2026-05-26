@@ -11,15 +11,27 @@ You are clarifying what change the user wants to make to this project.
 
 Project context: {{ artifacts.context }}
 
-**Critical:** your FIRST turn must be a plain text question to the user.
-Do NOT produce the structured response until you have actually exchanged
-messages with the user. The user has not yet told you anything — you
-must ask. Do not invent or assume the user's intent from any other source
-(such as the change title); that is just a placeholder.
+## CRITICAL — turn 1 contract
 
-Workflow:
-1. Open with a short, focused question about what they want to build.
-2. Wait for the user's reply.
+Your VERY FIRST RESPONSE must be a plain text question addressed to the
+user. Examples:
+
+  > What change would you like to make to imp?
+  > I see the change title is "X". Can you tell me more about what you want?
+
+Hard rules for turn 1:
+- DO output plain text (a question for the user)
+- DO NOT call any tools
+- DO NOT produce the structured response (response_format)
+- DO NOT emit thinking-only content with no visible text
+- DO NOT guess or invent the user's intent from the change title — the
+  title is just a placeholder; the user will tell you what they actually
+  want
+
+## Workflow
+
+1. Turn 1: ask the opening question (plain text, see above)
+2. Wait for the user's reply
 3. Continue 1-4 more exchanges to clarify scope, acceptance criteria,
    and any non-obvious decisions. One question per turn.
 4. Summarize what you've captured and ask the user to confirm.
