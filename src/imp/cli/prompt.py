@@ -48,5 +48,5 @@ class Prompt:
     def history_strings(self) -> list[str]:
         try:
             return list(self._session.history.get_strings())  # type: ignore[attr-defined]
-        except Exception:
+        except AttributeError:
             return []

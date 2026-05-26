@@ -69,8 +69,8 @@ def execute_step(
     events_path: Path | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] | None = None,
-    human_output_fn: Callable[[str], None] | None = None,
+    human_input_fn: Callable[[], str] = input,
+    human_output_fn: Callable[[str], None] = print,
 ) -> tuple[Action, dict[str, Any] | None]:
     """Run one step. Returns (action, agent_output_or_None).
 
@@ -218,8 +218,8 @@ def execute_phase(
     resolved_models: dict[str, BaseChatModel] | None = None,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] | None = None,
-    human_output_fn: Callable[[str], None] | None = None,
+    human_input_fn: Callable[[], str] = input,
+    human_output_fn: Callable[[str], None] = print,
 ) -> Action:
     """Walk phase steps, then phase gates. `workflow` is needed for AgentDef
     lookup keyed by `step.file.stem` (V14 ensures the stem == agent name).
@@ -449,8 +449,8 @@ def _run_step_gates(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     workflow: Workflow | None = None,
     on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] | None = None,
-    human_output_fn: Callable[[str], None] | None = None,
+    human_input_fn: Callable[[], str] = input,
+    human_output_fn: Callable[[str], None] = print,
 ) -> Action:
     if not step.gates:
         # Implicit: continue if status: Success, retry on anything else.
@@ -484,8 +484,8 @@ def _run_one_gate(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     workflow: Workflow | None = None,
     on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] | None = None,
-    human_output_fn: Callable[[str], None] | None = None,
+    human_input_fn: Callable[[], str] = input,
+    human_output_fn: Callable[[str], None] = print,
 ) -> Action:
     if isinstance(gate, ScriptGate):
         env_extra = {
@@ -497,9 +497,7 @@ def _run_one_gate(
         _emit(on_event, log, "script_gate_result", context)
         return action
     if isinstance(gate, HumanGate):
-        _input_fn = human_input_fn or input
-        _output_fn = human_output_fn or print
-        return run_human_gate(gate, input_fn=_input_fn, output_fn=_output_fn)
+        return run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
     if isinstance(gate, AgentGate):
         return _run_agent_gate(
             gate, change, log,
