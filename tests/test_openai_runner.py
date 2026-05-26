@@ -10,8 +10,11 @@ from imp.agents.runner import (
     ChangeContext,
     Message,
     TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
+from imp.agents.transcript import Transcript
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.openai import OpenAIAgentRunner
 from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
@@ -80,3 +83,49 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
     assert "agent_message" in kinds
     assert kinds[-1] == "agent_output"
     assert events[-1]["payload"] == {"status": "Success", "note": "ok"}
+
+
+@pytest.mark.anyio
+async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
+    """If transcript.jsonl exists, runner reloads it and continues mid-step."""
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    (inv.transcript_dir).mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(
+        role="assistant",
+        content=(
+            TextBlock(text="reading first…"),
+            ToolUseBlock(id="t0", name="read_file", input={"path": "/project/x"}),
+        ),
+    ))
+    t.append(Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t0", content="some content"),),
+    ))
+
+    # The runner sees the SEND_TO_LLM resume state; next call is the agent's
+    # next turn — and it completes the step.
+    fake = FakeAsyncOpenAI([
+        completion(message(
+            content="done",
+            tool_calls=[tool_call("c1", "complete_step", {"status": "Success"})],
+        )),
+    ])
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini",
+        client_factory=lambda: fake,
+    )
+
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    kinds = [e["type"] for e in events]
+    assert kinds[-1] == "agent_output"
+    # Initial-messages were NOT re-appended because transcript was non-empty.
+    loaded = t.load()
+    # Original 3 + new assistant turn = 4 messages.
+    assert len(loaded) == 4
