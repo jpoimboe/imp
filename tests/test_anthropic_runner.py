@@ -264,3 +264,70 @@ async def test_ceiling_trip_mid_batch_preserves_transcript_invariant(tmp_path: P
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_runner_dispatches_task_via_subagent(tmp_path: Path) -> None:
+    """End-to-end runner path: agent declares `task` + subagent; LLM emits a
+    tool_use for `task`; runner's special-case `await dispatch_task(...)`
+    fires; child runner's agent_output JSON-stringifies into the tool_result.
+    """
+    import dataclasses
+
+    (tmp_path / "art").mkdir()
+    # Parent agent with `task` declared + reviewer subagent ref
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+    reviewer_def = AgentDef(
+        name="reviewer", description="",
+        tools=frozenset({"complete_step"}), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),
+                    OutputField(name="verdict", type="enum",
+                                values=("approve", "rework"), required=True)),
+            source=SourceLoc(file=Path("r.md"), line=1),
+        ),
+        prompt_template_source="review",
+        source_path=Path("r.md"),
+        source=SourceLoc(file=Path("r.md"), line=1),
+    )
+    parent_def = dataclasses.replace(
+        _agent_def(tools=frozenset({"complete_step", "task"})),
+        subagents=("reviewer",),
+    )
+
+    inv = dataclasses.replace(
+        _inv(tmp_path),
+        agent_def=parent_def,
+        subagent_defs={"reviewer": reviewer_def},
+    )
+
+    # Parent and child share the queue. Consumption order:
+    #   1. parent → tool_use task
+    #   2. child  → complete_step with verdict=approve (satisfies reviewer schema)
+    #   3. parent → complete_step (status=Success) after task returns
+    parent_fake = FakeAsyncAnthropic([
+        response(tool_use("t1", "task", {
+            "subagent_name": "reviewer", "task_description": "review the spec",
+        })),
+        response(tool_use("rc", "complete_step",
+                          {"status": "Success", "verdict": "approve"})),
+        response(tool_use("pc", "complete_step",
+                          {"status": "Success", "note": "done"})),
+    ])
+
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6",
+        client_factory=lambda: parent_fake,
+    )
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["payload"]["status"] == "Success"
+
+    # The parent's tool_result for the task call should carry the
+    # JSON-stringified subagent agent_output.
+    tool_results = [e for e in events if e["type"] == "tool_result"]
+    task_result = next(e for e in tool_results if e["payload"]["id"] == "t1")
+    import json
+    parsed = json.loads(task_result["payload"]["content"])
+    assert parsed.get("verdict") == "approve"
