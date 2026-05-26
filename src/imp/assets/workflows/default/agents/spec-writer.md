@@ -9,7 +9,7 @@ output:
 
 You are writing the specification for the change the user described.
 
-Captured intent: {{ events['intent-clarifier'].intent }}
+Change title (the user's starting intent): {{ change.title }}
 Project context: {{ artifacts.context }}
 
 Write `/artifacts/spec.md` covering:

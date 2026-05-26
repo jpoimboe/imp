@@ -12,13 +12,12 @@ defaults:
 onboard:
   steps:
     - {name: context-loader, file: agents/context-loader.md, model_role: default}
-    - {name: intent-clarifier, file: agents/intent-clarifier.md, model_role: spec, interactive: true}
   gates:
     - type: human
-      prompt: "Captured intent look right?"
+      prompt: "Context loaded. Use change title as the starting intent for spec?"
       options:
         - {label: "Yes",  action: {kind: continue}}
-        - {label: "Redo", action: {kind: retry}}
+        - {label: "Skip", action: {kind: continue}}
 
 spec:
   steps:

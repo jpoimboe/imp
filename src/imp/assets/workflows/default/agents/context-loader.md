@@ -7,7 +7,7 @@ output:
   summary: {type: string, required: false}
 ---
 
-You are surveying a project so the next agent (intent-clarifier) has context.
+You are surveying a project so the next agent (spec-writer) has context.
 
 Your job:
 1. List the top-level directory structure.

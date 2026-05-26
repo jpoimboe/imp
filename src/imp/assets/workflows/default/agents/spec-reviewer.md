@@ -10,11 +10,11 @@ output:
 
 You are reviewing the spec.
 
-Captured intent: {{ events['intent-clarifier'].intent }}
+Change title (user's starting intent): {{ change.title }}
 Spec: {{ artifacts.spec }}
 
 Evaluate:
-- Does the spec address the captured intent?
+- Does the spec address the change title and any clarifications added during spec rework?
 - Are the acceptance criteria concrete and testable?
 - Are scope boundaries clear?
 - Are there obvious gaps or contradictions?
