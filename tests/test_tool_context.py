@@ -52,6 +52,14 @@ def test_check_fs_permission_passthrough(tmp_path: Path) -> None:
         ctx.check_fs_permission("write", "/project/x.py")
 
 
+def test_change_context_field(tmp_path: Path) -> None:
+    from imp.agents.runner import ChangeContext
+    ctx = _ctx(tmp_path)
+    assert ctx.change_context is None
+    ctx.change_context = ChangeContext(change_id=7, project_root=tmp_path, artifacts_dir=tmp_path)
+    assert ctx.change_context.change_id == 7
+
+
 def _ctx(tmp_path: Path, rules: tuple[FsRule, ...] = ()) -> ToolContext:
     artifacts = tmp_path / "_artifacts"
     artifacts.mkdir()

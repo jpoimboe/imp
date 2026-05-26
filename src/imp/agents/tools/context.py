@@ -30,6 +30,8 @@ class ToolContext:
     model_name: str = ""
     parent_transcript_dir: Path | None = None
     interactive: bool = False
+    # The change being processed; used by subagent dispatch to propagate change_id.
+    change_context: Any = None
     # When the runner serves ask_user requests, it injects this callable.
     user_input_fn: Any = None
     # Subagent dispatch hook (filled by runner; signature defined in subagents tool).
