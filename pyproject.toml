@@ -38,6 +38,16 @@ imp = "imp.cli.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/imp"]
 
+# Explicit package-data for setuptools fallback and editable re-installs.
+# Hatchling (the primary build backend) includes all files under packages=
+# by default, so the .yaml/.sh/.md assets ship without further config.
+[tool.setuptools.package-data]
+"imp.assets" = [
+  "workflows/default/workflow.yaml",
+  "workflows/default/scripts/*.sh",
+  "workflows/default/agents/*.md",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"

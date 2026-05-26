@@ -1,0 +1,139 @@
+name: standard-feature
+description: |
+  Standard imp workflow: onboard → spec → design → plan → implement → review → merge.
+  Each gate either advances, retries the current phase, or pauses for human input.
+
+phases: [onboard, spec, design, plan, implement, review, merge]
+
+defaults:
+  max_retries: 3
+  on_max_retries: {kind: pause}
+
+onboard:
+  steps:
+    - {name: context-loader, file: agents/context-loader.md, model_role: default}
+    - {name: intent-clarifier, file: agents/intent-clarifier.md, model_role: spec, interactive: true}
+  gates:
+    - type: human
+      prompt: "Captured intent look right?"
+      options:
+        - {label: Yes,  action: {kind: continue}}
+        - {label: Redo, action: {kind: retry}}
+
+spec:
+  steps:
+    - name: spec-writer
+      file: agents/spec-writer.md
+      model_role: spec
+      fs_permissions:
+        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/**"], mode: deny}
+      gates:
+        - type: script
+          command: ./scripts/lint-spec.sh
+          decide:
+            - {when: {exit: 0}, action: {kind: continue}}
+            - {else: true, action: {kind: retry}}
+  gates:
+    - type: agent
+      file: agents/spec-reviewer.md
+      model_role: spec_review
+      decide:
+        - {when: {verdict: approve},  action: {kind: continue}}
+        - {when: {verdict: rework},   action: {kind: retry}}
+        - {else: true, action: {kind: pause}}
+    - type: human
+      prompt: "Approve spec?"
+      options:
+        - {label: Approve,            action: {kind: continue}}
+        - {label: Back to onboarding, action: {kind: goto, target: onboard}}
+        - {label: Rewrite spec,       action: {kind: retry}}
+
+design:
+  steps:
+    - name: design-writer
+      file: agents/design-writer.md
+      model_role: design
+      fs_permissions:
+        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/**"], mode: deny}
+  gates:
+    - type: agent
+      file: agents/design-reviewer.md
+      model_role: design_review
+      decide:
+        - {when: {verdict: approve}, action: {kind: continue}}
+        - {when: {verdict: rework},  action: {kind: retry}}
+        - {else: true, action: {kind: pause}}
+    - type: human
+      prompt: "Approve design?"
+      options:
+        - {label: Approve,       action: {kind: continue}}
+        - {label: Back to spec,  action: {kind: goto, target: spec}}
+        - {label: Rewrite design, action: {kind: retry}}
+
+plan:
+  steps:
+    - name: plan-writer
+      file: agents/plan-writer.md
+      model_role: design
+      fs_permissions:
+        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/**"], mode: deny}
+  gates:
+    - type: human
+      prompt: "Approve plan?"
+      options:
+        - {label: Approve,        action: {kind: continue}}
+        - {label: Back to design, action: {kind: goto, target: design}}
+        - {label: Rewrite plan,   action: {kind: retry}}
+
+implement:
+  steps:
+    - name: coder
+      file: agents/coder.md
+      model_role: code
+      fs_permissions:
+        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/project/**"], mode: allow}
+        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+      gates:
+        - type: script
+          command: ./scripts/run-tests.sh
+          decide:
+            - {when: {exit: 0}, action: {kind: continue}}
+            - {else: true, action: {kind: retry}}
+    - name: documenter
+      file: agents/documenter.md
+      model_role: code
+      fs_permissions:
+        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/project/**"], mode: allow}
+        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+
+review:
+  steps: []
+  gates:
+    - type: agent
+      file: agents/code-reviewer.md
+      model_role: code_review
+      decide:
+        - {when: {verdict: approve}, action: {kind: continue}}
+        - {when: {verdict: rework},  action: {kind: goto, target: implement}}
+        - {else: true, action: {kind: pause}}
+    - type: human
+      prompt: "Merge?"
+      options:
+        - {label: Merge,           action: {kind: continue}}
+        - {label: Back to implement, action: {kind: goto, target: implement}}
+
+merge:
+  steps: []
+  gates:
+    - type: human
+      prompt: "Change complete. Close it?"
+      options:
+        - {label: Close, action: {kind: continue}}
