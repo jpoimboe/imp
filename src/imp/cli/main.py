@@ -19,12 +19,12 @@ from imp.agents.stub_runner import StubAgentRunner
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run
+from imp.engine.project_root import find_project_root
 from imp.engine.state import LockHeld, ProjectLock, State
 
 
 def _project_root() -> Path:
-    """Plan 1 only: cwd is the project root. Plan 3 adds walk-up discovery."""
-    return Path.cwd()
+    return find_project_root()
 
 
 def _write_change_lock(change: Change) -> None:
