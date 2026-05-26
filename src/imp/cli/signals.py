@@ -75,6 +75,24 @@ def tool_kill_escalation(
         _signal_pg_excluding_self(pgid, signal.SIGKILL)
 
 
+class InterruptCoordinator:
+    """Minimal Task 32 stub — full mechanics land in Plan 3 (spec §6.15)."""
+
+    def __init__(self) -> None:
+        self._runner_interrupt = None
+        self._should_pause = False
+
+    def attach_runner(self, interrupt_fn) -> None:
+        self._runner_interrupt = interrupt_fn
+
+    def detach_runner(self) -> None:
+        self._runner_interrupt = None
+
+    @property
+    def should_pause(self) -> bool:
+        return self._should_pause
+
+
 def _signal_pg_excluding_self(pgid: int, sig: int) -> None:
     """Walk /proc looking for procs whose PGID matches; signal those that
     aren't us. POSIX-only; best-effort."""

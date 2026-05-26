@@ -1,55 +1,38 @@
-"""Workflow executor: step, phase, top-level loops; action handling."""
+"""Workflow executor (V1): async step dispatch, per-step transcript cleanup,
+gate evaluation, state persistence.
+
+The engine owns state.json + events.jsonl. The runner owns transcript.jsonl.
+On successful step completion the engine deletes the step's transcript dir.
+"""
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
 from enum import Enum
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from langchain_core.language_models import BaseChatModel
-
-from imp.agents.prompts import PromptRenderError, build_context, render_prompt
-from imp.agents.runner import AgentInvocation, AgentRunner
+from imp.agents.prompts import build_context, render_prompt
+from imp.agents.runner import (
+    AgentInvocation, ChangeContext, Message, TextBlock,
+)
 from imp.engine.change import Change
-from imp.engine.gates import run_human_gate, run_script_gate
+from imp.engine.gates import (
+    run_human_gate, run_script_gate,
+)
 from imp.engine.loader import load_workflow
 from imp.engine.schema import validate_agent_output
-from imp.engine.state import EventLog, State
+from imp.engine.state import CurrentStep, EventLog, State
 from imp.engine.types import (
-    Action,
-    AgentDef,
-    AgentGate,
-    Continue,
-    Goto,
-    HumanGate,
-    Pause,
-    Phase,
-    Retry,
-    ScriptGate,
-    Step,
-    StubGate,
-    Workflow,
+    Action, AgentGate, Continue, Goto, HumanGate,
+    Pause, Phase, Retry, ScriptGate, Step, StubGate, Workflow,
 )
 from imp.providers.config import Config, load_config
-from imp.providers.resolve import ProviderUnavailable, resolve_role
-
-if TYPE_CHECKING:
-    from langgraph.checkpoint.base import BaseCheckpointSaver
+from imp.providers.resolve import resolve_role
 
 EventCallback = Callable[[dict[str, Any]], None]
-
-
-def _open_checkpointer(state_dir: Path) -> Any:
-    """Return a SqliteSaver context manager for state_dir/checkpoint.db.
-
-    Returns whatever shape SqliteSaver.from_conn_string returns (context
-    manager in current versions). Caller uses `with ... as checkpointer:`.
-    """
-    from langgraph.checkpoint.sqlite import SqliteSaver
-
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return SqliteSaver.from_conn_string(str(state_dir / "checkpoint.db"))
+HumanInputFn = Callable[[], str]
+HumanOutputFn = Callable[[str], None]
 
 
 class RunResult(Enum):
@@ -58,568 +41,312 @@ class RunResult(Enum):
     ERRORED = "errored"
 
 
-def execute_step(
-    step: Step,
-    agent_def: AgentDef,
+async def run_change(
     change: Change,
-    runner: AgentRunner,
-    state: State,
     *,
-    model: BaseChatModel | None = None,
-    events_path: Path | None = None,
-    checkpointer: BaseCheckpointSaver[Any] | None = None,
     on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] = input,
-    human_output_fn: Callable[[str], None] = print,
-) -> tuple[Action, dict[str, Any] | None]:
-    """Run one step. Returns (action, agent_output_or_None).
+    human_input_fn: HumanInputFn = input,
+    human_output_fn: HumanOutputFn = print,
+    user_chat_input_fn: Callable[[str], str] | None = None,
+    coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
+) -> RunResult:
+    on_event = on_event or (lambda _e: None)
+    if coordinator is None:
+        # Lazy import to avoid circular dep at module-load time.
+        from imp.cli.signals import InterruptCoordinator
+        coordinator = InterruptCoordinator()
 
-    Caller supplies `agent_def` (looked up from `workflow.agents`) — execute_step
-    does not re-parse the agent file. V14 guarantees workflow.agents[step.file.stem]
-    is the right def.
-    """
-    log = change.event_log()
+    workflow = load_workflow(change.workflow_dir)
+    config = load_config(change.project_root)
 
-    # Resume-skip-step (Plan 1 review #3 + Plan 2 reviews #7 #8):
-    # If we have a cached agent_output for this (phase, step) from a prior
-    # run, skip the runner and re-evaluate gates against the cached output.
-    # Guarded by BOTH step_attempt == 0 AND phase_attempt == 0 so that
-    # neither a step-level Retry nor a phase-level Retry (which resets
-    # step_attempt) loops forever against the same stale cache (Bug O
-    # from dogfood: design-writer lied about writing the artifact and
-    # the phase retry just re-used the cached "Success" output).
-    cached = (
-        log.cached_output_for(state.phase, step.name)
-        if state.step_attempt == 0 and state.phase_attempt == 0 else None
+    log = EventLog(change.events_path)
+    state = State.load(change.state_dir)
+
+    while True:
+        if state.phase is None:
+            state.status = "completed"
+            state.save(change.state_dir)
+            return RunResult.COMPLETED
+
+        phase = next(p for p in workflow.phases if p.name == state.phase)
+        action = await _execute_phase(
+            phase, workflow, config, change, state, log, on_event,
+            human_input_fn=human_input_fn, human_output_fn=human_output_fn,
+            user_chat_input_fn=user_chat_input_fn,
+            coordinator=coordinator,
+        )
+
+        # Coordinator pause request takes precedence over the action's intent.
+        if coordinator.should_pause:
+            state.status = "paused"
+            state.save(change.state_dir)
+            _emit(log, on_event, "workflow_paused", {})
+            return RunResult.PAUSED
+
+        if isinstance(action, Pause):
+            state.status = "paused"
+            state.save(change.state_dir)
+            _emit(log, on_event, "workflow_paused", {})
+            return RunResult.PAUSED
+        if isinstance(action, Continue):
+            next_phase = _next_phase(workflow, state.phase)
+            state.phase = next_phase
+            state.step = None
+            state.step_attempt = 0
+            state.phase_attempt = 0
+        elif isinstance(action, Goto):
+            state.phase = action.target
+            state.step = None
+            state.step_attempt = 0
+            state.phase_attempt = 0
+        else:
+            raise AssertionError(f"unexpected action {action!r}")
+        state.save(change.state_dir)
+
+
+def _next_phase(workflow: Workflow, current: str) -> str | None:
+    """Return the name of the phase after `current`, or None if last."""
+    names = [p.name for p in workflow.phases]
+    idx = names.index(current)
+    if idx + 1 >= len(names):
+        return None
+    return names[idx + 1]
+
+
+async def _execute_phase(
+    phase: Phase, workflow: Workflow, config: Config, change: Change,
+    state: State, log: EventLog, on_event: EventCallback,
+    *,
+    human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
+    user_chat_input_fn: Callable[[str], str] | None,
+    coordinator: Any,
+) -> Action:
+    _emit(log, on_event, "phase_started", {"phase": phase.name})
+    # Outer loop: each iteration is one walk of the steps; step-level retry
+    # bounces back to the top via `continue`. State mutations carry across
+    # iterations — no recursion.
+    while True:
+        steps_iter = list(phase.steps)
+        start_idx = 0
+        if state.step is not None:
+            for i, s in enumerate(steps_iter):
+                if s.name == state.step:
+                    start_idx = i; break
+
+        retry_from_top = False
+        for step in steps_iter[start_idx:]:
+            state.step = step.name
+            state.save(change.state_dir)
+            action = await _execute_step(
+                step, workflow, config, change, state, log, on_event,
+                human_input_fn=human_input_fn,
+                user_chat_input_fn=user_chat_input_fn,
+                coordinator=coordinator,
+            )
+            if isinstance(action, Retry):
+                state.step_attempt += 1
+                if state.step_attempt > step.max_retries:
+                    action = step.on_max_retries
+                    # Validator forbids on_max_retries == Retry. Defense-in-depth:
+                    # if a malformed workflow slipped past validation, fail loud.
+                    assert not isinstance(action, Retry), (
+                        f"on_max_retries cannot be Retry; "
+                        f"got {action!r} for step {step.name!r}"
+                    )
+                else:
+                    # Restart the steps walk from this same step.
+                    retry_from_top = True
+                    break
+            if isinstance(action, (Goto, Pause)):
+                return action
+            if isinstance(action, Continue):
+                state.step_attempt = 0
+                continue
+
+        if retry_from_top:
+            continue  # outer while True: re-enter the steps walk
+
+        # Phase-level gates chain: each Continue means "next gate"; only the
+        # last gate's Continue ends the phase.
+        retried_phase = False
+        for gate in phase.gates:
+            action = await _run_gate(
+                gate, workflow, config, change, state, log, on_event,
+                human_input_fn=human_input_fn, human_output_fn=human_output_fn,
+                user_chat_input_fn=user_chat_input_fn,
+            )
+            if isinstance(action, Retry):
+                state.phase_attempt += 1
+                if state.phase_attempt > phase.max_retries:
+                    action = phase.on_max_retries
+                if isinstance(action, Retry):
+                    state.step = None
+                    state.step_attempt = 0
+                    retried_phase = True
+                    break  # re-enter the outer steps walk
+            if isinstance(action, (Goto, Pause)):
+                return action
+            # Continue: proceed to next gate (no early return)
+        if retried_phase:
+            continue  # outer while True: re-walk steps then gates
+        _emit(log, on_event, "phase_completed", {"phase": phase.name})
+        return Continue()
+
+
+async def _execute_step(
+    step: Step, workflow: Workflow, config: Config, change: Change,
+    state: State, log: EventLog, on_event: EventCallback,
+    *,
+    human_input_fn: HumanInputFn,
+    user_chat_input_fn: Callable[[str], str] | None,
+    coordinator: Any,
+) -> Action:
+    agent_def = workflow.agents[step.file.stem]
+    role = config.roles.get(step.model_role) or config.roles["default"]
+    provider = resolve_role(role)
+
+    artifacts_dir = change.artifacts_dir
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    transcript_dir = change.change_dir / "steps" / state.phase / step.name
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    rendered = render_prompt(
+        agent_def.prompt_template_source, build_context(
+            change_id=change.id, change_title=change.title,
+            artifacts_dir=artifacts_dir, event_log=log,
+        ),
     )
-    if cached is not None:
-        _emit(on_event, log, "step_resumed_with_cached_output", {
-            "step": step.name, "phase": state.phase,
-        })
-        # Schema-validate the cache (defense in depth)
-        try:
-            validate_agent_output(cached, agent_def.output_schema)
-        except Exception as e:
-            _emit(on_event, log, "error", {
-                "message": f"cached output failed schema validation: {e}",
-            })
-            _emit(on_event, log, "step_completed", {
-                "step": step.name, "action": "retry",
-                "reason": "cached output invalid; rerunning",
-            })
-            return Retry(), None
-        action = _run_step_gates(
-            step, change, log, cached,
-            runner=runner, resolved_models=None,
-            checkpointer=checkpointer, workflow=None,
-            on_event=on_event,
-            human_input_fn=human_input_fn,
-            human_output_fn=human_output_fn,
-        )
-        _emit(on_event, log, "step_completed", {
-            "step": step.name, "action": _action_name(action),
-        })
-        return action, cached
 
-    try:
-        rendered_prompt = render_prompt(
-            agent_def.prompt_template_source,
-            build_context(
-                change_id=change.id, change_title=change.title,
-                artifacts_dir=change.artifacts_dir,
-                event_log=log,
-            ),
-        )
-    except PromptRenderError as e:
-        _emit(on_event, log, "error", {"message": f"prompt render failed: {e}"})
-        _emit(on_event, log, "step_started", {
-            "step": step.name, "phase": state.phase,
-            "model_role": step.model_role, "interactive": step.interactive,
-        })
-        _emit(on_event, log, "step_completed", {
-            "step": step.name, "action": "retry",
-            "reason": "prompt render failed",
-        })
-        return Retry(), None
+    # Resolve subagents into their AgentDefs
+    subagent_defs = {
+        name: workflow.agents[name]
+        for name in agent_def.subagents
+        if name in workflow.agents
+    }
 
-    _emit(on_event, log, "step_started", {
-        "step": step.name,
-        "phase": state.phase,
-        "model_role": step.model_role,
-        "interactive": step.interactive,
-    })
+    state.current_step = CurrentStep(transcript_dir=transcript_dir)
+    state.save(change.state_dir)
+
+    # Spec §6.5 ceiling resolution: agent.max_tool_calls → defaults → 50.
+    resolved_max_tool_calls = (
+        agent_def.max_tool_calls
+        or workflow.defaults.max_tool_calls
+        or 50
+    )
 
     invocation = AgentInvocation(
         agent_def=agent_def,
-        model_role=step.model_role,
-        change_id=change.id,
-        change_artifacts_dir=change.artifacts_dir,
-        project_root=change.project_root,
+        provider_name=provider.name,
+        model_name=provider.model,
+        system_prompt=rendered,
+        initial_messages=(Message(role="user", content=(TextBlock(text="begin"),)),),
+        change_context=ChangeContext(
+            change_id=change.id, project_root=change.project_root, artifacts_dir=artifacts_dir,
+        ),
         interactive=step.interactive,
-        model=model,
-        system_prompt=rendered_prompt,
-        initial_messages=({"role": "user", "content": "begin"},),
-        events_path=events_path or change.events_path,
-        checkpointer=checkpointer,
+        transcript_dir=transcript_dir,
         fs_permissions=step.fs_permissions,
+        events_path=change.events_path,
+        subagent_defs=subagent_defs,
+        max_tool_calls=resolved_max_tool_calls,
     )
 
+    _emit(log, on_event, "step_started", {
+        "step": step.name, "model": invocation.model_name,
+        "provider": provider.name,
+        "tools": sorted(agent_def.tools),
+        "interactive": step.interactive,
+    })
+
+    runner = provider.create_runner(invocation)
     agent_output: dict[str, Any] | None = None
-    runner_failed = False
-    # Runner crashes become an `error` event + Retry instead of propagating up.
+
+    coordinator.attach_runner(runner.interrupt)
     try:
-        for event in runner.run(invocation):
-            if on_event:
-                on_event(event)
-            if event["type"] != "agent_token":
-                log.append(event["type"], event["payload"])
+        async for event in runner.run(invocation):
+            _emit_event(log, on_event, event)
             if event["type"] == "agent_output":
                 agent_output = event["payload"]
             if event["type"] == "error":
-                runner_failed = True
-    except Exception as e:
-        _emit(on_event, log, "error",
-              {"message": f"agent runner crashed: {type(e).__name__}: {e}"})
-        runner_failed = True
+                _emit(log, on_event, "step_completed", {"step": step.name, "action": "retry"})
+                return Retry()
+            if coordinator.should_pause:
+                # Coordinator triggered mid-step. Runner's interrupt() has fired.
+                return Pause()
+    finally:
+        coordinator.detach_runner()
 
-    if runner_failed or agent_output is None:
-        _emit(on_event, log, "step_completed", {
-            "step": step.name, "action": "retry",
-            "reason": "agent did not produce valid output",
-        })
-        return Retry(), None
+    if agent_output is None:
+        _emit(log, on_event, "step_completed", {"step": step.name, "action": "retry"})
+        return Retry()
+
     try:
         validate_agent_output(agent_output, agent_def.output_schema)
     except Exception as e:
-        _emit(on_event, log, "error",
-              {"message": f"agent output failed schema validation: {e}"})
-        _emit(on_event, log, "step_completed", {
-            "step": step.name, "action": "retry",
-            "reason": "schema validation failed",
-        })
-        return Retry(), None
+        _emit(log, on_event, "error", {"message": f"output validation: {e}"})
+        return Retry()
 
-    action = _run_step_gates(
-        step, change, log, agent_output,
-        runner=None, resolved_models=None,
-        checkpointer=checkpointer, workflow=None,
-        on_event=on_event,
-        human_input_fn=human_input_fn,
-        human_output_fn=human_output_fn,
-    )
-    _emit(on_event, log, "step_completed", {"step": step.name, "action": _action_name(action)})
-    return action, agent_output
-
-
-def execute_phase(
-    phase: Phase,
-    workflow: Workflow,
-    change: Change,
-    runner: AgentRunner,
-    state: State,
-    *,
-    resolved_models: dict[str, BaseChatModel] | None = None,
-    checkpointer: BaseCheckpointSaver[Any] | None = None,
-    on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] = input,
-    human_output_fn: Callable[[str], None] = print,
-) -> Action:
-    """Walk phase steps, then phase gates. `workflow` is needed for AgentDef
-    lookup keyed by `step.file.stem` (V14 ensures the stem == agent name).
-    """
-    log = change.event_log()
-    _emit(on_event, log, "phase_started", {"phase": phase.name})
-
-    # Resume support: skip steps before the cursor.
-    start_idx = 0
-    if state.step:
-        for i, st in enumerate(phase.steps):
-            if st.name == state.step:
-                start_idx = i
-                break
-
-    i = start_idx
-    while i < len(phase.steps):
-        step = phase.steps[i]
-        state.step = step.name
-        state.save(change.state_dir)
-        action, _ = execute_step(
-            step=step,
-            agent_def=workflow.agents[step.file.stem],
-            change=change,
-            runner=runner,
-            state=state,
-            model=(resolved_models.get(step.model_role) if resolved_models else None),
-            events_path=change.events_path,
-            checkpointer=checkpointer,
-            on_event=on_event,
-            human_input_fn=human_input_fn,
-            human_output_fn=human_output_fn,
-        )
-        if isinstance(action, Continue):
-            i += 1
-            state.step_attempt = 0
-        elif isinstance(action, Retry):
-            state.step_attempt += 1
-            if state.step_attempt > step.max_retries:
-                _emit(on_event, log, "step_exhausted", {
-                    "step": step.name, "attempts": state.step_attempt,
-                })
-                state.step_attempt = 0
-                return step.on_max_retries
-            continue
-        else:
-            _emit(on_event, log, "phase_completed", {
-                "phase": phase.name, "action": _action_name(action),
-            })
-            return action
-
-    # All steps done; now run phase gates.
-    for gate in phase.gates:
-        action = _run_one_gate(
-            gate, change, log, agent_output={},
-            runner=runner, resolved_models=resolved_models,
-            checkpointer=checkpointer, workflow=workflow,
-            on_event=on_event,
-            human_input_fn=human_input_fn,
-            human_output_fn=human_output_fn,
-        )
-        _emit(on_event, log, "gate_evaluated", {
-            "phase": phase.name, "gate_type": type(gate).__name__,
-            "action": _action_name(action),
-        })
-        if not isinstance(action, Continue):
-            _emit(on_event, log, "phase_completed", {
-                "phase": phase.name, "action": _action_name(action),
-            })
-            return action
-
-    _emit(on_event, log, "phase_completed", {"phase": phase.name, "action": "continue"})
-    return Continue()
-
-
-def _resolve_all_referenced_roles(
-    workflow: Workflow, config: Config,
-) -> dict[str, BaseChatModel]:
-    """Walk every step + agent gate, collect model_role refs, resolve each.
-    All failures surfaced together."""
-    referenced: set[str] = set()
-    for phase in workflow.phases:
-        for step in phase.steps:
-            referenced.add(step.model_role)
-        for gate in phase.gates:
-            if isinstance(gate, AgentGate):
-                referenced.add(gate.model_role)
-
-    resolved: dict[str, BaseChatModel] = {}
-    failures: list[str] = []
-    for role_name in sorted(referenced):
-        if role_name not in config.roles:
-            failures.append(
-                f"role {role_name!r} referenced by workflow but not in "
-                f"config.yaml (configured: {sorted(config.roles)})"
-            )
-            continue
-        try:
-            resolved[role_name] = resolve_role(config.roles[role_name])
-        except Exception as e:
-            failures.append(str(e))
-
-    if failures:
-        raise ProviderUnavailable(
-            "startup model resolution failed:\n  - "
-            + "\n  - ".join(failures)
-        )
-    return resolved
-
-
-def run(
-    change: Change,
-    runner: AgentRunner,
-    *,
-    on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] | None = None,
-    human_output_fn: Callable[[str], None] | None = None,
-) -> RunResult:
-    """Top-level executor: walk phases until done, paused, or errored.
-
-    Retry-counter semantics:
-      `max_retries: N` allows 1 + N total attempts (1 initial + N retries).
-      The comparison is `attempt > max_retries`, so for max_retries=2, attempts
-      run 1, 2, 3 before `on_max_retries` fires.
-    """
-    human_input_fn = human_input_fn or input
-    human_output_fn = human_output_fn or print
-    # Load config so V12 (model_role configured) fires for the snapshotted workflow.
-    config = load_config(change.project_root)
-    configured_roles = config.role_names()
-    workflow = load_workflow(
-        change.workflow_dir, configured_roles=configured_roles
-    )
-    resolved_models = _resolve_all_referenced_roles(workflow, config)
-    state = State.load(change.state_dir)
-    log = change.event_log()
-    _emit(on_event, log, "workflow_started",
-          {"name": workflow.name, "from_phase": state.phase})
-
-    with _open_checkpointer(change.state_dir) as checkpointer:
-        while True:
-            if state.phase is None:
-                state.status = "completed"
-                state.save(change.state_dir)
-                _emit(on_event, log, "workflow_completed", {})
-                return RunResult.COMPLETED
-
-            phase_idx = workflow.phase_index(state.phase)
-            if phase_idx is None:
-                _emit(on_event, log, "error",
-                      {"message": f"unknown phase {state.phase!r} in state"})
-                state.status = "errored"
-                state.save(change.state_dir)
-                return RunResult.ERRORED
-            phase = workflow.phases[phase_idx]
-
-            action = execute_phase(
-                phase=phase, workflow=workflow, change=change,
-                runner=runner, state=state,
-                resolved_models=resolved_models,
-                checkpointer=checkpointer,
-                on_event=on_event,
-                human_input_fn=human_input_fn,
-                human_output_fn=human_output_fn,
-            )
-
-            if isinstance(action, Continue):
-                next_name = workflow.next_phase(phase.name)
-                state.phase = next_name
-                state.step = None
-                state.phase_attempt = 0
-                state.save(change.state_dir)
-            elif isinstance(action, Goto):
-                state.phase = action.target
-                state.step = None
-                state.phase_attempt = 0
-                state.save(change.state_dir)
-            elif isinstance(action, Retry):
-                state.phase_attempt += 1
-                if state.phase_attempt > phase.max_retries:
-                    _emit(on_event, log, "phase_exhausted", {
-                        "phase": phase.name, "attempts": state.phase_attempt,
-                    })
-                    state.phase_attempt = 0
-                    on_max = phase.on_max_retries
-                    if isinstance(on_max, Pause):
-                        state.status = "paused"
-                        state.save(change.state_dir)
-                        _emit(on_event, log, "workflow_paused",
-                              {"reason": "phase_exhausted"})
-                        return RunResult.PAUSED
-                    elif isinstance(on_max, Goto):
-                        state.phase = on_max.target
-                        state.step = None
-                        state.save(change.state_dir)
-                    elif isinstance(on_max, Continue):
-                        state.phase = workflow.next_phase(phase.name)
-                        state.step = None
-                        state.save(change.state_dir)
-                else:
-                    state.step = None
-                    state.save(change.state_dir)
-            elif isinstance(action, Pause):
-                state.status = "paused"
-                state.save(change.state_dir)
-                _emit(on_event, log, "workflow_paused", {"reason": "explicit"})
-                return RunResult.PAUSED
-
-
-def _emit(
-    on_event: EventCallback | None,
-    log: EventLog,
-    event_type: str,
-    payload: dict[str, Any],
-) -> None:
-    """Fire on_event callback then append to the log."""
-    if on_event:
-        on_event({"type": event_type, "payload": payload})
-    log.append(event_type, payload)
-
-
-def _run_step_gates(
-    step: Step, change: Change, log: EventLog, agent_output: dict[str, Any],
-    *,
-    runner: AgentRunner | None = None,
-    resolved_models: dict[str, BaseChatModel] | None = None,
-    checkpointer: BaseCheckpointSaver[Any] | None = None,
-    workflow: Workflow | None = None,
-    on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] = input,
-    human_output_fn: Callable[[str], None] = print,
-) -> Action:
-    if not step.gates:
-        # Implicit: continue if status: Success, retry on anything else.
-        return Continue() if agent_output.get("status") == "Success" else Retry()
+    # Evaluate step-level gates
     for gate in step.gates:
-        action = _run_one_gate(
-            gate, change, log, agent_output,
-            runner=runner, resolved_models=resolved_models,
-            checkpointer=checkpointer, workflow=workflow,
-            on_event=on_event,
-            human_input_fn=human_input_fn,
-            human_output_fn=human_output_fn,
+        action = await _run_gate(
+            gate, workflow, config, change, state, log, on_event,
+            human_input_fn=human_input_fn, human_output_fn=print,
+            user_chat_input_fn=user_chat_input_fn,
+            agent_output_context=agent_output,
         )
-        _emit(on_event, log, "gate_evaluated", {
-            "step": step.name, "gate_type": type(gate).__name__,
-            "action": _action_name(action),
-        })
         if not isinstance(action, Continue):
             return action
+
+    # Step success — delete transcript dir
+    shutil.rmtree(transcript_dir, ignore_errors=True)
+    state.current_step = None
+    state.save(change.state_dir)
+    _emit(log, on_event, "step_completed", {"step": step.name, "action": "continue"})
     return Continue()
 
 
-def _run_one_gate(
-    gate: Any,
-    change: Change,
-    log: EventLog,
-    agent_output: dict[str, Any],
+async def _run_gate(
+    gate: Any, workflow: Workflow, config: Config, change: Change,
+    state: State, log: EventLog, on_event: EventCallback,
     *,
-    runner: AgentRunner | None = None,
-    resolved_models: dict[str, BaseChatModel] | None = None,
-    checkpointer: BaseCheckpointSaver[Any] | None = None,
-    workflow: Workflow | None = None,
-    on_event: EventCallback | None = None,
-    human_input_fn: Callable[[], str] = input,
-    human_output_fn: Callable[[str], None] = print,
+    human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
+    user_chat_input_fn: Callable[[str], str] | None,
+    agent_output_context: dict[str, Any] | None = None,
 ) -> Action:
-    if isinstance(gate, ScriptGate):
-        env_extra = {
-            "IMP_ARTIFACTS_DIR": str(change.artifacts_dir),
-            "IMP_PROJECT_ROOT": str(change.project_root),
-            "IMP_WORKFLOW_DIR": str(change.workflow_dir),
-            "IMP_CHANGE_ID": str(change.id),
-        }
-        # cwd defaults to the workflow snapshot dir so `./scripts/foo.sh`
-        # references resolve (scripts live alongside workflow.yaml in the
-        # snapshot). Scripts that need the project tree should `cd
-        # "$IMP_PROJECT_ROOT"` first.
-        action, context = run_script_gate(
-            gate, cwd=change.workflow_dir, env_extra=env_extra,
-        )
-        _emit(on_event, log, "script_gate_result", context)
-        return action
     if isinstance(gate, HumanGate):
-        return run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
+        action = run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
+        _emit(log, on_event, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
+        return action
+    if isinstance(gate, ScriptGate):
+        action, ctx = run_script_gate(gate, cwd=change.project_root)
+        _emit(log, on_event, "gate_evaluated", {"kind": "script", "context": ctx, "action": _action_dict(action)})
+        return action
     if isinstance(gate, AgentGate):
-        return _run_agent_gate(
-            gate, change, log,
-            runner=runner, resolved_models=resolved_models,
-            checkpointer=checkpointer, workflow=workflow,
-            on_event=on_event,
-        )
+        # Agent gates land in Plan 3.
+        raise NotImplementedError("agent gates land in Plan 3")
     if isinstance(gate, StubGate):
+        _emit(log, on_event, "gate_evaluated", {"kind": "stub", "action": _action_dict(gate.action)})
         return gate.action
     raise AssertionError(f"unknown gate type {type(gate).__name__}")
 
 
-def _run_agent_gate(
-    gate: AgentGate,
-    change: Change,
-    log: EventLog,
-    *,
-    runner: AgentRunner | None,
-    resolved_models: dict[str, BaseChatModel] | None,
-    checkpointer: BaseCheckpointSaver[Any] | None,
-    workflow: Workflow | None,
-    on_event: EventCallback | None = None,
-) -> Action:
-    """Run an agent as a gate. Output is schema-validated, then fed to decide."""
-    from imp.engine.gates import evaluate_decide
-
-    assert runner is not None and resolved_models is not None and workflow is not None
-
-    stem = gate.file.stem
-    agent_def = workflow.agents[stem]  # loader pre-parses every agents/*.md
-
-    try:
-        rendered_prompt = render_prompt(
-            agent_def.prompt_template_source,
-            build_context(
-                change_id=change.id, change_title=change.title,
-                artifacts_dir=change.artifacts_dir,
-                event_log=change.event_log(),
-            ),
-        )
-    except PromptRenderError as e:
-        _emit(on_event, log, "error", {"message": f"gate prompt render failed: {e}"})
-        return Pause()
-
-    invocation = AgentInvocation(
-        agent_def=agent_def,
-        model_role=gate.model_role,
-        change_id=change.id,
-        change_artifacts_dir=change.artifacts_dir,
-        project_root=change.project_root,
-        interactive=False,
-        model=resolved_models.get(gate.model_role),
-        system_prompt=rendered_prompt,
-        initial_messages=({"role": "user", "content": "begin"},),
-        events_path=change.events_path,
-        checkpointer=checkpointer,
-        fs_permissions=(),
-    )
-    _emit(on_event, log, "step_started", {
-        "step": f"gate:{stem}", "phase": None,
-        "model_role": gate.model_role, "interactive": False,
-    })
-    output: dict[str, Any] | None = None
-    try:
-        for event in runner.run(invocation):
-            if on_event:
-                on_event(event)
-            if event["type"] != "agent_token":
-                log.append(event["type"], event["payload"])
-            if event["type"] == "agent_output":
-                output = event["payload"]
-            if event["type"] == "error":
-                _emit(on_event, log, "step_completed", {
-                    "step": f"gate:{stem}", "action": "pause",
-                    "reason": "gate errored",
-                })
-                return Pause()
-    except Exception as e:
-        _emit(on_event, log, "error", {
-            "message": f"gate runner crashed: {type(e).__name__}: {e}",
-        })
-        _emit(on_event, log, "step_completed", {
-            "step": f"gate:{stem}", "action": "pause",
-            "reason": "gate runner crashed",
-        })
-        return Pause()
-    if output is None:
-        _emit(on_event, log, "step_completed", {
-            "step": f"gate:{stem}", "action": "pause",
-            "reason": "gate produced no output",
-        })
-        return Pause()
-
-    # Per review #9: schema-validate before evaluating decide.
-    try:
-        validate_agent_output(output, agent_def.output_schema)
-    except Exception as e:
-        _emit(on_event, log, "error", {
-            "message": f"gate output failed schema validation: {e}",
-        })
-        _emit(on_event, log, "step_completed", {
-            "step": f"gate:{stem}", "action": "pause",
-            "reason": "schema validation failed",
-        })
-        return Pause()
-
-    action = evaluate_decide(gate.decide, output)
-    _emit(on_event, log, "step_completed", {
-        "step": f"gate:{stem}", "action": _action_name(action),
-    })
-    return action
+def _action_dict(action: Action) -> dict[str, Any]:
+    if isinstance(action, Continue):
+        return {"kind": "continue"}
+    if isinstance(action, Retry):
+        return {"kind": "retry"}
+    if isinstance(action, Pause):
+        return {"kind": "pause"}
+    if isinstance(action, Goto):
+        return {"kind": "goto", "target": action.target}
+    return {"kind": "unknown"}
 
 
-def _action_name(action: Action) -> str:
-    return type(action).__name__.lower()
+def _emit(log: EventLog, on_event: EventCallback, type_: str, payload: dict[str, Any]) -> None:
+    log.append(type_, payload)
+    on_event({"type": type_, "payload": payload})
+
+
+def _emit_event(log: EventLog, on_event: EventCallback, event: dict[str, Any]) -> None:
+    log.append(event["type"], event.get("payload", {}))
+    on_event(event)
