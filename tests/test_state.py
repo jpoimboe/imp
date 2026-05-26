@@ -77,3 +77,27 @@ def test_event_log_filter_by_step(tmp_path: Path) -> None:
     # Slice from last 'step_started' for s1 to end.
     assert any(e["payload"].get("text") == "hi" for e in s1_events)
     assert not any(e["payload"].get("text") == "hello" for e in s1_events)
+
+
+def test_state_round_trip_with_current_step(tmp_path: Path) -> None:
+    from imp.engine.state import CurrentStep, State
+    s = State(
+        change_id=5, phase="implement", step="coder", step_attempt=0, phase_attempt=0,
+        status="running",
+        current_step=CurrentStep(transcript_dir=tmp_path / "steps/implement/coder"),
+    )
+    s.save(tmp_path)
+    loaded = State.load(tmp_path)
+    assert loaded.current_step is not None
+    assert loaded.current_step.transcript_dir == tmp_path / "steps/implement/coder"
+
+
+def test_state_round_trip_without_current_step(tmp_path: Path) -> None:
+    from imp.engine.state import State
+    s = State(
+        change_id=5, phase=None, step=None, step_attempt=0, phase_attempt=0,
+        status="completed",
+    )
+    s.save(tmp_path)
+    loaded = State.load(tmp_path)
+    assert loaded.current_step is None

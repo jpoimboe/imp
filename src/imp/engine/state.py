@@ -25,6 +25,18 @@ Status = Literal["running", "paused", "completed", "errored"]
 
 
 @dataclass
+class CurrentStep:
+    transcript_dir: Path
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"transcript_dir": str(self.transcript_dir)}
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> CurrentStep:
+        return cls(transcript_dir=Path(raw["transcript_dir"]))
+
+
+@dataclass
 class State:
     change_id: int
     phase: str | None
@@ -32,20 +44,32 @@ class State:
     step_attempt: int
     phase_attempt: int
     status: Status
+    current_step: CurrentStep | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
         data = json.loads((state_dir / "state.json").read_text())
-        return cls(**data)
+        cur = data.pop("current_step", None)
+        return cls(
+            **data,
+            current_step=CurrentStep.from_dict(cur) if cur else None,
+        )
 
     def save(self, state_dir: Path) -> None:
         """Atomic write: tmp file in same dir, fsync, rename."""
         state_dir.mkdir(parents=True, exist_ok=True)
         target = state_dir / "state.json"
+        payload = {
+            "change_id": self.change_id,
+            "phase": self.phase, "step": self.step,
+            "step_attempt": self.step_attempt, "phase_attempt": self.phase_attempt,
+            "status": self.status,
+            "current_step": self.current_step.to_dict() if self.current_step else None,
+        }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:
             with os.fdopen(fd, "w") as f:
-                json.dump(asdict(self), f, indent=2, sort_keys=True)
+                json.dump(payload, f, indent=2, sort_keys=True)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_name, target)
