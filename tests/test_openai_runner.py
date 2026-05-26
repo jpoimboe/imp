@@ -203,3 +203,75 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
 
     errors = [e for e in events if e["type"] == "error"]
     assert any(e["payload"].get("kind") == "tool_call_ceiling_exceeded" for e in errors)
+
+
+@pytest.mark.anyio
+async def test_runs_subagent_via_task(tmp_path: Path) -> None:
+    """task tool dispatches to a same-provider child runner; result flows back
+    as the parent's tool_result content."""
+    from dataclasses import replace
+
+    (tmp_path / "art").mkdir()
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(
+                name="status", type="enum",
+                values=("Success", "Error"), required=True,
+            ),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="hi from sub",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    parent_def = _agent_def(tools=frozenset({"complete_step", "task"}))
+    inv = _inv(tmp_path)
+    inv = replace(
+        inv,
+        agent_def=parent_def,
+        subagent_defs={"sub": sub_def},
+    )
+
+    # Sequence:
+    #   1. parent emits task(sub, ...)
+    #   2. sub emits complete_step(status=Success)
+    #   3. parent receives JSON tool_result, emits complete_step
+    fake = FakeAsyncOpenAI([
+        # parent turn 1
+        completion(message(
+            content="dispatching",
+            tool_calls=[tool_call("p1", "task",
+                                  {"subagent_name": "sub",
+                                   "task_description": "do work"})],
+        )),
+        # sub turn 1 (uses the same fake — order matters)
+        completion(message(
+            content="sub finishing",
+            tool_calls=[tool_call("s1", "complete_step", {"status": "Success"})],
+        )),
+        # parent turn 2
+        completion(message(
+            content="all done",
+            tool_calls=[tool_call("p2", "complete_step", {"status": "Success"})],
+        )),
+    ])
+
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini",
+        client_factory=lambda: fake,
+    )
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    # The terminal event is the parent's agent_output, NOT the subagent's.
+    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["payload"] == {"status": "Success"}
+    # The subagent's tool_result flowed through the parent.
+    parent_results = [e for e in events if e["type"] == "tool_result"]
+    assert any('"Success"' in (r["payload"].get("content") or "")
+               for r in parent_results)
