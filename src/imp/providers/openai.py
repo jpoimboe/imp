@@ -132,7 +132,7 @@ def _imp_to_openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
     return out
 
 
-def _join_text(content: tuple) -> str:  # type: ignore[type-arg]
+def _join_text(content: tuple[Any, ...]) -> str:
     """Concatenate TextBlock.text values; ignore other block types."""
     return "".join(b.text for b in content if isinstance(b, TextBlock))
 
