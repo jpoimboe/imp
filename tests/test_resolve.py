@@ -64,3 +64,19 @@ def test_unavailable_raises_when_nothing_resolves() -> None:
     role = RoleConfig(name="r", prefer=(ProviderModel(provider="fake_absent", model="m"),))
     with pytest.raises(ProviderUnavailable):
         resolve_role(role)
+
+
+def test_anthropic_registered_when_imported(monkeypatch):
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    import importlib
+    import imp.providers as pkg
+    importlib.reload(pkg)  # triggers eager registrations
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    role = RoleConfig(
+        name="default",
+        prefer=(ProviderModel(provider="anthropic", model="claude-sonnet-4-6"),),
+    )
+    p = resolve_role(role)
+    assert p.name == "anthropic"
