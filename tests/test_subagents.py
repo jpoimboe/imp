@@ -102,3 +102,59 @@ async def test_dispatch_task_unknown_subagent_raises(tmp_path: Path) -> None:
     ctx.spawn_subagent = lambda _inv: None  # type: ignore[assignment]
     with pytest.raises(ValueError, match="not declared"):
         await dispatch_task(ctx, "ghost", "hi")
+
+
+def test_dispatch_task_renders_subagent_prompt(tmp_path):
+    """Carryover important #1: subagent prompt template must be Jinja-rendered."""
+    from pathlib import Path
+    import anyio
+
+    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.subagents import dispatch_task
+    from imp.agents.tools.context import ToolContext
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(
+                name="status", type="enum",
+                values=("Success", "Error"), required=True,
+            ),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="hello change-{{ change.id }}",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    artifacts = tmp_path / "art"
+    artifacts.mkdir()
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=artifacts,
+        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+        subagent_defs={"sub": sub_def},
+        provider_name="anthropic", model_name="claude-sonnet-4-6",
+        parent_transcript_dir=tmp_path / "parent",
+        change_context=ChangeContext(
+            change_id=7, project_root=tmp_path, artifacts_dir=artifacts,
+        ),
+    )
+
+    captured: dict = {}
+
+    async def fake_spawn(inv: AgentInvocation):
+        captured["system_prompt"] = inv.system_prompt
+
+        async def _gen():
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        return _gen()
+
+    ctx.spawn_subagent = fake_spawn
+
+    result = anyio.run(dispatch_task, ctx, "sub", "do the thing")
+    assert captured["system_prompt"] == "hello change-7"
+    # Sanity: dispatch_task still returns JSON-stringified agent_output.
+    assert "Success" in result

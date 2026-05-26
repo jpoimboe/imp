@@ -12,9 +12,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
+from imp.engine.state import EventLog
 
 TASK_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -67,11 +69,22 @@ async def dispatch_task(ctx: ToolContext, subagent_name: str, task_description: 
         change_id=0, project_root=ctx.project_root, artifacts_dir=ctx.artifacts_dir,
     )
 
+    # Carryover important #1: render the subagent's Jinja template, same way
+    # executor._execute_step renders the parent's. The PromptContext reads the
+    # live events.jsonl for this Change so {{ events.<step>.<field> }} works.
+    prompt_ctx = build_context(
+        change_id=cc.change_id,
+        change_title=f"Change {cc.change_id}",  # subagents don't see parent title
+        artifacts_dir=cc.artifacts_dir,
+        event_log=EventLog(ctx.events_path),
+    )
+    rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
+
     sub_inv = AgentInvocation(
         agent_def=subagent_def,
         provider_name=ctx.provider_name,
         model_name=ctx.model_name,
-        system_prompt=subagent_def.prompt_template_source,
+        system_prompt=rendered_prompt,
         initial_messages=(Message(
             role="user", content=(TextBlock(text=task_description),),
         ),),
