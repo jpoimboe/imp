@@ -156,3 +156,50 @@ async def test_refusal_emits_runner_warning(tmp_path: Path) -> None:
     final = events[-1]
     assert final["type"] == "error"
     assert final["payload"]["kind"] == "no_complete_step"
+
+
+@pytest.mark.anyio
+async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
+    """The runner refuses to dispatch tool calls beyond the agent's ceiling
+    and emits both per-call ceiling-error tool_results and a final error event."""
+    from dataclasses import replace
+
+    (tmp_path / "art").mkdir()
+    (tmp_path / "f.txt").write_text("x")
+    project_rules = (FsRule(
+        operations=("read",), paths=("/project/**",), mode="allow",
+        source=SourceLoc(file=Path("w.yaml"), line=1),
+    ),)
+
+    inv = _inv(tmp_path)
+    inv = replace(inv, fs_permissions=project_rules, max_tool_calls=2)
+
+    # Two assistant turns, each issuing two tool_use blocks. After 2 calls
+    # the ceiling trips on the 3rd; the rest are backfilled with errors.
+    fake = FakeAsyncOpenAI([
+        completion(message(
+            content=None,
+            tool_calls=[
+                tool_call("c1", "read_file", {"path": "/project/f.txt"}),
+                tool_call("c2", "read_file", {"path": "/project/f.txt"}),
+            ],
+        )),
+        completion(message(
+            content=None,
+            tool_calls=[
+                tool_call("c3", "read_file", {"path": "/project/f.txt"}),
+                tool_call("c4", "read_file", {"path": "/project/f.txt"}),
+            ],
+        )),
+    ])
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini",
+        client_factory=lambda: fake,
+    )
+
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    errors = [e for e in events if e["type"] == "error"]
+    assert any(e["payload"].get("kind") == "tool_call_ceiling_exceeded" for e in errors)
