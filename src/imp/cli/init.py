@@ -60,16 +60,21 @@ def _build_role_map(
             prefer.append({"provider": prov, "model": model})
         roles[role] = {"prefer": prefer}
     return {
+        # TODO: load_config() doesn't yet consume the `providers:` block —
+        # the env-var info is informational only; per-role `prefer` entries
+        # are what runtime resolution reads.
         "providers": {p: {"env": env_vars[p]} for p in providers},
         "roles": roles,
     }
 
 
-def _split_providers(answer: str) -> list[str]:
-    """Accept 'anthropic', 'anthropic openai', 'anthropic, openai' etc."""
-    parts = [p.strip().lower() for p in answer.replace(",", " ").split()]
+def _split_providers(answer: str) -> tuple[list[str], list[str]]:
+    """Accept 'anthropic', 'anthropic openai', 'anthropic, openai' etc.
+    Returns (valid, unknown) — unknown tokens are surfaced to caller for warning."""
+    parts = [p.strip().lower() for p in answer.replace(",", " ").split() if p.strip()]
     valid = [p for p in parts if p in _PROVIDER_MODELS]
-    return valid
+    unknown = [p for p in parts if p not in _PROVIDER_MODELS]
+    return valid, unknown
 
 
 def run_init(
@@ -91,7 +96,9 @@ def run_init(
             "Which providers do you want to enable? "
             "(space-separated; choices: anthropic openai): "
         )
-        providers = _split_providers(ans)
+        providers, unknown = _split_providers(ans)
+        for bad in unknown:
+            output_fn(f"  (unknown provider ignored: {bad!r})")
         if providers:
             break
         output_fn("  (please pick at least one of: anthropic, openai)")

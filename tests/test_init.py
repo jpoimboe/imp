@@ -77,3 +77,16 @@ def test_supports_both_providers(tmp_path: Path) -> None:
         for role in data["roles"].values()
     )
     assert has_openai
+
+
+def test_warns_on_unknown_provider(tmp_path: Path) -> None:
+    warnings: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        input_fn=_inputs("anthropic googleai", "ANTHROPIC_API_KEY"),
+        output_fn=warnings.append,
+    )
+    assert any("googleai" in msg for msg in warnings)
+    # And the valid provider still gets configured
+    data = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    assert data["roles"]["default"]["prefer"][0]["provider"] == "anthropic"
