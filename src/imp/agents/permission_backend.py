@@ -40,25 +40,29 @@ class PermissionFilteringBackend:
         # behavior is OS-independent (paths in our rules are always POSIX).
         return posixpath.normpath(combined)
 
-    def read(self, path: str) -> Any:
-        check_permission(self._rules, "read", self._abs(path))
-        return self._inner.read(path)
+    # All gated methods accept *args/**kwargs and forward verbatim so any
+    # extra options the inner FilesystemBackend understands (offset, limit,
+    # encoding, etc.) pass through untouched.
 
-    def write(self, path: str, content: str) -> Any:
+    def read(self, path: str, *args: Any, **kwargs: Any) -> Any:
+        check_permission(self._rules, "read", self._abs(path))
+        return self._inner.read(path, *args, **kwargs)
+
+    def write(self, path: str, *args: Any, **kwargs: Any) -> Any:
         check_permission(self._rules, "write", self._abs(path))
-        return self._inner.write(path, content)
+        return self._inner.write(path, *args, **kwargs)
 
     def edit(self, path: str, *args: Any, **kwargs: Any) -> Any:
         check_permission(self._rules, "write", self._abs(path))
         return self._inner.edit(path, *args, **kwargs)
 
-    async def aread(self, path: str) -> Any:
+    async def aread(self, path: str, *args: Any, **kwargs: Any) -> Any:
         check_permission(self._rules, "read", self._abs(path))
-        return await self._inner.aread(path)
+        return await self._inner.aread(path, *args, **kwargs)
 
-    async def awrite(self, path: str, content: str) -> Any:
+    async def awrite(self, path: str, *args: Any, **kwargs: Any) -> Any:
         check_permission(self._rules, "write", self._abs(path))
-        return await self._inner.awrite(path, content)
+        return await self._inner.awrite(path, *args, **kwargs)
 
     async def aedit(self, path: str, *args: Any, **kwargs: Any) -> Any:
         check_permission(self._rules, "write", self._abs(path))
