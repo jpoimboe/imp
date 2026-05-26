@@ -30,6 +30,8 @@ try:
 except ImportError:  # pragma: no cover
     ESC_SENTINEL = "__IMP_ESC__"
 
+from imp.cli.slash import is_slash_command, run_slash_command
+
 
 def _last_ai_message(response: Any) -> AIMessage | None:
     """Extract the most recent AIMessage from a ModelResponse's `result`."""
@@ -56,9 +58,12 @@ class ChatMiddleware(AgentMiddleware):
             return response
         while True:
             user_text = self._input()
-            if user_text != ESC_SENTINEL:
-                break
-            # ESC: just re-prompt; no message injected, no log entry.
+            if user_text == ESC_SENTINEL:
+                continue
+            if is_slash_command(user_text):
+                run_slash_command(user_text, output_fn=print)
+                continue
+            break
         request.messages.append(HumanMessage(content=user_text))
         return response
 
@@ -71,8 +76,11 @@ class ChatMiddleware(AgentMiddleware):
             return response
         while True:
             user_text = await asyncio.to_thread(self._input)
-            if user_text != ESC_SENTINEL:
-                break
-            # ESC: just re-prompt; no message injected, no log entry.
+            if user_text == ESC_SENTINEL:
+                continue
+            if is_slash_command(user_text):
+                run_slash_command(user_text, output_fn=print)
+                continue
+            break
         request.messages.append(HumanMessage(content=user_text))
         return response
