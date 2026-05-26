@@ -25,6 +25,11 @@ except ImportError:  # pragma: no cover
     class AgentMiddleware:  # type: ignore[no-redef]
         pass
 
+try:
+    from imp.cli.prompt import ESC_SENTINEL
+except ImportError:  # pragma: no cover
+    ESC_SENTINEL = "__IMP_ESC__"
+
 
 def _last_ai_message(response: Any) -> AIMessage | None:
     """Extract the most recent AIMessage from a ModelResponse's `result`."""
@@ -49,7 +54,11 @@ class ChatMiddleware(AgentMiddleware):
         ai = _last_ai_message(response)
         if ai is None or ai.tool_calls:
             return response
-        user_text = self._input()
+        while True:
+            user_text = self._input()
+            if user_text != ESC_SENTINEL:
+                break
+            # ESC: just re-prompt; no message injected, no log entry.
         request.messages.append(HumanMessage(content=user_text))
         return response
 
@@ -60,6 +69,10 @@ class ChatMiddleware(AgentMiddleware):
         ai = _last_ai_message(response)
         if ai is None or ai.tool_calls:
             return response
-        user_text = await asyncio.to_thread(self._input)
+        while True:
+            user_text = await asyncio.to_thread(self._input)
+            if user_text != ESC_SENTINEL:
+                break
+            # ESC: just re-prompt; no message injected, no log entry.
         request.messages.append(HumanMessage(content=user_text))
         return response
