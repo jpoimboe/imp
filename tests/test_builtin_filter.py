@@ -34,3 +34,10 @@ def test_complete_step_never_filtered() -> None:
     overrides = build_filtered_builtin_overrides(declared=set())
     names = {t.name for t in overrides}
     assert "complete_step" not in names
+
+
+def test_all_declared_returns_empty_list() -> None:
+    """If the agent declares every built-in, no stubs are generated."""
+    from imp.agents.builtin_filter import _BUILTINS
+    overrides = build_filtered_builtin_overrides(declared=set(_BUILTINS))
+    assert overrides == []

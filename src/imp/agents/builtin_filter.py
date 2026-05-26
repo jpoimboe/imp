@@ -14,15 +14,17 @@ the agent still sees the built-in, and the error never fires.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import NoReturn
 
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 
-# Tracks deepagents 0.6.x built-ins. Keep in sync with the runner's
-# _DEEPAGENT_BUILTINS constant. `complete_step` was dropped in Plan 2.
+# Tracks deepagents 0.6.x built-ins (FilesystemMiddleware, TodoListMiddleware,
+# SubAgentMiddleware). `complete_step` was dropped in Plan 2 (replaced by
+# response_format=). When deepagents adds or renames a built-in, update here.
 _BUILTINS = frozenset({
     "read_file", "write_file", "edit_file", "glob", "grep", "ls",
-    "execute", "write_todos", "task", "ask_user",
+    "execute", "write_todos", "task",
 })
 
 
@@ -35,7 +37,7 @@ class _AnyArgs(BaseModel):
 
 
 def _make_stub(name: str) -> BaseTool:
-    def _stub(**kwargs: object) -> str:
+    def _stub(**kwargs: object) -> NoReturn:
         raise UndeclaredTool(
             f"tool {name!r} is not declared in this agent's tools: list; "
             f"add it to the agent .md frontmatter or remove the call"

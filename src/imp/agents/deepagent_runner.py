@@ -14,11 +14,10 @@ Per Spike 4 + Task 13: backend is a CompositeBackend routing /artifacts,
 /project to disk via FilesystemBackend(virtual_mode=True); / falls back
 to StateBackend.
 
-Per review #2: deepagents 0.6.x has no excluded_tools kwarg. Built-in tools
-(read_file, write_file, execute, write_todos, task, ask_user, etc.) ship
-to every agent regardless of agent.md `tools:` declaration. We only filter
-the imp-provided tools (query_events, web_fetch, git_diff) at source.
-Built-in tool exclusion is a Plan 3 follow-up.
+Per review #2 / Task 4: deepagents 0.6.x has no excluded_tools kwarg. Built-in
+tools (read_file, write_file, execute, write_todos, task, etc.) ship to every
+agent regardless of agent.md `tools:` declaration. Declaration-based gating is
+implemented via stub shadowing in builtin_filter.build_filtered_builtin_overrides.
 """
 
 from __future__ import annotations
