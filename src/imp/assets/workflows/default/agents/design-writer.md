@@ -1,7 +1,7 @@
 ---
 name: design-writer
 description: Write a DESIGN.md from the spec.
-tools: [read_file, write_file, edit_file, glob, grep, query_events]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   design_path: {type: string, required: false}

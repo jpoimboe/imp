@@ -1,7 +1,7 @@
 ---
 name: spec-reviewer
 description: Review the spec against the captured intent; verdict approve or rework.
-tools: [read_file, query_events]
+tools: [complete_step, read_file, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, rework]}

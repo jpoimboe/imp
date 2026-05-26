@@ -1,7 +1,7 @@
 ---
 name: plan-writer
 description: Write a PLAN.md (bite-sized task list) from the design.
-tools: [read_file, write_file, edit_file, glob, grep, query_events]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   plan_path: {type: string, required: false}

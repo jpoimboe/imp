@@ -1,7 +1,7 @@
 ---
 name: spec-writer
 description: Write a SPEC.md from the captured intent.
-tools: [read_file, write_file, edit_file, glob, grep, query_events]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   spec_path: {type: string, required: false}

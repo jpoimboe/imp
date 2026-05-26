@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Review the implementation against the spec.
-tools: [read_file, glob, grep, execute, query_events, git_diff]
+tools: [complete_step, read_file, glob, grep, bash, query_events, git_diff]
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, rework]}

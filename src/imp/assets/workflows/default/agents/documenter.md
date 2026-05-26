@@ -1,7 +1,7 @@
 ---
 name: documenter
 description: Update README/CHANGELOG/docs as needed for this change.
-tools: [read_file, write_file, edit_file, glob, grep, write_todos, query_events, git_diff]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, write_todos, query_events, git_diff]
 output:
   status: {type: enum, values: [Success, Error]}
   summary: {type: string, required: false}
