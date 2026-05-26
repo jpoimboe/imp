@@ -90,6 +90,13 @@ def parse_agent_file(path: Path) -> AgentDef:
     tools = frozenset(fm.get("tools") or [])
     subagents = tuple(fm.get("subagents") or [])
 
+    mtc_raw = fm.get("max_tool_calls")
+    if mtc_raw is not None and (not isinstance(mtc_raw, int) or isinstance(mtc_raw, bool) or mtc_raw <= 0):
+        raise LoadError(
+            f"'max_tool_calls' must be a positive integer; got {mtc_raw!r}",
+            source,
+        )
+
     return AgentDef(
         name=str(fm["name"]),
         description=str(fm.get("description", "")),
@@ -99,6 +106,7 @@ def parse_agent_file(path: Path) -> AgentDef:
         prompt_template_source=body,
         source_path=path,
         source=source,
+        max_tool_calls=mtc_raw,
     )
 
 
@@ -169,7 +177,15 @@ def _parse_defaults(
         if "on_max_retries" in raw
         else DEFAULT_ON_MAX_RETRIES
     )
-    return WorkflowDefaults(max_retries=max_retries, on_max_retries=on_max)
+    mtc_raw = raw.get("max_tool_calls")
+    if mtc_raw is not None and (not isinstance(mtc_raw, int) or isinstance(mtc_raw, bool) or mtc_raw <= 0):
+        raise LoadError(
+            f"'max_tool_calls' must be a positive integer; got {mtc_raw!r}",
+            defaults_source,
+        )
+    return WorkflowDefaults(
+        max_retries=max_retries, on_max_retries=on_max, max_tool_calls=mtc_raw,
+    )
 
 
 def load_workflow(

@@ -591,3 +591,39 @@ def test_decide_when_no_line_pollution(tmp_path: Path) -> None:
     gate = wf.phases[0].steps[0].gates[0]
     # decide.rules[0].when should be exactly (("exit", 0),) — no "__line__" pair.
     assert gate.decide.rules[0].when == (("exit", 0),)
+
+
+def test_workflow_defaults_max_tool_calls(tmp_path: Path) -> None:
+    wf = tmp_path / "wf"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "a.md").write_text(
+        "---\nname: a\nmax_tool_calls: 12\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nx\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [only]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}, max_tool_calls: 25}\n"
+        "only:\n  steps:\n    - {name: w, file: agents/a.md, model_role: default}\n"
+    )
+    from imp.engine.loader import load_workflow
+    w = load_workflow(wf)
+    assert w.defaults.max_tool_calls == 25
+    assert w.agents["a"].max_tool_calls == 12
+
+
+def test_workflow_defaults_max_tool_calls_optional(tmp_path: Path) -> None:
+    wf = tmp_path / "wf"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "a.md").write_text(
+        "---\nname: a\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nx\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [only]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
+        "only:\n  steps:\n    - {name: w, file: agents/a.md, model_role: default}\n"
+    )
+    from imp.engine.loader import load_workflow
+    w = load_workflow(wf)
+    assert w.defaults.max_tool_calls is None
+    assert w.agents["a"].max_tool_calls is None

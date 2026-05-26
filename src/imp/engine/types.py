@@ -196,6 +196,7 @@ class AgentDef:
     prompt_template_source: str             # the .md body before compilation
     source_path: Path
     source: SourceLoc
+    max_tool_calls: int | None = None
 
 
 # ── Workflow root ──────────────────────────────────────────────────────────
@@ -204,6 +205,7 @@ class AgentDef:
 class WorkflowDefaults:
     max_retries: int
     on_max_retries: Action
+    max_tool_calls: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
