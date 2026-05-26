@@ -6,10 +6,18 @@ with_structured_output as no-ops returning self.
 
 Responses are consumed in FIFO order. If the agent makes more LLM calls
 than there are canned responses, raises IndexError (test author's bug).
+
+Helper functions for building Anthropic-shaped AIMessages
+--------------------------------------------------------------
+Real Anthropic returns content as list[dict] with {type: text, text: ...}
+and {type: tool_use, ...} blocks, NOT as a plain string.  The helpers below
+produce that shape so tests exercise the deepagent_runner's _extract_text
+and _translate_message paths without a real API call.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Any, ClassVar
 
@@ -66,3 +74,70 @@ class FakeToolCallingChatModel(BaseChatModel):
         self, schema: Any, **kwargs: Any,
     ) -> FakeToolCallingChatModel:
         return self
+
+
+# ---------------------------------------------------------------------------
+# Anthropic-shaped AIMessage factories
+# ---------------------------------------------------------------------------
+
+
+def anthropic_text_message(
+    text: str,
+    tool_calls: list[dict[str, Any]] | None = None,
+) -> AIMessage:
+    """Build an AIMessage with Anthropic's list-of-blocks content shape.
+
+    ``text`` becomes a ``{type: text}`` block; ``tool_calls`` become
+    ``{type: tool_use}`` blocks.  Matches what real Anthropic returns for
+    tool-call turns so that tests exercise the _extract_text / _translate_message
+    paths in deepagent_runner without a live API call.
+
+    ``tool_calls`` items should have keys: id, name, args (dict).
+    """
+    content: list[dict[str, Any]] = []
+    if text:
+        content.append({"type": "text", "text": text})
+    lc_tool_calls: list[Any] = []
+    if tool_calls:
+        for tc in tool_calls:
+            content.append({
+                "type": "tool_use",
+                "id": tc["id"],
+                "name": tc["name"],
+                "input": tc.get("args", {}),
+            })
+            lc_tool_calls.append({
+                "id": tc["id"],
+                "name": tc["name"],
+                "args": tc.get("args", {}),
+                "type": "tool_call",
+            })
+    return AIMessage(
+        content=content if content else [],
+        tool_calls=lc_tool_calls,
+    )
+
+
+def anthropic_thinking_message(thinking: str, final_text: str = "") -> AIMessage:
+    """Build an AIMessage with a thinking block (no visible text unless
+    ``final_text`` provided).  Used to test the no-visible-text rendering path.
+
+    Thinking blocks have ``type: thinking`` in Anthropic's content-block schema.
+    The renderer's _extract_text ignores them (only picks up ``type: text``
+    blocks), which is the desired behaviour: thinking is not surfaced to users.
+    """
+    content: list[dict[str, Any]] = [{"type": "thinking", "thinking": thinking}]
+    if final_text:
+        content.append({"type": "text", "text": final_text})
+    return AIMessage(content=content)
+
+
+def anthropic_structured_response_via_text(payload: dict[str, Any]) -> AIMessage:
+    """Build an AIMessage whose text channel carries response_format JSON.
+
+    Some models emit response_format JSON via the text channel instead of the
+    tool-forced channel.  This exercises the renderer's _is_structured_response
+    filter and the runner's _looks_like_structured_response guard, both of which
+    should suppress the JSON from appearing as ``[agent] {...}`` in output.
+    """
+    return AIMessage(content=[{"type": "text", "text": json.dumps(payload)}])
