@@ -48,3 +48,64 @@ def test_process_stream_chunk_filters_empty_token() -> None:
 
     events = list(_process_stream_chunk("messages", (AIMessageChunk(content=""), {}), []))
     assert events == []
+
+
+# --- Bug A: _extract_text multimodal content shapes ---
+
+
+def test_extract_text_handles_plain_str() -> None:
+    from imp.agents.deepagent_runner import _extract_text
+    assert _extract_text("hello") == "hello"
+
+
+def test_extract_text_handles_anthropic_blocks() -> None:
+    from imp.agents.deepagent_runner import _extract_text
+    content = [
+        {"type": "text", "text": "Looking at the code."},
+        {"type": "tool_use", "id": "1", "name": "read_file", "input": {}},
+        {"type": "text", "text": " Let me check more."},
+    ]
+    assert _extract_text(content) == "Looking at the code. Let me check more."
+
+
+def test_extract_text_drops_thinking_blocks() -> None:
+    from imp.agents.deepagent_runner import _extract_text
+    content = [{"type": "thinking", "thinking": "internal reasoning..."}]
+    assert _extract_text(content) == ""
+
+
+def test_extract_text_handles_empty_inputs() -> None:
+    from imp.agents.deepagent_runner import _extract_text
+    assert _extract_text("") == ""
+    assert _extract_text([]) == ""
+    assert _extract_text(None) == ""
+
+
+# --- Bug D: _looks_like_structured_response + _translate_message filter ---
+
+
+def test_looks_like_structured_response_recognizes_status_envelopes() -> None:
+    from imp.agents.deepagent_runner import _looks_like_structured_response
+    assert _looks_like_structured_response('{"status": "Success"}')
+    assert _looks_like_structured_response('{"status": "Error", "intent": "x"}')
+    # Whitespace + nesting tolerated
+    assert _looks_like_structured_response('  {"status": "Success", "data": {"a": 1}}  ')
+
+
+def test_looks_like_structured_response_rejects_non_envelopes() -> None:
+    from imp.agents.deepagent_runner import _looks_like_structured_response
+    assert not _looks_like_structured_response("Just plain text")
+    assert not _looks_like_structured_response('{"foo": "bar"}')  # no status
+    assert not _looks_like_structured_response("{not json}")
+    assert not _looks_like_structured_response("")
+
+
+def test_translate_message_drops_structured_response_text() -> None:
+    """AIMessage whose entire content is the structured-response JSON does
+    NOT emit an agent_message event (the engine emits agent_output instead)."""
+    from langchain_core.messages import AIMessage
+
+    from imp.agents.deepagent_runner import _translate_message
+    msg = AIMessage(content='{"status": "Success", "summary": "ok"}')
+    events = _translate_message(msg, [])
+    assert events == []

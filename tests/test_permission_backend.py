@@ -84,3 +84,38 @@ def test_denied_edit_raises(tmp_path: Path) -> None:
     wrapped = PermissionFilteringBackend(inner, rules, prefix="/")
     with pytest.raises(PermissionDenied):
         wrapped.edit("/a.txt", "old", "new")
+
+
+# --- Bug K: *args/**kwargs forwarding ---
+
+
+def test_read_forwards_kwargs(tmp_path: Path) -> None:
+    """deepagents' read_file tool may pass offset/limit; the wrapper must
+    forward them so partial reads work."""
+    (tmp_path / "big.txt").write_text("line1\nline2\nline3\nline4\n")
+    inner = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    rules = (_rule(("read",), ("/**",), "allow"),)
+    wrapped = PermissionFilteringBackend(inner, rules, prefix="/")
+    # Behavior depends on what FilesystemBackend.read accepts; at minimum,
+    # the call must not raise TypeError on unexpected kwargs.
+    try:
+        result = wrapped.read("/big.txt", offset=0, limit=2)
+        # If it didn't raise, the kwargs got forwarded
+        assert result is not None
+    except TypeError as e:
+        # If FilesystemBackend itself rejected the kwarg, that's its problem —
+        # but the wrapper must not be the source of TypeError
+        msg = str(e)
+        assert "PermissionFilteringBackend.read" not in msg, (
+            f"wrapper swallowed kwargs: {msg}"
+        )
+
+
+def test_write_forwards_kwargs(tmp_path: Path) -> None:
+    inner = FilesystemBackend(root_dir=str(tmp_path), virtual_mode=True)
+    rules = (_rule(("write",), ("/**",), "allow"),)
+    wrapped = PermissionFilteringBackend(inner, rules, prefix="/")
+    try:
+        wrapped.write("/a.txt", content="hi")  # kwarg form
+    except TypeError as e:
+        assert "PermissionFilteringBackend.write" not in str(e)

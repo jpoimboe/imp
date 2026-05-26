@@ -87,3 +87,56 @@ def test_result_can_be_single_ai_message() -> None:
 
     mw.wrap_model_call(req, _handler)  # type: ignore[arg-type]
     assert req.messages[-1].content == "ok"
+
+
+# --- Bug I: visibility hint + _has_visible_text ---
+
+
+def test_no_visible_text_emits_hint_before_prompt(capsys) -> None:
+    """When the AIMessage had no user-visible text (e.g. thinking-only
+    blocks), ChatMiddleware prints a hint so the user knows whose turn
+    it is before being prompted."""
+    from imp.agents.chat_middleware import _has_visible_text  # noqa: F401
+
+    # Agent's AIMessage has only a thinking block — no user-visible text
+    ai = AIMessage(content=[{"type": "thinking", "thinking": "..."}])
+    req = _FakeRequest(messages=[HumanMessage("hi")])
+    resp = _FakeResponse(result=[ai])
+
+    answers = iter(["my reply"])
+    mw = ChatMiddleware(input_fn=lambda: next(answers))
+    mw.wrap_model_call(req, lambda _r: resp)  # type: ignore[arg-type]
+
+    captured = capsys.readouterr().out
+    assert "agent had no visible text" in captured
+
+
+def test_visible_text_does_not_emit_hint(capsys) -> None:
+    """If the AIMessage had visible text, no hint is printed (the renderer
+    already showed the agent's text)."""
+    ai = AIMessage(content="What do you want?")
+    req = _FakeRequest(messages=[HumanMessage("hi")])
+    resp = _FakeResponse(result=[ai])
+
+    mw = ChatMiddleware(input_fn=lambda: "my reply")
+    mw.wrap_model_call(req, lambda _r: resp)  # type: ignore[arg-type]
+
+    captured = capsys.readouterr().out
+    assert "agent had no visible text" not in captured
+
+
+def test_has_visible_text_handles_block_shapes() -> None:
+    from imp.agents.chat_middleware import _has_visible_text
+    # Plain str
+    assert _has_visible_text(AIMessage(content="hi"))
+    assert not _has_visible_text(AIMessage(content=""))
+    assert not _has_visible_text(AIMessage(content="   "))
+    # Text block
+    assert _has_visible_text(AIMessage(content=[{"type": "text", "text": "hi"}]))
+    # Thinking-only
+    assert not _has_visible_text(AIMessage(content=[{"type": "thinking", "thinking": "..."}]))
+    # Mixed: thinking + text
+    assert _has_visible_text(AIMessage(content=[
+        {"type": "thinking", "thinking": "..."},
+        {"type": "text", "text": "hi"},
+    ]))

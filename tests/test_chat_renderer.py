@@ -85,3 +85,33 @@ def test_script_gate_result_summarized() -> None:
     assert "exit=0" in text
     # Don't dump the stdout
     assert text.count("ok") < 10
+
+
+# --- Bugs C/G: token-buffer structured-response suppression ---
+
+
+def test_structured_response_token_stream_is_discarded() -> None:
+    """If the agent's text turn streams the response_format JSON envelope
+    character-by-character, the renderer must NOT show it as [agent] ..."""
+    text = _render([
+        {"type": "agent_token", "payload": {"text": '{"sta'}},
+        {"type": "agent_token", "payload": {"text": 'tus":"Su'}},
+        {"type": "agent_token", "payload": {"text": 'ccess"}'}},
+        {"type": "tool_call", "payload": {"name": "read_file", "args": {}}},
+    ])
+    assert "[agent]" not in text
+    assert "status" not in text
+    assert "read_file" in text  # other events still render
+
+
+def test_real_text_token_stream_renders_and_suppresses_message() -> None:
+    """Real text tokens flush to [agent] ..., and the matching agent_message
+    event (which arrives in updates-mode for the same content) is suppressed."""
+    text = _render([
+        {"type": "agent_token", "payload": {"text": "What would "}},
+        {"type": "agent_token", "payload": {"text": "you like to build?"}},
+        {"type": "agent_message", "payload": {"text": "What would you like to build?"}},
+    ])
+    # Exactly one rendering, no duplicate
+    assert text.count("What would you like to build?") == 1
+    assert "[agent]" in text
