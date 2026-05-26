@@ -140,3 +140,30 @@ def test_openai_tool_schema_wraps_with_function() -> None:
         )
     )
     assert nullable, f"note not nullable: {note_prop}"
+
+
+def test_round_trip_two_turn_conversation() -> None:
+    """Build an imp message list, convert to OpenAI, parse a canned OpenAI
+    response, then verify the resulting imp Message ends the conversation
+    correctly."""
+    # Imp-side: user said "go", assistant called complete_step.
+    user = Message(role="user", content=(TextBlock(text="go"),))
+    out = _imp_to_openai_messages([user])
+    assert out == [{"role": "user", "content": "go"}]
+
+    fake_response = FakeMessage(
+        role="assistant", content=None,
+        tool_calls=[FakeToolCall(
+            id="c1", type="function",
+            function=FakeFunction(
+                name="complete_step",
+                arguments='{"status": "Success"}',
+            ),
+        )],
+    )
+    parsed, warns = _openai_message_to_imp(fake_response)
+    assert warns == []
+    tool_uses = [b for b in parsed.content if isinstance(b, ToolUseBlock)]
+    assert len(tool_uses) == 1
+    assert tool_uses[0].name == "complete_step"
+    assert tool_uses[0].input == {"status": "Success"}
