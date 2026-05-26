@@ -32,6 +32,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from pydantic import BaseModel
 
 from imp.agents.backends import build_backend
+from imp.agents.builtin_filter import build_filtered_builtin_overrides
 from imp.agents.chat_middleware import ChatMiddleware
 from imp.agents.output_schema import schema_to_pydantic_model
 from imp.agents.runner import AgentInvocation
@@ -159,6 +160,9 @@ class DeepAgentRunner:
             invocation.agent_def.output_schema
         )
         tools = _build_imp_tools(invocation)
+        tools.extend(build_filtered_builtin_overrides(
+            invocation.agent_def.tools,
+        ))
         backend = build_backend(invocation)
         subagent_specs = compile_subagent_specs(
             invocation.agent_def,
