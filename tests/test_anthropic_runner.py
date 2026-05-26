@@ -13,7 +13,7 @@ from imp.agents.transcript import Transcript
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
-from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
+from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, thinking, tool_use
 
 
 def _agent_def(tools=frozenset({"complete_step", "read_file"})) -> AgentDef:
@@ -150,6 +150,53 @@ async def test_resume_uses_existing_transcript(tmp_path: Path) -> None:
     # The single LLM call should have been issued with all three prior messages.
     only_call = fake.messages.calls[0]
     assert len(only_call["messages"]) == 3
+
+
+@pytest.mark.anyio
+async def test_thinking_block_emits_warning_not_error(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([
+        # Response carries thinking + a complete_step tool_use.
+        response(
+            thinking("considering the options..."),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+        ),
+    ])
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake,
+    )
+    events = [e async for e in runner.run(_inv(tmp_path))]
+    kinds = [e["type"] for e in events]
+    # Must emit at least one runner_warning and reach agent_output (no error).
+    assert "runner_warning" in kinds
+    warn_payloads = [e["payload"]["message"] for e in events if e["type"] == "runner_warning"]
+    assert any("thinking" in m for m in warn_payloads)
+    assert events[-1]["type"] == "agent_output"
+
+
+@pytest.mark.anyio
+async def test_unknown_block_type_emits_warning_not_error(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    # Simulate a future block type by injecting an arbitrary-typed object.
+    from dataclasses import dataclass
+
+    @dataclass
+    class _FutureBlock:
+        type: str = "futurething"
+        payload: str = "x"
+
+    from tests.anthropic_fakes import FakeResponse
+    weird = FakeResponse(content=[
+        _FutureBlock(),
+        tool_use("c1", "complete_step", {"status": "Success"}),
+    ], stop_reason="tool_use")
+    fake = FakeAsyncAnthropic([weird])
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake,
+    )
+    events = [e async for e in runner.run(_inv(tmp_path))]
+    assert any(e["type"] == "runner_warning" for e in events)
+    assert events[-1]["type"] == "agent_output"
 
 
 @pytest.fixture

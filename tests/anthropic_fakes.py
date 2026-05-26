@@ -73,3 +73,13 @@ def tool_use(id: str, name: str, input: dict[str, Any]) -> FakeToolUseBlock:
 
 def response(*blocks: Any, stop_reason: str = "tool_use") -> FakeResponse:
     return FakeResponse(content=list(blocks), stop_reason=stop_reason)
+
+
+@dataclass
+class FakeThinkingBlock:
+    type: str  # "thinking"
+    thinking: str
+
+
+def thinking(text: str) -> FakeThinkingBlock:
+    return FakeThinkingBlock(type="thinking", thinking=text)
