@@ -1,60 +1,43 @@
-"""Resolve a RoleConfig to a langchain BaseChatModel by walking its prefer: list.
+"""Resolve a RoleConfig to a Provider by walking its prefer: list (spec §6.2).
 
-The first entry whose provider is supported AND whose env var is set wins.
-Resolution happens once per run (at engine startup); mid-run failover is
-explicitly out of V0 scope (spec §10).
+First entry whose env_check returns True wins. Mid-run failover is out of
+V1 scope; resolution happens once at startup.
+
+Providers register via providers.anthropic / providers.openai / providers.claude_code
+on module import. Tests use register_provider directly with fakes.
 """
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 
-from langchain_core.language_models import BaseChatModel
-
+from imp.providers.base import Provider
 from imp.providers.config import RoleConfig
 
-# provider name → (env var, factory). Task 7 adds OpenAI here.
-_PROVIDERS: dict[str, tuple[str, Callable[[str], BaseChatModel]]] = {}
-
-
-def _register(name: str, env_var: str, factory: Callable[[str], BaseChatModel]) -> None:
-    _PROVIDERS[name] = (env_var, factory)
-
-
-def _anthropic_factory(model: str) -> BaseChatModel:
-    from langchain_anthropic import ChatAnthropic
-
-    return ChatAnthropic(model=model)  # type: ignore[call-arg]
-
-
-_register("anthropic", "ANTHROPIC_API_KEY", _anthropic_factory)
-
-
-def _openai_factory(model: str) -> BaseChatModel:
-    from langchain_openai import ChatOpenAI
-
-    return ChatOpenAI(model=model)
-
-
-_register("openai", "OPENAI_API_KEY", _openai_factory)
+_PROVIDERS: dict[str, tuple[Callable[[], bool], Callable[[str], Provider]]] = {}
 
 
 class UnknownProvider(Exception):
-    """prefer: lists a provider name we don't know how to instantiate."""
+    pass
 
 
 class ProviderUnavailable(Exception):
-    """Every entry's env var was missing."""
+    pass
 
 
-def resolve_role(role: RoleConfig) -> BaseChatModel:
-    """Walk role.prefer in order; return the first available BaseChatModel.
+def register_provider(
+    name: str,
+    env_check: Callable[[], bool],
+    factory: Callable[[str], Provider],
+) -> None:
+    _PROVIDERS[name] = (env_check, factory)
 
-    Raises UnknownProvider on the first entry whose provider isn't registered
-    (configuration error, not transient).
-    Raises ProviderUnavailable only if every entry's env var is missing.
-    """
+
+def reset_providers_for_tests() -> None:
+    _PROVIDERS.clear()
+
+
+def resolve_role(role: RoleConfig) -> Provider:
     missing: list[str] = []
     for entry in role.prefer:
         if entry.provider not in _PROVIDERS:
@@ -62,13 +45,11 @@ def resolve_role(role: RoleConfig) -> BaseChatModel:
                 f"role {role.name!r}: unknown provider {entry.provider!r} "
                 f"(known: {sorted(_PROVIDERS)})"
             )
-        env_var, factory = _PROVIDERS[entry.provider]
-        if not os.environ.get(env_var):
-            missing.append(f"{entry.provider}({env_var})")
+        env_check, factory = _PROVIDERS[entry.provider]
+        if not env_check():
+            missing.append(entry.provider)
             continue
         return factory(entry.model)
-
     raise ProviderUnavailable(
-        f"role {role.name!r}: no provider available; "
-        f"tried {', '.join(missing) if missing else 'nothing'}"
+        f"role {role.name!r}: no provider available; tried {', '.join(missing) or 'nothing'}"
     )
