@@ -96,6 +96,17 @@ class ChatRenderer:
         if t == "gate_evaluated":
             self._line(f"[gate ] {p.get('rule', p.get('gate_type', '?'))} -> {p.get('action', '?')}")
             return
+        if t == "script_gate_result":
+            exit_code = p.get("exit", "?")
+            self._line(f"[gate ] script exit={exit_code}")
+            return
+        if t in ("step_resumed_with_cached_output", "step_exhausted",
+                 "phase_exhausted"):
+            step = p.get("step", "")
+            phase = p.get("phase", "")
+            target = step or phase or "?"
+            self._line(f"[wf   ] {t} {target}")
+            return
         if t in ("workflow_paused", "workflow_resumed", "workflow_started",
                  "workflow_completed"):
             self._line(f"[wf   ] {t}")

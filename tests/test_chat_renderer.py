@@ -74,3 +74,14 @@ def test_user_input_echoed() -> None:
         {"type": "user_input", "payload": {"text": "I want feature X"}},
     ])
     assert "feature X" in text
+
+
+def test_script_gate_result_summarized() -> None:
+    text = _render([
+        {"type": "script_gate_result", "payload": {
+            "exit": 0, "stdout": "ok\n" * 100, "stderr": "",
+        }},
+    ])
+    assert "exit=0" in text
+    # Don't dump the stdout
+    assert text.count("ok") < 10

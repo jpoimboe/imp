@@ -127,20 +127,22 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             try:
                 print(f"Resuming Change {change.id}: {change.title!r}")
                 print(f"Phase: {state.phase}, step: {state.step}")
-                change.event_log().append("workflow_resumed", {})
                 renderer = ChatRenderer()
-                _replay_current_step(change, state, renderer)
-                state.status = "running"
-                state.save(change.state_dir)
                 try:
-                    result = run(change, _agent_runner(), on_event=renderer.handle)
-                except (LoadError, LoadErrors) as e:
-                    print(f"imp: {e}", file=sys.stderr)
-                    return 2
+                    renderer.handle({"type": "workflow_resumed", "payload": {}})
+                    change.event_log().append("workflow_resumed", {})
+                    _replay_current_step(change, state, renderer)
+                    state.status = "running"
+                    state.save(change.state_dir)
+                    try:
+                        result = run(change, _agent_runner(), on_event=renderer.handle)
+                    except (LoadError, LoadErrors) as e:
+                        print(f"imp: {e}", file=sys.stderr)
+                        return 2
+                    print(f"Change {change.id}: {result.value}")
+                    return 0 if result is RunResult.COMPLETED else 1
                 finally:
                     renderer.close()
-                print(f"Change {change.id}: {result.value}")
-                return 0 if result is RunResult.COMPLETED else 1
             finally:
                 _clear_change_lock(change)
     except LockHeld as lock_err:
