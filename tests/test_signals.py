@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
+
+import pytest
 
 from imp.cli.signals import pause_and_exit
 from imp.engine.change import Change
@@ -78,23 +86,25 @@ def test_pause_when_no_state_file(tmp_path: Path) -> None:
     )
 
 
-import os
-import signal
-import subprocess
-import sys
-import time
-import contextlib
-
-import pytest
-
-
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX only")
 def test_install_process_group_makes_us_leader() -> None:
-    """After install_process_group, our PID == our PGID."""
-    from imp.cli.signals import install_process_group
+    """After install_process_group, os.getpid() == os.getpgid(0).
 
-    install_process_group()
-    assert os.getpid() == os.getpgid(0)
+    Runs in a subprocess to avoid mutating pytest's own pgid (which would
+    silently couple us to test_cli.py tests that may spawn imp subprocesses).
+    """
+    result = subprocess.run(
+        [
+            sys.executable, "-c",
+            "from imp.cli.signals import install_process_group; "
+            "import os; install_process_group(); "
+            "assert os.getpid() == os.getpgid(0), "
+            "f'{os.getpid()} != {os.getpgid(0)}'; "
+            "print('ok')",
+        ],
+        capture_output=True, text=True, timeout=10, check=True,
+    )
+    assert "ok" in result.stdout
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX only")
@@ -111,8 +121,8 @@ def test_tool_kill_escalation_terminates_child(tmp_path: Path) -> None:
     # Brief settle so /proc/<child_pid>/stat is available
     time.sleep(0.1)
     try:
-        # Send SIGTERM-then-SIGKILL to the PG (which includes us — pytest
-        # would die — so we exclude self by passing kill_self=False)
+        # Production uses kill_self=True (default — kills the whole PG including
+        # us). Tests use kill_self=False to keep pytest alive.
         tool_kill_escalation(timeout=0.5, kill_self=False)
         # Child should be gone in well under our 5s test budget
         for _ in range(50):

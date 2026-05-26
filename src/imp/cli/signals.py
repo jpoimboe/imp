@@ -81,6 +81,7 @@ def tool_kill_escalation(
 def _signal_pg_excluding_self(pgid: int, sig: int) -> None:
     """Walk /proc looking for procs whose PGID matches; signal those that
     aren't us. POSIX-only; best-effort."""
+    # Runs only on interrupt, so O(n_procs) /proc walk is acceptable.
     self_pid = os.getpid()
     try:
         entries = os.listdir("/proc")

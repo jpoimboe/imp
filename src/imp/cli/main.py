@@ -93,6 +93,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
                     return 2
                 except KeyboardInterrupt:
                     print("\n(interrupting...)", file=sys.stderr)
+                    # 2s blocking sleep — intentional, user is waiting for clean exit
                     tool_kill_escalation(timeout=2.0)
                     pause_and_exit(change, reason="ctrl-c")
                     print(f"\nChange {change.id}: paused (ctrl-c)")
@@ -171,6 +172,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                         return 2
                     except KeyboardInterrupt:
                         print("\n(interrupting...)", file=sys.stderr)
+                        # 2s blocking sleep — intentional, user is waiting for clean exit
                         tool_kill_escalation(timeout=2.0)
                         pause_and_exit(change, reason="ctrl-c")
                         print(f"\nChange {change.id}: paused (ctrl-c)")
