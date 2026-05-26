@@ -79,3 +79,26 @@ def register_tool(tool: Tool) -> None:
 
 
 __all__ = ["Tool", "clear_registry", "get_registry", "imp_tool", "register_tool"]
+
+
+# DO NOT REORDER: `_REGISTRY` and `imp_tool` must be defined ABOVE this point
+# so the side-effect imports inside `_register_builtins()` can resolve them.
+# Each built-in tool module does `from imp.agents.tools import imp_tool` mid-init,
+# which works only because `imp_tool` is already bound when the import runs.
+# Note: complete_step is NOT auto-imported here — it's synthesized per-agent
+# by make_complete_step_tool(...) and registered via Tool, not @imp_tool.
+def _register_builtins() -> None:
+    """Import all built-in tool modules so their @imp_tool decorations fire."""
+    from imp.agents.tools import (  # noqa: F401
+        ask_user,
+        bash,
+        fs,
+        git_diff,
+        nav,
+        query_events,
+        todos,
+        web_fetch,
+    )
+
+
+_register_builtins()
