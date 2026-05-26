@@ -152,6 +152,8 @@ def _process_stream_chunk(
     if mode == "messages":
         chunk, _meta = payload if isinstance(payload, tuple) else (payload, {})
         if isinstance(chunk, AIMessageChunk):
+            # Text-only path. Multimodal content (list of dicts) is dropped here;
+            # V0 agents are text-only so this is intentional.
             text = chunk.content if isinstance(chunk.content, str) else ""
             if text:
                 yield {"type": "agent_token", "payload": {"text": text}}

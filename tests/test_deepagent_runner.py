@@ -41,3 +41,12 @@ def test_runner_emits_agent_token_events_in_order(monkeypatch) -> None:
                 messages.append(e["payload"]["text"])
     assert tokens == ["hello ", "world"]
     assert messages == ["hello world"]
+
+
+def test_process_stream_chunk_filters_empty_token() -> None:
+    """Empty-content message chunks produce no agent_token event."""
+    from langchain_core.messages import AIMessageChunk
+    from imp.agents.deepagent_runner import _process_stream_chunk
+
+    events = list(_process_stream_chunk("messages", (AIMessageChunk(content=""), {}), []))
+    assert events == []
