@@ -307,14 +307,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Show the event log for a Change.",
         description=(
             "Show the event log for a Change. "
-            "Set NO_COLOR=1 to disable colors. "
-            "Use `less -R` to view a paged colored log."
+            "Set NO_COLOR=1 to disable colors."
         ),
     )
     p_log.add_argument("change_id", type=int, nargs="?")
     p_log.add_argument(
         "--full", action="store_true",
         help="Render every event (no tool-burst collapse).",
+    )
+    p_log.add_argument(
+        "--no-pager", action="store_true",
+        help="Disable the pager even when stdout is a TTY.",
     )
     p_log.set_defaults(func=_cmd_log)
 
