@@ -22,6 +22,11 @@ def loc(line: int = 1) -> SourceLoc:
     return SourceLoc(file=Path("x"), line=line)
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
 # ── Task 16: Decide evaluator ──────────────────────────────────────────────
 
 def test_decide_simple_match() -> None:
@@ -167,52 +172,57 @@ def _human_gate(*pairs: tuple[str, Action]) -> HumanGate:
     )
 
 
-def test_human_gate_match_by_number() -> None:
+@pytest.mark.anyio
+async def test_human_gate_match_by_number() -> None:
     gate = _human_gate(("Yes", Continue()), ("No", Pause()))
     inputs = iter(["1"])
     out: list[str] = []
-    action = run_human_gate(
+    action = await run_human_gate(
         gate, input_fn=lambda: next(inputs), output_fn=out.append
     )
     assert isinstance(action, Continue)
 
 
-def test_human_gate_match_by_label_prefix() -> None:
+@pytest.mark.anyio
+async def test_human_gate_match_by_label_prefix() -> None:
     gate = _human_gate(("Approve", Continue()), ("Reject", Pause()))
     inputs = iter(["app"])
-    action = run_human_gate(
+    action = await run_human_gate(
         gate, input_fn=lambda: next(inputs), output_fn=lambda _s: None
     )
     assert isinstance(action, Continue)
 
 
-def test_human_gate_reprompts_on_ambiguous() -> None:
+@pytest.mark.anyio
+async def test_human_gate_reprompts_on_ambiguous() -> None:
     gate = _human_gate(
         ("Approve", Continue()), ("Approve-with-edits", Retry()),
     )
     inputs = iter(["app", "Approve"])  # 1st ambiguous, 2nd exact
     out: list[str] = []
-    action = run_human_gate(
+    action = await run_human_gate(
         gate, input_fn=lambda: next(inputs), output_fn=out.append
     )
     assert isinstance(action, Continue)
     assert any("ambiguous" in s.lower() for s in out)
 
 
-def test_human_gate_reprompts_on_invalid() -> None:
+@pytest.mark.anyio
+async def test_human_gate_reprompts_on_invalid() -> None:
     gate = _human_gate(("Yes", Continue()), ("No", Pause()))
     inputs = iter(["maybe", "9", "2"])
     out: list[str] = []
-    action = run_human_gate(
+    action = await run_human_gate(
         gate, input_fn=lambda: next(inputs), output_fn=out.append
     )
     assert isinstance(action, Pause)
 
 
-def test_human_gate_renders_prompt_and_options() -> None:
+@pytest.mark.anyio
+async def test_human_gate_renders_prompt_and_options() -> None:
     gate = _human_gate(("Approve", Continue()), ("Retry", Retry()))
     out: list[str] = []
-    run_human_gate(
+    await run_human_gate(
         gate, input_fn=lambda: "1", output_fn=out.append,
     )
     rendered = "\n".join(out)

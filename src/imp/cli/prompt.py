@@ -46,6 +46,13 @@ class Prompt:
         result = self._session.prompt(prompt_text)
         return str(result) if result is not None else ""
 
+    async def ask_async(self, prompt_text: str = "> ") -> str:
+        """Async version of ask() — uses prompt_toolkit's native prompt_async()
+        so it shares the outer event loop instead of calling asyncio.run()
+        internally (which would crash inside anyio.run())."""
+        result = await self._session.prompt_async(prompt_text)
+        return str(result) if result is not None else ""
+
     def history_strings(self) -> list[str]:
         try:
             return list(self._session.history.get_strings())

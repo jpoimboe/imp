@@ -81,7 +81,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                             result = await run_change(
                                 change,
                                 on_event=renderer.handle,
-                                human_input_fn=lambda: prompt.ask("> "),
+                                human_input_fn=lambda: prompt.ask_async("> "),
                                 human_output_fn=renderer.line,
                                 coordinator=coord,
                             )
@@ -172,7 +172,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                             result = await run_change(
                                 change,
                                 on_event=renderer.handle,
-                                human_input_fn=lambda: prompt.ask("> "),
+                                human_input_fn=lambda: prompt.ask_async("> "),
                                 human_output_fn=renderer.line,
                                 coordinator=coord,
                             )

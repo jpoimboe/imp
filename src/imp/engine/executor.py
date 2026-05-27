@@ -8,7 +8,7 @@ On successful step completion the engine deletes the step's transcript dir.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -48,7 +48,7 @@ from imp.providers.config import Config, load_config
 from imp.providers.resolve import resolve_role
 
 EventCallback = Callable[[dict[str, Any]], None]
-HumanInputFn = Callable[[], str]
+HumanInputFn = Callable[[], str | Awaitable[str]]
 HumanOutputFn = Callable[[str], None]
 
 
@@ -475,7 +475,7 @@ async def _run_gate(
     coordinator: Any = None,
 ) -> Action:
     if isinstance(gate, HumanGate):
-        action = run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
+        action = await run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
         _emit(log, on_event, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
         return action
     if isinstance(gate, ScriptGate):

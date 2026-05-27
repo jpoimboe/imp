@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -70,10 +71,10 @@ def run_script_gate(
     return evaluate_decide(gate.decide, context), context
 
 
-def run_human_gate(
+async def run_human_gate(
     gate: HumanGate,
     *,
-    input_fn: Callable[[], str],
+    input_fn: Callable[[], str | Awaitable[str]],
     output_fn: Callable[[str], None],
 ) -> Action:
     """Prompt the user with the gate's options. Returns the chosen action.
@@ -82,6 +83,10 @@ def run_human_gate(
       - Numeric input -> 1-based option index
       - Otherwise case-insensitive label prefix match
       - Empty input or ambiguous prefix -> re-prompt
+
+    ``input_fn`` may return either a plain ``str`` or an ``Awaitable[str]``
+    (e.g. ``lambda: prompt.ask_async("> ")``). The coroutine is awaited
+    automatically so callers don't need to change their signature.
     """
     while True:
         output_fn("─── HUMAN GATE ──────────────────────────────────────")
@@ -89,7 +94,10 @@ def run_human_gate(
         for i, opt in enumerate(gate.options, start=1):
             output_fn(f"  {i}) {opt.label}")
         output_fn("")
-        raw = input_fn().strip()
+        result = input_fn()
+        if inspect.isawaitable(result):
+            result = await result
+        raw = result.strip()
         match = _match_human_option(raw, gate.options, output_fn)
         if match is not None:
             return match.action
