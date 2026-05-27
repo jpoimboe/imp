@@ -7,6 +7,7 @@ import pytest
 
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from tests._live import opted_in
 
 
 def _anthropic_key() -> str | None:
@@ -26,17 +27,18 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.skipif(
-    not _anthropic_key(),
-    reason="live test requires ANTHROPIC_API_KEY env var or ~/.anthropic-key file",
+    not opted_in("anthropic"),
+    reason="anthropic not in IMP_LIVE_PROVIDERS",
 )
 @pytest.mark.anyio
 async def test_live_minimal_change_completes_one_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Make the file-based key available to the anthropic SDK via env var
-    # (it reads ANTHROPIC_API_KEY by default). monkeypatch restores on teardown.
     key = _anthropic_key()
-    assert key is not None  # guaranteed by skipif
+    assert key is not None, (
+        "anthropic opted in via IMP_LIVE_PROVIDERS but no "
+        "ANTHROPIC_API_KEY env var or ~/.anthropic-key file found"
+    )
     monkeypatch.setenv("ANTHROPIC_API_KEY", key)
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
