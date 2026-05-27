@@ -198,14 +198,18 @@ def test_full_default_workflow_via_pty_events_driven(tmp_path: Path) -> None:
     os.close(slave)
 
     # start_new_session=True puts the subprocess in its own PG so Ctrl-C from
-    # the user's terminal does NOT reach it. Pytest's default SIGINT handler
-    # also defers KeyboardInterrupt until between tests. Install our own
-    # SIGINT handler so the first Ctrl-C kills the subprocess PG and aborts
-    # this test immediately.
+    # the user's terminal does NOT reach it directly. Worse: raising
+    # KeyboardInterrupt from a signal handler doesn't reliably abort a pytest
+    # test (some plugins / capture modes swallow it). We hard-kill the
+    # subprocess PG and then os._exit so Ctrl-C is unambiguous.
+    # os.write(2, ...) bypasses pytest's sys.stderr capture so the message
+    # surfaces even when -v is buffering output.
     def _on_sigint(_signum: int, _frame: Any) -> None:
+        with contextlib.suppress(OSError):
+            os.write(2, b"\n[pty-test] SIGINT received; killing subprocess and aborting\n")
         with contextlib.suppress(OSError, ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
-        raise KeyboardInterrupt
+        os._exit(130)
     _prev_sigint = signal.signal(signal.SIGINT, _on_sigint)
 
     events_file = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
