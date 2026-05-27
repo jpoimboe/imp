@@ -123,9 +123,15 @@ def _serialize(msg: Message) -> dict[str, Any]:
 
 
 class AnthropicAgentRunner:
-    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
+    def __init__(
+        self, model_name: str,
+        *,
+        client_factory: Any = None,
+        user_input_fn: Any = None,             # NEW
+    ) -> None:
         self.model = model_name                     # public per Provider protocol
         self._client_factory = client_factory
+        self._user_input_fn = user_input_fn    # NEW
         self._client: Any = None
         self._cancel = False
 
@@ -197,6 +203,8 @@ class AnthropicAgentRunner:
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
         ctx.spawn_subagent = self._make_spawn_subagent()
+        if self._user_input_fn is not None:
+            ctx.user_input_fn = self._user_input_fn  # NEW
 
         existing = transcript.load()
         if existing:
@@ -215,12 +223,23 @@ class AnthropicAgentRunner:
                     "message": "autonomous agent transcript ended without complete_step",
                 }}
                 return
-            # TODO(plan-3): ResumeState.PROMPT_USER falls through into the main
-            # loop, which POSTs to Anthropic with a trailing assistant text-only
-            # message. The user-prompt step should fire BEFORE the next LLM call.
-            # Wiring this up requires the interactive prompt path that Plan 3
-            # finalizes in cli/signals.py. Until then, interactive resume from
-            # this state is best-effort; the LLM will likely hallucinate a follow-up.
+            if state is ResumeState.PROMPT_USER:
+                if ctx.user_input_fn is None:
+                    yield {"type": "error", "payload": {
+                        "kind": "no_user_input_fn",
+                        "message": (
+                            "PROMPT_USER resume requires user_input_fn; "
+                            "none installed by runner"
+                        ),
+                    }}
+                    return
+                user_text = ctx.user_input_fn("")
+                user_msg = Message(
+                    role="user", content=(TextBlock(text=user_text),),
+                )
+                messages.append(user_msg)
+                transcript.append(user_msg)
+                yield {"type": "user_input", "payload": {"text": user_text}}
         else:
             messages = []
             for m in invocation.initial_messages:

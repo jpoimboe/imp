@@ -335,3 +335,70 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path) -> None:
     import json
     parsed = json.loads(task_result["payload"]["content"])
     assert parsed.get("verdict") == "approve"
+
+
+@pytest.mark.anyio
+async def test_interactive_resume_from_prompt_user_prompts_then_continues(
+    tmp_path: Path,
+) -> None:
+    """Interactive resume: transcript ends with text-only assistant → runner
+    must prompt user, append the response, then drive the next LLM call."""
+    from dataclasses import replace
+
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv = replace(inv, interactive=True)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-populate transcript: user said "go", assistant replied text-only.
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(
+        role="assistant",
+        content=(TextBlock(text="what about X?"),),
+    ))
+
+    # After the resume prompt, the user types "do X"; the runner sends one LLM
+    # call which completes the step.
+    fake = FakeAsyncAnthropic([
+        response(
+            tool_use("c1", "complete_step", {"status": "Success"}),
+            stop_reason="tool_use",
+        ),
+    ])
+
+    user_inputs = iter(["do X"])
+
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake,
+    )
+    # The runner injects user_input_fn from ctx; the executor would normally
+    # supply it. For this unit test, install it directly by patching
+    # ToolContext after construction — same pattern as test_ask_user_tool.py.
+    # Easiest: monkey-patch the runner's `_make_spawn_subagent` and rely on
+    # the executor-style hook. For Plan 3 we expose a constructor kwarg.
+    runner._user_input_fn = lambda _prompt: next(user_inputs)
+
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    kinds = [e["type"] for e in events]
+    # The new user_input event fires BEFORE any agent_message.
+    user_input_idx = kinds.index("user_input")
+    agent_message_idx = kinds.index("agent_message")
+    assert user_input_idx < agent_message_idx
+    assert events[user_input_idx]["payload"]["text"] == "do X"
+    assert kinds[-1] == "agent_output"
+
+    # Transcript now has 4 messages: user("go") / assistant("what about X?")
+    # / user("do X") / assistant(complete_step). Original two preserved.
+    loaded = t.load()
+    assert len(loaded) == 4
+    assert loaded[2].role == "user"
+    assert isinstance(loaded[2].content[0], TextBlock)
+    assert loaded[2].content[0].text == "do X"
