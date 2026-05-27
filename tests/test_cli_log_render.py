@@ -741,3 +741,39 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     assert "phase_started" in out
     # Three rendered lines, one per event (good, malformed, good).
     assert out.count("\n") == 3
+
+
+def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
+    """`python -m imp log 1` against a real change dir, stdout piped → no ANSI.
+
+    Covers the `__main__.py → _cmd_log` wiring, `should_use_color` on a
+    non-tty stream, and the real `sys.exit` path."""
+    import json, subprocess, sys
+
+    cdir = tmp_path / ".imp" / "changes" / "1"
+    cdir.mkdir(parents=True)
+    (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "sub"}))
+    (cdir / "events.jsonl").write_text(
+        json.dumps({
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "type": "change_created",
+            "payload": {"change_id": 1, "title": "sub"},
+        }) + "\n"
+        + json.dumps({
+            "timestamp": "2026-05-27T10:00:01+00:00",
+            "type": "phase_started",
+            "payload": {"phase": "spec"},
+        }) + "\n",
+    )
+
+    out = subprocess.run(
+        [sys.executable, "-m", "imp", "log", "1"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15,
+    )
+    assert out.returncode == 0, (
+        f"stderr: {out.stderr!r}\nstdout: {out.stdout!r}"
+    )
+    assert "change_created" in out.stdout
+    assert "phase_started" in out.stdout
+    # Pipe → not a tty → no ANSI codes regardless of NO_COLOR.
+    assert "\x1b[" not in out.stdout
