@@ -213,6 +213,9 @@ def _fmt_unknown(p: dict[str, Any], full: bool, color: bool) -> str:
 
 
 def _fmt_malformed(event: Any, full: bool, color: bool) -> str:
+    if isinstance(event, dict) and event.get("_malformed") is True:
+        raw = str(event.get("raw", ""))
+        return _elide(f"malformed line: {raw}", 80)
     return _elide(repr(event), 80)
 
 

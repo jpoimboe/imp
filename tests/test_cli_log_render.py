@@ -286,6 +286,16 @@ def test_fmt_malformed() -> None:
     assert len(s) <= 80
 
 
+def test_fmt_malformed_recognizes_sentinel_dict() -> None:
+    """When the input is the EventLog malformed sentinel, render the raw
+    line content, not the dict's repr."""
+    s = render._fmt_malformed(
+        {"_malformed": True, "raw": "this is not json"},
+        full=False, color=False,
+    )
+    assert s == "malformed line: this is not json"
+
+
 def test_fmt_tool_call_args_keyvalue() -> None:
     s = render._fmt_tool_call(
         {"id": "tu_1", "name": "bash", "args": {"command": "ls", "timeout": 5}},
