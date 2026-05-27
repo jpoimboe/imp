@@ -52,3 +52,36 @@ def test_should_use_color_on_when_tty_and_no_no_color(monkeypatch: pytest.Monkey
             return True
 
     assert render.should_use_color(FakeTTY()) is True
+
+
+def test_fmt_change_created() -> None:
+    s = render._fmt_change_created(
+        {"change_id": 42, "title": "add foo to bar"}, full=False, color=False,
+    )
+    assert s == "#42  add foo to bar"
+
+
+def test_fmt_workflow_started() -> None:
+    s = render._fmt_workflow_started(
+        {"name": "standard-feature", "from_phase": "onboard"},
+        full=False, color=False,
+    )
+    assert s == "standard-feature  (from onboard)"
+
+
+def test_fmt_workflow_paused_with_reason() -> None:
+    s = render._fmt_workflow_paused(
+        {"reason": "ctrl-c"}, full=False, color=False,
+    )
+    assert s == "paused  (ctrl-c)"
+
+
+def test_fmt_workflow_paused_no_reason() -> None:
+    # Defensive: payload may be {} per executor.py line 100.
+    s = render._fmt_workflow_paused({}, full=False, color=False)
+    assert s == "paused"
+
+
+def test_fmt_workflow_resumed() -> None:
+    s = render._fmt_workflow_resumed({}, full=False, color=False)
+    assert s == "resumed"

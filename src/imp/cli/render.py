@@ -44,3 +44,28 @@ def should_use_color(stream: Any) -> bool:
     unset in the environment. Matches the de-facto ``NO_COLOR`` convention.
     """
     return bool(stream.isatty()) and "NO_COLOR" not in os.environ
+
+
+# ----------------------------------------------------------------------
+# Per-event formatters. Each returns the summary text only (no timestamp,
+# no type column, no indent). ``full`` only affects tool_call/tool_result;
+# every other formatter ignores it.
+# ----------------------------------------------------------------------
+
+def _fmt_change_created(p: dict[str, Any], full: bool, color: bool) -> str:
+    return f"#{p.get('change_id', '?')}  {p.get('title', '')}"
+
+
+def _fmt_workflow_started(p: dict[str, Any], full: bool, color: bool) -> str:
+    name = p.get("name", "?")
+    frm = p.get("from_phase")
+    return f"{name}  (from {frm})" if frm else str(name)
+
+
+def _fmt_workflow_paused(p: dict[str, Any], full: bool, color: bool) -> str:
+    reason = p.get("reason")
+    return f"paused  ({reason})" if reason else "paused"
+
+
+def _fmt_workflow_resumed(p: dict[str, Any], full: bool, color: bool) -> str:
+    return "resumed"
