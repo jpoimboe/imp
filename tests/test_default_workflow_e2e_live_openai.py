@@ -14,6 +14,7 @@ import pytest
 
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from tests._live import opted_in
 
 
 def _openai_key() -> str | None:
@@ -33,15 +34,18 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.skipif(
-    not _openai_key(),
-    reason="live test requires OPENAI_API_KEY env var or ~/.openai-key file",
+    not opted_in("openai"),
+    reason="openai not in IMP_LIVE_PROVIDERS",
 )
 @pytest.mark.anyio
 async def test_one_step_walk_against_openai(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     key = _openai_key()
-    assert key is not None  # guaranteed by skipif
+    assert key is not None, (
+        "openai opted in via IMP_LIVE_PROVIDERS but no "
+        "OPENAI_API_KEY env var or ~/.openai-key file found"
+    )
     monkeypatch.setenv("OPENAI_API_KEY", key)
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
