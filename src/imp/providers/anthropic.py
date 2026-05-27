@@ -155,7 +155,33 @@ class AnthropicAgentRunner:
 
         return _spawn
 
+    async def _close_client(self) -> None:
+        """Close the underlying SDK client if we own it and it supports close().
+
+        Real `anthropic.AsyncAnthropic` owns an httpx pool; without explicit
+        close() the pool's async teardown can race with pytest-anyio's
+        per-test loop teardown and surface "Event loop is closed" errors in
+        later tests. Test fakes don't expose `.close()` — skip safely.
+        """
+        import contextlib
+        if self._client is None:
+            return
+        close = getattr(self._client, "close", None)
+        if close is not None:
+            with contextlib.suppress(Exception):
+                await close()
+        self._client = None
+
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        try:
+            async for ev in self._run_loop(invocation):
+                yield ev
+        finally:
+            await self._close_client()
+
+    async def _run_loop(
+        self, invocation: AgentInvocation,
+    ) -> AsyncGenerator[Event, None]:
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(

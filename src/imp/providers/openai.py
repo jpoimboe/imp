@@ -231,6 +231,23 @@ class OpenAIAgentRunner:
 
         return _spawn
 
+    async def _close_client(self) -> None:
+        """Close the underlying SDK client if we own it and it supports close().
+
+        Real `openai.AsyncOpenAI` owns an httpx pool; without explicit close()
+        the pool's async teardown can race with pytest-anyio's per-test loop
+        teardown and surface "Event loop is closed" errors. Test fakes don't
+        expose `.close()` — skip safely.
+        """
+        import contextlib
+        if self._client is None:
+            return
+        close = getattr(self._client, "close", None)
+        if close is not None:
+            with contextlib.suppress(Exception):
+                await close()
+        self._client = None
+
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
@@ -248,6 +265,19 @@ class OpenAIAgentRunner:
         ctx.change_context = invocation.change_context
         ctx.spawn_subagent = self._make_spawn_subagent()
 
+        try:
+            async for ev in self._run_loop(invocation, transcript, tools, ctx):
+                yield ev
+        finally:
+            await self._close_client()
+
+    async def _run_loop(
+        self,
+        invocation: AgentInvocation,
+        transcript: Transcript,
+        tools: dict[str, Tool],
+        ctx: ToolContext,
+    ) -> AsyncGenerator[Event, None]:
         existing = transcript.load()
         if existing:
             messages = existing
