@@ -265,6 +265,13 @@ def test_fmt_tools_synthetic() -> None:
     assert s == "6 calls  (3 bash, 2 read, 1 ls)"
 
 
+def test_fmt_tools_synthetic_singular() -> None:
+    s = render._fmt_tools(
+        {"counts": {"bash": 1}}, full=False, color=False,
+    )
+    assert s == "1 call  (1 bash)"
+
+
 def test_fmt_unknown_renders_kv_pairs() -> None:
     s = render._fmt_unknown(
         {"a": "alpha", "b": "b" * 100}, full=False, color=False,

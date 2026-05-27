@@ -9,7 +9,7 @@
 12:00:11  phase_completed     onboard  → next
 12:00:12  phase_started       implement
 12:00:13    step_started      spec-writer  [expensive]
-12:00:15      tools           1 calls  (1 bash)
+12:00:15      tools           1 call  (1 bash)
 12:00:16    gate_evaluated    spec-lint (agent)  → retry
 12:00:17    step_exhausted    spec-writer  → exhausted
 12:00:18    step_resumed_with_cached_output  spec-writer  (cached)

@@ -202,7 +202,8 @@ def _fmt_tools(p: dict[str, Any], full: bool, color: bool) -> str:
     total = sum(counts.values())
     by_count = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     parts = ", ".join(f"{n} {name}" for name, n in by_count)
-    return f"{total} calls  ({parts})"
+    noun = "call" if total == 1 else "calls"
+    return f"{total} {noun}  ({parts})"
 
 
 def _fmt_unknown(p: dict[str, Any], full: bool, color: bool) -> str:
