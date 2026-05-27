@@ -217,6 +217,59 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     assert events[-1]["payload"] == {"status": "Success"}
 
 
+@pytest.mark.anyio
+async def test_interactive_resume_from_prompt_user_prompts_then_continues(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+    from typing import Any
+
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv = replace(inv, interactive=True)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(
+        role="assistant",
+        content=(TextBlock(text="confirm?"),),
+    ))
+
+    scripted = [
+        assistant(text("done"), tool_use("c1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+    user_inputs = iter(["yes, proceed"])
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=factory,
+        user_input_fn=lambda _prompt: next(user_inputs),
+    )
+
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    kinds = [e["type"] for e in events]
+    user_idx = kinds.index("user_input")
+    msg_idx = kinds.index("agent_message")
+    assert user_idx < msg_idx
+    assert kinds[-1] == "agent_output"
+    loaded = t.load()
+    assert len(loaded) >= 3
+    assert loaded[2].role == "user"
+    assert isinstance(loaded[2].content[0], TextBlock)
+    assert loaded[2].content[0].text == "yes, proceed"
+
+
 def test_claude_code_provider_registered_and_resolves() -> None:
     """The claude_code provider is registered eagerly; resolve_role picks it up
     when claude is on PATH."""

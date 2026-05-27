@@ -360,9 +360,15 @@ class ClaudeCodeAgentRunner:
            registry; the agent sees them as `mcp__imp__<name>`.
     """
 
-    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
+    def __init__(
+        self, model_name: str,
+        *,
+        client_factory: Any = None,
+        user_input_fn: Any = None,
+    ) -> None:
         self.model = model_name
         self._client_factory = client_factory
+        self._user_input_fn = user_input_fn
         self._client: Any = None
         self._cancel = False
 
@@ -390,11 +396,13 @@ class ClaudeCodeAgentRunner:
 
     def _make_spawn_subagent(self) -> Any:
         client_factory = self._client_factory
+        user_input_fn = self._user_input_fn
 
         async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
             child = ClaudeCodeAgentRunner(
                 model_name=sub_invocation.model_name,
                 client_factory=client_factory,
+                user_input_fn=user_input_fn,
             )
             return child.run(sub_invocation)
 
@@ -416,6 +424,8 @@ class ClaudeCodeAgentRunner:
         )
         ctx.change_context = invocation.change_context
         ctx.spawn_subagent = self._make_spawn_subagent()
+        if self._user_input_fn is not None:
+            ctx.user_input_fn = self._user_input_fn
 
         state = _RunState()
         sdk_tools = _make_sdk_tools(tools, ctx, state)
@@ -455,7 +465,23 @@ class ClaudeCodeAgentRunner:
                     "message": "autonomous agent transcript ended without complete_step",
                 }}
                 return
-            # TODO(plan-3): PROMPT_USER finalization same as the other runners.
+            if resume_state is ResumeState.PROMPT_USER:
+                if ctx.user_input_fn is None:
+                    yield {"type": "error", "payload": {
+                        "kind": "no_user_input_fn",
+                        "message": (
+                            "PROMPT_USER resume requires user_input_fn; "
+                            "none installed by runner"
+                        ),
+                    }}
+                    return
+                user_text = ctx.user_input_fn("")
+                user_msg = Message(
+                    role="user", content=(TextBlock(text=user_text),),
+                )
+                messages.append(user_msg)
+                transcript.append(user_msg)
+                yield {"type": "user_input", "payload": {"text": user_text}}
         else:
             messages = []
             for m in invocation.initial_messages:
