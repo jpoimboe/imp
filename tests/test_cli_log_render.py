@@ -116,3 +116,57 @@ def test_fmt_phase_exhausted() -> None:
 def test_fmt_phase_exhausted_color() -> None:
     s = render._fmt_phase_exhausted({"phase": "design"}, full=False, color=True)
     assert "\x1b[31mexhausted\x1b[0m" in s
+
+
+def test_fmt_step_started_basic() -> None:
+    s = render._fmt_step_started(
+        {"step": "spec-writer", "model_role": "expensive", "interactive": False},
+        full=False, color=False,
+    )
+    assert s == "spec-writer  [expensive]"
+
+
+def test_fmt_step_started_omits_default_role() -> None:
+    s = render._fmt_step_started(
+        {"step": "spec-writer", "model_role": "default", "interactive": False},
+        full=False, color=False,
+    )
+    assert s == "spec-writer"
+
+
+def test_fmt_step_started_missing_role_treated_as_default() -> None:
+    # Older events may omit model_role entirely; suppress the bracket too.
+    s = render._fmt_step_started(
+        {"step": "spec-writer", "interactive": False},
+        full=False, color=False,
+    )
+    assert s == "spec-writer"
+
+
+def test_fmt_step_started_interactive_suffix() -> None:
+    s = render._fmt_step_started(
+        {"step": "talk", "model_role": "default", "interactive": True},
+        full=False, color=False,
+    )
+    assert s == "talk (interactive)"
+
+
+def test_fmt_step_completed() -> None:
+    s = render._fmt_step_completed(
+        {"step": "spec-writer", "action": "continue"}, full=False, color=False,
+    )
+    assert s == "spec-writer  → continue"
+
+
+def test_fmt_step_exhausted() -> None:
+    s = render._fmt_step_exhausted(
+        {"step": "spec-writer", "attempts": 4}, full=False, color=False,
+    )
+    assert s == "spec-writer  → exhausted"
+
+
+def test_fmt_step_resumed_with_cached_output() -> None:
+    s = render._fmt_step_resumed_with_cached_output(
+        {"step": "spec-writer"}, full=False, color=False,
+    )
+    assert s == "spec-writer  (cached)"

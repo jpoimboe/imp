@@ -112,3 +112,32 @@ def _fmt_phase_completed(p: dict[str, Any], full: bool, color: bool) -> str:
 def _fmt_phase_exhausted(p: dict[str, Any], full: bool, color: bool) -> str:
     phase = p.get("phase", "?")
     return f"{phase}  {_arrow(color)} {_accent_action('exhausted', color)}"
+
+
+def _fmt_step_started(p: dict[str, Any], full: bool, color: bool) -> str:
+    step = p.get("step", "?")
+    role = p.get("model_role", "default")
+    interactive = bool(p.get("interactive", False))
+    out = str(step)
+    if role and role != "default":
+        out = f"{out}  [{role}]"
+    if interactive:
+        out = f"{out} (interactive)"
+    return out
+
+
+def _fmt_step_completed(p: dict[str, Any], full: bool, color: bool) -> str:
+    step = p.get("step", "?")
+    action = str(p.get("action", "?"))
+    return f"{step}  {_arrow(color)} {_accent_action(action, color)}"
+
+
+def _fmt_step_exhausted(p: dict[str, Any], full: bool, color: bool) -> str:
+    step = p.get("step", "?")
+    return f"{step}  {_arrow(color)} {_accent_action('exhausted', color)}"
+
+
+def _fmt_step_resumed_with_cached_output(
+    p: dict[str, Any], full: bool, color: bool,
+) -> str:
+    return f"{p.get('step', '?')}  (cached)"
