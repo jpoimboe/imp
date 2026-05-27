@@ -135,10 +135,9 @@ def _python_type_for_property(prop_schema: dict[str, Any]) -> Any:
 
 
 def _python_schema_for_tool(t: Tool) -> dict[str, Any]:
-    """{param_name: python_type} mapping consumed by `claude_agent_sdk.tool`.
-
-    Defensive: a tool with no parameters still needs *some* schema dict; the
-    SDK accepts an empty dict.
+    """Lossy fallback: {param_name: python_type} for tools whose JSON Schema
+    we can't pass through. Currently unused — claude_agent_sdk.tool accepts
+    the full JSON Schema dict, so we prefer that path (see _wrap_one).
     """
     props = t.input_schema.get("properties") or {}
     return {name: _python_type_for_property(spec) for name, spec in props.items()}
@@ -153,7 +152,13 @@ def _wrap_one(
     runner; the MCP transport is stdio between claude-p and us, but tool
     invocation crosses it as JSONRPC — the body is async Python.
     """
-    schema: Any = _python_schema_for_tool(t)
+    # Pass the FULL JSON Schema (with enum, integer-vs-string, required, etc.)
+    # to claude_agent_sdk.tool. Per its docs, input_schema accepts a JSON
+    # Schema dict for full validation. The previous python-type-only path
+    # silently stripped enum + numeric type constraints, which let the LLM
+    # emit out-of-enum strings and quoted-string numbers that crashed tools
+    # downstream (V1 dogfood Bugs 3 + 4).
+    schema: Any = t.input_schema
 
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
         try:
