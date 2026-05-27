@@ -1,17 +1,23 @@
-"""bash tool (spec §6.6).
+"""bash tool (spec §6.6 + §6.15).
 
-Plan 1 ships a SYNC `subprocess.run` wrapper for simplicity. This blocks the
-event loop for the duration of the shell command — the runner can't poll
-`self._cancel` until bash returns. Plan 3's interrupt-mechanics hardening
-(§6.15) replaces this with `asyncio.create_subprocess_exec` + a process-group
-SIGTERM→2s→SIGKILL escalation path so the runner can interrupt long-running
-shell commands mid-execution.
+Runs a shell command via anyio.run_process in its own session (POSIX), so the
+process group can be SIGTERM/SIGKILL'd from the runner's interrupt path. The
+process is registered on ctx.running_processes for the duration; the runner's
+terminate_running_processes() walks the registry on interrupt.
+
+No FS permission gate (shell access is total at OS-user privilege; see spec
+§6.7 "bash bypasses FS permissions").
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
-import subprocess
+import os
+import signal
+from subprocess import PIPE
+
+import anyio
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
@@ -21,20 +27,52 @@ from imp.agents.tools.context import ToolContext
     name="bash",
     description=(
         "Run a shell command. Returns JSON {stdout, stderr, returncode}. "
-        "No permission gate (shell access is total at OS-user level)."
+        "No permission gate (shell access is total at OS-user level). "
+        "Interruptible: a runner interrupt sends SIGTERM to the process "
+        "group; 2 s grace; then SIGKILL."
     ),
 )
-def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
-    proc = subprocess.run(
-        command,
-        shell=True,
-        cwd=cwd or str(ctx.project_root),
-        capture_output=True,
-        text=True,
-        check=False,
+async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
+    cwd_path = cwd or str(ctx.project_root)
+    # POSIX: start_new_session=True makes the child a new session leader so
+    # SIGTERM to the PG affects the whole tree. Windows: this kwarg is ignored
+    # and signal handling differs — out of V1 scope (we ship POSIX-first).
+    kwargs: dict[str, object] = {}
+    if hasattr(os, "setsid"):
+        kwargs["start_new_session"] = True
+
+    # anyio.open_process accepts stdlib subprocess constants for stdin/stdout/
+    # stderr; PIPE is the documented way to capture both streams.
+    proc = await anyio.open_process(
+        ["sh", "-c", command],
+        stdin=None,
+        stdout=PIPE,
+        stderr=PIPE,
+        cwd=cwd_path,
+        **kwargs,
     )
+    ctx.running_processes.append(proc)
+    try:
+        # Drain both pipes concurrently so neither blocks on a full PIPE buffer.
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+
+        async def _drain(stream, sink):
+            if stream is None:
+                return
+            async for chunk in stream:
+                sink.append(chunk)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_drain, proc.stdout, stdout_chunks)
+            tg.start_soon(_drain, proc.stderr, stderr_chunks)
+            await proc.wait()
+    finally:
+        with contextlib.suppress(ValueError):
+            ctx.running_processes.remove(proc)
+
     return json.dumps({
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-        "returncode": proc.returncode,
+        "stdout": b"".join(stdout_chunks).decode("utf-8", "replace"),
+        "stderr": b"".join(stderr_chunks).decode("utf-8", "replace"),
+        "returncode": proc.returncode if proc.returncode is not None else -signal.SIGKILL,
     })

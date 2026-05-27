@@ -28,7 +28,20 @@ class Tool:
     fn: Callable[..., Any]
 
     def invoke(self, ctx: Any, args: dict[str, Any]) -> Any:
-        return self.fn(ctx, **args)
+        result = self.fn(ctx, **args)
+        if inspect.iscoroutine(result):
+            raise TypeError(
+                f"tool {self.name!r} is async; use async_invoke from runner"
+            )
+        return result
+
+    async def async_invoke(self, ctx: Any, args: dict[str, Any]) -> Any:
+        """Await-friendly invocation. Sync tools return their value; async
+        tools (`async def`) get awaited transparently."""
+        result = self.fn(ctx, **args)
+        if inspect.iscoroutine(result):
+            return await result
+        return result
 
 
 _REGISTRY: dict[str, Tool] = {}

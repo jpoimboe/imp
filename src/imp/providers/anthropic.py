@@ -332,7 +332,7 @@ class AnthropicAgentRunner:
                     }}
                     continue
                 try:
-                    raw = tool.invoke(ctx, tu.input)
+                    raw = await tool.async_invoke(ctx, tu.input)
                 except StepComplete as sc:
                     try:
                         validate_agent_output(sc.args_payload, invocation.agent_def.output_schema)

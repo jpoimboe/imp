@@ -168,7 +168,7 @@ def _wrap_one(
                 state.complete_step_called = True
                 state.complete_step_args = args
                 return _tool_response("step complete", is_error=False)
-            raw = t.invoke(ctx, args)
+            raw = await t.async_invoke(ctx, args)
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
             return _tool_response(content_str, is_error=False)
         except Exception as exc:
