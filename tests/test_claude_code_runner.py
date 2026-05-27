@@ -145,3 +145,35 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
     # Initial messages were NOT re-appended.
     loaded = t.load()
     assert len(loaded) == 4  # 3 original + 1 new assistant turn
+
+
+def test_claude_code_provider_registered_and_resolves() -> None:
+    """The claude_code provider is registered eagerly; resolve_role picks it up
+    when claude is on PATH."""
+    import importlib
+    import shutil
+
+    import imp.providers
+    from imp.providers import resolve
+    from imp.providers.claude_code import ClaudeCodeProvider
+    from imp.providers.config import ProviderModel, RoleConfig
+
+    # importlib.reload re-runs the package's top-level register_provider
+    # calls. import_module would be a no-op since the module is already
+    # cached in sys.modules.
+    resolve.reset_providers_for_tests()
+    importlib.reload(imp.providers)
+
+    role = RoleConfig(
+        name="r", prefer=(ProviderModel(provider="claude_code", model="claude-sonnet-4-5"),),
+    )
+    if shutil.which("claude") is None:
+        # Not on PATH — resolve should fail with ProviderUnavailable.
+        with pytest.raises(resolve.ProviderUnavailable):
+            resolve.resolve_role(role)
+        return
+
+    provider = resolve.resolve_role(role)
+    assert provider.name == "claude_code"
+    assert isinstance(provider, ClaudeCodeProvider)
+    assert provider.model == "claude-sonnet-4-5"
