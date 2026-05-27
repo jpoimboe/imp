@@ -475,6 +475,11 @@ async def _run_gate(
     coordinator: Any = None,
 ) -> Action:
     if isinstance(gate, HumanGate):
+        _emit(log, on_event, "human_gate_pending", {
+            "phase": state.phase,
+            "prompt": gate.prompt,
+            "options": [{"label": opt.label} for opt in gate.options],
+        })
         action = await run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
         _emit(log, on_event, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
         return action
