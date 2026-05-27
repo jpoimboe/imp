@@ -240,6 +240,24 @@ def test_fmt_script_gate_result_failure_long_stderr_elided() -> None:
     assert s.startswith("→ exit=2  ")
 
 
+def test_fmt_human_gate_pending() -> None:
+    s = render._fmt_human_gate_pending(
+        {"phase": "review", "prompt": "Merge?",
+         "options": [{"label": "Merge"}, {"label": "Back to implement"}]},
+        full=False, color=False,
+    )
+    assert s == "review prompt='Merge?' (2 options)"
+
+
+def test_fmt_human_gate_pending_singular_option() -> None:
+    s = render._fmt_human_gate_pending(
+        {"phase": "spec", "prompt": "Continue?",
+         "options": [{"label": "Yes"}]},
+        full=False, color=False,
+    )
+    assert s == "spec prompt='Continue?' (1 option)"
+
+
 def test_fmt_agent_output_two_keys_truncated() -> None:
     s = render._fmt_agent_output(
         {"status": "Success", "summary": "x" * 100, "extra": "y"},
