@@ -15,10 +15,15 @@ def _inputs(*answers: str) -> object:
     return lambda _prompt="": next(it)
 
 
+def _picks(*selected: str) -> object:
+    return lambda _available: list(selected)
+
+
 def test_writes_config_workflows_gitignore(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
-        input_fn=_inputs("anthropic", "ANTHROPIC_API_KEY"),
+        picker_fn=_picks("anthropic"),
+        input_fn=_inputs("ANTHROPIC_API_KEY"),
         output_fn=lambda _msg: None,
     )
     cfg = tmp_path / ".imp" / "config.yaml"
@@ -42,7 +47,8 @@ def test_appends_to_project_gitignore(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text("# existing\nfoo/\n")
     run_init(
         project_root=tmp_path,
-        input_fn=_inputs("anthropic", "ANTHROPIC_API_KEY"),
+        picker_fn=_picks("anthropic"),
+        input_fn=_inputs("ANTHROPIC_API_KEY"),
         output_fn=lambda _msg: None,
     )
     text = (tmp_path / ".gitignore").read_text()
@@ -56,7 +62,8 @@ def test_init_idempotent_refuses_existing(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         run_init(
             project_root=tmp_path,
-            input_fn=_inputs("anthropic", "ANTHROPIC_API_KEY"),
+            picker_fn=_picks("anthropic"),
+            input_fn=_inputs("ANTHROPIC_API_KEY"),
             output_fn=lambda _msg: None,
         )
 
@@ -64,14 +71,11 @@ def test_init_idempotent_refuses_existing(tmp_path: Path) -> None:
 def test_supports_both_providers(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
-        input_fn=_inputs(
-            "anthropic openai", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
-        ),
+        picker_fn=_picks("anthropic", "openai"),
+        input_fn=_inputs("ANTHROPIC_API_KEY", "OPENAI_API_KEY"),
         output_fn=lambda _msg: None,
     )
     data = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
-    # Each role should list both providers in some prefer entry — assert
-    # at least one role has openai available.
     has_openai = any(
         any(e["provider"] == "openai" for e in role["prefer"])
         for role in data["roles"].values()
@@ -79,14 +83,44 @@ def test_supports_both_providers(tmp_path: Path) -> None:
     assert has_openai
 
 
-def test_warns_on_unknown_provider(tmp_path: Path) -> None:
-    warnings: list[str] = []
+def test_supports_claude_code(tmp_path: Path) -> None:
+    # claude_code uses the local `claude` CLI — no env-var prompt, and no
+    # entry in the informational `providers:` block.
+    def _no_input(_prompt: str = "") -> str:
+        raise AssertionError(f"unexpected input prompt: {_prompt!r}")
+
     run_init(
         project_root=tmp_path,
-        input_fn=_inputs("anthropic googleai", "ANTHROPIC_API_KEY"),
-        output_fn=warnings.append,
+        picker_fn=_picks("claude_code"),
+        input_fn=_no_input,
+        output_fn=lambda _msg: None,
     )
-    assert any("googleai" in msg for msg in warnings)
-    # And the valid provider still gets configured
     data = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
-    assert data["roles"]["default"]["prefer"][0]["provider"] == "anthropic"
+    assert data["roles"]["default"]["prefer"][0]["provider"] == "claude_code"
+    assert "claude_code" not in data.get("providers", {})
+
+
+def test_picker_sees_all_three_providers(tmp_path: Path) -> None:
+    seen: list[list[str]] = []
+
+    def _picker(available: list[str]) -> list[str]:
+        seen.append(list(available))
+        return ["anthropic"]
+
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picker,
+        input_fn=_inputs("ANTHROPIC_API_KEY"),
+        output_fn=lambda _msg: None,
+    )
+    assert seen == [["claude_code", "anthropic", "openai"]]
+
+
+def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="at least one provider"):
+        run_init(
+            project_root=tmp_path,
+            picker_fn=lambda _available: [],
+            input_fn=_inputs(),
+            output_fn=lambda _msg: None,
+        )

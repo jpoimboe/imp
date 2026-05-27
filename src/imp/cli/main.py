@@ -53,6 +53,9 @@ def _cmd_init(args: argparse.Namespace) -> int:
     except FileExistsError as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print("\nimp: init cancelled", file=sys.stderr)
+        return 130
     return 0
 
 
