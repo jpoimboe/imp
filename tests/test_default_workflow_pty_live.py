@@ -117,7 +117,7 @@ def test_full_default_workflow_via_pty_real_anthropic(tmp_path: Path) -> None:
 
     # Lower max_retries to 1 so the workflow pauses promptly if a reviewer
     # keeps rejecting. With the shipped default of 3, each spec/design/code
-    # reviewer that finds nits can burn 3 × ~80s of Sonnet inference; the
+    # reviewer that finds nits can burn 3 x ~80s of Sonnet inference; the
     # test's wall-clock cap gets eaten before the workflow can reach merge.
     # 1 retry is enough to exercise the retry path; further iteration just
     # exercises the same code repeatedly.
@@ -170,7 +170,7 @@ def test_full_default_workflow_via_pty_real_anthropic(tmp_path: Path) -> None:
     #   onboard, spec, design, plan, review, merge.
     GATE_MARKER = b"HUMAN GATE"
     GATE_TIMEOUT = 0.5       # seconds of silence after marker → menu rendered
-    # Full workflow is 8 agents × 30-90s/agent on claude_code Sonnet-4.5
+    # Full workflow is 8 agents x 30-90s/agent on claude_code Sonnet-4.5
     # plus 6 human gates. 8 min cap is generous; a real hang shows up as
     # buffer flat for >30s which the developer can spot via the heartbeat.
     TOTAL_TIMEOUT = 480.0
@@ -269,10 +269,12 @@ def test_full_default_workflow_via_pty_real_anthropic(tmp_path: Path) -> None:
 
     rc = proc.wait(timeout=10)
     # 0   = workflow completed cleanly
-    # 130 = workflow paused (a reviewer agent gate hit max_retries, etc.) —
-    #       still a valid outcome of `imp new`; the user can resume later.
-    assert rc in (0, 130), (
-        f"expected exit 0 or 130, got {rc}; "
+    # 1   = workflow paused via on_max_retries (reviewer rejected enough times)
+    # 130 = workflow paused via Ctrl+C / Ctrl+D
+    # -9  = our own SIGKILL after TOTAL_TIMEOUT (test cap hit; means a hang
+    #       or slower-than-expected LLM, not an imp defect — surface clearly)
+    assert rc in (0, 1, 130), (
+        f"expected exit 0, 1, or 130, got {rc}; "
         f"gates_seen={gates_seen} gates_answered={gates_answered}\n"
         f"last 2000 bytes of output:\n{bytes(buf[-2000:])!r}"
     )
