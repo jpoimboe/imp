@@ -9,17 +9,35 @@ from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 
 
+def _anthropic_key() -> str | None:
+    """Resolve Anthropic API key from env var or `~/.anthropic-key` file."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+    key_file = Path.home() / ".anthropic-key"
+    if key_file.exists():
+        return key_file.read_text().strip()
+    return None
+
+
 @pytest.fixture
-def anyio_backend():
+def anyio_backend() -> str:
     return "asyncio"
 
 
 @pytest.mark.skipif(
-    not os.environ.get("ANTHROPIC_API_KEY"),
-    reason="live test requires ANTHROPIC_API_KEY",
+    not _anthropic_key(),
+    reason="live test requires ANTHROPIC_API_KEY env var or ~/.anthropic-key file",
 )
 @pytest.mark.anyio
-async def test_live_minimal_change_completes_one_step(tmp_path: Path) -> None:
+async def test_live_minimal_change_completes_one_step(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Make the file-based key available to the anthropic SDK via env var
+    # (it reads ANTHROPIC_API_KEY by default). monkeypatch restores on teardown.
+    key = _anthropic_key()
+    assert key is not None  # guaranteed by skipif
+    monkeypatch.setenv("ANTHROPIC_API_KEY", key)
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
