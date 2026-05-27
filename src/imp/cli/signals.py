@@ -25,11 +25,6 @@ from imp.engine.state import State
 
 _suppress = contextlib.suppress
 
-# Mid-stream ESC (cancel an LLM call in flight) is post-V0. The langchain
-# cancellation token API in the installed version doesn't surface cleanly
-# through deepagents' stream interface; punt to Plan 4. V0 ESC only fires
-# between turns (when ChatMiddleware is awaiting user input).
-
 
 def pause_and_exit(change: Change, *, reason: str) -> None:
     """Save state as paused; append workflow_paused with reason. Idempotent."""
