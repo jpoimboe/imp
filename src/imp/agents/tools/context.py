@@ -8,6 +8,7 @@ Virtual path conventions:
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -30,6 +31,7 @@ class ToolContext:
     model_name: str = ""
     parent_transcript_dir: Path | None = None
     interactive: bool = False
+    running_processes: list[Any] = field(default_factory=list)
     # The change being processed; used by subagent dispatch to propagate change_id.
     change_context: Any = None
     # When the runner serves ask_user requests, it injects this callable.
@@ -58,3 +60,42 @@ class ToolContext:
 
     def check_fs_permission(self, op: Literal["read", "write"], virtual: str) -> None:
         check_permission(self.fs_permissions, op, virtual)
+
+
+async def terminate_running_processes(
+    ctx: ToolContext, *, timeout: float = 2.0,
+) -> list[Any]:
+    """Send SIGTERM to every registered process, wait `timeout`, then SIGKILL
+    survivors. Drain the registry. Returns the list of processes that were
+    signalled (caller emits tool_killed events from it)."""
+    import anyio
+
+    if not ctx.running_processes:
+        return []
+    procs = list(ctx.running_processes)
+    ctx.running_processes.clear()
+
+    for p in procs:
+        # `.terminate()` sends SIGTERM (or maps to it on POSIX). Ignore errors
+        # for already-exited processes.
+        with contextlib.suppress(ProcessLookupError, AttributeError):
+            p.terminate()
+
+    # Wait up to `timeout` seconds for all to exit; whatever's still alive
+    # gets SIGKILL.
+    async def _wait_one(p: Any) -> None:
+        with contextlib.suppress(Exception):
+            await p.wait()
+
+    with anyio.move_on_after(timeout):
+        async with anyio.create_task_group() as tg:
+            for p in procs:
+                tg.start_soon(_wait_one, p)
+
+    for p in procs:
+        if getattr(p, "returncode", None) is None:
+            with contextlib.suppress(ProcessLookupError, AttributeError):
+                p.kill()
+            with contextlib.suppress(Exception):
+                await p.wait()
+    return procs

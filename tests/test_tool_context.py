@@ -69,3 +69,41 @@ def _ctx(tmp_path: Path, rules: tuple[FsRule, ...] = ()) -> ToolContext:
         fs_permissions=rules,
         events_path=tmp_path / "events.jsonl",
     )
+
+
+def test_running_processes_starts_empty(tmp_path):
+    from imp.agents.tools.context import ToolContext
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path,
+        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+    )
+    assert ctx.running_processes == []
+
+
+def test_terminate_running_processes_drains(tmp_path):
+    """terminate_running_processes signals SIGTERM, waits, then SIGKILL.
+    The registry is cleared regardless of whether the process honored SIGTERM."""
+    import anyio
+    from imp.agents.tools.context import ToolContext, terminate_running_processes
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path,
+        fs_permissions=(), events_path=tmp_path / "events.jsonl",
+    )
+
+    async def _spawn_and_kill():
+        # Use anyio.open_process so the fixture is realistic.
+        proc = await anyio.open_process(
+            ["sh", "-c", "sleep 5"], start_new_session=True,
+        )
+        ctx.running_processes.append(proc)
+        await terminate_running_processes(ctx, timeout=0.5)
+        # After termination the list is drained.
+        assert ctx.running_processes == []
+        # The process exit status is set (poll() returns non-None);
+        # cleanup of fds happens via anyio's __aexit__ or our drain code.
+        await proc.wait()
+        assert proc.returncode is not None
+
+    anyio.run(_spawn_and_kill)
