@@ -453,7 +453,12 @@ def test_render_log_indentation_by_depth() -> None:
     assert after_ts_2.startswith("    agent_output")
 
 
-def test_render_log_single_day_uses_short_timestamp() -> None:
+def test_render_log_single_day_uses_short_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TZ", "UTC")
+    import time
+    time.tzset()
     events = [
         _ev("change_created", "2026-05-27T10:00:00+00:00",
             change_id=1, title="hi"),
@@ -466,7 +471,12 @@ def test_render_log_single_day_uses_short_timestamp() -> None:
     assert ts0[2] == ":" and ts0[5] == ":"
 
 
-def test_render_log_multi_day_uses_long_timestamp() -> None:
+def test_render_log_multi_day_uses_long_timestamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TZ", "UTC")
+    import time
+    time.tzset()
     events = [
         _ev("change_created", "2026-05-26T10:00:00+00:00",
             change_id=1, title="hi"),
@@ -542,6 +552,18 @@ def test_render_log_malformed_event_renders_and_continues() -> None:
     assert len(lines) == 3
     assert "malformed" in lines[1]
     # Iteration continued to the third event.
+    assert "phase_started" in lines[2]
+
+
+def test_render_log_non_dict_event_renders_as_malformed() -> None:
+    events = [
+        {"type": "change_created", "payload": {"change_id": 1, "title": "ok"}},
+        None,  # not a dict at all — must not crash
+        {"type": "phase_started", "payload": {"phase": "x"}},
+    ]
+    lines = list(render.render_log(events, full=False, color=False))
+    assert len(lines) == 3
+    assert "malformed" in lines[1]
     assert "phase_started" in lines[2]
 
 

@@ -300,6 +300,15 @@ def _collapse_tool_bursts(events):
         return None
 
     for e in events:
+        if not isinstance(e, dict):
+            # Pass through malformed (non-dict) items to render_log so it
+            # can render them via the malformed branch. Flush any pending
+            # burst first to preserve ordering.
+            flushed = _flush()
+            if flushed is not None:
+                yield flushed
+            yield e
+            continue
         t = e.get("type")
         if t in _TOOL_TYPES and in_step:
             if t == "tool_call":
@@ -413,6 +422,8 @@ def _pick_ts_format(events: list[dict]) -> str:
     else ``%m-%d %H:%M:%S``."""
     dates = set()
     for e in events:
+        if not isinstance(e, dict):
+            continue
         ts = e.get("timestamp")
         if not isinstance(ts, str):
             continue
