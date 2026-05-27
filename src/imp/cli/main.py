@@ -82,6 +82,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                                 on_event=renderer.handle,
                                 human_input_fn=lambda: prompt.ask_async("> "),
                                 human_output_fn=renderer.line,
+                                user_chat_input_fn=lambda _q: prompt.ask_async("> "),
                                 coordinator=coord,
                             )
                         except (LoadError, LoadErrors) as e:
@@ -173,6 +174,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                                 on_event=renderer.handle,
                                 human_input_fn=lambda: prompt.ask_async("> "),
                                 human_output_fn=renderer.line,
+                                user_chat_input_fn=lambda _q: prompt.ask_async("> "),
                                 coordinator=coord,
                             )
                         except (LoadError, LoadErrors) as e:

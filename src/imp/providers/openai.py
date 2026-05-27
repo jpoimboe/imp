@@ -14,6 +14,7 @@ Translation surface:
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -318,6 +319,8 @@ class OpenAIAgentRunner:
                     }}
                     return
                 user_text = ctx.user_input_fn("")
+                if inspect.isawaitable(user_text):
+                    user_text = await user_text
                 user_msg = Message(
                     role="user", content=(TextBlock(text=user_text),),
                 )
@@ -357,6 +360,8 @@ class OpenAIAgentRunner:
             if not tool_uses:
                 if invocation.interactive and ctx.user_input_fn is not None:
                     user_text = ctx.user_input_fn("")
+                    if inspect.isawaitable(user_text):
+                        user_text = await user_text
                     user_msg = Message(role="user", content=(TextBlock(text=user_text),))
                     messages.append(user_msg)
                     transcript.append(user_msg)
@@ -479,6 +484,7 @@ class OpenAIProvider:
     def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
         return OpenAIAgentRunner(
             model_name=self.model, client_factory=self._client_factory,
+            user_input_fn=invocation.user_input_fn,
         )
 
 

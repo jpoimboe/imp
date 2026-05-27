@@ -8,7 +8,7 @@ inside `run()`. Transcripts on disk are JSONL of these types.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -70,6 +70,10 @@ class AgentInvocation:
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     # resolved by engine (Task 27a/28); None means "use executor default of 50"
     max_tool_calls: int | None = None
+    # Set by the executor when the step is interactive. Called by ask_user and
+    # by the providers' PROMPT_USER resume path. May return either a `str` or
+    # an `Awaitable[str]`; both call-sites await-if-awaitable.
+    user_input_fn: Callable[[str], str | Awaitable[str]] | None = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}

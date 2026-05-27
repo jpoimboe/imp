@@ -290,6 +290,7 @@ async def _run_agent_invocation(
         events_path=change.events_path,
         subagent_defs=subagent_defs,
         max_tool_calls=resolved_max_tool_calls,
+        user_input_fn=user_chat_input_fn if interactive else None,
     )
 
     _emit(log, on_event, "step_started", {
