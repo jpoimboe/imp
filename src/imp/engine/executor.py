@@ -478,7 +478,8 @@ async def _run_gate(
         _emit(log, on_event, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
         return action
     if isinstance(gate, ScriptGate):
-        action, ctx = run_script_gate(gate, cwd=change.project_root)
+        env_extra = {"IMP_ARTIFACTS_DIR": str(change.artifacts_dir)}
+        action, ctx = run_script_gate(gate, cwd=change.workflow_dir, env_extra=env_extra)
         _emit(log, on_event, "gate_evaluated",
               {"kind": "script", "context": ctx, "action": _action_dict(action)})
         return action

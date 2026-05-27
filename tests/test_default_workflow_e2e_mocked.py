@@ -1,5 +1,22 @@
+"""End-to-end test of the shipped default workflow via mocked Anthropic.
+
+Plan 3 reconnects the full workflow.yaml (with agent gates) after Plan 2
+landed all three runners. The shipped script gates check that artifact files
+exist; we replace them with `exit 0` shims because the fake provider doesn't
+write real artifacts.
+
+What this proves:
+- Multi-phase progression (onboard → spec → design → plan → implement → review → merge)
+- AgentGate retry/continue semantics through the executor
+- Human gate option-1 path through every phase
+- All shipped agent .md files parse and run via the executor
+- Step-level script-gate evaluation chains correctly with phase-level agent
+  gates
+"""
+
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -16,47 +33,56 @@ def anyio_backend():
     return "asyncio"
 
 
-def _seed_project(tmp_path: Path) -> Change:
-    """Write a slim two-phase workflow (writer step + human gate → doer step).
+def _seed_default_workflow(tmp_path: Path) -> Change:
+    """Copy the shipped default workflow into the change root, then replace
+    the script-gate shells with `exit 0` stubs."""
+    src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default"
+    dst = tmp_path / ".imp" / "workflows" / "default"
+    shutil.copytree(src, dst)
+    # Replace script gates with always-pass stubs.
+    for shell in (dst / "scripts").glob("*.sh"):
+        shell.write_text("#!/bin/sh\nexit 0\n")
+        shell.chmod(0o755)
 
-    The shipped default workflow uses agent gates; Plan 1's _run_gate raises
-    NotImplementedError on AgentGate. The slim workflow lets the e2e test
-    prove the executor wiring without depending on Plan 3.
-    """
-    wf = tmp_path / ".imp" / "workflows" / "default"
-    (wf / "agents").mkdir(parents=True)
-    for name in ("writer", "doer"):
-        (wf / "agents" / f"{name}.md").write_text(
-            f"---\nname: {name}\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-            "go {{ change.id }}\n"
-        )
-    (wf / "workflow.yaml").write_text(
-        "name: e2e\ndescription: e2e\n"
-        "phases: [a, b]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "a:\n"
-        "  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
-        "  gates:\n"
-        "    - type: human\n"
-        "      prompt: continue?\n"
-        "      options: [{label: Yes, action: {kind: continue}}]\n"
-        "b:\n"
-        "  steps:\n    - {name: d, file: agents/doer.md, model_role: default}\n"
+    # config.yaml: a single role for every model_role used by the workflow.
+    cfg = tmp_path / ".imp" / "config.yaml"
+    cfg.write_text(
+        "roles:\n"
+        "  default:       {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  spec:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  spec_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  design:        {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  design_review: {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  code:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  code_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: anthropic, model: claude-sonnet-4-6}]\n"
-    )
-    return Change.create(tmp_path, title="e2e")
+    return Change.create(tmp_path, title="e2e-default-workflow")
 
 
 @pytest.mark.anyio
-async def test_two_phase_workflow_completes_with_canned_complete_step(tmp_path) -> None:
-    change = _seed_project(tmp_path)
+async def test_full_default_workflow_completes_with_canned_anthropic(
+    tmp_path: Path,
+) -> None:
+    change = _seed_default_workflow(tmp_path)
 
-    # Default response: every LLM call returns a complete_step success.
+    # Default response: complete_step with all-fields-success. The fake's
+    # default_response is consulted whenever the canned list is empty.
+    #
+    # LOAD-BEARING: this strategy relies on `validate_agent_output` (in
+    # src/imp/engine/schema.py:72) iterating `schema.fields` only — extra
+    # keys in the output payload are silently ignored, not rejected. If a
+    # future tightening makes the validator strict, this test breaks and
+    # the fix is to construct per-agent canned responses instead.
     default = response(
-        tool_use("c0", "complete_step", {"status": "Success"}),
+        tool_use("c0", "complete_step", {
+            "status": "Success",
+            "verdict": "approve",
+            "summary": "ok",
+            "notes": "looks good",
+            "spec": "stub spec body",
+            "design": "stub design body",
+            "plan": "stub plan body",
+        }),
         stop_reason="tool_use",
     )
     fake = FakeAsyncAnthropic([], default_response=default)
@@ -70,10 +96,23 @@ async def test_two_phase_workflow_completes_with_canned_complete_step(tmp_path) 
         ),
     )
 
-    inputs = iter(["1", "1"])  # human gates: pick first option
+    # Auto-pick option 1 for every human gate (onboard continue, spec approve,
+    # design approve, plan approve, review merge, merge close).
+    answer_count = [0]
+    def _human_input() -> str:
+        answer_count[0] += 1
+        return "1"
+
     result = await run_change(
         change,
-        human_input_fn=lambda: next(inputs),
+        on_event=lambda _e: None,
+        human_input_fn=_human_input,
         human_output_fn=lambda _msg: None,
     )
-    assert result is RunResult.COMPLETED
+
+    assert result is RunResult.COMPLETED, (
+        f"expected COMPLETED, got {result!r}; "
+        f"human gates answered: {answer_count[0]}"
+    )
+    # 6 human gates: onboard, spec, design, plan, review, merge.
+    assert answer_count[0] == 6
