@@ -699,3 +699,45 @@ def test_snapshot_full_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         "Full-mode rendering drift. To accept the new output, "
         "rewrite tests/fixtures/log_full.txt with the actual output."
     )
+
+
+def test_imp_log_skips_malformed_lines_in_events_jsonl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A garbage line in events.jsonl renders as a malformed marker; the
+    surrounding good events still render and the command exits 0."""
+    import json
+    from imp.cli.main import main
+
+    cdir = tmp_path / ".imp" / "changes" / "1"
+    cdir.mkdir(parents=True)
+    (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "smoke"}))
+    (cdir / "events.jsonl").write_text(
+        json.dumps({
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "type": "change_created",
+            "payload": {"change_id": 1, "title": "smoke"},
+        }) + "\n"
+        + "this is not json\n"
+        + json.dumps({
+            "timestamp": "2026-05-27T10:00:02+00:00",
+            "type": "phase_started",
+            "payload": {"phase": "onboard"},
+        }) + "\n",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    from contextlib import redirect_stdout
+    import io
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["log", "1"])
+    assert rc == 0
+    out = buf.getvalue()
+    assert "change_created" in out
+    assert "malformed" in out
+    assert "this is not json" in out  # raw line surfaced
+    assert "phase_started" in out
+    # Three rendered lines, one per event (good, malformed, good).
+    assert out.count("\n") == 3
