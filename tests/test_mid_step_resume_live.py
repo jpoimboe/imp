@@ -1,4 +1,4 @@
-"""Mid-step Ctrl+C resume against the real Anthropic API.
+"""Mid-step Ctrl+C resume against real provider APIs.
 
 Verifies §6.15 mechanics end-to-end:
   1. Spawn `imp new` as a subprocess.
@@ -9,7 +9,7 @@ Verifies §6.15 mechanics end-to-end:
   5. Confirm state.json is "paused" with the writer step still set.
   6. Spawn `imp resume <id>`; confirm completion.
 
-Skips without ANTHROPIC_API_KEY (or ~/.anthropic-key).
+Each test skips independently based on its own provider key/CLI availability.
 """
 
 from __future__ import annotations
@@ -35,12 +35,6 @@ def _anthropic_key() -> str | None:
     if key_file.exists():
         return key_file.read_text().strip()
     return None
-
-
-pytestmark = pytest.mark.skipif(
-    not _anthropic_key(),
-    reason="mid-step resume requires real ANTHROPIC_API_KEY",
-)
 
 
 def _seed_project(tmp_path: Path) -> None:
@@ -107,6 +101,10 @@ def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
     return False
 
 
+@pytest.mark.skipif(
+    not _anthropic_key(),
+    reason="mid-step resume requires real ANTHROPIC_API_KEY",
+)
 def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None:
     _seed_project(tmp_path)
     env = os.environ.copy()
@@ -165,3 +163,116 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
 
     final_state = json.loads(state_path.read_text())
     assert final_state["status"] == "completed"
+
+
+def _openai_key() -> str | None:
+    key = os.environ.get("OPENAI_API_KEY")
+    if key:
+        return key
+    key_file = Path.home() / ".openai-key"
+    if key_file.exists():
+        return key_file.read_text().strip()
+    return None
+
+
+@pytest.mark.skipif(
+    not _openai_key(),
+    reason="mid-step resume requires real OPENAI_API_KEY",
+)
+def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
+    tmp_path: Path,
+) -> None:
+    _seed_project(tmp_path)
+    (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
+        roles:
+          default:
+            prefer: [{provider: openai, model: gpt-4o-mini}]
+    """))
+    env = os.environ.copy()
+    key = _openai_key()
+    assert key is not None
+    env["OPENAI_API_KEY"] = key
+    env.pop("CLAUDECODE", None)
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "imp", "new", "mid-step-resume-oa"],
+        cwd=tmp_path, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        events = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
+        if not _wait_for_bash_tool_call(events, timeout=60.0):
+            stdout, stderr = proc.communicate(timeout=10)
+            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+        time.sleep(1.0)
+        os.killpg(proc.pid, signal.SIGINT)
+        rc = proc.wait(timeout=15)
+        assert rc == 130
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    state_path = tmp_path / ".imp" / "changes" / "1" / "state" / "state.json"
+    state = json.loads(state_path.read_text())
+    assert state["status"] == "paused"
+
+    resume = subprocess.run(
+        [sys.executable, "-m", "imp", "resume", "1"],
+        cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=180,
+    )
+    assert resume.returncode == 0, (
+        f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
+    )
+
+
+@pytest.mark.skipif(
+    shutil.which("claude") is None,
+    reason="mid-step resume requires `claude` CLI on PATH",
+)
+def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
+    tmp_path: Path,
+) -> None:
+    _seed_project(tmp_path)
+    (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
+        roles:
+          default:
+            prefer: [{provider: claude_code, model: claude-sonnet-4-5}]
+    """))
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "imp", "new", "mid-step-resume-cc"],
+        cwd=tmp_path, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        events = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
+        if not _wait_for_bash_tool_call(events, timeout=120.0):
+            stdout, stderr = proc.communicate(timeout=10)
+            pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
+        time.sleep(2.0)  # CC subprocess startup is slower; extra grace
+        os.killpg(proc.pid, signal.SIGINT)
+        rc = proc.wait(timeout=20)
+        assert rc == 130
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    state_path = tmp_path / ".imp" / "changes" / "1" / "state" / "state.json"
+    state = json.loads(state_path.read_text())
+    assert state["status"] == "paused"
+
+    resume = subprocess.run(
+        [sys.executable, "-m", "imp", "resume", "1"],
+        cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=240,
+    )
+    assert resume.returncode == 0, (
+        f"resume failed rc={resume.returncode}; stderr={resume.stderr}"
+    )
