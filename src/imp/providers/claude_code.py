@@ -63,6 +63,7 @@ class _RunState:
     complete_step_called: bool = False
     complete_step_args: dict[str, Any] = field(default_factory=dict)
     runtime_errors: list[str] = field(default_factory=list)
+    killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -170,6 +171,18 @@ def _wrap_one(
                 return _tool_response("step complete", is_error=False)
             raw = await t.async_invoke(ctx, args)
             content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+            if name == "bash":
+                try:
+                    parsed = json.loads(content_str)
+                except (TypeError, ValueError):
+                    parsed = {}
+                rc = parsed.get("returncode")
+                if isinstance(rc, int) and rc < 0:
+                    state.killed_tool_uses.append({
+                        "id": args.get("__tool_use_id__", ""),
+                        "name": "bash",
+                        "signal": -rc,
+                    })
             return _tool_response(content_str, is_error=False)
         except Exception as exc:
             text = f"{type(exc).__name__}: {exc}"
@@ -371,6 +384,7 @@ class ClaudeCodeAgentRunner:
         self._user_input_fn = user_input_fn
         self._client: Any = None
         self._cancel = False
+        self._ctx: ToolContext | None = None
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str]) -> Any:
@@ -426,6 +440,7 @@ class ClaudeCodeAgentRunner:
         ctx.spawn_subagent = self._make_spawn_subagent()
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
+        self._ctx = ctx
 
         state = _RunState()
         sdk_tools = _make_sdk_tools(tools, ctx, state)
@@ -556,6 +571,11 @@ class ClaudeCodeAgentRunner:
                                     payload["error"] = True
                                 yield {"type": "tool_result", "payload": payload}
 
+                # Drain any bash kills detected by the MCP wrapper.
+                while state.killed_tool_uses:
+                    info = state.killed_tool_uses.pop(0)
+                    yield {"type": "tool_killed", "payload": info}
+
                 if cls_name == "ResultMessage":
                     # End-of-turn:
                     #   a) complete_step captured → emit agent_output, return
@@ -609,7 +629,10 @@ class ClaudeCodeAgentRunner:
         }}
 
     async def interrupt(self) -> None:
+        from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
+        if self._ctx is not None:
+            await terminate_running_processes(self._ctx, timeout=2.0)
 
 
 class ClaudeCodeProvider:

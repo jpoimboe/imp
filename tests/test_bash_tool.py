@@ -55,3 +55,41 @@ def test_bash_registers_and_clears_running_processes(tmp_path: Path) -> None:
     out = json.loads(_run_bash(ctx, {"command": "true"}))
     assert out["returncode"] == 0
     assert ctx.running_processes == []
+
+
+def test_bash_terminates_on_runner_interrupt(tmp_path: Path) -> None:
+    """terminate_running_processes mid-bash drains the registry and returns
+    the killed processes; bash's returncode reflects the signal."""
+    from imp.agents.tools.context import terminate_running_processes
+
+    ctx = _ctx(tmp_path)
+
+    async def _scenario():
+        async with anyio.create_task_group() as tg:
+            killed_holder: dict[str, list] = {}
+
+            async def _runner():
+                out = json.loads(
+                    await get_registry()["bash"].async_invoke(
+                        ctx, {"command": "sleep 10"},
+                    ),
+                )
+                killed_holder["out"] = out
+
+            async def _killer():
+                # Wait briefly so bash has time to register its proc.
+                await anyio.sleep(0.2)
+                killed = await terminate_running_processes(ctx, timeout=0.5)
+                killed_holder["killed"] = killed
+
+            tg.start_soon(_runner)
+            tg.start_soon(_killer)
+
+        # bash returned with a signal-killed returncode (< 0).
+        assert killed_holder["out"]["returncode"] < 0
+        # Registry is drained.
+        assert ctx.running_processes == []
+        # The killer reported at least one process.
+        assert len(killed_holder["killed"]) >= 1
+
+    anyio.run(_scenario)

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio
 import pytest
 
 from imp.agents.classify import ResumeState, classify_resume
@@ -402,3 +403,66 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     assert loaded[2].role == "user"
     assert isinstance(loaded[2].content[0], TextBlock)
     assert loaded[2].content[0].text == "do X"
+
+
+@pytest.mark.anyio
+async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: while the runner is awaiting bash, interrupt() is called.
+    bash returns with signal-killed returncode; runner emits tool_killed +
+    interrupted error; transcript is valid (tool_use has its tool_result)."""
+    from dataclasses import replace
+    from imp.agents.transcript import Transcript
+    from tests.anthropic_fakes import (
+        FakeAsyncAnthropic, response, tool_use as a_tool_use,
+    )
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv = replace(inv, agent_def=_agent_def(
+        tools=frozenset({"complete_step", "bash"}),
+    ))
+
+    fake = FakeAsyncAnthropic([
+        response(
+            a_tool_use("c1", "bash", {"command": "sleep 10"}),
+            stop_reason="tool_use",
+        ),
+    ])
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake,
+    )
+
+    events: list = []
+    async def _drain_events():
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    async def _interrupt_after_delay():
+        await anyio.sleep(0.3)
+        await runner.interrupt()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_drain_events)
+        tg.start_soon(_interrupt_after_delay)
+
+    kinds = [e["type"] for e in events]
+    assert "tool_killed" in kinds
+    # Last event is the runner's interrupted error.
+    assert events[-1]["type"] == "error"
+    assert events[-1]["payload"]["kind"] == "interrupted"
+
+    # Transcript invariant: every tool_use has its tool_result.
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    tool_use_ids = {
+        b.id for m in loaded if m.role == "assistant"
+        for b in m.content if hasattr(b, "id") and hasattr(b, "name")
+    }
+    tool_result_ids = {
+        b.tool_use_id for m in loaded if m.role == "user"
+        for b in m.content if hasattr(b, "tool_use_id")
+    }
+    assert tool_use_ids.issubset(tool_result_ids), (
+        f"dangling tool_use ids: {tool_use_ids - tool_result_ids}"
+    )

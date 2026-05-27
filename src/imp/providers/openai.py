@@ -212,6 +212,7 @@ class OpenAIAgentRunner:
         self._user_input_fn = user_input_fn
         self._client: Any = None
         self._cancel = False
+        self._ctx: ToolContext | None = None
 
     def _get_client(self) -> Any:
         if self._client is None:
@@ -274,6 +275,7 @@ class OpenAIAgentRunner:
         ctx.spawn_subagent = self._make_spawn_subagent()
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
+        self._ctx = ctx
 
         try:
             async for ev in self._run_loop(invocation, transcript, tools, ctx):
@@ -430,6 +432,17 @@ class OpenAIAgentRunner:
                     continue
 
                 content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+                if tu.name == "bash":
+                    # Detect a kill so the CLI can render a tool_killed event.
+                    try:
+                        parsed = json.loads(content_str)
+                    except (TypeError, ValueError):
+                        parsed = {}
+                    rc = parsed.get("returncode")
+                    if isinstance(rc, int) and rc < 0:
+                        yield {"type": "tool_killed", "payload": {
+                            "id": tu.id, "name": "bash", "signal": -rc,
+                        }}
                 tool_results.append(ToolResultBlock(tu.id, content_str))
                 yield {"type": "tool_result", "payload": {
                     "id": tu.id, "content": content_str,
@@ -450,7 +463,10 @@ class OpenAIAgentRunner:
         }}
 
     async def interrupt(self) -> None:
+        from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
+        if self._ctx is not None:
+            await terminate_running_processes(self._ctx, timeout=2.0)
 
 
 class OpenAIProvider:
