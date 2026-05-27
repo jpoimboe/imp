@@ -1,17 +1,17 @@
 """End-to-end test of the shipped default workflow via mocked Anthropic.
 
-Plan 3 reconnects the full workflow.yaml (with agent gates) after Plan 2
-landed all three runners. The shipped script gates check that artifact files
-exist; we replace them with `exit 0` shims because the fake provider doesn't
-write real artifacts.
+The shipped workflow.yaml has 5 phases (spec → plan → implement → review →
+merge); only review has a human gate ("Merge?"). The shipped script gates
+check that artifact files exist; we replace them with `exit 0` shims
+because the fake provider doesn't write real artifacts.
 
 What this proves:
-- Multi-phase progression (onboard → spec → design → plan → implement → review → merge)
+- Multi-phase progression (spec → plan → implement → review → merge)
 - AgentGate retry/continue semantics through the executor
-- Human gate option-1 path through every phase
+- Human gate option-1 path through the single review gate
 - All shipped agent .md files parse and run via the executor
-- Step-level script-gate evaluation chains correctly with phase-level agent
-  gates
+- Step-level script-gate evaluation chains correctly with phase-level
+  agent gates
 """
 
 from __future__ import annotations
@@ -51,8 +51,6 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  default:       {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  spec:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  spec_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  design:        {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  design_review: {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  code:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  code_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
     )
@@ -80,7 +78,6 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             "summary": "ok",
             "notes": "looks good",
             "spec": "stub spec body",
-            "design": "stub design body",
             "plan": "stub plan body",
         }),
         stop_reason="tool_use",
@@ -96,8 +93,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
         ),
     )
 
-    # Auto-pick option 1 for every human gate (onboard continue, spec approve,
-    # design approve, plan approve, review merge, merge close).
+    # Auto-pick option 1 for every human gate (review: Merge?).
     answer_count = [0]
     def _human_input() -> str:
         answer_count[0] += 1
@@ -114,8 +110,8 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
         f"expected COMPLETED, got {result!r}; "
         f"human gates answered: {answer_count[0]}"
     )
-    # 6 human gates: onboard, spec, design, plan, review, merge.
-    assert answer_count[0] == 6
+    # 1 human gate: review (Merge?).
+    assert answer_count[0] == 1
 
 
 @pytest.mark.anyio
@@ -138,7 +134,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
         tool_calls=[tool_call("c0", "complete_step", {
             "status": "Success", "verdict": "approve",
             "summary": "ok", "notes": "ok",
-            "spec": "stub", "design": "stub", "plan": "stub",
+            "spec": "stub", "plan": "stub",
         })],
     ))
     fake = FakeAsyncOpenAI([], default_response=default_completion)
@@ -196,7 +192,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                 cc_tool_use("c0", "complete_step", {
                     "status": "Success", "verdict": "approve",
                     "summary": "ok", "notes": "ok",
-                    "spec": "stub", "design": "stub", "plan": "stub",
+                    "spec": "stub", "plan": "stub",
                 }),
             ),
             cc_result(),
