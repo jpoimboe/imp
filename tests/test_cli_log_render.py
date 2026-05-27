@@ -580,3 +580,47 @@ def test_render_log_orphan_tool_result_renders_as_literal_tool() -> None:
     lines = list(render.render_log(events, full=True, color=False))
     # full mode, no preceding tool_call → label "tool"
     assert "tool →" in lines[1]
+
+
+def test_cli_log_pipes_through_render(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    """End-to-end: ``imp log`` reads events.jsonl and prints rendered lines.
+
+    Constructs a minimal Change directory by hand (no engine spinup) and
+    invokes ``main([..])`` directly.
+    """
+    import json
+    from imp.cli.main import main
+
+    project = tmp_path
+    (project / ".imp" / "changes" / "1").mkdir(parents=True)
+    (project / ".imp" / "changes" / "1" / "change.json").write_text(
+        json.dumps({"id": 1, "title": "smoke"}),
+    )
+    (project / ".imp" / "changes" / "1" / "events.jsonl").write_text(
+        json.dumps({
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "type": "change_created",
+            "payload": {"change_id": 1, "title": "smoke"},
+        }) + "\n"
+        + json.dumps({
+            "timestamp": "2026-05-27T10:00:01+00:00",
+            "type": "phase_started",
+            "payload": {"phase": "onboard"},
+        }) + "\n",
+    )
+    # ``_cmd_log`` only invokes ``Change.load`` (which reads change.json) and
+    # ``change.event_log().read()`` — no state files needed.
+    monkeypatch.chdir(project)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    rc = main(["log", "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "change_created" in out
+    assert "smoke" in out
+    assert "phase_started" in out
+    assert "onboard" in out
+    # No raw JSON braces in default rendering
+    assert "{" not in out

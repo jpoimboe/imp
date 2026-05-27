@@ -13,7 +13,6 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import anyio
 
@@ -211,6 +210,8 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
+    from imp.cli import render
+
     project = _project_root()
     change_id = args.change_id
     if change_id is None:
@@ -231,33 +232,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
     except LoadError as err:
         print(f"imp: {err}", file=sys.stderr)
         return 2
-    for e in change.event_log().read():
-        ts = e["timestamp"][:19].replace("T", " ")
-        if args.full:
-            print(f"{ts}  {e['type']:<18}  {json.dumps(e['payload'])}")
-        else:
-            summary = _summarize_event(e)
-            print(f"{ts}  {e['type']:<18}  {summary}")
+    events = change.event_log().read()
+    color = render.should_use_color(sys.stdout)
+    for line in render.render_log(events, full=args.full, color=color):
+        print(line)
     return 0
-
-
-def _summarize_event(e: dict[str, Any]) -> str:
-    t = e["type"]
-    p = e["payload"]
-    if t == "step_started":
-        return f"{p.get('step', '')} [model={p.get('model', '')}]"
-    if t == "step_completed":
-        return f"{p.get('step', '')}  → {p.get('action', '')}"
-    if t == "agent_output":
-        return " ".join(f"{k}={v}" for k, v in p.items())
-    if t == "phase_started":
-        return str(p.get("phase", ""))
-    if t == "phase_completed":
-        return f"{p.get('phase', '')}  → {p.get('action', '')}"
-    if t == "agent_message":
-        text = str(p.get("text", ""))
-        return text if len(text) < 60 else text[:57] + "..."
-    return json.dumps(p)[:80]
 
 
 def _last_event_timestamp(events_path: Path) -> str:
@@ -321,9 +300,20 @@ def main(argv: list[str] | None = None) -> int:
     p_resume.add_argument("change_id", type=int)
     p_resume.set_defaults(func=_cmd_resume)
 
-    p_log = sub.add_parser("log")
+    p_log = sub.add_parser(
+        "log",
+        help="Show the event log for a Change.",
+        description=(
+            "Show the event log for a Change. "
+            "Set NO_COLOR=1 to disable colors. "
+            "Use `less -R` to view a paged colored log."
+        ),
+    )
     p_log.add_argument("change_id", type=int, nargs="?")
-    p_log.add_argument("--full", action="store_true")
+    p_log.add_argument(
+        "--full", action="store_true",
+        help="Render every event (no tool-burst collapse).",
+    )
     p_log.set_defaults(func=_cmd_log)
 
     p_status = sub.add_parser("status")
