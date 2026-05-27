@@ -209,24 +209,44 @@ async def _execute_phase(
         return Continue()
 
 
-async def _execute_step(
-    step: Step, workflow: Workflow, config: Config, change: Change,
-    state: State, log: EventLog, on_event: EventCallback,
+async def _run_agent_invocation(
     *,
-    human_input_fn: HumanInputFn,
-    human_output_fn: HumanOutputFn,
+    agent_def: Any,
+    fs_permissions: Any,
+    model_role: str,
+    workflow: Workflow,
+    config: Config,
+    change: Change,
+    state: State,
+    log: EventLog,
+    on_event: EventCallback,
+    transcript_dir: Any,
+    step_started_payload_extras: dict[str, Any],
+    interactive: bool,
     user_chat_input_fn: Callable[[str], str] | None,
     coordinator: Any,
-) -> Action:
-    agent_def = workflow.agents[step.file.stem]
-    role = config.roles.get(step.model_role) or config.roles["default"]
+) -> tuple[dict[str, Any] | None, bool, bool]:
+    """Run an agent (step OR gate) to completion.
+
+    Returns ``(agent_output, errored, paused)`` where:
+    - ``agent_output`` is the validated output dict, or ``None`` if errored/paused.
+    - ``errored`` is ``True`` when the run produced an error that warrants a retry.
+    - ``paused`` is ``True`` when the coordinator requested a pause mid-run.
+
+    Note: the plan spec illustrated a 2-tuple ``(agent_output, errored)`` but Pause
+    has distinct semantics (it must propagate upward as ``Pause()``, not trigger a
+    retry), so the signature uses a 3-tuple.
+
+    The caller is responsible for:
+    - setting/clearing ``state.current_step``
+    - deciding what ``Action`` to return based on the output/errored/paused flags
+    - cleaning up ``transcript_dir`` on success
+    """
+    role = config.roles.get(model_role) or config.roles["default"]
     provider = resolve_role(role)
 
     artifacts_dir = change.artifacts_dir
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    assert state.phase is not None, "phase must be set before executing a step"
-    transcript_dir = change.change_dir / "steps" / state.phase / step.name
-    transcript_dir.mkdir(parents=True, exist_ok=True)
 
     rendered = render_prompt(
         agent_def.prompt_template_source, build_context(
@@ -241,9 +261,6 @@ async def _execute_step(
         for name in agent_def.subagents
         if name in workflow.agents
     }
-
-    state.current_step = CurrentStep(transcript_dir=transcript_dir)
-    state.save(change.state_dir)
 
     # Spec §6.5 ceiling resolution: agent.max_tool_calls → defaults → 50.
     # Use `is not None` (not `or`) so a literal 0 doesn't silently fall through.
@@ -263,19 +280,20 @@ async def _execute_step(
         change_context=ChangeContext(
             change_id=change.id, project_root=change.project_root, artifacts_dir=artifacts_dir,
         ),
-        interactive=step.interactive,
+        interactive=interactive,
         transcript_dir=transcript_dir,
-        fs_permissions=step.fs_permissions,
+        fs_permissions=fs_permissions,
         events_path=change.events_path,
         subagent_defs=subagent_defs,
         max_tool_calls=resolved_max_tool_calls,
     )
 
     _emit(log, on_event, "step_started", {
-        "step": step.name, "model": invocation.model_name,
+        "model": invocation.model_name,
         "provider": provider.name,
         "tools": sorted(agent_def.tools),
-        "interactive": step.interactive,
+        "interactive": interactive,
+        **step_started_payload_extras,
     })
 
     runner = provider.create_runner(invocation)
@@ -288,36 +306,73 @@ async def _execute_step(
             if event["type"] == "agent_output":
                 agent_output = event["payload"]
             if event["type"] == "error":
-                _emit(log, on_event, "step_completed", {"step": step.name, "action": "retry"})
-                return Retry()
+                return None, True, False
             if coordinator.should_pause:
                 # Coordinator triggered mid-step. Runner's interrupt() has fired.
-                return Pause()
+                return None, False, True
     finally:
         coordinator.detach_runner()
 
     if agent_output is None:
-        _emit(log, on_event, "step_completed", {"step": step.name, "action": "retry"})
-        return Retry()
+        return None, True, False
 
     try:
         validate_agent_output(agent_output, agent_def.output_schema)
     except Exception as e:
         _emit(log, on_event, "error", {"message": f"output validation: {e}"})
+        return None, True, False
+
+    return agent_output, False, False
+
+
+async def _execute_step(
+    step: Step, workflow: Workflow, config: Config, change: Change,
+    state: State, log: EventLog, on_event: EventCallback,
+    *,
+    human_input_fn: HumanInputFn,
+    human_output_fn: HumanOutputFn,
+    user_chat_input_fn: Callable[[str], str] | None,
+    coordinator: Any,
+) -> Action:
+    agent_def = workflow.agents[step.file.stem]
+    assert state.phase is not None, "phase must be set before executing a step"
+    transcript_dir = change.change_dir / "steps" / state.phase / step.name
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    state.current_step = CurrentStep(transcript_dir=transcript_dir)
+    state.save(change.state_dir)
+
+    agent_output, errored, paused = await _run_agent_invocation(
+        agent_def=agent_def,
+        fs_permissions=step.fs_permissions,
+        model_role=step.model_role,
+        workflow=workflow, config=config, change=change,
+        state=state, log=log, on_event=on_event,
+        transcript_dir=transcript_dir,
+        step_started_payload_extras={"step": step.name},
+        interactive=step.interactive,
+        user_chat_input_fn=user_chat_input_fn,
+        coordinator=coordinator,
+    )
+
+    if paused:
+        return Pause()
+
+    if errored or agent_output is None:
+        _emit(log, on_event, "step_completed", {"step": step.name, "action": "retry"})
         return Retry()
 
-    # Evaluate step-level gates
     for gate in step.gates:
         action = await _run_gate(
             gate, workflow, config, change, state, log, on_event,
-            human_input_fn=human_input_fn, human_output_fn=human_output_fn,
+            human_input_fn=human_input_fn,
+            human_output_fn=human_output_fn,
             user_chat_input_fn=user_chat_input_fn,
             agent_output_context=agent_output,
         )
         if not isinstance(action, Continue):
             return action
 
-    # Step success — delete transcript dir
     shutil.rmtree(transcript_dir, ignore_errors=True)
     state.current_step = None
     state.save(change.state_dir)
