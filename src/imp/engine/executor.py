@@ -21,10 +21,12 @@ from imp.agents.runner import (
 )
 from imp.engine.change import Change
 from imp.engine.gates import (
+    DecideNoMatch,
+    evaluate_decide,
     run_human_gate,
     run_script_gate,
 )
-from imp.engine.loader import load_workflow
+from imp.engine.loader import load_workflow, parse_agent_file
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import CurrentStep, EventLog, State
 from imp.engine.types import (
@@ -190,6 +192,7 @@ async def _execute_phase(
                 gate, workflow, config, change, state, log, on_event,
                 human_input_fn=human_input_fn, human_output_fn=human_output_fn,
                 user_chat_input_fn=user_chat_input_fn,
+                coordinator=coordinator,
             )
             if isinstance(action, Retry):
                 state.phase_attempt += 1
@@ -369,6 +372,7 @@ async def _execute_step(
             human_output_fn=human_output_fn,
             user_chat_input_fn=user_chat_input_fn,
             agent_output_context=agent_output,
+            coordinator=coordinator,
         )
         if not isinstance(action, Continue):
             return action
@@ -380,6 +384,86 @@ async def _execute_step(
     return Continue()
 
 
+def _next_gate_invocation_dir(gates_dir: Path, stem: str) -> Path:
+    """Pick the next `<stem>-N/` under `gates_dir`. Stateless: scans existing
+    dirs and returns max(N) + 1, or `<stem>-1/` if none exist. Survives
+    resume cleanly (a paused gate's transcript dir survives in `gates_dir`
+    until the engine deletes it on success, so the same N is picked up)."""
+    if not gates_dir.is_dir():
+        return gates_dir / f"{stem}-1"
+    prefix = f"{stem}-"
+    existing: list[int] = []
+    for entry in gates_dir.iterdir():
+        if not entry.is_dir() or not entry.name.startswith(prefix):
+            continue
+        suffix = entry.name[len(prefix):]
+        if suffix.isdigit():
+            existing.append(int(suffix))
+    next_n = (max(existing) + 1) if existing else 1
+    return gates_dir / f"{stem}-{next_n}"
+
+
+async def _run_agent_gate(
+    gate: AgentGate, workflow: Workflow, config: Config, change: Change,
+    state: State, log: EventLog, on_event: EventCallback,
+    *,
+    user_chat_input_fn: Callable[[str], str] | None,
+    coordinator: Any,
+) -> Action:
+    """Execute an agent-as-gate. Same machinery as _execute_step minus the
+    step-level gate loop. Decide block matches on the agent's structured output."""
+    # Re-parse the gate's agent file each invocation. Cheap — agents files are
+    # small. Avoids stale-cache surprises when a snapshot is edited.
+    agent_def = parse_agent_file(gate.file)
+    assert state.phase is not None
+
+    stem = gate.file.stem
+    gates_dir = change.change_dir / "steps" / state.phase / "gates"
+    transcript_dir = _next_gate_invocation_dir(gates_dir, stem)
+    transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    state.current_step = CurrentStep(transcript_dir=transcript_dir)
+    state.save(change.state_dir)
+
+    agent_output, errored, paused = await _run_agent_invocation(
+        agent_def=agent_def,
+        fs_permissions=gate.fs_permissions,
+        model_role=gate.model_role,
+        workflow=workflow, config=config, change=change,
+        state=state, log=log, on_event=on_event,
+        transcript_dir=transcript_dir,
+        step_started_payload_extras={"kind": "agent_gate", "gate_stem": stem},
+        interactive=False,                            # gates are autonomous
+        user_chat_input_fn=user_chat_input_fn,
+        coordinator=coordinator,                      # gate-internal bash etc.
+                                                      # must honor Ctrl+C
+    )
+
+    if paused:
+        _emit(log, on_event, "gate_evaluated",
+              {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
+        return Pause()
+
+    if errored or agent_output is None:
+        _emit(log, on_event, "gate_evaluated",
+              {"kind": "agent", "gate": stem, "action": _action_dict(Retry())})
+        return Retry()
+
+    try:
+        action = evaluate_decide(gate.decide, agent_output)
+    except DecideNoMatch as e:
+        _emit(log, on_event, "error", {"message": f"agent gate decide: {e}"})
+        return Retry()
+
+    # Clean up the gate's transcript dir on success (mirrors step success).
+    shutil.rmtree(transcript_dir, ignore_errors=True)
+    state.current_step = None
+    state.save(change.state_dir)
+    _emit(log, on_event, "gate_evaluated",
+          {"kind": "agent", "gate": stem, "action": _action_dict(action)})
+    return action
+
+
 async def _run_gate(
     gate: Any, workflow: Workflow, config: Config, change: Change,
     state: State, log: EventLog, on_event: EventCallback,
@@ -387,6 +471,7 @@ async def _run_gate(
     human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
     user_chat_input_fn: Callable[[str], str] | None,
     agent_output_context: dict[str, Any] | None = None,
+    coordinator: Any = None,
 ) -> Action:
     if isinstance(gate, HumanGate):
         action = run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
@@ -398,8 +483,11 @@ async def _run_gate(
               {"kind": "script", "context": ctx, "action": _action_dict(action)})
         return action
     if isinstance(gate, AgentGate):
-        # Agent gates land in Plan 3.
-        raise NotImplementedError("agent gates land in Plan 3")
+        return await _run_agent_gate(
+            gate, workflow, config, change, state, log, on_event,
+            user_chat_input_fn=user_chat_input_fn,
+            coordinator=coordinator,
+        )
     if isinstance(gate, StubGate):
         _emit(log, on_event, "gate_evaluated",
               {"kind": "stub", "action": _action_dict(gate.action)})
