@@ -17,7 +17,6 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
-import time
 from typing import Any
 
 from imp.engine.change import Change
@@ -43,32 +42,6 @@ def install_process_group() -> None:
     masse on Ctrl+C. POSIX-only; no-op on Windows."""
     with contextlib.suppress(AttributeError, OSError):
         os.setpgrp()
-
-
-def tool_kill_escalation(
-    *, timeout: float = 2.0, kill_self: bool = True,
-) -> None:
-    """Send SIGTERM to our PG, wait `timeout`, then SIGKILL anything alive.
-
-    If kill_self is False, send to every member of the PG EXCEPT us — used
-    by tests so pytest itself doesn't die. The CLI always calls with the
-    default (kill_self=True) — by then we've already saved state and are
-    about to sys.exit.
-    """
-    if not hasattr(os, "killpg"):
-        return  # Windows or other non-POSIX
-    pgid = os.getpgrp()
-    if kill_self:
-        with _suppress(ProcessLookupError):
-            os.killpg(pgid, signal.SIGTERM)
-    else:
-        _signal_pg_excluding_self(pgid, signal.SIGTERM)
-    time.sleep(timeout)
-    if kill_self:
-        with _suppress(ProcessLookupError):
-            os.killpg(pgid, signal.SIGKILL)
-    else:
-        _signal_pg_excluding_self(pgid, signal.SIGKILL)
 
 
 class InterruptCoordinator:
@@ -125,32 +98,3 @@ class InterruptCoordinator:
         with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
             async for _sig in signals:
                 await self.signal_pause()
-
-
-def _signal_pg_excluding_self(pgid: int, sig: int) -> None:
-    """Walk /proc looking for procs whose PGID matches; signal those that
-    aren't us. POSIX-only; best-effort."""
-    # Runs only on interrupt, so O(n_procs) /proc walk is acceptable.
-    self_pid = os.getpid()
-    try:
-        entries = os.listdir("/proc")
-    except FileNotFoundError:  # non-Linux POSIX (macOS) — skip in this path
-        return
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        pid = int(entry)
-        if pid == self_pid:
-            continue
-        try:
-            with open(f"/proc/{pid}/stat") as f:
-                # Field 5 is pgid; format: pid (comm) state ppid pgid ...
-                # comm may contain spaces, so parse from the closing paren
-                stat = f.read()
-            close_paren = stat.rfind(")")
-            fields = stat[close_paren + 2:].split()
-            if int(fields[2]) == pgid:
-                with _suppress(ProcessLookupError, PermissionError):
-                    os.kill(pid, sig)
-        except (FileNotFoundError, OSError, IndexError, ValueError):
-            continue
