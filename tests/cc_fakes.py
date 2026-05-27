@@ -51,6 +51,14 @@ FakeToolResultBlock.__name__ = "ToolResultBlock"
 
 
 @dataclass
+class FakeThinkingBlock:
+    thinking: str
+
+
+FakeThinkingBlock.__name__ = "ThinkingBlock"
+
+
+@dataclass
 class FakeAssistantMessage:
     content: list[Any]
 
@@ -135,3 +143,7 @@ def tool_use(id_: str, name: str, args: dict[str, Any]) -> FakeToolUseBlock:
 
 def tool_result(id_: str, content: str, is_error: bool = False) -> FakeToolResultBlock:
     return FakeToolResultBlock(tool_use_id=id_, content=content, is_error=is_error)
+
+
+def thinking(content: str) -> FakeThinkingBlock:
+    return FakeThinkingBlock(thinking=content)

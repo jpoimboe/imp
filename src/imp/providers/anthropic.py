@@ -87,14 +87,20 @@ def _message_to_anthropic(msg: Message) -> dict[str, Any]:
     return {"role": msg.role, "content": content}
 
 
-def _anthropic_to_message(response: Any) -> tuple[Message, list[str]]:
+def _anthropic_to_message(
+    response: Any,
+) -> tuple[Message, list[str], list[str]]:
     """Translate an Anthropic response to an imp Message + a list of warning
-    strings for any blocks we couldn't translate (caller emits runner_warning
-    events). Unknown block types — including `thinking` from extended-thinking
-    models — are skipped, not fatal.
+    strings + a list of extended-thinking contents.
+
+    Thinking blocks are stripped from the visible message (they're not part
+    of the conversation history we send back) but their content is returned
+    separately so the runner can emit `thinking` events for the audit trail.
+    Unknown block types still become warnings.
     """
     content: list[Any] = []
     warnings: list[str] = []
+    thinkings: list[str] = []
     for block in response.content:
         kind = getattr(block, "type", None)
         if kind == "text":
@@ -102,12 +108,10 @@ def _anthropic_to_message(response: Any) -> tuple[Message, list[str]]:
         elif kind == "tool_use":
             content.append(ToolUseBlock(id=block.id, name=block.name, input=block.input))
         elif kind == "thinking":
-            # Extended-thinking output — not part of the visible transcript.
-            thinking_len = len(getattr(block, "thinking", "") or "")
-            warnings.append(f"skipped thinking block ({thinking_len} chars)")
+            thinkings.append(str(getattr(block, "thinking", "") or ""))
         else:
             warnings.append(f"skipped unknown block type {kind!r}")
-    return Message(role="assistant", content=tuple(content)), warnings
+    return Message(role="assistant", content=tuple(content)), warnings, thinkings
 
 
 def _serialize(msg: Message) -> dict[str, Any]:
@@ -269,7 +273,9 @@ class AnthropicAgentRunner:
                 max_tokens=8192,
             )
 
-            assistant_msg, block_warnings = _anthropic_to_message(response)
+            assistant_msg, block_warnings, thinkings = _anthropic_to_message(response)
+            for content in thinkings:
+                yield {"type": "thinking", "payload": {"content": content}}
             for w in block_warnings:
                 yield {"type": "runner_warning", "payload": {"message": w}}
             messages.append(assistant_msg)

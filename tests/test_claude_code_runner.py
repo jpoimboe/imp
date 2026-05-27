@@ -20,6 +20,7 @@ from tests.cc_fakes import (
     assistant,
     result,
     text,
+    thinking,
     tool_use,
 )
 
@@ -267,6 +268,35 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     assert loaded[2].role == "user"
     assert isinstance(loaded[2].content[0], TextBlock)
     assert loaded[2].content[0].text == "yes, proceed"
+
+
+@pytest.mark.anyio
+async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
+    """Extended-thinking output from claude_code is captured as a `thinking`
+    event with the full content, not folded into runner_warning."""
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(
+            thinking("weighing options..."),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+        ),
+        result(),
+    ]
+
+    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=fake_client_factory,
+    )
+    events = [ev async for ev in runner.run(_inv(tmp_path))]
+
+    kinds = [e["type"] for e in events]
+    assert "thinking" in kinds
+    thinkings = [e["payload"]["content"] for e in events if e["type"] == "thinking"]
+    assert thinkings == ["weighing options..."]
+    assert kinds[-1] == "agent_output"
 
 
 def test_claude_code_provider_registered_and_resolves() -> None:

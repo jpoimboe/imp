@@ -159,7 +159,7 @@ async def test_resume_uses_existing_transcript(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_thinking_block_emits_warning_not_error(tmp_path: Path) -> None:
+async def test_thinking_block_emits_thinking_event_not_error(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     fake = FakeAsyncAnthropic([
         # Response carries thinking + a complete_step tool_use.
@@ -173,10 +173,11 @@ async def test_thinking_block_emits_warning_not_error(tmp_path: Path) -> None:
     )
     events = [e async for e in runner.run(_inv(tmp_path))]
     kinds = [e["type"] for e in events]
-    # Must emit at least one runner_warning and reach agent_output (no error).
-    assert "runner_warning" in kinds
-    warn_payloads = [e["payload"]["message"] for e in events if e["type"] == "runner_warning"]
-    assert any("thinking" in m for m in warn_payloads)
+    # Thinking is captured as its own event (not folded into runner_warning,
+    # not surfaced as a fatal error). The step still reaches agent_output.
+    assert "thinking" in kinds
+    thinking_payloads = [e["payload"]["content"] for e in events if e["type"] == "thinking"]
+    assert thinking_payloads == ["considering the options..."]
     assert events[-1]["type"] == "agent_output"
 
 

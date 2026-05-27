@@ -48,6 +48,13 @@ class ChatRenderer:
         if t == "runner_warning":
             self._line(f"[warn ] {p.get('message', '?')}")
             return
+        if t == "thinking":
+            content = str(p.get("content", ""))
+            preview = content.replace("\n", " ")
+            if len(preview) > 200:
+                preview = preview[:197] + "..."
+            self._line(f"[think] {preview} ({len(content)} chars)")
+            return
         if t == "step_started":
             step = p.get("step", "?")
             model = p.get("model", "?")

@@ -206,6 +206,19 @@ def _fmt_error(p: dict[str, Any], full: bool, color: bool) -> str:
     return _elide(str(p.get("message", "?")), 80)
 
 
+def _fmt_thinking(p: dict[str, Any], full: bool, color: bool) -> str:
+    """Render Claude's extended-thinking content.
+
+    Default mode: ``<first 80 chars>… (N chars)`` so the log stays scannable.
+    Full mode: the entire thinking content, newlines collapsed to ``\\n``
+    so each event still renders on one row.
+    """
+    content = str(p.get("content", ""))
+    if full:
+        return content.replace("\n", "\\n")
+    return _elide(content, 80) + f" ({len(content)} chars)"
+
+
 def _fmt_tools(p: dict[str, Any], full: bool, color: bool) -> str:
     counts = p.get("counts") or {}
     total = sum(counts.values())
@@ -370,6 +383,7 @@ _DEPTH: dict[str, int] = {
     "tool_call":        4,
     "tool_result":      4,
     "tools":            4,
+    "thinking":         4,
     "agent_output":     4,
     "error":            4,
 }
@@ -397,6 +411,7 @@ _TYPE_COLOR: dict[str, tuple[str, ...]] = {
     "tool_call":        ("gray",),
     "tool_result":      ("gray",),
     "tools":            ("gray",),
+    "thinking":         ("magenta",),
     "error":            ("bold", "red"),
 }
 
@@ -420,6 +435,7 @@ _FORMATTERS = {
     "error":            _fmt_error,
     "tool_call":        _fmt_tool_call,
     "tools":            _fmt_tools,
+    "thinking":         _fmt_thinking,
     # tool_result handled specially in render_log: needs the tool-name map.
 }
 

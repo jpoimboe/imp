@@ -332,19 +332,24 @@ class _AsyncIter:
 # ── SDK message translation ──────────────────────────────────────────────────
 
 
-def _sdk_message_to_imp(sdk_msg: Any) -> tuple[Message | None, list[str]]:
+def _sdk_message_to_imp(
+    sdk_msg: Any,
+) -> tuple[Message | None, list[str], list[str]]:
     """Convert an SDK AssistantMessage / UserMessage / SystemMessage to imp.
 
-    Returns (Message, warnings). For SDK message types we don't translate
-    (ResultMessage, StreamEvent, RateLimitEvent), returns (None, []).
+    Returns (Message, warnings, thinkings). For SDK message types we don't
+    translate (ResultMessage, StreamEvent, RateLimitEvent), returns
+    (None, [], []).
 
-    Unknown content block types become warnings — same contract as the
-    Anthropic and OpenAI runners.
+    ThinkingBlock contents are collected separately so the runner can emit
+    `thinking` events for the audit trail. Other unknown content block types
+    still become warnings — same contract as the Anthropic and OpenAI runners.
     """
     cls_name = type(sdk_msg).__name__
     if cls_name == "AssistantMessage":
         blocks: list[Any] = []
         warnings: list[str] = []
+        thinkings: list[str] = []
         for b in sdk_msg.content:
             btype = type(b).__name__
             if btype == "TextBlock":
@@ -354,12 +359,10 @@ def _sdk_message_to_imp(sdk_msg: Any) -> tuple[Message | None, list[str]]:
                     id=b.id, name=b.name, input=getattr(b, "input", {}),
                 ))
             elif btype == "ThinkingBlock":
-                warnings.append(
-                    f"skipped thinking block ({len(getattr(b, 'thinking', '') or '')} chars)"
-                )
+                thinkings.append(str(getattr(b, "thinking", "") or ""))
             else:
                 warnings.append(f"skipped unknown SDK block type {btype!r}")
-        return Message(role="assistant", content=tuple(blocks)), warnings
+        return Message(role="assistant", content=tuple(blocks)), warnings, thinkings
     if cls_name == "UserMessage":
         blocks = []
         warnings = []
@@ -374,11 +377,11 @@ def _sdk_message_to_imp(sdk_msg: Any) -> tuple[Message | None, list[str]]:
                 blocks.append(TextBlock(text=b.text))
             else:
                 warnings.append(f"skipped unknown SDK block type {btype!r}")
-        return Message(role="user", content=tuple(blocks)), warnings
+        return Message(role="user", content=tuple(blocks)), warnings, []
     if cls_name == "SystemMessage":
         # Skip; system messages from claude are init-banner type metadata.
-        return None, []
-    return None, []
+        return None, [], []
+    return None, [], []
 
 
 def _serialize(msg: Message) -> dict[str, Any]:
@@ -555,7 +558,9 @@ class ClaudeCodeAgentRunner:
                     return
 
                 cls_name = type(sdk_msg).__name__
-                imp_msg, warns = _sdk_message_to_imp(sdk_msg)
+                imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)
+                for content in thinkings:
+                    yield {"type": "thinking", "payload": {"content": content}}
                 for w in warns:
                     yield {"type": "runner_warning", "payload": {"message": w}}
                 if imp_msg is not None:

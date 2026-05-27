@@ -263,6 +263,28 @@ def test_fmt_human_gate_pending_singular_option() -> None:
     assert s == "spec prompt='Continue?' (1 option)"
 
 
+def test_fmt_thinking_default_mode_elides_and_shows_char_count() -> None:
+    """Default mode keeps the log scannable: first ~80 chars + (N chars)."""
+    long_thought = "I should consider option A, but option B has merit. " * 5
+    s = render._fmt_thinking(
+        {"content": long_thought}, full=False, color=False,
+    )
+    assert s.endswith(f"({len(long_thought)} chars)")
+    # Elided body is short — payload is much longer than the rendered preview.
+    assert len(s) < len(long_thought)
+
+
+def test_fmt_thinking_full_mode_keeps_whole_content() -> None:
+    """Full mode keeps the entire thinking content; newlines collapsed so
+    each event still renders on a single row."""
+    multi_line = "first line\nsecond line\nthird line"
+    s = render._fmt_thinking(
+        {"content": multi_line}, full=True, color=False,
+    )
+    assert s == "first line\\nsecond line\\nthird line"
+    assert "\n" not in s
+
+
 def test_fmt_agent_output_two_keys_truncated() -> None:
     s = render._fmt_agent_output(
         {"status": "Success", "summary": "x" * 100, "extra": "y"},
