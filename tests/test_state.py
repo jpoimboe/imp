@@ -101,3 +101,24 @@ def test_state_round_trip_without_current_step(tmp_path: Path) -> None:
     s.save(tmp_path)
     loaded = State.load(tmp_path)
     assert loaded.current_step is None
+
+
+def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
+    tmp_path: Path,
+) -> None:
+    """A line that isn't valid JSON yields a {'_malformed': True, 'raw': ...}
+    sentinel instead of crashing the iterator. Surrounding good lines still
+    parse normally."""
+    path = tmp_path / "events.jsonl"
+    log = EventLog(path)
+    log.append("good_one", {"x": 1})
+    # Hand-inject a garbage line between two good ones.
+    with path.open("a") as f:
+        f.write("this is not json\n")
+    log.append("good_two", {"y": 2})
+
+    events = list(log.read())
+    assert len(events) == 3
+    assert events[0]["type"] == "good_one"
+    assert events[1] == {"_malformed": True, "raw": "this is not json"}
+    assert events[2]["type"] == "good_two"
