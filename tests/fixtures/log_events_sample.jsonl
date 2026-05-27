@@ -8,6 +8,7 @@
 {"timestamp": "2026-05-27T12:00:07+00:00", "type": "tool_result", "payload": {"tool_call_id": "tu_2", "result": "# demo\n\nLine two\nLine three"}}
 {"timestamp": "2026-05-27T12:00:08+00:00", "type": "agent_output", "payload": {"status": "Success", "summary": "Surveyed the repo. Identified test framework and module layout. Lots more detail elided here for brevity in the fixture."}}
 {"timestamp": "2026-05-27T12:00:09+00:00", "type": "step_completed", "payload": {"step": "context-loader", "action": "continue"}}
+{"timestamp": "2026-05-27T12:00:09+00:00", "type": "human_gate_pending", "payload": {"phase": "onboard", "prompt": "Use change title as starting intent for spec?", "options": [{"label": "Yes"}, {"label": "Skip"}]}}
 {"timestamp": "2026-05-27T12:00:10+00:00", "type": "gate_evaluated", "payload": {"phase": "onboard", "gate_type": "HumanGate", "action": "continue"}}
 {"timestamp": "2026-05-27T12:00:11+00:00", "type": "phase_completed", "payload": {"phase": "onboard", "action": "next"}}
 {"timestamp": "2026-05-27T12:00:12+00:00", "type": "phase_started", "payload": {"phase": "implement"}}

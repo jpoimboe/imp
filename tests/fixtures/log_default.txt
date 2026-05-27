@@ -5,6 +5,7 @@
 12:00:07      tools           2 calls  (1 ls, 1 read)
 12:00:08      agent_output    status=Success summary=Surveyed the repo. Identified test framework and module layo…
 12:00:09    step_completed    context-loader  → continue
+12:00:09    human_gate_pending  onboard prompt='Use change title as starting intent for spec?' (2 options)
 12:00:10    gate_evaluated    HumanGate on onboard  → continue
 12:00:11  phase_completed     onboard  → next
 12:00:12  phase_started       implement
