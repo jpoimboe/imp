@@ -421,3 +421,140 @@ def test_collapse_burst_split_by_workflow_pause() -> None:
 
 def test_collapse_empty_iterable() -> None:
     assert list(render._collapse_tool_bursts(iter([]))) == []
+
+
+def test_render_log_emits_one_line_per_event_default_mode() -> None:
+    events = [
+        _ev("change_created", change_id=1, title="hi"),
+        _ev("workflow_started", name="wf", from_phase="onboard"),
+        _ev("phase_started", phase="onboard"),
+        _ev("step_started", step="s1", model_role="default", interactive=False),
+        _ev("step_completed", step="s1", action="continue"),
+        _ev("phase_completed", phase="onboard", action="next"),
+    ]
+    lines = list(render.render_log(events, full=False, color=False))
+    assert len(lines) == 6
+
+
+def test_render_log_indentation_by_depth() -> None:
+    events = [
+        _ev("phase_started", phase="onboard"),
+        _ev("step_started", step="s1", model_role="default", interactive=False),
+        _ev("agent_output", status="ok"),
+    ]
+    lines = list(render.render_log(events, full=False, color=False))
+    # phase_started: 0 spaces before "phase_started"
+    assert lines[0].split("  ", 1)[1].startswith("phase_started")
+    # step_started: 2 spaces before "step_started" within type column
+    after_ts_1 = lines[1].split("  ", 1)[1]
+    assert after_ts_1.startswith("  step_started")
+    # agent_output: 4 spaces
+    after_ts_2 = lines[2].split("  ", 1)[1]
+    assert after_ts_2.startswith("    agent_output")
+
+
+def test_render_log_single_day_uses_short_timestamp() -> None:
+    events = [
+        _ev("change_created", "2026-05-27T10:00:00+00:00",
+            change_id=1, title="hi"),
+        _ev("phase_started", "2026-05-27T11:00:00+00:00", phase="x"),
+    ]
+    lines = list(render.render_log(events, full=False, color=False))
+    # Local-time hour may differ from UTC, but format must be HH:MM:SS (8 chars).
+    ts0 = lines[0].split("  ", 1)[0]
+    assert len(ts0) == 8
+    assert ts0[2] == ":" and ts0[5] == ":"
+
+
+def test_render_log_multi_day_uses_long_timestamp() -> None:
+    events = [
+        _ev("change_created", "2026-05-26T10:00:00+00:00",
+            change_id=1, title="hi"),
+        _ev("phase_started", "2026-05-28T10:00:00+00:00", phase="x"),
+    ]
+    lines = list(render.render_log(events, full=False, color=False))
+    ts0 = lines[0].split("  ", 1)[0]
+    # MM-DD HH:MM:SS = 14 chars
+    assert len(ts0) == 14
+    assert ts0[2] == "-" and ts0[5] == " "
+
+
+def test_render_log_color_off_has_no_ansi() -> None:
+    events = [_ev("change_created", change_id=1, title="hi")]
+    line = next(iter(render.render_log(events, full=False, color=False)))
+    assert "\x1b[" not in line
+
+
+def test_render_log_color_on_styles_event_type() -> None:
+    events = [_ev("change_created", change_id=1, title="hi")]
+    line = next(iter(render.render_log(events, full=True, color=True)))
+    # change_created is bold magenta
+    assert "\x1b[1m" in line and "\x1b[35m" in line
+
+
+def test_render_log_full_mode_shows_every_tool_event() -> None:
+    events = [
+        _ev("step_started", step="s1", model_role="default", interactive=False),
+        _ev("tool_call", id="t1", name="bash", args={"command": "ls"}),
+        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("step_completed", step="s1", action="continue"),
+    ]
+    lines = list(render.render_log(events, full=True, color=False))
+    # one line per raw event, no collapse
+    assert len(lines) == 4
+    assert "tool_call" in lines[1]
+    assert "tool_result" in lines[2]
+    # tool_result labels with the call's tool name
+    assert "bash →" in lines[2]
+
+
+def test_render_log_default_mode_collapses_tool_burst() -> None:
+    events = [
+        _ev("step_started", step="s1", model_role="default", interactive=False),
+        _ev("tool_call", id="t1", name="bash", args={"command": "ls"}),
+        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("tool_call", id="t2", name="bash", args={"command": "pwd"}),
+        _ev("tool_result", tool_call_id="t2", result="/"),
+        _ev("step_completed", step="s1", action="continue"),
+    ]
+    lines = list(render.render_log(events, full=False, color=False))
+    # step_started, tools (rolled-up), step_completed
+    assert len(lines) == 3
+    assert "tools" in lines[1]
+    assert "2 calls" in lines[1]
+
+
+def test_render_log_unknown_event_falls_back() -> None:
+    events = [_ev("never_heard_of_this", foo="bar")]
+    lines = list(render.render_log(events, full=False, color=False))
+    assert len(lines) == 1
+    assert "never_heard_of_this" in lines[0]
+    assert "foo=bar" in lines[0]
+
+
+def test_render_log_malformed_event_renders_and_continues() -> None:
+    events = [
+        {"type": "change_created", "payload": {"change_id": 1, "title": "ok"}},
+        {"not_a_real_event": True},  # missing "type" — malformed
+        {"type": "phase_started", "payload": {"phase": "x"}},
+    ]
+    lines = list(render.render_log(events, full=False, color=False))
+    assert len(lines) == 3
+    assert "malformed" in lines[1]
+    # Iteration continued to the third event.
+    assert "phase_started" in lines[2]
+
+
+def test_render_log_empty_yields_nothing() -> None:
+    assert list(render.render_log([], full=False, color=False)) == []
+
+
+def test_render_log_orphan_tool_result_renders_as_literal_tool() -> None:
+    events = [
+        _ev("step_started", step="s1", model_role="default", interactive=False),
+        _ev("tool_result", tool_call_id="ghost", result="orphan"),
+        _ev("step_completed", step="s1", action="continue"),
+    ]
+    lines = list(render.render_log(events, full=True, color=False))
+    # full mode, no preceding tool_call → label "tool"
+    assert "tool →" in lines[1]

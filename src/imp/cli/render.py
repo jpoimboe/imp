@@ -321,3 +321,188 @@ def _collapse_tool_bursts(events):
     flushed = _flush()
     if flushed is not None:
         yield flushed
+
+
+# ----------------------------------------------------------------------
+# Depth (indentation) and color category per event type. Per spec §6.2:
+#   0 spaces — workflow + phase events
+#   2 spaces — step + gate events
+#   4 spaces — tool / output / error events
+# ----------------------------------------------------------------------
+
+_DEPTH: dict[str, int] = {
+    "change_created":   0,
+    "workflow_started": 0,
+    "workflow_paused":  0,
+    "workflow_resumed": 0,
+    "phase_started":    0,
+    "phase_completed":  0,
+    "phase_exhausted":  0,
+    "step_started":     2,
+    "step_completed":   2,
+    "step_exhausted":   2,
+    "step_resumed_with_cached_output": 2,
+    "gate_evaluated":   2,
+    "script_gate_result": 2,
+    "tool_call":        4,
+    "tool_result":      4,
+    "tools":            4,
+    "agent_output":     4,
+    "error":            4,
+}
+
+
+# Color codes applied to the event-type column (in addition to the
+# accent-verb colors inside summaries). Returned as a tuple so multiple
+# codes can be composed (e.g. ``("bold", "magenta")``).
+_TYPE_COLOR: dict[str, tuple[str, ...]] = {
+    "change_created":   ("bold", "magenta"),
+    "workflow_started": ("bold", "magenta"),
+    "workflow_resumed": ("bold", "magenta"),
+    "workflow_paused":  ("yellow",),
+    "phase_started":    ("bold", "blue"),
+    "phase_completed":  ("bold", "blue"),
+    "phase_exhausted":  ("bold", "blue"),
+    "step_started":     ("cyan",),
+    "step_completed":   ("cyan",),
+    "step_exhausted":   ("cyan",),
+    "step_resumed_with_cached_output": ("cyan",),
+    "gate_evaluated":   ("yellow",),
+    "script_gate_result": ("yellow",),
+    "agent_output":     ("green",),
+    "tool_call":        ("gray",),
+    "tool_result":      ("gray",),
+    "tools":            ("gray",),
+    "error":            ("bold", "red"),
+}
+
+
+_FORMATTERS = {
+    "change_created":   _fmt_change_created,
+    "workflow_started": _fmt_workflow_started,
+    "workflow_paused":  _fmt_workflow_paused,
+    "workflow_resumed": _fmt_workflow_resumed,
+    "phase_started":    _fmt_phase_started,
+    "phase_completed":  _fmt_phase_completed,
+    "phase_exhausted":  _fmt_phase_exhausted,
+    "step_started":     _fmt_step_started,
+    "step_completed":   _fmt_step_completed,
+    "step_exhausted":   _fmt_step_exhausted,
+    "step_resumed_with_cached_output": _fmt_step_resumed_with_cached_output,
+    "gate_evaluated":   _fmt_gate_evaluated,
+    "script_gate_result": _fmt_script_gate_result,
+    "agent_output":     _fmt_agent_output,
+    "error":            _fmt_error,
+    "tool_call":        _fmt_tool_call,
+    "tools":            _fmt_tools,
+    # tool_result handled specially in render_log: needs the tool-name map.
+}
+
+
+_TYPE_COL_WIDTH = 18
+
+
+def _parse_local_dt(iso_ts: str):
+    """Parse an ISO-8601 timestamp and convert to local time."""
+    from datetime import datetime
+    return datetime.fromisoformat(iso_ts).astimezone()
+
+
+def _pick_ts_format(events: list[dict]) -> str:
+    """Return ``%H:%M:%S`` if every event's local date is the same,
+    else ``%m-%d %H:%M:%S``."""
+    dates = set()
+    for e in events:
+        ts = e.get("timestamp")
+        if not isinstance(ts, str):
+            continue
+        try:
+            dates.add(_parse_local_dt(ts).date())
+        except (ValueError, TypeError):
+            continue
+        if len(dates) > 1:
+            return "%m-%d %H:%M:%S"
+    return "%H:%M:%S"
+
+
+def _format_timestamp(iso_ts: Any, fmt: str, color: bool) -> str:
+    if not isinstance(iso_ts, str):
+        text = "-" * (8 if fmt == "%H:%M:%S" else 14)
+        return _style(text, "dim", enabled=color)
+    try:
+        text = _parse_local_dt(iso_ts).strftime(fmt)
+    except (ValueError, TypeError):
+        text = "-" * (8 if fmt == "%H:%M:%S" else 14)
+    return _style(text, "dim", enabled=color)
+
+
+def _is_malformed(event: Any) -> bool:
+    if not isinstance(event, dict):
+        return True
+    if "type" not in event:
+        return True
+    if "payload" in event and not isinstance(event["payload"], dict):
+        return True
+    return False
+
+
+def render_log(events, full: bool, color: bool):
+    """Yield rendered output lines for ``events``.
+
+    Args:
+        events: Iterable of event dicts (as read from ``events.jsonl``).
+        full:   If True, render every event verbatim — no burst collapse,
+                tool_call/tool_result get their full-mode summaries.
+        color:  If True, emit ANSI color codes.
+
+    Yields:
+        One ``str`` per event (after burst collapsing in non-full mode).
+    """
+    buffered = list(events)
+    ts_fmt = _pick_ts_format(buffered)
+
+    iterable = buffered if full else _collapse_tool_bursts(buffered)
+
+    tool_names: dict[str, str] = {}
+
+    for e in iterable:
+        if _is_malformed(e):
+            ts = e.get("timestamp") if isinstance(e, dict) else None
+            ts_str = _format_timestamp(ts, ts_fmt, color)
+            type_token = "malformed".ljust(_TYPE_COL_WIDTH)
+            type_styled = _style(type_token, "bold", "red", enabled=color)
+            summary = _style(_fmt_malformed(e, full, color), "red", enabled=color)
+            yield f"{ts_str}  {type_styled}  {summary}"
+            continue
+
+        t = e["type"]
+        p = e.get("payload") or {}
+        depth = _DEPTH.get(t, 4)
+        indent = " " * depth
+
+        # Maintain the tool-name map regardless of mode — cheap, and useful
+        # if we ever expand full-mode features.
+        if t == "tool_call":
+            _record_tool_call(p, tool_names)
+
+        # Dispatch to formatter
+        if t == "tool_result":
+            tool_name = _lookup_tool_name(p.get("tool_call_id"), tool_names)
+            summary = _fmt_tool_result_with_name(
+                p, tool_name=tool_name, full=full, color=color,
+            )
+        elif t in _FORMATTERS:
+            summary = _FORMATTERS[t](p, full, color)
+        else:
+            summary = _fmt_unknown(p, full, color)
+
+        ts_str = _format_timestamp(e.get("timestamp"), ts_fmt, color)
+        # Indent goes BEFORE the type so timestamps + types stay aligned
+        # within a depth band (spec §6.1).
+        type_field = f"{indent}{t}".ljust(_TYPE_COL_WIDTH)
+        type_color = _TYPE_COLOR.get(t)
+        if type_color:
+            type_styled = _style(type_field, *type_color, enabled=color)
+        else:
+            type_styled = _style(type_field, "dim", enabled=color)
+        yield f"{ts_str}  {type_styled}  {summary}"
