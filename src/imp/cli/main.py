@@ -254,10 +254,27 @@ def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
     else:
         cmd = ["less", "-F", "-R", "-X"]
 
-    # Popen path lands in Task 3. For now, fall through to inline print
-    # so this skeleton compiles and the fallback-path tests pass.
-    for line in lines:
-        print(line)
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            text=True,
+        )
+    except (FileNotFoundError, OSError):
+        # Pager binary missing or unexecutable → silent fallback.
+        for line in lines:
+            print(line)
+        return
+
+    assert proc.stdin is not None  # stdin=PIPE guarantees this for type-checkers
+    try:
+        with contextlib.suppress(BrokenPipeError):
+            for line in lines:
+                proc.stdin.write(line + "\n")
+    finally:
+        with contextlib.suppress(BrokenPipeError):
+            proc.stdin.close()
+        proc.wait()
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
@@ -356,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Show the event log for a Change.",
         description=(
             "Show the event log for a Change. "
+            "Auto-pages through $PAGER (default `less -FRX`) when stdout is a TTY. "
             "Set NO_COLOR=1 to disable colors."
         ),
     )

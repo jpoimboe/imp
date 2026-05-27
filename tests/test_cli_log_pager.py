@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -126,3 +127,69 @@ def test_pager_unparseable_falls_back(
         _page_or_print(iter(["alpha"]), no_pager=False)
     assert popen.call_count == 0
     assert capsys.readouterr().out == "alpha\n"
+
+
+def test_tty_spawns_default_pager(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When stdout is a TTY, no_pager=False, and $PAGER is unset, the
+    helper spawns `less -F -R -X` and writes each input line followed by
+    a newline to the pager's stdin."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.delenv("PAGER", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.wait = MagicMock(return_value=0)
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        _page_or_print(iter(["alpha", "beta"]), no_pager=False)
+
+    assert popen.call_count == 1
+    call_args, call_kwargs = popen.call_args
+    assert call_args[0] == ["less", "-F", "-R", "-X"]
+    assert call_kwargs.get("stdin") == subprocess.PIPE
+    # Lines were written, each with trailing newline.
+    writes = [c.args[0] for c in proc.stdin.write.call_args_list]
+    assert writes == ["alpha\n", "beta\n"]
+    # Cleanup ran.
+    proc.stdin.close.assert_called_once()
+    proc.wait.assert_called_once()
+
+
+def test_color_ansi_passes_through_pager(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ANSI escape sequences in input lines reach the pager unmodified —
+    `less -R` is responsible for rendering them. This guards against any
+    accidental `.encode()`/strip step in the write loop."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.delenv("PAGER", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+
+    colored = "\x1b[32mgreen\x1b[0m"
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc):
+        _page_or_print(iter([colored]), no_pager=False)
+
+    written = "".join(c.args[0] for c in proc.stdin.write.call_args_list)
+    assert "\x1b[" in written
+    assert "\x1b[32mgreen\x1b[0m\n" == written
+
+
+def test_pager_env_respected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`PAGER="bat -p"` → Popen called with `["bat", "-p"]` (shlex split)."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.setenv("PAGER", "bat -p")
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        _page_or_print(iter(["alpha"]), no_pager=False)
+
+    assert popen.call_args.args[0] == ["bat", "-p"]
