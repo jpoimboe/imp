@@ -45,6 +45,7 @@ from imp.agents.subagents import dispatch_task, make_task_tool
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.errors import FatalToolError
 from imp.agents.transcript import Transcript
 from imp.engine.schema import validate_agent_output
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
@@ -65,6 +66,11 @@ class _RunState:
     complete_step_args: dict[str, Any] = field(default_factory=dict)
     runtime_errors: list[str] = field(default_factory=list)
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
+    # When a tool raises FatalToolError the wrapper captures (tool, message)
+    # here so the main runner loop can yield an `error` event with
+    # kind="fatal_tool_error" and bail out instead of letting Claude keep
+    # going.
+    fatal_tool_error: tuple[str, str] | None = None
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -190,6 +196,9 @@ def _wrap_one(
                         "signal": -rc,
                     })
             return _tool_response(content_str, is_error=False)
+        except FatalToolError as fte:
+            state.fatal_tool_error = (name, str(fte))
+            return _tool_response(str(fte), is_error=True)
         except Exception as exc:
             text = f"{type(exc).__name__}: {exc}"
             state.runtime_errors.append(text)
@@ -583,6 +592,18 @@ class ClaudeCodeAgentRunner:
                 while state.killed_tool_uses:
                     info = state.killed_tool_uses.pop(0)
                     yield {"type": "tool_killed", "payload": info}
+
+                # A tool raised FatalToolError → bail out instead of letting
+                # Claude burn more LLM calls trying to work around a runtime
+                # misconfiguration.
+                if state.fatal_tool_error is not None:
+                    tool_name, msg = state.fatal_tool_error
+                    yield {"type": "error", "payload": {
+                        "kind": "fatal_tool_error",
+                        "tool": tool_name,
+                        "message": msg,
+                    }}
+                    return
 
                 if cls_name == "ResultMessage":
                     # End-of-turn:

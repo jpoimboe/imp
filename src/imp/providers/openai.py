@@ -34,6 +34,7 @@ from imp.agents.subagents import dispatch_task, make_task_tool
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.errors import FatalToolError
 from imp.agents.transcript import Transcript
 from imp.engine.schema import validate_agent_output
 from imp.providers._openai_schema import to_openai_strict
@@ -427,6 +428,13 @@ class OpenAIAgentRunner:
                         }}
                         return
                     yield {"type": "agent_output", "payload": sc.args_payload}
+                    return
+                except FatalToolError as fte:
+                    yield {"type": "error", "payload": {
+                        "kind": "fatal_tool_error",
+                        "tool": tu.name,
+                        "message": str(fte),
+                    }}
                     return
                 except Exception as e:
                     text = f"{type(e).__name__}: {e}"

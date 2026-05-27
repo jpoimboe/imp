@@ -180,6 +180,80 @@ async def test_human_gate_pending_emitted_once_before_action(
     assert payload["options"] == [{"label": "Yes"}]
 
 
+class _FatalToolErrorRunner:
+    """Yields a single fatal_tool_error event then stops, simulating a
+    provider that caught FatalToolError from a tool invocation."""
+
+    def __init__(self, *, tool: str = "ask_user", message: str = "boom") -> None:
+        self._tool = tool
+        self._message = message
+        self.run_count = 0
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        self.run_count += 1
+        yield {"type": "error", "payload": {
+            "kind": "fatal_tool_error",
+            "tool": self._tool,
+            "message": self._message,
+        }}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+@pytest.mark.anyio
+async def test_fatal_tool_error_pauses_without_retry(
+    tmp_path: Path,
+) -> None:
+    """A runner-emitted error with kind='fatal_tool_error' must halt the
+    workflow immediately (status=paused) without burning step retries.
+
+    Concretely: the step in _seed_minimal_workflow has max_retries=1.
+    Old behavior treated all errors as retryable, so the runner.run()
+    would fire twice before pause-on-max-retries kicked in. With fatal
+    classification it fires exactly once."""
+    change = _seed_minimal_workflow(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _FatalToolErrorRunner(
+        tool="ask_user",
+        message="ask_user invoked but user_input_fn is not installed",
+    )
+
+    class _FatalProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda _m: _FatalProvider(),
+    )
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.PAUSED
+
+    state = State.load(change.state_dir)
+    assert state.status == "paused"
+
+    # runner.run() was invoked exactly once: no retry on fatal errors.
+    assert runner.run_count == 1, (
+        f"fatal_tool_error should not retry; ran {runner.run_count} times"
+    )
+
+    # The fatal_tool_error event is in the log (audit trail).
+    fatal_events = [e for e in events
+                    if e["type"] == "error"
+                    and e.get("payload", {}).get("kind") == "fatal_tool_error"]
+    assert len(fatal_events) == 1
+    assert fatal_events[0]["payload"]["tool"] == "ask_user"
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

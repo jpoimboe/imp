@@ -229,17 +229,17 @@ async def _run_agent_invocation(
     interactive: bool,
     user_chat_input_fn: Callable[[str], str] | None,
     coordinator: Any,
-) -> tuple[dict[str, Any] | None, bool, bool]:
+) -> tuple[dict[str, Any] | None, bool, bool, bool]:
     """Run an agent (step OR gate) to completion.
 
-    Returns ``(agent_output, errored, paused)`` where:
+    Returns ``(agent_output, errored, paused, fatal)`` where:
     - ``agent_output`` is the validated output dict, or ``None`` if errored/paused.
     - ``errored`` is ``True`` when the run produced an error that warrants a retry.
     - ``paused`` is ``True`` when the coordinator requested a pause mid-run.
-
-    Note: the plan spec illustrated a 2-tuple ``(agent_output, errored)`` but Pause
-    has distinct semantics (it must propagate upward as ``Pause()``, not trigger a
-    retry), so the signature uses a 3-tuple.
+    - ``fatal`` is ``True`` when the error was a ``fatal_tool_error`` (or any other
+      non-retryable misconfiguration); the caller turns this into ``Pause`` directly
+      so the user sees the failure immediately and we don't burn LLM calls on retries
+      that can't possibly succeed.
 
     The caller is responsible for:
     - setting/clearing ``state.current_step``
@@ -311,23 +311,24 @@ async def _run_agent_invocation(
             if event["type"] == "agent_output":
                 agent_output = event["payload"]
             if event["type"] == "error":
-                return None, True, False
+                fatal = (event.get("payload") or {}).get("kind") == "fatal_tool_error"
+                return None, True, False, fatal
             if coordinator.should_pause:
                 # Coordinator triggered mid-step. Runner's interrupt() has fired.
-                return None, False, True
+                return None, False, True, False
     finally:
         coordinator.detach_runner()
 
     if agent_output is None:
-        return None, True, False
+        return None, True, False, False
 
     try:
         validate_agent_output(agent_output, agent_def.output_schema)
     except Exception as e:
         _emit(log, on_event, "error", {"message": f"output validation: {e}"})
-        return None, True, False
+        return None, True, False, False
 
-    return agent_output, False, False
+    return agent_output, False, False, False
 
 
 async def _execute_step(
@@ -347,7 +348,7 @@ async def _execute_step(
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
     state.save(change.state_dir)
 
-    agent_output, errored, paused = await _run_agent_invocation(
+    agent_output, errored, paused, fatal = await _run_agent_invocation(
         agent_def=agent_def,
         fs_permissions=step.fs_permissions,
         model_role=step.model_role,
@@ -361,6 +362,10 @@ async def _execute_step(
     )
 
     if paused:
+        return Pause()
+
+    if fatal:
+        _emit(log, on_event, "step_completed", {"step": step.name, "action": "pause"})
         return Pause()
 
     if errored or agent_output is None:
@@ -427,7 +432,7 @@ async def _run_agent_gate(
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
     state.save(change.state_dir)
 
-    agent_output, errored, paused = await _run_agent_invocation(
+    agent_output, errored, paused, fatal = await _run_agent_invocation(
         agent_def=agent_def,
         fs_permissions=gate.fs_permissions,
         model_role=gate.model_role,
@@ -441,7 +446,7 @@ async def _run_agent_gate(
                                                       # must honor Ctrl+C
     )
 
-    if paused:
+    if paused or fatal:
         _emit(log, on_event, "gate_evaluated",
               {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
         return Pause()

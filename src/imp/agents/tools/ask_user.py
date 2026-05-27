@@ -15,6 +15,7 @@ import inspect
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.errors import FatalToolError
 
 
 @imp_tool(
@@ -26,7 +27,11 @@ from imp.agents.tools.context import ToolContext
 )
 async def ask_user(ctx: ToolContext, question: str) -> str:
     if ctx.user_input_fn is None:
-        raise RuntimeError("ask_user not available in non-interactive step")
+        raise FatalToolError(
+            "ask_user invoked but user_input_fn is not installed. The "
+            "workflow.yaml step is likely missing 'interactive: true', or "
+            "the runtime failed to wire user_input_fn through the provider."
+        )
     result = ctx.user_input_fn(question)
     if inspect.isawaitable(result):
         result = await result

@@ -9,6 +9,7 @@ import pytest
 import imp.agents.tools.ask_user  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.errors import FatalToolError
 
 
 def _ctx(tmp_path: Path, input_fn=None) -> ToolContext:
@@ -44,9 +45,11 @@ def test_ask_user_returns_user_input_async(tmp_path: Path) -> None:
     assert out == "the awaited answer"
 
 
-def test_ask_user_without_handler_raises(tmp_path: Path) -> None:
+def test_ask_user_without_handler_raises_fatal(tmp_path: Path) -> None:
+    """When user_input_fn is missing, ask_user raises FatalToolError so the
+    runner halts the step instead of letting the agent retry forever."""
     ctx = _ctx(tmp_path, input_fn=None)
-    with pytest.raises(RuntimeError, match="not available"):
+    with pytest.raises(FatalToolError, match="user_input_fn is not installed"):
         asyncio.run(
             get_registry()["ask_user"].async_invoke(ctx, {"question": "x"})
         )

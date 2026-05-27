@@ -350,23 +350,6 @@ def test_full_default_workflow_via_pty_events_driven(tmp_path: Path) -> None:
                         f"question={question!r}",
                         file=sys.stderr, flush=True,
                     )
-                elif etype == "tool_result":
-                    # Fail fast on the known-bad signature of an unwired
-                    # interactive step. Otherwise the agent retries other
-                    # tools and the bug only surfaces at the 720s timeout
-                    # via the asks_answered>=1 final assertion — very slow
-                    # to diagnose.
-                    result_text = json.dumps(payload.get("result"))
-                    if "ask_user not available in non-interactive step" in result_text:
-                        proc.kill()
-                        proc.wait()
-                        pytest.fail(
-                            "ask_user returned 'not available in non-interactive "
-                            "step' — interactive flag is not flowing from the "
-                            "workflow.yaml step to the provider runner. Check "
-                            "AgentInvocation.user_input_fn wiring in executor + "
-                            "providers/*.create_runner."
-                        )
 
             now = time.time()
             if now - last_progress >= PROGRESS_INTERVAL:
