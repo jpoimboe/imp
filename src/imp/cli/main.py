@@ -10,7 +10,10 @@ import argparse
 import contextlib
 import json
 import os
+import shlex
+import subprocess
 import sys
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -211,6 +214,52 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
 
 
+def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
+    """Write rendered ``lines`` to stdout, paging through ``$PAGER`` (default
+    ``less -FRX``) when ``sys.stdout.isatty()`` is true, ``no_pager`` is
+    False, and ``$PAGER`` is not set to an empty/whitespace string.
+
+    Falls back to ``print()`` per line when paging doesn't apply or the
+    pager binary cannot be started. Each input line should NOT have a
+    trailing newline; the helper adds one itself.
+    """
+    if no_pager or not sys.stdout.isatty():
+        for line in lines:
+            print(line)
+        return
+
+    pager_env = os.environ.get("PAGER")
+    if pager_env is not None:
+        stripped = pager_env.strip()
+        if not stripped:
+            # PAGER="" or whitespace: explicit disable, like git.
+            for line in lines:
+                print(line)
+            return
+        try:
+            cmd = shlex.split(stripped)
+        except ValueError:
+            # Malformed quoting in $PAGER (e.g. `less "unclosed`). Don't
+            # crash `imp log` — degrade to inline output, same as a
+            # missing pager binary.
+            for line in lines:
+                print(line)
+            return
+        if not cmd:
+            # Defensive: post-strip non-empty value can't normally split
+            # to empty, but if it does, fall through to inline output.
+            for line in lines:
+                print(line)
+            return
+    else:
+        cmd = ["less", "-F", "-R", "-X"]
+
+    # Popen path lands in Task 3. For now, fall through to inline print
+    # so this skeleton compiles and the fallback-path tests pass.
+    for line in lines:
+        print(line)
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import render
 
@@ -236,8 +285,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
         return 2
     events = change.event_log().read()
     color = render.should_use_color(sys.stdout)
-    for line in render.render_log(events, full=args.full, color=color):
-        print(line)
+    lines = render.render_log(events, full=args.full, color=color)
+    _page_or_print(lines, no_pager=args.no_pager)
     return 0
 
 
