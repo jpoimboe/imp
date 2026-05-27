@@ -6,7 +6,6 @@ costs on your account (subscription, Bedrock, Vertex, etc.).
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -22,13 +21,8 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.skipif(
-    shutil.which("claude") is None or os.environ.get("CLAUDECODE") == "1",
-    reason=(
-        "skip live Claude Code walk: `claude` CLI not on PATH, or running "
-        "inside a Claude Code session (spawned `claude -p` inherits parent "
-        "MCP tools and can't complete the step cleanly — run from a clean "
-        "shell to verify)"
-    ),
+    shutil.which("claude") is None,
+    reason="`claude` CLI not on PATH; skip live Claude Code walk",
 )
 @pytest.mark.anyio
 async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:

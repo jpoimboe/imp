@@ -11,9 +11,21 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 @pytest.fixture(autouse=True)
-def _stub_provider_api_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_provider_api_keys(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Stub provider env vars only if not already set. Live-API tests get
-    the real key through; ordinary tests get the stub."""
+    the real env through (their own skipif handles the "no auth" case);
+    ordinary tests get the stub so module-level provider construction works.
+
+    The Claude Code live test spawns `claude -p` as a subprocess, which falls
+    back to user subscription auth when ANTHROPIC_API_KEY is unset. Stubbing
+    it to "sk-test" makes the subprocess try the fake key and fail with
+    "Invalid API key". So we skip stubbing for any test file whose name
+    matches the live-API pattern.
+    """
+    if "test_default_workflow_e2e_live" in str(request.node.fspath):
+        return
     if not os.environ.get("ANTHROPIC_API_KEY"):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     if not os.environ.get("OPENAI_API_KEY"):

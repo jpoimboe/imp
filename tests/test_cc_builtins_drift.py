@@ -6,12 +6,15 @@ system message — claude advertises its tool registry there.
 
 If `claude` is missing (CI without the CLI), skip. The point of the guard is
 to fire when the CLI IS available and a new built-in has appeared.
+
+The spawned `claude -p` reports the same tools whether or not the parent
+process is itself a Claude Code session (verified empirically by scrubbing
+CLAUDECODE/CLAUDE_CODE_* env vars and comparing init output).
 """
 
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 
@@ -24,12 +27,6 @@ def test_builtin_tools_match_cli() -> None:
     cli = shutil.which("claude")
     if cli is None:
         pytest.skip("`claude` CLI not on PATH")
-    if os.environ.get("CLAUDECODE") == "1":
-        pytest.skip(
-            "running inside a Claude Code session — spawned `claude -p` "
-            "inherits parent MCP tools and over-advertises. Run this test "
-            "from a clean shell (outside Claude Code) to verify drift."
-        )
 
     # Minimal stream-json input: one short user prompt that terminates without
     # tool use. The `init` system message arrives BEFORE the model starts the
