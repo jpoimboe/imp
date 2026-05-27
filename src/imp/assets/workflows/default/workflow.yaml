@@ -11,7 +11,13 @@ defaults:
 
 onboard:
   steps:
-    - {name: context-loader, file: agents/context-loader.md, model_role: default}
+    - name: context-loader
+      file: agents/context-loader.md
+      model_role: default
+      fs_permissions:
+        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+        - {operations: [write], paths: ["/**"], mode: deny}
   gates:
     - type: human
       prompt: "Context loaded. Use change title as the starting intent for spec?"
