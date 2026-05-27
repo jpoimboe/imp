@@ -13,6 +13,7 @@ import pytest
 
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from tests._live import opted_in
 
 
 @pytest.fixture
@@ -21,11 +22,15 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.skipif(
-    shutil.which("claude") is None,
-    reason="`claude` CLI not on PATH; skip live Claude Code walk",
+    not opted_in("claude_code"),
+    reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
 @pytest.mark.anyio
 async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
+    assert shutil.which("claude") is not None, (
+        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
+        "not found on PATH"
+    )
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
