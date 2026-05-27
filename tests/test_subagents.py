@@ -107,9 +107,10 @@ async def test_dispatch_task_unknown_subagent_raises(tmp_path: Path) -> None:
 def test_dispatch_task_renders_subagent_prompt(tmp_path):
     """Carryover important #1: subagent prompt template must be Jinja-rendered."""
     from pathlib import Path
+
     import anyio
 
-    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.agents.runner import ChangeContext
     from imp.agents.subagents import dispatch_task
     from imp.agents.tools.context import ToolContext
     from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
