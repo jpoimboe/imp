@@ -147,6 +147,76 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
     assert len(loaded) == 4  # 3 original + 1 new assistant turn
 
 
+@pytest.mark.anyio
+async def test_runs_subagent_via_task(tmp_path: Path) -> None:
+    """Parent dispatches via task → child runner runs to complete_step →
+    parent receives JSON-stringified payload and emits its own complete_step."""
+    from dataclasses import replace
+
+    (tmp_path / "art").mkdir()
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(
+                name="status", type="enum",
+                values=("Success", "Error"), required=True,
+            ),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    parent_def = _agent_def(tools=frozenset({"complete_step", "task"}))
+    inv = _inv(tmp_path)
+    inv = replace(
+        inv,
+        agent_def=parent_def,
+        subagent_defs={"sub": sub_def},
+    )
+
+    parent_scripted = [
+        assistant(
+            text("dispatching"),
+            tool_use("p1", "task",
+                     {"subagent_name": "sub", "task_description": "do work"}),
+        ),
+        # SDK will send a tool_result back from the MCP server's task wrapper.
+        # The fake doesn't simulate that round trip; the runner sees the
+        # parent's next agent turn directly.
+        assistant(
+            text("got result"),
+            tool_use("p2", "complete_step", {"status": "Success"}),
+        ),
+        result(),
+    ]
+    child_scripted = [
+        assistant(
+            text("sub working"),
+            tool_use("s1", "complete_step", {"status": "Success"}),
+        ),
+        result(),
+    ]
+
+    scripts = iter([parent_scripted, child_scripted])
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=next(scripts))
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    assert events[-1]["type"] == "agent_output"
+    assert events[-1]["payload"] == {"status": "Success"}
+
+
 def test_claude_code_provider_registered_and_resolves() -> None:
     """The claude_code provider is registered eagerly; resolve_role picks it up
     when claude is on PATH."""
