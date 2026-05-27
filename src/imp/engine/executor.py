@@ -155,6 +155,7 @@ async def _execute_phase(
             action = await _execute_step(
                 step, workflow, config, change, state, log, on_event,
                 human_input_fn=human_input_fn,
+                human_output_fn=human_output_fn,
                 user_chat_input_fn=user_chat_input_fn,
                 coordinator=coordinator,
             )
@@ -213,6 +214,7 @@ async def _execute_step(
     state: State, log: EventLog, on_event: EventCallback,
     *,
     human_input_fn: HumanInputFn,
+    human_output_fn: HumanOutputFn,
     user_chat_input_fn: Callable[[str], str] | None,
     coordinator: Any,
 ) -> Action:
@@ -308,7 +310,7 @@ async def _execute_step(
     for gate in step.gates:
         action = await _run_gate(
             gate, workflow, config, change, state, log, on_event,
-            human_input_fn=human_input_fn, human_output_fn=print,
+            human_input_fn=human_input_fn, human_output_fn=human_output_fn,
             user_chat_input_fn=user_chat_input_fn,
             agent_output_context=agent_output,
         )

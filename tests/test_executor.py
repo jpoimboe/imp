@@ -74,6 +74,56 @@ async def test_run_change_completes_minimal_workflow(tmp_path: Path, monkeypatch
     assert state.status == "completed"
 
 
+@pytest.mark.anyio
+async def test_step_level_human_gate_uses_renderer(tmp_path: Path) -> None:
+    """A step-level human gate must render through the renderer's
+    human_output_fn, not directly to print."""
+    from imp.providers import resolve
+
+    # Workflow with a step-level human gate (gate inside the step).
+    wf = tmp_path / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "go\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [only]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
+        "only:\n"
+        "  steps:\n"
+        "    - name: w\n"
+        "      file: agents/writer.md\n"
+        "      model_role: default\n"
+        "      gates:\n"
+        "        - type: human\n"
+        "          prompt: ok?\n"
+        "          options: [{label: Yes, action: {kind: continue}}]\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
+    )
+    change = Change.create(tmp_path, title="t")
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _FakeProvider({"status": "Success"}, model=model),
+    )
+
+    captured: list[str] = []
+    result = await run_change(
+        change,
+        on_event=lambda _e: None,
+        human_input_fn=lambda: "1",
+        human_output_fn=lambda msg: captured.append(msg),
+    )
+    assert result is RunResult.COMPLETED
+    # The "─── HUMAN GATE ───" prefix must have flowed through the captured fn.
+    assert any("HUMAN GATE" in line for line in captured)
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
