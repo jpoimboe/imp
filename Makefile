@@ -42,14 +42,24 @@ test-verbose: ## Same as `test` but with -v.
 	$(PYTEST) -v
 
 .PHONY: test-live
-test-live: ## Run the live-API tests (real Anthropic calls; ~5-8 min, ~$0.50).
-	@$(_LOAD_KEY) && IMP_LIVE_API=1 ANTHROPIC_API_KEY="$$ANTHROPIC_API_KEY" \
-	    timeout 1800 $(PYTEST) -v tests/test_end_to_end_live.py
+test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
+	@$(_REQUIRE_PROVIDERS) && \
+	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
+	    timeout 1800 $(PYTEST) -v \
+	      tests/test_default_workflow_e2e_live.py \
+	      tests/test_default_workflow_e2e_live_openai.py \
+	      tests/test_default_workflow_e2e_live_claude_code.py \
+	      tests/test_default_workflow_pty_live.py \
+	      tests/test_mid_step_resume_live.py
 
 .PHONY: test-live-quick
-test-live-quick: ## Just the cheap live test (one step, ~3s, ~$0.001).
-	@$(_LOAD_KEY) && IMP_LIVE_API=1 ANTHROPIC_API_KEY="$$ANTHROPIC_API_KEY" \
-	    $(PYTEST) -v tests/test_end_to_end_live.py::test_one_step_live
+test-live-quick: ## One-step live test for the first opted-in provider only.
+	@$(_REQUIRE_PROVIDERS) && \
+	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
+	    $(PYTEST) -v \
+	      tests/test_default_workflow_e2e_live.py \
+	      tests/test_default_workflow_e2e_live_openai.py \
+	      tests/test_default_workflow_e2e_live_claude_code.py
 
 .PHONY: test-all
 test-all: test test-live ## Full suite including live tests.
@@ -106,5 +116,59 @@ define _LOAD_KEY
       exit 1; \
     fi; \
   fi; \
+}
+endef
+
+# Validate IMP_LIVE_PROVIDERS is set, every token is a recognized provider,
+# and the matching auth is present (loading key files into env vars as the
+# legacy _LOAD_KEY did). Use as `@$(_REQUIRE_PROVIDERS) && ...`.
+define _REQUIRE_PROVIDERS
+{ \
+  if [[ -z "$${IMP_LIVE_PROVIDERS:-}" ]]; then \
+    echo "ERROR: IMP_LIVE_PROVIDERS is not set." >&2; \
+    echo "" >&2; \
+    echo "Set it to a comma-separated list of providers you have auth for:" >&2; \
+    echo "  IMP_LIVE_PROVIDERS=anthropic       (needs ANTHROPIC_API_KEY or ~/.anthropic-key)" >&2; \
+    echo "  IMP_LIVE_PROVIDERS=openai          (needs OPENAI_API_KEY or ~/.openai-key)" >&2; \
+    echo "  IMP_LIVE_PROVIDERS=claude_code     (needs \`claude\` CLI on PATH)" >&2; \
+    echo "  IMP_LIVE_PROVIDERS=anthropic,openai,claude_code  (combine as desired)" >&2; \
+    echo "" >&2; \
+    echo "Note: per-provider one-step tests run for every provider listed." >&2; \
+    echo "      The full PTY workflow test uses only the FIRST provider in the list." >&2; \
+    exit 1; \
+  fi; \
+  IFS=',' read -r -a _provs <<< "$${IMP_LIVE_PROVIDERS}"; \
+  for prov in "$${_provs[@]}"; do \
+    case "$$prov" in \
+      anthropic) \
+        if [[ -z "$${ANTHROPIC_API_KEY:-}" ]]; then \
+          if [[ -r "$(KEY_FILE)" && -s "$(KEY_FILE)" ]]; then \
+            export ANTHROPIC_API_KEY="$$(cat "$(KEY_FILE)")"; \
+          elif [[ -r "$$HOME/.anthropic-key" && -s "$$HOME/.anthropic-key" ]]; then \
+            export ANTHROPIC_API_KEY="$$(cat "$$HOME/.anthropic-key")"; \
+          else \
+            echo "ERROR: provider 'anthropic' opted in but no ANTHROPIC_API_KEY / ~/.anthropic-key." >&2; \
+            exit 1; \
+          fi; \
+        fi ;; \
+      openai) \
+        if [[ -z "$${OPENAI_API_KEY:-}" ]]; then \
+          if [[ -r "$$HOME/.openai-key" && -s "$$HOME/.openai-key" ]]; then \
+            export OPENAI_API_KEY="$$(cat "$$HOME/.openai-key")"; \
+          else \
+            echo "ERROR: provider 'openai' opted in but no OPENAI_API_KEY / ~/.openai-key." >&2; \
+            exit 1; \
+          fi; \
+        fi ;; \
+      claude_code) \
+        if ! command -v claude >/dev/null 2>&1; then \
+          echo "ERROR: provider 'claude_code' opted in but \`claude\` CLI not on PATH." >&2; \
+          exit 1; \
+        fi ;; \
+      *) \
+        echo "ERROR: unknown provider '$$prov' in IMP_LIVE_PROVIDERS (valid: anthropic, openai, claude_code)." >&2; \
+        exit 1 ;; \
+    esac; \
+  done; \
 }
 endef
