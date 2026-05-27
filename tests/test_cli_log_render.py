@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import io
+import json
+import subprocess
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
 
 from imp.cli import render
+from imp.cli.main import main
 
 
 def test_style_disabled_returns_plain_text() -> None:
@@ -666,7 +671,6 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _read_sample_events() -> list[dict]:
-    import json
     src = FIXTURES / "log_events_sample.jsonl"
     out: list[dict] = []
     for line in src.read_text().splitlines():
@@ -706,9 +710,6 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
 ) -> None:
     """A garbage line in events.jsonl renders as a malformed marker; the
     surrounding good events still render and the command exits 0."""
-    import json
-    from imp.cli.main import main
-
     cdir = tmp_path / ".imp" / "changes" / "1"
     cdir.mkdir(parents=True)
     (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "smoke"}))
@@ -728,8 +729,6 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
 
-    from contextlib import redirect_stdout
-    import io
     buf = io.StringIO()
     with redirect_stdout(buf):
         rc = main(["log", "1"])
@@ -748,7 +747,6 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
 
     Covers the `__main__.py → _cmd_log` wiring, `should_use_color` on a
     non-tty stream, and the real `sys.exit` path."""
-    import json, subprocess, sys
 
     cdir = tmp_path / ".imp" / "changes" / "1"
     cdir.mkdir(parents=True)
@@ -783,9 +781,6 @@ def test_cmd_log_auto_picks_latest_change_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`imp log` (no id) picks the highest numeric change dir."""
-    import json
-    from imp.cli.main import main
-
     for cid, title in [(1, "first"), (2, "second"), (10, "tenth")]:
         cdir = tmp_path / ".imp" / "changes" / str(cid)
         cdir.mkdir(parents=True)
@@ -801,8 +796,6 @@ def test_cmd_log_auto_picks_latest_change_id(
         )
     monkeypatch.chdir(tmp_path)
 
-    from contextlib import redirect_stdout
-    import io
     buf = io.StringIO()
     with redirect_stdout(buf):
         rc = main(["log"])
@@ -819,7 +812,6 @@ def test_cmd_log_no_changes_yet_returns_rc_2(
 ) -> None:
     """`imp log` in a project with no .imp/changes/ returns rc=2 with a
     friendly stderr message."""
-    from imp.cli.main import main
 
     # .imp/ may or may not exist — neither has changes/.
     monkeypatch.chdir(tmp_path)
@@ -835,9 +827,6 @@ def test_cli_log_full_mode_keeps_individual_tool_events(
 ) -> None:
     """Default mode collapses tool bursts into a synthetic `tools` line;
     `--full` keeps the raw `tool_call` / `tool_result` lines."""
-    import json
-    from imp.cli.main import main
-
     cdir = tmp_path / ".imp" / "changes" / "1"
     cdir.mkdir(parents=True)
     (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "fullmode"}))
@@ -860,9 +849,6 @@ def test_cli_log_full_mode_keeps_individual_tool_events(
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
-
-    from contextlib import redirect_stdout
-    import io
 
     buf_default = io.StringIO()
     with redirect_stdout(buf_default):
