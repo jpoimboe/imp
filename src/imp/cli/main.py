@@ -284,7 +284,15 @@ def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
     finally:
         with contextlib.suppress(BrokenPipeError):
             proc.stdin.close()
-        proc.wait()
+        # Ctrl-C in the pager raises KeyboardInterrupt out of proc.wait().
+        # Re-wait until the child actually exits so the user sees the pager
+        # behave normally instead of a Python traceback.
+        while True:
+            try:
+                proc.wait()
+                break
+            except KeyboardInterrupt:
+                pass
 
 
 def _cmd_log(args: argparse.Namespace) -> int:

@@ -463,3 +463,27 @@ def test_main_log_no_pager_flag_skips_pager_on_tty(
     assert rc == 0
     assert popen.call_count == 0
     assert "change_created" in capsys.readouterr().out
+
+
+def test_keyboard_interrupt_in_wait_does_not_raise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ctrl-C in the pager interrupts proc.wait() with KeyboardInterrupt.
+    The helper must catch it and re-wait until the child actually exits,
+    so the user doesn't see a Python traceback when the pager is still up."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.delenv("PAGER", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    # First wait() raises KeyboardInterrupt (Ctrl-C); second returns normally
+    # (less exits when the user presses `q`).
+    proc.wait.side_effect = [KeyboardInterrupt, 0]
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc):
+        # Must not raise.
+        _page_or_print(iter(["alpha"]), no_pager=False)
+
+    assert proc.wait.call_count == 2
