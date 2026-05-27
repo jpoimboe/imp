@@ -45,7 +45,7 @@ test-verbose: ## Same as `test` but with -v.
 test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
 	@$(_REQUIRE_PROVIDERS) && \
 	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
-	    timeout 1800 $(PYTEST) -v \
+	    timeout --foreground 1800 $(PYTEST) -v \
 	      tests/test_default_workflow_e2e_live.py \
 	      tests/test_default_workflow_e2e_live_openai.py \
 	      tests/test_default_workflow_e2e_live_claude_code.py \
