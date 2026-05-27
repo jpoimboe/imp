@@ -26,11 +26,15 @@ from __future__ import annotations
 import json
 import shutil
 import uuid
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import (
     AgentInvocation,
+    AgentRunner,
+    Event,
     Message,
     TextBlock,
     ToolResultBlock,
@@ -40,6 +44,9 @@ from imp.agents.subagents import dispatch_task, make_task_tool
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.transcript import Transcript
+from imp.engine.schema import validate_agent_output
+from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 
 # ── Per-run state captured by tool wrappers and read by the receive loop ─────
@@ -344,7 +351,252 @@ def _serialize(msg: Message) -> dict[str, Any]:
     }
 
 
-# Runner class lands in Task 22; provider class + env_check + factory in Task 22.
+class ClaudeCodeAgentRunner:
+    """Drives `claude -p` via claude_agent_sdk.
+
+    Persistence: per-step transcript.jsonl, identical to the other runners.
+    Resume: stream-json history replay via _stream_history (Spike 7 verified).
+    Tools: in-process MCP server (`create_sdk_mcp_server`) hosts the imp
+           registry; the agent sees them as `mcp__imp__<name>`.
+    """
+
+    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
+        self.model = model_name
+        self._client_factory = client_factory
+        self._client: Any = None
+        self._cancel = False
+
+    def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
+                       tool_names: list[str]) -> Any:
+        from claude_agent_sdk import ClaudeAgentOptions
+        return ClaudeAgentOptions(
+            model=self.model,
+            system_prompt=invocation.system_prompt,
+            mcp_servers={"imp": mcp_server},
+            allowed_tools=[f"mcp__imp__{n}" for n in tool_names],
+            disallowed_tools=list(ALL_CLAUDE_CODE_BUILTIN_TOOLS),
+            setting_sources=[],
+            strict_mcp_config=True,
+            extra_args={"no-session-persistence": None},
+        )
+
+    def _build_client(self, opts: Any) -> Any:
+        """Return an async-context-manager wrapping ClaudeSDKClient(opts).
+        Tests inject a factory that returns a FakeClaudeSDKClient."""
+        if self._client_factory is not None:
+            return self._client_factory(opts)
+        from claude_agent_sdk import ClaudeSDKClient
+        return ClaudeSDKClient(opts)
+
+    def _make_spawn_subagent(self) -> Any:
+        client_factory = self._client_factory
+
+        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
+            child = ClaudeCodeAgentRunner(
+                model_name=sub_invocation.model_name,
+                client_factory=client_factory,
+            )
+            return child.run(sub_invocation)
+
+        return _spawn
+
+    async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
+        tools = _build_tools(invocation)
+        ctx = ToolContext(
+            project_root=invocation.change_context.project_root,
+            artifacts_dir=invocation.change_context.artifacts_dir,
+            fs_permissions=invocation.fs_permissions,
+            events_path=invocation.events_path,
+            subagent_defs=invocation.subagent_defs,
+            provider_name=invocation.provider_name,
+            model_name=invocation.model_name,
+            parent_transcript_dir=invocation.transcript_dir,
+            interactive=invocation.interactive,
+        )
+        ctx.change_context = invocation.change_context
+        ctx.spawn_subagent = self._make_spawn_subagent()
+
+        state = _RunState()
+        sdk_tools = _make_sdk_tools(tools, ctx, state)
+
+        # In-process MCP server hosting imp tools. The real SDK call:
+        #   from claude_agent_sdk import create_sdk_mcp_server
+        #   mcp_server = create_sdk_mcp_server(name="imp", tools=sdk_tools)
+        # Tests stub this via _build_client.
+        try:
+            from claude_agent_sdk import create_sdk_mcp_server
+            mcp_server = create_sdk_mcp_server(name="imp", tools=sdk_tools)
+        except ImportError:
+            mcp_server = None   # fakes don't need a server
+
+        # Build options only when we'll use the real SDK (mcp_server is not None).
+        # When a client_factory is injected (tests), skip building options to
+        # avoid constructing ClaudeAgentOptions with mcp_server=None.
+        if mcp_server is not None:
+            opts = self._build_options(invocation, mcp_server, list(tools))
+        else:
+            opts = None
+
+        existing = transcript.load()
+        if existing:
+            messages = existing
+            tool_calls_used = count_tool_uses(messages)
+            resume_state = classify_resume(messages, interactive=invocation.interactive)
+            if resume_state is ResumeState.DANGLING_TOOL_USE:
+                yield {"type": "error", "payload": {
+                    "kind": "transcript_invalid",
+                    "message": "transcript ended with dangling tool_use",
+                }}
+                return
+            if resume_state is ResumeState.MISSING_COMPLETE_STEP:
+                yield {"type": "error", "payload": {
+                    "kind": "missing_complete_step",
+                    "message": "autonomous agent transcript ended without complete_step",
+                }}
+                return
+            # TODO(plan-3): PROMPT_USER finalization same as the other runners.
+        else:
+            messages = []
+            for m in invocation.initial_messages:
+                messages.append(m)
+                transcript.append(m)
+            tool_calls_used = 0
+
+        ceiling = invocation.max_tool_calls or 50
+
+        client_ctx = self._build_client(opts)
+        async with client_ctx as client:
+            await client.query(_stream_history(messages))
+
+            async for sdk_msg in client.receive_response():
+                if self._cancel:
+                    yield {"type": "error", "payload": {
+                        "kind": "interrupted",
+                        "message": "runner cancelled by interrupt",
+                    }}
+                    return
+
+                cls_name = type(sdk_msg).__name__
+                imp_msg, warns = _sdk_message_to_imp(sdk_msg)
+                for w in warns:
+                    yield {"type": "runner_warning", "payload": {"message": w}}
+                if imp_msg is not None:
+                    messages.append(imp_msg)
+                    transcript.append(imp_msg)
+
+                    if imp_msg.role == "assistant":
+                        yield {"type": "agent_message",
+                               "payload": _serialize(imp_msg)}
+                        for b in imp_msg.content:
+                            if isinstance(b, ToolUseBlock):
+                                # Dual-write `complete_step` state at the
+                                # runner level so the test fakes don't need
+                                # to drive the MCP wrapper. In production the
+                                # wrapper *also* sets these fields when the
+                                # SDK invokes it — idempotent write.
+                                if b.name == "complete_step":
+                                    state.complete_step_called = True
+                                    state.complete_step_args = b.input
+                                # Ceiling guard: observational here. With
+                                # Claude Code we can't prevent the (K+1)th
+                                # tool dispatch — MCP invocation is async
+                                # claude-side, decoupled from this iteration
+                                # loop. The ceiling becomes a *post hoc* fatal
+                                # check after the ResultMessage.
+                                if tool_calls_used >= ceiling:
+                                    ceil_msg = (
+                                        f"tool_call_ceiling_exceeded (ceiling={ceiling})"
+                                    )
+                                    yield {"type": "tool_result", "payload": {
+                                        "id": b.id,
+                                        "content": ceil_msg,
+                                        "error": True,
+                                    }}
+                                    continue
+                                tool_calls_used += 1
+                                yield {"type": "tool_call", "payload": {
+                                    "id": b.id, "name": b.name, "input": b.input,
+                                }}
+                    elif imp_msg.role == "user":
+                        # ToolResultBlocks generated by claude calling our MCP
+                        # tools. Emit the corresponding tool_result events.
+                        for b in imp_msg.content:
+                            if isinstance(b, ToolResultBlock):
+                                payload: dict[str, Any] = {
+                                    "id": b.tool_use_id, "content": b.content,
+                                }
+                                if b.is_error:
+                                    payload["error"] = True
+                                yield {"type": "tool_result", "payload": payload}
+
+                if cls_name == "ResultMessage":
+                    # End-of-turn:
+                    #   a) complete_step captured → emit agent_output, return
+                    #   b) interactive mode → prompt user, send another query
+                    #   c) autonomous mode without complete_step → error
+                    if state.complete_step_called:
+                        try:
+                            validate_agent_output(
+                                state.complete_step_args,
+                                invocation.agent_def.output_schema,
+                            )
+                        except Exception as ve:
+                            yield {"type": "error", "payload": {
+                                "kind": "output_validation",
+                                "message": str(ve),
+                            }}
+                            return
+                        yield {"type": "agent_output",
+                               "payload": state.complete_step_args}
+                        return
+
+                    if tool_calls_used >= ceiling and not state.complete_step_called:
+                        yield {"type": "error", "payload": {
+                            "kind": "tool_call_ceiling_exceeded",
+                            "ceiling": ceiling,
+                        }}
+                        return
+
+                    if invocation.interactive and ctx.user_input_fn is not None:
+                        user_text = ctx.user_input_fn("")
+                        user_msg = Message(
+                            role="user", content=(TextBlock(text=user_text),),
+                        )
+                        messages.append(user_msg)
+                        transcript.append(user_msg)
+                        yield {"type": "user_input",
+                               "payload": {"text": user_text}}
+                        await client.query(user_text)
+                        continue
+
+                    yield {"type": "error", "payload": {
+                        "kind": "no_complete_step",
+                        "message": "agent finished without calling complete_step",
+                    }}
+                    return
+
+        # Fell out of the receive loop without seeing a ResultMessage.
+        yield {"type": "error", "payload": {
+            "kind": "no_result_message",
+            "message": "SDK closed without yielding a ResultMessage",
+        }}
+
+    async def interrupt(self) -> None:
+        self._cancel = True
+
+
+class ClaudeCodeProvider:
+    name = "claude_code"
+
+    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
+        self.model = model_name
+        self._client_factory = client_factory
+
+    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+        return ClaudeCodeAgentRunner(
+            model_name=self.model, client_factory=self._client_factory,
+        )
 
 
 def _env_check() -> bool:
@@ -352,6 +604,4 @@ def _env_check() -> bool:
 
 
 def _factory(model: str) -> Provider:
-    raise NotImplementedError(
-        f"ClaudeCodeProvider arrives in Task 22; model={model}"
-    )
+    return ClaudeCodeProvider(model_name=model)
