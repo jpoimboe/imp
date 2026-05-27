@@ -193,3 +193,91 @@ def test_pager_env_respected(monkeypatch: pytest.MonkeyPatch) -> None:
         _page_or_print(iter(["alpha"]), no_pager=False)
 
     assert popen.call_args.args[0] == ["bat", "-p"]
+
+
+def test_less_env_set_when_pager_is_less_and_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PAGER=less + no LESS in env → child env has LESS=FRX."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.setenv("PAGER", "less")
+    monkeypatch.delenv("LESS", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        _page_or_print(iter(["alpha"]), no_pager=False)
+
+    env = popen.call_args.kwargs.get("env")
+    assert env is not None
+    assert env.get("LESS") == "FRX"
+
+
+def test_less_env_not_overridden_when_already_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PAGER=less + user set LESS=SR → child env keeps LESS=SR."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.setenv("PAGER", "less")
+    monkeypatch.setenv("LESS", "SR")
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        _page_or_print(iter(["alpha"]), no_pager=False)
+
+    env = popen.call_args.kwargs.get("env")
+    assert env is not None
+    assert env.get("LESS") == "SR"
+
+
+def test_less_env_set_for_default_pager_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PAGER unset (default `less -F -R -X`) + no LESS in env → child env
+    has LESS=FRX. The default pager is `less`, so it should get the same
+    treatment as PAGER=less."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.delenv("PAGER", raising=False)
+    monkeypatch.delenv("LESS", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        _page_or_print(iter(["alpha"]), no_pager=False)
+
+    env = popen.call_args.kwargs.get("env")
+    assert env is not None
+    assert env.get("LESS") == "FRX"
+
+
+def test_less_env_not_set_for_non_less_pager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PAGER=bat → no LESS injection. (We don't touch unrelated env keys.)"""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.setenv("PAGER", "bat -p")
+    monkeypatch.delenv("LESS", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        _page_or_print(iter(["alpha"]), no_pager=False)
+
+    # Either env is None (we didn't bother passing it) or env contains
+    # no LESS key. Both are acceptable; the contract is "don't inject."
+    env = popen.call_args.kwargs.get("env")
+    if env is not None:
+        assert "LESS" not in env
