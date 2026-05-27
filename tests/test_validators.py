@@ -365,3 +365,133 @@ def test_v12_model_role_unconfigured(tmp_path: Path) -> None:
     with pytest.raises(LoadErrors) as ei:
         load_workflow(wf, configured_roles=frozenset({"default"}))
     assert any("'missing-role'" in str(e) for e in ei.value.errors)
+
+
+# ── V15: write_tool_needs_write_permission ─────────────────────────────────
+
+_WRITE_FILE_AGENT = (
+    "---\n"
+    "name: writer\n"
+    "tools: [write_file, complete_step]\n"
+    "output:\n"
+    "  status: {type: enum, values: [Success, Error]}\n"
+    "---\nprompt body\n"
+)
+
+_READ_ONLY_AGENT = (
+    "---\n"
+    "name: reader\n"
+    "tools: [read_file, complete_step]\n"
+    "output:\n"
+    "  status: {type: enum, values: [Success, Error]}\n"
+    "---\nprompt body\n"
+)
+
+
+def test_v15_pass_write_file_with_write_permission(tmp_path: Path) -> None:
+    """A step declaring write_file AND an allow-write fs_permissions rule → no error."""
+    wf = _make_workflow(
+        tmp_path,
+        agents={"writer.md": _WRITE_FILE_AGENT},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n"
+            "  steps:\n"
+            "    - name: s\n"
+            "      file: agents/writer.md\n"
+            "      fs_permissions:\n"
+            "        - {operations: [read], paths: ['/artifacts/**'], mode: allow}\n"
+            "        - {operations: [write], paths: ['/artifacts/**'], mode: allow}\n"
+        ),
+    )
+    load_workflow(wf)  # must not raise
+
+
+def test_v15_fail_write_file_no_fs_permissions(tmp_path: Path) -> None:
+    """Bug 2 shape: agent has write_file but step has NO fs_permissions → error."""
+    wf = _make_workflow(
+        tmp_path,
+        agents={"writer.md": _WRITE_FILE_AGENT},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n"
+            "  steps:\n"
+            "    - {name: s, file: agents/writer.md}\n"
+        ),
+    )
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf)
+    assert any(
+        "write_file" in str(e) and "no fs_permissions" in str(e)
+        for e in ei.value.errors
+    )
+
+
+def test_v15_fail_write_file_only_read_permission(tmp_path: Path) -> None:
+    """Agent has write_file but fs_permissions only allows read → error."""
+    wf = _make_workflow(
+        tmp_path,
+        agents={"writer.md": _WRITE_FILE_AGENT},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n"
+            "  steps:\n"
+            "    - name: s\n"
+            "      file: agents/writer.md\n"
+            "      fs_permissions:\n"
+            "        - {operations: [read], paths: ['/artifacts/**'], mode: allow}\n"
+        ),
+    )
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf)
+    assert any(
+        "write_file" in str(e) and "no fs_permissions" in str(e)
+        for e in ei.value.errors
+    )
+
+
+def test_v15_pass_no_write_file_tool_empty_permissions(tmp_path: Path) -> None:
+    """A step that does NOT declare write_file → no error even with empty fs_permissions."""
+    wf = _make_workflow(
+        tmp_path,
+        agents={"reader.md": _READ_ONLY_AGENT},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n"
+            "  steps:\n"
+            "    - {name: s, file: agents/reader.md}\n"
+        ),
+    )
+    load_workflow(wf)  # must not raise
+
+
+def test_v15_fail_agent_gate_write_file_no_permission(tmp_path: Path) -> None:
+    """An AgentGate with write_file but no write fs_permissions triggers the same error."""
+    gate_agent = (
+        "---\n"
+        "name: gate-writer\n"
+        "tools: [write_file, complete_step]\n"
+        "output:\n"
+        "  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n"
+    )
+    wf = _make_workflow(
+        tmp_path,
+        agents={"stub.md": _OK_AGENT, "gate-writer.md": gate_agent},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n"
+            "  steps: [{name: s, file: agents/stub.md}]\n"
+            "  gates:\n"
+            "    - type: agent\n"
+            "      file: agents/gate-writer.md\n"
+            "      decide:\n"
+            "        - {else: true, action: {kind: continue}}\n"
+        ),
+    )
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf)
+    assert any(
+        "write_file" in str(e) and "no fs_permissions" in str(e)
+        for e in ei.value.errors
+    )

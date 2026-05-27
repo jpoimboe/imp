@@ -43,6 +43,7 @@ def validate(
         _v12_model_role_configured(workflow, configured_roles, errors)
     _v13_decide_missing_else(workflow, warnings)
     _v14_filename_matches_agent_name(workflow, errors)
+    _v15_write_tool_needs_write_permission(workflow, errors)
 
     return errors, warnings
 
@@ -337,3 +338,46 @@ def _v14_filename_matches_agent_name(
         for gate in phase.gates:
             if isinstance(gate, AgentGate):
                 check(gate.file, gate.source)
+
+
+def _v15_write_tool_needs_write_permission(
+    workflow: Workflow, errors: list[LoadError]
+) -> None:
+    """A step (or AgentGate) whose agent declares `write_file` in its tools
+    must have at least one fs_permissions rule with mode=='allow' and
+    'write' in operations.  Catches the Bug 2 class: agent can call
+    write_file but the step grants no write path, so every write silently
+    fails with PermissionDenied.
+    """
+
+    def _has_write_allow(fs_permissions: tuple[FsRule, ...]) -> bool:
+        return any(
+            rule.mode == "allow" and "write" in rule.operations
+            for rule in fs_permissions
+        )
+
+    def check(file: Path, fs_permissions: tuple[FsRule, ...], source: object) -> None:
+        agent = workflow.agents.get(file.stem)
+        if agent is None:
+            return  # V1 reports the missing-file case
+        if "write_file" not in agent.tools:
+            return
+        if not _has_write_allow(fs_permissions):
+            errors.append(
+                LoadError(
+                    f"agent {agent.name!r} declares tool 'write_file' but the "
+                    f"step/gate has no fs_permissions rule with "
+                    f"mode=allow and operation=write",
+                    source,  # type: ignore[arg-type]
+                )
+            )
+
+    for phase in workflow.phases:
+        for step in phase.steps:
+            check(step.file, step.fs_permissions, step.source)
+            for gate in step.gates:
+                if isinstance(gate, AgentGate):
+                    check(gate.file, gate.fs_permissions, gate.source)
+        for gate in phase.gates:
+            if isinstance(gate, AgentGate):
+                check(gate.file, gate.fs_permissions, gate.source)

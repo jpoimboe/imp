@@ -18,13 +18,14 @@ def _stub_provider_api_keys(
     the real env through (their own skipif handles the "no auth" case);
     ordinary tests get the stub so module-level provider construction works.
 
-    The Claude Code live test spawns `claude -p` as a subprocess, which falls
-    back to user subscription auth when ANTHROPIC_API_KEY is unset. Stubbing
-    it to "sk-test" makes the subprocess try the fake key and fail with
-    "Invalid API key". So we skip stubbing for any test file whose name
-    matches the live-API pattern.
+    The PTY live test and Claude Code live test spawn subprocesses that read
+    ANTHROPIC_API_KEY from the real env. Stubbing it to "sk-test" would give
+    the subprocess a fake key and cause 401 errors. Skip stubbing for test
+    files whose name matches the live-API patterns.
     """
     if "test_default_workflow_e2e_live" in str(request.node.fspath):
+        return
+    if "test_default_workflow_pty_live" in str(request.node.fspath):
         return
     if not os.environ.get("ANTHROPIC_API_KEY"):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")

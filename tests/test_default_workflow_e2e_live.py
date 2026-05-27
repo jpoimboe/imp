@@ -41,7 +41,7 @@ async def test_live_minimal_change_completes_one_step(
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
-        "---\nname: writer\ntools: [complete_step, write_file]\n"
+        "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n  note: {type: string}\n"
         "---\n"
         "You are testing imp. Call complete_step with status=Success and a one-word note.\n"
