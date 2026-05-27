@@ -259,3 +259,65 @@ def _fmt_tool_result_with_name(
         short = escaped
     label = tool_name if tool_name else "tool"
     return f"{label} → {short}"
+
+
+# ----------------------------------------------------------------------
+# Burst collapse: default mode only. A "burst" is a maximal run of
+# consecutive tool_call / tool_result events occurring inside a
+# step_started…step_completed window, with no non-tool event between
+# them. Each burst collapses to one synthetic "tools" event timestamped
+# at the last raw tool event in the burst.
+# ----------------------------------------------------------------------
+
+_TOOL_TYPES = frozenset({"tool_call", "tool_result"})
+
+
+def _collapse_tool_bursts(events):
+    """Generator wrapper over an event iterator.
+
+    Stateful: tracks an ``in_step`` flag toggled by ``step_started`` /
+    ``step_completed`` / ``step_exhausted`` events, and an in-progress
+    burst buffer (counts + last-timestamp). Any non-tool event flushes
+    the burst.
+    """
+    in_step = False
+    counts: dict[str, int] = {}
+    last_ts: str | None = None
+
+    def _flush():
+        nonlocal counts, last_ts
+        if counts:
+            ev = {
+                "timestamp": last_ts,
+                "type": "tools",
+                "payload": {"counts": dict(counts)},
+            }
+            counts = {}
+            last_ts = None
+            return ev
+        counts = {}
+        last_ts = None
+        return None
+
+    for e in events:
+        t = e.get("type")
+        if t in _TOOL_TYPES and in_step:
+            if t == "tool_call":
+                name = (e.get("payload") or {}).get("name") or "?"
+                counts[name] = counts.get(name, 0) + 1
+            last_ts = e.get("timestamp", last_ts)
+            continue
+        # Any non-tool event (or any tool event outside a step window)
+        # flushes the burst.
+        flushed = _flush()
+        if flushed is not None:
+            yield flushed
+        if t == "step_started":
+            in_step = True
+        elif t in ("step_completed", "step_exhausted"):
+            in_step = False
+        yield e
+    # End-of-stream: flush any pending burst.
+    flushed = _flush()
+    if flushed is not None:
+        yield flushed

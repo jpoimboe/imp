@@ -344,3 +344,80 @@ def test_resolve_tool_name_builds_running_map() -> None:
         elif e["type"] == "tool_call":
             render._record_tool_call(e["payload"], seen)
     assert seen == {"tu_1": "bash", "tu_2": "read"}
+
+
+def _ev(t: str, ts: str = "2026-05-27T10:00:00+00:00", **p) -> dict:
+    return {"timestamp": ts, "type": t, "payload": dict(p)}
+
+
+def test_collapse_happy_path_one_burst() -> None:
+    events = [
+        _ev("step_started", step="s1"),
+        _ev("tool_call", id="t1", name="bash", args={}),
+        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("tool_call", id="t2", name="bash", args={}),
+        _ev("tool_result", tool_call_id="t2", result="ok"),
+        _ev("tool_call", id="t3", name="ls",  args={}, ts="2026-05-27T10:00:09+00:00"),
+        _ev("tool_result", tool_call_id="t3", result="ok",
+            ts="2026-05-27T10:00:10+00:00"),
+        _ev("step_completed", step="s1", action="continue"),
+    ]
+    out = list(render._collapse_tool_bursts(events))
+    # step_started, tools, step_completed = 3 events
+    assert [e["type"] for e in out] == ["step_started", "tools", "step_completed"]
+    tools = out[1]
+    assert tools["payload"]["counts"] == {"bash": 2, "ls": 1}
+    # synthetic event inherits last tool event's timestamp
+    assert tools["timestamp"] == "2026-05-27T10:00:10+00:00"
+
+
+def test_collapse_split_by_non_tool_event() -> None:
+    events = [
+        _ev("step_started", step="s1"),
+        _ev("tool_call", id="t1", name="bash", args={}),
+        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("gate_evaluated", kind="script", action={"kind": "continue"}),
+        _ev("tool_call", id="t2", name="bash", args={}),
+        _ev("tool_result", tool_call_id="t2", result="ok"),
+        _ev("step_completed", step="s1", action="continue"),
+    ]
+    out = list(render._collapse_tool_bursts(events))
+    types = [e["type"] for e in out]
+    assert types == [
+        "step_started", "tools", "gate_evaluated", "tools", "step_completed",
+    ]
+
+
+def test_collapse_no_step_window_no_collapse() -> None:
+    # Outside step_started..step_completed, tool events pass through unchanged
+    # (current engine never emits them there, but the renderer should be safe).
+    events = [
+        _ev("tool_call", id="t1", name="bash", args={}),
+        _ev("tool_result", tool_call_id="t1", result="ok"),
+    ]
+    out = list(render._collapse_tool_bursts(events))
+    assert [e["type"] for e in out] == ["tool_call", "tool_result"]
+
+
+def test_collapse_burst_split_by_workflow_pause() -> None:
+    events = [
+        _ev("step_started", step="s1"),
+        _ev("tool_call", id="t1", name="bash", args={}),
+        _ev("workflow_paused", reason="ctrl-c"),
+        _ev("workflow_resumed"),
+        _ev("tool_call", id="t2", name="bash", args={}),
+        _ev("tool_result", tool_call_id="t2", result="ok"),
+        _ev("step_completed", step="s1", action="continue"),
+    ]
+    out = list(render._collapse_tool_bursts(events))
+    types = [e["type"] for e in out]
+    # First burst: just t1 → one tools. Then pause/resume. Then second burst.
+    assert types == [
+        "step_started", "tools",
+        "workflow_paused", "workflow_resumed",
+        "tools", "step_completed",
+    ]
+
+
+def test_collapse_empty_iterable() -> None:
+    assert list(render._collapse_tool_bursts(iter([]))) == []
