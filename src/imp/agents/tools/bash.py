@@ -49,7 +49,7 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
         stdout=PIPE,
         stderr=PIPE,
         cwd=cwd_path,
-        **kwargs,
+        **kwargs,  # type: ignore[arg-type]
     )
     ctx.running_processes.append(proc)
     try:
@@ -57,10 +57,10 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
 
-        async def _drain(stream, sink):
+        async def _drain(stream: object, sink: list[bytes]) -> None:
             if stream is None:
                 return
-            async for chunk in stream:
+            async for chunk in stream:  # type: ignore[attr-defined]
                 sink.append(chunk)
 
         async with anyio.create_task_group() as tg:

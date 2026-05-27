@@ -332,6 +332,7 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
     tmp_path: Path,
 ) -> None:
     from dataclasses import replace
+
     from imp.agents.transcript import Transcript
 
     (tmp_path / "art").mkdir()

@@ -222,7 +222,6 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     tmp_path: Path,
 ) -> None:
     from dataclasses import replace
-    from typing import Any
 
     from imp.agents.runner import Message, TextBlock
     from imp.agents.transcript import Transcript

@@ -10,6 +10,7 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from imp.agents.prompts import build_context, render_prompt

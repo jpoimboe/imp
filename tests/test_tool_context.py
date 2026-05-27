@@ -85,6 +85,7 @@ def test_terminate_running_processes_drains(tmp_path):
     """terminate_running_processes signals SIGTERM, waits, then SIGKILL.
     The registry is cleared regardless of whether the process honored SIGTERM."""
     import anyio
+
     from imp.agents.tools.context import ToolContext, terminate_running_processes
 
     ctx = ToolContext(

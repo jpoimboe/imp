@@ -413,9 +413,14 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
     bash returns with signal-killed returncode; runner emits tool_killed +
     interrupted error; transcript is valid (tool_use has its tool_result)."""
     from dataclasses import replace
+
     from imp.agents.transcript import Transcript
     from tests.anthropic_fakes import (
-        FakeAsyncAnthropic, response, tool_use as a_tool_use,
+        FakeAsyncAnthropic,
+        response,
+    )
+    from tests.anthropic_fakes import (
+        tool_use as a_tool_use,
     )
 
     (tmp_path / "art").mkdir()

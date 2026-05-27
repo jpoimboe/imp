@@ -166,10 +166,18 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     tmp_path: Path,
 ) -> None:
     from typing import Any
+
     from imp.providers.claude_code import ClaudeCodeProvider
     from tests.cc_fakes import (
-        FakeClaudeSDKClient, assistant, result as cc_result,
-        text, tool_use as cc_tool_use,
+        FakeClaudeSDKClient,
+        assistant,
+        text,
+    )
+    from tests.cc_fakes import (
+        result as cc_result,
+    )
+    from tests.cc_fakes import (
+        tool_use as cc_tool_use,
     )
 
     change = _seed_default_workflow(tmp_path)

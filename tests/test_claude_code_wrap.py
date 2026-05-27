@@ -151,6 +151,7 @@ async def test_wrap_bash_killed_records_state(tmp_path: Path) -> None:
     """_impl wrapper records signal-killed bash invocations on _RunState
     so the receive loop can emit tool_killed events later."""
     import json
+
     from imp.agents.tools import get_registry
     from imp.providers.claude_code import _RunState, _wrap_one
 
