@@ -254,11 +254,10 @@ def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
     else:
         cmd = ["less", "-F", "-R", "-X"]
 
-    # When the resolved pager is `less`, ensure the child environment
-    # carries a `LESS` value.  Default to `LESS=FRX` if the user hasn't
-    # set it, so `PAGER=less` behaves the same as the unset-PAGER default
-    # (`less -FRX`).  When the user has already set `LESS`, pass their
-    # value through unchanged.
+    # When the resolved pager is `less`, always pass an explicit `LESS`
+    # value to the child env: use the user's existing value if set,
+    # otherwise default to `FRX` so that `PAGER=less` behaves the same
+    # as the unset-PAGER default (`less -FRX`).
     env: dict[str, str] | None = None
     if os.path.basename(cmd[0]) == "less":
         less_val = os.environ.get("LESS", "FRX")
