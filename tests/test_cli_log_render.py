@@ -85,3 +85,34 @@ def test_fmt_workflow_paused_no_reason() -> None:
 def test_fmt_workflow_resumed() -> None:
     s = render._fmt_workflow_resumed({}, full=False, color=False)
     assert s == "resumed"
+
+
+def test_fmt_phase_started() -> None:
+    s = render._fmt_phase_started({"phase": "design"}, full=False, color=False)
+    assert s == "design"
+
+
+def test_fmt_phase_completed_no_color() -> None:
+    s = render._fmt_phase_completed(
+        {"phase": "design", "action": "next"}, full=False, color=False,
+    )
+    assert s == "design  → next"
+
+
+def test_fmt_phase_completed_color_accents_action() -> None:
+    s = render._fmt_phase_completed(
+        {"phase": "design", "action": "loop"}, full=False, color=True,
+    )
+    # arrow dimmed, action green
+    assert "\x1b[2m→\x1b[0m" in s
+    assert "\x1b[32mloop\x1b[0m" in s
+
+
+def test_fmt_phase_exhausted() -> None:
+    s = render._fmt_phase_exhausted({"phase": "design"}, full=False, color=False)
+    assert s == "design  → exhausted"
+
+
+def test_fmt_phase_exhausted_color() -> None:
+    s = render._fmt_phase_exhausted({"phase": "design"}, full=False, color=True)
+    assert "\x1b[31mexhausted\x1b[0m" in s

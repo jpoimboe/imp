@@ -47,6 +47,34 @@ def should_use_color(stream: Any) -> bool:
 
 
 # ----------------------------------------------------------------------
+# Accent verb colors for action fields on *_completed / *_exhausted events.
+# ----------------------------------------------------------------------
+
+_ACCENT: dict[str, str] = {
+    "next":      "green",
+    "loop":      "green",
+    "continue":  "green",
+    "retry":     "yellow",
+    "pause":     "cyan",
+    "goto":      "cyan",
+    "exhausted": "red",
+}
+
+
+def _accent_action(action: str, color: bool) -> str:
+    """Color the action token per the §5 palette. Unknown actions render
+    plain."""
+    code = _ACCENT.get(action)
+    if code is None:
+        return action
+    return _style(action, code, enabled=color)
+
+
+def _arrow(color: bool) -> str:
+    return _style("→", "dim", enabled=color)
+
+
+# ----------------------------------------------------------------------
 # Per-event formatters. Each returns the summary text only (no timestamp,
 # no type column, no indent). ``full`` only affects tool_call/tool_result;
 # every other formatter ignores it.
@@ -69,3 +97,18 @@ def _fmt_workflow_paused(p: dict[str, Any], full: bool, color: bool) -> str:
 
 def _fmt_workflow_resumed(p: dict[str, Any], full: bool, color: bool) -> str:
     return "resumed"
+
+
+def _fmt_phase_started(p: dict[str, Any], full: bool, color: bool) -> str:
+    return str(p.get("phase", "?"))
+
+
+def _fmt_phase_completed(p: dict[str, Any], full: bool, color: bool) -> str:
+    phase = p.get("phase", "?")
+    action = str(p.get("action", "?"))
+    return f"{phase}  {_arrow(color)} {_accent_action(action, color)}"
+
+
+def _fmt_phase_exhausted(p: dict[str, Any], full: bool, color: bool) -> str:
+    phase = p.get("phase", "?")
+    return f"{phase}  {_arrow(color)} {_accent_action('exhausted', color)}"
