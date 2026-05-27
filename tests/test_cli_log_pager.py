@@ -281,3 +281,109 @@ def test_less_env_not_set_for_non_less_pager(
     env = popen.call_args.kwargs.get("env")
     if env is not None:
         assert "LESS" not in env
+
+
+def test_broken_pipe_on_write_swallowed_and_child_reaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the pager exits (e.g. user pressed `q`), `proc.stdin.write` raises
+    BrokenPipeError. The helper must swallow it, then still close stdin and
+    wait() the child."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.delenv("PAGER", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.stdin.write.side_effect = BrokenPipeError("pager gone")
+    proc.wait = MagicMock(return_value=0)
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc):
+        # Must not raise.
+        _page_or_print(iter(["alpha", "beta"]), no_pager=False)
+
+    proc.stdin.close.assert_called_once()
+    proc.wait.assert_called_once()
+
+
+def test_broken_pipe_on_close_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`proc.stdin.close()` can itself raise BrokenPipeError if the buffered
+    write hasn't flushed yet and the pager is gone. Suppressed; `wait()`
+    still runs."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.delenv("PAGER", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.stdin.close.side_effect = BrokenPipeError("pager gone before flush")
+    proc.wait = MagicMock(return_value=0)
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc):
+        _page_or_print(iter(["alpha"]), no_pager=False)
+
+    proc.wait.assert_called_once()
+
+
+def test_other_write_exception_cleans_up_and_propagates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-BrokenPipe exception during writes must propagate, but
+    cleanup (`close()` + `wait()`) must still run via the `finally` block."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.delenv("PAGER", raising=False)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.stdin.write.side_effect = RuntimeError("boom")
+    proc.wait = MagicMock(return_value=0)
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc):
+        with pytest.raises(RuntimeError, match="boom"):
+            _page_or_print(iter(["alpha"]), no_pager=False)
+
+    proc.stdin.close.assert_called_once()
+    proc.wait.assert_called_once()
+
+
+def test_missing_pager_falls_back_to_print(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """If `Popen` raises FileNotFoundError (pager binary missing), the
+    helper silently degrades to inline print. No warning, no exit."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.setenv("PAGER", "nope-not-a-real-pager-xyz")
+
+    with patch(
+        "imp.cli.main.subprocess.Popen",
+        side_effect=FileNotFoundError(2, "No such file", "nope-not-a-real-pager-xyz"),
+    ):
+        _page_or_print(iter(["alpha", "beta"]), no_pager=False)
+
+    out = capsys.readouterr().out
+    assert out == "alpha\nbeta\n"
+
+
+def test_missing_pager_oserror_falls_back_to_print(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`Popen` can also raise generic OSError (e.g. PermissionError, which
+    is an OSError subclass). Also degrades to print()."""
+    from imp.cli.main import _page_or_print
+
+    _fake_tty_stdout(monkeypatch, isatty=True)
+    monkeypatch.setenv("PAGER", "/etc/passwd")  # not executable
+
+    with patch(
+        "imp.cli.main.subprocess.Popen",
+        side_effect=PermissionError(13, "Permission denied"),
+    ):
+        _page_or_print(iter(["alpha"]), no_pager=False)
+
+    assert capsys.readouterr().out == "alpha\n"
