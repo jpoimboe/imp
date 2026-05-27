@@ -275,3 +275,52 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     parent_results = [e for e in events if e["type"] == "tool_result"]
     assert any('"Success"' in (r["payload"].get("content") or "")
                for r in parent_results)
+
+
+@pytest.mark.anyio
+async def test_interactive_resume_from_prompt_user_prompts_then_continues(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+    from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv = replace(inv, interactive=True)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(
+        role="assistant",
+        content=(TextBlock(text="anything else to clarify?"),),
+    ))
+
+    fake = FakeAsyncOpenAI([
+        completion(message(
+            content="done",
+            tool_calls=[tool_call("c1", "complete_step", {"status": "Success"})],
+        )),
+    ])
+    user_inputs = iter(["nothing, proceed"])
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini",
+        client_factory=lambda: fake,
+        user_input_fn=lambda _prompt: next(user_inputs),
+    )
+
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    kinds = [e["type"] for e in events]
+    user_idx = kinds.index("user_input")
+    msg_idx = kinds.index("agent_message")
+    assert user_idx < msg_idx
+    assert kinds[-1] == "agent_output"
+    loaded = t.load()
+    assert len(loaded) == 4
+    assert loaded[2].role == "user"

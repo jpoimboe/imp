@@ -201,9 +201,15 @@ class OpenAIAgentRunner:
     """Mirrors AnthropicAgentRunner.run; differences live in the translation
     helpers above and in the API call below."""
 
-    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
+    def __init__(
+        self, model_name: str,
+        *,
+        client_factory: Any = None,
+        user_input_fn: Any = None,
+    ) -> None:
         self.model = model_name                     # public per Provider protocol
         self._client_factory = client_factory
+        self._user_input_fn = user_input_fn
         self._client: Any = None
         self._cancel = False
 
@@ -221,11 +227,13 @@ class OpenAIAgentRunner:
         child for the task tool. Provider constraint per spec §6.13: subagent
         runs on the same provider as parent."""
         client_factory = self._client_factory
+        user_input_fn = self._user_input_fn
 
         async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
             child = OpenAIAgentRunner(
                 model_name=sub_invocation.model_name,
                 client_factory=client_factory,
+                user_input_fn=user_input_fn,
             )
             return child.run(sub_invocation)
 
@@ -264,6 +272,8 @@ class OpenAIAgentRunner:
         )
         ctx.change_context = invocation.change_context
         ctx.spawn_subagent = self._make_spawn_subagent()
+        if self._user_input_fn is not None:
+            ctx.user_input_fn = self._user_input_fn
 
         try:
             async for ev in self._run_loop(invocation, transcript, tools, ctx):
@@ -295,9 +305,23 @@ class OpenAIAgentRunner:
                     "message": "autonomous agent transcript ended without complete_step",
                 }}
                 return
-            # TODO(plan-3): same PROMPT_USER limitation as the Anthropic runner;
-            # see providers/anthropic.py:192-197. Plan 3's cli/signals.py work
-            # finalizes the interactive-resume path.
+            if state is ResumeState.PROMPT_USER:
+                if ctx.user_input_fn is None:
+                    yield {"type": "error", "payload": {
+                        "kind": "no_user_input_fn",
+                        "message": (
+                            "PROMPT_USER resume requires user_input_fn; "
+                            "none installed by runner"
+                        ),
+                    }}
+                    return
+                user_text = ctx.user_input_fn("")
+                user_msg = Message(
+                    role="user", content=(TextBlock(text=user_text),),
+                )
+                messages.append(user_msg)
+                transcript.append(user_msg)
+                yield {"type": "user_input", "payload": {"text": user_text}}
         else:
             messages = []
             for m in invocation.initial_messages:
