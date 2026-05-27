@@ -74,6 +74,13 @@ def _arrow(color: bool) -> str:
     return _style("→", "dim", enabled=color)
 
 
+def _elide(s: str, limit: int) -> str:
+    """Truncate to ``limit`` chars, appending the ``…`` token when cut."""
+    if len(s) <= limit:
+        return s
+    return s[:limit] + "…"
+
+
 # ----------------------------------------------------------------------
 # Per-event formatters. Each returns the summary text only (no timestamp,
 # no type column, no indent). ``full`` only affects tool_call/tool_result;
@@ -141,3 +148,68 @@ def _fmt_step_resumed_with_cached_output(
     p: dict[str, Any], full: bool, color: bool,
 ) -> str:
     return f"{p.get('step', '?')}  (cached)"
+
+
+def _fmt_gate_evaluated(p: dict[str, Any], full: bool, color: bool) -> str:
+    # Legacy shape: {phase|step, gate_type, action: <str>}
+    if "gate_type" in p:
+        target = p.get("phase") or p.get("step") or "?"
+        action = str(p.get("action", "?"))
+        return (
+            f"{p['gate_type']} on {target}  "
+            f"{_arrow(color)} {_accent_action(action, color)}"
+        )
+    # Modern shape: {kind, gate?, action: {kind, target?}, ...}
+    kind = str(p.get("kind", "?"))
+    action_d = p.get("action") or {}
+    if isinstance(action_d, dict):
+        a_kind = str(action_d.get("kind", "?"))
+        if a_kind == "goto" and "target" in action_d:
+            # Apply the cyan accent to the whole "goto(target)" token.
+            action_styled = _style(
+                f"goto({action_d['target']})", "cyan", enabled=color,
+            )
+        else:
+            action_styled = _accent_action(a_kind, color)
+    else:
+        action_styled = _accent_action(str(action_d), color)
+    label = f"{p['gate']} ({kind})" if "gate" in p else f"{kind} gate"
+    return f"{label}  {_arrow(color)} {action_styled}"
+
+
+def _fmt_script_gate_result(p: dict[str, Any], full: bool, color: bool) -> str:
+    rc = p.get("exit", "?")
+    if rc == 0:
+        return f"{_arrow(color)} exit={rc}"
+    stderr = (p.get("stderr") or "").splitlines()
+    first_line = stderr[0] if stderr else ""
+    if first_line:
+        return f"{_arrow(color)} exit={rc}  {_elide(first_line, 60)}"
+    return f"{_arrow(color)} exit={rc}"
+
+
+def _fmt_agent_output(p: dict[str, Any], full: bool, color: bool) -> str:
+    items = list(p.items())[:2]
+    return " ".join(f"{k}={_elide(str(v), 60)}" for k, v in items)
+
+
+def _fmt_error(p: dict[str, Any], full: bool, color: bool) -> str:
+    return _elide(str(p.get("message", "?")), 80)
+
+
+def _fmt_tools(p: dict[str, Any], full: bool, color: bool) -> str:
+    counts = p.get("counts") or {}
+    total = sum(counts.values())
+    by_count = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    parts = ", ".join(f"{n} {name}" for name, n in by_count)
+    return f"{total} calls  ({parts})"
+
+
+def _fmt_unknown(p: dict[str, Any], full: bool, color: bool) -> str:
+    if not isinstance(p, dict):
+        return _elide(repr(p), 80)
+    return " ".join(f"{k}={_elide(str(v), 60)}" for k, v in p.items())
+
+
+def _fmt_malformed(event: Any, full: bool, color: bool) -> str:
+    return _elide(repr(event), 80)

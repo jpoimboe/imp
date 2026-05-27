@@ -170,3 +170,109 @@ def test_fmt_step_resumed_with_cached_output() -> None:
         {"step": "spec-writer"}, full=False, color=False,
     )
     assert s == "spec-writer  (cached)"
+
+
+def test_fmt_gate_evaluated_modern_with_gate_name() -> None:
+    s = render._fmt_gate_evaluated(
+        {"kind": "agent", "gate": "spec-lint",
+         "action": {"kind": "continue"}},
+        full=False, color=False,
+    )
+    assert s == "spec-lint (agent)  → continue"
+
+
+def test_fmt_gate_evaluated_modern_without_gate_name() -> None:
+    s = render._fmt_gate_evaluated(
+        {"kind": "human", "action": {"kind": "retry"}},
+        full=False, color=False,
+    )
+    assert s == "human gate  → retry"
+
+
+def test_fmt_gate_evaluated_modern_goto_target() -> None:
+    s = render._fmt_gate_evaluated(
+        {"kind": "agent", "gate": "review",
+         "action": {"kind": "goto", "target": "implement"}},
+        full=False, color=False,
+    )
+    assert s == "review (agent)  → goto(implement)"
+
+
+def test_fmt_gate_evaluated_legacy_shape() -> None:
+    s = render._fmt_gate_evaluated(
+        {"phase": "onboard", "gate_type": "HumanGate", "action": "continue"},
+        full=False, color=False,
+    )
+    assert s == "HumanGate on onboard  → continue"
+
+
+def test_fmt_gate_evaluated_legacy_on_step() -> None:
+    s = render._fmt_gate_evaluated(
+        {"step": "spec-writer", "gate_type": "ScriptGate", "action": "retry"},
+        full=False, color=False,
+    )
+    assert s == "ScriptGate on spec-writer  → retry"
+
+
+def test_fmt_script_gate_result_success() -> None:
+    s = render._fmt_script_gate_result(
+        {"exit": 0, "stdout": "ok", "stderr": ""}, full=False, color=False,
+    )
+    assert s == "→ exit=0"
+
+
+def test_fmt_script_gate_result_failure_with_stderr() -> None:
+    s = render._fmt_script_gate_result(
+        {"exit": 1, "stdout": "", "stderr": "boom: file missing\nignored line two"},
+        full=False, color=False,
+    )
+    assert s == "→ exit=1  boom: file missing"
+
+
+def test_fmt_script_gate_result_failure_long_stderr_elided() -> None:
+    long = "x" * 200
+    s = render._fmt_script_gate_result(
+        {"exit": 2, "stdout": "", "stderr": long}, full=False, color=False,
+    )
+    # 60 chars then ellipsis token
+    assert "…" in s
+    assert s.startswith("→ exit=2  ")
+
+
+def test_fmt_agent_output_two_keys_truncated() -> None:
+    s = render._fmt_agent_output(
+        {"status": "Success", "summary": "x" * 100, "extra": "y"},
+        full=False, color=False,
+    )
+    # first two pairs only; summary value truncated to 60
+    assert s.startswith("status=Success summary=")
+    assert "extra" not in s  # third key omitted
+    assert "…" in s
+
+
+def test_fmt_error_truncates_to_80() -> None:
+    s = render._fmt_error({"message": "z" * 200}, full=False, color=False)
+    assert len(s) <= 81  # 80 chars + ellipsis token
+    assert "…" in s
+
+
+def test_fmt_tools_synthetic() -> None:
+    s = render._fmt_tools(
+        {"counts": {"bash": 3, "ls": 1, "read": 2}}, full=False, color=False,
+    )
+    # total = 6, sorted by count desc
+    assert s == "6 calls  (3 bash, 2 read, 1 ls)"
+
+
+def test_fmt_unknown_renders_kv_pairs() -> None:
+    s = render._fmt_unknown(
+        {"a": "alpha", "b": "b" * 100}, full=False, color=False,
+    )
+    assert s.startswith("a=alpha b=")
+    assert "…" in s
+
+
+def test_fmt_malformed() -> None:
+    s = render._fmt_malformed({"not": "an event"}, full=False, color=False)
+    assert s.startswith("{")  # repr of the raw object
+    assert len(s) <= 80
