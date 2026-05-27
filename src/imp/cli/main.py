@@ -20,7 +20,7 @@ import anyio
 from imp.cli.chat import ChatRenderer
 from imp.cli.init import run_init
 from imp.cli.prompt import Prompt
-from imp.cli.signals import install_process_group, pause_and_exit, tool_kill_escalation
+from imp.cli.signals import install_process_group, pause_and_exit
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
@@ -58,6 +58,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     project = _project_root()
     lock = ProjectLock(project / ".imp" / "lock")
+    from imp.cli.signals import InterruptCoordinator
+
     try:
         with lock.acquire():
             try:
@@ -70,31 +72,39 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 print(f"Created Change {change.id}: {change.title!r}")
                 prompt = Prompt()
                 renderer = ChatRenderer()
+                coord = InterruptCoordinator()
+                rc = 0
                 try:
-                    result = await run_change(
-                        change,
-                        on_event=renderer.handle,
-                        human_input_fn=lambda: prompt.ask("> "),
-                        human_output_fn=renderer.line,
-                    )
-                except (LoadError, LoadErrors) as e:
-                    print(f"imp: {e}", file=sys.stderr)
-                    return 2
-                except KeyboardInterrupt:
-                    print("\n(interrupting...)", file=sys.stderr)
-                    # 2s blocking sleep — intentional, user is waiting for clean exit
-                    tool_kill_escalation(timeout=2.0)
-                    pause_and_exit(change, reason="ctrl-c")
-                    print(f"\nChange {change.id}: paused (ctrl-c)")
-                    return 130
-                except EOFError:
-                    pause_and_exit(change, reason="ctrl-d")
-                    print(f"\nChange {change.id}: paused (ctrl-d)")
-                    return 130
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(coord.run_signal_receiver)
+                        try:
+                            result = await run_change(
+                                change,
+                                on_event=renderer.handle,
+                                human_input_fn=lambda: prompt.ask("> "),
+                                human_output_fn=renderer.line,
+                                coordinator=coord,
+                            )
+                        except (LoadError, LoadErrors) as e:
+                            print(f"imp: {e}", file=sys.stderr)
+                            rc = 2
+                        except EOFError:
+                            pause_and_exit(change, reason="ctrl-d")
+                            print(f"\nChange {change.id}: paused (ctrl-d)")
+                            rc = 130
+                        else:
+                            if coord.should_pause:
+                                pause_and_exit(change, reason="ctrl-c")
+                                print(f"\nChange {change.id}: paused (ctrl-c)")
+                                rc = 130
+                            else:
+                                print(f"Change {change.id}: {result.value}")
+                                rc = 0 if result is RunResult.COMPLETED else 1
+                        finally:
+                            tg.cancel_scope.cancel()
                 finally:
                     renderer.close()
-                print(f"Change {change.id}: {result.value}")
-                return 0 if result is RunResult.COMPLETED else 1
+                return rc
             finally:
                 _clear_change_lock(change)
     except LockHeld as lock_err:
@@ -125,6 +135,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     project = _project_root()
     lock = ProjectLock(project / ".imp" / "lock")
+    from imp.cli.signals import InterruptCoordinator
+
     try:
         with lock.acquire():
             try:
@@ -146,37 +158,44 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 print(f"Phase: {state.phase}, step: {state.step}")
                 prompt = Prompt()
                 renderer = ChatRenderer()
+                coord = InterruptCoordinator()
+                rc = 0
                 try:
                     renderer.handle({"type": "workflow_resumed", "payload": {}})
                     change.event_log().append("workflow_resumed", {})
                     _replay_current_step(change, state, renderer)
                     state.status = "running"
                     state.save(change.state_dir)
-                    try:
-                        result = await run_change(
-                            change,
-                            on_event=renderer.handle,
-                            human_input_fn=lambda: prompt.ask("> "),
-                            human_output_fn=renderer.line,
-                        )
-                    except (LoadError, LoadErrors) as e:
-                        print(f"imp: {e}", file=sys.stderr)
-                        return 2
-                    except KeyboardInterrupt:
-                        print("\n(interrupting...)", file=sys.stderr)
-                        # 2s blocking sleep — intentional, user is waiting for clean exit
-                        tool_kill_escalation(timeout=2.0)
-                        pause_and_exit(change, reason="ctrl-c")
-                        print(f"\nChange {change.id}: paused (ctrl-c)")
-                        return 130
-                    except EOFError:
-                        pause_and_exit(change, reason="ctrl-d")
-                        print(f"\nChange {change.id}: paused (ctrl-d)")
-                        return 130
-                    print(f"Change {change.id}: {result.value}")
-                    return 0 if result is RunResult.COMPLETED else 1
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(coord.run_signal_receiver)
+                        try:
+                            result = await run_change(
+                                change,
+                                on_event=renderer.handle,
+                                human_input_fn=lambda: prompt.ask("> "),
+                                human_output_fn=renderer.line,
+                                coordinator=coord,
+                            )
+                        except (LoadError, LoadErrors) as e:
+                            print(f"imp: {e}", file=sys.stderr)
+                            rc = 2
+                        except EOFError:
+                            pause_and_exit(change, reason="ctrl-d")
+                            print(f"\nChange {change.id}: paused (ctrl-d)")
+                            rc = 130
+                        else:
+                            if coord.should_pause:
+                                pause_and_exit(change, reason="ctrl-c")
+                                print(f"\nChange {change.id}: paused (ctrl-c)")
+                                rc = 130
+                            else:
+                                print(f"Change {change.id}: {result.value}")
+                                rc = 0 if result is RunResult.COMPLETED else 1
+                        finally:
+                            tg.cancel_scope.cancel()
                 finally:
                     renderer.close()
+                return rc
             finally:
                 _clear_change_lock(change)
     except LockHeld as lock_err:
