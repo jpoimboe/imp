@@ -23,6 +23,7 @@ import json
 import os
 import select
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -196,6 +197,17 @@ def test_full_default_workflow_via_pty_events_driven(tmp_path: Path) -> None:
     )
     os.close(slave)
 
+    # start_new_session=True puts the subprocess in its own PG so Ctrl-C from
+    # the user's terminal does NOT reach it. Pytest's default SIGINT handler
+    # also defers KeyboardInterrupt until between tests. Install our own
+    # SIGINT handler so the first Ctrl-C kills the subprocess PG and aborts
+    # this test immediately.
+    def _on_sigint(_signum: int, _frame: Any) -> None:
+        with contextlib.suppress(OSError, ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        raise KeyboardInterrupt
+    _prev_sigint = signal.signal(signal.SIGINT, _on_sigint)
+
     events_file = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
 
     # Per spec: 720s wall-clock cap accommodates max_retries: 3 left intact.
@@ -366,9 +378,12 @@ def test_full_default_workflow_via_pty_events_driven(tmp_path: Path) -> None:
                 f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
             )
     finally:
+        signal.signal(signal.SIGINT, _prev_sigint)
         with contextlib.suppress(OSError):
             os.close(master)
         if proc.poll() is None:
+            with contextlib.suppress(OSError, ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
             proc.kill()
             proc.wait()
 
