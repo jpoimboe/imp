@@ -213,3 +213,49 @@ def _fmt_unknown(p: dict[str, Any], full: bool, color: bool) -> str:
 
 def _fmt_malformed(event: Any, full: bool, color: bool) -> str:
     return _elide(repr(event), 80)
+
+
+# ----------------------------------------------------------------------
+# Tool-call name resolver. Used in full mode to label tool_result lines.
+# ----------------------------------------------------------------------
+
+def _record_tool_call(payload: dict[str, Any], names: dict[str, str]) -> None:
+    """Record ``tool_call_id → tool_name`` so subsequent ``tool_result``
+    events can be labeled."""
+    tcid = payload.get("id")
+    name = payload.get("name")
+    if isinstance(tcid, str) and isinstance(name, str):
+        names[tcid] = name
+
+
+def _lookup_tool_name(tcid: Any, names: dict[str, str]) -> str | None:
+    if isinstance(tcid, str):
+        return names.get(tcid)
+    return None
+
+
+def _fmt_tool_call(p: dict[str, Any], full: bool, color: bool) -> str:
+    name = p.get("name", "tool")
+    args = p.get("args") or p.get("input") or {}
+    if isinstance(args, dict):
+        parts = " ".join(f"{k}={_elide(str(v), 60)}" for k, v in args.items())
+    else:
+        parts = _elide(str(args), 60)
+    return f"{name}  ({parts})"
+
+
+def _fmt_tool_result_with_name(
+    p: dict[str, Any], *, tool_name: str | None, full: bool, color: bool,
+) -> str:
+    raw = p.get("result")
+    if raw is None:
+        raw = p.get("content", "")
+    s = str(raw)
+    # Escape newlines so each event is one line.
+    escaped = s.replace("\n", "\\n")
+    if len(escaped) > 80:
+        short = f"{escaped[:80]}… ({len(s)} chars)"
+    else:
+        short = escaped
+    label = tool_name if tool_name else "tool"
+    return f"{label} → {short}"

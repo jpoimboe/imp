@@ -276,3 +276,71 @@ def test_fmt_malformed() -> None:
     s = render._fmt_malformed({"not": "an event"}, full=False, color=False)
     assert s.startswith("{")  # repr of the raw object
     assert len(s) <= 80
+
+
+def test_fmt_tool_call_args_keyvalue() -> None:
+    s = render._fmt_tool_call(
+        {"id": "tu_1", "name": "bash", "args": {"command": "ls", "timeout": 5}},
+        full=True, color=False,
+    )
+    assert s.startswith("bash  (")
+    assert "command=ls" in s
+    assert "timeout=5" in s
+
+
+def test_fmt_tool_call_long_arg_elided() -> None:
+    long = "x" * 200
+    s = render._fmt_tool_call(
+        {"id": "tu_1", "name": "bash", "args": {"command": long}},
+        full=True, color=False,
+    )
+    assert "…" in s
+
+
+def test_fmt_tool_result_with_known_name() -> None:
+    # Result formatter takes the resolved tool_name as a parameter.
+    s = render._fmt_tool_result_with_name(
+        {"tool_call_id": "tu_1", "result": "ok\nhello"},
+        tool_name="bash", full=True, color=False,
+    )
+    # newlines escaped, no elision needed
+    assert s == "bash → ok\\nhello"
+
+
+def test_fmt_tool_result_long_content_elided_with_charcount() -> None:
+    long = "y" * 500
+    s = render._fmt_tool_result_with_name(
+        {"tool_call_id": "tu_1", "result": long},
+        tool_name="bash", full=True, color=False,
+    )
+    assert s.startswith("bash → ")
+    assert "… (500 chars)" in s
+
+
+def test_fmt_tool_result_unknown_name_renders_tool() -> None:
+    # When the resolver couldn't find a name (orphan tool_result), the
+    # literal label "tool" is used.
+    s = render._fmt_tool_result_with_name(
+        {"tool_call_id": "ghost", "result": "x"},
+        tool_name=None, full=True, color=False,
+    )
+    assert s == "tool → x"
+
+
+def test_resolve_tool_name_builds_running_map() -> None:
+    events = [
+        {"type": "tool_call",
+         "payload": {"id": "tu_1", "name": "bash", "args": {}}},
+        {"type": "tool_result",
+         "payload": {"tool_call_id": "tu_1", "result": "ok"}},
+        {"type": "tool_call",
+         "payload": {"id": "tu_2", "name": "read", "args": {}}},
+    ]
+    seen: dict[str, str | None] = {}
+    for e in events:
+        if e["type"] == "tool_result":
+            name = render._lookup_tool_name(e["payload"].get("tool_call_id"), seen)
+            assert name == "bash"
+        elif e["type"] == "tool_call":
+            render._record_tool_call(e["payload"], seen)
+    assert seen == {"tu_1": "bash", "tu_2": "read"}
