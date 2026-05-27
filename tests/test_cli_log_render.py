@@ -1,0 +1,51 @@
+"""Tests for the imp log renderer (src/imp/cli/render.py)."""
+
+from __future__ import annotations
+
+import io
+import os
+
+import pytest
+
+from imp.cli import render
+
+
+def test_style_disabled_returns_plain_text() -> None:
+    assert render._style("hi", "red", enabled=False) == "hi"
+
+
+def test_style_enabled_wraps_in_ansi() -> None:
+    out = render._style("hi", "red", enabled=True)
+    assert out == "\x1b[31mhi\x1b[0m"
+
+
+def test_style_multiple_codes() -> None:
+    out = render._style("hi", "bold", "magenta", enabled=True)
+    # codes concatenated in order, single reset
+    assert out == "\x1b[1m\x1b[35mhi\x1b[0m"
+
+
+def test_should_use_color_off_when_not_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    stream = io.StringIO()  # not a tty
+    assert render.should_use_color(stream) is False
+
+
+def test_should_use_color_off_when_no_color_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    class FakeTTY:
+        def isatty(self) -> bool:
+            return True
+
+    assert render.should_use_color(FakeTTY()) is False
+
+
+def test_should_use_color_on_when_tty_and_no_no_color(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    class FakeTTY:
+        def isatty(self) -> bool:
+            return True
+
+    assert render.should_use_color(FakeTTY()) is True
