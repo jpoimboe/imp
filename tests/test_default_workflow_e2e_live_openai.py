@@ -1,8 +1,8 @@
 """Live end-to-end test of the OpenAI runner against the real API.
 
-Skips without OPENAI_API_KEY. Costs ~1 cent per run. Tests the whole stack:
-provider resolution → message translation → API call → tool dispatch →
-complete_step → agent_output validation.
+Skips without OPENAI_API_KEY env var or ~/.openai-key file. Costs ~1 cent
+per run. Tests the whole stack: provider resolution → message translation →
+API call → tool dispatch → complete_step → agent_output validation.
 """
 
 from __future__ import annotations
@@ -16,17 +16,33 @@ from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 
 
+def _openai_key() -> str | None:
+    """Resolve OpenAI API key from env var or `~/.openai-key` file."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if key:
+        return key
+    key_file = Path.home() / ".openai-key"
+    if key_file.exists():
+        return key_file.read_text().strip()
+    return None
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
 
 
 @pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set; skip live OpenAI walk",
+    not _openai_key(),
+    reason="live test requires OPENAI_API_KEY env var or ~/.openai-key file",
 )
 @pytest.mark.anyio
-async def test_one_step_walk_against_openai(tmp_path: Path) -> None:
+async def test_one_step_walk_against_openai(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key = _openai_key()
+    assert key is not None  # guaranteed by skipif
+    monkeypatch.setenv("OPENAI_API_KEY", key)
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
