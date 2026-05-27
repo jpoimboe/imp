@@ -124,6 +124,62 @@ async def test_step_level_human_gate_uses_renderer(tmp_path: Path) -> None:
     assert any("HUMAN GATE" in line for line in captured)
 
 
+@pytest.mark.anyio
+async def test_human_gate_pending_emitted_once_before_action(
+    tmp_path: Path,
+) -> None:
+    """`human_gate_pending` is emitted exactly once per gate invocation,
+    immediately before `gate_evaluated`. Re-prompts on invalid input do not
+    re-emit."""
+    from imp.engine.change import Change
+    from imp.engine.executor import run_change
+
+    wf = tmp_path / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [only]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
+        "only:\n"
+        "  steps: []\n"
+        "  gates:\n"
+        "    - type: human\n"
+        "      prompt: Continue?\n"
+        "      options:\n"
+        "        - {label: Yes, action: {kind: continue}}\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
+    )
+    change = Change.create(tmp_path, title="t")
+
+    # Drive the human gate: first an empty answer (re-prompt), then "1".
+    answers = iter(["", "1"])
+    events: list[dict] = []
+
+    await run_change(
+        change,
+        on_event=events.append,
+        human_input_fn=lambda: next(answers),
+        human_output_fn=lambda _msg: None,
+    )
+
+    pendings = [e for e in events if e["type"] == "human_gate_pending"]
+    assert len(pendings) == 1, (
+        f"expected 1 human_gate_pending event, got {len(pendings)}; "
+        f"all types: {[e['type'] for e in events]}"
+    )
+    pending_idx = events.index(pendings[0])
+    gate_eval_idx = next(
+        i for i, e in enumerate(events)
+        if e["type"] == "gate_evaluated" and e["payload"].get("kind") == "human"
+    )
+    assert pending_idx < gate_eval_idx
+    payload = pendings[0]["payload"]
+    assert payload["phase"] == "only"
+    assert payload["prompt"] == "Continue?"
+    assert payload["options"] == [{"label": "Yes"}]
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
