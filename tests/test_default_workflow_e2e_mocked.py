@@ -116,3 +116,99 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     )
     # 6 human gates: onboard, spec, design, plan, review, merge.
     assert answer_count[0] == 6
+
+
+@pytest.mark.anyio
+async def test_full_default_workflow_completes_with_canned_openai(
+    tmp_path: Path,
+) -> None:
+    from imp.providers.openai import OpenAIProvider
+    from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
+
+    change = _seed_default_workflow(tmp_path)
+    # Rewrite config to OpenAI provider for every role.
+    cfg = tmp_path / ".imp" / "config.yaml"
+    cfg.write_text(cfg.read_text().replace(
+        "{provider: anthropic, model: claude-sonnet-4-6}",
+        "{provider: openai, model: gpt-4o-mini}",
+    ))
+
+    default_completion = completion(message(
+        content=None,
+        tool_calls=[tool_call("c0", "complete_step", {
+            "status": "Success", "verdict": "approve",
+            "summary": "ok", "notes": "ok",
+            "spec": "stub", "design": "stub", "plan": "stub",
+        })],
+    ))
+    fake = FakeAsyncOpenAI([], default_response=default_completion)
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "openai", env_check=lambda: True,
+        factory=lambda model: OpenAIProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+
+    answer_count = [0]
+    result = await run_change(
+        change,
+        on_event=lambda _e: None,
+        human_input_fn=lambda: (answer_count.__setitem__(0, answer_count[0] + 1), "1")[1],
+        human_output_fn=lambda _msg: None,
+    )
+    assert result is RunResult.COMPLETED
+
+
+@pytest.mark.anyio
+async def test_full_default_workflow_completes_with_canned_claude_code(
+    tmp_path: Path,
+) -> None:
+    from typing import Any
+    from imp.providers.claude_code import ClaudeCodeProvider
+    from tests.cc_fakes import (
+        FakeClaudeSDKClient, assistant, result as cc_result,
+        text, tool_use as cc_tool_use,
+    )
+
+    change = _seed_default_workflow(tmp_path)
+    cfg = tmp_path / ".imp" / "config.yaml"
+    cfg.write_text(cfg.read_text().replace(
+        "{provider: anthropic, model: claude-sonnet-4-6}",
+        "{provider: claude_code, model: claude-sonnet-4-5}",
+    ))
+
+    # The CC fake is per-step; each runner spawns a fresh client. Use a
+    # factory that returns the same scripted reply for every new client.
+    def _scripted():
+        return [
+            assistant(
+                text("ok"),
+                cc_tool_use("c0", "complete_step", {
+                    "status": "Success", "verdict": "approve",
+                    "summary": "ok", "notes": "ok",
+                    "spec": "stub", "design": "stub", "plan": "stub",
+                }),
+            ),
+            cc_result(),
+        ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=_scripted())
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "claude_code", env_check=lambda: True,
+        factory=lambda model: ClaudeCodeProvider(
+            model_name=model, client_factory=factory,
+        ),
+    )
+
+    result = await run_change(
+        change,
+        on_event=lambda _e: None,
+        human_input_fn=lambda: "1",
+        human_output_fn=lambda _msg: None,
+    )
+    assert result is RunResult.COMPLETED
