@@ -16,7 +16,7 @@ from imp.engine.state import EventLog
 def query_events(ctx: ToolContext, type: str | None = None, limit: int | None = None) -> str:
     events = list(EventLog(ctx.events_path).read())
     if type:
-        events = [e for e in events if e["type"] == type]
+        events = [e for e in events if e.get("type") == type]
     if limit is not None:
         # Coerce: some providers' tool schemas don't enforce numeric types,
         # so the LLM may emit `limit: "50"` as a quoted string.

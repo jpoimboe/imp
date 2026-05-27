@@ -128,8 +128,8 @@ class EventLog:
         last_start = -1
         for i, e in enumerate(events):
             if (
-                e["type"] == "step_started"
-                and e["payload"].get("step") == step_name
+                e.get("type") == "step_started"
+                and (e.get("payload") or {}).get("step") == step_name
             ):
                 last_start = i
         if last_start == -1:
@@ -139,8 +139,8 @@ class EventLog:
         end = len(events)
         for i in range(last_start + 1, len(events)):
             if (
-                events[i]["type"] == "step_started"
-                and events[i]["payload"].get("step") != step_name
+                events[i].get("type") == "step_started"
+                and (events[i].get("payload") or {}).get("step") != step_name
             ):
                 end = i
                 break

@@ -63,10 +63,11 @@ class _EventsNamespace:
         self._outputs: dict[str, dict[str, Any]] = {}
         current: str | None = None
         for e in event_log.read():
-            if e["type"] == "step_started":
-                current = e["payload"].get("step")
-            elif e["type"] == "agent_output" and current:
-                self._outputs[current] = e["payload"]
+            etype = e.get("type")
+            if etype == "step_started":
+                current = (e.get("payload") or {}).get("step")
+            elif etype == "agent_output" and current:
+                self._outputs[current] = e.get("payload") or {}
 
     def __getattr__(self, step: str) -> _StepEvents | _EmptyOnMissing:
         return self[step]
