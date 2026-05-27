@@ -11,7 +11,6 @@ print path (via `print()` which adds its own newline).
 
 from __future__ import annotations
 
-import io
 import json
 import subprocess
 from pathlib import Path
@@ -176,7 +175,7 @@ def test_color_ansi_passes_through_pager(monkeypatch: pytest.MonkeyPatch) -> Non
 
     written = "".join(c.args[0] for c in proc.stdin.write.call_args_list)
     assert "\x1b[" in written
-    assert "\x1b[32mgreen\x1b[0m\n" == written
+    assert written == "\x1b[32mgreen\x1b[0m\n"
 
 
 def test_pager_env_respected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -342,9 +341,11 @@ def test_other_write_exception_cleans_up_and_propagates(
     proc.stdin.write.side_effect = RuntimeError("boom")
     proc.wait = MagicMock(return_value=0)
 
-    with patch("imp.cli.main.subprocess.Popen", return_value=proc):
-        with pytest.raises(RuntimeError, match="boom"):
-            _page_or_print(iter(["alpha"]), no_pager=False)
+    with (
+        patch("imp.cli.main.subprocess.Popen", return_value=proc),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        _page_or_print(iter(["alpha"]), no_pager=False)
 
     proc.stdin.close.assert_called_once()
     proc.wait.assert_called_once()
@@ -387,3 +388,77 @@ def test_missing_pager_oserror_falls_back_to_print(
         _page_or_print(iter(["alpha"]), no_pager=False)
 
     assert capsys.readouterr().out == "alpha\n"
+
+
+def test_main_log_invokes_pager_on_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """End-to-end: `main(["log", "1"])` against a tmp project with one
+    Change, stdout faked as a TTY, Popen mocked → Popen called exactly
+    once and nothing was printed to capsys (the helper went down the
+    pager path, not the print fallback)."""
+    cdir = tmp_path / ".imp" / "changes" / "1"
+    cdir.mkdir(parents=True)
+    (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "smoke"}))
+    (cdir / "events.jsonl").write_text(
+        json.dumps({
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "type": "change_created",
+            "payload": {"change_id": 1, "title": "smoke"},
+        }) + "\n",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("PAGER", raising=False)
+    _fake_tty_stdout(monkeypatch, isatty=True)
+
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.wait = MagicMock(return_value=0)
+
+    with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
+        rc = main(["log", "1"])
+
+    assert rc == 0
+    assert popen.call_count == 1, "_cmd_log must route TTY output through _page_or_print"
+    # And nothing leaked to stdout via the print fallback.
+    assert capsys.readouterr().out == ""
+    # Rendered lines reached the pager.
+    writes = "".join(c.args[0] for c in proc.stdin.write.call_args_list)
+    assert "change_created" in writes
+    assert "smoke" in writes
+    # Cleanup happened through the helper, not bypassed by some
+    # alternate code path in _cmd_log.
+    proc.stdin.close.assert_called_once()
+    proc.wait.assert_called_once()
+
+
+def test_main_log_no_pager_flag_skips_pager_on_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`main(["log", "--no-pager", "1"])` on a TTY → no Popen, inline print.
+    Catches refactors that drop `args.no_pager` from the helper call."""
+    cdir = tmp_path / ".imp" / "changes" / "1"
+    cdir.mkdir(parents=True)
+    (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "smoke"}))
+    (cdir / "events.jsonl").write_text(
+        json.dumps({
+            "timestamp": "2026-05-27T10:00:00+00:00",
+            "type": "change_created",
+            "payload": {"change_id": 1, "title": "smoke"},
+        }) + "\n",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    _fake_tty_stdout(monkeypatch, isatty=True)
+
+    with patch("imp.cli.main.subprocess.Popen") as popen:
+        rc = main(["log", "--no-pager", "1"])
+
+    assert rc == 0
+    assert popen.call_count == 0
+    assert "change_created" in capsys.readouterr().out
