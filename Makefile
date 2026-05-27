@@ -41,16 +41,25 @@ test: ## Fast test suite (skips live-API tests). What CI runs.
 test-verbose: ## Same as `test` but with -v.
 	$(PYTEST) -v
 
+_LIVE_TEST_FILES := \
+  tests/test_default_workflow_e2e_live.py \
+  tests/test_default_workflow_e2e_live_openai.py \
+  tests/test_default_workflow_e2e_live_claude_code.py \
+  tests/test_default_workflow_pty_live.py \
+  tests/test_mid_step_resume_live.py
+
 .PHONY: test-live
 test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
 	@$(_REQUIRE_PROVIDERS) && \
 	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
-	    timeout --foreground 1800 $(PYTEST) -v \
-	      tests/test_default_workflow_e2e_live.py \
-	      tests/test_default_workflow_e2e_live_openai.py \
-	      tests/test_default_workflow_e2e_live_claude_code.py \
-	      tests/test_default_workflow_pty_live.py \
-	      tests/test_mid_step_resume_live.py
+	    timeout --foreground 1800 $(PYTEST) -v $(_LIVE_TEST_FILES)
+
+.PHONY: test-live-verbose
+test-live-verbose: ## test-live but with live progress + raw PTY output streamed to your terminal.
+	@$(_REQUIRE_PROVIDERS) && \
+	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
+	  IMP_PTY_TRACE=1 \
+	    timeout --foreground 1800 $(PYTEST) -s -v $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
 test-live-quick: ## One-step live test for the first opted-in provider only.
