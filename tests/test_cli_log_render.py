@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import os
 
 import pytest
 
@@ -39,6 +38,10 @@ def test_should_use_color_off_when_no_color_set(monkeypatch: pytest.MonkeyPatch)
             return True
 
     assert render.should_use_color(FakeTTY()) is False
+
+
+def test_style_no_codes_returns_plain_text() -> None:
+    assert render._style("hi", enabled=True) == "hi"
 
 
 def test_should_use_color_on_when_tty_and_no_no_color(monkeypatch: pytest.MonkeyPatch) -> None:
