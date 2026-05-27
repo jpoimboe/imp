@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import pytest
 
@@ -624,3 +625,42 @@ def test_cli_log_pipes_through_render(
     assert "onboard" in out
     # No raw JSON braces in default rendering
     assert "{" not in out
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _read_sample_events() -> list[dict]:
+    import json
+    src = FIXTURES / "log_events_sample.jsonl"
+    out: list[dict] = []
+    for line in src.read_text().splitlines():
+        if line.strip():
+            out.append(json.loads(line))
+    return out
+
+
+def test_snapshot_default_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TZ", "UTC")
+    import time
+    time.tzset()
+    events = _read_sample_events()
+    actual = "\n".join(render.render_log(events, full=False, color=False)) + "\n"
+    golden = (FIXTURES / "log_default.txt").read_text()
+    assert actual == golden, (
+        "Default-mode rendering drift. To accept the new output, "
+        "rewrite tests/fixtures/log_default.txt with the actual output."
+    )
+
+
+def test_snapshot_full_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TZ", "UTC")
+    import time
+    time.tzset()
+    events = _read_sample_events()
+    actual = "\n".join(render.render_log(events, full=True, color=False)) + "\n"
+    golden = (FIXTURES / "log_full.txt").read_text()
+    assert actual == golden, (
+        "Full-mode rendering drift. To accept the new output, "
+        "rewrite tests/fixtures/log_full.txt with the actual output."
+    )

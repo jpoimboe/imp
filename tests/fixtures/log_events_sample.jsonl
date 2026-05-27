@@ -1,0 +1,26 @@
+{"timestamp": "2026-05-27T12:00:00+00:00", "type": "change_created", "payload": {"change_id": 7, "title": "demo Change"}}
+{"timestamp": "2026-05-27T12:00:01+00:00", "type": "workflow_started", "payload": {"name": "standard-feature", "from_phase": "onboard"}}
+{"timestamp": "2026-05-27T12:00:02+00:00", "type": "phase_started", "payload": {"phase": "onboard"}}
+{"timestamp": "2026-05-27T12:00:03+00:00", "type": "step_started", "payload": {"step": "context-loader", "phase": "onboard", "model_role": "default", "interactive": false}}
+{"timestamp": "2026-05-27T12:00:04+00:00", "type": "tool_call", "payload": {"id": "tu_1", "name": "ls", "args": {"path": "/"}}}
+{"timestamp": "2026-05-27T12:00:05+00:00", "type": "tool_result", "payload": {"tool_call_id": "tu_1", "result": "['/artifacts/', '/project/']"}}
+{"timestamp": "2026-05-27T12:00:06+00:00", "type": "tool_call", "payload": {"id": "tu_2", "name": "read", "args": {"path": "README.md"}}}
+{"timestamp": "2026-05-27T12:00:07+00:00", "type": "tool_result", "payload": {"tool_call_id": "tu_2", "result": "# demo\n\nLine two\nLine three"}}
+{"timestamp": "2026-05-27T12:00:08+00:00", "type": "agent_output", "payload": {"status": "Success", "summary": "Surveyed the repo. Identified test framework and module layout. Lots more detail elided here for brevity in the fixture."}}
+{"timestamp": "2026-05-27T12:00:09+00:00", "type": "step_completed", "payload": {"step": "context-loader", "action": "continue"}}
+{"timestamp": "2026-05-27T12:00:10+00:00", "type": "gate_evaluated", "payload": {"phase": "onboard", "gate_type": "HumanGate", "action": "continue"}}
+{"timestamp": "2026-05-27T12:00:11+00:00", "type": "phase_completed", "payload": {"phase": "onboard", "action": "next"}}
+{"timestamp": "2026-05-27T12:00:12+00:00", "type": "phase_started", "payload": {"phase": "implement"}}
+{"timestamp": "2026-05-27T12:00:13+00:00", "type": "step_started", "payload": {"step": "spec-writer", "phase": "implement", "model_role": "expensive", "interactive": false}}
+{"timestamp": "2026-05-27T12:00:14+00:00", "type": "tool_call", "payload": {"id": "tu_3", "name": "bash", "args": {"command": "ls -la"}}}
+{"timestamp": "2026-05-27T12:00:15+00:00", "type": "tool_result", "payload": {"tool_call_id": "tu_3", "result": "total 12\ndrwxr-xr-x  2 ..."}}
+{"timestamp": "2026-05-27T12:00:16+00:00", "type": "gate_evaluated", "payload": {"kind": "agent", "gate": "spec-lint", "action": {"kind": "retry"}}}
+{"timestamp": "2026-05-27T12:00:17+00:00", "type": "step_exhausted", "payload": {"step": "spec-writer", "attempts": 4}}
+{"timestamp": "2026-05-27T12:00:18+00:00", "type": "step_resumed_with_cached_output", "payload": {"step": "spec-writer"}}
+{"timestamp": "2026-05-27T12:00:19+00:00", "type": "script_gate_result", "payload": {"exit": 0, "stdout": "spec ok\n", "stderr": ""}}
+{"timestamp": "2026-05-27T12:00:20+00:00", "type": "script_gate_result", "payload": {"exit": 127, "stdout": "", "stderr": "/bin/sh: line 1: missing.sh: No such file or directory\n"}}
+{"timestamp": "2026-05-27T12:00:21+00:00", "type": "gate_evaluated", "payload": {"kind": "agent", "gate": "review", "action": {"kind": "goto", "target": "implement"}}}
+{"timestamp": "2026-05-27T12:00:22+00:00", "type": "workflow_paused", "payload": {"reason": "ctrl-c"}}
+{"timestamp": "2026-05-27T12:00:23+00:00", "type": "workflow_resumed", "payload": {}}
+{"timestamp": "2026-05-27T12:00:24+00:00", "type": "error", "payload": {"message": "runner crashed: TypeError: missing arg 'x'"}}
+{"timestamp": "2026-05-27T12:00:25+00:00", "type": "phase_exhausted", "payload": {"phase": "implement"}}

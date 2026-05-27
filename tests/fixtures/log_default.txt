@@ -1,0 +1,22 @@
+12:00:00  change_created      #7  demo Change
+12:00:01  workflow_started    standard-feature  (from onboard)
+12:00:02  phase_started       onboard
+12:00:03    step_started      context-loader
+12:00:07      tools           2 calls  (1 ls, 1 read)
+12:00:08      agent_output    status=Success summary=Surveyed the repo. Identified test framework and module layo…
+12:00:09    step_completed    context-loader  → continue
+12:00:10    gate_evaluated    HumanGate on onboard  → continue
+12:00:11  phase_completed     onboard  → next
+12:00:12  phase_started       implement
+12:00:13    step_started      spec-writer  [expensive]
+12:00:15      tools           1 calls  (1 bash)
+12:00:16    gate_evaluated    spec-lint (agent)  → retry
+12:00:17    step_exhausted    spec-writer  → exhausted
+12:00:18    step_resumed_with_cached_output  spec-writer  (cached)
+12:00:19    script_gate_result  → exit=0
+12:00:20    script_gate_result  → exit=127  /bin/sh: line 1: missing.sh: No such file or directory
+12:00:21    gate_evaluated    review (agent)  → goto(implement)
+12:00:22  workflow_paused     paused  (ctrl-c)
+12:00:23  workflow_resumed    resumed
+12:00:24      error           runner crashed: TypeError: missing arg 'x'
+12:00:25  phase_exhausted     implement  → exhausted
