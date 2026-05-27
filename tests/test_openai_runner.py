@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio
 import pytest
 
 from imp.agents.runner import (
@@ -324,3 +325,56 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     loaded = t.load()
     assert len(loaded) == 4
     assert loaded[2].role == "user"
+
+
+@pytest.mark.anyio
+async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv = replace(inv, agent_def=_agent_def(
+        tools=frozenset({"complete_step", "bash"}),
+    ))
+
+    fake = FakeAsyncOpenAI([
+        completion(message(
+            content=None,
+            tool_calls=[tool_call("c1", "bash", {"command": "sleep 10"})],
+        )),
+    ])
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini", client_factory=lambda: fake,
+    )
+
+    events: list = []
+    async def _drain():
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    async def _interrupt():
+        await anyio.sleep(0.3)
+        await runner.interrupt()
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_drain)
+        tg.start_soon(_interrupt)
+
+    kinds = [e["type"] for e in events]
+    assert "tool_killed" in kinds
+    assert events[-1]["type"] == "error"
+    assert events[-1]["payload"]["kind"] == "interrupted"
+
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    tool_use_ids = {
+        b.id for m in loaded if m.role == "assistant"
+        for b in m.content if hasattr(b, "id") and hasattr(b, "name")
+    }
+    tool_result_ids = {
+        b.tool_use_id for m in loaded if m.role == "user"
+        for b in m.content if hasattr(b, "tool_use_id")
+    }
+    assert tool_use_ids.issubset(tool_result_ids)

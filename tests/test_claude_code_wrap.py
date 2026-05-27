@@ -144,3 +144,37 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
     text = out["content"][0]["text"]
     # dispatch_task returns JSON-stringified agent_output.
     assert json.loads(text) == {"status": "Success"}
+
+
+@pytest.mark.anyio
+async def test_wrap_bash_killed_records_state(tmp_path: Path) -> None:
+    """_impl wrapper records signal-killed bash invocations on _RunState
+    so the receive loop can emit tool_killed events later."""
+    import json
+    from imp.agents.tools import get_registry
+    from imp.providers.claude_code import _RunState, _wrap_one
+
+    state = _RunState()
+    bash_tool = get_registry()["bash"]
+
+    # Stub: the tool's fn returns a JSON string with returncode -15 (SIGTERM).
+    # We can't actually kill a real sleep here without timing flakiness, so
+    # monkey-patch the registry entry's fn to return the canonical kill shape.
+    from dataclasses import replace as dc_replace
+    killed_tool = dc_replace(
+        bash_tool,
+        fn=lambda ctx, **kw: json.dumps({
+            "stdout": "", "stderr": "", "returncode": -15,
+        }),
+    )
+
+    wrapped = _wrap_one(
+        "bash", killed_tool, _ctx(tmp_path), state, _passthrough_decorator,
+    )
+    out = await wrapped({"command": "sleep 10"})
+    # Tool returns successfully (the runner records the kill, doesn't error).
+    assert out.get("isError") is not True
+    # killed_tool_uses captured the signal.
+    assert len(state.killed_tool_uses) == 1
+    assert state.killed_tool_uses[0]["name"] == "bash"
+    assert state.killed_tool_uses[0]["signal"] == 15
