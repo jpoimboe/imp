@@ -828,3 +828,65 @@ def test_cmd_log_no_changes_yet_returns_rc_2(
     assert rc == 2
     err = capsys.readouterr().err
     assert "no Changes" in err
+
+
+def test_cli_log_full_mode_keeps_individual_tool_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default mode collapses tool bursts into a synthetic `tools` line;
+    `--full` keeps the raw `tool_call` / `tool_result` lines."""
+    import json
+    from imp.cli.main import main
+
+    cdir = tmp_path / ".imp" / "changes" / "1"
+    cdir.mkdir(parents=True)
+    (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "fullmode"}))
+    events = [
+        {"timestamp": "2026-05-27T10:00:00+00:00",
+         "type": "step_started",
+         "payload": {"step": "s", "model_role": "default", "interactive": False}},
+        {"timestamp": "2026-05-27T10:00:01+00:00",
+         "type": "tool_call",
+         "payload": {"id": "t1", "name": "bash", "args": {"command": "ls"}}},
+        {"timestamp": "2026-05-27T10:00:02+00:00",
+         "type": "tool_result",
+         "payload": {"tool_call_id": "t1", "result": "ok"}},
+        {"timestamp": "2026-05-27T10:00:03+00:00",
+         "type": "step_completed",
+         "payload": {"step": "s", "action": "continue"}},
+    ]
+    (cdir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    from contextlib import redirect_stdout
+    import io
+
+    buf_default = io.StringIO()
+    with redirect_stdout(buf_default):
+        rc_default = main(["log", "1"])
+    assert rc_default == 0
+    default_out = buf_default.getvalue()
+
+    buf_full = io.StringIO()
+    with redirect_stdout(buf_full):
+        rc_full = main(["log", "1", "--full"])
+    assert rc_full == 0
+    full_out = buf_full.getvalue()
+
+    # Default mode: synthetic 'tools' line, no raw tool_call/tool_result.
+    assert "tools" in default_out
+    assert "tool_call" not in default_out
+    assert "tool_result" not in default_out
+
+    # Full mode: raw tool_call + tool_result lines, no synthetic 'tools'.
+    assert "tool_call" in full_out
+    assert "tool_result" in full_out
+    # The synthetic "tools" event has type column "tools" — that should NOT
+    # appear in full mode. (The substring "tools" might still appear inside
+    # a tool name like "tool_call"; check that the standalone type column
+    # doesn't.) The renderer left-pads the type to width 18; "tools" with
+    # 4-space depth indent occupies "    tools" + padding.
+    assert "    tools  " not in full_out
