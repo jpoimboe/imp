@@ -177,6 +177,15 @@ def _fmt_gate_evaluated(p: dict[str, Any], full: bool, color: bool) -> str:
     return f"{label}  {_arrow(color)} {action_styled}"
 
 
+def _fmt_human_gate_pending(p: dict[str, Any], full: bool, color: bool) -> str:
+    phase = p.get("phase", "?")
+    prompt = str(p.get("prompt", ""))
+    options = p.get("options") or []
+    n = len(options) if isinstance(options, list) else 0
+    noun = "option" if n == 1 else "options"
+    return f"{phase} prompt='{prompt}' ({n} {noun})"
+
+
 def _fmt_script_gate_result(p: dict[str, Any], full: bool, color: bool) -> str:
     rc = p.get("exit", "?")
     if rc == 0:
@@ -356,6 +365,7 @@ _DEPTH: dict[str, int] = {
     "step_exhausted":   2,
     "step_resumed_with_cached_output": 2,
     "gate_evaluated":   2,
+    "human_gate_pending": 2,
     "script_gate_result": 2,
     "tool_call":        4,
     "tool_result":      4,
@@ -381,6 +391,7 @@ _TYPE_COLOR: dict[str, tuple[str, ...]] = {
     "step_exhausted":   ("cyan",),
     "step_resumed_with_cached_output": ("cyan",),
     "gate_evaluated":   ("yellow",),
+    "human_gate_pending": ("yellow",),
     "script_gate_result": ("yellow",),
     "agent_output":     ("green",),
     "tool_call":        ("gray",),
@@ -403,6 +414,7 @@ _FORMATTERS = {
     "step_exhausted":   _fmt_step_exhausted,
     "step_resumed_with_cached_output": _fmt_step_resumed_with_cached_output,
     "gate_evaluated":   _fmt_gate_evaluated,
+    "human_gate_pending": _fmt_human_gate_pending,
     "script_gate_result": _fmt_script_gate_result,
     "agent_output":     _fmt_agent_output,
     "error":            _fmt_error,
