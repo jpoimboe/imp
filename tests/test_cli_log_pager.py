@@ -454,6 +454,7 @@ def test_main_log_no_pager_flag_skips_pager_on_tty(
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("PAGER", raising=False)
     _fake_tty_stdout(monkeypatch, isatty=True)
 
     with patch("imp.cli.main.subprocess.Popen") as popen:
