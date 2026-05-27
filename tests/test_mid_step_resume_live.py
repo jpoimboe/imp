@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._live import opted_in
+
 
 def _anthropic_key() -> str | None:
     key = os.environ.get("ANTHROPIC_API_KEY")
@@ -102,10 +104,14 @@ def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
 
 
 @pytest.mark.skipif(
-    not _anthropic_key(),
-    reason="mid-step resume requires real ANTHROPIC_API_KEY",
+    not opted_in("anthropic"),
+    reason="anthropic not in IMP_LIVE_PROVIDERS",
 )
 def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None:
+    assert _anthropic_key() is not None, (
+        "anthropic opted in via IMP_LIVE_PROVIDERS but no "
+        "ANTHROPIC_API_KEY env var or ~/.anthropic-key file found"
+    )
     _seed_project(tmp_path)
     env = os.environ.copy()
     key = _anthropic_key()
@@ -176,12 +182,16 @@ def _openai_key() -> str | None:
 
 
 @pytest.mark.skipif(
-    not _openai_key(),
-    reason="mid-step resume requires real OPENAI_API_KEY",
+    not opted_in("openai"),
+    reason="openai not in IMP_LIVE_PROVIDERS",
 )
 def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     tmp_path: Path,
 ) -> None:
+    assert _openai_key() is not None, (
+        "openai opted in via IMP_LIVE_PROVIDERS but no "
+        "OPENAI_API_KEY env var or ~/.openai-key file found"
+    )
     _seed_project(tmp_path)
     (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
         roles:
@@ -229,12 +239,16 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
 
 
 @pytest.mark.skipif(
-    shutil.which("claude") is None,
-    reason="mid-step resume requires `claude` CLI on PATH",
+    not opted_in("claude_code"),
+    reason="claude_code not in IMP_LIVE_PROVIDERS",
 )
 def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     tmp_path: Path,
 ) -> None:
+    assert shutil.which("claude") is not None, (
+        "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
+        "not found on PATH"
+    )
     _seed_project(tmp_path)
     (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
         roles:
