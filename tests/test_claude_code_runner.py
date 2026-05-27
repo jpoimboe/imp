@@ -95,3 +95,53 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
     assert "agent_message" in kinds
     assert kinds[-1] == "agent_output"
     assert events[-1]["payload"] == {"status": "Success", "note": "ok"}
+
+
+@pytest.mark.anyio
+async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
+    """Pre-populate transcript with a user/assistant/user(tool_result) sequence;
+    runner skips initial_messages and replays history via client.query."""
+    from imp.agents.runner import ToolResultBlock, ToolUseBlock
+    from imp.agents.transcript import Transcript
+
+    (tmp_path / "art").mkdir()
+    inv = _inv(tmp_path)
+    inv.transcript_dir.mkdir(parents=True, exist_ok=True)
+
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="go"),)))
+    t.append(Message(
+        role="assistant",
+        content=(
+            TextBlock(text="thinking…"),
+            ToolUseBlock(id="t0", name="read_file", input={"path": "/p/x"}),
+        ),
+    ))
+    t.append(Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="t0", content="x"),),
+    ))
+
+    scripted = [
+        assistant(
+            text("done"),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+        ),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    assert events[-1]["type"] == "agent_output"
+    # Initial messages were NOT re-appended.
+    loaded = t.load()
+    assert len(loaded) == 4  # 3 original + 1 new assistant turn
