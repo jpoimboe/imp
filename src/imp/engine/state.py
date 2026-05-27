@@ -101,14 +101,23 @@ class EventLog:
         return record
 
     def read(self) -> Iterator[dict[str, Any]]:
-        """Read all events from the log."""
+        """Read all events from the log.
+
+        A line that fails to parse yields a sentinel
+        ``{"_malformed": True, "raw": <line>}`` instead of raising — preserves
+        the audit trail and keeps ``imp log`` runnable on a corrupted file.
+        """
         if not self.path.exists():
             return
         with self.path.open() as f:
             for line in f:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     yield json.loads(line)
+                except json.JSONDecodeError:
+                    yield {"_malformed": True, "raw": line}
 
     def events_for_current_step(self, step_name: str) -> Iterable[dict[str, Any]]:
         """Replay-helper for `imp resume`: yield events from the last
