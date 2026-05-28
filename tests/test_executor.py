@@ -537,6 +537,19 @@ async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
     assert output["agent_id"] == f"step:{phase}/{step}"
 
 
+def test_gate_dir_allocator_never_reclaims_wiped_n(tmp_path: Path) -> None:
+    from imp.engine.executor import _next_gate_invocation_dir
+    gates = tmp_path / "gates"
+    d1 = _next_gate_invocation_dir(gates, "lint")
+    d1.mkdir(parents=True)
+    assert d1.name == "lint-1"
+    # Simulate success-wipe of lint-1.
+    import shutil
+    shutil.rmtree(d1)
+    d2 = _next_gate_invocation_dir(gates, "lint")
+    assert d2.name == "lint-2"            # NOT lint-1 again
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

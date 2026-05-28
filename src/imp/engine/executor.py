@@ -434,21 +434,30 @@ async def _execute_step(
 
 
 def _next_gate_invocation_dir(gates_dir: Path, stem: str) -> Path:
-    """Pick the next `<stem>-N/` under `gates_dir`. Stateless: scans existing
-    dirs and returns max(N) + 1, or `<stem>-1/` if none exist. Survives
-    resume cleanly (a paused gate's transcript dir survives in `gates_dir`
-    until the engine deletes it on success, so the same N is picked up)."""
-    if not gates_dir.is_dir():
-        return gates_dir / f"{stem}-1"
+    """Pick the next `<stem>-N/`. Monotonic: a wiped N is never reclaimed.
+
+    Persists a per-stem high-water mark in `<gates_dir>/.hwm-<stem>` so the
+    allocator returns max(highest_dir_seen, hwm) + 1. This guarantees one
+    transcript_dir ⇒ one logical agent_id forever, even though successful
+    gates wipe their dir and a step-re-run re-enters the allocator.
+    """
+    gates_dir.mkdir(parents=True, exist_ok=True)
     prefix = f"{stem}-"
-    existing: list[int] = []
+    present = 0
     for entry in gates_dir.iterdir():
-        if not entry.is_dir() or not entry.name.startswith(prefix):
-            continue
-        suffix = entry.name[len(prefix):]
-        if suffix.isdigit():
-            existing.append(int(suffix))
-    next_n = (max(existing) + 1) if existing else 1
+        if entry.is_dir() and entry.name.startswith(prefix):
+            suffix = entry.name[len(prefix):]
+            if suffix.isdigit():
+                present = max(present, int(suffix))
+    hwm_file = gates_dir / f".hwm-{stem}"
+    hwm = 0
+    if hwm_file.exists():
+        try:
+            hwm = int(hwm_file.read_text().strip())
+        except (ValueError, OSError):
+            hwm = 0
+    next_n = max(present, hwm) + 1
+    hwm_file.write_text(str(next_n))
     return gates_dir / f"{stem}-{next_n}"
 
 
