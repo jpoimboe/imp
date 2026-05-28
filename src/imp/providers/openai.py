@@ -24,6 +24,7 @@ from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
+    Diagnostics,
     Event,
     Message,
     TextBlock,
@@ -241,6 +242,89 @@ def _openai_message_to_imp(
     return Message(role="assistant", content=tuple(blocks)), warnings
 
 
+def _serialize_openai_response(response: Any) -> dict[str, Any]:
+    """response → llm_response.raw dict. SDK .model_dump() preferred; fake
+    fallback introspects choices[0].message + usage."""
+    dump = getattr(response, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(mode="json")
+        except TypeError:
+            return dump()
+    choice = response.choices[0]
+    msg = choice.message
+    tool_calls = []
+    for tc in getattr(msg, "tool_calls", None) or []:
+        fn = getattr(tc, "function", None)
+        tool_calls.append({
+            "id": getattr(tc, "id", None),
+            "type": getattr(tc, "type", "function"),
+            "function": {"name": getattr(fn, "name", None),
+                         "arguments": getattr(fn, "arguments", "")},
+        })
+    return {
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": getattr(msg, "content", None),
+                "tool_calls": tool_calls or None,
+                "refusal": getattr(msg, "refusal", None),
+            },
+            "finish_reason": getattr(choice, "finish_reason", None),
+        }],
+        "usage": _usage_dict(getattr(response, "usage", None)),
+    }
+
+
+def _usage_dict(usage: Any) -> dict[str, Any]:
+    if usage is None:
+        return {}
+    dump = getattr(usage, "model_dump", None)
+    if callable(dump):
+        return dump()
+    if isinstance(usage, dict):
+        return usage
+    return {k: getattr(usage, k) for k in
+            ("prompt_tokens", "completion_tokens", "total_tokens")
+            if getattr(usage, k, None) is not None}
+
+
+def _parse_openai_message(raw: dict[str, Any]) -> Message:
+    msg = raw["choices"][0]["message"]
+    blocks: list[Any] = []
+    text = msg.get("content")
+    if text:
+        blocks.append(TextBlock(text=text))
+    for tc in msg.get("tool_calls") or []:
+        if tc.get("type", "function") != "function":
+            continue
+        fn = tc.get("function") or {}
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        blocks.append(ToolUseBlock(id=tc["id"], name=fn.get("name"), input=args))
+    return Message(role="assistant", content=tuple(blocks))
+
+
+def _extract_openai_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+    msg = raw["choices"][0]["message"]
+    warnings: list[str] = []
+    for tc in msg.get("tool_calls") or []:
+        if tc.get("type", "function") != "function":
+            warnings.append(f"skipped tool_call type {tc.get('type')!r}")
+        else:
+            fn = tc.get("function") or {}
+            try:
+                json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError as e:
+                warnings.append(f"tool_call {tc.get('id')!r} arguments not JSON: {e}")
+    refusal = msg.get("refusal")
+    if refusal:
+        warnings.append(f"skipped refusal: {refusal[:80]!r}")
+    return Diagnostics(block_warnings=tuple(warnings), thinkings=())
+
+
 def _serialize(msg: Message) -> dict[str, Any]:
     """Same shape as anthropic._serialize — used by `agent_message` events."""
     return {
@@ -441,9 +525,10 @@ class OpenAIAgentRunner:
                 tools=openai_tools,
             )
 
-            choice = response.choices[0]
-            assistant_msg, block_warnings = _openai_message_to_imp(choice.message)
-            for w in block_warnings:
+            raw = _serialize_openai_response(response)
+            assistant_msg = _parse_openai_message(raw)
+            diag = _extract_openai_diagnostics(raw)
+            for w in diag.block_warnings:
                 yield {"type": "runner_warning", "payload": {"message": w}}
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
