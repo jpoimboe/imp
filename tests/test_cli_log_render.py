@@ -898,3 +898,25 @@ def test_cli_log_full_mode_keeps_individual_tool_events(
     # doesn't.) The renderer left-pads the type to width 18; "tools" with
     # 4-space depth indent occupies "    tools" + padding.
     assert "    tools  " not in full_out
+
+
+def test_fmt_error_includes_category_tag() -> None:
+    """When an error event payload carries a 'category' field, the
+    renderer surfaces it as a dimmed [category] tag in the message column."""
+    from imp.cli.render import _fmt_error
+
+    out = _fmt_error(
+        {"category": "auth", "message": "claude CLI: Invalid API key"},
+        full=False, color=False,
+    )
+    assert "[auth]" in out
+    assert "Invalid API key" in out
+
+
+def test_fmt_error_omits_category_tag_when_absent() -> None:
+    """Legacy events without 'category' still render — no broken bracket."""
+    from imp.cli.render import _fmt_error
+
+    out = _fmt_error({"message": "old-style message"}, full=False, color=False)
+    assert "old-style message" in out
+    assert "[" not in out

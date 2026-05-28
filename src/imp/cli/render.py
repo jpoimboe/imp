@@ -203,7 +203,12 @@ def _fmt_agent_output(p: dict[str, Any], full: bool, color: bool) -> str:
 
 
 def _fmt_error(p: dict[str, Any], full: bool, color: bool) -> str:
-    return _elide(str(p.get("message", "?")), 80)
+    msg = _elide(str(p.get("message", "?")), 80)
+    category = p.get("category")
+    if not category:
+        return msg
+    tag = _style(f"[{category}]", "dim", enabled=color)
+    return f"{tag} {msg}"
 
 
 def _fmt_thinking(p: dict[str, Any], full: bool, color: bool) -> str:
