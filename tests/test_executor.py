@@ -254,6 +254,63 @@ async def test_fatal_tool_error_pauses_without_retry(
     assert fatal_events[0]["payload"]["tool"] == "ask_user"
 
 
+class _CategoryErrorRunner:
+    """Yields a single classified error event then stops. Mimics a
+    provider that classified an SDK exception and emitted the
+    category-tagged error event."""
+
+    def __init__(self, *, category: str, kind: str, message: str) -> None:
+        self._category = category
+        self._kind = kind
+        self._message = message
+        self.run_count = 0
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        self.run_count += 1
+        yield {"type": "error", "payload": {
+            "category": self._category,
+            "kind": self._kind,
+            "message": self._message,
+        }}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+@pytest.mark.anyio
+async def test_auth_error_pauses_without_burning_retries(
+    tmp_path: Path,
+) -> None:
+    """A category=auth error must Pause immediately, identical to the
+    legacy fatal_tool_error path but driven by the new policy."""
+    change = _seed_minimal_workflow(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _CategoryErrorRunner(
+        category="auth", kind="AuthError",
+        message="Invalid API key — Anthropic returned 401",
+    )
+
+    class _AuthProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _AuthProvider(),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    assert runner.run_count == 1, (
+        f"auth error should not retry; ran {runner.run_count} times"
+    )
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
