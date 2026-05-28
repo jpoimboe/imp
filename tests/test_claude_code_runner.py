@@ -1,6 +1,7 @@
 # tests/test_claude_code_runner.py
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from imp.agents.runner import (
     TextBlock,
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
+from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.claude_code import ClaudeCodeAgentRunner
 from tests.cc_fakes import (
@@ -47,7 +49,13 @@ def _agent_def(tools: frozenset[str] = frozenset({"complete_step"})) -> AgentDef
     )
 
 
-def _inv(tmp_path: Path, tools: frozenset[str] | None = None) -> AgentInvocation:
+def _inv(
+    tmp_path: Path,
+    tools: frozenset[str] | None = None,
+    event_log: InMemoryEventLog | None = None,
+    agent_id: str = "step:p/s",
+) -> AgentInvocation:
+    log = event_log if event_log is not None else InMemoryEventLog()
     return AgentInvocation(
         agent_def=_agent_def(tools or frozenset({"complete_step"})),
         provider_name="claude_code", model_name="claude-sonnet-4-5",
@@ -62,6 +70,8 @@ def _inv(tmp_path: Path, tools: frozenset[str] | None = None) -> AgentInvocation
             source=SourceLoc(file=Path("w.yaml"), line=1),
         ),),
         events_path=tmp_path / "events.jsonl",
+        agent_id=agent_id,
+        event_log=log,
     )
 
 
@@ -84,18 +94,31 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
     def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=fake_client_factory,
     )
     events = []
-    async for ev in runner.run(_inv(tmp_path)):
+    async for ev in runner.run(inv):
         events.append(ev)
 
+    # After the flip: runners yield ONLY agent_output/error
     kinds = [e["type"] for e in events]
-    assert "agent_message" in kinds
-    assert kinds[-1] == "agent_output"
+    assert kinds == ["agent_output"], f"expected only agent_output, got {kinds}"
     assert events[-1]["payload"] == {"status": "Success", "note": "ok"}
+
+    # Audit trail is in the event log
+    log_events = list(log.read())
+    log_types = [e["type"] for e in log_events]
+    assert "step_context" in log_types
+    assert "user_message" in log_types
+    assert "llm_response" in log_types
+
+    # All events have the right agent_id
+    for e in log_events:
+        assert e["agent_id"] == "step:p/s", f"wrong agent_id: {e}"
 
 
 @pytest.mark.anyio
@@ -152,8 +175,10 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
 async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     """Parent dispatches via task → child runner runs to complete_step →
     parent receives JSON-stringified payload and emits its own complete_step."""
-    from dataclasses import replace
 
+    # NOTE: the fake client bypasses the real MCP transport, so _impl for "task"
+    # is not invoked; the race-free tool_call-append path is integration-only
+    # (covered in Task 16). This test verifies dispatch wiring + return payload.
     (tmp_path / "art").mkdir()
 
     sub_def = AgentDef(
@@ -222,14 +247,13 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
 async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     tmp_path: Path,
 ) -> None:
-    from dataclasses import replace
-
     from imp.agents.runner import Message, TextBlock
     from imp.agents.transcript import Transcript
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
     (tmp_path / "art").mkdir()
-    inv = _inv(tmp_path)
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
     inv = replace(inv, interactive=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
@@ -258,11 +282,20 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     async for ev in runner.run(inv):
         events.append(ev)
 
+    # After the flip: user_input is NO LONGER yielded; it's appended to the log.
+    # The runner should yield only agent_output.
     kinds = [e["type"] for e in events]
-    user_idx = kinds.index("user_input")
-    msg_idx = kinds.index("agent_message")
-    assert user_idx < msg_idx
     assert kinds[-1] == "agent_output"
+
+    # Verify ordering in the event log: user_message before llm_response
+    log_events = list(log.read())
+    log_types = [e["type"] for e in log_events]
+    user_idx = log_types.index("user_message")
+    llm_idx = log_types.index("llm_response")
+    assert user_idx < llm_idx, (
+        f"user_message (idx={user_idx}) must precede llm_response (idx={llm_idx})"
+    )
+
     loaded = t.load()
     assert len(loaded) >= 3
     assert loaded[2].role == "user"
@@ -273,7 +306,7 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
 @pytest.mark.anyio
 async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
     """Extended-thinking output from claude_code is captured as a `thinking`
-    event with the full content, not folded into runner_warning."""
+    event in the log, not folded into runner_warning."""
     (tmp_path / "art").mkdir()
     scripted = [
         assistant(
@@ -286,17 +319,24 @@ async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
     def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
         return FakeClaudeSDKClient(opts, scripted_messages=scripted)
 
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5",
         client_factory=fake_client_factory,
     )
-    events = [ev async for ev in runner.run(_inv(tmp_path))]
+    events = [ev async for ev in runner.run(inv)]
 
+    # After the flip: thinking is in the log, not yielded
     kinds = [e["type"] for e in events]
-    assert "thinking" in kinds
-    thinkings = [e["payload"]["content"] for e in events if e["type"] == "thinking"]
+    assert "thinking" not in kinds, f"thinking should be in log, not yielded: {kinds}"
+    assert kinds == ["agent_output"], f"expected only agent_output, got {kinds}"
+
+    log_events = list(log.read())
+    log_types = [e["type"] for e in log_events]
+    assert "thinking" in log_types
+    thinkings = [e["payload"]["content"] for e in log_events if e["type"] == "thinking"]
     assert thinkings == ["weighing options..."]
-    assert kinds[-1] == "agent_output"
 
 
 def test_classify_agent_text_invalid_api_key() -> None:

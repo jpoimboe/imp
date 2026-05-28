@@ -115,6 +115,9 @@ class _RunState:
     # kind="fatal_tool_error" and bail out instead of letting Claude keep
     # going.
     fatal_tool_error: tuple[str, str] | None = None
+    # Set once at runner entry; read by the MCP wrapper to append the spawning
+    # task tool_call on the parent's agent chain.
+    agent_id: str = ""
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -214,14 +217,27 @@ def _wrap_one(
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
         try:
             if name == "task":
-                # Interim: __tool_use_id__ is synchronously available here
-                # because the claude CLI injects it into every MCP tool call's
-                # arguments dict. Task 14 finalizes this by appending the task
-                # tool_call event inside _impl and passing that persisted event
-                # id, making the parent link durable in the event log.
+                # Append the task tool_call event INSIDE _impl using the
+                # synchronously-available __tool_use_id__. This is race-free:
+                # the receive loop processes AssistantMessage on a different
+                # async path and would create a duplicate if it also appended
+                # here. The receive loop SKIPS task tool_calls (see below).
+                tu_id = args.get("__tool_use_id__", "")
+                tc_event_id = ""
+                # ctx.event_log is always set by _run_loop before tools dispatch;
+                # this guard is defensive (no-log → tool_call_event_id="" →
+                # subagent agent_id="sub:" with a broken parent link).
+                if ctx.event_log is not None:
+                    tc_ev = ctx.event_log.append_tool_call(
+                        agent_id=state.agent_id,
+                        block=ToolUseBlock(
+                            id=tu_id, name="task",
+                            input={"subagent_name": args["subagent_name"],
+                                   "task_description": args["task_description"]}))
+                    tc_event_id = tc_ev["id"]
                 result = await dispatch_task(
                     ctx, args["subagent_name"], args["task_description"],
-                    tool_call_event_id=args.get("__tool_use_id__", ""),
+                    tool_call_event_id=tc_event_id,
                 )
                 return _tool_response(result, is_error=False)
             if name == "complete_step":
@@ -509,6 +525,7 @@ def _sdk_message_to_imp(
     return None, [], []
 
 
+# Dead since Task 14; removed in Task 15.
 def _serialize(msg: Message) -> dict[str, Any]:
     return {
         "role": msg.role,
@@ -606,6 +623,10 @@ class ClaudeCodeAgentRunner:
             return
 
     async def _run_loop(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        from imp.engine.state import JsonlEventLog
+        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
+        aid = invocation.agent_id or "step:unnamed"
+
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(
@@ -621,11 +642,13 @@ class ClaudeCodeAgentRunner:
         )
         ctx.change_context = invocation.change_context
         ctx.spawn_subagent = self._make_spawn_subagent()
+        ctx.event_log = elog
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
         self._ctx = ctx
 
         state = _RunState()
+        state.agent_id = aid
         sdk_tools = _make_sdk_tools(tools, ctx, state)
 
         # In-process MCP server hosting imp tools. The real SDK call:
@@ -658,11 +681,7 @@ class ClaudeCodeAgentRunner:
             if repair is not None:
                 for b in repair.content:
                     if isinstance(b, ToolResultBlock):
-                        yield {"type": "tool_result", "payload": {
-                            "id": b.tool_use_id,
-                            "content": b.content,
-                            "error": b.is_error,
-                        }}
+                        elog.append_tool_result(agent_id=aid, block=b)
             resume_state = classify_resume(messages, interactive=invocation.interactive)
             if resume_state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
@@ -705,13 +724,29 @@ class ClaudeCodeAgentRunner:
                 )
                 messages.append(user_msg)
                 transcript.append(user_msg)
-                yield {"type": "user_input", "payload": {"text": user_text}}
+                elog.append_user_message(agent_id=aid, message=user_msg)
         else:
             messages = []
             for m in invocation.initial_messages:
                 messages.append(m)
                 transcript.append(m)
             tool_calls_used = 0
+            # Fresh-entry audit scaffolding. Ordered IMMEDIATELY after the
+            # transcript append so the "step_context emitted exactly once per
+            # agent_id" invariant holds (resume takes the branch above and
+            # emits nothing).
+            elog.append_step_context(
+                agent_id=aid, parent_id_override=invocation.first_event_parent_id,
+                provider=invocation.provider_name, model=self.model,
+                system_prompt=invocation.system_prompt,
+                # Name-only schemas: the in-process MCP server owns the full
+                # input schemas; unlike anthropic/openai we don't pass them here.
+                tools_schema=[{"name": _canon_tool_name(n)} for n in tools],
+                params={"no-session-persistence": None},
+                max_tool_calls=invocation.max_tool_calls or 50)
+            for m in invocation.initial_messages:
+                if all(isinstance(b, TextBlock) for b in m.content):
+                    elog.append_user_message(agent_id=aid, message=m)
 
         ceiling = invocation.max_tool_calls or 50
 
@@ -731,16 +766,23 @@ class ClaudeCodeAgentRunner:
                 cls_name = type(sdk_msg).__name__
                 imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)
                 for content in thinkings:
-                    yield {"type": "thinking", "payload": {"content": content}}
+                    elog.append(agent_id=aid, type="thinking",
+                                payload={"content": content})
                 for w in warns:
-                    yield {"type": "runner_warning", "payload": {"message": w}}
+                    elog.append(agent_id=aid, type="runner_warning",
+                                payload={"message": w})
                 if imp_msg is not None:
                     messages.append(imp_msg)
                     transcript.append(imp_msg)
 
                     if imp_msg.role == "assistant":
-                        yield {"type": "agent_message",
-                               "payload": _serialize(imp_msg)}
+                        if cls_name == "AssistantMessage":
+                            raw = _serialize_claude_code_message(sdk_msg)
+                            elog.append_llm_response(
+                                agent_id=aid, provider=invocation.provider_name,
+                                model=self.model, raw=raw,
+                                usage=raw.get("usage") or {},
+                                stop_reason=raw.get("stop_reason"))
                         for b in imp_msg.content:
                             if isinstance(b, ToolUseBlock):
                                 # Dual-write `complete_step` state at the
@@ -761,34 +803,33 @@ class ClaudeCodeAgentRunner:
                                     ceil_msg = (
                                         f"tool_call_ceiling_exceeded (ceiling={ceiling})"
                                     )
-                                    yield {"type": "tool_result", "payload": {
-                                        "id": b.id,
-                                        "content": ceil_msg,
-                                        "error": True,
-                                    }}
+                                    elog.append_tool_result(
+                                        agent_id=aid,
+                                        block=ToolResultBlock(b.id, ceil_msg,
+                                                              is_error=True))
                                     continue
                                 tool_calls_used += 1
-                                yield {"type": "tool_call", "payload": {
-                                    "id": b.id,
-                                    "name": _canon_tool_name(b.name),
-                                    "input": b.input,
-                                }}
+                                canon = _canon_tool_name(b.name)
+                                if canon == "task":
+                                    # tool_call for task is appended inside the
+                                    # MCP wrapper (_impl) using __tool_use_id__,
+                                    # race-free. Don't double-append here.
+                                    continue
+                                elog.append_tool_call(
+                                    agent_id=aid,
+                                    block=ToolUseBlock(id=b.id, name=canon,
+                                                       input=b.input))
                     elif imp_msg.role == "user":
                         # ToolResultBlocks generated by claude calling our MCP
-                        # tools. Emit the corresponding tool_result events.
+                        # tools. Append the corresponding tool_result events.
                         for b in imp_msg.content:
                             if isinstance(b, ToolResultBlock):
-                                payload: dict[str, Any] = {
-                                    "id": b.tool_use_id, "content": b.content,
-                                }
-                                if b.is_error:
-                                    payload["error"] = True
-                                yield {"type": "tool_result", "payload": payload}
+                                elog.append_tool_result(agent_id=aid, block=b)
 
                 # Drain any bash kills detected by the MCP wrapper.
                 while state.killed_tool_uses:
                     info = state.killed_tool_uses.pop(0)
-                    yield {"type": "tool_killed", "payload": info}
+                    elog.append(agent_id=aid, type="tool_killed", payload=info)
 
                 # A tool raised FatalToolError → bail out instead of letting
                 # Claude burn more LLM calls trying to work around a runtime
@@ -842,8 +883,7 @@ class ClaudeCodeAgentRunner:
                         )
                         messages.append(user_msg)
                         transcript.append(user_msg)
-                        yield {"type": "user_input",
-                               "payload": {"text": user_text}}
+                        elog.append_user_message(agent_id=aid, message=user_msg)
                         await client.query(user_text)
                         continue
 
