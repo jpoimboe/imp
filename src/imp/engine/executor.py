@@ -90,7 +90,7 @@ async def run_change(
 
         phase = next(p for p in workflow.phases if p.name == state.phase)
         action = await _execute_phase(
-            phase, workflow, config, change, state, log, on_event,
+            phase, workflow, config, change, state, log,
             human_input_fn=human_input_fn, human_output_fn=human_output_fn,
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator,
@@ -135,7 +135,7 @@ def _next_phase(workflow: Workflow, current: str) -> str | None:
 
 async def _execute_phase(
     phase: Phase, workflow: Workflow, config: Config, change: Change,
-    state: State, log: EventLog, on_event: EventCallback,
+    state: State, log: EventLog,
     *,
     human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
     user_chat_input_fn: Callable[[str], str] | None,
@@ -159,7 +159,7 @@ async def _execute_phase(
             state.step = step.name
             state.save(change.state_dir)
             action = await _execute_step(
-                step, workflow, config, change, state, log, on_event,
+                step, workflow, config, change, state, log,
                 human_input_fn=human_input_fn,
                 human_output_fn=human_output_fn,
                 user_chat_input_fn=user_chat_input_fn,
@@ -193,7 +193,7 @@ async def _execute_phase(
         retried_phase = False
         for gate in phase.gates:
             action = await _run_gate(
-                gate, workflow, config, change, state, log, on_event,
+                gate, workflow, config, change, state, log,
                 human_input_fn=human_input_fn, human_output_fn=human_output_fn,
                 user_chat_input_fn=user_chat_input_fn,
                 coordinator=coordinator,
@@ -218,6 +218,7 @@ async def _execute_phase(
 
 async def _run_agent_invocation(
     *,
+    agent_id: str,
     agent_def: Any,
     fs_permissions: Any,
     model_role: str,
@@ -226,7 +227,6 @@ async def _run_agent_invocation(
     change: Change,
     state: State,
     log: EventLog,
-    on_event: EventCallback,
     transcript_dir: Any,
     step_started_payload_extras: dict[str, Any],
     interactive: bool,
@@ -284,6 +284,17 @@ async def _run_agent_invocation(
     else:
         resolved_max_tool_calls = 50
 
+    # step_started is an executor lifecycle event (not from the runner), so
+    # agent_id=None — it does not anchor into the per-agent chain. Its id
+    # seeds the agent's first event (step_context) via first_event_parent_id.
+    started = _emit(log, "step_started", {
+        "model": provider.model,
+        "provider": provider.name,
+        "tools": sorted(agent_def.tools),
+        "interactive": interactive,
+        **step_started_payload_extras,
+    }, agent_id=None)
+
     invocation = AgentInvocation(
         agent_def=agent_def,
         provider_name=provider.name,
@@ -300,15 +311,10 @@ async def _run_agent_invocation(
         subagent_defs=subagent_defs,
         max_tool_calls=resolved_max_tool_calls,
         user_input_fn=user_chat_input_fn if interactive else None,
+        agent_id=agent_id,
+        event_log=log,
+        first_event_parent_id=started["id"],  # chains step_context.parent_id to step_started
     )
-
-    _emit(log, "step_started", {
-        "model": invocation.model_name,
-        "provider": provider.name,
-        "tools": sorted(agent_def.tools),
-        "interactive": interactive,
-        **step_started_payload_extras,
-    })
 
     runner = provider.create_runner(invocation)
     agent_output: dict[str, Any] | None = None
@@ -316,7 +322,7 @@ async def _run_agent_invocation(
     coordinator.attach_runner(runner.interrupt)
     try:
         async for event in runner.run(invocation):
-            _emit_event(log, event, agent_id=(invocation.agent_id or None))
+            _emit_event(log, event, agent_id=invocation.agent_id)
             if event["type"] == "agent_output":
                 agent_output = event["payload"]
             if event["type"] == "error":
@@ -346,11 +352,12 @@ async def _run_agent_invocation(
     try:
         validate_agent_output(agent_output, agent_def.output_schema)
     except Exception as e:
+        # Executor-synthesized error (not runner-yielded): agent_id=None.
         _emit(log, "error", {
             "category": "agent_output_missing",
             "kind": "output_validation",
             "message": f"output validation: {e}",
-        })
+        }, agent_id=None)
         return None, True, False, False, None
 
     return agent_output, False, False, False, None
@@ -358,7 +365,7 @@ async def _run_agent_invocation(
 
 async def _execute_step(
     step: Step, workflow: Workflow, config: Config, change: Change,
-    state: State, log: EventLog, on_event: EventCallback,
+    state: State, log: EventLog,
     *,
     human_input_fn: HumanInputFn,
     human_output_fn: HumanOutputFn,
@@ -376,11 +383,12 @@ async def _execute_step(
     step_backoff_attempts = 0
     while True:
         agent_output, errored, paused, fatal, backoff_delay = await _run_agent_invocation(
+            agent_id=f"step:{state.phase}/{step.name}",
             agent_def=agent_def,
             fs_permissions=step.fs_permissions,
             model_role=step.model_role,
             workflow=workflow, config=config, change=change,
-            state=state, log=log, on_event=on_event,
+            state=state, log=log,
             transcript_dir=transcript_dir,
             step_started_payload_extras={"step": step.name},
             interactive=step.interactive,
@@ -408,7 +416,7 @@ async def _execute_step(
 
     for gate in step.gates:
         action = await _run_gate(
-            gate, workflow, config, change, state, log, on_event,
+            gate, workflow, config, change, state, log,
             human_input_fn=human_input_fn,
             human_output_fn=human_output_fn,
             user_chat_input_fn=user_chat_input_fn,
@@ -446,7 +454,7 @@ def _next_gate_invocation_dir(gates_dir: Path, stem: str) -> Path:
 
 async def _run_agent_gate(
     gate: AgentGate, workflow: Workflow, config: Config, change: Change,
-    state: State, log: EventLog, on_event: EventCallback,
+    state: State, log: EventLog,
     *,
     user_chat_input_fn: Callable[[str], str] | None,
     coordinator: Any,
@@ -469,11 +477,12 @@ async def _run_agent_gate(
     gate_backoff_attempts = 0
     while True:
         agent_output, errored, paused, fatal, backoff_delay = await _run_agent_invocation(
+            agent_id=f"gate:{state.phase}/{transcript_dir.name}",
             agent_def=agent_def,
             fs_permissions=gate.fs_permissions,
             model_role=gate.model_role,
             workflow=workflow, config=config, change=change,
-            state=state, log=log, on_event=on_event,
+            state=state, log=log,
             transcript_dir=transcript_dir,
             step_started_payload_extras={"kind": "agent_gate", "gate_stem": stem},
             interactive=False,                            # gates are autonomous
@@ -504,11 +513,12 @@ async def _run_agent_gate(
     try:
         action = evaluate_decide(gate.decide, agent_output)
     except DecideNoMatch as e:
+        # Executor-synthesized error (not runner-yielded): agent_id=None.
         _emit(log, "error", {
             "category": "agent_output_missing",
             "kind": "decide_no_match",
             "message": f"agent gate decide: {e}",
-        })
+        }, agent_id=None)
         return Retry()
 
     # Clean up the gate's transcript dir on success (mirrors step success).
@@ -522,7 +532,7 @@ async def _run_agent_gate(
 
 async def _run_gate(
     gate: Any, workflow: Workflow, config: Config, change: Change,
-    state: State, log: EventLog, on_event: EventCallback,
+    state: State, log: EventLog,
     *,
     human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
     user_chat_input_fn: Callable[[str], str] | None,
@@ -546,7 +556,7 @@ async def _run_gate(
         return action
     if isinstance(gate, AgentGate):
         return await _run_agent_gate(
-            gate, workflow, config, change, state, log, on_event,
+            gate, workflow, config, change, state, log,
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator,
         )

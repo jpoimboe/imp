@@ -34,31 +34,42 @@ class _FakeProvider:
         return _FakeRunner(self._output)
 
 
-def _seed_minimal_workflow(root: Path) -> Change:
-    """Create a minimal workflow on disk and snapshot it into a Change."""
+def _seed_minimal_workflow(
+    root: Path,
+    *,
+    phase_name: str = "only",
+    step_name: str = "w",
+    agent_stem: str = "writer",
+) -> tuple[Change, str, str]:
+    """Create a minimal workflow on disk and snapshot it into a Change.
+
+    Returns ``(change, phase_name, step_name)`` so callers that need to
+    construct expected agent_ids can read the names back rather than hardcode.
+    """
     wf_dir = root / ".imp" / "workflows" / "default"
     (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "agents" / "writer.md").write_text(
-        "---\nname: writer\ntools: [complete_step]\n"
+    (wf_dir / "agents" / f"{agent_stem}.md").write_text(
+        f"---\nname: {agent_stem}\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
         "go {{ change.id }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
+        f"name: t\ndescription: t\nphases: [{phase_name}]\n"
         "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "only:\n  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
+        f"{phase_name}:\n  steps:\n"
+        f"    - {{name: {step_name}, file: agents/{agent_stem}.md, model_role: default}}\n"
     )
     config = root / ".imp" / "config.yaml"
     config.write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
     change = Change.create(root, title="t")
-    return change
+    return change, phase_name, step_name
 
 
 @pytest.mark.anyio
 async def test_run_change_completes_minimal_workflow(tmp_path: Path, monkeypatch) -> None:
-    change = _seed_minimal_workflow(tmp_path)
+    change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -212,7 +223,7 @@ async def test_fatal_tool_error_pauses_without_retry(
     Old behavior treated all errors as retryable, so the runner.run()
     would fire twice before pause-on-max-retries kicked in. With fatal
     classification it fires exactly once."""
-    change = _seed_minimal_workflow(tmp_path)
+    change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -283,7 +294,7 @@ async def test_auth_error_pauses_without_burning_retries(
 ) -> None:
     """A category=auth error must Pause immediately, identical to the
     legacy fatal_tool_error path but driven by the new policy."""
-    change = _seed_minimal_workflow(tmp_path)
+    change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -346,7 +357,7 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
     from imp.engine import error_policy
     monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
 
-    change = _seed_minimal_workflow(tmp_path)
+    change, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
@@ -382,7 +393,7 @@ async def test_rate_limit_exhaustion_pauses(
     from imp.engine import error_policy
     monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
 
-    change = _seed_minimal_workflow(tmp_path)
+    change, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
@@ -501,6 +512,29 @@ async def test_agent_gate_rate_limit_backs_off_without_phase_attempt(
 
     state = State.load(change.state_dir)
     assert state.phase_attempt == 0
+
+
+@pytest.mark.anyio
+async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
+    tmp_path: Path,
+) -> None:
+    change, phase, step = _seed_minimal_workflow(
+        tmp_path, phase_name="myphase", step_name="mystep", agent_stem="worker",
+    )
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _FakeProvider({"status": "Success"}, model=model),
+    )
+
+    await run_change(change, on_event=lambda _e: None)
+    events = list(change.event_log().read())
+    started = next(e for e in events if e["type"] == "step_started")
+    output = next(e for e in events if e["type"] == "agent_output")
+    assert started["agent_id"] is None
+    assert output["agent_id"] == f"step:{phase}/{step}"
 
 
 @pytest.fixture
