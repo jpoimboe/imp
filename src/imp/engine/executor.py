@@ -348,6 +348,7 @@ async def _run_agent_invocation(
     except Exception as e:
         _emit(log, on_event, "error", {
             "category": "agent_output_missing",
+            "kind": "output_validation",
             "message": f"output validation: {e}",
         })
         return None, True, False, False, None
@@ -503,7 +504,11 @@ async def _run_agent_gate(
     try:
         action = evaluate_decide(gate.decide, agent_output)
     except DecideNoMatch as e:
-        _emit(log, on_event, "error", {"message": f"agent gate decide: {e}"})
+        _emit(log, on_event, "error", {
+            "category": "agent_output_missing",
+            "kind": "decide_no_match",
+            "message": f"agent gate decide: {e}",
+        })
         return Retry()
 
     # Clean up the gate's transcript dir on success (mirrors step success).
