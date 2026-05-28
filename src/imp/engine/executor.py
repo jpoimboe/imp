@@ -465,19 +465,30 @@ async def _run_agent_gate(
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
     state.save(change.state_dir)
 
-    agent_output, errored, paused, fatal, _backoff_delay = await _run_agent_invocation(
-        agent_def=agent_def,
-        fs_permissions=gate.fs_permissions,
-        model_role=gate.model_role,
-        workflow=workflow, config=config, change=change,
-        state=state, log=log, on_event=on_event,
-        transcript_dir=transcript_dir,
-        step_started_payload_extras={"kind": "agent_gate", "gate_stem": stem},
-        interactive=False,                            # gates are autonomous
-        user_chat_input_fn=user_chat_input_fn,
-        coordinator=coordinator,                      # gate-internal bash etc.
-                                                      # must honor Ctrl+C
-    )
+    gate_backoff_attempts = 0
+    while True:
+        agent_output, errored, paused, fatal, backoff_delay = await _run_agent_invocation(
+            agent_def=agent_def,
+            fs_permissions=gate.fs_permissions,
+            model_role=gate.model_role,
+            workflow=workflow, config=config, change=change,
+            state=state, log=log, on_event=on_event,
+            transcript_dir=transcript_dir,
+            step_started_payload_extras={"kind": "agent_gate", "gate_stem": stem},
+            interactive=False,                            # gates are autonomous
+            user_chat_input_fn=user_chat_input_fn,
+            coordinator=coordinator,                      # gate-internal bash etc.
+                                                          # must honor Ctrl+C
+            prior_backoff_attempts=gate_backoff_attempts,
+        )
+        if backoff_delay is None:
+            break
+        gate_backoff_attempts += 1
+        await anyio.sleep(backoff_delay)
+        if coordinator.should_pause:
+            _emit(log, on_event, "gate_evaluated",
+                  {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
+            return Pause()
 
     if paused or fatal:
         _emit(log, on_event, "gate_evaluated",

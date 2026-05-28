@@ -410,6 +410,99 @@ async def test_rate_limit_exhaustion_pauses(
     )
 
 
+@pytest.mark.anyio
+async def test_agent_gate_rate_limit_backs_off_without_phase_attempt(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Same backoff property in the gate path: a rate_limit error from
+    the agent-gate runner must sleep + retry without incrementing
+    state.phase_attempt."""
+    from imp.engine import error_policy
+    monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
+
+    # Workflow with one trivial step + one agent-gate. The step runner
+    # always succeeds; the gate runner rate-limits once then succeeds.
+    wf = tmp_path / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "gater.md").write_text(
+        "---\nname: gater\ntools: [complete_step]\n"
+        "output:\n"
+        "  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [Yes, No]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [only]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
+        "only:\n"
+        "  steps:\n"
+        "    - {name: w, file: agents/writer.md, model_role: default}\n"
+        "  gates:\n"
+        "    - type: agent\n"
+        "      file: agents/gater.md\n"
+        "      model_role: default\n"
+        "      decide:\n"
+        "        - {when: {verdict: Yes}, action: {kind: continue}}\n"
+        "        - {else: true, action: {kind: retry}}\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
+    )
+    change = Change.create(tmp_path, title="t")
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    gate_calls = [0]
+
+    class _AlternatingRunner:
+        """Step path: always succeed.
+        Gate path: 1st call rate-limits, 2nd call yields verdict=Yes."""
+
+        def __init__(self, *, kind: str) -> None:
+            self._kind = kind
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._kind == "gater":
+                gate_calls[0] += 1
+                if gate_calls[0] == 1:
+                    yield {"type": "error", "payload": {
+                        "category": "rate_limit",
+                        "kind": "RateLimitError",
+                        "message": "429",
+                    }}
+                    return
+                yield {"type": "agent_output", "payload": {"status": "Success", "verdict": "Yes"}}
+                return
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _AltProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _AlternatingRunner(kind=invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _AltProvider(),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    assert gate_calls[0] == 2, (
+        f"expected 2 gate invocations (rate-limit then success); got {gate_calls[0]}"
+    )
+
+    state = State.load(change.state_dir)
+    assert state.phase_attempt == 0
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
