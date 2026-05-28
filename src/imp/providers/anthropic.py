@@ -34,7 +34,64 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.transcript import Transcript
 from imp.engine.schema import validate_agent_output
+from imp.providers import errors as perr
 from imp.providers.base import Provider
+
+
+def _classify_anthropic_exception(exc: BaseException) -> perr.ProviderError:
+    """Translate an Anthropic SDK exception into the matching
+    ProviderError subclass. Re-raises anything that doesn't fit a
+    known category — the runner's top-level handler turns that into
+    an 'unknown' error event.
+    """
+    from anthropic import (
+        APIConnectionError,
+        APIStatusError,
+        APITimeoutError,
+        AuthenticationError,
+        BadRequestError,
+        InternalServerError,
+        NotFoundError,
+        PermissionDeniedError,
+    )
+    from anthropic import RateLimitError as _AnthropicRateLimit
+
+    if isinstance(exc, AuthenticationError):
+        request_id = getattr(exc, "request_id", None)
+        detail: dict[str, object] = {"request_id": request_id} if request_id else {}
+        return perr.AuthError(str(exc), detail=detail)
+    if isinstance(exc, PermissionDeniedError):
+        return perr.AuthError(str(exc))
+    if isinstance(exc, _AnthropicRateLimit):
+        retry_after: float | None = None
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            headers = getattr(resp, "headers", None) or {}
+            raw = headers.get("retry-after") if hasattr(headers, "get") else None
+            if raw:
+                try:
+                    retry_after = float(raw)
+                except (TypeError, ValueError):
+                    retry_after = None
+        detail = (
+            {"retry_after_seconds": retry_after} if retry_after is not None else {}
+        )
+        return perr.RateLimitError(str(exc), detail=detail)
+    if isinstance(exc, (APIConnectionError, APITimeoutError, InternalServerError)):
+        return perr.NetworkError(str(exc))
+    if isinstance(exc, NotFoundError):
+        return perr.ConfigError(f"model not found: {exc}")
+    if isinstance(exc, BadRequestError):
+        msg = str(exc)
+        msg_low = msg.lower()
+        if "prompt is too long" in msg or "context_length_exceeded" in msg:
+            return perr.ContextWindowError(msg)
+        if "credit balance" in msg_low or "billing" in msg_low:
+            return perr.QuotaError(msg)
+        return perr.ConfigError(msg)
+    if isinstance(exc, APIStatusError):
+        return perr.NetworkError(f"{exc.status_code}: {exc}")
+    raise exc
 
 
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
@@ -187,8 +244,20 @@ class AnthropicAgentRunner:
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         try:
-            async for ev in self._run_loop(invocation):
-                yield ev
+            try:
+                async for ev in self._run_loop(invocation):
+                    yield ev
+            except perr.ProviderError as exc:
+                yield perr.make_error_event(exc)
+                return
+            except Exception as exc:
+                try:
+                    classified = _classify_anthropic_exception(exc)
+                except Exception:
+                    yield perr.make_unknown_error_event(exc)
+                    return
+                yield perr.make_error_event(classified)
+                return
         finally:
             await self._close_client()
 
