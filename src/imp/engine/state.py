@@ -17,7 +17,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+import uuid
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from imp.agents.runner import Message
 
 import filelock
 
@@ -79,34 +83,200 @@ class State:
             raise
 
 
-class EventLog:
-    """Append-only event log for audit trail."""
+# ── EventLog: audit trail with envelope + typed appends + chain map ──────────
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        path.parent.mkdir(parents=True, exist_ok=True)
+_REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
+    "step_context": ("provider", "model", "system_prompt",
+                     "tools_schema", "params", "max_tool_calls"),
+    "user_message": ("role", "content"),
+    "llm_response": ("provider", "model", "raw", "usage", "stop_reason"),
+    "tool_call": ("id", "name", "input"),
+    "tool_result": ("id", "content", "error"),
+}
 
-    def append(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Append an event to the log with a timestamp."""
+
+def _block_to_dict(b: Any) -> dict[str, Any]:
+    """Serialize a content block by duck-typing on .type (avoids importing the
+    runner block classes into state.py — keeps the module dependency-free)."""
+    bt = getattr(b, "type", None)
+    if bt == "text":
+        return {"type": "text", "text": b.text}
+    if bt == "tool_use":
+        return {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
+    if bt == "tool_result":
+        return {"type": "tool_result", "tool_use_id": b.tool_use_id,
+                "content": b.content, "is_error": b.is_error}
+    return {"type": str(bt)}
+
+
+@runtime_checkable
+class EventLog(Protocol):
+    """Audit log. Callers never pass parent_id; the writer computes it from an
+    internal agent_id → last_event_id chain map. parent_id_override is honored
+    only on an agent's first append (its step_context)."""
+
+    def append_step_context(self, *, agent_id: str | None,
+                            parent_id_override: str | None = None,
+                            provider: str, model: str, system_prompt: Any,
+                            tools_schema: Any, params: dict[str, Any],
+                            max_tool_calls: int) -> dict[str, Any]: ...
+    def append_user_message(self, *, agent_id: str | None,
+                            message: "Message") -> dict[str, Any]: ...
+    def append_llm_response(self, *, agent_id: str | None, provider: str,
+                            model: str, raw: Any, usage: dict[str, Any],
+                            stop_reason: Any) -> dict[str, Any]: ...
+    def append_tool_call(self, *, agent_id: str | None,
+                         block: Any) -> dict[str, Any]: ...
+    def append_tool_result(self, *, agent_id: str | None,
+                           block: Any) -> dict[str, Any]: ...
+    def append(self, *, agent_id: str | None, type: str,
+               payload: dict[str, Any]) -> dict[str, Any]: ...
+    def read(self) -> Iterator[dict[str, Any]]: ...
+
+
+class _BaseEventLog:
+    """Shared envelope/chain/validation/fan-out logic. Subclasses implement
+    _persist(record) and read()."""
+
+    def __init__(self, *, on_event: Any = None, strict: bool = False) -> None:
+        self._on_event = on_event
+        self._strict = strict
+        self._last: dict[str, str] = {}   # agent_id → last event id (non-None only)
+        self._rebuild_chain()
+
+    def _rebuild_chain(self) -> None:
+        for e in self.read():
+            aid = e.get("agent_id")
+            eid = e.get("id")
+            if aid is not None and isinstance(eid, str):
+                self._last[aid] = eid
+
+    # --- core emit -----------------------------------------------------------
+
+    def _emit(self, *, agent_id: str | None, type: str, payload: Any,
+              parent_id_override: str | None = None) -> dict[str, Any]:
+        new_id = uuid.uuid4().hex
+        if parent_id_override is not None:
+            parent_id = parent_id_override
+        elif agent_id is None:
+            parent_id = None                 # executor-level events never chain
+        else:
+            parent_id = self._last.get(agent_id)
+
+        issues = self._validate(type, payload)
+        if issues:
+            if self._strict:
+                raise ValueError(f"{type} payload invalid: {'; '.join(issues)}")
+            payload = self._coerce(payload)
+
         record = {
+            "id": new_id,
+            "parent_id": parent_id,
+            "agent_id": agent_id,
             "timestamp": datetime.now(UTC).isoformat(),
-            "type": event_type,
+            "type": type,
             "payload": payload,
         }
+        self._persist(record)
+        if agent_id is not None:
+            self._last[agent_id] = new_id
+        if self._on_event is not None:
+            self._on_event(record)
+
+        # Write-side failure contract: in lenient mode, surface validation
+        # issues as a runner_warning AFTER the best-effort write. runner_warning
+        # has a trivial shape so it can never re-trigger this branch.
+        if issues and not self._strict:
+            self._emit(agent_id=agent_id, type="runner_warning",
+                       payload={"message": f"{type} payload invalid: "
+                                           f"{'; '.join(issues)}"})
+        return record
+
+    @staticmethod
+    def _validate(event_type: str, payload: Any) -> list[str]:
+        # NOTE: parameter is `event_type`, NOT `type` — shadowing the builtin
+        # `type` here would break the `payload.__class__.__name__` path below.
+        if not isinstance(payload, dict):
+            return [f"payload is {payload.__class__.__name__}, expected dict"]
+        missing = [k for k in _REQUIRED_KEYS.get(event_type, ()) if k not in payload]
+        return [f"missing key {k!r}" for k in missing]
+
+    @staticmethod
+    def _coerce(payload: Any) -> dict[str, Any]:
+        return payload if isinstance(payload, dict) else {"_raw": str(payload)}
+
+    # --- typed appends -------------------------------------------------------
+
+    def append_step_context(self, *, agent_id: str | None,
+                            parent_id_override: str | None = None,
+                            provider: str, model: str, system_prompt: Any,
+                            tools_schema: Any, params: dict[str, Any],
+                            max_tool_calls: int) -> dict[str, Any]:
+        return self._emit(
+            agent_id=agent_id, type="step_context",
+            parent_id_override=parent_id_override,
+            payload={"provider": provider, "model": model,
+                     "system_prompt": system_prompt, "tools_schema": tools_schema,
+                     "params": params, "max_tool_calls": max_tool_calls})
+
+    def append_user_message(self, *, agent_id: str | None,
+                            message: Any) -> dict[str, Any]:
+        return self._emit(
+            agent_id=agent_id, type="user_message",
+            payload={"role": message.role,
+                     "content": [_block_to_dict(b) for b in message.content]})
+
+    def append_llm_response(self, *, agent_id: str | None, provider: str,
+                            model: str, raw: Any, usage: dict[str, Any],
+                            stop_reason: Any) -> dict[str, Any]:
+        return self._emit(
+            agent_id=agent_id, type="llm_response",
+            payload={"provider": provider, "model": model, "raw": raw,
+                     "usage": usage, "stop_reason": stop_reason})
+
+    def append_tool_call(self, *, agent_id: str | None,
+                         block: Any) -> dict[str, Any]:
+        return self._emit(
+            agent_id=agent_id, type="tool_call",
+            payload={"id": block.id, "name": block.name, "input": block.input})
+
+    def append_tool_result(self, *, agent_id: str | None,
+                           block: Any) -> dict[str, Any]:
+        return self._emit(
+            agent_id=agent_id, type="tool_result",
+            payload={"id": block.tool_use_id, "content": block.content,
+                     "error": block.is_error})
+
+    def append(self, *, agent_id: str | None, type: str,  # type: ignore[override]
+               payload: Any) -> dict[str, Any]:
+        return self._emit(agent_id=agent_id, type=type, payload=payload)
+
+    # --- abstract ------------------------------------------------------------
+
+    def _persist(self, record: dict[str, Any]) -> None:
+        raise NotImplementedError
+
+    def read(self) -> Iterator[dict[str, Any]]:
+        raise NotImplementedError
+
+
+class JsonlEventLog(_BaseEventLog):
+    """File-backed append-only event log."""
+
+    def __init__(self, path: Path, *, on_event: Any = None,
+                 strict: bool = False) -> None:
+        self.path = path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(on_event=on_event, strict=strict)
+
+    def _persist(self, record: dict[str, Any]) -> None:
         with self.path.open("a") as f:
             f.write(json.dumps(record))
             f.write("\n")
             f.flush()
             os.fsync(f.fileno())
-        return record
 
     def read(self) -> Iterator[dict[str, Any]]:
-        """Read all events from the log.
-
-        A line that fails to parse yields a sentinel
-        ``{"_malformed": True, "raw": <line>}`` instead of raising — preserves
-        the audit trail and keeps ``imp log`` runnable on a corrupted file.
-        """
         if not self.path.exists():
             return
         with self.path.open() as f:
@@ -127,25 +297,32 @@ class EventLog:
         events = list(self.read())
         last_start = -1
         for i, e in enumerate(events):
-            if (
-                e.get("type") == "step_started"
-                and (e.get("payload") or {}).get("step") == step_name
-            ):
+            if (e.get("type") == "step_started"
+                    and (e.get("payload") or {}).get("step") == step_name):
                 last_start = i
         if last_start == -1:
             return []
-
-        # Find the end: either end of file or next step_started with different step
         end = len(events)
         for i in range(last_start + 1, len(events)):
-            if (
-                events[i].get("type") == "step_started"
-                and (events[i].get("payload") or {}).get("step") != step_name
-            ):
+            if (events[i].get("type") == "step_started"
+                    and (events[i].get("payload") or {}).get("step") != step_name):
                 end = i
                 break
-
         return events[last_start:end]
+
+
+class InMemoryEventLog(_BaseEventLog):
+    """In-memory event log for tests; shape-equivalent to JsonlEventLog."""
+
+    def __init__(self, *, on_event: Any = None, strict: bool = False) -> None:
+        self._events: list[dict[str, Any]] = []
+        super().__init__(on_event=on_event, strict=strict)
+
+    def _persist(self, record: dict[str, Any]) -> None:
+        self._events.append(record)
+
+    def read(self) -> Iterator[dict[str, Any]]:
+        yield from list(self._events)
 
 
 class LockHeld(Exception):
