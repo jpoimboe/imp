@@ -325,7 +325,10 @@ async def _run_agent_invocation(
     try:
         validate_agent_output(agent_output, agent_def.output_schema)
     except Exception as e:
-        _emit(log, on_event, "error", {"message": f"output validation: {e}"})
+        _emit(log, on_event, "error", {
+            "category": "agent_output_missing",
+            "message": f"output validation: {e}",
+        })
         return None, True, False, False
 
     return agent_output, False, False, False
