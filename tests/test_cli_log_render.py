@@ -124,34 +124,40 @@ def test_fmt_phase_exhausted_color() -> None:
     assert "\x1b[31mexhausted\x1b[0m" in s
 
 
-def test_fmt_step_started_basic() -> None:
+def test_fmt_step_started_regular_step() -> None:
+    # Real payload from executor: {step, model, provider, tools, interactive}
     s = render._fmt_step_started(
-        {"step": "spec-writer", "model_role": "expensive", "interactive": False},
-        full=False, color=False,
-    )
-    assert s == "spec-writer  [expensive]"
-
-
-def test_fmt_step_started_omits_default_role() -> None:
-    s = render._fmt_step_started(
-        {"step": "spec-writer", "model_role": "default", "interactive": False},
+        {"step": "spec-writer", "model": "claude-sonnet-4-6",
+         "provider": "anthropic", "tools": ["bash"], "interactive": False},
         full=False, color=False,
     )
     assert s == "spec-writer"
 
 
-def test_fmt_step_started_missing_role_treated_as_default() -> None:
-    # Older events may omit model_role entirely; suppress the bracket too.
+def test_fmt_step_started_agent_gate() -> None:
+    # Real payload for agent gates: {kind: "agent_gate", gate_stem, model, provider, ...}
     s = render._fmt_step_started(
-        {"step": "spec-writer", "interactive": False},
+        {"kind": "agent_gate", "gate_stem": "spec-lint",
+         "model": "claude-sonnet-4-6", "provider": "anthropic",
+         "tools": [], "interactive": False},
         full=False, color=False,
     )
-    assert s == "spec-writer"
+    assert s == "agent_gate: spec-lint"
+
+
+def test_fmt_step_started_missing_step_key() -> None:
+    # Defensive: if step key is absent on a non-gate event, shows "?"
+    s = render._fmt_step_started(
+        {"interactive": False},
+        full=False, color=False,
+    )
+    assert s == "?"
 
 
 def test_fmt_step_started_interactive_suffix() -> None:
     s = render._fmt_step_started(
-        {"step": "talk", "model_role": "default", "interactive": True},
+        {"step": "talk", "model": "claude-sonnet-4-6",
+         "provider": "anthropic", "tools": [], "interactive": True},
         full=False, color=False,
     )
     assert s == "talk (interactive)"
@@ -363,7 +369,7 @@ def test_fmt_tool_call_long_arg_elided() -> None:
 def test_fmt_tool_result_with_known_name() -> None:
     # Result formatter takes the resolved tool_name as a parameter.
     s = render._fmt_tool_result_with_name(
-        {"tool_call_id": "tu_1", "result": "ok\nhello"},
+        {"id": "tu_1", "content": "ok\nhello", "error": False},
         tool_name="bash", full=True, color=False,
     )
     # newlines escaped, no elision needed
@@ -373,7 +379,7 @@ def test_fmt_tool_result_with_known_name() -> None:
 def test_fmt_tool_result_long_content_elided_with_charcount() -> None:
     long = "y" * 500
     s = render._fmt_tool_result_with_name(
-        {"tool_call_id": "tu_1", "result": long},
+        {"id": "tu_1", "content": long, "error": False},
         tool_name="bash", full=True, color=False,
     )
     assert s.startswith("bash → ")
@@ -384,7 +390,7 @@ def test_fmt_tool_result_unknown_name_renders_tool() -> None:
     # When the resolver couldn't find a name (orphan tool_result), the
     # literal label "tool" is used.
     s = render._fmt_tool_result_with_name(
-        {"tool_call_id": "ghost", "result": "x"},
+        {"id": "ghost", "content": "x", "error": False},
         tool_name=None, full=True, color=False,
     )
     assert s == "tool → x"
@@ -395,14 +401,14 @@ def test_resolve_tool_name_builds_running_map() -> None:
         {"type": "tool_call",
          "payload": {"id": "tu_1", "name": "bash", "args": {}}},
         {"type": "tool_result",
-         "payload": {"tool_call_id": "tu_1", "result": "ok"}},
+         "payload": {"id": "tu_1", "content": "ok", "error": False}},
         {"type": "tool_call",
          "payload": {"id": "tu_2", "name": "read", "args": {}}},
     ]
     seen: dict[str, str | None] = {}
     for e in events:
         if e["type"] == "tool_result":
-            name = render._lookup_tool_name(e["payload"].get("tool_call_id"), seen)
+            name = render._lookup_tool_name(e["payload"].get("id"), seen)
             assert name == "bash"
         elif e["type"] == "tool_call":
             render._record_tool_call(e["payload"], seen)
@@ -417,12 +423,12 @@ def test_collapse_happy_path_one_burst() -> None:
     events = [
         _ev("step_started", step="s1"),
         _ev("tool_call", id="t1", name="bash", args={}),
-        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("tool_result", id="t1", content="ok", error=False),
         _ev("tool_call", id="t2", name="bash", args={}),
-        _ev("tool_result", tool_call_id="t2", result="ok"),
+        _ev("tool_result", id="t2", content="ok", error=False),
         _ev("tool_call", id="t3", name="ls",  args={}, ts="2026-05-27T10:00:09+00:00"),
-        _ev("tool_result", tool_call_id="t3", result="ok",
-            ts="2026-05-27T10:00:10+00:00"),
+        _ev("tool_result", id="t3", content="ok",
+            ts="2026-05-27T10:00:10+00:00", error=False),
         _ev("step_completed", step="s1", action="continue"),
     ]
     out = list(render._collapse_tool_bursts(events))
@@ -438,10 +444,10 @@ def test_collapse_split_by_non_tool_event() -> None:
     events = [
         _ev("step_started", step="s1"),
         _ev("tool_call", id="t1", name="bash", args={}),
-        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("tool_result", id="t1", content="ok", error=False),
         _ev("gate_evaluated", kind="script", action={"kind": "continue"}),
         _ev("tool_call", id="t2", name="bash", args={}),
-        _ev("tool_result", tool_call_id="t2", result="ok"),
+        _ev("tool_result", id="t2", content="ok", error=False),
         _ev("step_completed", step="s1", action="continue"),
     ]
     out = list(render._collapse_tool_bursts(events))
@@ -456,7 +462,7 @@ def test_collapse_no_step_window_no_collapse() -> None:
     # (current engine never emits them there, but the renderer should be safe).
     events = [
         _ev("tool_call", id="t1", name="bash", args={}),
-        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("tool_result", id="t1", content="ok", error=False),
     ]
     out = list(render._collapse_tool_bursts(events))
     assert [e["type"] for e in out] == ["tool_call", "tool_result"]
@@ -469,7 +475,7 @@ def test_collapse_burst_split_by_workflow_pause() -> None:
         _ev("workflow_paused", reason="ctrl-c"),
         _ev("workflow_resumed"),
         _ev("tool_call", id="t2", name="bash", args={}),
-        _ev("tool_result", tool_call_id="t2", result="ok"),
+        _ev("tool_result", id="t2", content="ok", error=False),
         _ev("step_completed", step="s1", action="continue"),
     ]
     out = list(render._collapse_tool_bursts(events))
@@ -569,7 +575,7 @@ def test_render_log_full_mode_shows_every_tool_event() -> None:
     events = [
         _ev("step_started", step="s1", model_role="default", interactive=False),
         _ev("tool_call", id="t1", name="bash", args={"command": "ls"}),
-        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("tool_result", id="t1", content="ok", error=False),
         _ev("step_completed", step="s1", action="continue"),
     ]
     lines = list(render.render_log(events, full=True, color=False))
@@ -585,9 +591,9 @@ def test_render_log_default_mode_collapses_tool_burst() -> None:
     events = [
         _ev("step_started", step="s1", model_role="default", interactive=False),
         _ev("tool_call", id="t1", name="bash", args={"command": "ls"}),
-        _ev("tool_result", tool_call_id="t1", result="ok"),
+        _ev("tool_result", id="t1", content="ok", error=False),
         _ev("tool_call", id="t2", name="bash", args={"command": "pwd"}),
-        _ev("tool_result", tool_call_id="t2", result="/"),
+        _ev("tool_result", id="t2", content="/", error=False),
         _ev("step_completed", step="s1", action="continue"),
     ]
     lines = list(render.render_log(events, full=False, color=False))
@@ -637,7 +643,7 @@ def test_render_log_empty_yields_nothing() -> None:
 def test_render_log_orphan_tool_result_renders_as_literal_tool() -> None:
     events = [
         _ev("step_started", step="s1", model_role="default", interactive=False),
-        _ev("tool_result", tool_call_id="ghost", result="orphan"),
+        _ev("tool_result", id="ghost", content="orphan", error=False),
         _ev("step_completed", step="s1", action="continue"),
     ]
     lines = list(render.render_log(events, full=True, color=False))
@@ -861,7 +867,7 @@ def test_cli_log_full_mode_keeps_individual_tool_events(
          "payload": {"id": "t1", "name": "bash", "args": {"command": "ls"}}},
         {"timestamp": "2026-05-27T10:00:02+00:00",
          "type": "tool_result",
-         "payload": {"tool_call_id": "t1", "result": "ok"}},
+         "payload": {"id": "t1", "content": "ok", "error": False}},
         {"timestamp": "2026-05-27T10:00:03+00:00",
          "type": "step_completed",
          "payload": {"step": "s", "action": "continue"}},

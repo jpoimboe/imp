@@ -130,12 +130,14 @@ def _fmt_phase_exhausted(p: dict[str, Any], full: bool, color: bool) -> str:
 
 
 def _fmt_step_started(p: dict[str, Any], full: bool, color: bool) -> str:
-    step = p.get("step", "?")
-    role = p.get("model_role", "default")
+    # Agent-gate step_started: has kind/gate_stem, no step key.
+    kind = p.get("kind")
+    if kind == "agent_gate":
+        stem = p.get("gate_stem", "?")
+        out = f"agent_gate: {stem}"
+    else:
+        out = str(p.get("step", "?"))
     interactive = bool(p.get("interactive", False))
-    out = str(step)
-    if role and role != "default":
-        out = f"{out}  [{role}]"
     if interactive:
         out = f"{out} (interactive)"
     return out
@@ -326,9 +328,9 @@ def _fmt_tool_call(p: dict[str, Any], full: bool, color: bool) -> str:
 def _fmt_tool_result_with_name(
     p: dict[str, Any], *, tool_name: str | None, full: bool, color: bool,
 ) -> str:
-    raw = p.get("result")
+    raw = p.get("content")
     if raw is None:
-        raw = p.get("content", "")
+        raw = p.get("result", "")
     s = str(raw)
     # Escape newlines so each event is one line.
     escaped = s.replace("\n", "\\n")
@@ -592,7 +594,7 @@ def render_log(events, full: bool, color: bool):
 
         # Dispatch to formatter
         if t == "tool_result":
-            tool_name = _lookup_tool_name(p.get("tool_call_id"), tool_names)
+            tool_name = _lookup_tool_name(p.get("id"), tool_names)
             summary = _fmt_tool_result_with_name(
                 p, tool_name=tool_name, full=full, color=color,
             )

@@ -12,7 +12,7 @@
 12:00:10    gate_evaluated    HumanGate on onboard  → continue
 12:00:11  phase_completed     onboard  → next
 12:00:12  phase_started       implement
-12:00:13    step_started      spec-writer  [expensive]
+12:00:13    step_started      spec-writer
 12:00:14      tool_call       bash  (command=ls -la)
 12:00:15      tool_result     bash → total 12\ndrwxr-xr-x  2 ...
 12:00:16    gate_evaluated    spec-lint (agent)  → retry
