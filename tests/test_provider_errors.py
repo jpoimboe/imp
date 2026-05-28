@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from imp.providers import errors as perr
 
 

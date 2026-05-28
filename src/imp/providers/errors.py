@@ -32,9 +32,9 @@ class ProviderError(Exception):
 
     category: Category  # overridden by each subclass
 
-    def __init__(self, message: str, *, detail: dict | None = None) -> None:
+    def __init__(self, message: str, *, detail: dict[str, object] | None = None) -> None:
         super().__init__(message)
-        self.detail: dict = detail or {}
+        self.detail: dict[str, object] = detail or {}
 
 
 class AuthError(ProviderError):
@@ -65,7 +65,7 @@ class NetworkError(ProviderError):
     category: Category = "network"
 
 
-def make_error_event(exc: ProviderError, *, kind: str = "") -> dict:
+def make_error_event(exc: ProviderError, *, kind: str = "") -> dict[str, object]:
     """Build the canonical error event for a classified provider exception.
 
     ``kind`` is informational (rendered nowhere today; preserved for
@@ -83,7 +83,7 @@ def make_error_event(exc: ProviderError, *, kind: str = "") -> dict:
     }
 
 
-def make_unknown_error_event(exc: BaseException) -> dict:
+def make_unknown_error_event(exc: BaseException) -> dict[str, object]:
     """Build the canonical 'unknown' error event for the runner's
     top-level fallback ``except Exception`` branch. Single source of
     truth so the wire format stays consistent.
