@@ -214,8 +214,14 @@ def _wrap_one(
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
         try:
             if name == "task":
+                # Interim: __tool_use_id__ is synchronously available here
+                # because the claude CLI injects it into every MCP tool call's
+                # arguments dict. Task 14 finalizes this by appending the task
+                # tool_call event inside _impl and passing that persisted event
+                # id, making the parent link durable in the event log.
                 result = await dispatch_task(
                     ctx, args["subagent_name"], args["task_description"],
+                    tool_call_event_id=args.get("__tool_use_id__", ""),
                 )
                 return _tool_response(result, is_error=False)
             if name == "complete_step":

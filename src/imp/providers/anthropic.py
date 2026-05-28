@@ -468,10 +468,13 @@ class AnthropicAgentRunner:
 
                 # task special-case: bypasses the sync Tool.invoke path
                 # entirely — go straight to the async dispatcher.
+                # Interim: tu.id (the API tool_use block id) is the parent link.
+                # Task 14 may switch to a persisted event id for full durability.
                 if tu.name == "task":
                     try:
                         result_str = await dispatch_task(
                             ctx, tu.input["subagent_name"], tu.input["task_description"],
+                            tool_call_event_id=tu.id,
                         )
                     except Exception as e:
                         text = f"{type(e).__name__}: {e}"

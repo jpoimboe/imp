@@ -159,3 +159,36 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
     assert captured["system_prompt"] == "hello change-7"
     # Sanity: dispatch_task still returns JSON-stringified agent_output.
     assert "Success" in result
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> None:
+    from imp.engine.state import InMemoryEventLog
+    from imp.agents.tools.context import ToolContext
+
+    shared = InMemoryEventLog()
+    captured: dict = {}
+
+    async def fake_spawn(sub_inv):
+        captured["agent_id"] = sub_inv.agent_id
+        captured["event_log"] = sub_inv.event_log
+        captured["first_event_parent_id"] = sub_inv.first_event_parent_id
+
+        async def _gen():
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        return _gen()
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl",
+        subagent_defs={"helper": _agent("helper")},
+        parent_transcript_dir=tmp_path / "steps" / "p" / "s",
+    )
+    ctx.event_log = shared
+    ctx.spawn_subagent = fake_spawn
+
+    out = await dispatch_task(ctx, "helper", "do it", tool_call_event_id="tc-99")
+    assert json.loads(out) == {"status": "Success"}
+    assert captured["agent_id"] == "sub:tc-99"
+    assert captured["event_log"] is shared
+    assert captured["first_event_parent_id"] == "tc-99"

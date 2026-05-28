@@ -50,7 +50,10 @@ def make_task_tool() -> Tool:
     )
 
 
-async def dispatch_task(ctx: ToolContext, subagent_name: str, task_description: str) -> str:
+async def dispatch_task(
+    ctx: ToolContext, subagent_name: str, task_description: str,
+    *, tool_call_event_id: str = "",
+) -> str:
     if subagent_name not in ctx.subagent_defs:
         raise ValueError(
             f"subagent {subagent_name!r} not declared; available: "
@@ -72,6 +75,11 @@ async def dispatch_task(ctx: ToolContext, subagent_name: str, task_description: 
     # Carryover important #1: render the subagent's Jinja template, same way
     # executor._execute_step renders the parent's. The PromptContext reads the
     # live events.jsonl for this Change so {{ events.<step>.<field> }} works.
+    # Prompt rendering uses a SEPARATE read-only JsonlEventLog, NOT
+    # ctx.event_log. ctx.event_log is the shared WRITE instance that fans
+    # subagent audit events out to the parent's on_event chain; passing it
+    # here would conflate the write-fan-out log with a read-only snapshot
+    # cursor. Keep them distinct.
     prompt_ctx = build_context(
         change_id=cc.change_id,
         change_title=f"Change {cc.change_id}",  # subagents don't see parent title
@@ -94,6 +102,10 @@ async def dispatch_task(ctx: ToolContext, subagent_name: str, task_description: 
         fs_permissions=ctx.fs_permissions,
         events_path=ctx.events_path,
         subagent_defs={},
+        # Stable subagent identity + shared write log + cross-agent parent link
+        agent_id=f"sub:{tool_call_event_id}",
+        event_log=ctx.event_log,
+        first_event_parent_id=tool_call_event_id if tool_call_event_id else None,
     )
 
     gen = await ctx.spawn_subagent(sub_inv)
