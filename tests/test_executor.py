@@ -314,6 +314,100 @@ async def test_auth_error_pauses_without_burning_retries(
     assert state.status == "paused"
 
 
+class _RateLimitThenSuccessRunner:
+    """First call yields a rate_limit error; subsequent calls succeed."""
+
+    def __init__(self, output: dict) -> None:
+        self._output = output
+        self.run_count = 0
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        self.run_count += 1
+        if self.run_count == 1:
+            yield {"type": "error", "payload": {
+                "category": "rate_limit",
+                "kind": "RateLimitError",
+                "message": "429 Too Many Requests",
+            }}
+            return
+        yield {"type": "agent_output", "payload": self._output}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+@pytest.mark.anyio
+async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A rate_limit error must trigger a backoff sleep + retry that does
+    NOT increment state.step_attempt. After the first sleep, the second
+    invocation returns agent_output and the workflow completes."""
+    from imp.engine import error_policy
+    monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
+
+    change = _seed_minimal_workflow(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _RateLimitThenSuccessRunner({"status": "Success"})
+
+    class _RLProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _RLProvider(),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    assert runner.run_count == 2, (
+        f"expected exactly 2 invocations (1 rate-limit + 1 success); "
+        f"got {runner.run_count}"
+    )
+
+    state = State.load(change.state_dir)
+    assert state.step_attempt == 0
+
+
+@pytest.mark.anyio
+async def test_rate_limit_exhaustion_pauses(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """4 consecutive rate_limit events → Pause (schedule exhausted)."""
+    from imp.engine import error_policy
+    monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
+
+    change = _seed_minimal_workflow(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _CategoryErrorRunner(
+        category="rate_limit", kind="RateLimitError", message="429",
+    )
+
+    class _RLProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _RLProvider(),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    assert runner.run_count == 4, (
+        f"expected 4 backoff attempts before Pause; got {runner.run_count}"
+    )
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

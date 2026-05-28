@@ -13,6 +13,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import anyio
+
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import (
     AgentInvocation,
@@ -370,18 +372,31 @@ async def _execute_step(
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
     state.save(change.state_dir)
 
-    agent_output, errored, paused, fatal, _backoff_delay = await _run_agent_invocation(
-        agent_def=agent_def,
-        fs_permissions=step.fs_permissions,
-        model_role=step.model_role,
-        workflow=workflow, config=config, change=change,
-        state=state, log=log, on_event=on_event,
-        transcript_dir=transcript_dir,
-        step_started_payload_extras={"step": step.name},
-        interactive=step.interactive,
-        user_chat_input_fn=user_chat_input_fn,
-        coordinator=coordinator,
-    )
+    step_backoff_attempts = 0
+    while True:
+        agent_output, errored, paused, fatal, backoff_delay = await _run_agent_invocation(
+            agent_def=agent_def,
+            fs_permissions=step.fs_permissions,
+            model_role=step.model_role,
+            workflow=workflow, config=config, change=change,
+            state=state, log=log, on_event=on_event,
+            transcript_dir=transcript_dir,
+            step_started_payload_extras={"step": step.name},
+            interactive=step.interactive,
+            user_chat_input_fn=user_chat_input_fn,
+            coordinator=coordinator,
+            prior_backoff_attempts=step_backoff_attempts,
+        )
+        if backoff_delay is None:
+            break
+        step_backoff_attempts += 1
+        await anyio.sleep(backoff_delay)
+        if coordinator.should_pause:
+            return Pause()
+        if step_backoff_attempts >= error_policy._MAX_BACKOFF_ATTEMPTS:
+            # Schedule exhausted: the next decide() call would return Pause.
+            # Avoid a redundant invocation — surface Pause directly.
+            return Pause()
 
     if paused:
         return Pause()
