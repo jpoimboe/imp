@@ -21,6 +21,7 @@ from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
+    Diagnostics,
     Event,
     Message,
     TextBlock,
@@ -144,31 +145,79 @@ def _message_to_anthropic(msg: Message) -> dict[str, Any]:
     return {"role": msg.role, "content": content}
 
 
-def _anthropic_to_message(
-    response: Any,
-) -> tuple[Message, list[str], list[str]]:
-    """Translate an Anthropic response to an imp Message + a list of warning
-    strings + a list of extended-thinking contents.
-
-    Thinking blocks are stripped from the visible message (they're not part
-    of the conversation history we send back) but their content is returned
-    separately so the runner can emit `thinking` events for the audit trail.
-    Unknown block types still become warnings.
-    """
-    content: list[Any] = []
-    warnings: list[str] = []
-    thinkings: list[str] = []
-    for block in response.content:
+def _serialize_anthropic_response(response: Any) -> dict[str, Any]:
+    """Serialize a provider response to a plain dict (the llm_response.raw
+    value). Prefers SDK pydantic .model_dump() for max fidelity; falls back to
+    introspecting .content / .stop_reason / .usage for test fakes. Both paths
+    produce {content: [block-dicts], stop_reason, usage}."""
+    dump = getattr(response, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(mode="json")
+        except TypeError:
+            return dump()
+    content: list[dict[str, Any]] = []
+    for block in getattr(response, "content", []):
         kind = getattr(block, "type", None)
         if kind == "text":
-            content.append(TextBlock(text=block.text))
+            content.append({"type": "text", "text": block.text})
         elif kind == "tool_use":
-            content.append(ToolUseBlock(id=block.id, name=block.name, input=block.input))
+            content.append({"type": "tool_use", "id": block.id,
+                            "name": block.name, "input": block.input})
         elif kind == "thinking":
-            thinkings.append(str(getattr(block, "thinking", "") or ""))
+            content.append({"type": "thinking",
+                            "thinking": getattr(block, "thinking", "")})
+        else:
+            content.append({"type": str(kind)})
+    return {
+        "content": content,
+        "stop_reason": getattr(response, "stop_reason", None),
+        "usage": _usage_dict(getattr(response, "usage", None)),
+    }
+
+
+def _usage_dict(usage: Any) -> dict[str, Any]:
+    if usage is None:
+        return {}
+    dump = getattr(usage, "model_dump", None)
+    if callable(dump):
+        return dump()
+    if isinstance(usage, dict):
+        return usage
+    return {k: getattr(usage, k) for k in
+            ("input_tokens", "output_tokens",
+             "cache_read_input_tokens", "cache_creation_input_tokens")
+            if getattr(usage, k, None) is not None}
+
+
+def _parse_anthropic_message(raw: dict[str, Any]) -> Message:
+    """raw → assistant Message. Reconstruction-critical; shared with replay.py.
+    Thinking + unknown blocks are dropped (they're not conversation history)."""
+    content: list[Any] = []
+    for block in raw.get("content", []):
+        kind = block.get("type")
+        if kind == "text":
+            content.append(TextBlock(text=block.get("text", "")))
+        elif kind == "tool_use":
+            content.append(ToolUseBlock(id=block["id"], name=block["name"],
+                                        input=block.get("input", {})))
+        # thinking + unknown: skipped (see diagnostics)
+    return Message(role="assistant", content=tuple(content))
+
+
+def _extract_anthropic_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+    """Render-only: thinking contents + unknown-block warnings."""
+    warnings: list[str] = []
+    thinkings: list[str] = []
+    for block in raw.get("content", []):
+        kind = block.get("type")
+        if kind in ("text", "tool_use"):
+            continue
+        if kind == "thinking":
+            thinkings.append(str(block.get("thinking", "") or ""))
         else:
             warnings.append(f"skipped unknown block type {kind!r}")
-    return Message(role="assistant", content=tuple(content)), warnings, thinkings
+    return Diagnostics(block_warnings=tuple(warnings), thinkings=tuple(thinkings))
 
 
 def _serialize(msg: Message) -> dict[str, Any]:
@@ -365,10 +414,12 @@ class AnthropicAgentRunner:
                 max_tokens=8192,
             )
 
-            assistant_msg, block_warnings, thinkings = _anthropic_to_message(response)
-            for content in thinkings:
+            raw = _serialize_anthropic_response(response)
+            assistant_msg = _parse_anthropic_message(raw)
+            diag = _extract_anthropic_diagnostics(raw)
+            for content in diag.thinkings:
                 yield {"type": "thinking", "payload": {"content": content}}
-            for w in block_warnings:
+            for w in diag.block_warnings:
                 yield {"type": "runner_warning", "payload": {"message": w}}
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
