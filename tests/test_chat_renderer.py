@@ -5,16 +5,6 @@ from io import StringIO
 from imp.cli.chat import ChatRenderer
 
 
-def test_renderer_agent_message_block() -> None:
-    out = StringIO()
-    r = ChatRenderer(out=out)
-    r.handle({"type": "agent_message", "payload": {
-        "role": "assistant",
-        "content": [{"type": "text", "text": "hello"}],
-    }})
-    assert "hello" in out.getvalue()
-
-
 def test_renderer_tool_call_visible() -> None:
     out = StringIO()
     r = ChatRenderer(out=out)

@@ -70,10 +70,10 @@ def test_event_log_filter_by_step(tmp_path: Path) -> None:
     log = JsonlEventLog(tmp_path / "events.jsonl")
     log.append(agent_id=None, type="phase_started", payload={"phase": "p"})
     log.append(agent_id=None, type="step_started", payload={"step": "s1"})
-    log.append(agent_id=None, type="agent_message", payload={"step": "s1", "text": "hi"})
+    log.append(agent_id=None, type="agent_output", payload={"step": "s1", "text": "hi"})
     log.append(agent_id=None, type="step_completed", payload={"step": "s1", "action": "continue"})
     log.append(agent_id=None, type="step_started", payload={"step": "s2"})
-    log.append(agent_id=None, type="agent_message", payload={"step": "s2", "text": "hello"})
+    log.append(agent_id=None, type="agent_output", payload={"step": "s2", "text": "hello"})
 
     s1_events = list(log.events_for_current_step("s1"))
     # Slice from last 'step_started' for s1 to end.

@@ -1,6 +1,6 @@
 """ChatRenderer: stream agent events to a terminal-like output stream.
 
-V1: no streaming; events arrive as discrete agent_message / llm_response
+V1: no streaming; events arrive as discrete llm_response / user_message
 blocks. The renderer dispatches per event type. Spec §5.3 event vocabulary.
 """
 
@@ -27,9 +27,6 @@ class ChatRenderer:
         t = event["type"]
         p = event.get("payload", {})
 
-        if t == "agent_message":
-            self._render_agent_message(p)
-            return
         if t == "llm_response":
             self._render_llm_response(p)
             return
@@ -46,9 +43,6 @@ class ChatRenderer:
             return
         if t == "tool_killed":
             self._line(f"[kill ] {p.get('name', 'tool')} terminated")
-            return
-        if t == "user_input":
-            self._line(f"[you  ] {p.get('text', '')}")
             return
         if t == "agent_output":
             kvs = " ".join(f"{k}={v}" for k, v in p.items())
@@ -92,17 +86,6 @@ class ChatRenderer:
             return
         # Unknown event — render generically so we never silently drop
         self._line(f"[{t}] {p}")
-
-    def _render_agent_message(self, payload: dict[str, Any]) -> None:
-        content = payload.get("content", [])
-        for block in content:
-            kind = block.get("type")
-            if kind == "text":
-                text = (block.get("text") or "").strip()
-                if text:
-                    self._line(f"[agent] {text}")
-            # tool_use blocks are followed by a tool_call event with the same id,
-            # so we don't render them here — the tool_call event handles display.
 
     def _render_llm_response(self, payload: dict[str, Any]) -> None:
         r = _render_llm_response_helper(payload)

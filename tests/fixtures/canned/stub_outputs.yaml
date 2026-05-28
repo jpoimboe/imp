@@ -1,12 +1,10 @@
 # name → canned events; engine asserts the final event is agent_output or error.
 stub:
   events:
-    - {type: agent_message, payload: {text: "ok"}}
     - {type: agent_output, payload: {status: Success}}
 
 failing-stub:
   events:
-    - {type: agent_message, payload: {text: "trying"}}
     - {type: agent_output, payload: {status: Error}}
 
 crashing-stub:

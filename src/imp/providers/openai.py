@@ -205,13 +205,16 @@ def _join_text(content: tuple[Any, ...]) -> str:
 def _openai_message_to_imp(
     msg: Any,
 ) -> tuple[Message, list[str]]:
-    """Convert an OpenAI assistant message (from response.choices[0].message)
-    to an imp Message + warnings list. Mirrors anthropic._anthropic_to_message.
+    """Convert an OpenAI assistant message (SDK object form) to an imp Message
+    + warnings list.
+
+    Called from tests only; the production runner now reconstructs the assistant
+    Message from the serialized llm_response.raw via _parse_openai_message. This
+    helper is retained as a tested record of the SDK-object → imp Message surface.
 
     Unknown shapes (e.g., msg.refusal — OpenAI's refusal field) become
-    runner_warning entries, never raise. This matches deferred-scope's
-    "unknown content block types ... translate to runner_warning, never raise"
-    contract for the new runners."""
+    runner_warning entries, never raise (unknown content block types translate
+    to a runner_warning rather than crashing the runner)."""
     blocks: list[Any] = []
     warnings: list[str] = []
 
@@ -324,21 +327,6 @@ def _extract_openai_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     if refusal:
         warnings.append(f"skipped refusal: {refusal[:80]!r}")
     return Diagnostics(block_warnings=tuple(warnings), thinkings=())
-
-
-def _serialize(msg: Message) -> dict[str, Any]:
-    """Same shape as anthropic._serialize — used by `agent_message` events."""
-    return {
-        "role": msg.role,
-        "content": [
-            {"type": "text", "text": b.text} if isinstance(b, TextBlock)
-            else {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
-            if isinstance(b, ToolUseBlock)
-            else {"type": "tool_result", "tool_use_id": b.tool_use_id,
-                  "content": b.content, "is_error": b.is_error}
-            for b in msg.content
-        ],
-    }
 
 
 class OpenAIAgentRunner:

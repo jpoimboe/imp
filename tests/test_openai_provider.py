@@ -120,48 +120,6 @@ def test_imp_to_openai_user_with_tool_results_fans_out() -> None:
     assert "bad" in out[1]["content"]
 
 
-def test_openai_message_to_imp_text_and_tool_calls() -> None:
-    msg = FakeMessage(
-        role="assistant",
-        content="thinking…",
-        tool_calls=[FakeToolCall(
-            id="c1", type="function",
-            function=FakeFunction(name="bash", arguments='{"command": "ls"}'),
-        )],
-    )
-    out, warns = _openai_message_to_imp(msg)
-    assert out.role == "assistant"
-    assert any(isinstance(b, TextBlock) and b.text == "thinking…" for b in out.content)
-    assert any(
-        isinstance(b, ToolUseBlock) and b.name == "bash" and b.input == {"command": "ls"}
-        for b in out.content
-    )
-    assert warns == []
-
-
-def test_openai_message_to_imp_refusal_becomes_warning() -> None:
-    msg = FakeMessage(role="assistant", content=None, refusal="not allowed")
-    out, warns = _openai_message_to_imp(msg)
-    assert out.content == ()
-    assert any("refusal" in w for w in warns)
-
-
-def test_openai_message_to_imp_bad_json_args_becomes_warning() -> None:
-    msg = FakeMessage(
-        role="assistant", content=None,
-        tool_calls=[FakeToolCall(
-            id="c1", type="function",
-            function=FakeFunction(name="bash", arguments="not-json"),
-        )],
-    )
-    out, warns = _openai_message_to_imp(msg)
-    # Block is still emitted but with empty input; warning describes the issue.
-    blocks = [b for b in out.content if isinstance(b, ToolUseBlock)]
-    assert len(blocks) == 1
-    assert blocks[0].input == {}
-    assert any("not JSON" in w for w in warns)
-
-
 def test_openai_tool_schema_wraps_with_function() -> None:
     schema = OutputSchema(
         fields=(

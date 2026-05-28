@@ -10,6 +10,7 @@ across the three.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -107,6 +108,16 @@ async def _drive(runner: Any, inv: AgentInvocation) -> Any:
     return final
 
 
+def _assert_event_log_parity(events_path: Path) -> None:
+    """Assert that the event log contains the required audit event kinds:
+    step_context + user_message + llm_response (spec §5.3 parity assertion)."""
+    events = [json.loads(line) for line in events_path.read_text().splitlines() if line.strip()]
+    kinds = {e["type"] for e in events}
+    assert "step_context" in kinds, f"missing step_context in {kinds}"
+    assert "user_message" in kinds, f"missing user_message in {kinds}"
+    assert "llm_response" in kinds, f"missing llm_response in {kinds}"
+
+
 @pytest.mark.anyio
 async def test_anthropic_runner_matches(tmp_path: Path) -> None:
     fake = FakeAsyncAnthropic([
@@ -118,8 +129,10 @@ async def test_anthropic_runner_matches(tmp_path: Path) -> None:
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake,
     )
-    out = await _drive(runner, _shared_invocation(tmp_path, "anthropic", "claude-sonnet-4-6"))
+    inv = _shared_invocation(tmp_path, "anthropic", "claude-sonnet-4-6")
+    out = await _drive(runner, inv)
     assert out == EXPECTED
+    _assert_event_log_parity(inv.events_path)
 
 
 @pytest.mark.anyio
@@ -133,8 +146,10 @@ async def test_openai_runner_matches(tmp_path: Path) -> None:
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini", client_factory=lambda: fake,
     )
-    out = await _drive(runner, _shared_invocation(tmp_path, "openai", "gpt-4o-mini"))
+    inv = _shared_invocation(tmp_path, "openai", "gpt-4o-mini")
+    out = await _drive(runner, inv)
     assert out == EXPECTED
+    _assert_event_log_parity(inv.events_path)
 
 
 @pytest.mark.anyio
@@ -151,5 +166,7 @@ async def test_claude_code_runner_matches(tmp_path: Path) -> None:
     runner = ClaudeCodeAgentRunner(
         model_name="claude-sonnet-4-5", client_factory=factory,
     )
-    out = await _drive(runner, _shared_invocation(tmp_path, "claude_code", "claude-sonnet-4-5"))
+    inv = _shared_invocation(tmp_path, "claude_code", "claude-sonnet-4-5")
+    out = await _drive(runner, inv)
     assert out == EXPECTED
+    _assert_event_log_parity(inv.events_path)

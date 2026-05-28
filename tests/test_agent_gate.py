@@ -24,7 +24,6 @@ class _FakeRunner:
         self._output = output
 
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-        yield {"type": "agent_message", "payload": {"role": "assistant", "content": []}}
         yield {"type": "agent_output", "payload": self._output}
 
     async def interrupt(self) -> None:

@@ -224,20 +224,6 @@ def _extract_anthropic_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     return Diagnostics(block_warnings=tuple(warnings), thinkings=tuple(thinkings))
 
 
-def _serialize(msg: Message) -> dict[str, Any]:
-    return {
-        "role": msg.role,
-        "content": [
-            {"type": "text", "text": b.text} if isinstance(b, TextBlock)
-            else {"type": "tool_use", "id": b.id, "name": b.name, "input": b.input}
-            if isinstance(b, ToolUseBlock)
-            else {"type": "tool_result", "tool_use_id": b.tool_use_id,
-                  "content": b.content, "is_error": b.is_error}
-            for b in msg.content
-        ],
-    }
-
-
 class AnthropicAgentRunner:
     def __init__(
         self, model_name: str,
