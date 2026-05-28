@@ -168,7 +168,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 rc = 0
                 try:
                     renderer.handle({"type": "workflow_resumed", "payload": {}})
-                    change.event_log().append("workflow_resumed", {})
+                    change.event_log().append(
+                        agent_id=None, type="workflow_resumed", payload={})
                     _replay_current_step(change, state, renderer)
                     state.status = "running"
                     state.save(change.state_dir)

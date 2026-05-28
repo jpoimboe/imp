@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from imp.engine.state import EventLog, State
+from imp.engine.state import JsonlEventLog, State
 
 
 def test_state_round_trip(tmp_path: Path) -> None:
@@ -46,32 +46,34 @@ def test_state_no_partial_writes(tmp_path: Path) -> None:
 
 
 def test_event_log_append_and_read(tmp_path: Path) -> None:
-    log = EventLog(tmp_path / "events.jsonl")
-    log.append("phase_started", {"phase": "onboard"})
-    log.append("step_started", {"step": "intent-clarifier", "model": "claude-sonnet-4-6"})
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    log.append(agent_id=None, type="phase_started", payload={"phase": "onboard"})
+    log.append(agent_id=None, type="step_started",
+               payload={"step": "intent-clarifier", "model": "claude-sonnet-4-6"})
     events = list(log.read())
     assert [e["type"] for e in events] == ["phase_started", "step_started"]
     assert events[0]["payload"]["phase"] == "onboard"
     assert events[0]["timestamp"]  # ISO-8601
+    assert "id" in events[0] and "agent_id" in events[0]
 
 
 def test_event_log_append_only(tmp_path: Path) -> None:
-    log = EventLog(tmp_path / "events.jsonl")
-    log.append("a", {})
-    log.append("b", {})
-    log.append("c", {})
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    log.append(agent_id=None, type="a", payload={})
+    log.append(agent_id=None, type="b", payload={})
+    log.append(agent_id=None, type="c", payload={})
     raw_lines = (tmp_path / "events.jsonl").read_text().splitlines()
     assert len(raw_lines) == 3
 
 
 def test_event_log_filter_by_step(tmp_path: Path) -> None:
-    log = EventLog(tmp_path / "events.jsonl")
-    log.append("phase_started", {"phase": "p"})
-    log.append("step_started", {"step": "s1"})
-    log.append("agent_message", {"step": "s1", "text": "hi"})
-    log.append("step_completed", {"step": "s1", "action": "continue"})
-    log.append("step_started", {"step": "s2"})
-    log.append("agent_message", {"step": "s2", "text": "hello"})
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    log.append(agent_id=None, type="phase_started", payload={"phase": "p"})
+    log.append(agent_id=None, type="step_started", payload={"step": "s1"})
+    log.append(agent_id=None, type="agent_message", payload={"step": "s1", "text": "hi"})
+    log.append(agent_id=None, type="step_completed", payload={"step": "s1", "action": "continue"})
+    log.append(agent_id=None, type="step_started", payload={"step": "s2"})
+    log.append(agent_id=None, type="agent_message", payload={"step": "s2", "text": "hello"})
 
     s1_events = list(log.events_for_current_step("s1"))
     # Slice from last 'step_started' for s1 to end.
@@ -110,12 +112,12 @@ def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
     sentinel instead of crashing the iterator. Surrounding good lines still
     parse normally."""
     path = tmp_path / "events.jsonl"
-    log = EventLog(path)
-    log.append("good_one", {"x": 1})
+    log = JsonlEventLog(path)
+    log.append(agent_id=None, type="good_one", payload={"x": 1})
     # Hand-inject a garbage line between two good ones.
     with path.open("a") as f:
         f.write("this is not json\n")
-    log.append("good_two", {"y": 2})
+    log.append(agent_id=None, type="good_two", payload={"y": 2})
 
     events = list(log.read())
     assert len(events) == 3

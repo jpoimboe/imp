@@ -10,7 +10,7 @@ import imp.agents.tools.query_events
 import imp.agents.tools.web_fetch  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.engine.state import EventLog
+from imp.engine.state import JsonlEventLog
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -23,9 +23,9 @@ def _ctx(tmp_path: Path) -> ToolContext:
 
 
 def test_query_events_returns_recent(tmp_path: Path) -> None:
-    log = EventLog(tmp_path / "events.jsonl")
-    log.append("phase_started", {"phase": "spec"})
-    log.append("step_started", {"step": "spec-writer"})
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    log.append(agent_id=None, type="phase_started", payload={"phase": "spec"})
+    log.append(agent_id=None, type="step_started", payload={"step": "spec-writer"})
     out = get_registry()["query_events"].invoke(_ctx(tmp_path), {"limit": 1})
     events = json.loads(out)
     assert len(events) == 1

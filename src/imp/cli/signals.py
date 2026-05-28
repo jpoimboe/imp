@@ -34,7 +34,7 @@ def pause_and_exit(change: Change, *, reason: str) -> None:
     except FileNotFoundError:
         # State never reached the durable phase — nothing to update
         pass
-    change.event_log().append("workflow_paused", {"reason": reason})
+    change.event_log().append(agent_id=None, type="workflow_paused", payload={"reason": reason})
 
 
 def install_process_group() -> None:

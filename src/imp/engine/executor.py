@@ -32,7 +32,7 @@ from imp.engine.gates import (
 )
 from imp.engine.loader import load_workflow, parse_agent_file
 from imp.engine.schema import validate_agent_output
-from imp.engine.state import CurrentStep, EventLog, State
+from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
     AgentGate,
@@ -79,7 +79,7 @@ async def run_change(
     workflow = load_workflow(change.workflow_dir)
     config = load_config(change.project_root)
 
-    log = EventLog(change.events_path)
+    log = JsonlEventLog(change.events_path, on_event=on_event)
     state = State.load(change.state_dir)
 
     while True:
@@ -100,13 +100,13 @@ async def run_change(
         if coordinator.should_pause:
             state.status = "paused"
             state.save(change.state_dir)
-            _emit(log, on_event, "workflow_paused", {})
+            _emit(log, "workflow_paused", {})
             return RunResult.PAUSED
 
         if isinstance(action, Pause):
             state.status = "paused"
             state.save(change.state_dir)
-            _emit(log, on_event, "workflow_paused", {})
+            _emit(log, "workflow_paused", {})
             return RunResult.PAUSED
         if isinstance(action, Continue):
             next_phase = _next_phase(workflow, state.phase)
@@ -141,7 +141,7 @@ async def _execute_phase(
     user_chat_input_fn: Callable[[str], str] | None,
     coordinator: Any,
 ) -> Action:
-    _emit(log, on_event, "phase_started", {"phase": phase.name})
+    _emit(log, "phase_started", {"phase": phase.name})
     # Outer loop: each iteration is one walk of the steps; step-level retry
     # bounces back to the top via `continue`. State mutations carry across
     # iterations — no recursion.
@@ -212,7 +212,7 @@ async def _execute_phase(
             # Continue: proceed to next gate (no early return)
         if retried_phase:
             continue  # outer while True: re-walk steps then gates
-        _emit(log, on_event, "phase_completed", {"phase": phase.name})
+        _emit(log, "phase_completed", {"phase": phase.name})
         return Continue()
 
 
@@ -302,7 +302,7 @@ async def _run_agent_invocation(
         user_input_fn=user_chat_input_fn if interactive else None,
     )
 
-    _emit(log, on_event, "step_started", {
+    _emit(log, "step_started", {
         "model": invocation.model_name,
         "provider": provider.name,
         "tools": sorted(agent_def.tools),
@@ -316,7 +316,7 @@ async def _run_agent_invocation(
     coordinator.attach_runner(runner.interrupt)
     try:
         async for event in runner.run(invocation):
-            _emit_event(log, on_event, event)
+            _emit_event(log, event, agent_id=(invocation.agent_id or None))
             if event["type"] == "agent_output":
                 agent_output = event["payload"]
             if event["type"] == "error":
@@ -346,7 +346,7 @@ async def _run_agent_invocation(
     try:
         validate_agent_output(agent_output, agent_def.output_schema)
     except Exception as e:
-        _emit(log, on_event, "error", {
+        _emit(log, "error", {
             "category": "agent_output_missing",
             "kind": "output_validation",
             "message": f"output validation: {e}",
@@ -399,11 +399,11 @@ async def _execute_step(
         return Pause()
 
     if fatal:
-        _emit(log, on_event, "step_completed", {"step": step.name, "action": "pause"})
+        _emit(log, "step_completed", {"step": step.name, "action": "pause"})
         return Pause()
 
     if errored or agent_output is None:
-        _emit(log, on_event, "step_completed", {"step": step.name, "action": "retry"})
+        _emit(log, "step_completed", {"step": step.name, "action": "retry"})
         return Retry()
 
     for gate in step.gates:
@@ -421,7 +421,7 @@ async def _execute_step(
     shutil.rmtree(transcript_dir, ignore_errors=True)
     state.current_step = None
     state.save(change.state_dir)
-    _emit(log, on_event, "step_completed", {"step": step.name, "action": "continue"})
+    _emit(log, "step_completed", {"step": step.name, "action": "continue"})
     return Continue()
 
 
@@ -487,24 +487,24 @@ async def _run_agent_gate(
         gate_backoff_attempts += 1
         await anyio.sleep(backoff_delay)
         if coordinator.should_pause:
-            _emit(log, on_event, "gate_evaluated",
+            _emit(log, "gate_evaluated",
                   {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
             return Pause()
 
     if paused or fatal:
-        _emit(log, on_event, "gate_evaluated",
+        _emit(log, "gate_evaluated",
               {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
         return Pause()
 
     if errored or agent_output is None:
-        _emit(log, on_event, "gate_evaluated",
+        _emit(log, "gate_evaluated",
               {"kind": "agent", "gate": stem, "action": _action_dict(Retry())})
         return Retry()
 
     try:
         action = evaluate_decide(gate.decide, agent_output)
     except DecideNoMatch as e:
-        _emit(log, on_event, "error", {
+        _emit(log, "error", {
             "category": "agent_output_missing",
             "kind": "decide_no_match",
             "message": f"agent gate decide: {e}",
@@ -515,7 +515,7 @@ async def _run_agent_gate(
     shutil.rmtree(transcript_dir, ignore_errors=True)
     state.current_step = None
     state.save(change.state_dir)
-    _emit(log, on_event, "gate_evaluated",
+    _emit(log, "gate_evaluated",
           {"kind": "agent", "gate": stem, "action": _action_dict(action)})
     return action
 
@@ -530,18 +530,18 @@ async def _run_gate(
     coordinator: Any = None,
 ) -> Action:
     if isinstance(gate, HumanGate):
-        _emit(log, on_event, "human_gate_pending", {
+        _emit(log, "human_gate_pending", {
             "phase": state.phase,
             "prompt": gate.prompt,
             "options": [{"label": opt.label} for opt in gate.options],
         })
         action = await run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
-        _emit(log, on_event, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
+        _emit(log, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
         return action
     if isinstance(gate, ScriptGate):
         env_extra = {"IMP_ARTIFACTS_DIR": str(change.artifacts_dir)}
         action, ctx = run_script_gate(gate, cwd=change.workflow_dir, env_extra=env_extra)
-        _emit(log, on_event, "gate_evaluated",
+        _emit(log, "gate_evaluated",
               {"kind": "script", "context": ctx, "action": _action_dict(action)})
         return action
     if isinstance(gate, AgentGate):
@@ -551,7 +551,7 @@ async def _run_gate(
             coordinator=coordinator,
         )
     if isinstance(gate, StubGate):
-        _emit(log, on_event, "gate_evaluated",
+        _emit(log, "gate_evaluated",
               {"kind": "stub", "action": _action_dict(gate.action)})
         return gate.action
     raise AssertionError(f"unknown gate type {type(gate).__name__}")
@@ -569,11 +569,12 @@ def _action_dict(action: Action) -> dict[str, Any]:
     return {"kind": "unknown"}
 
 
-def _emit(log: EventLog, on_event: EventCallback, type_: str, payload: dict[str, Any]) -> None:
-    log.append(type_, payload)
-    on_event({"type": type_, "payload": payload})
+def _emit(log: EventLog, type_: str, payload: dict[str, Any], *,
+          agent_id: str | None = None) -> dict[str, Any]:
+    return log.append(agent_id=agent_id, type=type_, payload=payload)
 
 
-def _emit_event(log: EventLog, on_event: EventCallback, event: dict[str, Any]) -> None:
-    log.append(event["type"], event.get("payload", {}))
-    on_event(event)
+def _emit_event(log: EventLog, event: dict[str, Any], *,
+                agent_id: str | None = None) -> dict[str, Any]:
+    return log.append(agent_id=agent_id, type=event["type"],
+                      payload=event.get("payload", {}))

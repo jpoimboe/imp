@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 
 from imp.agents.prompts import PromptRenderError, build_context, render_prompt
-from imp.engine.state import EventLog
+from imp.engine.state import EventLog, JsonlEventLog
 
 
 def _log(path: Path, events: list[tuple[str, dict]]) -> EventLog:
-    log = EventLog(path)
+    log = JsonlEventLog(path)
     for t, p in events:
-        log.append(t, p)
+        log.append(agent_id=None, type=t, payload=p)
     return log
 
 

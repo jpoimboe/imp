@@ -16,7 +16,7 @@ from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
-from imp.engine.state import EventLog
+from imp.engine.state import JsonlEventLog
 
 TASK_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -76,7 +76,7 @@ async def dispatch_task(ctx: ToolContext, subagent_name: str, task_description: 
         change_id=cc.change_id,
         change_title=f"Change {cc.change_id}",  # subagents don't see parent title
         artifacts_dir=cc.artifacts_dir,
-        event_log=EventLog(ctx.events_path),
+        event_log=JsonlEventLog(ctx.events_path),
     )
     rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
 

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from imp.engine.errors import LoadError
-from imp.engine.state import EventLog, State
+from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
 
@@ -43,8 +43,8 @@ class Change:
     def events_path(self) -> Path:
         return self.change_dir / "events.jsonl"
 
-    def event_log(self) -> EventLog:
-        return EventLog(self.events_path)
+    def event_log(self) -> JsonlEventLog:
+        return JsonlEventLog(self.events_path)
 
     @classmethod
     def create(cls, project_root: Path, title: str | None = None) -> Change:
@@ -106,8 +106,8 @@ class Change:
             change_dir=change_dir,
         )
         change.event_log().append(
-            "change_created",
-            {"change_id": new_id, "title": title},
+            agent_id=None, type="change_created",
+            payload={"change_id": new_id, "title": title},
         )
         return change
 
