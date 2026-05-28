@@ -47,6 +47,7 @@ ALL_CLAUDE_CODE_BUILTIN_TOOLS: tuple[str, ...] = (
     "ToolSearch",
     "WebFetch",
     "WebSearch",
+    "Workflow",
     "Write",
 )
 
