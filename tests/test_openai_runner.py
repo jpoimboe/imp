@@ -16,6 +16,7 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.agents.transcript import Transcript
+from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.openai import OpenAIAgentRunner
 from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
@@ -43,7 +44,8 @@ def _agent_def(tools=frozenset({"complete_step", "read_file"})) -> AgentDef:
     )
 
 
-def _inv(tmp_path: Path, tools=None) -> AgentInvocation:
+def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
+         interactive=False, user_input_fn=None) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent_def(tools or frozenset({"complete_step", "read_file"})),
         provider_name="openai", model_name="gpt-4o-mini",
@@ -52,12 +54,15 @@ def _inv(tmp_path: Path, tools=None) -> AgentInvocation:
         change_context=ChangeContext(
             change_id=1, project_root=tmp_path, artifacts_dir=tmp_path / "art",
         ),
-        interactive=False, transcript_dir=tmp_path / "step",
+        interactive=interactive, transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(
             operations=("read",), paths=("/project/**",), mode="allow",
             source=SourceLoc(file=Path("w.yaml"), line=1),
         ),),
         events_path=tmp_path / "events.jsonl",
+        agent_id=agent_id,
+        event_log=event_log,
+        user_input_fn=user_input_fn,
     )
 
 
@@ -72,18 +77,25 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
         )),
     ])
 
+    log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini",
         client_factory=lambda: fake,
     )
-    events = []
-    async for ev in runner.run(_inv(tmp_path)):
-        events.append(ev)
+    yielded = []
+    async for ev in runner.run(_inv(tmp_path, event_log=log)):
+        yielded.append(ev)
 
-    kinds = [e["type"] for e in events]
-    assert "agent_message" in kinds
-    assert kinds[-1] == "agent_output"
-    assert events[-1]["payload"] == {"status": "Success", "note": "ok"}
+    log_types = [e["type"] for e in log.read()]
+    assert "step_context" in log_types
+    assert "user_message" in log_types
+    assert "llm_response" in log_types
+    # audit events are NOT yielded any more — only control signals
+    assert [e["type"] for e in yielded] == ["agent_output"]
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert "raw" in resp["payload"]
+    assert resp["agent_id"] == "step:p/s"
+    assert yielded[-1]["payload"] == {"status": "Success", "note": "ok"}
 
 
 @pytest.mark.anyio
@@ -142,15 +154,18 @@ async def test_refusal_emits_runner_warning(tmp_path: Path) -> None:
         # to "agent finished without complete_step" error (autonomous mode).
         completion(message(content=None, refusal="I can't help with that.")),
     ])
+    log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini",
         client_factory=lambda: fake,
     )
     events = []
-    async for ev in runner.run(_inv(tmp_path)):
+    async for ev in runner.run(_inv(tmp_path, event_log=log)):
         events.append(ev)
 
-    warnings = [e for e in events if e["type"] == "runner_warning"]
+    log_types = [e["type"] for e in log.read()]
+    assert "runner_warning" in log_types
+    warnings = [e for e in log.read() if e["type"] == "runner_warning"]
     assert any("refusal" in w["payload"]["message"] for w in warnings)
     # No fatal — the final event is `error` (no complete_step), not `error` for
     # an unknown block.
@@ -261,21 +276,22 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
         )),
     ])
 
+    log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini",
         client_factory=lambda: fake,
     )
     events = []
-    async for ev in runner.run(inv):
+    async for ev in runner.run(replace(inv, event_log=log)):
         events.append(ev)
 
     # The terminal event is the parent's agent_output, NOT the subagent's.
     assert events[-1]["type"] == "agent_output"
     assert events[-1]["payload"] == {"status": "Success"}
-    # The subagent's tool_result flowed through the parent.
-    parent_results = [e for e in events if e["type"] == "tool_result"]
-    assert any('"Success"' in (r["payload"].get("content") or "")
-               for r in parent_results)
+    # tool_call and tool_result go to the log, not the yield stream
+    log_types = [e["type"] for e in log.read()]
+    assert "tool_call" in log_types
+    assert "tool_result" in log_types
 
 
 @pytest.mark.anyio
@@ -289,8 +305,7 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
 
     (tmp_path / "art").mkdir()
-    inv = _inv(tmp_path)
-    inv = replace(inv, interactive=True)
+    inv = _inv(tmp_path, interactive=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
@@ -307,6 +322,7 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
         )),
     ])
     user_inputs = iter(["nothing, proceed"])
+    log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini",
         client_factory=lambda: fake,
@@ -314,14 +330,13 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     )
 
     events = []
-    async for ev in runner.run(inv):
+    async for ev in runner.run(replace(inv, event_log=log)):
         events.append(ev)
 
-    kinds = [e["type"] for e in events]
-    user_idx = kinds.index("user_input")
-    msg_idx = kinds.index("agent_message")
-    assert user_idx < msg_idx
-    assert kinds[-1] == "agent_output"
+    # user_message before llm_response in the log
+    types = [e["type"] for e in log.read()]
+    assert types.index("user_message") < types.index("llm_response")
+    assert events[-1]["type"] == "agent_output"
     loaded = t.load()
     assert len(loaded) == 4
     assert loaded[2].role == "user"
@@ -347,13 +362,14 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
             tool_calls=[tool_call("c1", "bash", {"command": "sleep 10"})],
         )),
     ])
+    log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini", client_factory=lambda: fake,
     )
 
     events: list = []
     async def _drain():
-        async for ev in runner.run(inv):
+        async for ev in runner.run(replace(inv, event_log=log)):
             events.append(ev)
 
     async def _interrupt():
@@ -365,7 +381,10 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
         tg.start_soon(_interrupt)
 
     kinds = [e["type"] for e in events]
-    assert "tool_killed" in kinds
+    log_types = [e["type"] for e in log.read()]
+    # tool_killed is now in the log, not the yield stream
+    assert "tool_killed" in log_types
+    assert "tool_killed" not in kinds
     assert events[-1]["type"] == "error"
     assert events[-1]["payload"]["kind"] == "interrupted"
 
