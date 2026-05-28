@@ -46,7 +46,7 @@ from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
-from imp.agents.transcript import Transcript
+from imp.agents.transcript import Transcript, repair_dangling_tool_use_on_resume
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
@@ -558,6 +558,19 @@ class ClaudeCodeAgentRunner:
         if existing:
             messages = existing
             tool_calls_used = count_tool_uses(messages)
+            # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
+            # Persist a synthetic tool_result so the SEND_TO_LLM path has a
+            # balanced transcript; emit `tool_result` events so `imp log`
+            # shows what the agent sees on the next turn.
+            repair = repair_dangling_tool_use_on_resume(messages, transcript)
+            if repair is not None:
+                for b in repair.content:
+                    if isinstance(b, ToolResultBlock):
+                        yield {"type": "tool_result", "payload": {
+                            "id": b.tool_use_id,
+                            "content": b.content,
+                            "error": b.is_error,
+                        }}
             resume_state = classify_resume(messages, interactive=invocation.interactive)
             if resume_state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {

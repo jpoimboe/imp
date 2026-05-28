@@ -35,7 +35,7 @@ from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
-from imp.agents.transcript import Transcript
+from imp.agents.transcript import Transcript, repair_dangling_tool_use_on_resume
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
@@ -365,6 +365,19 @@ class OpenAIAgentRunner:
         if existing:
             messages = existing
             tool_calls_used = count_tool_uses(messages)
+            # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
+            # the executor's pause check fires after `tool_result` was yielded
+            # but before the user message was appended. Patch the transcript
+            # before classifying.
+            repair = repair_dangling_tool_use_on_resume(messages, transcript)
+            if repair is not None:
+                for b in repair.content:
+                    if isinstance(b, ToolResultBlock):
+                        yield {"type": "tool_result", "payload": {
+                            "id": b.tool_use_id,
+                            "content": b.content,
+                            "error": b.is_error,
+                        }}
             state = classify_resume(messages, interactive=invocation.interactive)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
