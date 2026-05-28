@@ -44,7 +44,6 @@ _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
   tests/test_default_workflow_e2e_live_openai.py \
   tests/test_default_workflow_e2e_live_claude_code.py \
-  tests/test_default_workflow_pty_live.py \
   tests/test_mid_step_resume_live.py
 
 .PHONY: test-live

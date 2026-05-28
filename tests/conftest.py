@@ -25,8 +25,6 @@ def _stub_provider_api_keys(
     """
     if "test_default_workflow_e2e_live" in str(request.node.fspath):
         return
-    if "test_default_workflow_pty_live" in str(request.node.fspath):
-        return
     if "test_default_workflow_dogfood_live" in str(request.node.fspath):
         return
     if not os.environ.get("ANTHROPIC_API_KEY"):
