@@ -1,8 +1,16 @@
 """Human-readable renderer for `imp log` / `imp log --full`.
 
-Self-contained: depends only on the event-dict shape used in
-``events.jsonl``. No imports from ``imp.engine.*``. Pure functions and one
-generator; no global state.
+Mostly self-contained: depends on the event-dict shape used in
+``events.jsonl``. Pure functions and one generator; no global state.
+
+Exception: rendering ``llm_response`` and ``user_message`` events requires
+``imp.cli.render_helpers``, which transitively imports ``imp.engine.replay``
+and ``imp.agents.runner`` to reconstruct the assistant Message from
+``llm_response.raw`` via ``parse_message``.  This is intentional — there is
+no way to render a provider's raw response without the shared provider-aware
+parser.  The imports are lazy (inside ``_fmt_llm_response`` and
+``_fmt_user_message``) so the dependency is confined to those two formatters
+and the rest of the module remains engine-independent.
 
 Spec: ``docs/superpowers/specs/2026-05-27-imp-log-readability-design.md``.
 """
@@ -83,8 +91,8 @@ def _elide(s: str, limit: int) -> str:
 
 # ----------------------------------------------------------------------
 # Per-event formatters. Each returns the summary text only (no timestamp,
-# no type column, no indent). ``full`` only affects tool_call/tool_result;
-# every other formatter ignores it.
+# no type column, no indent). ``full`` is forwarded to all formatters; most
+# ignore it, but tool_call/tool_result/thinking/step_context use it.
 # ----------------------------------------------------------------------
 
 def _fmt_change_created(p: dict[str, Any], full: bool, color: bool) -> str:
@@ -231,6 +239,46 @@ def _fmt_tools(p: dict[str, Any], full: bool, color: bool) -> str:
     parts = ", ".join(f"{n} {name}" for name, n in by_count)
     noun = "call" if total == 1 else "calls"
     return f"{total} {noun}  ({parts})"
+
+
+def _fmt_llm_response(p: dict[str, Any], full: bool, color: bool) -> str:
+    from imp.cli.render_helpers import render_llm_response
+    r = render_llm_response(p)
+    text = " ".join(t.strip() for t in r.texts if t.strip())
+    head = _elide(text, 80) if text else f"({len(r.tool_uses)} tool_use)"
+    u = r.usage or {}
+    footer = (f"[stop: {r.stop_reason} • in: {u.get('input_tokens', 0)} tok "
+              f"• out: {u.get('output_tokens', 0)} tok "
+              f"• cache: {u.get('cache_read_input_tokens', 0)}/"
+              f"{u.get('cache_creation_input_tokens', 0)}]")
+    footer = _style(footer, "dim", enabled=color)
+    return f"{head}  {footer}"
+
+
+def _fmt_step_context(p: dict[str, Any], full: bool, color: bool) -> str:
+    # Full mode intentionally emits multiple lines (a config dump: system
+    # prompt + tools list), unlike one-row formatters such as _fmt_thinking.
+    provider = p.get("provider", "?")
+    model = p.get("model", "?")
+    tools = p.get("tools_schema") or []
+    params = p.get("params") or {}
+    if not full:
+        param_bits = ", ".join(f"{k}={v}" for k, v in params.items())
+        suffix = f", {param_bits}" if param_bits else ""
+        return f"{provider}/{model}, {len(tools)} tools{suffix}"
+    lines = [f"{provider}/{model}  max_tool_calls={p.get('max_tool_calls', '?')}"]
+    lines.append("system_prompt:")
+    lines.append(str(p.get("system_prompt", "")))
+    lines.append("tools_schema:")
+    for t in tools:
+        lines.append(f"  - {t.get('name', t)}")
+    lines.append(f"params: {params}")
+    return "\n".join(lines)
+
+
+def _fmt_user_message(p: dict[str, Any], full: bool, color: bool) -> str:
+    from imp.cli.render_helpers import user_message_text
+    return _elide(user_message_text(p), 80)
 
 
 def _fmt_unknown(p: dict[str, Any], full: bool, color: bool) -> str:
@@ -391,6 +439,9 @@ _DEPTH: dict[str, int] = {
     "thinking":         4,
     "agent_output":     4,
     "error":            4,
+    "step_context":     2,
+    "user_message":     4,
+    "llm_response":     4,
 }
 
 
@@ -418,6 +469,9 @@ _TYPE_COLOR: dict[str, tuple[str, ...]] = {
     "tools":            ("gray",),
     "thinking":         ("magenta",),
     "error":            ("bold", "red"),
+    "step_context":     ("dim",),
+    "user_message":     ("blue",),
+    "llm_response":     ("green",),
 }
 
 
@@ -442,6 +496,9 @@ _FORMATTERS = {
     "tools":            _fmt_tools,
     "thinking":         _fmt_thinking,
     # tool_result handled specially in render_log: needs the tool-name map.
+    "llm_response":     _fmt_llm_response,
+    "step_context":     _fmt_step_context,
+    "user_message":     _fmt_user_message,
 }
 
 

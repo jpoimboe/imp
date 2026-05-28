@@ -1,7 +1,7 @@
 """ChatRenderer: stream agent events to a terminal-like output stream.
 
-V1: no streaming; events arrive as discrete agent_message blocks. The
-renderer dispatches per event type. Spec §5.3 event vocabulary.
+V1: no streaming; events arrive as discrete agent_message / llm_response
+blocks. The renderer dispatches per event type. Spec §5.3 event vocabulary.
 """
 
 from __future__ import annotations
@@ -9,6 +9,9 @@ from __future__ import annotations
 import json
 import sys
 from typing import Any, TextIO
+
+from imp.cli.render_helpers import render_llm_response as _render_llm_response_helper
+from imp.cli.render_helpers import user_message_text as _user_text
 
 
 def _compact(value: Any) -> str:
@@ -26,6 +29,12 @@ class ChatRenderer:
 
         if t == "agent_message":
             self._render_agent_message(p)
+            return
+        if t == "llm_response":
+            self._render_llm_response(p)
+            return
+        if t == "user_message":
+            self._line(f"[you  ] {_user_text(p)}")
             return
         if t == "tool_call":
             self._line(f"[tool ] {p.get('name', '?')}({_compact(p.get('input', {}))})")
@@ -94,6 +103,15 @@ class ChatRenderer:
                     self._line(f"[agent] {text}")
             # tool_use blocks are followed by a tool_call event with the same id,
             # so we don't render them here — the tool_call event handles display.
+
+    def _render_llm_response(self, payload: dict[str, Any]) -> None:
+        r = _render_llm_response_helper(payload)
+        for text in r.texts:
+            text = text.strip()
+            if text:
+                self._line(f"[agent] {text}")
+        # tool_use blocks are followed by tool_call events with the same id;
+        # the tool_call branch renders them.
 
     def close(self) -> None:
         # No streaming buffer to flush in V1.

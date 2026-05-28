@@ -920,3 +920,49 @@ def test_fmt_error_omits_category_tag_when_absent() -> None:
     out = _fmt_error({"message": "old-style message"}, full=False, color=False)
     assert "old-style message" in out
     assert "[" not in out
+
+
+def test_render_llm_response_summary_and_footer() -> None:
+    from imp.cli.render import render_log
+    ev = {"timestamp": "2026-05-28T00:00:00+00:00", "type": "llm_response",
+          "agent_id": "step:p/s", "payload": {
+              "provider": "anthropic", "model": "claude-sonnet-4-6",
+              "raw": {"content": [{"type": "text", "text": "done"}],
+                      "stop_reason": "end_turn",
+                      "usage": {"input_tokens": 1234, "output_tokens": 567,
+                                "cache_read_input_tokens": 0,
+                                "cache_creation_input_tokens": 0}},
+              "usage": {"input_tokens": 1234, "output_tokens": 567,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 0},
+              "stop_reason": "end_turn"}}
+    lines = list(render_log([ev], full=False, color=False))
+    blob = "\n".join(lines)
+    assert "done" in blob
+    assert "stop: end_turn" in blob
+    assert "1234" in blob and "567" in blob
+
+
+def test_render_step_context_summary_and_full() -> None:
+    from imp.cli.render import render_log
+    ev = {"timestamp": "2026-05-28T00:00:00+00:00", "type": "step_context",
+          "agent_id": "step:p/s", "payload": {
+              "provider": "anthropic", "model": "claude-sonnet-4-6",
+              "system_prompt": "SYSTEM PROMPT TEXT",
+              "tools_schema": [{"name": "a"}, {"name": "b"}],
+              "params": {"max_tokens": 8192}, "max_tool_calls": 50}}
+    summary = "\n".join(render_log([ev], full=False, color=False))
+    assert "anthropic/claude-sonnet-4-6" in summary
+    assert "2 tools" in summary
+    full = "\n".join(render_log([ev], full=True, color=False))
+    assert "SYSTEM PROMPT TEXT" in full
+
+
+def test_render_user_message_inline() -> None:
+    from imp.cli.render import render_log
+    ev = {"timestamp": "2026-05-28T00:00:00+00:00", "type": "user_message",
+          "agent_id": "step:p/s",
+          "payload": {"role": "user",
+                      "content": [{"type": "text", "text": "go ahead"}]}}
+    blob = "\n".join(render_log([ev], full=False, color=False))
+    assert "go ahead" in blob
