@@ -47,6 +47,15 @@ class Message:
     content: tuple[ContentBlock, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class Diagnostics:
+    """Render-side extraction from a provider response: block warnings to
+    surface as runner_warning events, and extended-thinking contents to
+    surface as thinking events. Not consulted by reconstruction."""
+    block_warnings: tuple[str, ...] = ()
+    thinkings: tuple[str, ...] = ()
+
+
 # Engine → runner boundary value. Frozen to make it safe to pass to subagents.
 @dataclass(frozen=True, slots=True)
 class ChangeContext:
@@ -74,6 +83,17 @@ class AgentInvocation:
     # by the providers' PROMPT_USER resume path. May return either a `str` or
     # an `Awaitable[str]`; both call-sites await-if-awaitable.
     user_input_fn: Callable[[str], str | Awaitable[str]] | None = None
+    # Stable identity of this agent invocation (step/gate/subagent), used as
+    # the strict filter key for reconstruction. Derived by the executor /
+    # dispatch_task; empty string only in legacy direct-construction tests.
+    agent_id: str = ""
+    # Shared EventLog instance (imp.engine.state.EventLog protocol). The runner
+    # writes audit events through this; None means "construct a private
+    # JsonlEventLog over events_path" (legacy/test fallback).
+    event_log: Any = None
+    # parent_id override for this agent's FIRST emitted event (step_context):
+    # the spawning step_started id (steps/gates) or task tool_call id (subagents).
+    first_event_parent_id: str | None = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}
