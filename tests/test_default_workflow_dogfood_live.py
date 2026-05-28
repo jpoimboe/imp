@@ -48,7 +48,6 @@ import yaml
 
 from tests._live import first_opted_in
 
-
 # ── Constants ──────────────────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
