@@ -48,8 +48,51 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.transcript import Transcript
 from imp.engine.schema import validate_agent_output
+from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
+
+_AUTH_PATTERNS = (
+    "Invalid API key",
+    "Please run `/login`",
+)
+
+_QUOTA_PATTERNS = (
+    "You have reached your usage limit",
+    "Credit balance is too low",
+)
+
+
+def _classify_agent_text(text: str) -> perr.ProviderError | None:
+    """Detect known claude CLI terminal-error patterns in agent text.
+
+    The CLI catches its own errors and returns them as a text response
+    with exit 0 (no out-of-band signal). Exact-substring patterns,
+    conservatively chosen: false negatives fall back to existing
+    retry behavior; false positives would convert recoverable agent
+    confusion into fatal pause.
+    """
+    for pat in _AUTH_PATTERNS:
+        if pat in text:
+            return perr.AuthError(f"claude CLI: {pat}")
+    for pat in _QUOTA_PATTERNS:
+        if pat in text:
+            return perr.QuotaError(f"claude CLI: {pat}")
+    return None
+
+
+def _text_of(message: Any) -> str:
+    """Concatenate TextBlock contents from a Message; ignore other block types.
+
+    Used as input to _classify_agent_text. Joins blocks with newlines so
+    consecutive text blocks remain visually separated for pattern matching.
+    """
+    parts: list[str] = []
+    for block in message.content:
+        if isinstance(block, TextBlock):
+            parts.append(block.text)
+    return "\n".join(parts)
+
 
 # ── Per-run state captured by tool wrappers and read by the receive loop ─────
 
@@ -513,10 +556,18 @@ class ClaudeCodeAgentRunner:
                 }}
                 return
             if resume_state is ResumeState.MISSING_COMPLETE_STEP:
+                last_text = ""
+                if messages and messages[-1].role == "assistant":
+                    last_text = _text_of(messages[-1])
+                classified = _classify_agent_text(last_text)
+                if classified is not None:
+                    yield perr.make_error_event(classified)
+                    return
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",
                     "kind": "missing_complete_step",
                     "message": "autonomous agent transcript ended without complete_step",
+                    "detail": {"last_agent_text": last_text[:500]},
                 }}
                 return
             if resume_state is ResumeState.PROMPT_USER:
@@ -680,10 +731,23 @@ class ClaudeCodeAgentRunner:
                         await client.query(user_text)
                         continue
 
+                    last_text = ""
+                    # Walk backward through the messages we appended to find
+                    # the most recent assistant message — that's where the
+                    # terminal CLI message lives.
+                    for prev in reversed(messages):
+                        if prev.role == "assistant":
+                            last_text = _text_of(prev)
+                            break
+                    classified = _classify_agent_text(last_text)
+                    if classified is not None:
+                        yield perr.make_error_event(classified)
+                        return
                     yield {"type": "error", "payload": {
                         "category": "agent_output_missing",
                         "kind": "no_complete_step",
                         "message": "agent finished without calling complete_step",
+                        "detail": {"last_agent_text": last_text[:500]},
                     }}
                     return
 

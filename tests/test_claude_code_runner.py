@@ -299,6 +299,102 @@ async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
     assert kinds[-1] == "agent_output"
 
 
+def test_classify_agent_text_invalid_api_key() -> None:
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    out = cc._classify_agent_text("Some preamble. Invalid API key, sorry.")
+    assert isinstance(out, perr.AuthError)
+
+
+def test_classify_agent_text_login_required() -> None:
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    out = cc._classify_agent_text("Please run `/login` first.")
+    assert isinstance(out, perr.AuthError)
+
+
+def test_classify_agent_text_quota_usage_limit() -> None:
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    out = cc._classify_agent_text("You have reached your usage limit for today.")
+    assert isinstance(out, perr.QuotaError)
+
+
+def test_classify_agent_text_credit_balance() -> None:
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    out = cc._classify_agent_text("Sorry — Credit balance is too low to continue.")
+    assert isinstance(out, perr.QuotaError)
+
+
+def test_classify_agent_text_benign_returns_none() -> None:
+    from imp.providers import claude_code as cc
+    assert cc._classify_agent_text("I'm working on the task. One moment.") is None
+    # Pattern conservatism: a tool result that *mentions* auth errors must
+    # NOT trip the classifier.
+    assert cc._classify_agent_text(
+        "git push reported: Authentication failed for repo X",
+    ) is None
+
+
+def test_text_of_concatenates_textblocks_only() -> None:
+    from imp.agents.runner import Message, TextBlock, ToolUseBlock
+    from imp.providers import claude_code as cc
+
+    msg = Message(
+        role="assistant",
+        content=(
+            TextBlock(text="hello "),
+            ToolUseBlock(id="t1", name="bash", input={}),
+            TextBlock(text="world"),
+        ),
+    )
+    assert cc._text_of(msg) == "hello \nworld"
+
+
+@pytest.mark.anyio
+async def test_runner_reclassifies_invalid_api_key_text_to_auth_event(
+    tmp_path: Path,
+) -> None:
+    """When the claude CLI returns 'Invalid API key' as an assistant
+    text response and the SDK closes the stream with a ResultMessage,
+    the runner must yield a single category=auth error event (NOT
+    missing_complete_step / no_complete_step)."""
+    # Build a fake SDK client that yields: AssistantMessage("Invalid API key"),
+    # then ResultMessage. The runner should reclassify the assistant text
+    # via _classify_agent_text and emit a category=auth event.
+    fake_messages = [
+        assistant(text("Invalid API key — got 401. Cannot continue.")),
+        result(),
+    ]
+
+    def client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=fake_messages)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=client_factory,
+    )
+    inv = _inv(tmp_path)
+
+    events: list[dict] = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    error_events = [e for e in events if e.get("type") == "error"]
+    assert len(error_events) == 1, (
+        f"expected 1 error event, got "
+        f"{[e.get('payload', {}) for e in error_events]}"
+    )
+    payload = error_events[0]["payload"]
+    assert payload["category"] == "auth", (
+        f"expected category=auth, got {payload}"
+    )
+
+
 def test_claude_code_provider_registered_and_resolves() -> None:
     """The claude_code provider is registered eagerly; resolve_role picks it up
     when claude is on PATH."""
