@@ -25,7 +25,7 @@ KEY_FILE ?= /tmp/.imp-key
 .PHONY: help
 help: ## Print this help.
 	@awk 'BEGIN {FS = ":.*?## "} \
-	     /^[a-zA-Z0-9_.-]+:.*?## / { printf "  \033[36m%-17s\033[0m %s\n", $$1, $$2 }' \
+	     /^[a-zA-Z0-9_.-]+:.*?## / { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' \
 	     $(MAKEFILE_LIST)
 
 .PHONY: install
