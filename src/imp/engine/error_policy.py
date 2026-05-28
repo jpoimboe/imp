@@ -36,7 +36,7 @@ class RetryWithBackoff:
 ErrorDecision = Pause | RetryNow | RetryWithBackoff
 
 
-_POLICY: dict[Category, type] = {
+_POLICY: dict[Category, type[Pause] | type[RetryNow] | type[RetryWithBackoff]] = {
     "auth":                 Pause,
     "config":               Pause,
     "quota":                Pause,
@@ -50,6 +50,7 @@ _POLICY: dict[Category, type] = {
 
 _MAX_BACKOFF_ATTEMPTS = 4
 _BACKOFF_SCHEDULE = [1.0, 2.0, 4.0, 8.0]
+assert len(_BACKOFF_SCHEDULE) == _MAX_BACKOFF_ATTEMPTS
 
 
 def decide(
