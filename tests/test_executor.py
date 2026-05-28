@@ -310,6 +310,9 @@ async def test_auth_error_pauses_without_burning_retries(
         f"auth error should not retry; ran {runner.run_count} times"
     )
 
+    state = State.load(change.state_dir)
+    assert state.status == "paused"
+
 
 @pytest.fixture
 def anyio_backend():
