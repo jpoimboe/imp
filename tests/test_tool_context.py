@@ -108,3 +108,15 @@ def test_terminate_running_processes_drains(tmp_path):
         assert proc.returncode is not None
 
     anyio.run(_spawn_and_kill)
+
+
+def test_tool_context_has_event_log_field(tmp_path) -> None:
+    from imp.agents.tools.context import ToolContext
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl",
+    )
+    assert ctx.event_log is None
+    sentinel = object()
+    ctx.event_log = sentinel
+    assert ctx.event_log is sentinel

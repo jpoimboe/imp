@@ -36,6 +36,12 @@ class ToolContext:
     change_context: Any = None
     # When the runner serves ask_user requests, it injects this callable.
     user_input_fn: Any = None
+    # Shared EventLog WRITE instance, set by the parent runner at the same site
+    # it sets spawn_subagent. dispatch_task threads this into the subagent's
+    # AgentInvocation so subagent audit events land in the parent's log + fire
+    # the parent's on_event. Distinct from the read-only EventLog dispatch_task
+    # builds for prompt-context rendering.
+    event_log: Any = None
     # Subagent dispatch hook (filled by runner; signature defined in subagents tool).
     spawn_subagent: Any = None
     # invocation_id counter for disambiguating same-named subagent invocations
