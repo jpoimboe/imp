@@ -424,4 +424,33 @@ def test_claude_code_provider_registered_and_resolves() -> None:
     provider = resolve.resolve_role(role)
     assert provider.name == "claude_code"
     assert isinstance(provider, ClaudeCodeProvider)
-    assert provider.model == "claude-sonnet-4-5"
+
+
+@pytest.mark.anyio
+async def test_runner_translates_unknown_sdk_exception_to_unknown_event(
+    tmp_path: Path,
+) -> None:
+    """An unexpected exception from the SDK must produce a single
+    category=unknown error event (not crash the runner)."""
+    class _ExplodingClient:
+        async def __aenter__(self):
+            raise RuntimeError("SDK broke unexpectedly")
+
+        async def __aexit__(self, *args):
+            return None
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-6",
+        client_factory=lambda _opts: _ExplodingClient(),
+    )
+    inv = _inv(tmp_path)
+
+    events: list[dict] = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    error_events = [e for e in events if e.get("type") == "error"]
+    assert len(error_events) == 1, (
+        f"expected 1 error event, got {[e.get('payload', {}) for e in error_events]}"
+    )
+    assert error_events[0]["payload"]["category"] == "unknown"

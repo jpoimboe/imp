@@ -503,6 +503,17 @@ class ClaudeCodeAgentRunner:
         return _spawn
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        try:
+            async for ev in self._run_loop(invocation):
+                yield ev
+        except perr.ProviderError as exc:
+            yield perr.make_error_event(exc)
+            return
+        except Exception as exc:
+            yield perr.make_unknown_error_event(exc)
+            return
+
+    async def _run_loop(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(
