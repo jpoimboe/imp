@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import pytest
+
+from imp.agents.runner import AgentInvocation, AgentRunner, Event
+from imp.engine.change import Change
+from imp.engine.executor import RunResult, run_change
+from imp.engine.state import State
+
+
+class _AuthErrorRunner:
+    """Mimics a real provider that classified an SDK exception."""
+
+    def __init__(self) -> None:
+        self.run_count = 0
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        self.run_count += 1
+        yield {"type": "error", "payload": {
+            "category": "auth",
+            "kind": "AuthError",
+            "message": "Invalid API key — Anthropic returned 401",
+            "detail": {"request_id": "req_01abc"},
+        }}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+def _seed_workflow_with_max_retries_3(root: Path) -> Change:
+    wf = root / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [only]\n"
+        "defaults: {max_retries: 3, on_max_retries: {kind: pause}}\n"
+        "only:\n  steps: [{name: w, file: agents/writer.md, model_role: default}]\n"
+    )
+    (root / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
+    )
+    return Change.create(root, title="t")
+
+
+@pytest.mark.anyio
+async def test_auth_failure_pauses_immediately_with_diagnostic(
+    tmp_path: Path,
+) -> None:
+    """The acceptance test from the design's Goal section:
+
+    Running with a category=auth event produces a single error event,
+    immediately Pauses (does NOT consume max_retries=3), and the event
+    payload carries the diagnostic detail (category, message, request_id).
+    """
+    change = _seed_workflow_with_max_retries_3(tmp_path)
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    runner = _AuthErrorRunner()
+
+    class _AuthProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, _inv: AgentInvocation) -> AgentRunner:
+            return runner
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _AuthProvider(),
+    )
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+
+    assert result is RunResult.PAUSED
+
+    # Critical: with max_retries=3, the legacy behavior would invoke the
+    # runner 4 times (initial + 3 retries) before Pause. The new policy
+    # Pauses on the first call.
+    assert runner.run_count == 1, (
+        f"auth failure should not consume retries; "
+        f"ran {runner.run_count} times"
+    )
+
+    # The error event is in the audit trail with full diagnostic context.
+    error_events = [e for e in events if e["type"] == "error"]
+    assert len(error_events) == 1
+    payload = error_events[0]["payload"]
+    assert payload["category"] == "auth"
+    assert "Invalid API key" in payload["message"]
+    assert payload["detail"].get("request_id") == "req_01abc"
+
+    # State persists as paused.
+    state = State.load(change.state_dir)
+    assert state.status == "paused"
+    assert state.step_attempt == 0
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
