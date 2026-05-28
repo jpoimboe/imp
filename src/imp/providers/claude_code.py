@@ -272,8 +272,31 @@ def _stream_history(messages: list[Message]) -> Any:
     Per spec §6.11, replayed `tool_use` blocks are NOT re-dispatched — claude
     treats `assistant` / `system` messages in stream-json input as conversation
     *context*, not as instructions to act on.
+
+    Streaming chunks from claude-p (thinking, then text, then tool_use) land
+    in transcript.jsonl as separate assistant messages — the persistence path
+    runs once per yielded SDK message. The Anthropic API rejects consecutive
+    assistant turns ("tool use concurrency issues"), so we fold streamed
+    fragments back into one assistant message per logical turn before replay.
+    Drop empty assistant content (thinking-only fragments after we extracted
+    the thinking blocks) since "assistant with no content" is also invalid.
     """
-    return _AsyncIter(_history_dicts(messages))
+    return _AsyncIter(_history_dicts(_merge_assistant_fragments(messages)))
+
+
+def _merge_assistant_fragments(messages: list[Message]) -> list[Message]:
+    out: list[Message] = []
+    for m in messages:
+        if m.role == "assistant" and not m.content:
+            continue
+        if m.role == "assistant" and out and out[-1].role == "assistant":
+            out[-1] = Message(
+                role="assistant",
+                content=out[-1].content + m.content,
+            )
+        else:
+            out.append(m)
+    return out
 
 
 def _history_dicts(messages: list[Message]) -> Any:
@@ -469,12 +492,22 @@ class ClaudeCodeAgentRunner:
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str]) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions
+        # ToolSearch is claude-p's internal schema-loader for deferred MCP
+        # tools (default mode for any mcp_server). It only returns schemas;
+        # it can't read/write/exec, so allowing it doesn't break the
+        # strict-MCP-only stance. Disallowing it breaks resume: when claude-p
+        # replays an MCP tool_use from history it tries to ToolSearch the
+        # schema first, and a denied tool_use shows up at the API as a
+        # tool_use without a matching tool_result ("API Error: 400 due to
+        # tool use concurrency issues"). Keep ToolSearch out of the deny
+        # list while keeping every other built-in denied.
+        disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t != "ToolSearch"]
         return ClaudeAgentOptions(
             model=self.model,
             system_prompt=invocation.system_prompt,
             mcp_servers={"imp": mcp_server},
             allowed_tools=[f"mcp__imp__{n}" for n in tool_names],
-            disallowed_tools=list(ALL_CLAUDE_CODE_BUILTIN_TOOLS),
+            disallowed_tools=disallowed,
             setting_sources=[],
             strict_mcp_config=True,
             extra_args={"no-session-persistence": None},
