@@ -69,6 +69,14 @@ test-live-quick: ## One-step live test for the first opted-in provider only.
 	      tests/test_default_workflow_e2e_live_openai.py \
 	      tests/test_default_workflow_e2e_live_claude_code.py
 
+.PHONY: test-dogfood
+test-dogfood: ## Dogfood imp on imp via PTY against the first opted-in provider (costs real tokens).
+	IMP_RUN_DOGFOOD=1 $(PYTEST) -q tests/test_default_workflow_dogfood_live.py
+
+.PHONY: test-dogfood-verbose
+test-dogfood-verbose: ## test-dogfood with -v + raw PTY trace.
+	IMP_RUN_DOGFOOD=1 IMP_PTY_TRACE=1 $(PYTEST) -v -s tests/test_default_workflow_dogfood_live.py
+
 .PHONY: test-all
 test-all: test test-live ## Full suite including live tests.
 
