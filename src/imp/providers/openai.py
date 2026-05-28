@@ -299,12 +299,14 @@ class OpenAIAgentRunner:
             state = classify_resume(messages, interactive=invocation.interactive)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
+                    "category": "config",
                     "kind": "transcript_invalid",
                     "message": "transcript ended with dangling tool_use",
                 }}
                 return
             if state is ResumeState.MISSING_COMPLETE_STEP:
                 yield {"type": "error", "payload": {
+                    "category": "agent_output_missing",
                     "kind": "missing_complete_step",
                     "message": "autonomous agent transcript ended without complete_step",
                 }}
@@ -312,6 +314,7 @@ class OpenAIAgentRunner:
             if state is ResumeState.PROMPT_USER:
                 if ctx.user_input_fn is None:
                     yield {"type": "error", "payload": {
+                        "category": "config",
                         "kind": "no_user_input_fn",
                         "message": (
                             "PROMPT_USER resume requires user_input_fn; "
@@ -369,6 +372,7 @@ class OpenAIAgentRunner:
                     yield {"type": "user_input", "payload": {"text": user_text}}
                     continue
                 yield {"type": "error", "payload": {
+                    "category": "agent_output_missing",
                     "kind": "no_complete_step",
                     "message": "agent finished without calling complete_step",
                 }}
@@ -424,13 +428,16 @@ class OpenAIAgentRunner:
                         validate_agent_output(sc.args_payload, invocation.agent_def.output_schema)
                     except Exception as ve:
                         yield {"type": "error", "payload": {
-                            "kind": "output_validation", "message": str(ve),
+                            "category": "agent_output_missing",
+                            "kind": "output_validation",
+                            "message": str(ve),
                         }}
                         return
                     yield {"type": "agent_output", "payload": sc.args_payload}
                     return
                 except FatalToolError as fte:
                     yield {"type": "error", "payload": {
+                        "category": "config",
                         "kind": "fatal_tool_error",
                         "tool": tu.name,
                         "message": str(fte),
@@ -467,12 +474,16 @@ class OpenAIAgentRunner:
 
             if ceiling_tripped:
                 yield {"type": "error", "payload": {
-                    "kind": "tool_call_ceiling_exceeded", "ceiling": ceiling,
+                    "category": "config",
+                    "kind": "tool_call_ceiling_exceeded",
+                    "ceiling": ceiling,
                 }}
                 return
 
         yield {"type": "error", "payload": {
-            "kind": "interrupted", "message": "runner cancelled by interrupt",
+            "category": "config",
+            "kind": "interrupted",
+            "message": "runner cancelled by interrupt",
         }}
 
     async def interrupt(self) -> None:
