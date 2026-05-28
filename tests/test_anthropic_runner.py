@@ -17,6 +17,7 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
 from imp.agents.transcript import Transcript
+from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, thinking, tool_use
@@ -39,46 +40,49 @@ def _agent_def(tools=frozenset({"complete_step", "read_file"})) -> AgentDef:
     )
 
 
-def _inv(tmp_path: Path, tools=None) -> AgentInvocation:
+def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
+         interactive=False, user_input_fn=None) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent_def(tools or frozenset({"complete_step", "read_file"})),
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            change_id=1, project_root=tmp_path, artifacts_dir=tmp_path / "art",
-        ),
-        interactive=False, transcript_dir=tmp_path / "step",
-        fs_permissions=(FsRule(
-            operations=("read",), paths=("/project/**",), mode="allow",
-            source=SourceLoc(file=Path("w.yaml"), line=1),
-        ),),
+            change_id=1, project_root=tmp_path, artifacts_dir=tmp_path / "art"),
+        interactive=interactive, transcript_dir=tmp_path / "step",
+        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
+                               mode="allow",
+                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
         events_path=tmp_path / "events.jsonl",
+        agent_id=agent_id,
+        event_log=event_log,
+        user_input_fn=user_input_fn,
     )
 
 
 @pytest.mark.anyio
 async def test_runs_to_complete_step(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
-    fake = FakeAsyncAnthropic([
-        response(
-            text("calling complete_step"),
-            tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
-        ),
-    ])
+    fake = FakeAsyncAnthropic([response(
+        text("calling complete_step"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    yielded = []
+    async for ev in runner.run(_inv(tmp_path, event_log=log)):
+        yielded.append(ev)
 
-    runner = AnthropicAgentRunner(
-        model_name="claude-sonnet-4-6",
-        client_factory=lambda: fake,
-    )
-    events = []
-    async for ev in runner.run(_inv(tmp_path)):
-        events.append(ev)
-
-    kinds = [e["type"] for e in events]
-    assert "agent_message" in kinds
-    assert kinds[-1] == "agent_output"
-    assert events[-1]["payload"] == {"status": "Success", "note": "ok"}
+    log_types = [e["type"] for e in log.read()]
+    assert "step_context" in log_types
+    assert "user_message" in log_types
+    assert "llm_response" in log_types
+    # audit events are NOT yielded any more — only control signals
+    assert [e["type"] for e in yielded] == ["agent_output"]
+    resp = next(e for e in log.read() if e["type"] == "llm_response")
+    assert "raw" in resp["payload"]
+    assert resp["agent_id"] == "step:p/s"
 
 
 @pytest.mark.anyio
@@ -92,13 +96,18 @@ async def test_dispatches_read_file_then_completes(tmp_path: Path) -> None:
         ),
     ])
 
+    log = InMemoryEventLog()
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake,
     )
-    events = [e async for e in runner.run(_inv(tmp_path))]
+    events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
     kinds = [e["type"] for e in events]
-    assert "tool_call" in kinds
-    assert "tool_result" in kinds
+    # control signals only: just agent_output
+    assert "agent_output" in kinds
+    # audit events go to log
+    log_types = [e["type"] for e in log.read()]
+    assert "tool_call" in log_types
+    assert "tool_result" in log_types
     # Tool result was passed back to the LLM in the next .create() call.
     second_call = fake.messages.calls[1]
     last_msg = second_call["messages"][-1]
@@ -168,16 +177,17 @@ async def test_thinking_block_emits_thinking_event_not_error(tmp_path: Path) -> 
             tool_use("c1", "complete_step", {"status": "Success"}),
         ),
     ])
+    log = InMemoryEventLog()
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake,
     )
-    events = [e async for e in runner.run(_inv(tmp_path))]
-    kinds = [e["type"] for e in events]
-    # Thinking is captured as its own event (not folded into runner_warning,
-    # not surfaced as a fatal error). The step still reaches agent_output.
-    assert "thinking" in kinds
-    thinking_payloads = [e["payload"]["content"] for e in events if e["type"] == "thinking"]
+    events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
+    # Thinking is captured in the log (not yielded as an event).
+    log_types = [e["type"] for e in log.read()]
+    assert "thinking" in log_types
+    thinking_payloads = [e["payload"]["content"] for e in log.read() if e["type"] == "thinking"]
     assert thinking_payloads == ["considering the options..."]
+    # The step still reaches agent_output.
     assert events[-1]["type"] == "agent_output"
 
 
@@ -198,11 +208,13 @@ async def test_unknown_block_type_emits_warning_not_error(tmp_path: Path) -> Non
         tool_use("c1", "complete_step", {"status": "Success"}),
     ], stop_reason="tool_use")
     fake = FakeAsyncAnthropic([weird])
+    log = InMemoryEventLog()
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake,
     )
-    events = [e async for e in runner.run(_inv(tmp_path))]
-    assert any(e["type"] == "runner_warning" for e in events)
+    events = [e async for e in runner.run(_inv(tmp_path, event_log=log))]
+    log_types = [e["type"] for e in log.read()]
+    assert "runner_warning" in log_types
     assert events[-1]["type"] == "agent_output"
 
 
@@ -302,8 +314,9 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path) -> None:
         subagents=("reviewer",),
     )
 
+    log = InMemoryEventLog()
     inv = dataclasses.replace(
-        _inv(tmp_path),
+        _inv(tmp_path, event_log=log),
         agent_def=parent_def,
         subagent_defs={"reviewer": reviewer_def},
     )
@@ -330,12 +343,17 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path) -> None:
     assert events[-1]["type"] == "agent_output"
     assert events[-1]["payload"]["status"] == "Success"
 
-    # The parent's tool_result for the task call should carry the
-    # JSON-stringified subagent agent_output.
-    tool_results = [e for e in events if e["type"] == "tool_result"]
-    task_result = next(e for e in tool_results if e["payload"]["id"] == "t1")
+    # tool_call + tool_result are now in the log, not the yield stream.
+    log_types = [e["type"] for e in log.read()]
+    assert "tool_call" in log_types
+    assert "tool_result" in log_types
+    # Find the task tool_result in the log and verify it has the subagent output.
+    task_result_ev = next(
+        e for e in log.read()
+        if e["type"] == "tool_result" and e["payload"].get("id") == "t1"
+    )
     import json
-    parsed = json.loads(task_result["payload"]["content"])
+    parsed = json.loads(task_result_ev["payload"]["content"])
     assert parsed.get("verdict") == "approve"
 
 
@@ -352,8 +370,7 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
 
     (tmp_path / "art").mkdir()
-    inv = _inv(tmp_path)
-    inv = replace(inv, interactive=True)
+    inv = _inv(tmp_path, interactive=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
     # Pre-populate transcript: user said "go", assistant replied text-only.
@@ -374,28 +391,19 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     ])
 
     user_inputs = iter(["do X"])
+    log = InMemoryEventLog()
 
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake,
     )
-    # The runner injects user_input_fn from ctx; the executor would normally
-    # supply it. For this unit test, install it directly by patching
-    # ToolContext after construction — same pattern as test_ask_user_tool.py.
-    # Easiest: monkey-patch the runner's `_make_spawn_subagent` and rely on
-    # the executor-style hook. For Plan 3 we expose a constructor kwarg.
     runner._user_input_fn = lambda _prompt: next(user_inputs)
 
-    events = []
-    async for ev in runner.run(inv):
-        events.append(ev)
+    async for _ in runner.run(replace(inv, event_log=log)):
+        pass
 
-    kinds = [e["type"] for e in events]
-    # The new user_input event fires BEFORE any agent_message.
-    user_input_idx = kinds.index("user_input")
-    agent_message_idx = kinds.index("agent_message")
-    assert user_input_idx < agent_message_idx
-    assert events[user_input_idx]["payload"]["text"] == "do X"
-    assert kinds[-1] == "agent_output"
+    types = [e["type"] for e in log.read()]
+    # user_message before llm_response in the log
+    assert types.index("user_message") < types.index("llm_response")
 
     # Transcript now has 4 messages: user("go") / assistant("what about X?")
     # / user("do X") / assistant(complete_step). Original two preserved.
@@ -436,13 +444,14 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
             stop_reason="tool_use",
         ),
     ])
+    log = InMemoryEventLog()
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6", client_factory=lambda: fake,
     )
 
     events: list = []
     async def _drain_events():
-        async for ev in runner.run(inv):
+        async for ev in runner.run(replace(inv, event_log=log)):
             events.append(ev)
 
     async def _interrupt_after_delay():
@@ -454,8 +463,11 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
         tg.start_soon(_interrupt_after_delay)
 
     kinds = [e["type"] for e in events]
-    assert "tool_killed" in kinds
-    # Last event is the runner's interrupted error.
+    log_types = [e["type"] for e in log.read()]
+    # tool_killed is now in the log, not the yield stream
+    assert "tool_killed" in log_types
+    assert "tool_killed" not in kinds
+    # Last event is the runner's interrupted error (still a control signal yield).
     assert events[-1]["type"] == "error"
     assert events[-1]["payload"]["kind"] == "interrupted"
 

@@ -3,10 +3,14 @@
 Loop:
   1. Build messages (transcript or initial_messages)
   2. POST to messages.create with declared tools
-  3. Append assistant response to transcript; emit agent_message
-  4. For each tool_use block: dispatch tool, append tool_result, emit events
+  3. Append assistant response to transcript; append llm_response to EventLog
+  4. For each tool_use block: dispatch tool, append tool_result to EventLog
   5. complete_step catches StepComplete → validate, emit agent_output, return
   6. No tool_use in assistant and interactive: prompt user; else error
+
+Yields ONLY control signals: agent_output, error.
+All audit events (step_context, user_message, llm_response, tool_call,
+tool_result, thinking, runner_warning, tool_killed) are written via EventLog.
 """
 
 from __future__ import annotations
@@ -239,11 +243,11 @@ class AnthropicAgentRunner:
         self, model_name: str,
         *,
         client_factory: Any = None,
-        user_input_fn: Any = None,             # NEW
+        user_input_fn: Any = None,
     ) -> None:
         self.model = model_name                     # public per Provider protocol
         self._client_factory = client_factory
-        self._user_input_fn = user_input_fn    # NEW
+        self._user_input_fn = user_input_fn
         self._client: Any = None
         self._cancel = False
         self._ctx: ToolContext | None = None
@@ -313,6 +317,10 @@ class AnthropicAgentRunner:
     async def _run_loop(
         self, invocation: AgentInvocation,
     ) -> AsyncGenerator[Event, None]:
+        from imp.engine.state import JsonlEventLog
+        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
+        aid = invocation.agent_id or "step:unnamed"
+
         transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
         tools = _build_tools(invocation)
         ctx = ToolContext(
@@ -328,8 +336,9 @@ class AnthropicAgentRunner:
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
         ctx.spawn_subagent = self._make_spawn_subagent()
+        ctx.event_log = elog                       # shared write instance
         if self._user_input_fn is not None:
-            ctx.user_input_fn = self._user_input_fn  # NEW
+            ctx.user_input_fn = self._user_input_fn
         self._ctx = ctx
 
         existing = transcript.load()
@@ -344,11 +353,7 @@ class AnthropicAgentRunner:
             if repair is not None:
                 for b in repair.content:
                     if isinstance(b, ToolResultBlock):
-                        yield {"type": "tool_result", "payload": {
-                            "id": b.tool_use_id,
-                            "content": b.content,
-                            "error": b.is_error,
-                        }}
+                        elog.append_tool_result(agent_id=aid, block=b)
             state = classify_resume(messages, interactive=invocation.interactive)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
@@ -390,13 +395,27 @@ class AnthropicAgentRunner:
                 )
                 messages.append(user_msg)
                 transcript.append(user_msg)
-                yield {"type": "user_input", "payload": {"text": user_text}}
+                elog.append_user_message(agent_id=aid, message=user_msg)
         else:
             messages = []
             for m in invocation.initial_messages:
                 messages.append(m)
                 transcript.append(m)
             tool_calls_used = 0
+            # Fresh-entry audit scaffolding. Ordered IMMEDIATELY after the
+            # transcript append so the "step_context emitted exactly once per
+            # agent_id" invariant holds (resume takes the branch above and
+            # emits nothing).
+            elog.append_step_context(
+                agent_id=aid, parent_id_override=invocation.first_event_parent_id,
+                provider=invocation.provider_name, model=self.model,
+                system_prompt=invocation.system_prompt,
+                tools_schema=[_anthropic_tool_schema(t) for t in tools.values()],
+                params={"max_tokens": 8192},
+                max_tool_calls=invocation.max_tool_calls or 50)
+            for m in invocation.initial_messages:
+                if all(isinstance(b, TextBlock) for b in m.content):
+                    elog.append_user_message(agent_id=aid, message=m)
 
         # Spec §6.5: agent_def.max_tool_calls or workflow.defaults.max_tool_calls or 50.
         # The engine (Task 28) resolves the first two and passes the result via
@@ -418,12 +437,17 @@ class AnthropicAgentRunner:
             assistant_msg = _parse_anthropic_message(raw)
             diag = _extract_anthropic_diagnostics(raw)
             for content in diag.thinkings:
-                yield {"type": "thinking", "payload": {"content": content}}
+                elog.append(agent_id=aid, type="thinking",
+                            payload={"content": content})
             for w in diag.block_warnings:
-                yield {"type": "runner_warning", "payload": {"message": w}}
+                elog.append(agent_id=aid, type="runner_warning",
+                            payload={"message": w})
             messages.append(assistant_msg)
             transcript.append(assistant_msg)
-            yield {"type": "agent_message", "payload": _serialize(assistant_msg)}
+            elog.append_llm_response(
+                agent_id=aid, provider=invocation.provider_name, model=self.model,
+                raw=raw, usage=raw.get("usage") or {},
+                stop_reason=raw.get("stop_reason"))
 
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
             if not tool_uses:
@@ -434,7 +458,7 @@ class AnthropicAgentRunner:
                     user_msg = Message(role="user", content=(TextBlock(text=user_text),))
                     messages.append(user_msg)
                     transcript.append(user_msg)
-                    yield {"type": "user_input", "payload": {"text": user_text}}
+                    elog.append_user_message(agent_id=aid, message=user_msg)
                     continue
                 last_text = "".join(
                     b.text for b in assistant_msg.content
@@ -454,51 +478,44 @@ class AnthropicAgentRunner:
                 if tool_calls_used >= ceiling:
                     # Backfill error tool_results to preserve transcript invariant.
                     err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
-                    tool_results.append(ToolResultBlock(tu.id, err_text, is_error=True))
-                    yield {"type": "tool_result", "payload": {
-                        "id": tu.id, "content": err_text, "error": True,
-                    }}
+                    block = ToolResultBlock(tu.id, err_text, is_error=True)
+                    tool_results.append(block)
+                    elog.append_tool_result(agent_id=aid, block=block)
                     ceiling_tripped = True
                     continue
                 tool_calls_used += 1
 
-                yield {"type": "tool_call", "payload": {
-                    "id": tu.id, "name": tu.name, "input": tu.input,
-                }}
+                tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
 
                 # task special-case: bypasses the sync Tool.invoke path
                 # entirely — go straight to the async dispatcher.
-                # Interim: tu.id (the API tool_use block id) is the parent link.
-                # Task 14 may switch to a persisted event id for full durability.
+                # Use the persisted tool_call event id for durable parent link.
                 if tu.name == "task":
                     try:
                         result_str = await dispatch_task(
                             ctx, tu.input["subagent_name"], tu.input["task_description"],
-                            tool_call_event_id=tu.id,
+                            tool_call_event_id=tc_ev["id"],
                         )
                     except Exception as e:
-                        text = f"{type(e).__name__}: {e}"
-                        tool_results.append(ToolResultBlock(tu.id, text, is_error=True))
-                        yield {"type": "tool_result", "payload": {
-                            "id": tu.id, "content": text, "error": True,
-                        }}
+                        err_text = f"{type(e).__name__}: {e}"
+                        block = ToolResultBlock(tu.id, err_text, is_error=True)
+                        tool_results.append(block)
+                        elog.append_tool_result(agent_id=aid, block=block)
                         continue
-                    tool_results.append(ToolResultBlock(tu.id, result_str))
-                    yield {"type": "tool_result", "payload": {
-                        "id": tu.id, "content": result_str,
-                    }}
+                    block = ToolResultBlock(tu.id, result_str)
+                    tool_results.append(block)
+                    elog.append_tool_result(agent_id=aid, block=block)
                     continue
 
                 tool = tools.get(tu.name)
                 if tool is None:
                     msg = f"unknown tool {tu.name!r}"
-                    tool_results.append(ToolResultBlock(tu.id, msg, is_error=True))
-                    yield {"type": "tool_result", "payload": {
-                        "id": tu.id, "content": msg, "error": True,
-                    }}
+                    block = ToolResultBlock(tu.id, msg, is_error=True)
+                    tool_results.append(block)
+                    elog.append_tool_result(agent_id=aid, block=block)
                     continue
                 try:
-                    raw = await tool.async_invoke(ctx, tu.input)
+                    raw_result = await tool.async_invoke(ctx, tu.input)
                 except StepComplete as sc:
                     try:
                         validate_agent_output(sc.args_payload, invocation.agent_def.output_schema)
@@ -520,29 +537,28 @@ class AnthropicAgentRunner:
                     }}
                     return
                 except Exception as e:
-                    text = f"{type(e).__name__}: {e}"
-                    tool_results.append(ToolResultBlock(tu.id, text, is_error=True))
-                    yield {"type": "tool_result", "payload": {
-                        "id": tu.id, "content": text, "error": True,
-                    }}
+                    err_text = f"{type(e).__name__}: {e}"
+                    block = ToolResultBlock(tu.id, err_text, is_error=True)
+                    tool_results.append(block)
+                    elog.append_tool_result(agent_id=aid, block=block)
                     continue
 
-                content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
+                content_str = (raw_result if isinstance(raw_result, str)
+                               else json.dumps(raw_result, default=str))
                 if tu.name == "bash":
-                    # Detect a kill so the CLI can render a tool_killed event.
+                    # Detect a kill so the log carries a tool_killed event.
                     try:
                         parsed = json.loads(content_str)
                     except (TypeError, ValueError):
                         parsed = {}
                     rc = parsed.get("returncode")
                     if isinstance(rc, int) and rc < 0:
-                        yield {"type": "tool_killed", "payload": {
-                            "id": tu.id, "name": "bash", "signal": -rc,
-                        }}
-                tool_results.append(ToolResultBlock(tu.id, content_str))
-                yield {"type": "tool_result", "payload": {
-                    "id": tu.id, "content": content_str,
-                }}
+                        elog.append(agent_id=aid, type="tool_killed",
+                                    payload={"id": tu.id, "name": "bash",
+                                             "signal": -rc})
+                block = ToolResultBlock(tu.id, content_str)
+                tool_results.append(block)
+                elog.append_tool_result(agent_id=aid, block=block)
 
             user_msg = Message(role="user", content=tuple(tool_results))
             messages.append(user_msg)
