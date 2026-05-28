@@ -393,10 +393,6 @@ async def _execute_step(
         await anyio.sleep(backoff_delay)
         if coordinator.should_pause:
             return Pause()
-        if step_backoff_attempts >= error_policy._MAX_BACKOFF_ATTEMPTS:
-            # Schedule exhausted: the next decide() call would return Pause.
-            # Avoid a redundant invocation — surface Pause directly.
-            return Pause()
 
     if paused:
         return Pause()

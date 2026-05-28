@@ -403,8 +403,10 @@ async def test_rate_limit_exhaustion_pauses(
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    assert runner.run_count == 4, (
-        f"expected 4 backoff attempts before Pause; got {runner.run_count}"
+    assert runner.run_count == 5, (
+        f"expected 5 invocations (4 rate-limited with backoff + 1 final "
+        f"where decide() exhausts the schedule and returns Pause); "
+        f"got {runner.run_count}"
     )
 
 
