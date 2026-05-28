@@ -35,6 +35,7 @@ from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
+    Diagnostics,
     Event,
     Message,
     TextBlock,
@@ -377,6 +378,58 @@ def _canon_tool_name(name: str) -> str:
 
 def _join_text(content: tuple[Any, ...]) -> str:
     return "".join(b.text for b in content if isinstance(b, TextBlock))
+
+
+def _serialize_claude_code_message(sdk_msg: Any) -> dict[str, Any]:
+    """Serialize an SDK AssistantMessage to llm_response.raw. claude_code has
+    no interceptable per-turn API call, so this is a normalized view: canonical
+    tool names, thinking preserved, best-effort usage/stop_reason."""
+    content: list[dict[str, Any]] = []
+    for b in getattr(sdk_msg, "content", []):
+        btype = type(b).__name__
+        if btype == "TextBlock":
+            content.append({"type": "text", "text": b.text})
+        elif btype == "ToolUseBlock":
+            content.append({"type": "tool_use", "id": b.id,
+                            "name": _canon_tool_name(b.name),
+                            "input": getattr(b, "input", {})})
+        elif btype == "ThinkingBlock":
+            content.append({"type": "thinking",
+                            "thinking": getattr(b, "thinking", "")})
+        else:
+            content.append({"type": btype})
+    usage = getattr(sdk_msg, "usage", None)
+    return {
+        "content": content,
+        "stop_reason": getattr(sdk_msg, "stop_reason", None),
+        "usage": usage if isinstance(usage, dict) else {},
+    }
+
+
+def _parse_claude_code_message(raw: dict[str, Any]) -> Message:
+    content: list[Any] = []
+    for block in raw.get("content", []):
+        kind = block.get("type")
+        if kind == "text":
+            content.append(TextBlock(text=block.get("text", "")))
+        elif kind == "tool_use":
+            content.append(ToolUseBlock(id=block["id"], name=block["name"],
+                                        input=block.get("input", {})))
+    return Message(role="assistant", content=tuple(content))
+
+
+def _extract_claude_code_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+    warnings: list[str] = []
+    thinkings: list[str] = []
+    for block in raw.get("content", []):
+        kind = block.get("type")
+        if kind in ("text", "tool_use"):
+            continue
+        if kind == "thinking":
+            thinkings.append(str(block.get("thinking", "") or ""))
+        else:
+            warnings.append(f"skipped unknown block type {kind!r}")
+    return Diagnostics(block_warnings=tuple(warnings), thinkings=tuple(thinkings))
 
 
 class _AsyncIter:
