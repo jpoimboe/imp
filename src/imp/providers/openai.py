@@ -37,8 +37,65 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.transcript import Transcript
 from imp.engine.schema import validate_agent_output
+from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
+
+
+def _classify_openai_exception(exc: BaseException) -> perr.ProviderError:
+    """Translate an OpenAI SDK exception into the matching
+    ProviderError subclass. Re-raises anything unrecognized so the
+    runner's top-level handler can produce an 'unknown' event.
+    """
+    from openai import (
+        APIConnectionError,
+        APIStatusError,
+        APITimeoutError,
+        AuthenticationError,
+        BadRequestError,
+        InternalServerError,
+        NotFoundError,
+        PermissionDeniedError,
+    )
+    from openai import RateLimitError as _OpenAIRateLimit
+
+    if isinstance(exc, AuthenticationError):
+        return perr.AuthError(str(exc))
+    if isinstance(exc, PermissionDeniedError):
+        return perr.AuthError(str(exc))
+    if isinstance(exc, _OpenAIRateLimit):
+        retry_after: float | None = None
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            headers = getattr(resp, "headers", None) or {}
+            raw = headers.get("retry-after") if hasattr(headers, "get") else None
+            if raw:
+                try:
+                    retry_after = float(raw)
+                except (TypeError, ValueError):
+                    retry_after = None
+        detail: dict[str, object] = (
+            {"retry_after_seconds": retry_after} if retry_after is not None else {}
+        )
+        return perr.RateLimitError(str(exc), detail=detail)
+    if isinstance(exc, (APIConnectionError, APITimeoutError, InternalServerError)):
+        return perr.NetworkError(str(exc))
+    if isinstance(exc, NotFoundError):
+        return perr.ConfigError(f"model not found: {exc}")
+    if isinstance(exc, BadRequestError):
+        msg = str(exc)
+        msg_low = msg.lower()
+        if (
+            "maximum context length" in msg_low
+            or "context_length_exceeded" in msg_low
+        ):
+            return perr.ContextWindowError(msg)
+        if "quota" in msg_low or "billing" in msg_low or "insufficient_quota" in msg_low:
+            return perr.QuotaError(msg)
+        return perr.ConfigError(msg)
+    if isinstance(exc, APIStatusError):
+        return perr.NetworkError(f"{exc.status_code}: {exc}")
+    raise exc
 
 
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
@@ -280,8 +337,20 @@ class OpenAIAgentRunner:
         self._ctx = ctx
 
         try:
-            async for ev in self._run_loop(invocation, transcript, tools, ctx):
-                yield ev
+            try:
+                async for ev in self._run_loop(invocation, transcript, tools, ctx):
+                    yield ev
+            except perr.ProviderError as exc:
+                yield perr.make_error_event(exc)
+                return
+            except Exception as exc:
+                try:
+                    classified = _classify_openai_exception(exc)
+                except Exception:
+                    yield perr.make_unknown_error_event(exc)
+                    return
+                yield perr.make_error_event(classified)
+                return
         finally:
             await self._close_client()
 
