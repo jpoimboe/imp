@@ -374,10 +374,17 @@ class OpenAIAgentRunner:
                 }}
                 return
             if state is ResumeState.MISSING_COMPLETE_STEP:
+                last_text = ""
+                if messages and messages[-1].role == "assistant":
+                    last_text = "".join(
+                        b.text for b in messages[-1].content
+                        if isinstance(b, TextBlock)
+                    )
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",
                     "kind": "missing_complete_step",
                     "message": "autonomous agent transcript ended without complete_step",
+                    "detail": {"last_agent_text": last_text[:500]},
                 }}
                 return
             if state is ResumeState.PROMPT_USER:
@@ -440,10 +447,15 @@ class OpenAIAgentRunner:
                     transcript.append(user_msg)
                     yield {"type": "user_input", "payload": {"text": user_text}}
                     continue
+                last_text = "".join(
+                    b.text for b in assistant_msg.content
+                    if isinstance(b, TextBlock)
+                )
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",
                     "kind": "no_complete_step",
                     "message": "agent finished without calling complete_step",
+                    "detail": {"last_agent_text": last_text[:500]},
                 }}
                 return
 
