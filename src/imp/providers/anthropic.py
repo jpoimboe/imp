@@ -437,6 +437,29 @@ class AnthropicAgentRunner:
 
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
             if not tool_uses:
+                last_text = "".join(
+                    b.text for b in assistant_msg.content
+                    if isinstance(b, TextBlock)
+                )
+                cont = invocation.continuation_fn
+                if cont is not None:
+                    next_text = cont(last_text)
+                    if inspect.isawaitable(next_text):
+                        next_text = await next_text
+                    if next_text is None:
+                        yield {"type": "error", "payload": {
+                            "category": "agent_incomplete",
+                            "kind": "no_complete_step_after_nudges",
+                            "message": "agent did not call complete_step after nudges",
+                            "detail": {"last_agent_text": last_text[:500]},
+                        }}
+                        return
+                    user_msg = Message(role="user", content=(TextBlock(text=next_text),))
+                    messages.append(user_msg)
+                    transcript.append(user_msg)
+                    elog.append_user_message(agent_id=aid, message=user_msg)
+                    continue
+                # Legacy/test fallback: no continuation_fn wired by the executor.
                 if invocation.interactive and ctx.user_input_fn is not None:
                     user_text = ctx.user_input_fn("")
                     if inspect.isawaitable(user_text):
@@ -446,10 +469,6 @@ class AnthropicAgentRunner:
                     transcript.append(user_msg)
                     elog.append_user_message(agent_id=aid, message=user_msg)
                     continue
-                last_text = "".join(
-                    b.text for b in assistant_msg.content
-                    if isinstance(b, TextBlock)
-                )
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",
                     "kind": "no_complete_step",
