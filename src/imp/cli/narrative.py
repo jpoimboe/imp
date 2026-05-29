@@ -14,6 +14,7 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -45,14 +46,14 @@ class WorkflowNode:
     change_id: int | None = None
     title: str = ""
     status: str = "running"            # running | paused | completed
-    children: list = field(default_factory=list)
+    children: list[Any] = field(default_factory=list)
     collapsible = False
 
 
 @dataclass
 class PhaseNode:
     name: str
-    children: list = field(default_factory=list)
+    children: list[Any] = field(default_factory=list)
     closed: bool = False
     collapsible = False
 
@@ -64,7 +65,7 @@ class StepNode:
     interactive: bool = False
     model: str | None = None
     provider: str | None = None
-    children: list = field(default_factory=list)
+    children: list[Any] = field(default_factory=list)
     outcome: OutcomeLine | None = None
     closed: bool = False
     collapsible = False
@@ -72,7 +73,7 @@ class StepNode:
 
 @dataclass
 class AgentTextNode:
-    payload: dict                      # the llm_response payload
+    payload: dict[str, Any]            # the llm_response payload
     _cache: Any = field(default=None, repr=False)  # cached RenderedMessage (F5)
     collapsible = False
 
@@ -111,7 +112,7 @@ class ThinkingFold:
 class ToolCall:
     call_id: str
     name: str
-    input: dict
+    input: dict[str, Any]
     result: str | None = None
     is_error: bool = False
     killed: bool = False
@@ -119,7 +120,7 @@ class ToolCall:
 
 @dataclass
 class ToolBurstFold:
-    calls: list = field(default_factory=list)   # list[ToolCall]
+    calls: list[ToolCall] = field(default_factory=list)
     collapsible = True
 
 
@@ -145,9 +146,9 @@ class SubagentFold:
 class GateNode:
     kind: str                          # human | script | stub
     prompt: str | None = None
-    options: list = field(default_factory=list)
+    options: list[Any] = field(default_factory=list)
     action: Any = None                 # dict {kind, target?}
-    context: dict | None = None
+    context: dict[str, Any] | None = None
     collapsible = False
 
 
@@ -161,7 +162,7 @@ class ErrorNode:
 
 @dataclass
 class StepContextNode:
-    payload: dict
+    payload: dict[str, Any]
     collapsible = True
 
 
@@ -174,7 +175,7 @@ class OutcomeLine:
 @dataclass
 class FallbackLine:
     event_type: str
-    payload: dict
+    payload: dict[str, Any]
     collapsible = False
 
 
@@ -258,7 +259,7 @@ class NarrativeBuilder:
         handler(self, event, payload)
 
     # -- scope helpers --------------------------------------------------------
-    def _container(self):
+    def _container(self) -> WorkflowNode | PhaseNode | StepNode:
         if self._step_stack:
             return self._step_stack[-1]
         if self._current_phase is not None:
@@ -271,8 +272,20 @@ class NarrativeBuilder:
     def _flush_burst(self) -> None:
         self._current_burst = None
 
+    def _pop_step(self, name: str | None) -> StepNode | None:
+        """Pop the top open step. The top is always the right target: a normal step
+        is alone on the stack, and an agent-gate container is pushed *above* its
+        enclosing step, so its closing gate_evaluated pops the gate, not the step.
+        `name` is accepted for symmetry with the event payload but intentionally
+        unused (closing is best-effort — design §5.1)."""
+        if not self._step_stack:
+            return None
+        return self._step_stack.pop()
+
     # -- per-type handlers are registered in Task 3+ via _HANDLERS ------------
-    _HANDLERS: ClassVar[dict] = {}
+    _HANDLERS: ClassVar[
+        dict[str, Callable[[NarrativeBuilder, dict[str, Any], dict[str, Any]], None]]
+    ] = {}
 
 
 def _malformed_text(event: Any) -> str:
@@ -281,7 +294,7 @@ def _malformed_text(event: Any) -> str:
     return f"malformed event: {event!r}"[:200]
 
 
-def build_tree(events: Iterable[dict]) -> NarrativeTree:
+def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
     b = NarrativeBuilder()
     for e in events:
         b.add(e)
@@ -290,7 +303,7 @@ def build_tree(events: Iterable[dict]) -> NarrativeTree:
 
 # Handlers populate this in subsequent tasks; change_created lives here so the
 # skeleton test passes.
-def _h_change_created(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._root.change_id = p.get("change_id")
     self._root.title = p.get("title", "")
 
@@ -298,7 +311,7 @@ def _h_change_created(self: NarrativeBuilder, event: dict, p: dict) -> None:
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 
-def _h_phase_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_phase_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     name = p.get("phase", "?")
     # Resume re-entry: reuse the still-open current phase rather than appending a
@@ -317,14 +330,14 @@ def _h_phase_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._step_stack.clear()
 
 
-def _h_phase_completed(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_phase_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._step_stack.clear()
     if self._current_phase is not None:
         self._current_phase.closed = True
 
 
-def _h_step_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     is_gate = p.get("kind") == "agent_gate"
     name = p.get("gate_stem", "?") if is_gate else p.get("step", "?")
@@ -359,7 +372,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._step_stack.append(node)
 
 
-def _h_step_completed(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     outcome = OutcomeLine(action=p.get("action"))
     node = self._pop_step(p.get("step"))
@@ -369,30 +382,18 @@ def _h_step_completed(self: NarrativeBuilder, event: dict, p: dict) -> None:
         node.closed = True
 
 
-def _pop_step(self: NarrativeBuilder, name: str | None) -> StepNode | None:
-    """Pop the top open step. The top is always the right target: a normal step
-    is alone on the stack, and an agent-gate container is pushed *above* its
-    enclosing step, so its closing gate_evaluated pops the gate, not the step.
-    `name` is accepted for symmetry with the event payload but intentionally
-    unused (closing is best-effort — design §5.1)."""
-    if not self._step_stack:
-        return None
-    return self._step_stack.pop()
-
-
-NarrativeBuilder._pop_step = _pop_step  # type: ignore[attr-defined]
 NarrativeBuilder._HANDLERS["phase_started"] = _h_phase_started
 NarrativeBuilder._HANDLERS["phase_completed"] = _h_phase_completed
 NarrativeBuilder._HANDLERS["step_started"] = _h_step_started
 NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 
 
-def _h_workflow_paused(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._root.status = "paused"
 
 
-def _h_workflow_resumed(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._root.status = "running"
     self._resuming = True                # open the re-entry window
@@ -402,7 +403,7 @@ NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
 NarrativeBuilder._HANDLERS["workflow_resumed"] = _h_workflow_resumed
 
 
-def _h_human_gate_pending(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_human_gate_pending(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     gate = GateNode(kind="human", prompt=str(p.get("prompt", "")),
                     options=list(p.get("options") or []))
@@ -410,7 +411,7 @@ def _h_human_gate_pending(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._pending_human_gate = gate
 
 
-def _h_gate_evaluated(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_gate_evaluated(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     kind = str(p.get("kind", "?"))
     action = p.get("action")
@@ -435,7 +436,7 @@ NarrativeBuilder._HANDLERS["human_gate_pending"] = _h_human_gate_pending
 NarrativeBuilder._HANDLERS["gate_evaluated"] = _h_gate_evaluated
 
 
-def _user_message_text(payload: dict) -> str:
+def _user_message_text(payload: dict[str, Any]) -> str:
     """Inline (pure) extraction of user chat text. Deliberately NOT
     render_helpers.user_message_text — importing that module pulls the provider
     parse chain at module load (D3). This logic is trivial; keep it local."""
@@ -444,29 +445,29 @@ def _user_message_text(payload: dict) -> str:
         if isinstance(b, dict) and b.get("type") == "text")
 
 
-def _h_user_message(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._append(UserMessageNode(text=_user_message_text(p)))
 
 
-def _h_llm_response(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Token accumulation already happened in add(); here we only build the node.
     self._flush_burst()
     self._append(AgentTextNode(payload=p))
 
 
-def _h_thinking(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_thinking(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._append(ThinkingFold(content=str(p.get("content", ""))))
 
 
-def _h_step_context(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_step_context(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # step_context is the agent's first event; do NOT flush — it opens, not
     # interrupts, the content stream. (No burst can be open before it anyway.)
     self._append(StepContextNode(payload=p))
 
 
-def _h_agent_output(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # design §5.1: agent_output is the executor's step-result capture consumed
     # by templating; it has NO node. The visible outcome is the OutcomeLine.
     return
@@ -486,7 +487,7 @@ def _ensure_burst(self: NarrativeBuilder) -> ToolBurstFold:
     return self._current_burst
 
 
-def _h_tool_call(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     if p.get("name") == "task":
         _open_subagent_fold(self, event, p)     # defined in Task 6
         return
@@ -496,7 +497,7 @@ def _h_tool_call(self: NarrativeBuilder, event: dict, p: dict) -> None:
         input=p.get("input") or {}))
 
 
-def _h_tool_result(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
     # Closing a subagent? (parent `task` tool_result carries the block id.)
     fold = self._open_sub_by_block.pop(rid, None)
@@ -521,7 +522,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict, p: dict) -> None:
         is_error=bool(p.get("error", False))))
 
 
-def _h_tool_killed(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
     burst = self._current_burst
     if burst is not None:
@@ -548,14 +549,14 @@ NarrativeBuilder._HANDLERS["tool_result"] = _h_tool_result
 NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
 
 
-def _h_error(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._append(ErrorNode(
         message=str(p.get("message", "?")), category=p.get("category"),
         is_warning=False))
 
 
-def _h_runner_warning(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Non-terminal: do NOT flush the burst (a warning can be emitted mid-burst
     # for a dropped block; flushing would split an otherwise-contiguous run).
     self._append(ErrorNode(message=str(p.get("message", "?")), is_warning=True))
@@ -565,7 +566,7 @@ NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 
 
-def _open_subagent_fold(self: NarrativeBuilder, event: dict, p: dict) -> None:
+def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     """A `task` tool_call opens a SubagentFold (never part of a burst — §5.3
     rule 2). Routing key is "sub:" + the tool_call EVENT id; the closing
     `task` tool_result is matched by the tool_use BLOCK id (payload['id']).

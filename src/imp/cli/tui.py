@@ -9,16 +9,22 @@ This file is layered:
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from imp.cli import narrative as nv
 from imp.cli import palette as pal
 
-# StyleAndTextTuples == list[tuple[str, str]]  (prompt_toolkit fragment list)
-Fragments = list
+if TYPE_CHECKING:
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.buffer import Buffer
+
+# StyleAndTextTuples: each fragment is (style, text) or (style, text, handler)
+# We use list[Any] to accommodate both 2-tuples and 3-tuples (mouse handlers).
+Fragments = list[Any]
 
 
 @dataclass
@@ -130,13 +136,15 @@ def render_tree_to_lines(tree: nv.NarrativeTree, fold_state: FoldState,
     return out
 
 
-def _line(out, text, depth, node, color, *codes, is_fold_header=False):
+def _line(out: list[RenderedLine], text: str, depth: int, node: Any, color: bool,
+          *codes: str, is_fold_header: bool = False) -> None:
     s = pal.ansi(f"{_INDENT * depth}{text}", *codes, enabled=color)
     out.append(RenderedLine(fragments=_ansi_to_fragments(s), node=node,
                             is_fold_header=is_fold_header))
 
 
-def _emit(out, node, *, depth, fs, width, color, memo) -> None:
+def _emit(out: list[RenderedLine], node: Any, *, depth: int, fs: FoldState,
+          width: int, color: bool, memo: AnsiMemo | None) -> None:
     if isinstance(node, nv.PhaseNode):
         _line(out, node.name, depth, node, color, *pal.NODE_COLORS["phase"])
         for c in node.children:
@@ -186,7 +194,8 @@ def _emit(out, node, *, depth, fs, width, color, memo) -> None:
         return
 
 
-def _emit_fold(out, node, *, depth, fs, width, color, memo) -> None:
+def _emit_fold(out: list[RenderedLine], node: Any, *, depth: int, fs: FoldState,
+               width: int, color: bool, memo: AnsiMemo | None) -> None:
     expanded = fs.is_expanded(node)
     glyph = pal.fold_glyph(expanded=expanded)
     if isinstance(node, nv.ThinkingFold):
@@ -248,7 +257,8 @@ def _emit_fold(out, node, *, depth, fs, width, color, memo) -> None:
         return
 
 
-def _wrap_fragments(text, width, depth, color, codes) -> list[Fragments]:
+def _wrap_fragments(text: str, width: int, depth: int, color: bool,
+                    codes: tuple[str, ...]) -> list[Fragments]:
     import textwrap
     indent = _INDENT * depth
     avail = max(8, width - len(indent))
@@ -259,7 +269,8 @@ def _wrap_fragments(text, width, depth, color, codes) -> list[Fragments]:
     return out
 
 
-def _prose_lines(node, width, depth, color, memo) -> list[Fragments]:
+def _prose_lines(node: Any, width: int, depth: int, color: bool,
+                 memo: AnsiMemo | None) -> list[Fragments]:
     indent_cols = len(_INDENT) * depth
     key = (id(node), width)
     cached = memo.get(key) if memo is not None else None
@@ -314,8 +325,9 @@ class NarrativeApp:
     sticky tail (M5); `live=False` is read-only log mode."""
 
     def __init__(self, tree: nv.NarrativeTree, *, live: bool, mouse: bool,
-                 full: bool = False, _osc_writer=None, builder=None,
-                 coordinator=None) -> None:
+                 full: bool = False, _osc_writer: Any = None,
+                 builder: nv.NarrativeBuilder | None = None,
+                 coordinator: Any = None) -> None:
         # emission thread: on-loop, verified 2026-05-28 (grep found no
         # to_thread/run_in_executor/Thread usage in providers/agents/engine)
         self.live = live
@@ -329,12 +341,13 @@ class NarrativeApp:
         self.status_note = ""
         self._osc_writer = _osc_writer        # injected in tests; real one in build
         self.coordinator = coordinator
-        self.exit_reason = None               # None | "pause" | "eof" | "done"
+        self.exit_reason: str | None = None   # None | "pause" | "eof" | "done"
         self._pausing = False
         # For live mode, hold the builder so on_event can feed it incrementally;
         # the tree is then a live view over builder.tree (design §7.7).
         # If no builder is supplied in live mode, create a fresh one so callers
         # can use on_event without pre-constructing a builder.
+        self._builder: nv.NarrativeBuilder | None
         if live:
             self._builder = builder if builder is not None else nv.NarrativeBuilder()
             self.tree = self._builder.tree
@@ -343,22 +356,28 @@ class NarrativeApp:
             self.tree = tree
         self.new_below_count = 0
         # live input state (design §7.5)
-        self._active_input = None          # asyncio.Future | None
+        self._active_input: asyncio.Future[str] | None = None
         self._input_prompt = "> "
         # human-gate inline selector state (design §7.5 / Task 31)
         self._gate_active = False
-        self._gate_options: list = []
-        self._gate_future = None           # asyncio.Future | None
-        self._pending_gate = None          # (prompt, options) stashed by on_event
+        self._gate_options: list[Any] = []
+        self._gate_future: asyncio.Future[str] | None = None
+        self._pending_gate: tuple[str, list[Any]] | None = None
+        self._input_buffer: Buffer | None
         if self.live:
             from prompt_toolkit.buffer import Buffer
             self._input_buffer = Buffer(multiline=False,
                                         accept_handler=self._on_accept)
         else:
             self._input_buffer = None
+        # Set in build_application(); declared here so mypy tracks the type.
+        self._narrative_window: Any = None
+        self._input_window: Any = None
+        self.application: Application[Any] | None = None
+        # Set by run_live_tui._main so on_event / ensure_future can reference it.
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._rebuild()
         self.cursor_line = max(0, len(self._lines) - 1)   # log mode starts at tail
-        self.application = None               # set in build_application()
 
     # -- line rebuild ---------------------------------------------------------
     def _rebuild(self) -> None:
@@ -382,20 +401,20 @@ class NarrativeApp:
         return None
 
     # -- mouse support --------------------------------------------------------
-    def _on_fold_click(self, fold) -> None:
+    def _on_fold_click(self, fold: Any) -> None:
         self.toggle_fold_node(fold)
 
-    def _make_mouse_handler(self, fold):
+    def _make_mouse_handler(self, fold: Any) -> Any:
         from prompt_toolkit.mouse_events import MouseEventType
 
-        def handler(mouse_event):
+        def handler(mouse_event: Any) -> None:
             if mouse_event.event_type == MouseEventType.MOUSE_UP:
                 self._on_fold_click(fold)
         return handler
 
     # -- formatted text for the control --------------------------------------
-    def _get_formatted_text(self):
-        frags = []
+    def _get_formatted_text(self) -> list[Any]:
+        frags: list[Any] = []
         for i, ln in enumerate(self._lines):
             style_prefix = "reverse " if i == self.cursor_line else ""
             handler = (self._make_mouse_handler(ln.node)
@@ -412,8 +431,8 @@ class NarrativeApp:
             frags.pop()
         return frags
 
-    def _cursor_position(self):
-        from prompt_toolkit.layout.controls import Point
+    def _cursor_position(self) -> Any:
+        from prompt_toolkit.data_structures import Point
         return Point(x=0, y=self.cursor_line)
 
     # -- navigation (called by key bindings; tested directly) ----------------
@@ -451,7 +470,7 @@ class NarrativeApp:
         self.follow_tail = False
         self._invalidate()
 
-    def _enclosing_fold(self, node) -> Any:
+    def _enclosing_fold(self, node: Any) -> Any:
         return node if getattr(node, "collapsible", False) else None
 
     def toggle_fold_at_cursor(self) -> None:
@@ -466,7 +485,7 @@ class NarrativeApp:
         self.follow_tail = is_at_tail(self.cursor_line, len(self._lines))
         self._invalidate()
 
-    def toggle_fold_node(self, fold) -> None:
+    def toggle_fold_node(self, fold: Any) -> None:
         """Toggle a specific fold (mouse click target)."""
         if not getattr(fold, "collapsible", False):
             return
@@ -519,10 +538,9 @@ class NarrativeApp:
         sys.stdout.flush()
 
     # -- live input (design §7.5) --------------------------------------------
-    def request_line(self, prompt_text: str = "> "):
+    def request_line(self, prompt_text: str = "> ") -> asyncio.Future[str]:
         """Return an awaitable that resolves when the user submits a line (or
         ESC → ESC_SENTINEL). Engine callbacks await this."""
-        import asyncio
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[str] = loop.create_future()
         self._active_input = fut
@@ -533,13 +551,12 @@ class NarrativeApp:
         self._invalidate()
         return fut
 
-    def user_chat_input_fn(self, _question: str):
+    def user_chat_input_fn(self, _question: str) -> asyncio.Future[str]:
         return self.request_line("> ")
 
-    def request_gate_choice(self, prompt_text: str, options: list):
+    def request_gate_choice(self, prompt_text: str, options: list[Any]) -> asyncio.Future[str]:
         """Return an awaitable that resolves with the chosen option label when
         the user selects a gate option via _select_gate_option."""
-        import asyncio
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[str] = loop.create_future()
         self._gate_future = fut
@@ -561,7 +578,7 @@ class NarrativeApp:
         self._refocus_narrative()
         self._invalidate()
 
-    def human_input_fn(self):
+    def human_input_fn(self) -> asyncio.Future[str]:
         # Live gate dispatch: on_event stashes the pending gate from the
         # human_gate_pending event the executor emits just before this call.
         if self._pending_gate is not None:
@@ -581,7 +598,7 @@ class NarrativeApp:
             self.status_note = t[1:-1]
             self._invalidate()
 
-    def _on_accept(self, buff) -> bool:
+    def _on_accept(self, buff: Any) -> bool:
         self._submit_input(buff.text)
         return False                        # clear the buffer
 
@@ -677,7 +694,7 @@ class NarrativeApp:
         self.request_pause()
 
     # -- live event sink (design §7.7) ----------------------------------------
-    def on_event(self, event: dict) -> None:
+    def on_event(self, event: dict[str, Any]) -> None:
         """Synchronous on_event sink (design §7.7): builder.add then invalidate.
         No awaiting in the hot path. MUST run on the loop thread (see comment in
         __init__ — verified on-loop as of 2026-05-28)."""
@@ -696,8 +713,8 @@ class NarrativeApp:
         # Stash pending gate info so human_input_fn can route to the selector
         # (outside the builder block — reads the event directly, design §7.5 / Task 31)
         if event.get("type") == "human_gate_pending":
-            p = event.get("payload") or {}
-            self._pending_gate = (p.get("prompt", ""), list(p.get("options") or []))
+            p: dict[str, Any] = event.get("payload") or {}
+            self._pending_gate = (str(p.get("prompt", "")), list(p.get("options") or []))
 
     async def clock_tick(self) -> None:
         """~1s tick so the footer's elapsed timer advances between events
@@ -719,7 +736,7 @@ class NarrativeApp:
             return "PgUp/Dn ⌃N/⌃P ⌃␣ ⌃E ⌃Y ⌃C q"
         return "↑↓ ⏎ a y Tab q"
 
-    def _footer_text(self):
+    def _footer_text(self) -> list[tuple[str, str]]:
         root = self.tree.root
         ident = f"#{root.change_id if root.change_id is not None else '?'} {root.title}".strip()
         left = f"{ident} · {root.status} · {self._fmt_tokens()}"
@@ -729,7 +746,7 @@ class NarrativeApp:
         return [("reverse", f" {left} "), ("", "  "), ("reverse", f" {right} ")]
 
     # -- application construction --------------------------------------------
-    def build_application(self, *, _input=None, _output=None):
+    def build_application(self, *, _input: Any = None, _output: Any = None) -> Application[Any]:
         from prompt_toolkit.application import Application
         from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.layout import Layout
@@ -744,54 +761,55 @@ class NarrativeApp:
         kb = KeyBindings()
         if not self.live:
             @kb.add("up")
-            def _(event): self.move_cursor(-1)
+            def _(event: Any) -> None: self.move_cursor(-1)
 
             @kb.add("down")
-            def _(event): self.move_cursor(1)
+            def _(event: Any) -> None: self.move_cursor(1)
 
             @kb.add("pageup")
-            def _(event): self.page(-1)
+            def _(event: Any) -> None: self.page(-1)
 
             @kb.add("pagedown")
-            def _(event): self.page(1)
+            def _(event: Any) -> None: self.page(1)
 
             @kb.add("g")
             @kb.add("home")
-            def _(event): self.goto_top()
+            def _(event: Any) -> None: self.goto_top()
 
             @kb.add("G")
             @kb.add("end")
-            def _(event): self.goto_tail()
+            def _(event: Any) -> None: self.goto_tail()
 
             @kb.add("tab")
-            def _(event): self.next_fold()
+            def _(event: Any) -> None: self.next_fold()
 
             @kb.add("s-tab")
-            def _(event): self.prev_fold()
+            def _(event: Any) -> None: self.prev_fold()
 
             @kb.add("enter")
             @kb.add("space")
-            def _(event): self.toggle_fold_at_cursor()
+            def _(event: Any) -> None: self.toggle_fold_at_cursor()
 
             @kb.add("a")
-            def _(event): self.toggle_expand_all()
+            def _(event: Any) -> None: self.toggle_expand_all()
 
             @kb.add("y")
-            def _(event): self.copy_focused_node()      # Task 26
+            def _(event: Any) -> None: self.copy_focused_node()      # Task 26
 
             @kb.add("q")
-            def _(event): event.app.exit()
+            def _(event: Any) -> None: event.app.exit()
 
         from prompt_toolkit.layout.containers import VSplit
         from prompt_toolkit.layout.controls import BufferControl
         from prompt_toolkit.layout.controls import FormattedTextControl as _FTC
 
-        windows = [self._narrative_window]
+        windows: list[Any] = [self._narrative_window]
         if self.live:
             # NOTE: do NOT capture the event loop here — build_application runs
             # before anyio.run() starts, so the running loop doesn't exist yet.
             # run_live_tui sets self._loop inside _main (Task 32).
             prompt_ctrl = _FTC(text=lambda: [("bold", self._input_prompt)])
+            assert self._input_buffer is not None  # set in __init__ when live=True
             self._input_window = Window(
                 content=BufferControl(buffer=self._input_buffer), height=1)
             input_row = VSplit([Window(content=prompt_ctrl, width=2), self._input_window])
@@ -803,41 +821,41 @@ class NarrativeApp:
         if self.live:
             # Input-bar bindings (the buffer handles normal typing itself).
             @kb.add("escape", eager=True)
-            def _(event): self._escape_input()
+            def _(event: Any) -> None: self._escape_input()
 
             @kb.add("c-c")
-            def _(event): self.request_pause()        # H2 a
+            def _(event: Any) -> None: self.request_pause()        # H2 a
 
             @kb.add("c-d")
-            def _(event): self.request_exit_eof()     # H2 a
+            def _(event: Any) -> None: self.request_exit_eof()     # H2 a
 
             # Narrative nav via Ctrl-chords (letters/space/tab type — §7.4).
             @kb.add("pageup")
-            def _(event): self.page(-1)
+            def _(event: Any) -> None: self.page(-1)
 
             @kb.add("pagedown")
-            def _(event): self.page(1)
+            def _(event: Any) -> None: self.page(1)
 
             @kb.add("end")
-            def _(event): self.goto_tail()            # re-attach to live tail
+            def _(event: Any) -> None: self.goto_tail()            # re-attach to live tail
 
             @kb.add("home")
-            def _(event): self.goto_top()
+            def _(event: Any) -> None: self.goto_top()
 
             @kb.add("c-n")
-            def _(event): self.next_fold()
+            def _(event: Any) -> None: self.next_fold()
 
             @kb.add("c-p")
-            def _(event): self.prev_fold()
+            def _(event: Any) -> None: self.prev_fold()
 
             @kb.add("c-space")
-            def _(event): self.toggle_fold_at_cursor()
+            def _(event: Any) -> None: self.toggle_fold_at_cursor()
 
             @kb.add("c-e")
-            def _(event): self.toggle_expand_all()
+            def _(event: Any) -> None: self.toggle_expand_all()
 
             @kb.add("c-y")
-            def _(event): self.copy_focused_node()
+            def _(event: Any) -> None: self.copy_focused_node()
 
         focused = self._input_window if self.live else self._narrative_window
         self.application = Application(
@@ -887,7 +905,7 @@ def node_copy_text(node: Any) -> str:
 
 
 def run_log_tui(tree: nv.NarrativeTree, *, full: bool, mouse: bool,
-                _input=None, _output=None) -> int:
+                _input: Any = None, _output: Any = None) -> int:
     """Module-level entry point for log-mode TUI (called by _cmd_log)."""
     app_obj = NarrativeApp(tree, live=False, mouse=mouse, full=full)
     application = app_obj.build_application(_input=_input, _output=_output)
@@ -895,8 +913,8 @@ def run_log_tui(tree: nv.NarrativeTree, *, full: bool, mouse: bool,
     return 0
 
 
-def run_live_tui(*, run_change, coordinator, mouse: bool,
-                 seed_events=None, _input=None, _output=None):
+def run_live_tui(*, run_change: Any, coordinator: Any, mouse: bool,
+                 seed_events: Any = None, _input: Any = None, _output: Any = None) -> Any:
     """Run the live narrative TUI concurrently with the engine on one asyncio
     loop (design §7.7). ``run_change`` is a coroutine callable that already has
     change bound (e.g. via functools.partial) EXCEPT for the keyword callbacks
@@ -923,10 +941,9 @@ def run_live_tui(*, run_change, coordinator, mouse: bool,
                            builder=builder, coordinator=coordinator)
     application = app_obj.build_application(_input=_input, _output=_output)
 
-    result_box: dict = {}
+    result_box: dict[str, Any] = {}
 
     async def _main() -> None:
-        import asyncio
         # Store the running loop so on_event (and ensure_future) can reference it.
         app_obj._loop = asyncio.get_running_loop()
         async with anyio.create_task_group() as tg:
@@ -970,7 +987,7 @@ def run_live_tui(*, run_change, coordinator, mouse: bool,
     return result_box.get("result")
 
 
-def _render_prose_ansi(node, avail_width: int, color: bool) -> list[str]:
+def _render_prose_ansi(node: Any, avail_width: int, color: bool) -> list[str]:
     """Render an AgentTextNode/UserMessageNode to a list of ANSI line strings.
 
     AgentTextNode → markdown (bold/italic/lists/headers + syntax-highlighted

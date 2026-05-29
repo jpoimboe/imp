@@ -129,7 +129,8 @@ def _burst_counts(burst: nv.ToolBurstFold) -> str:
     return " · ".join(f"{n} {name}" for name, n in by_count)
 
 
-def _render_burst(burst, *, depth, full, color, width) -> Iterator[str]:
+def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
+                  color: bool, width: int) -> Iterator[str]:
     total = len(burst.calls)
     if not full:
         glyph = pal.fold_glyph(expanded=False)
@@ -149,7 +150,8 @@ def _render_burst(burst, *, depth, full, color, width) -> Iterator[str]:
             yield pal.ansi(wl, *pal.NODE_COLORS["tools"], enabled=color)
 
 
-def _render_subagent(sub, *, depth, full, color, width) -> Iterator[str]:
+def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
+                     color: bool, width: int) -> Iterator[str]:
     if not full:
         glyph = pal.fold_glyph(expanded=False)
         tail = "running" if sub.running else f"→ {(sub.outcome or '').strip()[:40]}"
@@ -162,7 +164,8 @@ def _render_subagent(sub, *, depth, full, color, width) -> Iterator[str]:
         yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
 
 
-def _render_step_context(ctx, *, depth, full, color, width) -> Iterator[str]:
+def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
+                         color: bool, width: int) -> Iterator[str]:
     p = ctx.payload
     provider = p.get("provider", "?")
     model = p.get("model", "?")
@@ -183,7 +186,7 @@ def _render_step_context(ctx, *, depth, full, color, width) -> Iterator[str]:
         yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"])
 
 
-def _render_gate(gate, *, depth, color, width) -> Iterator[str]:
+def _render_gate(gate: nv.GateNode, *, depth: int, color: bool, width: int) -> Iterator[str]:
     action = pal.action_text(gate.action) if gate.action is not None else "pending"
     pal.accent_color(gate.action) if gate.action is not None else None
     header = f"{gate.kind} gate → {action}"
@@ -196,7 +199,7 @@ def _render_gate(gate, *, depth, color, width) -> Iterator[str]:
                         *pal.NODE_COLORS["gate"])
 
 
-def stream_event(event: dict, *, color: bool, width: int = 80) -> str | None:
+def stream_event(event: Any, *, color: bool, width: int = 80) -> str | None:
     """Format ONE event as an append-only block for the --no-tui live stream.
 
     Returns the text (possibly multi-line) or None to skip. Subagent (sub:)
@@ -268,6 +271,6 @@ def stream_event(event: dict, *, color: bool, width: int = 80) -> str | None:
     return None
 
 
-def _stream_user_text(p: dict) -> str:
+def _stream_user_text(p: dict[str, Any]) -> str:
     return "".join(b.get("text", "") for b in (p.get("content") or [])
                    if isinstance(b, dict) and b.get("type") == "text")
