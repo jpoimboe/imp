@@ -38,3 +38,21 @@ def test_marks_optional_fields_optional() -> None:
 def test_instructs_tool_call_not_prose() -> None:
     text = completion_instruction(_schema())
     assert "prose" in text.lower()
+
+
+def test_renders_non_enum_types() -> None:
+    schema = OutputSchema(
+        fields=(
+            OutputField(name="status", type="enum",
+                        values=("Success", "Error"), required=True),
+            OutputField(name="count", type="int", required=True),
+            OutputField(name="found", type="bool", required=True),
+            OutputField(name="payload", type="object", required=False),
+        ),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    text = completion_instruction(schema)
+    assert "`count` (int)" in text
+    assert "`found` (bool)" in text
+    assert "`payload` (object)" in text
+    assert "optional" in text.lower()  # payload is optional

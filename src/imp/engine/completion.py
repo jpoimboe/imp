@@ -14,6 +14,7 @@ from imp.engine.types import OutputSchema
 def completion_instruction(schema: OutputSchema) -> str:
     """Prose instruction naming every field the agent must pass to
     `complete_step`, with enum values inlined and optional fields marked."""
+    assert schema.fields, "OutputSchema must have at least one field"
     parts: list[str] = []
     for field in schema.fields:
         if field.type == "enum":
