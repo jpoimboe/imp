@@ -615,11 +615,12 @@ def main(argv: list[str] | None = None) -> int:
 
     p_log = sub.add_parser(
         "log",
-        help="Show the event log for a Change.",
+        help="Show the narrative for a Change.",
         description=(
-            "Show the event log for a Change. "
-            "Auto-pages through $PAGER (default `less -FRX`) when stdout is a TTY. "
-            "Set NO_COLOR=1 to disable colors."
+            "Show the narrative for a Change. Interactive TUI on a TTY; "
+            "plain text when piped or with --no-tui. --full starts every fold "
+            "expanded. Set NO_COLOR=1 to disable colors in the text view. "
+            "Tip: imp log N --no-tui --full | grep ... for line-oriented scripting."
         ),
     )
     p_log.add_argument("change_id", type=int, nargs="?")
