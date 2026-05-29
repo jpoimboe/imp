@@ -336,6 +336,8 @@ class NarrativeApp:
             if node is not None:
                 self.cursor_line = remap_cursor_to_node(
                     self._lines, node, fallback=self.cursor_line)
+            else:
+                self.cursor_line = max(0, min(self.cursor_line, len(self._lines) - 1))
 
     def _cursor_node(self) -> Any:
         if 0 <= self.cursor_line < len(self._lines):
@@ -358,7 +360,91 @@ class NarrativeApp:
         from prompt_toolkit.layout.controls import Point
         return Point(x=0, y=self.cursor_line)
 
-    # -- application construction (Task 24 adds key bindings) ----------------
+    # -- navigation (called by key bindings; tested directly) ----------------
+    _page_size = 20
+
+    def _invalidate(self) -> None:
+        if self.application is not None:
+            self.application.invalidate()
+
+    def move_cursor(self, delta: int) -> None:
+        self.cursor_line = max(0, min(len(self._lines) - 1, self.cursor_line + delta))
+        self.follow_tail = is_at_tail(self.cursor_line, len(self._lines))
+        self._invalidate()
+
+    def page(self, direction: int) -> None:
+        self.move_cursor(direction * self._page_size)
+
+    def goto_top(self) -> None:
+        self.cursor_line = 0
+        self.follow_tail = False
+        self._invalidate()
+
+    def goto_tail(self) -> None:
+        self.cursor_line = max(0, len(self._lines) - 1)
+        self.follow_tail = True
+        self._invalidate()
+
+    def next_fold(self) -> None:
+        self.cursor_line = next_fold_line(self._lines, self.cursor_line)
+        self.follow_tail = is_at_tail(self.cursor_line, len(self._lines))
+        self._invalidate()
+
+    def prev_fold(self) -> None:
+        self.cursor_line = prev_fold_line(self._lines, self.cursor_line)
+        self.follow_tail = False
+        self._invalidate()
+
+    def _enclosing_fold(self, node) -> Any:
+        return node if getattr(node, "collapsible", False) else None
+
+    def toggle_fold_at_cursor(self) -> None:
+        node = self._cursor_node()
+        fold = self._enclosing_fold(node)
+        if fold is None:
+            return
+        self.fold_state.toggle(fold)
+        self._rebuild()
+        # Fold-stable: keep the cursor pinned to the fold header (design §7.3).
+        self.cursor_line = remap_cursor_to_node(self._lines, fold, fallback=self.cursor_line)
+        self.follow_tail = is_at_tail(self.cursor_line, len(self._lines))
+        self._invalidate()
+
+    def toggle_fold_node(self, fold) -> None:
+        """Toggle a specific fold (mouse click target)."""
+        if not getattr(fold, "collapsible", False):
+            return
+        self.fold_state.toggle(fold)
+        self._rebuild()
+        self.cursor_line = remap_cursor_to_node(self._lines, fold, fallback=self.cursor_line)
+        self._invalidate()
+
+    def expand_all(self) -> None:
+        node = self._cursor_node()
+        self.fold_state.set_all(True)
+        self._rebuild()
+        if node is not None:
+            self.cursor_line = remap_cursor_to_node(self._lines, node, fallback=self.cursor_line)
+        self._invalidate()
+
+    def collapse_all(self) -> None:
+        node = self._cursor_node()
+        self.fold_state.set_all(False)
+        self._rebuild()
+        if node is not None:
+            self.cursor_line = remap_cursor_to_node(self._lines, node, fallback=self.cursor_line)
+        self._invalidate()
+
+    def toggle_expand_all(self) -> None:
+        if self.fold_state.default_expanded:
+            self.collapse_all()
+        else:
+            self.expand_all()
+
+    def copy_focused_node(self) -> None:
+        pass    # implemented in Task 26
+
+    # -- application construction --------------------------------------------
     def build_application(self):
         from prompt_toolkit.application import Application
         from prompt_toolkit.key_binding import KeyBindings
@@ -372,10 +458,45 @@ class NarrativeApp:
         self._narrative_window = Window(content=control, wrap_lines=True,
                                         always_hide_cursor=True)
         kb = KeyBindings()
+        if not self.live:
+            @kb.add("up")
+            def _(event): self.move_cursor(-1)
 
-        @kb.add("q")
-        def _quit(event) -> None:
-            event.app.exit()
+            @kb.add("down")
+            def _(event): self.move_cursor(1)
+
+            @kb.add("pageup")
+            def _(event): self.page(-1)
+
+            @kb.add("pagedown")
+            def _(event): self.page(1)
+
+            @kb.add("g")
+            @kb.add("home")
+            def _(event): self.goto_top()
+
+            @kb.add("G")
+            @kb.add("end")
+            def _(event): self.goto_tail()
+
+            @kb.add("tab")
+            def _(event): self.next_fold()
+
+            @kb.add("s-tab")
+            def _(event): self.prev_fold()
+
+            @kb.add("enter")
+            @kb.add("space")
+            def _(event): self.toggle_fold_at_cursor()
+
+            @kb.add("a")
+            def _(event): self.toggle_expand_all()
+
+            @kb.add("y")
+            def _(event): self.copy_focused_node()      # Task 26
+
+            @kb.add("q")
+            def _(event): event.app.exit()
 
         root_container = HSplit([self._narrative_window])
         self.application = Application(
