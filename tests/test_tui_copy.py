@@ -64,3 +64,47 @@ def test_copy_focused_node_writes_osc52_and_sets_status() -> None:
     assert captured and "copy me" in __import__("base64").b64decode(
         captured[0][len("\x1b]52;c;"):-1]).decode()
     assert "copied" in app.status_note.lower()
+
+
+def test_copy_focused_node_noop_on_non_copyable_node() -> None:
+    """Cursor on a PhaseNode (no copyable text) → writer not called, status_note set."""
+    captured = []
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+    ])
+    app = NarrativeApp(tree, live=False, mouse=False, _osc_writer=captured.append)
+    phase_idx = next(i for i, ln in enumerate(app._lines) if isinstance(ln.node, nv.PhaseNode))
+    app.cursor_line = phase_idx
+    app.copy_focused_node()
+    assert captured == [], "writer must not be called for non-copyable node"
+    assert app.status_note == "nothing to copy"
+
+
+def test_copy_focused_node_failure_sets_clipboard_unavailable() -> None:
+    """Injected writer raises RuntimeError → no propagation, status_note is 'clipboard unavailable'."""
+    def _failing_writer(seq: str) -> None:
+        raise RuntimeError("no tty")
+
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={}, raw={"content": [{"type": "text", "text": "hello"}]}),
+    ])
+    app = NarrativeApp(tree, live=False, mouse=False, _osc_writer=_failing_writer)
+    at_idx = next(i for i, ln in enumerate(app._lines) if isinstance(ln.node, nv.AgentTextNode))
+    app.cursor_line = at_idx
+    app.copy_focused_node()  # must not raise
+    assert app.status_note == "clipboard unavailable"
+
+
+def test_osc52_sequence_non_ascii_roundtrip() -> None:
+    """osc52_sequence must correctly encode non-ASCII text (multi-byte UTF-8)."""
+    text = "héllo 世界 🚀"
+    seq = osc52_sequence(text)
+    assert seq.startswith("\x1b]52;c;")
+    assert seq.endswith("\x07")
+    b64 = seq[len("\x1b]52;c;"):-1]
+    decoded = base64.b64decode(b64).decode("utf-8")
+    assert decoded == text
