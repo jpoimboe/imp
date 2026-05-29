@@ -21,14 +21,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from imp.agents.runner import (
     Message,
+    TextBlock,
     ToolResultBlock,
     ToolUseBlock,
     message_from_json,
     message_to_json,
 )
+
+if TYPE_CHECKING:
+    from imp.engine.state import EventLog
 
 
 class Transcript:
@@ -112,3 +117,53 @@ def repair_dangling_tool_use_on_resume(
     messages.append(repair)
     transcript.append(repair)
     return repair
+
+
+def inject_retry_feedback(
+    messages: list[Message],
+    transcript: Transcript,
+    elog: "EventLog",
+    agent_id: str,
+    text: str,
+) -> Message:
+    """Balance the trailing dangling tool_use and append gate feedback as ONE
+    user turn so `classify_resume` returns SEND_TO_LLM (design §5).
+
+    The targeted step's transcript ends with a SUCCESSFUL `complete_step`
+    tool_use. For that block synthesize a NON-error, success-shaped result —
+    `repair_dangling_tool_use_on_resume`'s `is_error=True` "interrupted" content
+    would tell the agent its own success failed. Any other trailing tool_use is
+    a genuine interruption and gets the same error-flavored content the repair
+    helper uses. The feedback `TextBlock` rides on the SAME user message (not a
+    second consecutive user message) to preserve Anthropic role alternation.
+
+    Emits a single `user_message` audit event for the injected turn.
+    """
+    last = messages[-1] if messages else None
+    tool_uses = (
+        [b for b in last.content if isinstance(b, ToolUseBlock)]
+        if last is not None and last.role == "assistant"
+        else []
+    )
+    result_blocks: list[ToolResultBlock] = []
+    for tu in tool_uses:
+        if tu.name == "complete_step":
+            result_blocks.append(ToolResultBlock(
+                tool_use_id=tu.id,
+                content="previous step output recorded; superseded by the feedback below",
+                is_error=False,
+            ))
+        else:
+            result_blocks.append(ToolResultBlock(
+                tool_use_id=tu.id,
+                content=_synthetic_tool_result_content(tu.name),
+                is_error=True,
+            ))
+    injected = Message(
+        role="user",
+        content=(*result_blocks, TextBlock(text=text)),
+    )
+    messages.append(injected)
+    transcript.append(injected)
+    elog.append_user_message(agent_id=agent_id, message=injected)
+    return injected
