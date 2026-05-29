@@ -242,11 +242,16 @@ def _term_width() -> int:
 
 
 def _tui_available() -> bool:
-    """True once cli/tui.py exists (M4+). Until then, a TTY degrades to the text
-    view so the M3 checkpoint genuinely 'works on a TTY' rather than raising
-    ImportError. After M4 this is always True for a normal install."""
+    """True once the TUI entry point ``run_log_tui`` is importable (Task 27+).
+    Until then — including while ``cli/tui.py`` is being built up incrementally
+    across M4 but its entry point doesn't yet exist — a TTY degrades to the text
+    view rather than raising ImportError. Checking the symbol (not just the
+    module's existence) keeps the suite green during M4 construction. Only called
+    when ``_use_tui`` is already True (a real TTY), so importing here is fine."""
     import importlib.util
-    return importlib.util.find_spec("imp.cli.tui") is not None
+    if importlib.util.find_spec("imp.cli.tui") is None:
+        return False
+    return hasattr(importlib.import_module("imp.cli.tui"), "run_log_tui")
 
 
 def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
