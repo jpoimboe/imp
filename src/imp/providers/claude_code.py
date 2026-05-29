@@ -566,6 +566,12 @@ class ClaudeCodeAgentRunner:
         disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t != "ToolSearch"]
         return ClaudeAgentOptions(
             model=self.model,
+            # Pin the `claude` subprocess to the change's project_root. Without
+            # this the SDK launches claude with cwd=None and leaves $PWD as
+            # inherited, so claude keys off a stale $PWD and edits/commits the
+            # wrong working tree (e.g. imp's own repo when launched from a
+            # subdir or via Popen(cwd=...) which doesn't update $PWD).
+            cwd=str(invocation.change_context.project_root),
             system_prompt=invocation.system_prompt,
             mcp_servers={"imp": mcp_server},
             allowed_tools=[f"mcp__imp__{n}" for n in tool_names],
