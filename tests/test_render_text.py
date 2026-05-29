@@ -200,6 +200,31 @@ def test_nonempty_thinking_keeps_summary() -> None:
     assert out == ["  ▸ thinking · 5 chars"]
 
 
+def test_render_gate_recap_false_is_header_only() -> None:
+    gate = nv.GateNode(kind="human", prompt="Approve?",
+                       options=[{"label": "yes"}, {"label": "no"}],
+                       action={"kind": "continue"})
+    header_only = list(rt._render_gate(gate, depth=1, color=False, width=80, recap=False))
+    assert header_only == ["  human gate → continue"]
+
+
+def test_render_gate_recap_true_includes_prompt_and_options() -> None:
+    gate = nv.GateNode(kind="human", prompt="Approve?",
+                       options=[{"label": "yes"}, {"label": "no"}],
+                       action={"kind": "continue"})
+    full = list(rt._render_gate(gate, depth=1, color=False, width=80))
+    assert full[0] == "  human gate → continue"
+    assert any("Approve?" in ln for ln in full)
+    assert any("yes" in ln for ln in full) and any("no" in ln for ln in full)
+
+
+def test_render_gate_colors_resolved_action() -> None:
+    gate = nv.GateNode(kind="human", action={"kind": "continue"})
+    out = list(rt._render_gate(gate, depth=0, color=True, width=80, recap=False))
+    # continue -> green accent (pal._ACCENT["continue"])
+    assert out[0].startswith("\x1b[32m")
+
+
 def test_snapshot_covers_every_node_type() -> None:
     # Guard: the fixture must exercise all node types (design §11).
     tree = nv.build_tree(_sample_events())

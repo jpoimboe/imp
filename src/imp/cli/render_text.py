@@ -197,12 +197,18 @@ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
         yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"])
 
 
-def _render_gate(gate: nv.GateNode, *, depth: int, color: bool, width: int) -> Iterator[str]:
+def _render_gate(gate: nv.GateNode, *, depth: int, color: bool, width: int,
+                 recap: bool = True) -> Iterator[str]:
+    """Render a gate node. `recap=True` (imp log) emits header + prompt + every
+    option — the permanent record. `recap=False` (live driver) emits the header
+    line only, because run_human_gate already showed the prompt/options as live
+    chrome; re-rendering them would duplicate a multi-line block in scroll-back."""
     action = pal.action_text(gate.action) if gate.action is not None else "pending"
-    pal.accent_color(gate.action) if gate.action is not None else None
+    accent = pal.accent_color(gate.action) if gate.action is not None else None
+    codes = (accent,) if accent else pal.NODE_COLORS["gate"]
     header = f"{gate.kind} gate → {action}"
-    yield _line(header, depth, color, *pal.NODE_COLORS["gate"])
-    if gate.prompt:
+    yield _line(header, depth, color, *codes)
+    if recap and gate.prompt:
         for line in _wrap(gate.prompt, width, depth + 1):
             yield pal.ansi(line, *pal.NODE_COLORS["gate"], enabled=color)
         for opt in gate.options:
