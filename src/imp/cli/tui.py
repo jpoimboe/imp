@@ -321,6 +321,15 @@ class NarrativeApp:
         self._lines: list[RenderedLine] = []
         self.status_note = ""
         self._osc_writer = _osc_writer        # injected in tests; real one in build
+        # live input state (design §7.5)
+        self._active_input = None          # asyncio.Future | None
+        self._input_prompt = "> "
+        if self.live:
+            from prompt_toolkit.buffer import Buffer
+            self._input_buffer = Buffer(multiline=False,
+                                        accept_handler=self._on_accept)
+        else:
+            self._input_buffer = None
         self._rebuild()
         self.cursor_line = max(0, len(self._lines) - 1)   # log mode starts at tail
         self.application = None               # set in build_application()
@@ -482,6 +491,62 @@ class NarrativeApp:
         import sys
         sys.stdout.write(seq)
         sys.stdout.flush()
+
+    # -- live input (design §7.5) --------------------------------------------
+    def request_line(self, prompt_text: str = "> "):
+        """Return an awaitable that resolves when the user submits a line (or
+        ESC → ESC_SENTINEL). Engine callbacks await this."""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        fut: "asyncio.Future[str]" = loop.create_future()
+        self._active_input = fut
+        self._input_prompt = prompt_text
+        if self.application is not None:
+            try:
+                self.application.layout.focus(self._input_window)
+            except Exception:
+                pass
+        self._invalidate()
+        return fut
+
+    def user_chat_input_fn(self, _question: str):
+        return self.request_line("> ")
+
+    def human_input_fn(self):
+        return self.request_line("> ")
+
+    def _on_accept(self, buff) -> bool:
+        self._submit_input(buff.text)
+        return False                        # clear the buffer
+
+    def _submit_input(self, text: str) -> None:
+        if self._input_buffer is not None:
+            self._input_buffer.text = ""
+        fut, self._active_input = self._active_input, None
+        if fut is not None and not fut.done():
+            fut.set_result(text)
+        self._refocus_narrative()
+        self._invalidate()
+
+    def _escape_input(self) -> None:
+        from imp.cli.prompt import ESC_SENTINEL
+        if self._input_buffer is not None:
+            self._input_buffer.text = ""
+        fut, self._active_input = self._active_input, None
+        if fut is not None and not fut.done():
+            fut.set_result(ESC_SENTINEL)
+        self._refocus_narrative()
+        self._invalidate()
+
+    def _input_buffer_text(self) -> str:
+        return self._input_buffer.text if self._input_buffer is not None else ""
+
+    def _refocus_narrative(self) -> None:
+        if self.application is not None:
+            try:
+                self.application.layout.focus(self._narrative_window)
+            except Exception:
+                pass
 
     # -- footer ---------------------------------------------------------------
     def _fmt_tokens(self) -> str:
