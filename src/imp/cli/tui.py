@@ -309,7 +309,7 @@ class NarrativeApp:
     sticky tail (M5); `live=False` is read-only log mode."""
 
     def __init__(self, tree: nv.NarrativeTree, *, live: bool, mouse: bool,
-                 full: bool = False) -> None:
+                 full: bool = False, _osc_writer=None) -> None:
         self.tree = tree
         self.live = live
         self.mouse = mouse
@@ -319,6 +319,8 @@ class NarrativeApp:
         self.follow_tail = True               # sticky tail (live); harmless in log
         self._width = 80
         self._lines: list[RenderedLine] = []
+        self.status_note = ""
+        self._osc_writer = _osc_writer        # injected in tests; real one in build
         self._rebuild()
         self.cursor_line = max(0, len(self._lines) - 1)   # log mode starts at tail
         self.application = None               # set in build_application()
@@ -461,7 +463,25 @@ class NarrativeApp:
             self.expand_all()
 
     def copy_focused_node(self) -> None:
-        pass    # implemented in Task 26
+        node = self._cursor_node()
+        text = node_copy_text(node) if node is not None else ""
+        if not text:
+            self.status_note = "nothing to copy"
+            self._invalidate()
+            return
+        seq = osc52_sequence(text)
+        writer = self._osc_writer or self._default_osc_writer
+        try:
+            writer(seq)
+            self.status_note = f"copied {len(text)} chars (OSC 52)"
+        except Exception:
+            self.status_note = "clipboard unavailable"
+        self._invalidate()
+
+    def _default_osc_writer(self, seq: str) -> None:
+        import sys
+        sys.stdout.write(seq)
+        sys.stdout.flush()
 
     # -- application construction --------------------------------------------
     def build_application(self):
@@ -522,6 +542,45 @@ class NarrativeApp:
             layout=Layout(root_container, focused_element=self._narrative_window),
             key_bindings=kb, full_screen=True, mouse_support=self.mouse)
         return self.application
+
+
+def osc52_sequence(text: str) -> str:
+    """Return an OSC 52 escape sequence that copies *text* to the system clipboard.
+
+    The sequence is: ESC ] 52 ; c ; <base64> BEL  (design §7.6 / §13).
+    TODO §13: for terminals that reject oversized sequences, consider chunking or
+    truncating with notice."""
+    import base64
+    b64 = base64.b64encode(text.encode("utf-8", "replace")).decode("ascii")
+    return f"\x1b]52;c;{b64}\x07"
+
+
+def node_copy_text(node: Any) -> str:
+    """The FULL underlying text of a node (design §7.6) — the whole message /
+    tool output, not the on-screen slice."""
+    if isinstance(node, nv.AgentTextNode):
+        return node.text
+    if isinstance(node, nv.UserMessageNode):
+        return node.text
+    if isinstance(node, nv.ThinkingFold):
+        return node.content
+    if isinstance(node, nv.StepContextNode):
+        return str(node.payload)
+    if isinstance(node, nv.ToolBurstFold):
+        parts = []
+        for c in node.calls:
+            args = " ".join(f"{k}={v}" for k, v in (c.input or {}).items())
+            parts.append(f"{c.name} {args}\n{c.result or ''}".rstrip())
+        return "\n\n".join(parts)
+    if isinstance(node, nv.SubagentFold):
+        return "\n".join(node_copy_text(c) for c in node.tree.root.children
+                         if isinstance(c, (nv.AgentTextNode, nv.UserMessageNode,
+                                           nv.ThinkingFold)))
+    if isinstance(node, nv.ErrorNode):
+        return node.message
+    if isinstance(node, nv.OutcomeLine):
+        return pal.action_text(node.action)
+    return ""
 
 
 def _render_prose_ansi(node, avail_width: int, color: bool) -> "list[str]":
