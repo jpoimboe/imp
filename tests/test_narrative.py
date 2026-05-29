@@ -73,3 +73,91 @@ def test_token_totals_accumulate_across_all_llm_responses() -> None:
     ])
     assert tree.tokens.input == 150
     assert tree.tokens.output == 25
+
+
+def _ev(eid, etype, agent_id=None, **payload):
+    return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
+
+
+def test_phase_and_step_nest_and_close() -> None:
+    tree = nv.build_tree([
+        _ev("1", "change_created", change_id=1, title="x"),
+        _ev("2", "phase_started", phase="design"),
+        _ev("3", "step_started", step="spec", model="m", provider="anthropic",
+            interactive=False),
+        _ev("4", "step_completed", step="spec", action="continue"),
+        _ev("5", "phase_completed", phase="design"),
+    ])
+    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert len(phases) == 1
+    phase = phases[0]
+    assert phase.name == "design"
+    assert phase.closed is True
+    steps = [c for c in phase.children if isinstance(c, nv.StepNode)]
+    assert len(steps) == 1
+    step = steps[0]
+    assert step.name == "spec"
+    assert step.kind is None
+    assert step.closed is True
+    assert isinstance(step.outcome, nv.OutcomeLine)
+    assert step.outcome.action == "continue"
+
+
+def test_open_step_is_a_valid_terminal_state() -> None:
+    # User-pause path emits no step_completed (design §5.1). The step stays open.
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="design"),
+        _ev("2", "step_started", step="spec", model="m", provider="anthropic",
+            interactive=False),
+        _ev("3", "workflow_paused", reason="ctrl-c"),
+    ])
+    phase = tree.root.children[0]
+    step = phase.children[0]
+    assert step.closed is False
+    assert step.outcome is None
+    assert tree.root.status == "paused"
+
+
+def test_agent_gate_inside_open_step_pushes_and_pops_container() -> None:
+    # Order from executor: step opens, runs; then a step-level AGENT gate emits
+    # its own step_started(kind=agent_gate) while the step is still open; the
+    # gate closes via gate_evaluated(kind=agent); then the step completes.
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="design"),
+        _ev("2", "step_started", step="spec", model="m", provider="anthropic",
+            interactive=False),
+        _ev("3", "step_started", kind="agent_gate", gate_stem="spec-lint",
+            model="m", provider="anthropic", interactive=False),
+        _ev("4", "gate_evaluated", kind="agent", gate="spec-lint",
+            action={"kind": "continue"}),
+        _ev("5", "step_completed", step="spec", action="continue"),
+    ])
+    phase = tree.root.children[0]
+    step = phase.children[0]
+    assert step.name == "spec" and step.kind is None and step.closed is True
+    # The agent gate is a StepNode-shaped container nested inside the step.
+    gate_containers = [c for c in step.children if isinstance(c, nv.StepNode)]
+    assert len(gate_containers) == 1
+    gc = gate_containers[0]
+    assert gc.kind == "agent_gate"
+    assert gc.name == "spec-lint"
+    assert gc.closed is True
+    assert isinstance(gc.outcome, nv.OutcomeLine)
+    assert gc.outcome.action == {"kind": "continue"}
+
+
+def test_phase_level_agent_gate_attaches_to_phase() -> None:
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="design"),
+        _ev("2", "step_started", step="spec", model="m", provider="anthropic",
+            interactive=False),
+        _ev("3", "step_completed", step="spec", action="continue"),
+        _ev("4", "step_started", kind="agent_gate", gate_stem="review",
+            model="m", provider="anthropic", interactive=False),
+        _ev("5", "gate_evaluated", kind="agent", gate="review",
+            action={"kind": "continue"}),
+    ])
+    phase = tree.root.children[0]
+    containers = [c for c in phase.children if isinstance(c, nv.StepNode)]
+    assert [c.name for c in containers] == ["spec", "review"]
+    assert containers[1].kind == "agent_gate"

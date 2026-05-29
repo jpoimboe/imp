@@ -306,4 +306,92 @@ def _h_phase_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._step_stack.clear()
 
 
+def _h_phase_completed(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    self._step_stack.clear()
+    if self._current_phase is not None:
+        self._current_phase.closed = True
+
+
+def _h_step_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    if p.get("kind") == "agent_gate":
+        node = StepNode(
+            name=p.get("gate_stem", "?"), kind="agent_gate",
+            model=p.get("model"), provider=p.get("provider"),
+            interactive=bool(p.get("interactive", False)))
+    else:
+        node = StepNode(
+            name=p.get("step", "?"), kind=None,
+            model=p.get("model"), provider=p.get("provider"),
+            interactive=bool(p.get("interactive", False)))
+    # Attach to whatever is open: a still-open step (nested agent gate) → that
+    # step's children; else the current phase; else root (defensive / nested
+    # subagent trees that never see a phase).
+    self._append(node)
+    self._step_stack.append(node)
+
+
+def _h_step_completed(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    outcome = OutcomeLine(action=p.get("action"))
+    node = self._pop_step(p.get("step"))
+    if node is not None:
+        node.outcome = outcome
+        node.children.append(outcome)
+        node.closed = True
+
+
+def _pop_step(self: NarrativeBuilder, name: str | None) -> StepNode | None:
+    """Pop the top open step. The top is always the right target: a normal step
+    is alone on the stack, and an agent-gate container is pushed *above* its
+    enclosing step, so its closing gate_evaluated pops the gate, not the step.
+    `name` is accepted for symmetry with the event payload but intentionally
+    unused (closing is best-effort — design §5.1)."""
+    if not self._step_stack:
+        return None
+    return self._step_stack.pop()
+
+
+NarrativeBuilder._pop_step = _pop_step  # type: ignore[attr-defined]
 NarrativeBuilder._HANDLERS["phase_started"] = _h_phase_started
+NarrativeBuilder._HANDLERS["phase_completed"] = _h_phase_completed
+NarrativeBuilder._HANDLERS["step_started"] = _h_step_started
+NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
+
+
+def _h_workflow_paused(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    self._root.status = "paused"
+
+
+def _h_workflow_resumed(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    self._root.status = "running"
+
+
+NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
+NarrativeBuilder._HANDLERS["workflow_resumed"] = _h_workflow_resumed
+
+
+def _h_gate_evaluated(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    # For agent gates (kind="agent"), gate_evaluated closes the top agent-gate
+    # StepNode container on the stack (the gate was pushed above its enclosing
+    # step, so popping here leaves the enclosing step still open).
+    if p.get("kind") == "agent":
+        outcome = OutcomeLine(action=p.get("action"))
+        node = self._pop_step(p.get("gate"))
+        if node is not None:
+            node.outcome = outcome
+            node.children.append(outcome)
+            node.closed = True
+    else:
+        # human/script/stub gates handled in later tasks; fall through to GateNode.
+        self._append(GateNode(
+            kind=p.get("kind", "?"),
+            action=p.get("action"),
+        ))
+
+
+NarrativeBuilder._HANDLERS["gate_evaluated"] = _h_gate_evaluated
