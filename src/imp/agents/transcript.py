@@ -122,7 +122,7 @@ def repair_dangling_tool_use_on_resume(
 def inject_retry_feedback(
     messages: list[Message],
     transcript: Transcript,
-    elog: "EventLog",
+    elog: EventLog,
     agent_id: str,
     text: str,
 ) -> Message:

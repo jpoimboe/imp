@@ -678,7 +678,7 @@ async def test_agent_incomplete_error_pauses(tmp_path: Path) -> None:
 async def test_step_transcript_persists_past_success_until_change_completion(
     tmp_path: Path,
 ) -> None:
-    change, phase, step = _seed_minimal_workflow(tmp_path)
+    change, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
