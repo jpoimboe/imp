@@ -2,8 +2,8 @@
 # Run the project's test suite. Convention: project provides `make test`
 # or `python -m pytest` works.
 #
-# Script gates run with cwd=$IMP_WORKFLOW_DIR; cd into the project tree
-# before invoking the test runner.
+# Script gates run with cwd set to the workflow snapshot dir; cd into the
+# project tree (IMP_PROJECT_ROOT, set by the engine) before running tests.
 #
 # Decision tree:
 #   - Makefile with `test:` target → `make test`

@@ -39,8 +39,10 @@ def run_script_gate(
 ) -> tuple[Action, dict[str, Any]]:
     """Run the script, capture exit/stdout/stderr, evaluate decide.
 
-    The `cwd` argument is the Change's project root; the gate's own `cwd:`
-    overrides if set.
+    The `cwd` argument is the Change's workflow snapshot dir (so relative
+    `command:` paths like `./scripts/lint.sh` resolve against the snapshot);
+    the gate's own `cwd:` overrides if set. The project root is exposed to the
+    script via the IMP_PROJECT_ROOT env var (see engine_env), not via cwd.
 
     `shell=True` is intentional and not a security issue: workflow YAML is part
     of the trusted code base (snapshotted at imp new, gitted, peer-reviewed)
