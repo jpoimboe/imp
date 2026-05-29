@@ -46,3 +46,8 @@ def test_action_display_text() -> None:
 def test_fold_glyphs_default_unicode() -> None:
     assert pal.fold_glyph(expanded=False) == "▸"
     assert pal.fold_glyph(expanded=True) == "▾"
+
+
+def test_agent_and_ask_user_colors_present() -> None:
+    assert pal.NODE_COLORS["agent"] == ("bold",)
+    assert pal.NODE_COLORS["ask_user"] == ("bold", "cyan")
