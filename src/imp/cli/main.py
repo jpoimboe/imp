@@ -20,7 +20,6 @@ from typing import Any
 
 import anyio
 
-from imp.cli.chat import ChatRenderer
 from imp.cli.init import run_init
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit
@@ -123,18 +122,6 @@ def _cmd_new(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_new, args)
 
 
-def _replay_current_step(change: Change, state: State, renderer: ChatRenderer) -> None:
-    if state.step is None:
-        return
-    events = list(change.event_log().events_for_current_step(state.step))
-    if not events:
-        return
-    print("── replaying current step context ──")
-    for e in events:
-        renderer.handle(e)
-    print("── end replay ──")
-
-
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     project = _project_root()
@@ -161,46 +148,48 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 print(f"Resuming Change {change.id}: {change.title!r}")
                 print(f"Phase: {state.phase}, step: {state.step}")
                 prompt = Prompt()
-                renderer = ChatRenderer()
+                _emit_line, _print_text = _stream_sinks()   # shared helper (Task 16)
+
                 coord = InterruptCoordinator()
                 rc = 0
-                try:
-                    renderer.handle({"type": "workflow_resumed", "payload": {}})
-                    change.event_log().append(
-                        agent_id=None, type="workflow_resumed", payload={})
-                    _replay_current_step(change, state, renderer)
-                    state.status = "running"
-                    state.save(change.state_dir)
-                    async with anyio.create_task_group() as tg:
-                        tg.start_soon(coord.run_signal_receiver)
-                        try:
-                            result = await run_change(
-                                change,
-                                on_event=renderer.handle,
-                                human_input_fn=lambda: prompt.ask_async("> "),
-                                human_output_fn=renderer.line,
-                                user_chat_input_fn=lambda _q: prompt.ask_async("> "),
-                                coordinator=coord,
-                            )
-                        except (LoadError, LoadErrors) as e:
-                            print(f"imp: {e}", file=sys.stderr)
-                            rc = 2
-                        except EOFError:
-                            pause_and_exit(change, reason="ctrl-d")
-                            print(f"\nChange {change.id}: paused (ctrl-d)")
+                # --no-tui resume keeps the lighter current-step replay (no
+                # scroll-back; design §4.2). The workflow_resumed marker is
+                # still appended exactly once, as today.
+                change.event_log().append(
+                    agent_id=None, type="workflow_resumed", payload={})
+                if state.step is not None:
+                    for e in change.event_log().events_for_current_step(state.step):
+                        _emit_line(e)
+                state.status = "running"
+                state.save(change.state_dir)
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(coord.run_signal_receiver)
+                    try:
+                        result = await run_change(
+                            change,
+                            on_event=_emit_line,
+                            human_input_fn=lambda: prompt.ask_async("> "),
+                            human_output_fn=_print_text,
+                            user_chat_input_fn=lambda _q: prompt.ask_async("> "),
+                            coordinator=coord,
+                        )
+                    except (LoadError, LoadErrors) as e:
+                        print(f"imp: {e}", file=sys.stderr)
+                        rc = 2
+                    except EOFError:
+                        pause_and_exit(change, reason="ctrl-d")
+                        print(f"\nChange {change.id}: paused (ctrl-d)")
+                        rc = 130
+                    else:
+                        if coord.should_pause:
+                            pause_and_exit(change, reason="ctrl-c")
+                            print(f"\nChange {change.id}: paused (ctrl-c)")
                             rc = 130
                         else:
-                            if coord.should_pause:
-                                pause_and_exit(change, reason="ctrl-c")
-                                print(f"\nChange {change.id}: paused (ctrl-c)")
-                                rc = 130
-                            else:
-                                print(f"Change {change.id}: {result.value}")
-                                rc = 0 if result is RunResult.COMPLETED else 1
-                        finally:
-                            tg.cancel_scope.cancel()
-                finally:
-                    renderer.close()
+                            print(f"Change {change.id}: {result.value}")
+                            rc = 0 if result is RunResult.COMPLETED else 1
+                    finally:
+                        tg.cancel_scope.cancel()
                 return rc
             finally:
                 _clear_change_lock(change)

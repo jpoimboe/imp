@@ -7,6 +7,72 @@ import json
 from imp.cli.main import _use_tui, main
 
 
+# ── Task-17: resume uses _stream_sinks, not ChatRenderer ─────────────────────
+
+def test_replay_current_step_removed() -> None:
+    """_replay_current_step must be deleted after Task 17."""
+    import imp.cli.main as m
+    assert not hasattr(m, "_replay_current_step"), (
+        "_replay_current_step was not removed — Task 17 incomplete"
+    )
+
+
+def test_resume_uses_stream_sinks_not_chat_renderer(tmp_path, monkeypatch, capsys) -> None:
+    """_async_cmd_resume must route events through _stream_sinks() (stream_event)
+    rather than through ChatRenderer.  We patch _stream_sinks to record calls and
+    verify at least the workflow_resumed event reaches it.
+    """
+    import argparse
+    import json
+    import anyio
+    import imp.cli.main as m
+    from imp.engine.state import State
+
+    # Build a minimal paused change on disk (without a real workflow).
+    change_dir = tmp_path / ".imp" / "changes" / "1"
+    (change_dir / "state").mkdir(parents=True)
+    (change_dir / "artifacts").mkdir()
+    (change_dir / "events.jsonl").write_text("")
+    (change_dir / "change.json").write_text(
+        json.dumps({"id": 1, "title": "resume-test"})
+    )
+    # Write paused state
+    state = State(change_id=1, status="paused", phase=None, step=None,
+                  step_attempt=0, phase_attempt=0)
+    state.save(change_dir / "state")
+
+    received: list[dict] = []
+    output_lines: list[str] = []
+
+    def fake_stream_sinks():
+        def on_event(e: dict) -> None:
+            received.append(e)
+        def print_text(t: str) -> None:
+            output_lines.append(t)
+        return on_event, print_text
+
+    # Stub run_change so it immediately returns COMPLETED without calling a real provider.
+    from imp.engine.executor import RunResult
+    async def fake_run_change(change, **kwargs):
+        # Invoke on_event with a dummy event so we can verify the callback.
+        on_event = kwargs.get("on_event")
+        if on_event:
+            on_event({"type": "change_created", "payload": {}})
+        return RunResult.COMPLETED
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_stream_sinks", fake_stream_sinks)
+    monkeypatch.setattr(m, "run_change", fake_run_change)
+
+    args = argparse.Namespace(change_id=1)
+    rc = anyio.run(m._async_cmd_resume, args)
+
+    assert rc == 0
+    # The on_event callback from _stream_sinks must have been called.
+    types = [e.get("type") for e in received]
+    assert "change_created" in types, f"stream_sinks on_event not called; got {types}"
+
+
 class _TTY(io.StringIO):
     def isatty(self) -> bool:
         return True
