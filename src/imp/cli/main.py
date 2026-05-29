@@ -16,6 +16,7 @@ import sys
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import anyio
 
@@ -218,6 +219,30 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
 
 
+def _use_tui(*, no_tui: bool, stream: Any = None) -> bool:
+    """TUI is the default on a TTY; forced off by --no-tui or a non-TTY stdout
+    (design §8)."""
+    if no_tui:
+        return False
+    stream = stream if stream is not None else sys.stdout
+    return bool(getattr(stream, "isatty", lambda: False)())
+
+
+def _term_width() -> int:
+    try:
+        return os.get_terminal_size().columns
+    except OSError:
+        return 80
+
+
+def _tui_available() -> bool:
+    """True once cli/tui.py exists (M4+). Until then, a TTY degrades to the text
+    view so the M3 checkpoint genuinely 'works on a TTY' rather than raising
+    ImportError. After M4 this is always True for a normal install."""
+    import importlib.util
+    return importlib.util.find_spec("imp.cli.tui") is not None
+
+
 def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
     """Write rendered ``lines`` to stdout, paging through ``$PAGER`` (default
     ``less -FRX``) when ``sys.stdout.isatty()`` is true, ``no_pager`` is
@@ -300,7 +325,8 @@ def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
-    from imp.cli import render
+    from imp.cli import narrative
+    from imp.cli.render_text import render_tree
 
     project = _project_root()
     change_id = args.change_id
@@ -309,10 +335,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
         if not changes_root.is_dir():
             print("imp: no Changes yet", file=sys.stderr)
             return 2
-        ids = sorted(
-            int(d.name) for d in changes_root.iterdir()
-            if d.is_dir() and d.name.isdigit()
-        )
+        ids = sorted(int(d.name) for d in changes_root.iterdir()
+                     if d.is_dir() and d.name.isdigit())
         if not ids:
             print("imp: no Changes yet", file=sys.stderr)
             return 2
@@ -322,9 +346,18 @@ def _cmd_log(args: argparse.Namespace) -> int:
     except LoadError as err:
         print(f"imp: {err}", file=sys.stderr)
         return 2
-    events = change.event_log().read()
-    color = render.should_use_color(sys.stdout)
-    lines = render.render_log(events, full=args.full, color=color)
+
+    events = list(change.event_log().read())
+    tree = narrative.build_tree(events)
+
+    if _use_tui(no_tui=args.no_tui) and _tui_available():
+        from imp.cli.tui import run_log_tui            # built in M4
+        return run_log_tui(tree, full=args.full, mouse=not args.no_mouse)
+
+    from imp.cli.palette import should_use_color
+    width = _term_width()
+    color = should_use_color(sys.stdout)
+    lines = render_tree(tree, full=args.full, color=color, width=width)
     _page_or_print(lines, no_pager=args.no_pager)
     return 0
 
@@ -408,6 +441,10 @@ def main(argv: list[str] | None = None) -> int:
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.",
     )
+    p_log.add_argument("--no-tui", action="store_true",
+                       help="Force the plain-text view even on a TTY.")
+    p_log.add_argument("--no-mouse", action="store_true",
+                       help="Disable TUI mouse capture.")
     p_log.set_defaults(func=_cmd_log)
 
     p_status = sub.add_parser("status")
