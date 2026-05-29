@@ -148,6 +148,11 @@ class SubagentFold:
     def tree(self) -> NarrativeTree:
         return self.nested.tree
 
+    def current_activity(self) -> str:
+        detail = self.nested.current_activity()
+        tail = f" · {detail}" if detail else ""
+        return f"task → {self.subagent_name} · {self.event_count} events{tail}"
+
 
 @dataclass
 class GateNode:
@@ -234,6 +239,31 @@ class NarrativeBuilder:
     @property
     def tree(self) -> NarrativeTree:
         return NarrativeTree(root=self._root, tokens=self._tokens)
+
+    @property
+    def current_burst(self) -> ToolBurstFold | None:
+        """The open (still-accumulating) tool burst, or None. Public read-only
+        accessor for the live driver's finalization check and LiveStatus."""
+        return self._current_burst
+
+    def current_activity(self) -> str | None:
+        """A one-line description of what the active step is doing right now, for
+        the live status line. None when no step is active. Reads only public-ish
+        state via this method so LiveStatus never touches builder internals."""
+        step = (self._step_stack[-1].name if self._step_stack
+                else self._current_phase.name if self._current_phase else None)
+        for fold in self._open_sub_by_block.values():
+            if fold.running:
+                return fold.current_activity()
+        burst = self._current_burst
+        if burst is not None and burst.calls:
+            last = burst.calls[-1]
+            arg = next(iter((last.input or {}).values()), "")
+            head = f"{step} · " if step else ""
+            return f"{head}{last.name} {arg} · {len(burst.calls)} tools".rstrip()
+        if step is not None:
+            return f"{step} · working"
+        return None
 
     def add(self, event: Any) -> None:
         if not isinstance(event, dict) or "type" not in event:

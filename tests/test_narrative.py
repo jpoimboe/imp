@@ -595,3 +595,52 @@ def test_ask_user_call_flushes_open_burst() -> None:
     step = tree.root.children[0].children[0]
     kinds = [type(c).__name__ for c in step.children]
     assert kinds == ["ToolBurstFold", "AskUserNode"]  # burst closed before the question
+
+
+def test_current_activity_reports_open_burst() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="step:design/spec", id="b1",
+           name="read_file", input={"path": "config.py"}),
+    ]:
+        b.add(e)
+    assert b.current_burst is not None
+    act = b.current_activity()
+    assert act is not None and "spec" in act and "read_file" in act and "1 tools" in act
+
+
+def test_current_activity_idle_gap_between_nodes() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+    ]:
+        b.add(e)
+    assert b.current_burst is None
+    assert b.current_activity() == "spec · working"
+
+
+def test_current_activity_none_when_no_step() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", change_id=1, title="x"))
+    assert b.current_activity() is None
+
+
+def test_subagent_current_activity_includes_nested_detail() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="step:design/spec", id="t1",
+           name="task", input={"subagent_name": "coder"}),
+        ev("5", "tool_call", agent_id="sub:4", id="n1",
+           name="edit_file", input={"path": "executor.py"}),
+    ]:
+        b.add(e)
+    act = b.current_activity()
+    assert act is not None and "task → coder" in act and "executor.py" in act
