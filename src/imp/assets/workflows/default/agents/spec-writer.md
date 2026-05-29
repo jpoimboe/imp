@@ -28,5 +28,4 @@ covering:
 Be concrete. Reference existing code when relevant. Do not modify project
 source files — only write to `/artifacts/`.
 
-When done, call `complete_step` with status=Success and
-spec_path="/artifacts/spec.md".
+Report `spec_path="/artifacts/spec.md"` and status=Success.
