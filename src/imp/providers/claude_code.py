@@ -856,6 +856,52 @@ class ClaudeCodeAgentRunner:
                         }}
                         return
 
+                    last_text = ""
+                    # Walk backward through the messages we appended to find
+                    # the most recent assistant message — that's where the
+                    # terminal CLI message lives.
+                    for prev in reversed(messages):
+                        if prev.role == "assistant":
+                            last_text = _text_of(prev)
+                            break
+
+                    # Classify ONLY on the non-interactive path, before the
+                    # nudge: a surfaced provider error (auth/quota) must win
+                    # over a pointless nudge. Never classify an interactive
+                    # turn — its prose can legitimately contain auth/quota
+                    # substrings (see _classify_agent_text docstring). Note:
+                    # this now runs on each non-interactive nudge turn (up to
+                    # N+1), not just the terminal one — intentional, so an auth
+                    # failure surfaces on turn 1 instead of after N nudges.
+                    if not invocation.interactive:
+                        classified = _classify_agent_text(last_text)
+                        if classified is not None:
+                            yield perr.make_error_event(classified)
+                            return
+
+                    cont = invocation.continuation_fn
+                    if cont is not None:
+                        next_text = cont(last_text)
+                        if inspect.isawaitable(next_text):
+                            next_text = await next_text
+                        if next_text is None:
+                            yield {"type": "error", "payload": {
+                                "category": "agent_incomplete",
+                                "kind": "no_complete_step_after_nudges",
+                                "message": "agent did not call complete_step after nudges",
+                                "detail": {"last_agent_text": last_text[:500]},
+                            }}
+                            return
+                        user_msg = Message(
+                            role="user", content=(TextBlock(text=next_text),),
+                        )
+                        messages.append(user_msg)
+                        transcript.append(user_msg)
+                        elog.append_user_message(agent_id=aid, message=user_msg)
+                        await client.query(next_text)
+                        continue
+
+                    # Legacy/test fallback: no continuation_fn wired.
                     if invocation.interactive and ctx.user_input_fn is not None:
                         user_text = ctx.user_input_fn("")
                         if inspect.isawaitable(user_text):
@@ -869,18 +915,6 @@ class ClaudeCodeAgentRunner:
                         await client.query(user_text)
                         continue
 
-                    last_text = ""
-                    # Walk backward through the messages we appended to find
-                    # the most recent assistant message — that's where the
-                    # terminal CLI message lives.
-                    for prev in reversed(messages):
-                        if prev.role == "assistant":
-                            last_text = _text_of(prev)
-                            break
-                    classified = _classify_agent_text(last_text)
-                    if classified is not None:
-                        yield perr.make_error_event(classified)
-                        return
                     yield {"type": "error", "payload": {
                         "category": "agent_output_missing",
                         "kind": "no_complete_step",

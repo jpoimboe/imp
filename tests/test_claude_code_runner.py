@@ -435,6 +435,96 @@ async def test_runner_reclassifies_invalid_api_key_text_to_auth_event(
     )
 
 
+@pytest.mark.anyio
+async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
+    """continuation_fn nudges the agent, which then calls complete_step."""
+    (tmp_path / "art").mkdir()
+
+    # Flat script: turn 1 yields prose+result (no complete_step),
+    # turn 2 yields complete_step+result after the nudge.
+    scripted = [
+        assistant(text("prose, no tool")), result(),
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})), result(),
+    ]
+
+    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    inv = replace(inv, continuation_fn=lambda _last: "please call complete_step")
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
+    )
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "agent_output"
+
+
+@pytest.mark.anyio
+async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) -> None:
+    """continuation_fn returning None after N nudges yields agent_incomplete."""
+    (tmp_path / "art").mkdir()
+
+    # Three turns of prose — agent never calls complete_step.
+    scripted = [
+        assistant(text("prose")), result(),
+        assistant(text("prose")), result(),
+        assistant(text("prose")), result(),
+    ]
+
+    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    calls: dict[str, int] = {"n": 0}
+
+    def cont(_last: str) -> str | None:
+        if calls["n"] >= 2:
+            return None
+        calls["n"] += 1
+        return "please call complete_step"
+
+    inv = replace(inv, continuation_fn=cont)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
+    )
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "error"
+    assert events[-1]["payload"]["category"] == "agent_incomplete"
+    assert calls["n"] == 2
+
+
+@pytest.mark.anyio
+async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
+    """Non-interactive agent whose last text matches an auth pattern surfaces
+    AuthError; continuation_fn is never consulted."""
+    (tmp_path / "art").mkdir()
+
+    scripted = [assistant(text("Invalid API key")), result()]
+
+    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    consulted: dict[str, bool] = {"hit": False}
+
+    def cont(_last: str) -> str | None:
+        consulted["hit"] = True
+        return "nudge"
+
+    inv = replace(inv, continuation_fn=cont)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
+    )
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "error"
+    assert events[-1]["payload"]["category"] == "auth"
+    assert consulted["hit"] is False
+
+
 def test_claude_code_provider_registered_and_resolves() -> None:
     """The claude_code provider is registered eagerly; resolve_role picks it up
     when claude is on PATH."""
