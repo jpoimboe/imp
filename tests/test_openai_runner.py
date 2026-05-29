@@ -398,3 +398,48 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
         for b in m.content if hasattr(b, "tool_use_id")
     }
     assert tool_use_ids.issubset(tool_result_ids)
+
+
+@pytest.mark.anyio
+async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncOpenAI([
+        completion(message(content="prose, no tool call")),
+        completion(message(tool_calls=[tool_call("c1", "complete_step",
+                                                  {"status": "Success"})])),
+    ])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    inv = replace(_inv(tmp_path, event_log=log),
+                  continuation_fn=lambda _last: "please call complete_step")
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "agent_output"
+
+
+@pytest.mark.anyio
+async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncOpenAI(
+        [], default_response=completion(message(content="still prose")),
+    )
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    calls: dict[str, int] = {"n": 0}
+
+    def cont(_last: str) -> str | None:
+        if calls["n"] >= 2:
+            return None
+        calls["n"] += 1
+        return "please call complete_step"
+
+    inv = replace(_inv(tmp_path, event_log=log), continuation_fn=cont)
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "error"
+    assert events[-1]["payload"]["category"] == "agent_incomplete"
+    assert calls["n"] == 2
