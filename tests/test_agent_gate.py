@@ -234,8 +234,9 @@ async def test_agent_gate_goto(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_agent_gate_no_match_retries(tmp_path: Path) -> None:
-    """decide block with rework → retry and else → pause; max_retries hit → pause."""
+async def test_agent_gate_retry_exhausted_pauses(tmp_path: Path) -> None:
+    """rework verdict matches the retry rule on every invocation; after max_retries
+    is exhausted on_max_retries fires and the run pauses."""
     change = _seed_workflow_with_agent_gate(tmp_path, gate_decide_yaml=(
         "      decide:\n"
         "        - {when: {verdict: approve}, action: {kind: continue}}\n"
@@ -300,5 +301,10 @@ async def test_agent_gate_decide_no_match_pauses(
         e.get("type") == "error"
         and (e.get("payload") or {}).get("category") == "config"
         and (e.get("payload") or {}).get("kind") == "decide_no_match"
+        for e in events
+    )
+    assert any(
+        e.get("type") == "gate_evaluated"
+        and (e.get("payload") or {}).get("action", {}).get("kind") == "pause"
         for e in events
     )
