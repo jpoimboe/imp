@@ -60,6 +60,11 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
     )
 
 
+def test_agent_invocation_retry_feedback_defaults_none(tmp_path: Path) -> None:
+    inv = _inv(tmp_path)
+    assert inv.retry_feedback is None
+
+
 @pytest.mark.anyio
 async def test_runs_to_complete_step(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()

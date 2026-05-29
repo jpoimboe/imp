@@ -103,6 +103,10 @@ class AgentInvocation:
     # parent_id override for this agent's FIRST emitted event (step_context):
     # the spawning step_started id (steps/gates) or task tool_call id (subagents).
     first_event_parent_id: str | None = None
+    # Set by the executor when this invocation targets a step that just had a
+    # gate fail: the already-formatted feedback string to inject on resume
+    # (design §4). None on every fresh run and every non-targeted step.
+    retry_feedback: str | None = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}
