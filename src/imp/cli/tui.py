@@ -309,8 +309,9 @@ class NarrativeApp:
     sticky tail (M5); `live=False` is read-only log mode."""
 
     def __init__(self, tree: nv.NarrativeTree, *, live: bool, mouse: bool,
-                 full: bool = False, _osc_writer=None) -> None:
-        self.tree = tree
+                 full: bool = False, _osc_writer=None, builder=None) -> None:
+        # emission thread: on-loop, verified 2026-05-28 (grep found no
+        # to_thread/run_in_executor/Thread usage in providers/agents/engine)
         self.live = live
         self.mouse = mouse
         self.fold_state = FoldState(default_expanded=full)
@@ -321,6 +322,17 @@ class NarrativeApp:
         self._lines: list[RenderedLine] = []
         self.status_note = ""
         self._osc_writer = _osc_writer        # injected in tests; real one in build
+        # For live mode, hold the builder so on_event can feed it incrementally;
+        # the tree is then a live view over builder.tree (design §7.7).
+        # If no builder is supplied in live mode, create a fresh one so callers
+        # can use on_event without pre-constructing a builder.
+        if live:
+            self._builder = builder if builder is not None else nv.NarrativeBuilder()
+            self.tree = self._builder.tree
+        else:
+            self._builder = None
+            self.tree = tree
+        self.new_below_count = 0
         # live input state (design §7.5)
         self._active_input = None          # asyncio.Future | None
         self._input_prompt = "> "
@@ -547,6 +559,31 @@ class NarrativeApp:
                 self.application.layout.focus(self._narrative_window)
             except Exception:
                 pass
+
+    # -- live event sink (design §7.7) ----------------------------------------
+    def on_event(self, event: dict) -> None:
+        """Synchronous on_event sink (design §7.7): builder.add then invalidate.
+        No awaiting in the hot path. MUST run on the loop thread (see comment in
+        __init__ — verified on-loop as of 2026-05-28)."""
+        if self._builder is not None:
+            self._builder.add(event)
+            self.tree = self._builder.tree
+        was_following = self.follow_tail
+        self._rebuild()
+        if was_following:
+            self.cursor_line = max(0, len(self._lines) - 1)
+            self.new_below_count = 0
+        else:
+            self.new_below_count += 1
+        self._invalidate()
+
+    async def clock_tick(self) -> None:
+        """~1s tick so the footer's elapsed timer advances between events
+        (design §7.7). Runs in the engine task group."""
+        import anyio
+        while True:
+            await anyio.sleep(1.0)
+            self._invalidate()
 
     # -- footer ---------------------------------------------------------------
     def _fmt_tokens(self) -> str:
