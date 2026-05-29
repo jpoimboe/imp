@@ -405,3 +405,40 @@ def test_step_level_human_gate_nests_inside_open_step() -> None:
     ])
     step = tree.root.children[0].children[0]
     assert any(isinstance(c, nv.GateNode) for c in step.children)
+
+
+def test_error_event_becomes_error_node() -> None:
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "error", category="auth", message="Invalid API key"),
+    ])
+    errs = [c for c in tree.root.children[0].children if isinstance(c, nv.ErrorNode)]
+    assert len(errs) == 1
+    assert errs[0].category == "auth"
+    assert errs[0].message == "Invalid API key"
+    assert errs[0].is_warning is False
+
+
+def test_runner_warning_is_styled_non_terminal_error_node() -> None:
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "runner_warning", agent_id="step:p/s",
+            message="dropped a malformed block"),
+    ])
+    step = tree.root.children[0].children[0]
+    warns = [c for c in step.children if isinstance(c, nv.ErrorNode)]
+    assert warns and warns[0].is_warning is True
+
+
+def test_unknown_and_legacy_types_fall_through_to_fallback_line() -> None:
+    # Legacy types the engine no longer emits (design §5.1) get no structural
+    # meaning — they fall through, never crash, never drop.
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "phase_exhausted", phase="p"),         # legacy
+        _ev("3", "never_heard_of_this", foo="bar"),     # unknown
+    ])
+    fbs = [c for c in tree.root.children[0].children if isinstance(c, nv.FallbackLine)]
+    assert {f.event_type for f in fbs} == {"phase_exhausted", "never_heard_of_this"}
+    assert fbs[1].payload == {"foo": "bar"}

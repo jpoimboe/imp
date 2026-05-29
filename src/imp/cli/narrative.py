@@ -520,6 +520,23 @@ NarrativeBuilder._HANDLERS["tool_result"] = _h_tool_result
 NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
 
 
+def _h_error(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    self._append(ErrorNode(
+        message=str(p.get("message", "?")), category=p.get("category"),
+        is_warning=False))
+
+
+def _h_runner_warning(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    # Non-terminal: do NOT flush the burst (a warning can be emitted mid-burst
+    # for a dropped block; flushing would split an otherwise-contiguous run).
+    self._append(ErrorNode(message=str(p.get("message", "?")), is_warning=True))
+
+
+NarrativeBuilder._HANDLERS["error"] = _h_error
+NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
+
+
 def _open_subagent_fold(self: NarrativeBuilder, event: dict, p: dict) -> None:
     """A `task` tool_call opens a SubagentFold (never part of a burst — §5.3
     rule 2). Routing key is "sub:" + the tool_call EVENT id; the closing
