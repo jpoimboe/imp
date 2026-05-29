@@ -439,3 +439,76 @@ NarrativeBuilder._HANDLERS["llm_response"] = _h_llm_response
 NarrativeBuilder._HANDLERS["thinking"] = _h_thinking
 NarrativeBuilder._HANDLERS["step_context"] = _h_step_context
 NarrativeBuilder._HANDLERS["agent_output"] = _h_agent_output
+
+
+def _ensure_burst(self: NarrativeBuilder) -> ToolBurstFold:
+    if self._current_burst is None:
+        self._current_burst = ToolBurstFold()
+        self._append(self._current_burst)
+    return self._current_burst
+
+
+def _h_tool_call(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    if p.get("name") == "task":
+        _open_subagent_fold(self, event, p)     # defined in Task 6
+        return
+    burst = _ensure_burst(self)
+    burst.calls.append(ToolCall(
+        call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
+        input=p.get("input") or {}))
+
+
+def _h_tool_result(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    rid = str(p.get("id", ""))
+    # Closing a subagent? (parent `task` tool_result carries the block id.)
+    fold = self._open_sub_by_block.pop(rid, None)
+    if fold is not None:
+        fold.running = False
+        fold.is_error = bool(p.get("error", False))
+        fold.outcome = _summarize_result(p.get("content"))
+        return
+    # Normal burst result: pair with the matching open call.
+    burst = self._current_burst
+    if burst is not None:
+        for call in burst.calls:
+            if call.call_id == rid and call.result is None:
+                call.result = _summarize_result(p.get("content"))
+                call.is_error = bool(p.get("error", False))
+                return
+    # Orphan result (malformed log): start/extend a burst with a "tool" entry.
+    burst = _ensure_burst(self)
+    burst.calls.append(ToolCall(
+        call_id=rid, name="tool", input={},
+        result=_summarize_result(p.get("content")),
+        is_error=bool(p.get("error", False))))
+
+
+def _h_tool_killed(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    rid = str(p.get("id", ""))
+    burst = self._current_burst
+    if burst is not None:
+        for call in burst.calls:
+            if call.call_id == rid:
+                call.killed = True
+                return
+    # No matching open burst call → record a standalone killed marker.
+    b = _ensure_burst(self)
+    b.calls.append(ToolCall(
+        call_id=rid, name=str(p.get("name", "tool")), input={}, killed=True))
+
+
+def _summarize_result(content: Any) -> str:
+    """Full underlying result text, newlines preserved. The view decides how to
+    wrap/elide; the model keeps the whole thing (the 'full messages' goal)."""
+    if content is None:
+        return ""
+    return content if isinstance(content, str) else str(content)
+
+
+NarrativeBuilder._HANDLERS["tool_call"] = _h_tool_call
+NarrativeBuilder._HANDLERS["tool_result"] = _h_tool_result
+NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
+
+
+def _open_subagent_fold(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    raise NotImplementedError  # replaced in Task 6

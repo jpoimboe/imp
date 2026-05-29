@@ -218,3 +218,63 @@ def test_agent_text_node_holds_payload_and_parses_lazily() -> None:
     assert at.payload["model"] == "m"
     # .text triggers the lazy parse chain and returns the assistant prose.
     assert at.text == "hello world"
+
+
+def _step_events(*content):
+    return [_ev("p", "phase_started", phase="p"),
+            _ev("s", "step_started", step="s", model="m", provider="anthropic"),
+            *content,
+            _ev("c", "step_completed", step="s", action="continue")]
+
+
+def _only_step(tree):
+    return tree.root.children[0].children[0]
+
+
+def test_consecutive_non_task_tools_form_one_burst() -> None:
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "ls"}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok",
+            error=False),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b2", name="bash",
+            input={"command": "pwd"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b2", content="/",
+            error=False),
+    ))
+    step = _only_step(tree)
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert len(bursts) == 1
+    calls = bursts[0].calls
+    assert [c.name for c in calls] == ["bash", "bash"]
+    assert calls[0].result == "ok" and calls[1].result == "/"
+
+
+def test_non_tool_event_flushes_burst_into_two() -> None:
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False),
+        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="tool_use", usage={},
+            raw={"content": [{"type": "text", "text": "thinking out loud"}]}),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b2", name="grep", input={}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b2", content="hit", error=False),
+    ))
+    step = _only_step(tree)
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert len(bursts) == 2
+    assert [c.name for c in bursts[0].calls] == ["bash"]
+    assert [c.name for c in bursts[1].calls] == ["grep"]
+
+
+def test_tool_killed_marks_the_matching_call_in_burst() -> None:
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "sleep 999"}),
+        _ev("2", "tool_killed", agent_id="step:p/s", id="b1", name="bash"),
+        _ev("3", "tool_result", agent_id="step:p/s", id="b1",
+            content="terminated", error=True),
+    ))
+    step = _only_step(tree)
+    burst = [c for c in step.children if isinstance(c, nv.ToolBurstFold)][0]
+    assert burst.calls[0].killed is True
