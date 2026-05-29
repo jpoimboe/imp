@@ -83,6 +83,15 @@ class AgentInvocation:
     # by the providers' PROMPT_USER resume path. May return either a `str` or
     # an `Awaitable[str]`; both call-sites await-if-awaitable.
     user_input_fn: Callable[[str], str | Awaitable[str]] | None = None
+    # Set by the executor for the END-OF-TURN resume — distinct from
+    # user_input_fn, which serves the PROMPT_USER / ask_user mid-turn path.
+    # Called with the agent's last text; returns the next user-message text to
+    # inject and continue, or None to stop (→ agent_incomplete). None means
+    # "no end-of-turn resume wired" (legacy/test); providers then fall back to
+    # the prior interactive-resume / no_complete_step behavior.
+    continuation_fn: (
+        Callable[[str], str | None | Awaitable[str | None]] | None
+    ) = None
     # Stable identity of this agent invocation (step/gate/subagent), used as
     # the strict filter key for reconstruction. Derived by the executor /
     # dispatch_task; empty string only in legacy direct-construction tests.

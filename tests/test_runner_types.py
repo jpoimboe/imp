@@ -84,6 +84,49 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
     assert inv.first_event_parent_id is None
 
 
+def test_agent_invocation_has_continuation_fn_default_none() -> None:
+    from pathlib import Path
+
+    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.engine.types import OutputField, OutputSchema, SourceLoc
+    from imp.engine.types import AgentDef
+
+    schema = OutputSchema(
+        fields=(OutputField(name="status", type="enum",
+                            values=("Success", "Error"), required=True),),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    agent_def = AgentDef(
+        name="t", description="", tools=frozenset({"complete_step"}),
+        subagents=(), output_schema=schema, prompt_template_source="hi",
+        source_path=Path("a.md"), source=SourceLoc(file=Path("a.md"), line=1),
+    )
+    inv = AgentInvocation(
+        agent_def=agent_def, provider_name="anthropic", model_name="m",
+        system_prompt="x",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(change_id=1, project_root=Path("."),
+                                     artifacts_dir=Path(".")),
+        interactive=False, transcript_dir=Path("."),
+        fs_permissions=(), events_path=Path("e.jsonl"),
+    )
+    assert inv.continuation_fn is None
+
+    captured: list[str] = []
+    inv2 = AgentInvocation(
+        agent_def=agent_def, provider_name="anthropic", model_name="m",
+        system_prompt="x",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(change_id=1, project_root=Path("."),
+                                     artifacts_dir=Path(".")),
+        interactive=False, transcript_dir=Path("."),
+        fs_permissions=(), events_path=Path("e.jsonl"),
+        continuation_fn=lambda last: captured.append(last) or "nudge",
+    )
+    assert inv2.continuation_fn("prose") == "nudge"
+    assert captured == ["prose"]
+
+
 def test_diagnostics_holds_warnings_and_thinkings() -> None:
     from imp.agents.runner import Diagnostics
     d = Diagnostics(block_warnings=("w1",), thinkings=("t1", "t2"))
