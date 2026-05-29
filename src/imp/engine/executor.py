@@ -28,6 +28,11 @@ from imp.engine import error_policy
 from imp.engine.change import Change
 from imp.engine.completion import completion_instruction
 from imp.engine.env import engine_env
+from imp.engine.feedback import (
+    format_agent_feedback,
+    format_human_feedback,
+    format_script_feedback,
+)
 from imp.engine.gates import (
     DecideNoMatch,
     evaluate_decide,
@@ -197,7 +202,7 @@ async def _execute_phase(
         # last gate's Continue ends the phase.
         retried_phase = False
         for gate in phase.gates:
-            action = await _run_gate(
+            action, feedback = await _run_gate(
                 gate, workflow, config, change, state, log,
                 human_input_fn=human_input_fn, human_output_fn=human_output_fn,
                 user_chat_input_fn=user_chat_input_fn,
@@ -207,11 +212,20 @@ async def _execute_phase(
                 state.phase_attempt += 1
                 if state.phase_attempt > phase.max_retries:
                     action = phase.on_max_retries
-                if isinstance(action, Retry):
-                    state.step = None
-                    state.step_attempt = 0
-                    retried_phase = True
-                    break  # re-enter the outer steps walk
+            # Stash only when we will actually retry/goto (not when exhaustion
+            # turned Retry into Pause). Resolve the target against the final
+            # action so an on_max_retries Goto targets where we actually land.
+            if feedback is not None and isinstance(action, (Retry, Goto)):
+                target = _resolve_target_step(
+                    workflow, action, current_phase=phase.name, current_step=None)
+                if target is not None:
+                    state.retry_feedback = {"target_step": target, "text": feedback}
+                    state.save(change.state_dir)
+            if isinstance(action, Retry):
+                state.step = None
+                state.step_attempt = 0
+                retried_phase = True
+                break  # re-enter the outer steps walk
             if isinstance(action, (Goto, Pause)):
                 return action
             # Continue: proceed to next gate (no early return)
@@ -489,7 +503,7 @@ async def _execute_step(
         return Retry()
 
     for gate in step.gates:
-        action = await _run_gate(
+        action, feedback = await _run_gate(
             gate, workflow, config, change, state, log,
             human_input_fn=human_input_fn,
             human_output_fn=human_output_fn,
@@ -498,6 +512,13 @@ async def _execute_step(
             coordinator=coordinator,
         )
         if not isinstance(action, Continue):
+            if feedback is not None:
+                target = _resolve_target_step(
+                    workflow, action,
+                    current_phase=state.phase, current_step=step.name)
+                if target is not None:
+                    state.retry_feedback = {"target_step": target, "text": feedback}
+                    state.save(change.state_dir)
             return action
 
     state.current_step = None
@@ -540,7 +561,7 @@ async def _run_agent_gate(
     *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
-) -> Action:
+) -> tuple[Action, str | None]:
     """Execute an agent-as-gate. Same machinery as _execute_step minus the
     step-level gate loop. Decide block matches on the agent's structured output."""
     # Re-parse the gate's agent file each invocation. Cheap — agents files are
@@ -580,17 +601,17 @@ async def _run_agent_gate(
         if coordinator.should_pause:
             _emit(log, "gate_evaluated",
                   {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
-            return Pause()
+            return Pause(), None
 
     if paused or fatal:
         _emit(log, "gate_evaluated",
               {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
-        return Pause()
+        return Pause(), None
 
     if errored or agent_output is None:
         _emit(log, "gate_evaluated",
               {"kind": "agent", "gate": stem, "action": _action_dict(Retry())})
-        return Retry()
+        return Retry(), None
 
     try:
         action = evaluate_decide(gate.decide, agent_output)
@@ -605,7 +626,7 @@ async def _run_agent_gate(
         }, agent_id=None)
         _emit(log, "gate_evaluated",
               {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
-        return Pause()
+        return Pause(), None
 
     # Clean up the gate's transcript dir on success (mirrors step success).
     shutil.rmtree(transcript_dir, ignore_errors=True)
@@ -613,7 +634,34 @@ async def _run_agent_gate(
     state.save(change.state_dir)
     _emit(log, "gate_evaluated",
           {"kind": "agent", "gate": stem, "action": _action_dict(action)})
-    return action
+    feedback = (
+        format_agent_feedback(stem, agent_output)
+        if isinstance(action, (Retry, Goto)) else None
+    )
+    return action, feedback
+
+
+def _resolve_target_step(
+    workflow: Workflow, action: Action, *,
+    current_phase: str, current_step: str | None,
+) -> str | None:
+    """Which step should consume the feedback (design §2).
+
+    - Goto(target)            → first step of the target phase
+    - Retry with current_step → that same step (step-gate retry)
+    - Retry without           → first step of current phase (phase-gate retry)
+
+    Returns None when the resolved phase has no steps (nothing to target).
+    """
+    if isinstance(action, Goto):
+        phase = next((p for p in workflow.phases if p.name == action.target), None)
+        if phase is None or not phase.steps:
+            return None
+        return phase.steps[0].name
+    if current_step is not None:
+        return current_step
+    phase = next(p for p in workflow.phases if p.name == current_phase)
+    return phase.steps[0].name if phase.steps else None
 
 
 async def _run_gate(
@@ -624,16 +672,21 @@ async def _run_gate(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     agent_output_context: dict[str, Any] | None = None,
     coordinator: Any = None,
-) -> Action:
+) -> tuple[Action, str | None]:
     if isinstance(gate, HumanGate):
         _emit(log, "human_gate_pending", {
             "phase": state.phase,
             "prompt": gate.prompt,
             "options": [{"label": opt.label} for opt in gate.options],
         })
-        action, _chosen = await run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
+        action, chosen = await run_human_gate(
+            gate, input_fn=human_input_fn, output_fn=human_output_fn)
         _emit(log, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
-        return action
+        feedback = (
+            format_human_feedback(chosen.label)
+            if isinstance(action, (Retry, Goto)) else None
+        )
+        return action, feedback
     if isinstance(gate, ScriptGate):
         env_extra = engine_env(
             project_root=change.project_root, artifacts_dir=change.artifacts_dir,
@@ -641,7 +694,12 @@ async def _run_gate(
         action, ctx = run_script_gate(gate, cwd=change.workflow_dir, env_extra=env_extra)
         _emit(log, "gate_evaluated",
               {"kind": "script", "context": ctx, "action": _action_dict(action)})
-        return action
+        feedback = (
+            format_script_feedback(
+                gate.command, ctx["exit"], ctx["stdout"], ctx["stderr"])
+            if isinstance(action, (Retry, Goto)) else None
+        )
+        return action, feedback
     if isinstance(gate, AgentGate):
         return await _run_agent_gate(
             gate, workflow, config, change, state, log,
@@ -651,7 +709,7 @@ async def _run_gate(
     if isinstance(gate, StubGate):
         _emit(log, "gate_evaluated",
               {"kind": "stub", "action": _action_dict(gate.action)})
-        return gate.action
+        return gate.action, None
     raise AssertionError(f"unknown gate type {type(gate).__name__}")
 
 

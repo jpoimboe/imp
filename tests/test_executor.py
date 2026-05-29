@@ -693,6 +693,106 @@ async def test_step_transcript_persists_past_success_until_change_completion(
     assert not (change.change_dir / "steps").exists()
 
 
+@pytest.mark.anyio
+async def test_failing_script_gate_feeds_back_then_clears(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Workflow: one phase, one step, with a step-level script gate that fails
+    # the first time and passes the second (toggled by a sentinel file).
+    wf_dir = tmp_path / ".imp" / "workflows" / "default"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    gate_script = wf_dir / "gate.sh"
+    gate_script.write_text(
+        "#!/bin/sh\n"
+        'if [ -f "$IMP_ARTIFACTS_DIR/seen" ]; then exit 0; fi\n'
+        'touch "$IMP_ARTIFACTS_DIR/seen"\n'
+        'echo "first run fails" >&2\n'
+        "exit 1\n"
+    )
+    gate_script.chmod(0o755)
+    (wf_dir / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [only]\n"
+        "defaults: {max_retries: 2, on_max_retries: {kind: pause}}\n"
+        "only:\n  steps:\n"
+        "    - name: w\n      file: agents/writer.md\n      model_role: default\n"
+        "      gates:\n"
+        "        - type: script\n"
+        "          command: sh ./gate.sh\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+    )
+    change = Change.create(tmp_path, title="t")
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    feedbacks: list[str | None] = []
+
+    class _RecordingRunner(_FakeRunner):
+        async def run(self, invocation):
+            feedbacks.append(invocation.retry_feedback)
+            async for ev in super().run(invocation):
+                yield ev
+
+    class _RecordingProvider(_FakeProvider):
+        def create_runner(self, invocation):
+            return _RecordingRunner(self._output)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _RecordingProvider({"status": "Success"}, model=model),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    # First invocation got no feedback; the retry got the script's failure.
+    assert feedbacks[0] is None
+    assert feedbacks[1] is not None and "gate.sh` failed" in feedbacks[1]
+    # Consumed: cleared on the engine's state.
+    assert State.load(change.state_dir).retry_feedback is None
+
+
+@pytest.mark.anyio
+async def test_resolve_target_step_unit(tmp_path: Path) -> None:
+    from imp.engine.executor import _resolve_target_step
+    from imp.engine.loader import load_workflow
+
+    # Two phases: design (steps: spec) and implement (steps: coder, doc).
+    wf_dir = tmp_path / ".imp" / "workflows" / "default"
+    (wf_dir / "agents").mkdir(parents=True)
+    for stem in ("spec", "coder", "doc"):
+        (wf_dir / "agents" / f"{stem}.md").write_text(
+            f"---\nname: {stem}\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+        )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [design, implement]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
+        "design:\n  steps:\n"
+        "    - {name: spec, file: agents/spec.md, model_role: default}\n"
+        "implement:\n  steps:\n"
+        "    - {name: coder, file: agents/coder.md, model_role: default}\n"
+        "    - {name: doc, file: agents/doc.md, model_role: default}\n"
+    )
+    wf = load_workflow(wf_dir)
+    from imp.engine.types import Goto, Retry
+
+    # step-gate retry → same step
+    assert _resolve_target_step(
+        wf, Retry(), current_phase="implement", current_step="coder") == "coder"
+    # phase-gate retry → first step of current phase
+    assert _resolve_target_step(
+        wf, Retry(), current_phase="implement", current_step=None) == "coder"
+    # goto → first step of target phase
+    assert _resolve_target_step(
+        wf, Goto(target="design"), current_phase="implement",
+        current_step="coder") == "spec"
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
