@@ -136,3 +136,51 @@ def test_step_context_collapsed_even_in_default_mode() -> None:
     ], full=False))
     assert "SYSTEM PROMPT TEXT" not in out
     assert "▸ context" in out
+
+
+import json
+from pathlib import Path
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _sample_events():
+    src = FIXTURES / "narrative_sample.jsonl"
+    return [json.loads(ln) for ln in src.read_text().splitlines() if ln.strip()]
+
+
+def test_snapshot_default(monkeypatch) -> None:
+    tree = nv.build_tree(_sample_events())
+    actual = "\n".join(render_tree(tree, full=False, color=False, width=80)) + "\n"
+    golden = (FIXTURES / "narrative_default.txt").read_text()
+    assert actual == golden, ("default-mode drift; to accept, rewrite "
+                              "tests/fixtures/narrative_default.txt with the actual output")
+
+
+def test_snapshot_full(monkeypatch) -> None:
+    tree = nv.build_tree(_sample_events())
+    actual = "\n".join(render_tree(tree, full=True, color=False, width=80)) + "\n"
+    golden = (FIXTURES / "narrative_full.txt").read_text()
+    assert actual == golden, ("full-mode drift; to accept, rewrite "
+                              "tests/fixtures/narrative_full.txt with the actual output")
+
+
+def test_snapshot_covers_every_node_type() -> None:
+    # Guard: the fixture must exercise all node types (design §11).
+    tree = nv.build_tree(_sample_events())
+    seen: set[str] = set()
+
+    def walk(n):
+        seen.add(type(n).__name__)
+        for c in getattr(n, "children", []):
+            walk(c)
+        if isinstance(n, nv.SubagentFold):
+            for c in n.tree.root.children:
+                walk(c)
+        if isinstance(n, nv.StepNode) and n.outcome:
+            seen.add("OutcomeLine")
+    walk(tree.root)
+    required = {"WorkflowNode", "PhaseNode", "StepNode", "AgentTextNode",
+                "UserMessageNode", "ThinkingFold", "ToolBurstFold", "SubagentFold",
+                "GateNode", "ErrorNode", "StepContextNode", "OutcomeLine", "FallbackLine"}
+    assert required <= seen, f"fixture missing node types: {required - seen}"
