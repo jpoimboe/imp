@@ -37,7 +37,11 @@ from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
-from imp.agents.transcript import Transcript, repair_dangling_tool_use_on_resume
+from imp.agents.transcript import (
+    Transcript,
+    inject_retry_feedback,
+    repair_dangling_tool_use_on_resume,
+)
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers.base import Provider
@@ -335,11 +339,15 @@ class AnthropicAgentRunner:
             # the executor's pause check fires after `tool_result` was yielded
             # but before the user message was appended. Patch the transcript
             # before classifying.
-            repair = repair_dangling_tool_use_on_resume(messages, transcript)
-            if repair is not None:
-                for b in repair.content:
-                    if isinstance(b, ToolResultBlock):
-                        elog.append_tool_result(agent_id=aid, block=b)
+            if invocation.retry_feedback is not None:
+                inject_retry_feedback(
+                    messages, transcript, elog, aid, invocation.retry_feedback)
+            else:
+                repair = repair_dangling_tool_use_on_resume(messages, transcript)
+                if repair is not None:
+                    for b in repair.content:
+                        if isinstance(b, ToolResultBlock):
+                            elog.append_tool_result(agent_id=aid, block=b)
             state = classify_resume(messages, interactive=invocation.interactive)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {

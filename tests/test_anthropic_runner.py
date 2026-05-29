@@ -173,6 +173,56 @@ async def test_resume_uses_existing_transcript(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    inv_dir = tmp_path / "step"
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    # Targeted-step shape: a prior successful complete_step (no tool_result).
+    transcript.append(Message(role="user", content=(TextBlock(text="begin"),)))
+    transcript.append(Message(role="assistant", content=(
+        TextBlock(text="all done"),
+        ToolUseBlock(id="c1", name="complete_step", input={"status": "Success"}),
+    )))
+
+    # The re-run will fix things and complete again.
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c2", "complete_step", {"status": "Success", "note": "fixed"}),
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+
+    inv = AgentInvocation(
+        agent_def=_agent_def(), provider_name="anthropic",
+        model_name="claude-sonnet-4-6", system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(
+            change_id=1, project_root=tmp_path, artifacts_dir=tmp_path / "art"),
+        interactive=False, transcript_dir=inv_dir,
+        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
+                               mode="allow",
+                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s", event_log=log,
+        retry_feedback="Gate `test` failed (exit 1). FAIL: assertion",
+    )
+
+    yielded = [ev async for ev in runner.run(inv)]
+
+    # SEND_TO_LLM path taken (no missing_complete_step error), agent re-completed.
+    assert [e["type"] for e in yielded] == ["agent_output"]
+    assert yielded[-1]["payload"]["note"] == "fixed"
+    # The feedback was injected as a user turn balancing the prior complete_step.
+    msgs = transcript.load()
+    injected = msgs[2]
+    assert injected.role == "user"
+    assert any(isinstance(b, ToolResultBlock) and not b.is_error
+               for b in injected.content)
+    assert any(isinstance(b, TextBlock) and "FAIL: assertion" in b.text
+               for b in injected.content)
+
+
+@pytest.mark.anyio
 async def test_thinking_block_emits_thinking_event_not_error(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
     fake = FakeAsyncAnthropic([
