@@ -489,3 +489,72 @@ def test_parity_holds_with_open_step_when_paused() -> None:
     for e in log:
         b.add(e)
     assert nv.structural_repr(batch.root) == nv.structural_repr(b.tree.root)
+
+
+def test_resume_reentry_reuses_phase_and_resets_step() -> None:
+    seed = [
+        _ev("c", "change_created", change_id=1, title="t"),
+        _ev("p", "phase_started", phase="design"),
+        _ev("s1", "step_started", step="spec", model="m", provider="anthropic"),
+        _ev("s1c", "step_completed", step="spec", action="continue"),
+        _ev("s2", "step_started", step="build", model="m", provider="anthropic"),
+        _ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "partial attempt"}]}),
+        _ev("wp", "workflow_paused", reason="ctrl-c"),
+        _ev("wr", "workflow_resumed"),
+    ]
+    live = [
+        _ev("p2", "phase_started", phase="design"),        # re-emitted on resume
+        _ev("s2b", "step_started", step="build", model="m", provider="anthropic"),
+        _ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "fresh complete"}]}),
+        _ev("s2c", "step_completed", step="build", action="continue"),
+        _ev("pc", "phase_completed", phase="design"),
+    ]
+    tree = nv.build_tree(seed + live)
+    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert len(phases) == 1                              # design NOT duplicated
+    assert phases[0].closed is True
+    steps = [c for c in phases[0].children if isinstance(c, nv.StepNode)]
+    assert [s.name for s in steps] == ["spec", "build"]  # build NOT duplicated
+    build = steps[1]
+    texts = [c.text for c in build.children if isinstance(c, nv.AgentTextNode)]
+    assert texts == ["fresh complete"]                   # partial replaced by re-run
+    assert build.closed is True
+    assert build.outcome.action == "continue"
+
+
+def test_goto_loop_keeps_separate_phase_iterations() -> None:
+    # No workflow_resumed marker → two design nodes (faithful loop iterations).
+    events = [
+        _ev("p1", "phase_started", phase="design"),
+        _ev("s1", "step_started", step="spec", model="m", provider="anthropic"),
+        _ev("s1c", "step_completed", step="spec", action="continue"),
+        _ev("g", "gate_evaluated", kind="stub",
+            action={"kind": "goto", "target": "design"}),   # loop back, phase left open
+        _ev("p2", "phase_started", phase="design"),         # second iteration
+        _ev("s2", "step_started", step="spec", model="m", provider="anthropic"),
+        _ev("s2c", "step_completed", step="spec", action="continue"),
+        _ev("pc", "phase_completed", phase="design"),
+    ]
+    tree = nv.build_tree(events)
+    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert len(phases) == 2                              # both iterations preserved
+
+
+def test_resume_into_a_new_phase_does_not_reuse() -> None:
+    # Interrupted phase completed and advanced; resume re-emits a DIFFERENT phase.
+    seed = [
+        _ev("p1", "phase_started", phase="design"),
+        _ev("s1", "step_started", step="spec", model="m", provider="anthropic"),
+        _ev("s1c", "step_completed", step="spec", action="continue"),
+        _ev("pc", "phase_completed", phase="design"),     # design CLOSED
+        _ev("wp", "workflow_paused", reason="ctrl-c"),
+        _ev("wr", "workflow_resumed"),
+    ]
+    live = [_ev("p2", "phase_started", phase="implement")]
+    tree = nv.build_tree(seed + live)
+    names = [c.name for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert names == ["design", "implement"]              # implement is genuinely new

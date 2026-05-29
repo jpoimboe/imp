@@ -300,7 +300,18 @@ NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 def _h_phase_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._flush_burst()
-    phase = PhaseNode(name=p.get("phase", "?"))
+    name = p.get("phase", "?")
+    # Resume re-entry: reuse the still-open current phase rather than appending a
+    # twin. Keyed on self._resuming (the workflow_resumed boundary) — NOT on
+    # name-match alone, so goto loops (no marker) still create new nodes. Keep
+    # _resuming True so the re-emitted step_started below can also re-enter.
+    if (self._resuming and self._current_phase is not None
+            and not self._current_phase.closed
+            and self._current_phase.name == name):
+        self._step_stack.clear()
+        return
+    self._resuming = False
+    phase = PhaseNode(name=name)
     self._root.children.append(phase)
     self._current_phase = phase
     self._step_stack.clear()
@@ -315,19 +326,35 @@ def _h_phase_completed(self: NarrativeBuilder, event: dict, p: dict) -> None:
 
 def _h_step_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._flush_burst()
-    if p.get("kind") == "agent_gate":
-        node = StepNode(
-            name=p.get("gate_stem", "?"), kind="agent_gate",
-            model=p.get("model"), provider=p.get("provider"),
-            interactive=bool(p.get("interactive", False)))
+    is_gate = p.get("kind") == "agent_gate"
+    name = p.get("gate_stem", "?") if is_gate else p.get("step", "?")
+    # The first step_started after a resume re-enters the interrupted step. The
+    # executor re-runs it from scratch, so reuse the open StepNode and RESET its
+    # content (the fresh re-run supersedes the interrupted partial). Consume the
+    # re-entry window regardless of whether a match is found.
+    resuming, self._resuming = self._resuming, False
+    if resuming and not is_gate and self._current_phase is not None:
+        existing = next(
+            (c for c in self._current_phase.children
+             if isinstance(c, StepNode) and c.kind is None
+             and c.name == name and not c.closed), None)
+        if existing is not None:
+            existing.children.clear()
+            existing.outcome = None
+            existing.closed = False
+            existing.model = p.get("model")
+            existing.provider = p.get("provider")
+            existing.interactive = bool(p.get("interactive", False))
+            self._step_stack = [existing]
+            return
+    if is_gate:
+        node = StepNode(name=name, kind="agent_gate", model=p.get("model"),
+                        provider=p.get("provider"),
+                        interactive=bool(p.get("interactive", False)))
     else:
-        node = StepNode(
-            name=p.get("step", "?"), kind=None,
-            model=p.get("model"), provider=p.get("provider"),
-            interactive=bool(p.get("interactive", False)))
-    # Attach to whatever is open: a still-open step (nested agent gate) → that
-    # step's children; else the current phase; else root (defensive / nested
-    # subagent trees that never see a phase).
+        node = StepNode(name=name, kind=None, model=p.get("model"),
+                        provider=p.get("provider"),
+                        interactive=bool(p.get("interactive", False)))
     self._append(node)
     self._step_stack.append(node)
 
@@ -368,6 +395,7 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict, p: dict) -> None:
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._flush_burst()
     self._root.status = "running"
+    self._resuming = True                # open the re-entry window
 
 
 NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
