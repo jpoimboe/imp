@@ -605,6 +605,21 @@ class NarrativeApp:
     def _submit_input(self, text: str) -> None:
         if self._input_buffer is not None:
             self._input_buffer.text = ""
+        # When a human gate is active the awaited future is _gate_future, not
+        # _active_input. The engine's _match_human_option accepts numeric indices
+        # ("1") and label prefixes ("Merge") alike, so feed it the raw typed text;
+        # a non-match makes run_human_gate re-prompt (request_gate_choice runs
+        # again, re-arming the gate). Without this, typing a choice + Enter would
+        # resolve nothing and the gate would hang.
+        if self._gate_active:
+            gfut, self._gate_future = self._gate_future, None
+            self._gate_active = False
+            self._gate_options = []
+            if gfut is not None and not gfut.done():
+                gfut.set_result(text)
+            self._refocus_narrative()
+            self._invalidate()
+            return
         fut, self._active_input = self._active_input, None
         if fut is not None and not fut.done():
             fut.set_result(text)

@@ -77,6 +77,30 @@ def test_human_gate_dispatch_routes_input_fn_to_selector() -> None:
     asyncio.run(go())
 
 
+def test_typing_a_gate_choice_and_pressing_enter_resolves_the_gate() -> None:
+    # Regression: the live key bindings have no digit/_select_gate_option route,
+    # so the ONLY keyboard path to answer a human gate is typing into the input
+    # buffer and pressing Enter (-> _on_accept -> _submit_input). That must
+    # resolve _gate_future (not _active_input, which is None during a gate), or
+    # the engine's run_human_gate awaits forever and the live TUI hangs.
+    async def go():
+        app = NarrativeApp(_tree(), live=True, mouse=False)
+        app.on_event({"id": "g", "agent_id": None, "type": "human_gate_pending",
+                      "payload": {"prompt": "Merge?",
+                                  "options": [{"label": "Merge"}, {"label": "Back"}]}})
+        fut = asyncio.ensure_future(app.human_input_fn())
+        await asyncio.sleep(0)
+        assert app._gate_active is True
+        assert app._active_input is None          # gate uses _gate_future, not this
+        assert app._input_buffer is not None
+        app._input_buffer.text = "1"              # user types option index
+        app._on_accept(app._input_buffer)         # Enter
+        assert await fut == "1"                   # engine's matcher maps "1" -> opt 1
+        assert app._gate_active is False
+        assert app._gate_future is None
+    asyncio.run(go())
+
+
 def test_human_output_fn_surfaces_validation_feedback() -> None:
     app = NarrativeApp(_tree(), live=True, mouse=False)
     app.human_output_fn("─── HUMAN GATE ───")     # decorative → ignored
