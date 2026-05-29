@@ -118,81 +118,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         return 2
 
 
-def _cmd_new_tui(args: argparse.Namespace) -> int:
-    """TUI branch of ``imp new``: manages its own event loop via run_live_tui so
-    there is no nested anyio.run() call."""
-    import functools
-
-    from imp.cli.signals import InterruptCoordinator
-    from imp.cli.tui import run_live_tui
-
-    install_process_group()
-    project = _project_root()
-    lock = ProjectLock(project / ".imp" / "lock")
-    try:
-        with lock.acquire():
-            try:
-                change = Change.create(project, title=args.title)
-            except (LoadError, LoadErrors) as e:
-                print(f"imp: {e}", file=sys.stderr)
-                return 2
-            _write_change_lock(change)
-            try:
-                print(f"Created Change {change.id}: {change.title!r}")
-                coord = InterruptCoordinator()
-                bound = functools.partial(run_change, change)
-                try:
-                    result = run_live_tui(
-                        run_change=bound,
-                        coordinator=coord,
-                        mouse=not args.no_mouse,
-                    )
-                except (LoadError, LoadErrors) as e:
-                    print(f"imp: {e}", file=sys.stderr)
-                    return 2
-                except BaseExceptionGroup as eg:
-                    # run_live_tui may wrap engine errors in an ExceptionGroup
-                    # (anyio task group); unwrap and surface a LoadError/LoadErrors
-                    # if one is present.
-                    load_errs = [
-                        exc for exc in eg.exceptions
-                        if isinstance(exc, (LoadError, LoadErrors))
-                    ]
-                    if load_errs:
-                        print(f"imp: {load_errs[0]}", file=sys.stderr)
-                        return 2
-                    raise
-                # Honor exit_reason: pause/eof save state; done/completed use result.
-                if coord.should_pause:
-                    pause_and_exit(change, reason="ctrl-c")
-                    print(f"\nChange {change.id}: paused (ctrl-c)")
-                    return 130
-                elif result is None:
-                    # App exited with no engine result and no pause flag → Ctrl-D / EOF.
-                    pause_and_exit(change, reason="ctrl-d")
-                    print(f"\nChange {change.id}: paused (ctrl-d)")
-                    return 130
-                elif result is RunResult.COMPLETED:
-                    print(f"Change {change.id}: {result.value}")
-                    return 0
-                else:
-                    # RunResult.PAUSED (workflow self-pause / human gate) or
-                    # RunResult.ERRORED — engine already saved state.
-                    print(f"Change {change.id}: {result.value}")
-                    return 1
-            finally:
-                _clear_change_lock(change)
-    except LockHeld as lock_err:
-        print(
-            f"imp: another Change is running (lock held by pid {lock_err.held_by_pid})",
-            file=sys.stderr,
-        )
-        return 2
-
-
 def _cmd_new(args: argparse.Namespace) -> int:
-    if _use_tui(no_tui=args.no_tui):
-        return _cmd_new_tui(args)
     return anyio.run(_async_cmd_new, args)
 
 
@@ -226,9 +152,6 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
                 coord = InterruptCoordinator()
                 rc = 0
-                # --no-tui resume keeps the lighter current-step replay (no
-                # scroll-back; design §4.2). The workflow_resumed marker is
-                # still appended exactly once, as today.
                 change.event_log().append(
                     agent_id=None, type="workflow_resumed", payload={})
                 if state.step is not None:
@@ -275,110 +198,13 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return 2
 
 
-def _cmd_resume_tui(args: argparse.Namespace) -> int:
-    """TUI branch of ``imp resume``: manages its own event loop via run_live_tui
-    so there is no nested anyio.run() call.  Full-log seeding (F4): the prior
-    events.jsonl is fed into the builder synchronously before the engine starts,
-    so the user sees complete scroll-back history before the live tail begins."""
-    import functools
-
-    from imp.cli.signals import InterruptCoordinator
-    from imp.cli.tui import run_live_tui
-
-    install_process_group()
-    project = _project_root()
-    lock = ProjectLock(project / ".imp" / "lock")
-    try:
-        with lock.acquire():
-            try:
-                change = Change.load(project, args.change_id)
-            except (LoadError, LoadErrors) as err:
-                print(f"imp: {err}", file=sys.stderr)
-                return 2
-            state = State.load(change.state_dir)
-            if state.status not in ("paused", "errored"):
-                print(
-                    f"imp: Change {change.id} status is {state.status!r}; "
-                    "nothing to resume",
-                    file=sys.stderr,
-                )
-                return 2
-            _write_change_lock(change)
-            try:
-                print(f"Resuming Change {change.id}: {change.title!r}")
-                print(f"Phase: {state.phase}, step: {state.step}")
-                coord = InterruptCoordinator()
-                # Append the resumed marker once (as the --no-tui path does),
-                # THEN snapshot the full log to seed the builder (F4).
-                # Order: marker first so it is part of the seeded history
-                # exactly once.  The model's re-entry dedup (Task 10B) then
-                # handles the re-emitted phase_started/step_started without
-                # creating duplicate nodes.
-                change.event_log().append(
-                    agent_id=None, type="workflow_resumed", payload={})
-                seed = list(change.event_log().read())
-                state.status = "running"
-                state.save(change.state_dir)
-                bound = functools.partial(run_change, change)
-                try:
-                    result = run_live_tui(
-                        run_change=bound,
-                        coordinator=coord,
-                        mouse=not args.no_mouse,
-                        seed_events=seed,
-                    )
-                except (LoadError, LoadErrors) as e:
-                    print(f"imp: {e}", file=sys.stderr)
-                    return 2
-                except BaseExceptionGroup as eg:
-                    # run_live_tui may wrap engine errors in an ExceptionGroup
-                    # (anyio task group); unwrap and surface a LoadError/LoadErrors
-                    # if one is present.
-                    load_errs = [
-                        exc for exc in eg.exceptions
-                        if isinstance(exc, (LoadError, LoadErrors))
-                    ]
-                    if load_errs:
-                        print(f"imp: {load_errs[0]}", file=sys.stderr)
-                        return 2
-                    raise
-                # Honor exit_reason: pause/eof save state; done/completed use result.
-                if coord.should_pause:
-                    pause_and_exit(change, reason="ctrl-c")
-                    print(f"\nChange {change.id}: paused (ctrl-c)")
-                    return 130
-                elif result is None:
-                    # App exited with no engine result and no pause flag → Ctrl-D / EOF.
-                    pause_and_exit(change, reason="ctrl-d")
-                    print(f"\nChange {change.id}: paused (ctrl-d)")
-                    return 130
-                elif result is RunResult.COMPLETED:
-                    print(f"Change {change.id}: {result.value}")
-                    return 0
-                else:
-                    # RunResult.PAUSED (workflow self-pause / human gate) or
-                    # RunResult.ERRORED — engine already saved state.
-                    print(f"Change {change.id}: {result.value}")
-                    return 1
-            finally:
-                _clear_change_lock(change)
-    except LockHeld as lock_err:
-        print(
-            f"imp: another Change is running (lock held by pid {lock_err.held_by_pid})",
-            file=sys.stderr,
-        )
-        return 2
-
-
 def _cmd_resume(args: argparse.Namespace) -> int:
-    if _use_tui(no_tui=args.no_tui):
-        return _cmd_resume_tui(args)
     return anyio.run(_async_cmd_resume, args)
 
 
 def _stream_sinks() -> tuple[Callable[[dict[str, Any]], None], Callable[[str], None]]:
     """Return (on_event, output) callbacks that stream the text view to stdout.
-    Shared by the --no-tui paths of `imp new` and `imp resume`."""
+    Shared by `imp new` and `imp resume`."""
     from imp.cli.palette import should_use_color
     from imp.cli.render_text import stream_event
     color = should_use_color(sys.stdout)
@@ -396,33 +222,11 @@ def _stream_sinks() -> tuple[Callable[[dict[str, Any]], None], Callable[[str], N
     return emit_line, output
 
 
-def _use_tui(*, no_tui: bool, stream: Any = None) -> bool:
-    """TUI is the default on a TTY; forced off by --no-tui or a non-TTY stdout
-    (design §8)."""
-    if no_tui:
-        return False
-    stream = stream if stream is not None else sys.stdout
-    return bool(getattr(stream, "isatty", lambda: False)())
-
-
 def _term_width() -> int:
     try:
         return os.get_terminal_size().columns
     except OSError:
         return 80
-
-
-def _tui_available() -> bool:
-    """True once the TUI entry point ``run_log_tui`` is importable (Task 27+).
-    Until then — including while ``cli/tui.py`` is being built up incrementally
-    across M4 but its entry point doesn't yet exist — a TTY degrades to the text
-    view rather than raising ImportError. Checking the symbol (not just the
-    module's existence) keeps the suite green during M4 construction. Only called
-    when ``_use_tui`` is already True (a real TTY), so importing here is fine."""
-    import importlib.util
-    if importlib.util.find_spec("imp.cli.tui") is None:
-        return False
-    return hasattr(importlib.import_module("imp.cli.tui"), "run_log_tui")
 
 
 def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
@@ -532,10 +336,6 @@ def _cmd_log(args: argparse.Namespace) -> int:
     events = list(change.event_log().read())
     tree = narrative.build_tree(events)
 
-    if _use_tui(no_tui=args.no_tui) and _tui_available():
-        from imp.cli.tui import run_log_tui  # built in M4
-        return run_log_tui(tree, full=args.full, mouse=not args.no_mouse)
-
     from imp.cli.palette import should_use_color
     width = _term_width()
     color = should_use_color(sys.stdout)
@@ -599,28 +399,19 @@ def main(argv: list[str] | None = None) -> int:
 
     p_new = sub.add_parser("new")
     p_new.add_argument("title", nargs="?")
-    p_new.add_argument("--no-tui", action="store_true",
-                       help="Force the plain-text stream even on a TTY.")
-    p_new.add_argument("--no-mouse", action="store_true",
-                       help="Disable TUI mouse capture.")
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
     p_resume.add_argument("change_id", type=int)
-    p_resume.add_argument("--no-tui", action="store_true",
-                          help="Force the plain-text stream even on a TTY.")
-    p_resume.add_argument("--no-mouse", action="store_true",
-                          help="Disable TUI mouse capture.")
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(
         "log",
         help="Show the narrative for a Change.",
         description=(
-            "Show the narrative for a Change. Interactive TUI on a TTY; "
-            "plain text when piped or with --no-tui. --full starts every fold "
-            "expanded. Set NO_COLOR=1 to disable colors in the text view. "
-            "Tip: imp log N --no-tui --full | grep ... for line-oriented scripting."
+            "Show the narrative for a Change as plain text. --full starts every "
+            "fold expanded. Set NO_COLOR=1 to disable colors. "
+            "Tip: imp log N --full | grep ... for line-oriented scripting."
         ),
     )
     p_log.add_argument("change_id", type=int, nargs="?")
@@ -632,10 +423,6 @@ def main(argv: list[str] | None = None) -> int:
         "--no-pager", action="store_true",
         help="Disable the pager even when stdout is a TTY.",
     )
-    p_log.add_argument("--no-tui", action="store_true",
-                       help="Force the plain-text view even on a TTY.")
-    p_log.add_argument("--no-mouse", action="store_true",
-                       help="Disable TUI mouse capture.")
     p_log.set_defaults(func=_cmd_log)
 
     p_status = sub.add_parser("status")
