@@ -309,7 +309,8 @@ class NarrativeApp:
     sticky tail (M5); `live=False` is read-only log mode."""
 
     def __init__(self, tree: nv.NarrativeTree, *, live: bool, mouse: bool,
-                 full: bool = False, _osc_writer=None, builder=None) -> None:
+                 full: bool = False, _osc_writer=None, builder=None,
+                 coordinator=None) -> None:
         # emission thread: on-loop, verified 2026-05-28 (grep found no
         # to_thread/run_in_executor/Thread usage in providers/agents/engine)
         self.live = live
@@ -322,6 +323,9 @@ class NarrativeApp:
         self._lines: list[RenderedLine] = []
         self.status_note = ""
         self._osc_writer = _osc_writer        # injected in tests; real one in build
+        self.coordinator = coordinator
+        self.exit_reason = None               # None | "pause" | "eof" | "done"
+        self._pausing = False
         # For live mode, hold the builder so on_event can feed it incrementally;
         # the tree is then a live view over builder.tree (design §7.7).
         # If no builder is supplied in live mode, create a fresh one so callers
@@ -560,6 +564,41 @@ class NarrativeApp:
             except Exception:
                 pass
 
+    # -- interrupt reconciliation (H2) ----------------------------------------
+    def request_pause(self) -> None:
+        """Keyboard Ctrl-C OR an OS signal converge here (H2 c). Guarded so a
+        signal + keystroke can't double-pause."""
+        if self._pausing:
+            return
+        self._pausing = True
+        self.exit_reason = "pause"
+        # Unwind any awaited input future so run_change doesn't hang mid-prompt.
+        self._escape_input()
+        # Flip the coordinator's pause + fire the runner interrupt (async).
+        if self.coordinator is not None and self.application is not None:
+            self.application.create_background_task(self.coordinator.signal_pause())
+        elif self.coordinator is not None:
+            # no application (unit test): schedule on the running loop
+            import asyncio
+            asyncio.ensure_future(self.coordinator.signal_pause())
+        if self.application is not None:
+            self.application.exit()
+
+    def request_exit_eof(self) -> None:
+        """Keyboard Ctrl-D (H2 a, EOF path)."""
+        if self._pausing:
+            return
+        self._pausing = True
+        self.exit_reason = "eof"
+        self._escape_input()
+        if self.application is not None:
+            self.application.exit()
+
+    def signal_paused_externally(self) -> None:
+        """Called by the CLI when run_signal_receiver fires (H2 b) so the app
+        also tears down. Converges on the same guard (H2 c)."""
+        self.request_pause()
+
     # -- live event sink (design §7.7) ----------------------------------------
     def on_event(self, event: dict) -> None:
         """Synchronous on_event sink (design §7.7): builder.add then invalidate.
@@ -575,6 +614,7 @@ class NarrativeApp:
             self.new_below_count = 0
         else:
             self.new_below_count += 1
+            self.cursor_line = min(self.cursor_line, max(0, len(self._lines) - 1))
         self._invalidate()
 
     async def clock_tick(self) -> None:
@@ -660,11 +700,65 @@ class NarrativeApp:
             @kb.add("q")
             def _(event): event.app.exit()
 
-        from prompt_toolkit.layout.controls import FormattedTextControl as _FTC
+        from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl as _FTC
+        from prompt_toolkit.layout.containers import VSplit
+
+        windows = [self._narrative_window]
+        if self.live:
+            # NOTE: do NOT capture the event loop here — build_application runs
+            # before anyio.run() starts, so the running loop doesn't exist yet.
+            # run_live_tui sets self._loop inside _main (Task 32).
+            prompt_ctrl = _FTC(text=lambda: [("bold", self._input_prompt)])
+            self._input_window = Window(
+                content=BufferControl(buffer=self._input_buffer), height=1)
+            input_row = VSplit([Window(content=prompt_ctrl, width=2), self._input_window])
+            windows.append(input_row)
         footer_window = Window(content=_FTC(text=self._footer_text), height=1)
-        root_container = HSplit([self._narrative_window, footer_window])
+        windows.append(footer_window)
+        root_container = HSplit(windows)
+
+        if self.live:
+            # Input-bar bindings (the buffer handles normal typing itself).
+            @kb.add("escape", eager=True)
+            def _(event): self._escape_input()
+
+            @kb.add("c-c")
+            def _(event): self.request_pause()        # H2 a
+
+            @kb.add("c-d")
+            def _(event): self.request_exit_eof()     # H2 a
+
+            # Narrative nav via Ctrl-chords (letters/space/tab type — §7.4).
+            @kb.add("pageup")
+            def _(event): self.page(-1)
+
+            @kb.add("pagedown")
+            def _(event): self.page(1)
+
+            @kb.add("end")
+            def _(event): self.goto_tail()            # re-attach to live tail
+
+            @kb.add("home")
+            def _(event): self.goto_top()
+
+            @kb.add("c-n")
+            def _(event): self.next_fold()
+
+            @kb.add("c-p")
+            def _(event): self.prev_fold()
+
+            @kb.add("c-space")
+            def _(event): self.toggle_fold_at_cursor()
+
+            @kb.add("c-e")
+            def _(event): self.toggle_expand_all()
+
+            @kb.add("c-y")
+            def _(event): self.copy_focused_node()
+
+        focused = self._input_window if self.live else self._narrative_window
         self.application = Application(
-            layout=Layout(root_container, focused_element=self._narrative_window),
+            layout=Layout(root_container, focused_element=focused),
             key_bindings=kb, full_screen=True, mouse_support=self.mouse,
             input=_input, output=_output)
         return self.application

@@ -35,6 +35,42 @@ def test_scrolled_up_user_is_not_yanked_to_tail_on_new_event() -> None:
     assert app.new_below_count >= 1         # footer "↓ N new" hint source
 
 
+class _FakeCoord:
+    def __init__(self):
+        self.paused = 0
+    async def signal_pause(self):
+        self.paused += 1
+    @property
+    def should_pause(self):
+        return self.paused > 0
+
+
+def test_request_pause_is_idempotent_across_signal_and_keystroke() -> None:
+    import asyncio
+    async def go():
+        coord = _FakeCoord()
+        app = NarrativeApp(nv.build_tree([]), live=True, mouse=False, coordinator=coord)
+        app.request_pause()          # keyboard Ctrl-C
+        app.request_pause()          # again (or an OS signal racing in)
+        await asyncio.sleep(0)
+        assert app.exit_reason == "pause"
+        assert app._pausing is True  # guard set; double-pause prevented
+    asyncio.run(go())
+
+
+def test_request_pause_resolves_a_pending_input_future() -> None:
+    import asyncio
+    from imp.cli.prompt import ESC_SENTINEL
+    async def go():
+        app = NarrativeApp(nv.build_tree([]), live=True, mouse=False, coordinator=_FakeCoord())
+        fut = asyncio.ensure_future(app.request_line("> "))
+        await asyncio.sleep(0)
+        app.request_pause()          # pause mid-prompt must unwind the awaiter
+        # the future resolves (sentinel) so run_change isn't left hanging
+        assert await fut == ESC_SENTINEL
+    asyncio.run(go())
+
+
 def test_subagent_tokens_count_toward_footer_total() -> None:
     app = NarrativeApp(nv.build_tree([]), live=True, mouse=False)
     app.on_event(_ev("1", "change_created", change_id=1, title="t"))
