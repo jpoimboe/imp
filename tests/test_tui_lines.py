@@ -79,9 +79,11 @@ def test_prose_renders_markdown_bold_via_rich() -> None:
     lines = render_tree_to_lines(tree, FoldState(), width=80, color=True)
     blob = "\n".join("".join(t for _s, t in ln.fragments) for ln in lines)
     assert "bold" in blob
-    # rich emits ANSI styling around the bold run when color is on.
-    assert any("\x1b[" in (ln_text := "".join(t for _s, t in ln.fragments)) and "bold" in ln_text
-               for ln in lines) or True   # tolerant: exact ANSI varies by rich version
+    # rich must actually apply bold styling: some fragment on an agent-prose line
+    # carries "bold" in its prompt_toolkit style string.
+    prose_frags = [frag for ln in lines if isinstance(ln.node, nv.AgentTextNode)
+                   for frag in ln.fragments]
+    assert any("bold" in style for style, text in prose_frags)
 
 
 def test_ansi_memo_caches_per_node_and_width() -> None:
