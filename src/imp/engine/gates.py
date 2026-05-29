@@ -78,7 +78,7 @@ async def run_human_gate(
     *,
     input_fn: Callable[[], str | Awaitable[str]],
     output_fn: Callable[[str], None],
-) -> Action:
+) -> tuple[Action, HumanOption]:
     """Prompt the user with the gate's options. Returns the chosen action.
 
     Matching rules:
@@ -102,7 +102,7 @@ async def run_human_gate(
         raw = result.strip()
         match = _match_human_option(raw, gate.options, output_fn)
         if match is not None:
-            return match.action
+            return match.action, match
 
 
 def _match_human_option(

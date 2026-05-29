@@ -614,7 +614,7 @@ async def _run_gate(
             "prompt": gate.prompt,
             "options": [{"label": opt.label} for opt in gate.options],
         })
-        action = await run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
+        action, _chosen = await run_human_gate(gate, input_fn=human_input_fn, output_fn=human_output_fn)
         _emit(log, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
         return action
     if isinstance(gate, ScriptGate):

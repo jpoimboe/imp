@@ -178,17 +178,18 @@ async def test_human_gate_match_by_number() -> None:
     gate = _human_gate(("Yes", Continue()), ("No", Pause()))
     inputs = iter(["1"])
     out: list[str] = []
-    action = await run_human_gate(
+    action, chosen = await run_human_gate(
         gate, input_fn=lambda: next(inputs), output_fn=out.append
     )
     assert isinstance(action, Continue)
+    assert chosen.label == gate.options[0].label
 
 
 @pytest.mark.anyio
 async def test_human_gate_match_by_label_prefix() -> None:
     gate = _human_gate(("Approve", Continue()), ("Reject", Pause()))
     inputs = iter(["app"])
-    action = await run_human_gate(
+    action, _chosen = await run_human_gate(
         gate, input_fn=lambda: next(inputs), output_fn=lambda _s: None
     )
     assert isinstance(action, Continue)
@@ -201,7 +202,7 @@ async def test_human_gate_reprompts_on_ambiguous() -> None:
     )
     inputs = iter(["app", "Approve"])  # 1st ambiguous, 2nd exact
     out: list[str] = []
-    action = await run_human_gate(
+    action, _chosen = await run_human_gate(
         gate, input_fn=lambda: next(inputs), output_fn=out.append
     )
     assert isinstance(action, Continue)
@@ -213,7 +214,7 @@ async def test_human_gate_reprompts_on_invalid() -> None:
     gate = _human_gate(("Yes", Continue()), ("No", Pause()))
     inputs = iter(["maybe", "9", "2"])
     out: list[str] = []
-    action = await run_human_gate(
+    action, _chosen = await run_human_gate(
         gate, input_fn=lambda: next(inputs), output_fn=out.append
     )
     assert isinstance(action, Pause)
