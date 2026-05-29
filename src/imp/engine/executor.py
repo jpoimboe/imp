@@ -24,6 +24,7 @@ from imp.agents.runner import (
 )
 from imp.engine import error_policy
 from imp.engine.change import Change
+from imp.engine.completion import completion_instruction
 from imp.engine.gates import (
     DecideNoMatch,
     evaluate_decide,
@@ -216,6 +217,48 @@ async def _execute_phase(
         return Continue()
 
 
+_NUDGE_LIMIT = 2
+
+
+def _build_continuation_fn(
+    *,
+    interactive: bool,
+    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
+    instruction: str,
+) -> Callable[[str], str | None | Awaitable[str | None]] | None:
+    """Build the end-of-turn continuation hook the provider calls when an
+    agent ends a turn without complete_step.
+
+    interactive: wrap the user chat input — the human keeps the conversation
+    going, so it always returns a string (an interactive agent ends only by
+    calling complete_step). Preserves today's interactive-resume behavior.
+
+    non-interactive: a fresh nudge counter per invocation. The first
+    _NUDGE_LIMIT calls return the corrective instruction; after that, None —
+    which makes the provider emit agent_incomplete (→ Pause).
+    """
+    if interactive:
+        if user_chat_input_fn is None:
+            return None
+
+        def _interactive(_last_text: str) -> str | Awaitable[str]:
+            return user_chat_input_fn("")
+
+        return _interactive
+
+    nudge = f"You ended your turn without calling `complete_step`. {instruction}"
+    count = 0
+
+    def _nudge(_last_text: str) -> str | None:
+        nonlocal count
+        if count >= _NUDGE_LIMIT:
+            return None
+        count += 1
+        return nudge
+
+    return _nudge
+
+
 async def _run_agent_invocation(
     *,
     agent_id: str,
@@ -268,6 +311,17 @@ async def _run_agent_invocation(
         ),
     )
 
+    # Change 5: tell every agent — from its own output schema — to call
+    # complete_step. Single source of truth shared with the nudge closure.
+    instruction = completion_instruction(agent_def.output_schema)
+    rendered = f"{rendered}\n\n{instruction}"
+
+    continuation_fn = _build_continuation_fn(
+        interactive=interactive,
+        user_chat_input_fn=user_chat_input_fn,
+        instruction=instruction,
+    )
+
     # Resolve subagents into their AgentDefs
     subagent_defs = {
         name: workflow.agents[name]
@@ -311,6 +365,7 @@ async def _run_agent_invocation(
         subagent_defs=subagent_defs,
         max_tool_calls=resolved_max_tool_calls,
         user_input_fn=user_chat_input_fn if interactive else None,
+        continuation_fn=continuation_fn,
         agent_id=agent_id,
         event_log=log,
         first_event_parent_id=started["id"],  # chains step_context.parent_id to step_started

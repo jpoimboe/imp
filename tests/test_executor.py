@@ -550,6 +550,130 @@ def test_gate_dir_allocator_never_reclaims_wiped_n(tmp_path: Path) -> None:
     assert d2.name == "lint-2"            # NOT lint-1 again
 
 
+@pytest.mark.anyio
+async def test_system_prompt_carries_completion_instruction_and_continuation(
+    tmp_path: Path,
+) -> None:
+    """The executor appends the schema-derived completion instruction to the
+    system prompt and wires a non-interactive nudge continuation_fn."""
+    from imp.providers import resolve
+
+    wf = tmp_path / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n"
+        "  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\n"
+        "go\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [a]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
+        "a:\n  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+    )
+    change = Change.create(tmp_path, title="t")
+
+    captured: dict[str, AgentInvocation] = {}
+
+    class _CapRunner:
+        def __init__(self, inv: AgentInvocation) -> None:
+            self._inv = inv
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            captured["inv"] = invocation
+            yield {"type": "agent_output",
+                   "payload": {"status": "Success", "verdict": "approve"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _CapProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _CapRunner:
+            return _CapRunner(invocation)
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _CapProvider(model),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    inv = captured["inv"]
+    # Change 5: instruction injected, naming the tool + enum values.
+    assert "complete_step" in inv.system_prompt
+    for token in ("status", "Success", "Error", "verdict", "approve", "rework"):
+        assert token in inv.system_prompt, token
+    # Change 3: non-interactive step gets a nudge closure that exhausts to None.
+    assert inv.continuation_fn is not None
+    assert inv.continuation_fn("prose") is not None   # nudge 1
+    assert inv.continuation_fn("prose") is not None   # nudge 2
+    assert inv.continuation_fn("prose") is None        # exhausted (N=2)
+
+
+@pytest.mark.anyio
+async def test_agent_incomplete_error_pauses(tmp_path: Path) -> None:
+    """A runner that emits an agent_incomplete error makes the step Pause
+    (fatal), not retry."""
+    from imp.providers import resolve
+
+    wf = tmp_path / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [a]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
+        "a:\n  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+    )
+    change = Change.create(tmp_path, title="t")
+
+    class _IncompleteRunner:
+        def __init__(self, inv: AgentInvocation) -> None:
+            pass
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            yield {"type": "error", "payload": {
+                "category": "agent_incomplete",
+                "kind": "no_complete_step_after_nudges",
+                "message": "x",
+            }}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _IncompleteProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _IncompleteRunner:
+            return _IncompleteRunner(invocation)
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _IncompleteProvider(model),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
