@@ -1,0 +1,196 @@
+# src/imp/cli/render_text.py
+"""Plain-text narrative view (--no-tui / non-TTY). Walks a NarrativeTree and
+yields wrapped ANSI lines. No rich — plain wrapped text only (design §3, §6).
+
+Default: folds render as one-line summaries; agent/user prose in full.
+--full: every fold expanded inline (Task 13). Same content the TUI shows after
+expand-all.
+"""
+from __future__ import annotations
+
+import textwrap
+from collections.abc import Iterator
+from typing import Any
+
+from imp.cli import narrative as nv
+from imp.cli import palette as pal
+
+_INDENT = "  "          # two spaces per tree level
+
+
+def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
+                width: int = 80) -> Iterator[str]:
+    root = tree.root
+    head = f"#{root.change_id if root.change_id is not None else '?'}  {root.title}".rstrip()
+    if root.status != "running":
+        head = f"{head}  ({root.status})"
+    yield pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
+    for child in root.children:
+        yield from _render(child, depth=0, full=full, color=color, width=width)
+
+
+def _wrap(text: str, width: int, depth: int) -> list[str]:
+    indent = _INDENT * depth
+    avail = max(8, width - len(indent))
+    out: list[str] = []
+    for para in text.split("\n"):
+        if not para:
+            out.append(indent)
+            continue
+        for line in textwrap.wrap(para, width=avail) or [""]:
+            out.append(f"{indent}{line}")
+    return out
+
+
+def _line(text: str, depth: int, color: bool, *codes: str) -> str:
+    return pal.ansi(f"{_INDENT * depth}{text}", *codes, enabled=color)
+
+
+def _render(node: Any, *, depth: int, full: bool, color: bool,
+            width: int) -> Iterator[str]:
+    if isinstance(node, nv.PhaseNode):
+        yield _line(node.name, depth, color, *pal.NODE_COLORS["phase"])
+        for c in node.children:
+            yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
+        return
+
+    if isinstance(node, nv.StepNode):
+        label = f"agent_gate: {node.name}" if node.kind == "agent_gate" else node.name
+        if node.interactive:
+            label += " (interactive)"
+        yield _line(label, depth, color, *pal.NODE_COLORS["step"])
+        for c in node.children:
+            yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
+        return
+
+    if isinstance(node, nv.AgentTextNode):
+        for line in _wrap(node.text, width, depth):
+            yield pal.ansi(line, enabled=color)
+        return
+
+    if isinstance(node, nv.UserMessageNode):
+        for line in _wrap(f"> {node.text}", width, depth):
+            yield pal.ansi(line, *pal.NODE_COLORS["user"], enabled=color)
+        return
+
+    if isinstance(node, nv.ThinkingFold):
+        if full:
+            yield _line(f"{pal.fold_glyph(expanded=True)} thinking", depth, color,
+                        *pal.NODE_COLORS["thinking"])
+            for line in _wrap(node.content, width, depth + 1):
+                yield pal.ansi(line, *pal.NODE_COLORS["thinking"], enabled=color)
+        else:
+            summary = f"{pal.fold_glyph(expanded=False)} thinking · {len(node.content)} chars"
+            yield _line(summary, depth, color, *pal.NODE_COLORS["thinking"])
+        return
+
+    if isinstance(node, nv.ToolBurstFold):
+        yield from _render_burst(node, depth=depth, full=full, color=color, width=width)
+        return
+
+    if isinstance(node, nv.SubagentFold):
+        yield from _render_subagent(node, depth=depth, full=full, color=color, width=width)
+        return
+
+    if isinstance(node, nv.StepContextNode):
+        yield from _render_step_context(node, depth=depth, full=full, color=color, width=width)
+        return
+
+    if isinstance(node, nv.GateNode):
+        yield from _render_gate(node, depth=depth, color=color, width=width)
+        return
+
+    if isinstance(node, nv.OutcomeLine):
+        text = pal.action_text(node.action)
+        ac = pal.accent_color(node.action)
+        codes = (ac,) if ac else ()
+        yield _line(f"→ {text}", depth, color, *codes)
+        return
+
+    if isinstance(node, nv.ErrorNode):
+        if node.is_warning:
+            yield _line(f"warning: {node.message}", depth, color, *pal.NODE_COLORS["warning"])
+        else:
+            tag = f"[{node.category}] " if node.category else ""
+            yield _line(f"error: {tag}{node.message}", depth, color, *pal.NODE_COLORS["error"])
+        return
+
+    if isinstance(node, nv.FallbackLine):
+        kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
+        yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color, "dim")
+        return
+
+
+def _burst_counts(burst: nv.ToolBurstFold) -> str:
+    counts: dict[str, int] = {}
+    for c in burst.calls:
+        counts[c.name] = counts.get(c.name, 0) + 1
+    by_count = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return " · ".join(f"{n} {name}" for name, n in by_count)
+
+
+def _render_burst(burst, *, depth, full, color, width) -> Iterator[str]:
+    total = len(burst.calls)
+    if not full:
+        glyph = pal.fold_glyph(expanded=False)
+        yield _line(f"{glyph} {total} tools · {_burst_counts(burst)}", depth, color,
+                    *pal.NODE_COLORS["tools"])
+        return
+    yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
+                *pal.NODE_COLORS["tools"])
+    for c in burst.calls:
+        args = " ".join(f"{k}={v}" for k, v in (c.input or {}).items())
+        killed = " [killed]" if c.killed else ""
+        result = (c.result or "").replace("\n", " ")
+        if len(result) > 60:
+            result = result[:60] + "…"
+        line = f"⏺ {c.name}  {args}  → {result}{killed}".rstrip()
+        for wl in _wrap(line, width, depth + 1):
+            yield pal.ansi(wl, *pal.NODE_COLORS["tools"], enabled=color)
+
+
+def _render_subagent(sub, *, depth, full, color, width) -> Iterator[str]:
+    if not full:
+        glyph = pal.fold_glyph(expanded=False)
+        tail = "running" if sub.running else f"→ {(sub.outcome or '').strip()[:40]}"
+        yield _line(f"{glyph} task → {sub.subagent_name} · {sub.event_count} events · {tail}",
+                    depth, color, *pal.NODE_COLORS["subagent"])
+        return
+    yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
+                depth, color, *pal.NODE_COLORS["subagent"])
+    for c in sub.tree.root.children:
+        yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
+
+
+def _render_step_context(ctx, *, depth, full, color, width) -> Iterator[str]:
+    p = ctx.payload
+    provider = p.get("provider", "?")
+    model = p.get("model", "?")
+    tools = p.get("tools_schema") or []
+    if not full:
+        yield _line(f"{pal.fold_glyph(expanded=False)} context · {provider}/{model} · "
+                    f"{len(tools)} tools", depth, color, *pal.NODE_COLORS["metadata"])
+        return
+    yield _line(f"{pal.fold_glyph(expanded=True)} context · {provider}/{model} · "
+                f"max_tool_calls={p.get('max_tool_calls', '?')}", depth, color,
+                *pal.NODE_COLORS["metadata"])
+    yield _line("system_prompt:", depth + 1, color, *pal.NODE_COLORS["metadata"])
+    for line in _wrap(str(p.get("system_prompt", "")), width, depth + 2):
+        yield pal.ansi(line, *pal.NODE_COLORS["metadata"], enabled=color)
+    yield _line("tools:", depth + 1, color, *pal.NODE_COLORS["metadata"])
+    for t in tools:
+        name = t.get("name", t) if isinstance(t, dict) else t
+        yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"])
+
+
+def _render_gate(gate, *, depth, color, width) -> Iterator[str]:
+    action = pal.action_text(gate.action) if gate.action is not None else "pending"
+    ac = pal.accent_color(gate.action) if gate.action is not None else None
+    header = f"{gate.kind} gate → {action}"
+    yield _line(header, depth, color, *pal.NODE_COLORS["gate"])
+    if gate.prompt:
+        for line in _wrap(gate.prompt, width, depth + 1):
+            yield pal.ansi(line, *pal.NODE_COLORS["gate"], enabled=color)
+        for opt in gate.options:
+            yield _line(f"- {opt.get('label', opt)}", depth + 1, color,
+                        *pal.NODE_COLORS["gate"])
