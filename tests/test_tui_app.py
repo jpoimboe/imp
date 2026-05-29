@@ -105,3 +105,24 @@ def test_handle_mouse_click_on_fold_toggles_it() -> None:
     assert app.fold_state.is_expanded(fold) is False
     app._on_fold_click(fold)
     assert app.fold_state.is_expanded(fold) is True
+
+
+def test_mouse_handler_fires_only_on_mouse_up() -> None:
+    from prompt_toolkit.mouse_events import MouseEventType
+    app = NarrativeApp(nv.build_tree(SAMPLE), live=False, mouse=True)
+    idx = next(i for i, ln in enumerate(app._lines) if ln.is_fold_header)
+    fold = app._lines[idx].node
+    handler = app._make_mouse_handler(fold)
+    before = app.fold_state.is_expanded(fold)
+
+    class _Down:  # minimal stub — handler only reads event_type
+        event_type = MouseEventType.MOUSE_DOWN
+
+    handler(_Down())
+    assert app.fold_state.is_expanded(fold) == before     # MOUSE_DOWN: no toggle
+
+    class _Up:
+        event_type = MouseEventType.MOUSE_UP
+
+    handler(_Up())
+    assert app.fold_state.is_expanded(fold) != before      # MOUSE_UP: toggled
