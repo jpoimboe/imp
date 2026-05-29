@@ -49,6 +49,7 @@ class State:
     phase_attempt: int
     status: Status
     current_step: CurrentStep | None = None
+    retry_feedback: dict[str, str] | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
@@ -69,6 +70,7 @@ class State:
             "step_attempt": self.step_attempt, "phase_attempt": self.phase_attempt,
             "status": self.status,
             "current_step": self.current_step.to_dict() if self.current_step else None,
+            "retry_feedback": self.retry_feedback,
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:

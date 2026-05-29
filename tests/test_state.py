@@ -105,6 +105,33 @@ def test_state_round_trip_without_current_step(tmp_path: Path) -> None:
     assert loaded.current_step is None
 
 
+def test_state_round_trip_with_retry_feedback(tmp_path: Path) -> None:
+    s = State(
+        change_id=7,
+        phase="implement",
+        step="coder",
+        step_attempt=1,
+        phase_attempt=0,
+        status="running",
+        retry_feedback={"target_step": "coder", "text": "fix the lint error"},
+    )
+    s.save(tmp_path)
+    loaded = State.load(tmp_path)
+    assert loaded == s
+    assert loaded.retry_feedback == {"target_step": "coder", "text": "fix the lint error"}
+
+
+def test_state_round_trip_retry_feedback_defaults_none(tmp_path: Path) -> None:
+    s = State(
+        change_id=1, phase="p", step=None, step_attempt=0, phase_attempt=0,
+        status="running",
+    )
+    s.save(tmp_path)
+    raw = json.loads((tmp_path / "state.json").read_text())
+    assert raw["retry_feedback"] is None
+    assert State.load(tmp_path).retry_feedback is None
+
+
 def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
     tmp_path: Path,
 ) -> None:
