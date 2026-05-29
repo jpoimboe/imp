@@ -13,7 +13,7 @@ import os
 import shlex
 import subprocess
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -376,14 +376,14 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
 
 
-def _stream_sinks():
+def _stream_sinks() -> tuple[Callable[[dict[str, Any]], None], Callable[[str], None]]:
     """Return (on_event, output) callbacks that stream the text view to stdout.
     Shared by the --no-tui paths of `imp new` and `imp resume`."""
     from imp.cli.palette import should_use_color
     from imp.cli.render_text import stream_event
     color = should_use_color(sys.stdout)
 
-    def emit_line(event: dict) -> None:
+    def emit_line(event: dict[str, Any]) -> None:
         block = stream_event(event, color=color, width=_term_width())
         if block is not None:
             print(block)
@@ -533,7 +533,7 @@ def _cmd_log(args: argparse.Namespace) -> int:
     tree = narrative.build_tree(events)
 
     if _use_tui(no_tui=args.no_tui) and _tui_available():
-        from imp.cli.tui import run_log_tui            # built in M4
+        from imp.cli.tui import run_log_tui  # built in M4
         return run_log_tui(tree, full=args.full, mouse=not args.no_mouse)
 
     from imp.cli.palette import should_use_color
