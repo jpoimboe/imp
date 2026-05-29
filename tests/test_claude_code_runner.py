@@ -447,8 +447,12 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
         assistant(tool_use("c1", "complete_step", {"status": "Success"})), result(),
     ]
 
+    fake: FakeClaudeSDKClient | None = None
+
     def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        nonlocal fake
+        fake = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        return fake
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
@@ -459,6 +463,14 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     )
     events = [e async for e in runner.run(inv)]
     assert events[-1]["type"] == "agent_output"
+
+    # Verify the nudge text was actually sent to the CLI via client.query().
+    # fake.queries records every string (or drained async-iterable) passed to
+    # query(); the continuation nudge is a plain string sent on the resume turn.
+    assert fake is not None
+    assert "please call complete_step" in fake.queries, (
+        f"expected nudge text in fake.queries, got: {fake.queries}"
+    )
 
 
 @pytest.mark.anyio
