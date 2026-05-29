@@ -182,3 +182,128 @@ class FallbackLine:
 class NarrativeTree:
     root: WorkflowNode
     tokens: TokenTotals
+
+
+# ── builder ──────────────────────────────────────────────────────────────────
+from collections.abc import Iterable   # noqa: E402  (kept near builder for clarity)
+
+
+class NarrativeBuilder:
+    """Per-agent_id state machine. add(event) routes one event into the tree.
+
+    Routing order in add() (design §5.3):
+      0. accumulate token usage for EVERY llm_response (before sub routing, so
+         subagent tokens count toward the change total — F2).
+      1. if agent_id is a registered child subagent fold → delegate down.
+      2. else dispatch by event type at the current open scope.
+    """
+
+    def __init__(self) -> None:
+        self._root = WorkflowNode()
+        self._tokens = TokenTotals()
+        self._current_phase: PhaseNode | None = None
+        # Stack of open StepNode containers. A normal step pushes one; an agent
+        # gate that runs *inside* a still-open step pushes a second (design
+        # §5.3 — nested agent-gate container). step_completed / gate_evaluated
+        # (kind=agent) pop.
+        self._step_stack: list[StepNode] = []
+        self._current_burst: ToolBurstFold | None = None
+        # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
+        self._sub_by_agent_id: dict[str, SubagentFold] = {}
+        # open subagent folds keyed by tool_use block id (to close on the
+        # parent's `task` tool_result, which carries the block id, not event id)
+        self._open_sub_by_block: dict[str, SubagentFold] = {}
+        self._pending_human_gate: GateNode | None = None
+        # True for the window between a workflow_resumed event and the first
+        # re-emitted step_started, so resume re-entry can reuse nodes instead of
+        # duplicating them (see Task 10B). Default False; goto loops never set it.
+        self._resuming = False
+
+    # -- public API -----------------------------------------------------------
+    @property
+    def tree(self) -> NarrativeTree:
+        return NarrativeTree(root=self._root, tokens=self._tokens)
+
+    def add(self, event: Any) -> None:
+        if not isinstance(event, dict) or "type" not in event:
+            self._append(ErrorNode(message=_malformed_text(event), is_warning=False))
+            return
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            self._append(ErrorNode(
+                message=f"{event.get('type')}: malformed payload", is_warning=False))
+            return
+
+        etype = event["type"]
+        agent_id = event.get("agent_id")
+
+        # 0. token accumulation — every llm_response, before sub routing (F2).
+        if etype == "llm_response":
+            self._tokens.add_usage(payload.get("usage"))
+
+        # 1. subagent routing by EXACT membership (not a "sub:" prefix check —
+        #    a nested builder's own events carry a sub: id that is NOT one of
+        #    its registered children; only delegate ids we actually registered).
+        if isinstance(agent_id, str) and agent_id in self._sub_by_agent_id:
+            fold = self._sub_by_agent_id[agent_id]
+            fold.nested.add(event)
+            fold.event_count += 1
+            return
+
+        # 2. dispatch by type.
+        handler = self._HANDLERS.get(etype)
+        if handler is None:
+            self._append(FallbackLine(event_type=etype, payload=payload))
+            return
+        handler(self, event, payload)
+
+    # -- scope helpers --------------------------------------------------------
+    def _container(self):
+        if self._step_stack:
+            return self._step_stack[-1]
+        if self._current_phase is not None:
+            return self._current_phase
+        return self._root
+
+    def _append(self, node: Any) -> None:
+        self._container().children.append(node)
+
+    def _flush_burst(self) -> None:
+        self._current_burst = None
+
+    # -- per-type handlers are registered in Task 3+ via _HANDLERS ------------
+    _HANDLERS: dict = {}
+
+
+def _malformed_text(event: Any) -> str:
+    if isinstance(event, dict):
+        return f"malformed event (missing type): {event!r}"[:200]
+    return f"malformed event: {event!r}"[:200]
+
+
+def build_tree(events: Iterable[dict]) -> NarrativeTree:
+    b = NarrativeBuilder()
+    for e in events:
+        b.add(e)
+    return b.tree
+
+
+# Handlers populate this in subsequent tasks; change_created lives here so the
+# skeleton test passes.
+def _h_change_created(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._root.change_id = p.get("change_id")
+    self._root.title = p.get("title", "")
+
+
+NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
+
+
+def _h_phase_started(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    phase = PhaseNode(name=p.get("phase", "?"))
+    self._root.children.append(phase)
+    self._current_phase = phase
+    self._step_stack.clear()
+
+
+NarrativeBuilder._HANDLERS["phase_started"] = _h_phase_started
