@@ -933,8 +933,15 @@ def run_live_tui(*, run_change, coordinator, mouse: bool,
                 finally:
                     # Engine finished (completed, paused, or errored) — ensure
                     # exit_reason is set so the CLI can act on it, then exit the app.
+                    # Guard: if Ctrl-C/Ctrl-D already called application.exit() and
+                    # the app's internal future is cleared, a second exit() raises
+                    # "Application is not running". Swallow it so the interrupt path
+                    # doesn't surface an ExceptionGroup traceback.
                     app_obj.exit_reason = app_obj.exit_reason or "done"
-                    application.exit()
+                    try:
+                        application.exit()
+                    except Exception:
+                        pass  # app already exited (Ctrl-C / Ctrl-D path)
 
             tg.start_soon(_engine)
 

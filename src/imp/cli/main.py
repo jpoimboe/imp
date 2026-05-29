@@ -141,11 +141,27 @@ def _cmd_new_tui(args: argparse.Namespace) -> int:
                 print(f"Created Change {change.id}: {change.title!r}")
                 coord = InterruptCoordinator()
                 bound = functools.partial(run_change, change)
-                result = run_live_tui(
-                    run_change=bound,
-                    coordinator=coord,
-                    mouse=not args.no_mouse,
-                )
+                try:
+                    result = run_live_tui(
+                        run_change=bound,
+                        coordinator=coord,
+                        mouse=not args.no_mouse,
+                    )
+                except (LoadError, LoadErrors) as e:
+                    print(f"imp: {e}", file=sys.stderr)
+                    return 2
+                except BaseExceptionGroup as eg:
+                    # run_live_tui may wrap engine errors in an ExceptionGroup
+                    # (anyio task group); unwrap and surface a LoadError/LoadErrors
+                    # if one is present.
+                    load_errs = [
+                        exc for exc in eg.exceptions
+                        if isinstance(exc, (LoadError, LoadErrors))
+                    ]
+                    if load_errs:
+                        print(f"imp: {load_errs[0]}", file=sys.stderr)
+                        return 2
+                    raise
                 # Honor exit_reason: pause/eof save state; done/completed use result.
                 if coord.should_pause:
                     pause_and_exit(change, reason="ctrl-c")

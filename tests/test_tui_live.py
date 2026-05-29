@@ -86,6 +86,81 @@ def test_subagent_tokens_count_toward_footer_total() -> None:
     assert app.tree.tokens.input == 99      # subagent tokens included (F2)
 
 
+def test_run_live_tui_interrupt_does_not_raise() -> None:
+    """Ctrl-C path: request_pause() calls application.exit() (1st call), then
+    _engine's finally calls application.exit() again (2nd call).  The guard in
+    tui.py must swallow the second call so run_live_tui returns without raising
+    an ExceptionGroup.  The deterministic mechanism: the fake engine awaits a
+    Future that is never resolved; we call app_obj.request_pause() directly via
+    a callback injected through on_event, so no real keyboard/OS event is needed.
+    run_live_tui must return (not raise) and exit_reason must be 'pause'."""
+    import anyio
+    from prompt_toolkit.input.defaults import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+    from imp.cli.tui import run_live_tui
+
+    class _Coord:
+        should_pause = False
+        async def signal_pause(self): ...
+        def attach_runner(self, fn): ...
+        def detach_runner(self): ...
+
+    # Sentinel event type used to trigger the pause from within on_event.
+    async def fake_run_change(*, on_event, **kw):
+        # Emit the sentinel event; on_event will call request_pause().
+        on_event({"id": "x", "agent_id": None, "type": "_test_pause", "payload": {}})
+        # Now park here forever — the pause should unwind us via CancelledError.
+        import asyncio
+        await asyncio.Future()   # never resolves; cancelled by tg.cancel_scope.cancel()
+
+    # We need a handle to app_obj so we can wire on_event → request_pause.
+    # Monkey-patch NarrativeApp to capture the instance, then inject the hook.
+    from imp.cli import tui as tui_mod
+
+    original_init = tui_mod.NarrativeApp.__init__
+    captured = {}
+
+    def patched_init(self, *a, **kw):
+        original_init(self, *a, **kw)
+        captured["app"] = self
+
+    tui_mod.NarrativeApp.__init__ = patched_init
+    try:
+        original_on_event = None
+
+        # We wrap on_event after build so we can trigger pause on sentinel.
+        original_run_live_tui = tui_mod.run_live_tui
+
+        def patched_run_live_tui(**kwargs):
+            orig_run_change = kwargs["run_change"]
+
+            async def hooked_run_change(*, on_event, **kw2):
+                app = captured.get("app")
+
+                def hooked_on_event(event):
+                    on_event(event)
+                    if event.get("type") == "_test_pause" and app is not None:
+                        app.request_pause()
+
+                return await orig_run_change(on_event=hooked_on_event, **kw2)
+
+            kwargs["run_change"] = hooked_run_change
+            return original_run_live_tui(**kwargs)
+
+        with create_pipe_input() as inp:
+            # Must not raise — this is the key assertion.
+            result = patched_run_live_tui(
+                run_change=fake_run_change, coordinator=_Coord(), mouse=False,
+                _input=inp, _output=DummyOutput())
+    finally:
+        tui_mod.NarrativeApp.__init__ = original_init
+
+    # Engine never completed, so result_box is empty → None.
+    assert result is None
+    # exit_reason was set to "pause" by request_pause().
+    assert captured["app"].exit_reason == "pause"
+
+
 def test_run_live_tui_drives_fake_engine_and_returns_completed(monkeypatch) -> None:
     """The live wiring: app + fake engine in one task group; on_event feeds the
     builder; engine completion exits the app. Uses a DummyOutput + pipe input."""
