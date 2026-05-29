@@ -793,6 +793,94 @@ async def test_resolve_target_step_unit(tmp_path: Path) -> None:
         current_step="coder") == "spec"
 
 
+@pytest.mark.anyio
+async def test_goto_implement_resumes_coder_with_feedback_no_missing_output(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wf_dir = tmp_path / ".imp" / "workflows" / "default"
+    (wf_dir / "agents").mkdir(parents=True)
+    for stem in ("coder", "doc"):
+        (wf_dir / "agents" / f"{stem}.md").write_text(
+            f"---\nname: {stem}\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+        )
+    # Reviewer agent-gate: first pass Reject→goto implement, second pass Accept.
+    # Every agent's output schema must declare a `status` enum (validator V2),
+    # so the reviewer carries both `status` and the decide-matched `verdict`.
+    (wf_dir / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [Accept, Reject]}\n---\ngo\n"
+    )
+    (wf_dir / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [implement]\n"
+        "defaults: {max_retries: 3, on_max_retries: {kind: pause}}\n"
+        "implement:\n  steps:\n"
+        "    - {name: coder, file: agents/coder.md, model_role: default}\n"
+        "    - {name: doc, file: agents/doc.md, model_role: default}\n"
+        "  gates:\n"
+        "    - type: agent\n"
+        "      file: agents/reviewer.md\n"
+        "      model_role: default\n"
+        "      decide:\n"
+        "        - {when: {verdict: Reject}, action: {kind: goto, target: implement}}\n"
+        "        - {else: true, action: {kind: continue}}\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+    )
+    change = Change.create(tmp_path, title="t")
+
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    # Per-agent canned outputs; the reviewer flips verdict on its 2nd run.
+    runs: list[tuple[str, str | None]] = []   # (agent_id, retry_feedback)
+    reviewer_calls = {"n": 0}
+
+    class _Runner(_FakeRunner):
+        def __init__(self, invocation):
+            self._inv = invocation
+        async def run(self, invocation):
+            aid = invocation.agent_id
+            runs.append((aid, invocation.retry_feedback))
+            if aid.startswith("gate:"):
+                reviewer_calls["n"] += 1
+                verdict = "Reject" if reviewer_calls["n"] == 1 else "Accept"
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "verdict": verdict}}
+            else:
+                yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self):
+            pass
+
+    class _Provider(_FakeProvider):
+        def __init__(self, model="m"):
+            self.model = model
+        def create_runner(self, invocation):
+            return _Runner(invocation)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.COMPLETED
+
+    # The coder ran twice; its SECOND run carried the reviewer's feedback.
+    coder_runs = [fb for (aid, fb) in runs if aid.endswith("/coder")]
+    assert len(coder_runs) == 2
+    assert coder_runs[0] is None
+    assert coder_runs[1] is not None and "reviewer" in coder_runs[1]
+
+    # No agent_output_missing surfaced anywhere.
+    assert not any(
+        e["type"] == "error"
+        and (e.get("payload") or {}).get("category") == "agent_output_missing"
+        for e in events
+    )
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
