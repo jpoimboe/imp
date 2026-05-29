@@ -82,6 +82,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             yield pal.ansi(line, *pal.NODE_COLORS["user"], enabled=color)
         return
 
+    if isinstance(node, nv.AskUserNode):
+        yield from _render_ask_user(node, depth=depth, color=color, width=width)
+        return
+
     if isinstance(node, nv.ThinkingFold):
         if not node.content.strip():
             return  # blank/whitespace thinking is pure noise — drop in both modes
@@ -195,6 +199,19 @@ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
     for t in tools:
         name = t.get("name", t) if isinstance(t, dict) else t
         yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"])
+
+
+def _render_ask_user(node: nv.AskUserNode, *, depth: int, color: bool,
+                     width: int) -> Iterator[str]:
+    """ask_user is the LLM asking the user. Render the question as an emphasized
+    prompt block; render the answer as a `> …` line when present (imp log shows
+    the full exchange — the live driver omits the answer, since the user's typed
+    input IS the live echo)."""
+    for line in _wrap(node.question, width, depth):
+        yield pal.ansi(line, *pal.NODE_COLORS["ask_user"], enabled=color)
+    if node.answer is not None:
+        for line in _wrap(f"> {node.answer}", width, depth):
+            yield pal.ansi(line, *pal.NODE_COLORS["user"], enabled=color)
 
 
 def _render_gate(gate: nv.GateNode, *, depth: int, color: bool, width: int,

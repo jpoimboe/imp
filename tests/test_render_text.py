@@ -225,6 +225,28 @@ def test_render_gate_colors_resolved_action() -> None:
     assert out[0].startswith("\x1b[32m")
 
 
+def test_ask_user_renders_question_block_and_answer() -> None:
+    node = nv.AskUserNode(question="Which port?", answer="8080")
+    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+    text = "\n".join(out)
+    assert "Which port?" in text
+    assert "> 8080" in text
+
+
+def test_ask_user_renders_question_only_when_no_answer() -> None:
+    node = nv.AskUserNode(question="Which port?")
+    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+    text = "\n".join(out)
+    assert "Which port?" in text
+    assert ">" not in text  # no answer echo yet
+
+
+def test_ask_user_question_is_emphasized_with_color() -> None:
+    node = nv.AskUserNode(question="Go?")
+    out = list(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert out[0].startswith("\x1b[1m\x1b[36m")  # bold cyan = NODE_COLORS["ask_user"]
+
+
 def test_snapshot_covers_every_node_type() -> None:
     # Guard: the fixture must exercise all node types (design §11).
     tree = nv.build_tree(_sample_events())
