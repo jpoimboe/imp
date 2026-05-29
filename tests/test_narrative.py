@@ -353,3 +353,55 @@ def test_subagent_running_until_task_result_arrives() -> None:
     sub = [c for c in step.children if isinstance(c, nv.SubagentFold)][0]
     assert sub.running is True
     assert sub.outcome is None
+
+
+def test_human_gate_pending_then_evaluated_builds_one_gate_node() -> None:
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="review"),
+        _ev("2", "human_gate_pending", phase="review", prompt="Merge?",
+            options=[{"label": "Merge"}, {"label": "Back"}]),
+        _ev("3", "gate_evaluated", kind="human", action={"kind": "continue"}),
+    ])
+    phase = tree.root.children[0]
+    gates = [c for c in phase.children if isinstance(c, nv.GateNode)]
+    assert len(gates) == 1
+    g = gates[0]
+    assert g.kind == "human"
+    assert g.prompt == "Merge?"
+    assert [o["label"] for o in g.options] == ["Merge", "Back"]
+    assert g.action == {"kind": "continue"}
+
+
+def test_script_gate_evaluated_builds_leaf_gate_node() -> None:
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="review"),
+        _ev("2", "gate_evaluated", kind="script", context={"exit": 0},
+            action={"kind": "continue"}),
+    ])
+    g = [c for c in tree.root.children[0].children if isinstance(c, nv.GateNode)][0]
+    assert g.kind == "script"
+    assert g.context == {"exit": 0}
+    assert g.action == {"kind": "continue"}
+
+
+def test_stub_gate_evaluated_builds_leaf_gate_node() -> None:
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="review"),
+        _ev("2", "gate_evaluated", kind="stub", action={"kind": "goto",
+            "target": "implement"}),
+    ])
+    g = [c for c in tree.root.children[0].children if isinstance(c, nv.GateNode)][0]
+    assert g.kind == "stub"
+    assert g.action == {"kind": "goto", "target": "implement"}
+
+
+def test_step_level_human_gate_nests_inside_open_step() -> None:
+    # Step gates run inside _execute_step, before step_completed → step is open.
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "gate_evaluated", kind="stub", action={"kind": "continue"}),
+        _ev("4", "step_completed", step="s", action="continue"),
+    ])
+    step = tree.root.children[0].children[0]
+    assert any(isinstance(c, nv.GateNode) for c in step.children)

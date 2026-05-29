@@ -374,26 +374,36 @@ NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
 NarrativeBuilder._HANDLERS["workflow_resumed"] = _h_workflow_resumed
 
 
+def _h_human_gate_pending(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    gate = GateNode(kind="human", prompt=str(p.get("prompt", "")),
+                    options=list(p.get("options") or []))
+    self._append(gate)
+    self._pending_human_gate = gate
+
+
 def _h_gate_evaluated(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._flush_burst()
-    # For agent gates (kind="agent"), gate_evaluated closes the top agent-gate
-    # StepNode container on the stack (the gate was pushed above its enclosing
-    # step, so popping here leaves the enclosing step still open).
-    if p.get("kind") == "agent":
-        outcome = OutcomeLine(action=p.get("action"))
-        node = self._pop_step(p.get("gate"))
+    kind = str(p.get("kind", "?"))
+    action = p.get("action")
+    if kind == "agent":
+        # Closes the open agent-gate container StepNode (opened by its
+        # step_started kind=agent_gate — Task 3).
+        outcome = OutcomeLine(action=action)
+        node = self._pop_step(None)
         if node is not None:
             node.outcome = outcome
             node.children.append(outcome)
             node.closed = True
-    else:
-        # human/script/stub gates handled in later tasks; fall through to GateNode.
-        self._append(GateNode(
-            kind=p.get("kind", "?"),
-            action=p.get("action"),
-        ))
+        return
+    if kind == "human" and self._pending_human_gate is not None:
+        self._pending_human_gate.action = action
+        self._pending_human_gate = None
+        return
+    self._append(GateNode(kind=kind, action=action, context=p.get("context")))
 
 
+NarrativeBuilder._HANDLERS["human_gate_pending"] = _h_human_gate_pending
 NarrativeBuilder._HANDLERS["gate_evaluated"] = _h_gate_evaluated
 
 
