@@ -560,3 +560,52 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict, p: dict) -> None:
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold
     self._open_sub_by_block[block_id] = fold
+
+
+def structural_repr(node: Any) -> Any:
+    """A JSON-able structural snapshot of a node subtree, for parity asserts.
+
+    Captures node type, structural fields, and children recursively. Excludes
+    only the lazy RenderedMessage cache (an identity/perf detail). Used by the
+    §5.4 incremental==batch test and by future regression tests."""
+    t = type(node).__name__
+    if isinstance(node, WorkflowNode):
+        return {"t": t, "change_id": node.change_id, "title": node.title,
+                "status": node.status, "children": [structural_repr(c) for c in node.children]}
+    if isinstance(node, PhaseNode):
+        return {"t": t, "name": node.name, "closed": node.closed,
+                "children": [structural_repr(c) for c in node.children]}
+    if isinstance(node, StepNode):
+        return {"t": t, "name": node.name, "kind": node.kind,
+                "interactive": node.interactive, "closed": node.closed,
+                "outcome": structural_repr(node.outcome) if node.outcome else None,
+                "children": [structural_repr(c) for c in node.children]}
+    if isinstance(node, AgentTextNode):
+        return {"t": t, "text": node.text}
+    if isinstance(node, UserMessageNode):
+        return {"t": t, "text": node.text}
+    if isinstance(node, ThinkingFold):
+        return {"t": t, "content": node.content}
+    if isinstance(node, ToolBurstFold):
+        return {"t": t, "calls": [
+            {"name": c.name, "call_id": c.call_id, "result": c.result,
+             "is_error": c.is_error, "killed": c.killed} for c in node.calls]}
+    if isinstance(node, SubagentFold):
+        return {"t": t, "subagent_name": node.subagent_name, "event_id": node.event_id,
+                "block_id": node.block_id, "running": node.running,
+                "outcome": node.outcome, "is_error": node.is_error,
+                "event_count": node.event_count,
+                "nested": [structural_repr(c) for c in node.tree.root.children]}
+    if isinstance(node, GateNode):
+        return {"t": t, "kind": node.kind, "prompt": node.prompt,
+                "options": node.options, "action": node.action, "context": node.context}
+    if isinstance(node, ErrorNode):
+        return {"t": t, "message": node.message, "category": node.category,
+                "is_warning": node.is_warning}
+    if isinstance(node, StepContextNode):
+        return {"t": t, "payload": node.payload}
+    if isinstance(node, OutcomeLine):
+        return {"t": t, "action": node.action}
+    if isinstance(node, FallbackLine):
+        return {"t": t, "event_type": node.event_type, "payload": node.payload}
+    return {"t": t}

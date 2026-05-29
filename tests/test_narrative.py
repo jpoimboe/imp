@@ -442,3 +442,50 @@ def test_unknown_and_legacy_types_fall_through_to_fallback_line() -> None:
     fbs = [c for c in tree.root.children[0].children if isinstance(c, nv.FallbackLine)]
     assert {f.event_type for f in fbs} == {"phase_exhausted", "never_heard_of_this"}
     assert fbs[1].payload == {"foo": "bar"}
+
+
+INTERLEAVED_LOG = [
+    _ev("c", "change_created", change_id=1, title="parity"),
+    _ev("p", "phase_started", phase="impl"),
+    _ev("s", "step_started", step="build", model="m", provider="anthropic"),
+    _ev("b1c", "tool_call", agent_id="step:impl/build", id="b1", name="read_file",
+        input={"path": "x"}),
+    _ev("b1r", "tool_result", agent_id="step:impl/build", id="b1", content="data", error=False),
+    _ev("tk1", "tool_call", agent_id="step:impl/build", id="b2", name="task",
+        input={"subagent_name": "reviewer", "task_description": "review"}),
+    _ev("su1", "step_context", agent_id="sub:tk1", provider="anthropic", model="m",
+        system_prompt="S", tools_schema=[], params={}, max_tool_calls=50),
+    _ev("su2", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+        stop_reason="end_turn", usage={"input_tokens": 4, "output_tokens": 1},
+        raw={"content": [{"type": "text", "text": "looks good"}]}),
+    _ev("tkr", "tool_result", agent_id="step:impl/build", id="b2",
+        content='{"status":"Success"}', error=False),
+    _ev("g1c", "tool_call", agent_id="step:impl/build", id="b3", name="grep", input={}),
+    _ev("g1r", "tool_result", agent_id="step:impl/build", id="b3", content="hit", error=False),
+    _ev("done", "step_completed", step="build", action="continue"),
+    _ev("pc", "phase_completed", phase="impl"),
+]
+
+
+def test_incremental_equals_batch_on_interleaved_log() -> None:
+    batch = nv.build_tree(INTERLEAVED_LOG)
+    b = nv.NarrativeBuilder()
+    for e in INTERLEAVED_LOG:
+        b.add(e)
+    incremental = b.tree
+    # Compare structure after the terminal event (design §5.4): open-node and
+    # `· running` transients can't differ here because the log is complete.
+    assert nv.structural_repr(batch.root) == nv.structural_repr(incremental.root)
+    assert (batch.tokens.input, batch.tokens.output) == \
+           (incremental.tokens.input, incremental.tokens.output)
+
+
+def test_parity_holds_with_open_step_when_paused() -> None:
+    # A live-then-paused log has an open StepNode; a batch replay of the same
+    # log shows it open too. Both are correct (design §5.1 / §11).
+    log = INTERLEAVED_LOG[:-2] + [_ev("wp", "workflow_paused", reason="ctrl-c")]
+    batch = nv.build_tree(log)
+    b = nv.NarrativeBuilder()
+    for e in log:
+        b.add(e)
+    assert nv.structural_repr(batch.root) == nv.structural_repr(b.tree.root)
