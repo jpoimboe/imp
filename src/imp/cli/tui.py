@@ -304,6 +304,86 @@ def is_at_tail(cursor: int, line_count: int) -> bool:
     return cursor >= line_count - 1
 
 
+class NarrativeApp:
+    """The full-screen narrative Application. `live=True` adds the input bar and
+    sticky tail (M5); `live=False` is read-only log mode."""
+
+    def __init__(self, tree: nv.NarrativeTree, *, live: bool, mouse: bool,
+                 full: bool = False) -> None:
+        self.tree = tree
+        self.live = live
+        self.mouse = mouse
+        self.fold_state = FoldState(default_expanded=full)
+        self.memo = AnsiMemo()
+        self.cursor_line = 0
+        self.follow_tail = True               # sticky tail (live); harmless in log
+        self._width = 80
+        self._lines: list[RenderedLine] = []
+        self._rebuild()
+        self.cursor_line = max(0, len(self._lines) - 1)   # log mode starts at tail
+        self.application = None               # set in build_application()
+
+    # -- line rebuild ---------------------------------------------------------
+    def _rebuild(self) -> None:
+        self._lines = render_tree_to_lines(
+            self.tree, self.fold_state, self._width, color=True, memo=self.memo)
+
+    def set_width(self, width: int) -> None:
+        if width != self._width:
+            self._width = width
+            node = self._cursor_node()
+            self._rebuild()
+            if node is not None:
+                self.cursor_line = remap_cursor_to_node(
+                    self._lines, node, fallback=self.cursor_line)
+
+    def _cursor_node(self) -> Any:
+        if 0 <= self.cursor_line < len(self._lines):
+            return self._lines[self.cursor_line].node
+        return None
+
+    # -- formatted text for the control --------------------------------------
+    def _get_formatted_text(self):
+        frags = []
+        for i, ln in enumerate(self._lines):
+            style_prefix = "reverse " if i == self.cursor_line else ""
+            for s, t in ln.fragments:
+                frags.append((f"{style_prefix}{s}".strip(), t))
+            frags.append(("", "\n"))
+        if frags and frags[-1] == ("", "\n"):
+            frags.pop()
+        return frags
+
+    def _cursor_position(self):
+        from prompt_toolkit.layout.controls import Point
+        return Point(x=0, y=self.cursor_line)
+
+    # -- application construction (Task 24 adds key bindings) ----------------
+    def build_application(self):
+        from prompt_toolkit.application import Application
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout import Layout
+        from prompt_toolkit.layout.containers import HSplit, Window
+        from prompt_toolkit.layout.controls import FormattedTextControl
+
+        control = FormattedTextControl(
+            text=self._get_formatted_text, focusable=True, show_cursor=False,
+            get_cursor_position=self._cursor_position)
+        self._narrative_window = Window(content=control, wrap_lines=True,
+                                        always_hide_cursor=True)
+        kb = KeyBindings()
+
+        @kb.add("q")
+        def _quit(event) -> None:
+            event.app.exit()
+
+        root_container = HSplit([self._narrative_window])
+        self.application = Application(
+            layout=Layout(root_container, focused_element=self._narrative_window),
+            key_bindings=kb, full_screen=True, mouse_support=self.mouse)
+        return self.application
+
+
 def _render_prose_ansi(node, avail_width: int, color: bool) -> "list[str]":
     """Render an AgentTextNode/UserMessageNode to a list of ANSI line strings.
 
