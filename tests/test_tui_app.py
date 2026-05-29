@@ -126,3 +126,28 @@ def test_mouse_handler_fires_only_on_mouse_up() -> None:
 
     handler(_Up())
     assert app.fold_state.is_expanded(fold) != before      # MOUSE_UP: toggled
+
+
+def test_footer_text_shows_identity_tokens_and_keyhints() -> None:
+    tree = nv.build_tree(SAMPLE + [
+        _ev("x", "llm_response", agent_id="step:design/spec", provider="anthropic",
+            model="m", stop_reason="end_turn",
+            usage={"input_tokens": 4200, "output_tokens": 1100}, raw={"content": []}),
+    ])
+    app = NarrativeApp(tree, live=False, mouse=False)
+    footer = "".join(t for _s, t in app._footer_text())
+    assert "#1" in footer
+    assert "4.2k" in footer or "4200" in footer
+    assert "q" in footer            # key hint present
+
+
+def test_run_log_tui_runs_and_exits_on_q() -> None:
+    from prompt_toolkit.input.defaults import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+    from imp.cli.tui import run_log_tui
+
+    tree = nv.build_tree(SAMPLE)
+    with create_pipe_input() as inp:
+        inp.send_text("q")
+        rc = run_log_tui(tree, full=False, mouse=False, _input=inp, _output=DummyOutput())
+    assert rc == 0

@@ -421,7 +421,7 @@ def test_main_log_invokes_pager_on_tty(
     proc.wait = MagicMock(return_value=0)
 
     with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
-        rc = main(["log", "1"])
+        rc = main(["log", "--no-tui", "1"])
 
     assert rc == 0
     assert popen.call_count == 1, "_cmd_log must route TTY output through _page_or_print"
@@ -460,7 +460,7 @@ def test_main_log_no_pager_flag_skips_pager_on_tty(
     _fake_tty_stdout(monkeypatch, isatty=True)
 
     with patch("imp.cli.main.subprocess.Popen") as popen:
-        rc = main(["log", "--no-pager", "1"])
+        rc = main(["log", "--no-tui", "--no-pager", "1"])
 
     assert rc == 0
     assert popen.call_count == 0

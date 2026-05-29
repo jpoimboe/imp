@@ -483,8 +483,29 @@ class NarrativeApp:
         sys.stdout.write(seq)
         sys.stdout.flush()
 
+    # -- footer ---------------------------------------------------------------
+    def _fmt_tokens(self) -> str:
+        def h(n: int) -> str:
+            return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+        t = self.tree.tokens
+        return f"↑{h(t.input)} ↓{h(t.output)}"
+
+    def _key_hints(self) -> str:
+        if self.live:
+            return "PgUp/Dn ⌃N/⌃P ⌃␣ ⌃E ⌃Y ⌃C q"
+        return "↑↓ ⏎ a y Tab q"
+
+    def _footer_text(self):
+        root = self.tree.root
+        ident = f"#{root.change_id if root.change_id is not None else '?'} {root.title}".strip()
+        left = f"{ident} · {root.status} · {self._fmt_tokens()}"
+        if self.status_note:
+            left += f" · {self.status_note}"
+        right = self._key_hints()
+        return [("reverse", f" {left} "), ("", "  "), ("reverse", f" {right} ")]
+
     # -- application construction --------------------------------------------
-    def build_application(self):
+    def build_application(self, *, _input=None, _output=None):
         from prompt_toolkit.application import Application
         from prompt_toolkit.key_binding import KeyBindings
         from prompt_toolkit.layout import Layout
@@ -537,10 +558,13 @@ class NarrativeApp:
             @kb.add("q")
             def _(event): event.app.exit()
 
-        root_container = HSplit([self._narrative_window])
+        from prompt_toolkit.layout.controls import FormattedTextControl as _FTC
+        footer_window = Window(content=_FTC(text=self._footer_text), height=1)
+        root_container = HSplit([self._narrative_window, footer_window])
         self.application = Application(
             layout=Layout(root_container, focused_element=self._narrative_window),
-            key_bindings=kb, full_screen=True, mouse_support=self.mouse)
+            key_bindings=kb, full_screen=True, mouse_support=self.mouse,
+            input=_input, output=_output)
         return self.application
 
 
@@ -581,6 +605,15 @@ def node_copy_text(node: Any) -> str:
     if isinstance(node, nv.OutcomeLine):
         return pal.action_text(node.action)
     return ""
+
+
+def run_log_tui(tree: nv.NarrativeTree, *, full: bool, mouse: bool,
+                _input=None, _output=None) -> int:
+    """Module-level entry point for log-mode TUI (called by _cmd_log)."""
+    app_obj = NarrativeApp(tree, live=False, mouse=mouse, full=full)
+    application = app_obj.build_application(_input=_input, _output=_output)
+    application.run()
+    return 0
 
 
 def _render_prose_ansi(node, avail_width: int, color: bool) -> "list[str]":
