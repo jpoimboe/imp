@@ -42,7 +42,9 @@ def test_no_pager_flag_parses(
 
     rc = main(["log", "--no-pager", "1"])
     assert rc == 0
-    assert "change_created" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # Narrative view renders change_created as "#1  <title>", not the event type string.
+    assert "#1" in out and "smoke" in out
 
 
 def _fake_tty_stdout(monkeypatch: pytest.MonkeyPatch, *, isatty: bool) -> None:
@@ -427,8 +429,8 @@ def test_main_log_invokes_pager_on_tty(
     assert capsys.readouterr().out == ""
     # Rendered lines reached the pager.
     writes = "".join(c.args[0] for c in proc.stdin.write.call_args_list)
-    assert "change_created" in writes
-    assert "smoke" in writes
+    # Narrative view renders change_created as "#1  <title>", not the event type string.
+    assert "#1" in writes and "smoke" in writes
     # Cleanup happened through the helper, not bypassed by some
     # alternate code path in _cmd_log.
     proc.stdin.close.assert_called_once()
@@ -462,7 +464,9 @@ def test_main_log_no_pager_flag_skips_pager_on_tty(
 
     assert rc == 0
     assert popen.call_count == 0
-    assert "change_created" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    # Narrative view renders change_created as "#1  <title>", not the event type string.
+    assert "#1" in out and "smoke" in out
 
 
 def test_keyboard_interrupt_in_wait_does_not_raise(
