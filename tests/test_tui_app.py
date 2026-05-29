@@ -87,3 +87,21 @@ def test_expand_all_then_collapse_all() -> None:
     assert app.fold_state.default_expanded is False
     blob2 = "\n".join("".join(t for _s, t in ln.fragments) for ln in app._lines)
     assert "▾" not in blob2
+
+
+def test_fold_header_fragments_carry_mouse_handler_when_mouse_on() -> None:
+    app = NarrativeApp(nv.build_tree(SAMPLE), live=False, mouse=True)
+    frags = app._get_formatted_text()
+    # When mouse is on, fold-header lines emit 3-tuples (style, text, handler).
+    handlers = [f for f in frags if len(f) == 3]
+    assert handlers, "expected mouse handlers on fold-header fragments"
+
+
+def test_handle_mouse_click_on_fold_toggles_it() -> None:
+    app = _app()
+    idx = [i for i, ln in enumerate(app._lines)
+           if ln.is_fold_header and isinstance(ln.node, nv.ThinkingFold)][0]
+    fold = app._lines[idx].node
+    assert app.fold_state.is_expanded(fold) is False
+    app._on_fold_click(fold)
+    assert app.fold_state.is_expanded(fold) is True

@@ -344,13 +344,32 @@ class NarrativeApp:
             return self._lines[self.cursor_line].node
         return None
 
+    # -- mouse support --------------------------------------------------------
+    def _on_fold_click(self, fold) -> None:
+        self.toggle_fold_node(fold)
+
+    def _make_mouse_handler(self, fold):
+        from prompt_toolkit.mouse_events import MouseEventType
+
+        def handler(mouse_event):
+            if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                self._on_fold_click(fold)
+        return handler
+
     # -- formatted text for the control --------------------------------------
     def _get_formatted_text(self):
         frags = []
         for i, ln in enumerate(self._lines):
             style_prefix = "reverse " if i == self.cursor_line else ""
+            handler = (self._make_mouse_handler(ln.node)
+                       if (self.mouse and ln.is_fold_header
+                           and getattr(ln.node, "collapsible", False)) else None)
             for s, t in ln.fragments:
-                frags.append((f"{style_prefix}{s}".strip(), t))
+                style = f"{style_prefix}{s}".strip()
+                if handler is not None:
+                    frags.append((style, t, handler))
+                else:
+                    frags.append((style, t))
             frags.append(("", "\n"))
         if frags and frags[-1] == ("", "\n"):
             frags.pop()
