@@ -118,7 +118,65 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         return 2
 
 
+def _cmd_new_tui(args: argparse.Namespace) -> int:
+    """TUI branch of ``imp new``: manages its own event loop via run_live_tui so
+    there is no nested anyio.run() call."""
+    import functools
+
+    from imp.cli.signals import InterruptCoordinator
+    from imp.cli.tui import run_live_tui
+
+    install_process_group()
+    project = _project_root()
+    lock = ProjectLock(project / ".imp" / "lock")
+    try:
+        with lock.acquire():
+            try:
+                change = Change.create(project, title=args.title)
+            except (LoadError, LoadErrors) as e:
+                print(f"imp: {e}", file=sys.stderr)
+                return 2
+            _write_change_lock(change)
+            try:
+                print(f"Created Change {change.id}: {change.title!r}")
+                coord = InterruptCoordinator()
+                bound = functools.partial(run_change, change)
+                result = run_live_tui(
+                    run_change=bound,
+                    coordinator=coord,
+                    mouse=not args.no_mouse,
+                )
+                # Honor exit_reason: pause/eof save state; done/completed use result.
+                if coord.should_pause:
+                    pause_and_exit(change, reason="ctrl-c")
+                    print(f"\nChange {change.id}: paused (ctrl-c)")
+                    return 130
+                elif result is None:
+                    # App exited with no engine result and no pause flag → Ctrl-D / EOF.
+                    pause_and_exit(change, reason="ctrl-d")
+                    print(f"\nChange {change.id}: paused (ctrl-d)")
+                    return 130
+                elif result is RunResult.COMPLETED:
+                    print(f"Change {change.id}: {result.value}")
+                    return 0
+                else:
+                    # RunResult.PAUSED (workflow self-pause / human gate) or
+                    # RunResult.ERRORED — engine already saved state.
+                    print(f"Change {change.id}: {result.value}")
+                    return 1
+            finally:
+                _clear_change_lock(change)
+    except LockHeld as lock_err:
+        print(
+            f"imp: another Change is running (lock held by pid {lock_err.held_by_pid})",
+            file=sys.stderr,
+        )
+        return 2
+
+
 def _cmd_new(args: argparse.Namespace) -> int:
+    if _use_tui(no_tui=args.no_tui):
+        return _cmd_new_tui(args)
     return anyio.run(_async_cmd_new, args)
 
 
@@ -428,6 +486,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p_new = sub.add_parser("new")
     p_new.add_argument("title", nargs="?")
+    p_new.add_argument("--no-tui", action="store_true",
+                       help="Force the plain-text stream even on a TTY.")
+    p_new.add_argument("--no-mouse", action="store_true",
+                       help="Disable TUI mouse capture.")
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")

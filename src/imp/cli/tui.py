@@ -892,6 +892,62 @@ def run_log_tui(tree: nv.NarrativeTree, *, full: bool, mouse: bool,
     return 0
 
 
+def run_live_tui(*, run_change, coordinator, mouse: bool,
+                 _input=None, _output=None):
+    """Run the live narrative TUI concurrently with the engine on one asyncio
+    loop (design §7.7). ``run_change`` is a coroutine callable that already has
+    change bound (e.g. via functools.partial) EXCEPT for the keyword callbacks
+    ``on_event``, ``human_input_fn``, ``human_output_fn``,
+    ``user_chat_input_fn``, and ``coordinator``, which this function supplies.
+    Returns the RunResult (or None if the app exited without an engine result)."""
+    import anyio
+
+    builder = nv.NarrativeBuilder()
+    app_obj = NarrativeApp(builder.tree, live=True, mouse=mouse,
+                           builder=builder, coordinator=coordinator)
+    application = app_obj.build_application(_input=_input, _output=_output)
+
+    result_box: dict = {}
+
+    async def _main() -> None:
+        import asyncio
+        # Store the running loop so on_event (and ensure_future) can reference it.
+        app_obj._loop = asyncio.get_running_loop()
+        async with anyio.create_task_group() as tg:
+            # Start run_signal_receiver if coordinator provides it (guard allows
+            # test doubles that omit the method).
+            if hasattr(coordinator, "run_signal_receiver"):
+                tg.start_soon(coordinator.run_signal_receiver)
+            # Clock tick keeps the footer's elapsed timer alive (H1: carry-forward).
+            tg.start_soon(app_obj.clock_tick)
+
+            async def _engine() -> None:
+                try:
+                    result_box["result"] = await run_change(
+                        on_event=app_obj.on_event,
+                        human_input_fn=app_obj.human_input_fn,
+                        human_output_fn=app_obj.human_output_fn,
+                        user_chat_input_fn=app_obj.user_chat_input_fn,
+                        coordinator=coordinator,
+                    )
+                finally:
+                    # Engine finished (completed, paused, or errored) — ensure
+                    # exit_reason is set so the CLI can act on it, then exit the app.
+                    app_obj.exit_reason = app_obj.exit_reason or "done"
+                    application.exit()
+
+            tg.start_soon(_engine)
+
+            # H2 e: handle_sigint=False so prompt_toolkit doesn't intercept
+            # SIGINT — run_signal_receiver owns it.
+            await application.run_async(handle_sigint=False)
+            # App exited (engine done, Ctrl-C, or Ctrl-D) — cancel remaining tasks.
+            tg.cancel_scope.cancel()
+
+    anyio.run(_main)
+    return result_box.get("result")
+
+
 def _render_prose_ansi(node, avail_width: int, color: bool) -> "list[str]":
     """Render an AgentTextNode/UserMessageNode to a list of ANSI line strings.
 

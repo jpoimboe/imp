@@ -84,3 +84,37 @@ def test_subagent_tokens_count_toward_footer_total() -> None:
                      model="m", stop_reason="end_turn",
                      usage={"input_tokens": 99, "output_tokens": 9}, raw={"content": []}))
     assert app.tree.tokens.input == 99      # subagent tokens included (F2)
+
+
+def test_run_live_tui_drives_fake_engine_and_returns_completed(monkeypatch) -> None:
+    """The live wiring: app + fake engine in one task group; on_event feeds the
+    builder; engine completion exits the app. Uses a DummyOutput + pipe input."""
+    import anyio
+    from prompt_toolkit.input.defaults import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+    from imp.cli.tui import run_live_tui
+    from imp.engine.executor import RunResult
+
+    events = [
+        {"id": "1", "agent_id": None, "type": "change_created",
+         "payload": {"change_id": 1, "title": "t"}},
+        {"id": "2", "agent_id": None, "type": "phase_started", "payload": {"phase": "p"}},
+    ]
+
+    class _Coord:
+        should_pause = False
+        async def signal_pause(self): ...
+        def attach_runner(self, fn): ...
+        def detach_runner(self): ...
+
+    async def fake_run_change(*, on_event, **kw):
+        for e in events:
+            on_event(e)
+            await anyio.sleep(0)
+        return RunResult.COMPLETED
+
+    with create_pipe_input() as inp:
+        result = run_live_tui(
+            run_change=fake_run_change, coordinator=_Coord(), mouse=False,
+            _input=inp, _output=DummyOutput())
+    assert result is RunResult.COMPLETED
