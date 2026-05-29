@@ -591,13 +591,35 @@ class NarrativeApp:
         self._refocus_narrative()
         self._invalidate()
 
-    def _escape_input(self) -> None:
+    def _escape_input(self, *, cancel_gate: bool = False) -> None:
+        """Unwind any pending input awaiter.
+
+        For the regular input future (_active_input) we always resolve with
+        ESC_SENTINEL so the engine's input loop sees a non-match and re-prompts.
+
+        For the gate future (_gate_future) the behaviour depends on the caller:
+        - ESC key (cancel_gate=False): resolve with ESC_SENTINEL so
+          _match_human_option sees no match and run_human_gate re-prompts.
+        - pause/EOF teardown (cancel_gate=True): *cancel* the future so
+          `await result` in run_human_gate raises CancelledError and the engine
+          unwinds cleanly.  Feeding ESC_SENTINEL here would only cause a
+          re-loop that creates a fresh gate future which also hangs.
+        """
         from imp.cli.prompt import ESC_SENTINEL
         if self._input_buffer is not None:
             self._input_buffer.text = ""
         fut, self._active_input = self._active_input, None
         if fut is not None and not fut.done():
             fut.set_result(ESC_SENTINEL)
+        # Unwind gate future if one is pending.
+        gfut, self._gate_future = self._gate_future, None
+        self._gate_active = False
+        self._gate_options = []
+        if gfut is not None and not gfut.done():
+            if cancel_gate:
+                gfut.cancel()
+            else:
+                gfut.set_result(ESC_SENTINEL)
         self._refocus_narrative()
         self._invalidate()
 
@@ -620,7 +642,10 @@ class NarrativeApp:
         self._pausing = True
         self.exit_reason = "pause"
         # Unwind any awaited input future so run_change doesn't hang mid-prompt.
-        self._escape_input()
+        # cancel_gate=True: cancel (not ESC_SENTINEL) the gate future so
+        # run_human_gate's `await result` raises CancelledError and the engine
+        # unwinds instead of re-looping into a new gate future that also hangs.
+        self._escape_input(cancel_gate=True)
         # Flip the coordinator's pause + fire the runner interrupt (async).
         # Use ensure_future (loop-owned task) rather than
         # application.create_background_task — prompt_toolkit cancels all
@@ -640,7 +665,7 @@ class NarrativeApp:
             return
         self._pausing = True
         self.exit_reason = "eof"
-        self._escape_input()
+        self._escape_input(cancel_gate=True)
         if self.application is not None:
             self.application.exit()
 

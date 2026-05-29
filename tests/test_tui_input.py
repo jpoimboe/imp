@@ -85,3 +85,61 @@ def test_human_output_fn_surfaces_validation_feedback() -> None:
     assert app.status_note == ""
     app.human_output_fn("  (no match for 'xyz'; try again)")
     assert "no match" in app.status_note          # validation feedback surfaced
+
+
+def test_escape_key_during_gate_resolves_with_esc_sentinel_for_reprompt() -> None:
+    """ESC key during an active gate should resolve _gate_future with ESC_SENTINEL
+    (re-prompt semantics), not cancel it — _match_human_option sees no match and
+    run_human_gate loops back to ask again."""
+    async def go():
+        app = NarrativeApp(_tree(), live=True, mouse=False)
+        fut = asyncio.ensure_future(app.request_gate_choice(
+            "Merge?", [{"label": "Merge"}, {"label": "Back"}]))
+        await asyncio.sleep(0)
+        assert app._gate_active is True
+        # ESC key path: cancel_gate defaults to False → ESC_SENTINEL
+        app._escape_input()
+        assert fut.done()
+        assert await fut == ESC_SENTINEL          # re-prompt path, not a cancel
+        assert app._gate_future is None
+        assert app._gate_active is False
+        assert app._gate_options == []
+    asyncio.run(go())
+
+
+def test_request_pause_during_gate_cancels_gate_future_no_hang() -> None:
+    """Pressing Ctrl-C while a human gate is pending must cancel the gate future
+    so run_human_gate's `await result` raises CancelledError and the engine
+    unwinds — the process must NOT hang waiting for a gate that will never be
+    resolved."""
+    async def go():
+        app = NarrativeApp(_tree(), live=True, mouse=False)
+        fut = asyncio.ensure_future(app.request_gate_choice(
+            "Merge?", [{"label": "Merge"}, {"label": "Back"}]))
+        await asyncio.sleep(0)
+        assert app._gate_active is True
+        app.request_pause()
+        # Gate future must be done (cancelled) so no awaiter can hang.
+        assert fut.done(), "gate future still pending after request_pause — would hang"
+        assert fut.cancelled()                    # CancelledError unwinds run_human_gate
+        assert app._gate_future is None
+        assert app._gate_active is False
+        assert app._gate_options == []
+    asyncio.run(go())
+
+
+def test_request_exit_eof_during_gate_cancels_gate_future_no_hang() -> None:
+    """Ctrl-D (EOF) while a human gate is pending must cancel the gate future
+    so the engine unwinds rather than hanging."""
+    async def go():
+        app = NarrativeApp(_tree(), live=True, mouse=False)
+        fut = asyncio.ensure_future(app.request_gate_choice(
+            "Merge?", [{"label": "Merge"}, {"label": "Back"}]))
+        await asyncio.sleep(0)
+        assert app._gate_active is True
+        app.request_exit_eof()
+        assert fut.done(), "gate future still pending after request_exit_eof — would hang"
+        assert fut.cancelled()
+        assert app._gate_future is None
+        assert app._gate_active is False
+    asyncio.run(go())
