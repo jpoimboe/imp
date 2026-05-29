@@ -52,9 +52,12 @@ def test_request_pause_is_idempotent_across_signal_and_keystroke() -> None:
         app = NarrativeApp(nv.build_tree([]), live=True, mouse=False, coordinator=coord)
         app.request_pause()          # keyboard Ctrl-C
         app.request_pause()          # again (or an OS signal racing in)
+        # Two ticks: one to schedule the ensure_future task, one to run it.
+        await asyncio.sleep(0)
         await asyncio.sleep(0)
         assert app.exit_reason == "pause"
         assert app._pausing is True  # guard set; double-pause prevented
+        assert coord.paused == 1     # signal_pause delivered exactly once (not cancelled)
     asyncio.run(go())
 
 

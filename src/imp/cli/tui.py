@@ -575,10 +575,13 @@ class NarrativeApp:
         # Unwind any awaited input future so run_change doesn't hang mid-prompt.
         self._escape_input()
         # Flip the coordinator's pause + fire the runner interrupt (async).
-        if self.coordinator is not None and self.application is not None:
-            self.application.create_background_task(self.coordinator.signal_pause())
-        elif self.coordinator is not None:
-            # no application (unit test): schedule on the running loop
+        # Use ensure_future (loop-owned task) rather than
+        # application.create_background_task — prompt_toolkit cancels all
+        # background tasks during run_async teardown
+        # (cancel_and_wait_for_background_tasks), so a background task created
+        # just before application.exit() would be cancelled before it runs.
+        # Loop-owned tasks are NOT cancelled by the application teardown.
+        if self.coordinator is not None:
             import asyncio
             asyncio.ensure_future(self.coordinator.signal_pause())
         if self.application is not None:
