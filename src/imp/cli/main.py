@@ -77,40 +77,37 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             try:
                 print(f"Created Change {change.id}: {change.title!r}")
                 prompt = Prompt()
-                renderer = ChatRenderer()
+                _emit_line, _print_text = _stream_sinks()
                 coord = InterruptCoordinator()
                 rc = 0
-                try:
-                    async with anyio.create_task_group() as tg:
-                        tg.start_soon(coord.run_signal_receiver)
-                        try:
-                            result = await run_change(
-                                change,
-                                on_event=renderer.handle,
-                                human_input_fn=lambda: prompt.ask_async("> "),
-                                human_output_fn=renderer.line,
-                                user_chat_input_fn=lambda _q: prompt.ask_async("> "),
-                                coordinator=coord,
-                            )
-                        except (LoadError, LoadErrors) as e:
-                            print(f"imp: {e}", file=sys.stderr)
-                            rc = 2
-                        except EOFError:
-                            pause_and_exit(change, reason="ctrl-d")
-                            print(f"\nChange {change.id}: paused (ctrl-d)")
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(coord.run_signal_receiver)
+                    try:
+                        result = await run_change(
+                            change,
+                            on_event=_emit_line,
+                            human_input_fn=lambda: prompt.ask_async("> "),
+                            human_output_fn=_print_text,
+                            user_chat_input_fn=lambda _q: prompt.ask_async("> "),
+                            coordinator=coord,
+                        )
+                    except (LoadError, LoadErrors) as e:
+                        print(f"imp: {e}", file=sys.stderr)
+                        rc = 2
+                    except EOFError:
+                        pause_and_exit(change, reason="ctrl-d")
+                        print(f"\nChange {change.id}: paused (ctrl-d)")
+                        rc = 130
+                    else:
+                        if coord.should_pause:
+                            pause_and_exit(change, reason="ctrl-c")
+                            print(f"\nChange {change.id}: paused (ctrl-c)")
                             rc = 130
                         else:
-                            if coord.should_pause:
-                                pause_and_exit(change, reason="ctrl-c")
-                                print(f"\nChange {change.id}: paused (ctrl-c)")
-                                rc = 130
-                            else:
-                                print(f"Change {change.id}: {result.value}")
-                                rc = 0 if result is RunResult.COMPLETED else 1
-                        finally:
-                            tg.cancel_scope.cancel()
-                finally:
-                    renderer.close()
+                            print(f"Change {change.id}: {result.value}")
+                            rc = 0 if result is RunResult.COMPLETED else 1
+                    finally:
+                        tg.cancel_scope.cancel()
                 return rc
             finally:
                 _clear_change_lock(change)
@@ -217,6 +214,26 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
+
+
+def _stream_sinks():
+    """Return (on_event, output) callbacks that stream the text view to stdout.
+    Shared by the --no-tui paths of `imp new` and `imp resume`."""
+    from imp.cli.palette import should_use_color
+    from imp.cli.render_text import stream_event
+    color = should_use_color(sys.stdout)
+
+    def emit_line(event: dict) -> None:
+        block = stream_event(event, color=color, width=_term_width())
+        if block is not None:
+            print(block)
+            sys.stdout.flush()
+
+    def output(text: str) -> None:
+        print(text)
+        sys.stdout.flush()
+
+    return emit_line, output
 
 
 def _use_tui(*, no_tui: bool, stream: Any = None) -> bool:

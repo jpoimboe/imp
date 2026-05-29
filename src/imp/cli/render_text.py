@@ -194,3 +194,80 @@ def _render_gate(gate, *, depth, color, width) -> Iterator[str]:
         for opt in gate.options:
             yield _line(f"- {opt.get('label', opt)}", depth + 1, color,
                         *pal.NODE_COLORS["gate"])
+
+
+def stream_event(event: dict, *, color: bool, width: int = 80) -> str | None:
+    """Format ONE event as an append-only block for the --no-tui live stream.
+
+    Returns the text (possibly multi-line) or None to skip. Subagent (sub:)
+    events are indented one level. Deliberately fold-free: this is the streaming
+    CI view, not the foldable tree (use `imp log` for that)."""
+    if not isinstance(event, dict):
+        return None
+    etype = event.get("type")
+    p = event.get("payload") or {}
+    agent_id = event.get("agent_id")
+    pad = _INDENT if isinstance(agent_id, str) and agent_id.startswith("sub:") else ""
+
+    def styled(text: str, *codes: str) -> str:
+        return "\n".join(pal.ansi(f"{pad}{ln}", *codes, enabled=color)
+                         for ln in text.split("\n"))
+
+    if etype == "phase_started":
+        return styled(f"═══ {p.get('phase', '?')} ═══", *pal.NODE_COLORS["phase"])
+    if etype == "phase_completed":
+        return styled(f"═══ {p.get('phase', '?')} done ═══", *pal.NODE_COLORS["phase"])
+    if etype == "step_started":
+        if p.get("kind") == "agent_gate":
+            return styled(f"── agent_gate: {p.get('gate_stem', '?')} ──",
+                          *pal.NODE_COLORS["gate"])
+        return styled(f"── {p.get('step', '?')} ──", *pal.NODE_COLORS["step"])
+    if etype == "step_completed":
+        return styled(f"→ {pal.action_text(p.get('action'))}",
+                      *((pal.accent_color(p.get('action')),) if pal.accent_color(p.get('action')) else ()))
+    if etype == "llm_response":
+        from imp.cli.render_helpers import render_llm_response
+        r = render_llm_response(p)
+        text = "\n\n".join(t.strip() for t in r.texts if t.strip())
+        return styled(text) if text else None
+    if etype == "user_message":
+        return styled(f"> {_stream_user_text(p)}", *pal.NODE_COLORS["user"])
+    if etype == "thinking":
+        c = str(p.get("content", ""))
+        return styled(f"thinking · {len(c)} chars", *pal.NODE_COLORS["thinking"])
+    if etype == "tool_call":
+        args = " ".join(f"{k}={v}" for k, v in (p.get("input") or {}).items())
+        return styled(f"⏺ {p.get('name', 'tool')}  {args}".rstrip(), *pal.NODE_COLORS["tools"])
+    if etype == "tool_result":
+        body = (p.get("content") or "")
+        body = body if isinstance(body, str) else str(body)
+        body = body.replace("\n", " ")
+        if len(body) > 200:
+            body = body[:200] + "…"
+        err = " [error]" if p.get("error") else ""
+        return styled(f"  → {body}{err}", *pal.NODE_COLORS["tools"])
+    if etype == "tool_killed":
+        return styled(f"  [killed] {p.get('name', 'tool')}", *pal.NODE_COLORS["error"])
+    if etype in ("gate_evaluated", "human_gate_pending"):
+        if etype == "human_gate_pending":
+            return styled(f"gate: {p.get('prompt', '')}", *pal.NODE_COLORS["gate"])
+        return styled(f"gate ({p.get('kind', '?')}) → {pal.action_text(p.get('action'))}",
+                      *pal.NODE_COLORS["gate"])
+    if etype == "error":
+        tag = f"[{p.get('category')}] " if p.get("category") else ""
+        return styled(f"error: {tag}{p.get('message', '?')}", *pal.NODE_COLORS["error"])
+    if etype == "runner_warning":
+        return styled(f"warning: {p.get('message', '?')}", *pal.NODE_COLORS["warning"])
+    if etype in ("workflow_paused", "workflow_resumed"):
+        return styled(etype.replace("_", " "), *pal.NODE_COLORS["metadata"])
+    if etype == "agent_output":
+        return None
+    if etype == "change_created":
+        return styled(f"#{p.get('change_id', '?')}  {p.get('title', '')}",
+                      *pal.NODE_COLORS["workflow"])
+    return None
+
+
+def _stream_user_text(p: dict) -> str:
+    return "".join(b.get("text", "") for b in (p.get("content") or [])
+                   if isinstance(b, dict) and b.get("type") == "text")
