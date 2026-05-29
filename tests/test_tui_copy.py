@@ -4,7 +4,7 @@ from __future__ import annotations
 import base64
 
 from imp.cli import narrative as nv
-from imp.cli.tui import NarrativeApp, osc52_sequence, node_copy_text
+from imp.cli.tui import NarrativeApp, node_copy_text, osc52_sequence
 
 
 def _ev(eid, etype, agent_id=None, **payload):
@@ -31,7 +31,7 @@ def test_node_copy_text_returns_full_agent_message() -> None:
             stop_reason="end_turn", usage={}, raw={"content": [{"type": "text", "text": long}]}),
     ])
     step = tree.root.children[0].children[0]
-    at = [c for c in step.children if isinstance(c, nv.AgentTextNode)][0]
+    at = next(c for c in step.children if isinstance(c, nv.AgentTextNode))
     assert node_copy_text(at) == long           # full underlying text, untruncated
 
 
@@ -44,7 +44,7 @@ def test_node_copy_text_for_tool_burst_joins_calls() -> None:
         _ev("4", "tool_result", agent_id="step:p/s", id="b1", content="file1\nfile2", error=False),
     ])
     step = tree.root.children[0].children[0]
-    burst = [c for c in step.children if isinstance(c, nv.ToolBurstFold)][0]
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
     txt = node_copy_text(burst)
     assert "bash" in txt and "file1\nfile2" in txt
 
@@ -55,10 +55,11 @@ def test_copy_focused_node_writes_osc52_and_sets_status() -> None:
         _ev("1", "phase_started", phase="p"),
         _ev("2", "step_started", step="s", model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
-            stop_reason="end_turn", usage={}, raw={"content": [{"type": "text", "text": "copy me"}]}),
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "copy me"}]}),
     ])
     app = NarrativeApp(tree, live=False, mouse=False, _osc_writer=captured.append)
-    at_idx = [i for i, ln in enumerate(app._lines) if isinstance(ln.node, nv.AgentTextNode)][0]
+    at_idx = next(i for i, ln in enumerate(app._lines) if isinstance(ln.node, nv.AgentTextNode))
     app.cursor_line = at_idx
     app.copy_focused_node()
     assert captured and "copy me" in __import__("base64").b64decode(
@@ -82,7 +83,8 @@ def test_copy_focused_node_noop_on_non_copyable_node() -> None:
 
 
 def test_copy_focused_node_failure_sets_clipboard_unavailable() -> None:
-    """Injected writer raises RuntimeError → no propagation, status_note is 'clipboard unavailable'."""
+    """Injected writer raises RuntimeError → no propagation; status_note is
+    'clipboard unavailable'."""
     def _failing_writer(seq: str) -> None:
         raise RuntimeError("no tty")
 

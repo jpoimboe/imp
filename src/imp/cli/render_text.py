@@ -185,7 +185,7 @@ def _render_step_context(ctx, *, depth, full, color, width) -> Iterator[str]:
 
 def _render_gate(gate, *, depth, color, width) -> Iterator[str]:
     action = pal.action_text(gate.action) if gate.action is not None else "pending"
-    ac = pal.accent_color(gate.action) if gate.action is not None else None
+    pal.accent_color(gate.action) if gate.action is not None else None
     header = f"{gate.kind} gate → {action}"
     yield _line(header, depth, color, *pal.NODE_COLORS["gate"])
     if gate.prompt:
@@ -223,8 +223,8 @@ def stream_event(event: dict, *, color: bool, width: int = 80) -> str | None:
                           *pal.NODE_COLORS["gate"])
         return styled(f"── {p.get('step', '?')} ──", *pal.NODE_COLORS["step"])
     if etype == "step_completed":
-        return styled(f"→ {pal.action_text(p.get('action'))}",
-                      *((pal.accent_color(p.get('action')),) if pal.accent_color(p.get('action')) else ()))
+        ac = pal.accent_color(p.get("action"))
+        return styled(f"→ {pal.action_text(p.get('action'))}", *((ac,) if ac else ()))
     if etype == "llm_response":
         from imp.cli.render_helpers import render_llm_response
         r = render_llm_response(p)

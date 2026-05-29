@@ -13,7 +13,6 @@ AnthropicAgentRunner with a FakeAsyncAnthropic client:
 from __future__ import annotations
 
 import dataclasses
-import json
 from pathlib import Path
 
 import pytest
@@ -26,14 +25,13 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.tools import get_registry  # noqa: F401 – ensures tools registered
+from imp.agents.tools import get_registry  # noqa: F401 - ensures tools registered
 from imp.agents.transcript import Transcript
 from imp.engine.replay import build_messages_from_events, reconstruct_request_for_response
 from imp.engine.state import InMemoryEventLog, JsonlEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
-
 
 # ── shared helpers ────────────────────────────────────────────────────────────
 
@@ -298,7 +296,7 @@ async def test_two_gates_g_succeeds_h_retries_distinct_gate_agent_ids(tmp_path: 
     distinct agent_ids (reviewer-1 then reviewer-2).
     """
     from imp.engine.change import Change
-    from imp.engine.executor import run_change, RunResult
+    from imp.engine.executor import RunResult, run_change
     from imp.providers import resolve
 
     # Build a workflow with writer step + one agent gate that retries once
@@ -446,7 +444,7 @@ async def test_resume_does_not_reemit_step_context(tmp_path: Path) -> None:
     step_dir = tmp_path / "step"
     step_dir.mkdir(parents=True, exist_ok=True)
 
-    inv = _inv(tmp_path, event_log=JsonlEventLog(log_path), agent_id="step:p/s")
+    _inv(tmp_path, event_log=JsonlEventLog(log_path), agent_id="step:p/s")
 
     # Seed a transcript: user("go") → assistant tool_use(read_file) → user(tool_result)
     # This mirrors how test_anthropic_runner.py tests resume.

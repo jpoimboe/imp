@@ -56,9 +56,12 @@ def test_round_trip_tool_use_and_result() -> None:
 
 def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
     from imp.agents.runner import (
-        AgentInvocation, ChangeContext, Message, TextBlock,
+        AgentInvocation,
+        ChangeContext,
+        Message,
+        TextBlock,
     )
-    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
     inv = AgentInvocation(
         agent_def=AgentDef(
             name="t", description="", tools=frozenset({"complete_step"}),

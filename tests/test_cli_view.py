@@ -12,7 +12,6 @@ import pytest
 
 from imp.cli.main import _use_tui, main
 
-
 # ── Task-17: resume uses _stream_sinks, not ChatRenderer ─────────────────────
 
 def test_replay_current_step_removed() -> None:
@@ -30,7 +29,9 @@ def test_resume_uses_stream_sinks_not_chat_renderer(tmp_path, monkeypatch, capsy
     """
     import argparse
     import json
+
     import anyio
+
     import imp.cli.main as m
     from imp.engine.state import State
 

@@ -63,6 +63,7 @@ def test_request_pause_is_idempotent_across_signal_and_keystroke() -> None:
 
 def test_request_pause_resolves_a_pending_input_future() -> None:
     import asyncio
+
     from imp.cli.prompt import ESC_SENTINEL
     async def go():
         app = NarrativeApp(nv.build_tree([]), live=True, mouse=False, coordinator=_FakeCoord())
@@ -94,10 +95,9 @@ def test_run_live_tui_interrupt_does_not_raise() -> None:
     Future that is never resolved; we call app_obj.request_pause() directly via
     a callback injected through on_event, so no real keyboard/OS event is needed.
     run_live_tui must return (not raise) and exit_reason must be 'pause'."""
-    import anyio
     from prompt_toolkit.input.defaults import create_pipe_input
     from prompt_toolkit.output import DummyOutput
-    from imp.cli.tui import run_live_tui
+
 
     class _Coord:
         should_pause = False
@@ -126,7 +126,6 @@ def test_run_live_tui_interrupt_does_not_raise() -> None:
 
     tui_mod.NarrativeApp.__init__ = patched_init
     try:
-        original_on_event = None
 
         # We wrap on_event after build so we can trigger pause on sentinel.
         original_run_live_tui = tui_mod.run_live_tui
@@ -167,6 +166,7 @@ def test_run_live_tui_drives_fake_engine_and_returns_completed(monkeypatch) -> N
     import anyio
     from prompt_toolkit.input.defaults import create_pipe_input
     from prompt_toolkit.output import DummyOutput
+
     from imp.cli.tui import run_live_tui
     from imp.engine.executor import RunResult
 
@@ -199,6 +199,7 @@ def test_resume_seed_plus_reemission_dedups_and_completes() -> None:
     import anyio
     from prompt_toolkit.input.defaults import create_pipe_input
     from prompt_toolkit.output import DummyOutput
+
     from imp.cli.tui import run_live_tui
     from imp.engine.executor import RunResult
 

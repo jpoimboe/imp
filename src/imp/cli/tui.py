@@ -9,8 +9,9 @@ This file is layered:
 """
 from __future__ import annotations
 
+import contextlib
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from imp.cli import narrative as nv
@@ -73,7 +74,7 @@ class AnsiMemo:
     limit."""
 
     def __init__(self, max_entries: int = 512) -> None:
-        self._d: "OrderedDict[tuple[int, int], list[str]]" = OrderedDict()
+        self._d: OrderedDict[tuple[int, int], list[str]] = OrderedDict()
         self.max_entries = max_entries
         self.hits = 0
 
@@ -81,14 +82,14 @@ class AnsiMemo:
     def size(self) -> int:
         return len(self._d)
 
-    def get(self, key: tuple[int, int]) -> "list[str] | None":
+    def get(self, key: tuple[int, int]) -> list[str] | None:
         v = self._d.get(key)
         if v is not None:
             self.hits += 1
             self._d.move_to_end(key)
         return v
 
-    def put(self, key: tuple[int, int], value: "list[str]") -> None:
+    def put(self, key: tuple[int, int], value: list[str]) -> None:
         self._d[key] = value
         self._d.move_to_end(key)
         while len(self._d) > self.max_entries:
@@ -107,11 +108,15 @@ def _plain(text: str) -> Fragments:
 
 def render_tree_to_lines(tree: nv.NarrativeTree, fold_state: FoldState,
                          width: int, *, color: bool = True,
-                         memo: "AnsiMemo | None" = None) -> list[RenderedLine]:
+                         memo: AnsiMemo | None = None) -> list[RenderedLine]:
     """Pure: NarrativeTree + fold state + width → ordered RenderedLines.
 
     `memo` (optional) caches per-(node,width) rich/ANSI output for prose nodes
     (design §7.2 / F5); pass None in tests that don't care about caching."""
+    # PERF (design §7.7): this does a full O(n) walk per invalidate. The AnsiMemo
+    # caches per-node rich cost, but not this walk. Fine at imp's scale; if a
+    # long streaming change regresses, switch to dirty-subtree line-list
+    # assembly (rebuild only the changed subtree, splice into a cached list).
     out: list[RenderedLine] = []
     root = tree.root
     head = f"#{root.change_id if root.change_id is not None else '?'}  {root.title}".rstrip()
@@ -519,14 +524,12 @@ class NarrativeApp:
         ESC → ESC_SENTINEL). Engine callbacks await this."""
         import asyncio
         loop = asyncio.get_running_loop()
-        fut: "asyncio.Future[str]" = loop.create_future()
+        fut: asyncio.Future[str] = loop.create_future()
         self._active_input = fut
         self._input_prompt = prompt_text
         if self.application is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.application.layout.focus(self._input_window)
-            except Exception:
-                pass
         self._invalidate()
         return fut
 
@@ -538,7 +541,7 @@ class NarrativeApp:
         the user selects a gate option via _select_gate_option."""
         import asyncio
         loop = asyncio.get_running_loop()
-        fut: "asyncio.Future[str]" = loop.create_future()
+        fut: asyncio.Future[str] = loop.create_future()
         self._gate_future = fut
         self._gate_options = options
         self._gate_active = True
@@ -628,10 +631,8 @@ class NarrativeApp:
 
     def _refocus_narrative(self) -> None:
         if self.application is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.application.layout.focus(self._narrative_window)
-            except Exception:
-                pass
 
     # -- interrupt reconciliation (H2) ----------------------------------------
     def request_pause(self) -> None:
@@ -655,7 +656,8 @@ class NarrativeApp:
         # Loop-owned tasks are NOT cancelled by the application teardown.
         if self.coordinator is not None:
             import asyncio
-            asyncio.ensure_future(self.coordinator.signal_pause())
+            _task = asyncio.ensure_future(self.coordinator.signal_pause())
+            _task  # noqa: B018  loop-owned task; must NOT be a background task
         if self.application is not None:
             self.application.exit()
 
@@ -780,8 +782,9 @@ class NarrativeApp:
             @kb.add("q")
             def _(event): event.app.exit()
 
-        from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl as _FTC
         from prompt_toolkit.layout.containers import VSplit
+        from prompt_toolkit.layout.controls import BufferControl
+        from prompt_toolkit.layout.controls import FormattedTextControl as _FTC
 
         windows = [self._narrative_window]
         if self.live:
@@ -951,10 +954,9 @@ def run_live_tui(*, run_change, coordinator, mouse: bool,
                     # "Application is not running". Swallow it so the interrupt path
                     # doesn't surface an ExceptionGroup traceback.
                     app_obj.exit_reason = app_obj.exit_reason or "done"
-                    try:
+                    # Swallow "Application is not running" (Ctrl-C/Ctrl-D path).
+                    with contextlib.suppress(Exception):
                         application.exit()
-                    except Exception:
-                        pass  # app already exited (Ctrl-C / Ctrl-D path)
 
             tg.start_soon(_engine)
 
@@ -968,7 +970,7 @@ def run_live_tui(*, run_change, coordinator, mouse: bool,
     return result_box.get("result")
 
 
-def _render_prose_ansi(node, avail_width: int, color: bool) -> "list[str]":
+def _render_prose_ansi(node, avail_width: int, color: bool) -> list[str]:
     """Render an AgentTextNode/UserMessageNode to a list of ANSI line strings.
 
     AgentTextNode → markdown (bold/italic/lists/headers + syntax-highlighted
@@ -987,6 +989,7 @@ def _render_prose_ansi(node, avail_width: int, color: bool) -> "list[str]":
         return out
     try:
         from io import StringIO
+
         from rich.console import Console
         from rich.markdown import Markdown
         buf = StringIO()

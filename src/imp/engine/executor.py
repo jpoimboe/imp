@@ -67,7 +67,7 @@ async def run_change(
     on_event: EventCallback | None = None,
     human_input_fn: HumanInputFn = input,
     human_output_fn: HumanOutputFn = print,
-    user_chat_input_fn: Callable[[str], str] | None = None,
+    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
@@ -138,7 +138,7 @@ async def _execute_phase(
     state: State, log: EventLog,
     *,
     human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
-    user_chat_input_fn: Callable[[str], str] | None,
+    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
 ) -> Action:
     _emit(log, "phase_started", {"phase": phase.name})
@@ -230,7 +230,7 @@ async def _run_agent_invocation(
     transcript_dir: Any,
     step_started_payload_extras: dict[str, Any],
     interactive: bool,
-    user_chat_input_fn: Callable[[str], str] | None,
+    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
     prior_backoff_attempts: int = 0,
 ) -> tuple[dict[str, Any] | None, bool, bool, bool, float | None]:
@@ -369,7 +369,7 @@ async def _execute_step(
     *,
     human_input_fn: HumanInputFn,
     human_output_fn: HumanOutputFn,
-    user_chat_input_fn: Callable[[str], str] | None,
+    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
 ) -> Action:
     agent_def = workflow.agents[step.file.stem]
@@ -465,7 +465,7 @@ async def _run_agent_gate(
     gate: AgentGate, workflow: Workflow, config: Config, change: Change,
     state: State, log: EventLog,
     *,
-    user_chat_input_fn: Callable[[str], str] | None,
+    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
 ) -> Action:
     """Execute an agent-as-gate. Same machinery as _execute_step minus the
@@ -544,7 +544,7 @@ async def _run_gate(
     state: State, log: EventLog,
     *,
     human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
-    user_chat_input_fn: Callable[[str], str] | None,
+    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     agent_output_context: dict[str, Any] | None = None,
     coordinator: Any = None,
 ) -> Action:

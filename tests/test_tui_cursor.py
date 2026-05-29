@@ -2,8 +2,14 @@
 from __future__ import annotations
 
 from imp.cli import narrative as nv
-from imp.cli.tui import (FoldState, fold_header_indices, next_fold_line,
-                         prev_fold_line, render_tree_to_lines, remap_cursor_to_node)
+from imp.cli.tui import (
+    FoldState,
+    fold_header_indices,
+    next_fold_line,
+    prev_fold_line,
+    remap_cursor_to_node,
+    render_tree_to_lines,
+)
 
 
 def _ev(eid, etype, agent_id=None, **payload):
@@ -38,12 +44,12 @@ def test_cursor_remaps_to_same_node_after_fold_toggle() -> None:
     fs = FoldState()
     lines = render_tree_to_lines(tree, fs, width=80, color=False)
     # Put the cursor on the tools fold header.
-    tools_idx = [i for i, ln in enumerate(lines)
-                 if ln.is_fold_header and isinstance(ln.node, nv.ToolBurstFold)][0]
+    tools_idx = next(i for i, ln in enumerate(lines)
+                 if ln.is_fold_header and isinstance(ln.node, nv.ToolBurstFold))
     node_at_cursor = lines[tools_idx].node
     # Expand the thinking fold ABOVE it — line numbers shift down.
-    think = lines[[i for i, ln in enumerate(lines)
-                   if ln.is_fold_header and isinstance(ln.node, nv.ThinkingFold)][0]].node
+    think = lines[next(i for i, ln in enumerate(lines)
+                   if ln.is_fold_header and isinstance(ln.node, nv.ThinkingFold))].node
     fs.toggle(think)
     new_lines = render_tree_to_lines(tree, fs, width=80, color=False)
     new_cursor = remap_cursor_to_node(new_lines, node_at_cursor, fallback=tools_idx)

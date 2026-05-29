@@ -31,11 +31,13 @@ def test_app_cursor_starts_at_tail_in_log_mode() -> None:
 
 
 def _app(full=False):
-    big = SAMPLE + [
+    big = [
+        *SAMPLE,
         _ev("6", "phase_started", phase="impl"),
         _ev("7", "step_started", step="build", model="m", provider="anthropic"),
         _ev("8", "tool_call", agent_id="step:impl/build", id="b1", name="bash", input={}),
-        _ev("9", "tool_result", agent_id="step:impl/build", id="b1", content="ok", error=False),
+        _ev("9", "tool_result", agent_id="step:impl/build", id="b1",
+            content="ok", error=False),
         _ev("10", "step_completed", step="build", action="continue"),
     ]
     return NarrativeApp(nv.build_tree(big), live=False, mouse=False, full=full)
@@ -56,8 +58,8 @@ def test_move_cursor_clamps_and_tracks_tail() -> None:
 def test_toggle_fold_at_cursor_is_fold_stable() -> None:
     app = _app()
     # Move cursor onto the thinking fold header.
-    idx = [i for i, ln in enumerate(app._lines)
-           if ln.is_fold_header and isinstance(ln.node, nv.ThinkingFold)][0]
+    idx = next(i for i, ln in enumerate(app._lines)
+           if ln.is_fold_header and isinstance(ln.node, nv.ThinkingFold))
     app.cursor_line = idx
     fold_node = app._lines[idx].node
     app.toggle_fold_at_cursor()
@@ -99,8 +101,8 @@ def test_fold_header_fragments_carry_mouse_handler_when_mouse_on() -> None:
 
 def test_handle_mouse_click_on_fold_toggles_it() -> None:
     app = _app()
-    idx = [i for i, ln in enumerate(app._lines)
-           if ln.is_fold_header and isinstance(ln.node, nv.ThinkingFold)][0]
+    idx = next(i for i, ln in enumerate(app._lines)
+           if ln.is_fold_header and isinstance(ln.node, nv.ThinkingFold))
     fold = app._lines[idx].node
     assert app.fold_state.is_expanded(fold) is False
     app._on_fold_click(fold)
@@ -129,7 +131,8 @@ def test_mouse_handler_fires_only_on_mouse_up() -> None:
 
 
 def test_footer_text_shows_identity_tokens_and_keyhints() -> None:
-    tree = nv.build_tree(SAMPLE + [
+    tree = nv.build_tree([
+        *SAMPLE,
         _ev("x", "llm_response", agent_id="step:design/spec", provider="anthropic",
             model="m", stop_reason="end_turn",
             usage={"input_tokens": 4200, "output_tokens": 1100}, raw={"content": []}),
@@ -144,6 +147,7 @@ def test_footer_text_shows_identity_tokens_and_keyhints() -> None:
 def test_run_log_tui_runs_and_exits_on_q() -> None:
     from prompt_toolkit.input.defaults import create_pipe_input
     from prompt_toolkit.output import DummyOutput
+
     from imp.cli.tui import run_log_tui
 
     tree = nv.build_tree(SAMPLE)

@@ -42,7 +42,7 @@ def test_expanding_a_fold_reveals_its_body() -> None:
     fs = FoldState()
     # locate the thinking fold node
     step = tree.root.children[0].children[0]
-    think = [c for c in step.children if isinstance(c, nv.ThinkingFold)][0]
+    think = next(c for c in step.children if isinstance(c, nv.ThinkingFold))
     fs.toggle(think)
     blob = _text(render_tree_to_lines(tree, fs, width=80, color=False))
     assert "▾ thinking" in blob
@@ -50,9 +50,11 @@ def test_expanding_a_fold_reveals_its_body() -> None:
 
 
 def test_default_expanded_keeps_step_context_collapsed_until_toggled() -> None:
-    events = SAMPLE[:3] + [
+    events = [
+        *SAMPLE[:3],
         _ev("c", "step_context", agent_id="step:design/spec", provider="anthropic",
-            model="m", system_prompt="SECRET", tools_schema=[], params={}, max_tool_calls=50),
+            model="m", system_prompt="SECRET", tools_schema=[], params={},
+            max_tool_calls=50),
     ]
     tree = nv.build_tree(events)
     fs = FoldState(default_expanded=True)        # mirrors --full / expand-all

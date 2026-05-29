@@ -15,7 +15,7 @@ tree-structure tests pull nothing heavy.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 
 # ── token accumulator (design §7.7 / F1: read usage straight from payload) ──
@@ -65,7 +65,7 @@ class StepNode:
     model: str | None = None
     provider: str | None = None
     children: list = field(default_factory=list)
-    outcome: "OutcomeLine | None" = None
+    outcome: OutcomeLine | None = None
     closed: bool = False
     collapsible = False
 
@@ -129,7 +129,7 @@ class SubagentFold:
     event_id: str                      # parent `task` tool_call EVENT id; routing
                                        # key is "sub:" + event_id
     block_id: str                      # tool_use block id; close-matching key
-    nested: "NarrativeBuilder"
+    nested: NarrativeBuilder
     event_count: int = 0
     running: bool = True
     outcome: str | None = None         # result summary when task tool_result lands
@@ -137,7 +137,7 @@ class SubagentFold:
     collapsible = True
 
     @property
-    def tree(self) -> "NarrativeTree":
+    def tree(self) -> NarrativeTree:
         return self.nested.tree
 
 
@@ -185,7 +185,7 @@ class NarrativeTree:
 
 
 # ── builder ──────────────────────────────────────────────────────────────────
-from collections.abc import Iterable   # noqa: E402  (kept near builder for clarity)
+from collections.abc import Iterable  # noqa: E402  (kept near builder for clarity)
 
 
 class NarrativeBuilder:
@@ -272,7 +272,7 @@ class NarrativeBuilder:
         self._current_burst = None
 
     # -- per-type handlers are registered in Task 3+ via _HANDLERS ------------
-    _HANDLERS: dict = {}
+    _HANDLERS: ClassVar[dict] = {}
 
 
 def _malformed_text(event: Any) -> str:
