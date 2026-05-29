@@ -266,6 +266,44 @@ def _prose_lines(node, width, depth, color, memo) -> list[Fragments]:
     return [_ansi_to_fragments(pad + line) for line in cached]
 
 
+def fold_header_indices(lines: list[RenderedLine]) -> list[int]:
+    return [i for i, ln in enumerate(lines) if ln.is_fold_header]
+
+
+def next_fold_line(lines: list[RenderedLine], cursor: int) -> int:
+    headers = fold_header_indices(lines)
+    for i in headers:
+        if i > cursor:
+            return i
+    return headers[-1] if headers else cursor
+
+
+def prev_fold_line(lines: list[RenderedLine], cursor: int) -> int:
+    headers = fold_header_indices(lines)
+    for i in reversed(headers):
+        if i < cursor:
+            return i
+    return headers[0] if headers else cursor
+
+
+def remap_cursor_to_node(lines: list[RenderedLine], node: Any, *, fallback: int) -> int:
+    """After a fold toggle / resize, find the line owning `node` (prefer its
+    fold header). Cursor follows the logical node, not the line number
+    (design §7.3)."""
+    header = next((i for i, ln in enumerate(lines)
+                   if ln.node is node and ln.is_fold_header), None)
+    if header is not None:
+        return header
+    any_line = next((i for i, ln in enumerate(lines) if ln.node is node), None)
+    if any_line is not None:
+        return any_line
+    return min(fallback, len(lines) - 1) if lines else 0
+
+
+def is_at_tail(cursor: int, line_count: int) -> bool:
+    return cursor >= line_count - 1
+
+
 def _render_prose_ansi(node, avail_width: int, color: bool) -> "list[str]":
     """Render an AgentTextNode/UserMessageNode to a list of ANSI line strings.
 
