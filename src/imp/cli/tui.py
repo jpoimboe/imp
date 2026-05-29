@@ -893,16 +893,29 @@ def run_log_tui(tree: nv.NarrativeTree, *, full: bool, mouse: bool,
 
 
 def run_live_tui(*, run_change, coordinator, mouse: bool,
-                 _input=None, _output=None):
+                 seed_events=None, _input=None, _output=None):
     """Run the live narrative TUI concurrently with the engine on one asyncio
     loop (design §7.7). ``run_change`` is a coroutine callable that already has
     change bound (e.g. via functools.partial) EXCEPT for the keyword callbacks
     ``on_event``, ``human_input_fn``, ``human_output_fn``,
     ``user_chat_input_fn``, and ``coordinator``, which this function supplies.
+
+    ``seed_events`` (optional, F4): a list of prior events to feed into the
+    builder synchronously *before* anyio.run() starts.  This completes before
+    _engine is started, so the read→subscribe window is empty and no event is
+    dropped or double-applied.  Used by ``imp resume`` to show the full prior
+    log as scrollable history before the live tail begins.
+
     Returns the RunResult (or None if the app exited without an engine result)."""
     import anyio
 
     builder = nv.NarrativeBuilder()
+    # F4: seed the ENTIRE prior log synchronously, before anything async runs.
+    # This completes before _engine is started, so the read→subscribe window is
+    # empty and no event is dropped or double-applied.
+    if seed_events is not None:
+        for e in seed_events:
+            builder.add(e)
     app_obj = NarrativeApp(builder.tree, live=True, mouse=mouse,
                            builder=builder, coordinator=coordinator)
     application = app_obj.build_application(_input=_input, _output=_output)

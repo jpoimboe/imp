@@ -193,3 +193,64 @@ def test_run_live_tui_drives_fake_engine_and_returns_completed(monkeypatch) -> N
             run_change=fake_run_change, coordinator=_Coord(), mouse=False,
             _input=inp, _output=DummyOutput())
     assert result is RunResult.COMPLETED
+
+
+def test_resume_seed_plus_reemission_dedups_and_completes() -> None:
+    import anyio
+    from prompt_toolkit.input.defaults import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+    from imp.cli.tui import run_live_tui
+    from imp.engine.executor import RunResult
+
+    # Prior log of an interrupted run, ending with the resume marker (exactly
+    # what _async_cmd_resume snapshots after appending workflow_resumed).
+    seed = [
+        _ev("c", "change_created", change_id=1, title="t"),
+        _ev("p", "phase_started", phase="design"),
+        _ev("s1", "step_started", step="spec", model="m", provider="anthropic"),
+        _ev("s1c", "step_completed", step="spec", action="continue"),
+        _ev("s2", "step_started", step="build", model="m", provider="anthropic"),
+        _ev("ll", "llm_response", agent_id="step:design/build", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "partial"}]}),
+        _ev("wp", "workflow_paused", reason="ctrl-c"),
+        _ev("wr", "workflow_resumed"),
+    ]
+    # What the executor re-emits on resume (re-runs the current step from scratch).
+    reemit = [
+        _ev("p2", "phase_started", phase="design"),
+        _ev("s2b", "step_started", step="build", model="m", provider="anthropic"),
+        _ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "fresh"}]}),
+        _ev("s2c", "step_completed", step="build", action="continue"),
+        _ev("pc", "phase_completed", phase="design"),
+    ]
+
+    # (1) Model dedup (guaranteed by Task 10B): one design phase, one build step.
+    tree = nv.build_tree(seed + reemit)
+    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert len(phases) == 1
+    builds = [s for s in phases[0].children
+              if isinstance(s, nv.StepNode) and s.name == "build"]
+    assert len(builds) == 1
+
+    # (2) Wiring: seed installed before the engine emits; runs to COMPLETED.
+    class _Coord:
+        should_pause = False
+        async def signal_pause(self): ...
+        async def run_signal_receiver(self): ...
+        def attach_runner(self, fn): ...
+        def detach_runner(self): ...
+
+    async def fake_run_change(*, on_event, **kw):
+        for e in reemit:
+            on_event(e)
+            await anyio.sleep(0)
+        return RunResult.COMPLETED
+
+    with create_pipe_input() as inp:
+        result = run_live_tui(run_change=fake_run_change, coordinator=_Coord(),
+                              mouse=False, seed_events=seed,
+                              _input=inp, _output=DummyOutput())
+    assert result is RunResult.COMPLETED

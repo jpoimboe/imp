@@ -275,7 +275,104 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return 2
 
 
+def _cmd_resume_tui(args: argparse.Namespace) -> int:
+    """TUI branch of ``imp resume``: manages its own event loop via run_live_tui
+    so there is no nested anyio.run() call.  Full-log seeding (F4): the prior
+    events.jsonl is fed into the builder synchronously before the engine starts,
+    so the user sees complete scroll-back history before the live tail begins."""
+    import functools
+
+    from imp.cli.signals import InterruptCoordinator
+    from imp.cli.tui import run_live_tui
+
+    install_process_group()
+    project = _project_root()
+    lock = ProjectLock(project / ".imp" / "lock")
+    try:
+        with lock.acquire():
+            try:
+                change = Change.load(project, args.change_id)
+            except (LoadError, LoadErrors) as err:
+                print(f"imp: {err}", file=sys.stderr)
+                return 2
+            state = State.load(change.state_dir)
+            if state.status not in ("paused", "errored"):
+                print(
+                    f"imp: Change {change.id} status is {state.status!r}; "
+                    "nothing to resume",
+                    file=sys.stderr,
+                )
+                return 2
+            _write_change_lock(change)
+            try:
+                print(f"Resuming Change {change.id}: {change.title!r}")
+                print(f"Phase: {state.phase}, step: {state.step}")
+                coord = InterruptCoordinator()
+                # Append the resumed marker once (as the --no-tui path does),
+                # THEN snapshot the full log to seed the builder (F4).
+                # Order: marker first so it is part of the seeded history
+                # exactly once.  The model's re-entry dedup (Task 10B) then
+                # handles the re-emitted phase_started/step_started without
+                # creating duplicate nodes.
+                change.event_log().append(
+                    agent_id=None, type="workflow_resumed", payload={})
+                seed = list(change.event_log().read())
+                state.status = "running"
+                state.save(change.state_dir)
+                bound = functools.partial(run_change, change)
+                try:
+                    result = run_live_tui(
+                        run_change=bound,
+                        coordinator=coord,
+                        mouse=not args.no_mouse,
+                        seed_events=seed,
+                    )
+                except (LoadError, LoadErrors) as e:
+                    print(f"imp: {e}", file=sys.stderr)
+                    return 2
+                except BaseExceptionGroup as eg:
+                    # run_live_tui may wrap engine errors in an ExceptionGroup
+                    # (anyio task group); unwrap and surface a LoadError/LoadErrors
+                    # if one is present.
+                    load_errs = [
+                        exc for exc in eg.exceptions
+                        if isinstance(exc, (LoadError, LoadErrors))
+                    ]
+                    if load_errs:
+                        print(f"imp: {load_errs[0]}", file=sys.stderr)
+                        return 2
+                    raise
+                # Honor exit_reason: pause/eof save state; done/completed use result.
+                if coord.should_pause:
+                    pause_and_exit(change, reason="ctrl-c")
+                    print(f"\nChange {change.id}: paused (ctrl-c)")
+                    return 130
+                elif result is None:
+                    # App exited with no engine result and no pause flag → Ctrl-D / EOF.
+                    pause_and_exit(change, reason="ctrl-d")
+                    print(f"\nChange {change.id}: paused (ctrl-d)")
+                    return 130
+                elif result is RunResult.COMPLETED:
+                    print(f"Change {change.id}: {result.value}")
+                    return 0
+                else:
+                    # RunResult.PAUSED (workflow self-pause / human gate) or
+                    # RunResult.ERRORED — engine already saved state.
+                    print(f"Change {change.id}: {result.value}")
+                    return 1
+            finally:
+                _clear_change_lock(change)
+    except LockHeld as lock_err:
+        print(
+            f"imp: another Change is running (lock held by pid {lock_err.held_by_pid})",
+            file=sys.stderr,
+        )
+        return 2
+
+
 def _cmd_resume(args: argparse.Namespace) -> int:
+    if _use_tui(no_tui=args.no_tui):
+        return _cmd_resume_tui(args)
     return anyio.run(_async_cmd_resume, args)
 
 
@@ -510,6 +607,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p_resume = sub.add_parser("resume")
     p_resume.add_argument("change_id", type=int)
+    p_resume.add_argument("--no-tui", action="store_true",
+                          help="Force the plain-text stream even on a TTY.")
+    p_resume.add_argument("--no-mouse", action="store_true",
+                          help="Disable TUI mouse capture.")
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(
