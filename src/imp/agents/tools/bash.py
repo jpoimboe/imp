@@ -21,6 +21,7 @@ import anyio
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
+from imp.engine.env import engine_env
 
 
 @imp_tool(
@@ -34,6 +35,10 @@ from imp.agents.tools.context import ToolContext
 )
 async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
     cwd_path = cwd or str(ctx.project_root)
+    env = {
+        **os.environ,
+        **engine_env(project_root=ctx.project_root, artifacts_dir=ctx.artifacts_dir),
+    }
     # POSIX: start_new_session=True makes the child a new session leader so
     # SIGTERM to the PG affects the whole tree. Windows: this kwarg is ignored
     # and signal handling differs — out of V1 scope (we ship POSIX-first).
@@ -49,6 +54,7 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
         stdout=PIPE,
         stderr=PIPE,
         cwd=cwd_path,
+        env=env,
         **kwargs,  # type: ignore[arg-type]
     )
     ctx.running_processes.append(proc)
