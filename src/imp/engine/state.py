@@ -12,12 +12,12 @@ import contextlib
 import json
 import os
 import tempfile
+import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-import uuid
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -123,7 +123,7 @@ class EventLog(Protocol):
                             tools_schema: Any, params: dict[str, Any],
                             max_tool_calls: int) -> dict[str, Any]: ...
     def append_user_message(self, *, agent_id: str | None,
-                            message: "Message") -> dict[str, Any]: ...
+                            message: Message) -> dict[str, Any]: ...
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],
                             stop_reason: Any) -> dict[str, Any]: ...
@@ -249,7 +249,7 @@ class _BaseEventLog:
             payload={"id": block.tool_use_id, "content": block.content,
                      "error": block.is_error})
 
-    def append(self, *, agent_id: str | None, type: str,  # type: ignore[override]
+    def append(self, *, agent_id: str | None, type: str,
                payload: Any) -> dict[str, Any]:
         return self._emit(agent_id=agent_id, type=type, payload=payload)
 

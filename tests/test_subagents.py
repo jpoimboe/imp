@@ -163,8 +163,8 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
 
 @pytest.mark.anyio
 async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> None:
-    from imp.engine.state import InMemoryEventLog
     from imp.agents.tools.context import ToolContext
+    from imp.engine.state import InMemoryEventLog
 
     shared = InMemoryEventLog()
     captured: dict = {}

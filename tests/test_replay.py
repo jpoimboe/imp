@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.engine.replay import (
     build_messages_from_events,

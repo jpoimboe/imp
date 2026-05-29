@@ -14,7 +14,7 @@ not import replay, so there is no cycle.)
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any
+from typing import Any, cast
 
 from imp.agents.runner import (
     Diagnostics,
@@ -131,7 +131,7 @@ def reconstruct_request_for_response(
         raise ValueError(f"no step_context for agent {agent_id!r} before response")
 
     messages = build_messages_from_events(
-        events, agent_id=agent_id, until_event_id=response_event_id)
+        events, agent_id=cast(str, agent_id), until_event_id=response_event_id)
     return {
         "system": ctx.get("system_prompt"),
         "tools": ctx.get("tools_schema"),

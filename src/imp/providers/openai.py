@@ -19,7 +19,7 @@ import inspect
 import json
 import os
 from collections.abc import AsyncGenerator, AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import (
@@ -256,9 +256,9 @@ def _serialize_openai_response(response: Any) -> dict[str, Any]:
     dump = getattr(response, "model_dump", None)
     if callable(dump):
         try:
-            return dump(mode="json")
+            return cast(dict[str, Any], dump(mode="json"))
         except TypeError:
-            return dump()
+            return cast(dict[str, Any], dump())
     choice = response.choices[0]
     msg = choice.message
     tool_calls = []
@@ -289,7 +289,7 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
         return {}
     dump = getattr(usage, "model_dump", None)
     if callable(dump):
-        return dump()
+        return cast(dict[str, Any], dump())
     if isinstance(usage, dict):
         return usage
     return {k: getattr(usage, k) for k in
@@ -311,7 +311,7 @@ def _parse_openai_message(raw: dict[str, Any]) -> Message:
             args = json.loads(fn.get("arguments") or "{}")
         except json.JSONDecodeError:
             args = {}
-        blocks.append(ToolUseBlock(id=tc["id"], name=fn.get("name"), input=args))
+        blocks.append(ToolUseBlock(id=tc["id"], name=cast(str, fn.get("name")), input=args))
     return Message(role="assistant", content=tuple(blocks))
 
 

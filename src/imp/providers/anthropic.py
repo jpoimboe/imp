@@ -19,7 +19,7 @@ import inspect
 import json
 import os
 from collections.abc import AsyncGenerator, AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
 from imp.agents.runner import (
@@ -161,9 +161,9 @@ def _serialize_anthropic_response(response: Any) -> dict[str, Any]:
     dump = getattr(response, "model_dump", None)
     if callable(dump):
         try:
-            return dump(mode="json")
+            return cast(dict[str, Any], dump(mode="json"))
         except TypeError:
-            return dump()
+            return cast(dict[str, Any], dump())
     content: list[dict[str, Any]] = []
     for block in getattr(response, "content", []):
         kind = getattr(block, "type", None)
@@ -189,7 +189,7 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
         return {}
     dump = getattr(usage, "model_dump", None)
     if callable(dump):
-        return dump()
+        return cast(dict[str, Any], dump())
     if isinstance(usage, dict):
         return usage
     return {k: getattr(usage, k) for k in

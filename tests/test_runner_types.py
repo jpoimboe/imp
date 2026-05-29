@@ -88,8 +88,7 @@ def test_agent_invocation_has_continuation_fn_default_none() -> None:
     from pathlib import Path
 
     from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
-    from imp.engine.types import OutputField, OutputSchema, SourceLoc
-    from imp.engine.types import AgentDef
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
     schema = OutputSchema(
         fields=(OutputField(name="status", type="enum",

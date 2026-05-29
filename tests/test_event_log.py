@@ -126,7 +126,7 @@ def test_inmemory_matches_jsonl_shape(tmp_path: Path) -> None:
             agent_id="A", parent_id_override="seed",
             provider="a", model="m", system_prompt="s",
             tools_schema=[], params={}, max_tool_calls=1)
-    mem_ev = list(mem.read())[0]
-    jl_ev = list(jl.read())[0]
+    mem_ev = next(iter(mem.read()))
+    jl_ev = next(iter(jl.read()))
     assert set(mem_ev) == set(jl_ev)
     assert mem_ev["type"] == jl_ev["type"] == "step_context"
