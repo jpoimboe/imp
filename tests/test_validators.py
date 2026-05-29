@@ -203,7 +203,7 @@ def test_v14_filename_must_match_name(tmp_path: Path) -> None:
     assert any("filename stem is 'coder'" in str(e) for e in ei.value.errors)
 
 
-def test_v13_warning_decide_no_else(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_v13_error_decide_no_else(tmp_path: Path) -> None:
     agent_md = (
         "---\nname: reviewer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
@@ -223,9 +223,33 @@ def test_v13_warning_decide_no_else(tmp_path: Path, capsys: pytest.CaptureFixtur
             "        - {when: {status: Success}, action: {kind: continue}}\n"
         ),
     )
-    load_workflow(wf)  # should not raise — warning only
-    captured = capsys.readouterr()
-    assert "no terminal 'else: true'" in captured.err
+    with pytest.raises(LoadErrors) as ei:
+        load_workflow(wf)
+    assert any("no terminal 'else: true'" in str(e) for e in ei.value.errors)
+
+
+def test_v13_decide_with_else_loads(tmp_path: Path) -> None:
+    agent_md = (
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n"
+    )
+    wf = _make_workflow(
+        tmp_path,
+        agents={"reviewer.md": agent_md, "stub.md": _OK_AGENT},
+        workflow_yaml=(
+            "name: t\ndescription: \"\"\nphases: [p]\n"
+            "p:\n"
+            "  steps: [{name: s, file: agents/stub.md}]\n"
+            "  gates:\n"
+            "    - type: agent\n"
+            "      file: agents/reviewer.md\n"
+            "      decide:\n"
+            "        - {when: {status: Success}, action: {kind: continue}}\n"
+            "        - {else: true, action: {kind: pause}}\n"
+        ),
+    )
+    load_workflow(wf)  # must not raise
 
 
 def test_v1_step_gate_agent_file_missing(tmp_path: Path) -> None:

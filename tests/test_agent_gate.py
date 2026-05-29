@@ -235,12 +235,12 @@ async def test_agent_gate_goto(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_agent_gate_no_match_retries(tmp_path: Path) -> None:
-    """decide block without else: true and no match → retry (defensive)."""
+    """decide block with rework → retry and else → pause; max_retries hit → pause."""
     change = _seed_workflow_with_agent_gate(tmp_path, gate_decide_yaml=(
         "      decide:\n"
         "        - {when: {verdict: approve}, action: {kind: continue}}\n"
         "        - {when: {verdict: rework}, action: {kind: retry}}\n"
-        # No else clause. Loader emits a WARNING (validator #13). We accept it.
+        "        - {else: true, action: {kind: pause}}\n"
     ))
 
     # Reviewer always returns rework → first eval matches → retry → max_retries hits → pause.
@@ -262,3 +262,43 @@ async def test_agent_gate_no_match_retries(tmp_path: Path) -> None:
     # max_retries=1 in defaults → 1 retry attempt → on_max_retries=pause.
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
+
+
+@pytest.mark.anyio
+async def test_agent_gate_decide_no_match_pauses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defensive path: if evaluate_decide raises DecideNoMatch at runtime, the
+    gate emits a config/decide_no_match error and Pauses — it does NOT Retry
+    (which would re-run upstream steps)."""
+    from imp.engine import executor as ex
+    from imp.engine.gates import DecideNoMatch
+
+    change = _seed_workflow_with_agent_gate(tmp_path, gate_decide_yaml=(
+        "      decide:\n"
+        "        - {when: {verdict: approve}, action: {kind: continue}}\n"
+        "        - {else: true, action: {kind: pause}}\n"
+    ))
+
+    def _always_no_match(_decide, _ctx):
+        raise DecideNoMatch("forced for test")
+
+    monkeypatch.setattr(ex, "evaluate_decide", _always_no_match)
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _FakeProvider(
+            {"status": "Success", "verdict": "approve"}, model=model,
+        ),
+    )
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=lambda e: events.append(e))
+    assert result is RunResult.PAUSED
+    assert any(
+        e.get("type") == "error"
+        and (e.get("payload") or {}).get("category") == "config"
+        and (e.get("payload") or {}).get("kind") == "decide_no_match"
+        for e in events
+    )

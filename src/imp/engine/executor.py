@@ -522,13 +522,17 @@ async def _run_agent_gate(
     try:
         action = evaluate_decide(gate.decide, agent_output)
     except DecideNoMatch as e:
-        # Executor-synthesized error (not runner-yielded): agent_id=None.
+        # Validation (V13) now guarantees every decide has an `else` rule, so
+        # this is a defensive, should-be-unreachable path. Surface to the human
+        # rather than looping a phase retry that re-runs upstream steps.
         _emit(log, "error", {
-            "category": "agent_output_missing",
+            "category": "config",
             "kind": "decide_no_match",
             "message": f"agent gate decide: {e}",
         }, agent_id=None)
-        return Retry()
+        _emit(log, "gate_evaluated",
+              {"kind": "agent", "gate": stem, "action": _action_dict(Pause())})
+        return Pause()
 
     # Clean up the gate's transcript dir on success (mirrors step success).
     shutil.rmtree(transcript_dir, ignore_errors=True)

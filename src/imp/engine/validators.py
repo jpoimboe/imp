@@ -41,7 +41,7 @@ def validate(
     _v11_fs_permissions_paths(workflow, errors)
     if configured_roles is not None:
         _v12_model_role_configured(workflow, configured_roles, errors)
-    _v13_decide_missing_else(workflow, warnings)
+    _v13_decide_missing_else(workflow, errors)
     _v14_filename_matches_agent_name(workflow, errors)
     _v15_write_tool_needs_write_permission(workflow, errors)
 
@@ -287,10 +287,10 @@ def _v12_model_role_configured(
                 check(gate.model_role, gate.source)
 
 
-def _v13_decide_missing_else(workflow: Workflow, warnings: list[LoadError]) -> None:
+def _v13_decide_missing_else(workflow: Workflow, errors: list[LoadError]) -> None:
     def check(decide: Decide, where: str) -> None:
         if not any(r.is_else for r in decide.rules):
-            warnings.append(
+            errors.append(
                 LoadError(
                     f"decide block in {where} has no terminal 'else: true' rule "
                     "(fall-through is undefined)",
