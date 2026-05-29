@@ -23,6 +23,7 @@ Category = Literal[
     "rate_limit",
     "network",
     "agent_output_missing",
+    "agent_incomplete",
     "unknown",
 ]
 

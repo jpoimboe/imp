@@ -78,5 +78,13 @@ def test_hint_ignored_for_pause_category() -> None:
     assert isinstance(d, ep.Pause)
 
 
+def test_pause_for_agent_incomplete() -> None:
+    for attempts in (0, 1, 99):
+        assert isinstance(
+            ep.decide("agent_incomplete", prior_backoff_attempts=attempts),
+            ep.Pause,
+        )
+
+
 def test_policy_covers_every_category() -> None:
     assert set(ep._POLICY.keys()) == set(get_args(Category))

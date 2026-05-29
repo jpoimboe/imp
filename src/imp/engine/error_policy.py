@@ -45,6 +45,7 @@ _POLICY: dict[Category, type[Pause] | type[RetryNow] | type[RetryWithBackoff]] =
     "rate_limit":           RetryWithBackoff,
     "network":              RetryWithBackoff,
     "agent_output_missing": RetryNow,
+    "agent_incomplete":     Pause,
     "unknown":              Pause,
 }
 
