@@ -46,26 +46,35 @@ def _line(text: str, depth: int, color: bool, *codes: str) -> str:
     return pal.ansi(f"{_INDENT * depth}{text}", *codes, enabled=color)
 
 
+def header_line(node: Any, *, depth: int, color: bool) -> str:
+    """The single header line for a container node (PhaseNode / StepNode), with
+    no children. Shared by `_render` and the live driver so indentation/label/
+    color stay identical in both paths."""
+    if isinstance(node, nv.PhaseNode):
+        return _line(node.name, depth, color, *pal.NODE_COLORS["phase"])
+    label = f"agent_gate: {node.name}" if node.kind == "agent_gate" else node.name
+    if node.interactive:
+        label += " (interactive)"
+    return _line(label, depth, color, *pal.NODE_COLORS["step"])
+
+
 def _render(node: Any, *, depth: int, full: bool, color: bool,
             width: int) -> Iterator[str]:
     if isinstance(node, nv.PhaseNode):
-        yield _line(node.name, depth, color, *pal.NODE_COLORS["phase"])
+        yield header_line(node, depth=depth, color=color)
         for c in node.children:
             yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
         return
 
     if isinstance(node, nv.StepNode):
-        label = f"agent_gate: {node.name}" if node.kind == "agent_gate" else node.name
-        if node.interactive:
-            label += " (interactive)"
-        yield _line(label, depth, color, *pal.NODE_COLORS["step"])
+        yield header_line(node, depth=depth, color=color)
         for c in node.children:
             yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
         return
 
     if isinstance(node, nv.AgentTextNode):
         for line in _wrap(node.text, width, depth):
-            yield pal.ansi(line, enabled=color)
+            yield pal.ansi(line, *pal.NODE_COLORS["agent"], enabled=color)
         return
 
     if isinstance(node, nv.UserMessageNode):

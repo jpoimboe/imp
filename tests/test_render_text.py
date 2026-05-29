@@ -5,7 +5,12 @@ import json
 from pathlib import Path
 
 from imp.cli import narrative as nv
+from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
+
+
+class _FakeRendered:
+    def __init__(self, texts): self.texts = texts
 
 
 def _lines(events, *, full=False, width=80):
@@ -163,6 +168,23 @@ def test_snapshot_full(monkeypatch) -> None:
     golden = (FIXTURES / "narrative_full.txt").read_text()
     assert actual == golden, ("full-mode drift; to accept, rewrite "
                               "tests/fixtures/narrative_full.txt with the actual output")
+
+
+def test_header_line_matches_render_for_phase_and_step() -> None:
+    phase = nv.PhaseNode(name="design")
+    step = nv.StepNode(name="spec", interactive=True)
+    gate = nv.StepNode(name="approve", kind="agent_gate")
+    assert rt.header_line(phase, depth=0, color=False) == "design"
+    assert rt.header_line(step, depth=1, color=False) == "  spec (interactive)"
+    assert rt.header_line(gate, depth=2, color=False) == "    agent_gate: approve"
+
+
+def test_agent_text_is_bold_when_color_enabled() -> None:
+    node = nv.AgentTextNode(payload={})
+    node._cache = _FakeRendered(["hello world"])
+    out = list(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert out and out[0].startswith("\x1b[1m")   # bold prefix from NODE_COLORS["agent"]
+    assert "hello world" in out[0]
 
 
 def test_snapshot_covers_every_node_type() -> None:
