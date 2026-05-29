@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from imp.cli import narrative as nv
+from tests._event_fixtures import ev
 
 
 def test_node_dataclasses_construct_and_default_collapsible() -> None:
@@ -17,6 +18,7 @@ def test_node_dataclasses_construct_and_default_collapsible() -> None:
     assert nv.UserMessageNode(text="hi").collapsible is False
     assert nv.GateNode(kind="human").collapsible is False
     assert nv.ErrorNode(message="boom").collapsible is False
+    assert nv.AskUserNode(question="q?").collapsible is False
     assert nv.OutcomeLine(action="continue").collapsible is False
     assert nv.FallbackLine(event_type="x", payload={}).collapsible is False
     # Collapsible folds.
@@ -558,3 +560,38 @@ def test_resume_into_a_new_phase_does_not_reuse() -> None:
     tree = nv.build_tree(seed + live)
     names = [c.name for c in tree.root.children if isinstance(c, nv.PhaseNode)]
     assert names == ["design", "implement"]              # implement is genuinely new
+
+
+def test_ask_user_is_first_class_node_not_a_burst() -> None:
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="step:design/spec", id="q1",
+           name="ask_user", input={"question": "Which port?"}),
+        ev("5", "tool_result", agent_id="step:design/spec", id="q1",
+           content="8080", error=False),
+    ])
+    step = tree.root.children[0].children[0]
+    ask_nodes = [c for c in step.children if isinstance(c, nv.AskUserNode)]
+    assert len(ask_nodes) == 1
+    assert ask_nodes[0].question == "Which port?"
+    assert ask_nodes[0].answer == "8080"
+    # No spurious tool burst was created for the ask_user call/result.
+    assert not any(isinstance(c, nv.ToolBurstFold) for c in step.children)
+
+
+def test_ask_user_call_flushes_open_burst() -> None:
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="step:design/spec", id="b1",
+           name="read_file", input={"path": "a"}),
+        ev("5", "tool_result", agent_id="step:design/spec", id="b1", content="ok"),
+        ev("6", "tool_call", agent_id="step:design/spec", id="q1",
+           name="ask_user", input={"question": "Go?"}),
+    ])
+    step = tree.root.children[0].children[0]
+    kinds = [type(c).__name__ for c in step.children]
+    assert kinds == ["ToolBurstFold", "AskUserNode"]  # burst closed before the question
