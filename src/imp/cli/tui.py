@@ -64,6 +64,37 @@ class FoldState:
 _INDENT = "  "
 
 
+class AnsiMemo:
+    """Bounded LRU cache of per-(node_id, width) rendered ANSI line lists.
+
+    Content nodes are immutable (design §7.2), so an entry is valid until the
+    width changes — a resize drops width-mismatched entries; only NEW nodes are
+    rendered. Bounded so long sessions / repeated resizes can't grow it without
+    limit."""
+
+    def __init__(self, max_entries: int = 512) -> None:
+        self._d: "OrderedDict[tuple[int, int], list[str]]" = OrderedDict()
+        self.max_entries = max_entries
+        self.hits = 0
+
+    @property
+    def size(self) -> int:
+        return len(self._d)
+
+    def get(self, key: tuple[int, int]) -> "list[str] | None":
+        v = self._d.get(key)
+        if v is not None:
+            self.hits += 1
+            self._d.move_to_end(key)
+        return v
+
+    def put(self, key: tuple[int, int], value: "list[str]") -> None:
+        self._d[key] = value
+        self._d.move_to_end(key)
+        while len(self._d) > self.max_entries:
+            self._d.popitem(last=False)
+
+
 def _ansi_to_fragments(ansi_str: str) -> Fragments:
     """Convert an ANSI-coded string to prompt_toolkit fragments."""
     from prompt_toolkit.formatted_text import ANSI
@@ -224,9 +255,45 @@ def _wrap_fragments(text, width, depth, color, codes) -> list[Fragments]:
 
 
 def _prose_lines(node, width, depth, color, memo) -> list[Fragments]:
-    """Prose (AgentTextNode/UserMessageNode) → fragments. Task 21 swaps the body
-    for rich markdown; for now (Task 20) it is plain wrapped text so the line
-    layer is testable without rich."""
-    text = node.text if isinstance(node, nv.AgentTextNode) else f"> {node.text}"
-    codes = () if isinstance(node, nv.AgentTextNode) else pal.NODE_COLORS["user"]
-    return _wrap_fragments(text, width, depth, color, codes)
+    indent_cols = len(_INDENT) * depth
+    key = (id(node), width)
+    cached = memo.get(key) if memo is not None else None
+    if cached is None:
+        cached = _render_prose_ansi(node, width - indent_cols, color)
+        if memo is not None:
+            memo.put(key, cached)
+    pad = _INDENT * depth
+    return [_ansi_to_fragments(pad + line) for line in cached]
+
+
+def _render_prose_ansi(node, avail_width: int, color: bool) -> "list[str]":
+    """Render an AgentTextNode/UserMessageNode to a list of ANSI line strings.
+
+    AgentTextNode → markdown (bold/italic/lists/headers + syntax-highlighted
+    fenced code). UserMessageNode → plain '> '-prefixed wrapped text. A rich
+    failure on any chunk degrades to plain wrapped text (design §7.2, never
+    crash the frame)."""
+    import textwrap
+    avail = max(8, avail_width)
+    if isinstance(node, nv.UserMessageNode):
+        return [f"> {ln}" for ln in (textwrap.wrap(node.text, width=avail) or [""])]
+    text = node.text
+    if not color:
+        out: list[str] = []
+        for para in text.split("\n"):
+            out.extend(textwrap.wrap(para, width=avail) or [""])
+        return out
+    try:
+        from io import StringIO
+        from rich.console import Console
+        from rich.markdown import Markdown
+        buf = StringIO()
+        console = Console(file=buf, width=avail, force_terminal=True,
+                          color_system="standard", soft_wrap=False)
+        console.print(Markdown(text))
+        return buf.getvalue().rstrip("\n").split("\n")
+    except Exception:
+        out = []
+        for para in text.split("\n"):
+            out.extend(textwrap.wrap(para, width=avail) or [""])
+        return out

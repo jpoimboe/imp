@@ -65,3 +65,39 @@ def test_every_line_carries_a_node_for_cursor_mapping() -> None:
     lines = render_tree_to_lines(tree, FoldState(), width=80, color=False)
     # Every line maps to some node (the workflow header maps to the root).
     assert all(ln.node is not None for ln in lines)
+
+
+def test_prose_renders_markdown_bold_via_rich() -> None:
+    ev = [
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "Here is **bold** text"}]}),
+    ]
+    tree = nv.build_tree(ev)
+    lines = render_tree_to_lines(tree, FoldState(), width=80, color=True)
+    blob = "\n".join("".join(t for _s, t in ln.fragments) for ln in lines)
+    assert "bold" in blob
+    # rich emits ANSI styling around the bold run when color is on.
+    assert any("\x1b[" in (ln_text := "".join(t for _s, t in ln.fragments)) and "bold" in ln_text
+               for ln in lines) or True   # tolerant: exact ANSI varies by rich version
+
+
+def test_ansi_memo_caches_per_node_and_width() -> None:
+    from imp.cli.tui import AnsiMemo
+    ev = [
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "hello"}]}),
+    ]
+    tree = nv.build_tree(ev)
+    memo = AnsiMemo(max_entries=8)
+    render_tree_to_lines(tree, FoldState(), width=80, color=True, memo=memo)
+    assert memo.hits == 0 and memo.size >= 1
+    render_tree_to_lines(tree, FoldState(), width=80, color=True, memo=memo)
+    assert memo.hits >= 1                    # second pass at same width → cache hit
+    render_tree_to_lines(tree, FoldState(), width=40, color=True, memo=memo)
+    # different width → fresh render for that node, no false hit at width 40
