@@ -88,3 +88,51 @@ def test_gate_and_error_lines() -> None:
     ]))
     assert "script gate" in out and "continue" in out
     assert "bad key" in out
+
+
+def test_full_mode_expands_tools_thinking_and_subagent() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "thinking", agent_id="step:p/s", content="deep thoughts here"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "ls -la"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="total 0", error=False),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "subagent verdict: approve"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status":"Success"}', error=False),
+    ], full=True))
+    assert "▾ thinking" in out and "deep thoughts here" in out
+    assert "▾ tools" in out
+    assert "⏺ bash" in out and "command=ls -la" in out and "total 0" in out
+    assert "▾ task → reviewer" in out
+    # nested subagent prose appears, indented under the fold
+    assert "subagent verdict: approve" in out
+
+
+def test_full_mode_expands_step_context_config_dump() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "step_context", agent_id="step:p/s", provider="anthropic", model="claude",
+            system_prompt="SYSTEM PROMPT TEXT", tools_schema=[{"name": "bash"}],
+            params={"max_tokens": 8192}, max_tool_calls=50),
+    ], full=True))
+    assert "SYSTEM PROMPT TEXT" in out
+    assert "- bash" in out
+
+
+def test_step_context_collapsed_even_in_default_mode() -> None:
+    # design §5.1: step_context is folded by default in BOTH views.
+    out = "\n".join(_lines([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "step_context", agent_id="step:p/s", provider="anthropic", model="claude",
+            system_prompt="SYSTEM PROMPT TEXT", tools_schema=[], params={}, max_tool_calls=50),
+    ], full=False))
+    assert "SYSTEM PROMPT TEXT" not in out
+    assert "▸ context" in out
