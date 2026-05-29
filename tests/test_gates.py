@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.engine.env import engine_env
 from imp.engine.gates import DecideNoMatch, evaluate_decide, run_human_gate, run_script_gate
 from imp.engine.types import (
     Action,
@@ -247,6 +248,23 @@ def test_script_gate_receives_env_extra(tmp_path: Path) -> None:
         gate, cwd=tmp_path, env_extra={"IMP_ARTIFACTS_DIR": "/tmp/probe"},
     )
     assert ctx["exit"] == 0  # test command passed → env var was set correctly
+    assert isinstance(action, Continue)
+
+
+def test_script_gate_receives_project_root_from_engine_env(tmp_path: Path) -> None:
+    """engine_env() output, fed to the gate, exposes IMP_PROJECT_ROOT — the var
+    run-tests.sh `cd`s into. Guards the dogfood blocker fix."""
+    decide = Decide(
+        rules=(
+            Rule(when=(("exit", 0),), is_else=False, action=Continue(), source=loc()),
+            Rule(when=(), is_else=True, action=Retry(), source=loc()),
+        ),
+        source=loc(),
+    )
+    gate = _script_gate(f'test "$IMP_PROJECT_ROOT" = "{tmp_path}"', decide)
+    env_extra = engine_env(project_root=tmp_path, artifacts_dir=tmp_path / "a")
+    action, ctx = run_script_gate(gate, cwd=tmp_path, env_extra=env_extra)
+    assert ctx["exit"] == 0
     assert isinstance(action, Continue)
 
 

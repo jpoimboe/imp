@@ -25,6 +25,7 @@ from imp.agents.runner import (
 from imp.engine import error_policy
 from imp.engine.change import Change
 from imp.engine.completion import completion_instruction
+from imp.engine.env import engine_env
 from imp.engine.gates import (
     DecideNoMatch,
     evaluate_decide,
@@ -617,7 +618,9 @@ async def _run_gate(
         _emit(log, "gate_evaluated", {"kind": "human", "action": _action_dict(action)})
         return action
     if isinstance(gate, ScriptGate):
-        env_extra = {"IMP_ARTIFACTS_DIR": str(change.artifacts_dir)}
+        env_extra = engine_env(
+            project_root=change.project_root, artifacts_dir=change.artifacts_dir,
+        )
         action, ctx = run_script_gate(gate, cwd=change.workflow_dir, env_extra=env_extra)
         _emit(log, "gate_evaluated",
               {"kind": "script", "context": ctx, "action": _action_dict(action)})
