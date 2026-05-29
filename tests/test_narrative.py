@@ -196,9 +196,9 @@ def test_thinking_and_step_context_become_collapsible_folds() -> None:
     kinds = [type(c).__name__ for c in step.children]
     assert "StepContextNode" in kinds
     assert "ThinkingFold" in kinds
-    ctx = [c for c in step.children if isinstance(c, nv.StepContextNode)][0]
+    ctx = next(c for c in step.children if isinstance(c, nv.StepContextNode))
     assert ctx.payload["system_prompt"] == "SYS"
-    think = [c for c in step.children if isinstance(c, nv.ThinkingFold)][0]
+    think = next(c for c in step.children if isinstance(c, nv.ThinkingFold))
     assert think.content == "let me think hard"
 
 
@@ -214,7 +214,7 @@ def test_agent_text_node_holds_payload_and_parses_lazily() -> None:
                  "usage": {"input_tokens": 1, "output_tokens": 1}}),
     ])
     step = tree.root.children[0].children[0]
-    at = [c for c in step.children if isinstance(c, nv.AgentTextNode)][0]
+    at = next(c for c in step.children if isinstance(c, nv.AgentTextNode))
     assert at.payload["model"] == "m"
     # .text triggers the lazy parse chain and returns the assistant prose.
     assert at.text == "hello world"
@@ -276,7 +276,7 @@ def test_tool_killed_marks_the_matching_call_in_burst() -> None:
             content="terminated", error=True),
     ))
     step = _only_step(tree)
-    burst = [c for c in step.children if isinstance(c, nv.ToolBurstFold)][0]
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
     assert burst.calls[0].killed is True
 
 
@@ -300,7 +300,7 @@ def test_read_task_grep_splits_into_three_nodes() -> None:
     kinds = [type(c).__name__ for c in step.children
              if isinstance(c, (nv.ToolBurstFold, nv.SubagentFold))]
     assert kinds == ["ToolBurstFold", "SubagentFold", "ToolBurstFold"]
-    sub = [c for c in step.children if isinstance(c, nv.SubagentFold)][0]
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.subagent_name == "reviewer"
     assert sub.running is False            # closed by the task tool_result
     assert sub.event_id == "tk1"
@@ -329,7 +329,7 @@ def test_interleaved_sub_events_route_into_fold_without_breaking_burst() -> None
             raw={"content": [{"type": "text", "text": "parent resumes"}]}),
     ))
     step = _only_step(tree)
-    sub = [c for c in step.children if isinstance(c, nv.SubagentFold)][0]
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     # Nested tree has the subagent's content (no phase/step — subagents emit none).
     nested_kinds = [type(c).__name__ for c in sub.tree.root.children]
     assert "StepContextNode" in nested_kinds and "AgentTextNode" in nested_kinds
@@ -350,7 +350,7 @@ def test_subagent_running_until_task_result_arrives() -> None:
             stop_reason="end_turn", usage={}, raw={"content": []}),
     ))   # NB: no task tool_result yet
     step = _only_step(tree)
-    sub = [c for c in step.children if isinstance(c, nv.SubagentFold)][0]
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
     assert sub.outcome is None
 
@@ -378,7 +378,7 @@ def test_script_gate_evaluated_builds_leaf_gate_node() -> None:
         _ev("2", "gate_evaluated", kind="script", context={"exit": 0},
             action={"kind": "continue"}),
     ])
-    g = [c for c in tree.root.children[0].children if isinstance(c, nv.GateNode)][0]
+    g = next(c for c in tree.root.children[0].children if isinstance(c, nv.GateNode))
     assert g.kind == "script"
     assert g.context == {"exit": 0}
     assert g.action == {"kind": "continue"}
@@ -390,7 +390,7 @@ def test_stub_gate_evaluated_builds_leaf_gate_node() -> None:
         _ev("2", "gate_evaluated", kind="stub", action={"kind": "goto",
             "target": "implement"}),
     ])
-    g = [c for c in tree.root.children[0].children if isinstance(c, nv.GateNode)][0]
+    g = next(c for c in tree.root.children[0].children if isinstance(c, nv.GateNode))
     assert g.kind == "stub"
     assert g.action == {"kind": "goto", "target": "implement"}
 
@@ -483,7 +483,7 @@ def test_incremental_equals_batch_on_interleaved_log() -> None:
 def test_parity_holds_with_open_step_when_paused() -> None:
     # A live-then-paused log has an open StepNode; a batch replay of the same
     # log shows it open too. Both are correct (design §5.1 / §11).
-    log = INTERLEAVED_LOG[:-2] + [_ev("wp", "workflow_paused", reason="ctrl-c")]
+    log = [*INTERLEAVED_LOG[:-2], _ev("wp", "workflow_paused", reason="ctrl-c")]
     batch = nv.build_tree(log)
     b = nv.NarrativeBuilder()
     for e in log:

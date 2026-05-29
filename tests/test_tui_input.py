@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from imp.cli import narrative as nv
 from imp.cli.prompt import ESC_SENTINEL
 from imp.cli.tui import NarrativeApp

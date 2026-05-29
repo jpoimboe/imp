@@ -1,6 +1,9 @@
 # tests/test_render_text.py
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from imp.cli import narrative as nv
 from imp.cli.render_text import render_tree
 
@@ -137,9 +140,6 @@ def test_step_context_collapsed_even_in_default_mode() -> None:
     assert "SYSTEM PROMPT TEXT" not in out
     assert "▸ context" in out
 
-
-import json
-from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
