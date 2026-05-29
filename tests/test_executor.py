@@ -674,6 +674,25 @@ async def test_agent_incomplete_error_pauses(tmp_path: Path) -> None:
     assert result is RunResult.PAUSED
 
 
+@pytest.mark.anyio
+async def test_step_transcript_persists_past_success_until_change_completion(
+    tmp_path: Path,
+) -> None:
+    change, phase, step = _seed_minimal_workflow(tmp_path)
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _FakeProvider({"status": "Success"}, model=model),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    # The success path no longer wipes; change completion removes the steps tree.
+    assert not (change.change_dir / "steps").exists()
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

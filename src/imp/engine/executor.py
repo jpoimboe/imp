@@ -2,7 +2,9 @@
 gate evaluation, state persistence.
 
 The engine owns state.json + events.jsonl. The runner owns transcript.jsonl.
-On successful step completion the engine deletes the step's transcript dir.
+A step's transcript dir is wiped at the entry of the next non-target step (so a
+gate-failure target keeps its transcript to resume); the whole steps/ tree is
+removed at change completion.
 """
 
 from __future__ import annotations
@@ -88,6 +90,7 @@ async def run_change(
         if state.phase is None:
             state.status = "completed"
             state.save(change.state_dir)
+            shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
             return RunResult.COMPLETED
 
         phase = next(p for p in workflow.phases if p.name == state.phase)
@@ -277,6 +280,7 @@ async def _run_agent_invocation(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
     prior_backoff_attempts: int = 0,
+    retry_feedback: str | None = None,
 ) -> tuple[dict[str, Any] | None, bool, bool, bool, float | None]:
     """Run an agent (step OR gate) to completion.
 
@@ -370,6 +374,7 @@ async def _run_agent_invocation(
         agent_id=agent_id,
         event_log=log,
         first_event_parent_id=started["id"],  # chains step_context.parent_id to step_started
+        retry_feedback=retry_feedback,
     )
 
     runner = provider.create_runner(invocation)
@@ -431,6 +436,18 @@ async def _execute_step(
     agent_def = workflow.agents[step.file.stem]
     assert state.phase is not None, "phase must be set before executing a step"
     transcript_dir = change.change_dir / "steps" / state.phase / step.name
+
+    # Consume retry feedback if this step is the gate-failure target; otherwise
+    # wipe so the step runs fresh. The success wipe now lives HERE (design §1):
+    # only the targeted step keeps its transcript and resumes.
+    feedback_text: str | None = None
+    fb = state.retry_feedback
+    if fb is not None and fb["target_step"] == step.name:
+        feedback_text = fb["text"]
+        state.retry_feedback = None
+        state.save(change.state_dir)
+    else:
+        shutil.rmtree(transcript_dir, ignore_errors=True)
     transcript_dir.mkdir(parents=True, exist_ok=True)
 
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
@@ -451,6 +468,7 @@ async def _execute_step(
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator,
             prior_backoff_attempts=step_backoff_attempts,
+            retry_feedback=feedback_text if step_backoff_attempts == 0 else None,
         )
         if backoff_delay is None:
             break
@@ -482,7 +500,6 @@ async def _execute_step(
         if not isinstance(action, Continue):
             return action
 
-    shutil.rmtree(transcript_dir, ignore_errors=True)
     state.current_step = None
     state.save(change.state_dir)
     _emit(log, "step_completed", {"step": step.name, "action": "continue"})
