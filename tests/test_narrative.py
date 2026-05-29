@@ -161,3 +161,60 @@ def test_phase_level_agent_gate_attaches_to_phase() -> None:
     containers = [c for c in phase.children if isinstance(c, nv.StepNode)]
     assert [c.name for c in containers] == ["spec", "review"]
     assert containers[1].kind == "agent_gate"
+
+
+def test_user_message_text_extracted_inline_without_heavy_import() -> None:
+    import sys
+    sys.modules.pop("imp.cli.render_helpers", None)
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "user_message", agent_id="step:p/s", role="user",
+            content=[{"type": "text", "text": "go ahead"},
+                     {"type": "text", "text": " now"}]),
+    ])
+    step = tree.root.children[0].children[0]
+    um = [c for c in step.children if isinstance(c, nv.UserMessageNode)]
+    assert len(um) == 1
+    assert um[0].text == "go ahead now"
+    # user_message must NOT trigger the provider parse chain (render_helpers
+    # must remain unloaded — langsmith pre-loads pydantic so we check the
+    # direct gate, not the transitive dependency).
+    assert "imp.cli.render_helpers" not in sys.modules
+
+
+def test_thinking_and_step_context_become_collapsible_folds() -> None:
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
+            model="m", system_prompt="SYS", tools_schema=[{"name": "a"}],
+            params={"max_tokens": 8192}, max_tool_calls=50),
+        _ev("4", "thinking", agent_id="step:p/s", content="let me think hard"),
+    ])
+    step = tree.root.children[0].children[0]
+    kinds = [type(c).__name__ for c in step.children]
+    assert "StepContextNode" in kinds
+    assert "ThinkingFold" in kinds
+    ctx = [c for c in step.children if isinstance(c, nv.StepContextNode)][0]
+    assert ctx.payload["system_prompt"] == "SYS"
+    think = [c for c in step.children if isinstance(c, nv.ThinkingFold)][0]
+    assert think.content == "let me think hard"
+
+
+def test_agent_text_node_holds_payload_and_parses_lazily() -> None:
+    tree = nv.build_tree([
+        _ev("1", "phase_started", phase="p"),
+        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic",
+            model="m", stop_reason="end_turn",
+            usage={"input_tokens": 1, "output_tokens": 1},
+            raw={"content": [{"type": "text", "text": "hello world"}],
+                 "stop_reason": "end_turn",
+                 "usage": {"input_tokens": 1, "output_tokens": 1}}),
+    ])
+    step = tree.root.children[0].children[0]
+    at = [c for c in step.children if isinstance(c, nv.AgentTextNode)][0]
+    assert at.payload["model"] == "m"
+    # .text triggers the lazy parse chain and returns the assistant prose.
+    assert at.text == "hello world"

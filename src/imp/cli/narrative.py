@@ -395,3 +395,47 @@ def _h_gate_evaluated(self: NarrativeBuilder, event: dict, p: dict) -> None:
 
 
 NarrativeBuilder._HANDLERS["gate_evaluated"] = _h_gate_evaluated
+
+
+def _user_message_text(payload: dict) -> str:
+    """Inline (pure) extraction of user chat text. Deliberately NOT
+    render_helpers.user_message_text — importing that module pulls the provider
+    parse chain at module load (D3). This logic is trivial; keep it local."""
+    return "".join(
+        b.get("text", "") for b in (payload.get("content") or [])
+        if isinstance(b, dict) and b.get("type") == "text")
+
+
+def _h_user_message(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    self._append(UserMessageNode(text=_user_message_text(p)))
+
+
+def _h_llm_response(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    # Token accumulation already happened in add(); here we only build the node.
+    self._flush_burst()
+    self._append(AgentTextNode(payload=p))
+
+
+def _h_thinking(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    self._flush_burst()
+    self._append(ThinkingFold(content=str(p.get("content", ""))))
+
+
+def _h_step_context(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    # step_context is the agent's first event; do NOT flush — it opens, not
+    # interrupts, the content stream. (No burst can be open before it anyway.)
+    self._append(StepContextNode(payload=p))
+
+
+def _h_agent_output(self: NarrativeBuilder, event: dict, p: dict) -> None:
+    # design §5.1: agent_output is the executor's step-result capture consumed
+    # by templating; it has NO node. The visible outcome is the OutcomeLine.
+    return
+
+
+NarrativeBuilder._HANDLERS["user_message"] = _h_user_message
+NarrativeBuilder._HANDLERS["llm_response"] = _h_llm_response
+NarrativeBuilder._HANDLERS["thinking"] = _h_thinking
+NarrativeBuilder._HANDLERS["step_context"] = _h_step_context
+NarrativeBuilder._HANDLERS["agent_output"] = _h_agent_output
