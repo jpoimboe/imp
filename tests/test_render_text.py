@@ -187,6 +187,19 @@ def test_agent_text_is_bold_when_color_enabled() -> None:
     assert "hello world" in out[0]
 
 
+def test_empty_thinking_is_suppressed_both_modes() -> None:
+    for content in ("", "   ", "\n\t "):
+        node = nv.ThinkingFold(content=content)
+        assert list(rt._render(node, depth=1, full=False, color=False, width=80)) == []
+        assert list(rt._render(node, depth=1, full=True, color=False, width=80)) == []
+
+
+def test_nonempty_thinking_keeps_summary() -> None:
+    node = nv.ThinkingFold(content="abcde")
+    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+    assert out == ["  ▸ thinking · 5 chars"]
+
+
 def test_snapshot_covers_every_node_type() -> None:
     # Guard: the fixture must exercise all node types (design §11).
     tree = nv.build_tree(_sample_events())

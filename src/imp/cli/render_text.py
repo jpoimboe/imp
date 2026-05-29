@@ -83,6 +83,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.ThinkingFold):
+        if not node.content.strip():
+            return  # blank/whitespace thinking is pure noise — drop in both modes
         if full:
             yield _line(f"{pal.fold_glyph(expanded=True)} thinking", depth, color,
                         *pal.NODE_COLORS["thinking"])
