@@ -340,6 +340,11 @@ class NarrativeApp:
         # live input state (design §7.5)
         self._active_input = None          # asyncio.Future | None
         self._input_prompt = "> "
+        # human-gate inline selector state (design §7.5 / Task 31)
+        self._gate_active = False
+        self._gate_options: list = []
+        self._gate_future = None           # asyncio.Future | None
+        self._pending_gate = None          # (prompt, options) stashed by on_event
         if self.live:
             from prompt_toolkit.buffer import Buffer
             self._input_buffer = Buffer(multiline=False,
@@ -528,8 +533,50 @@ class NarrativeApp:
     def user_chat_input_fn(self, _question: str):
         return self.request_line("> ")
 
+    def request_gate_choice(self, prompt_text: str, options: list):
+        """Return an awaitable that resolves with the chosen option label when
+        the user selects a gate option via _select_gate_option."""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        fut: "asyncio.Future[str]" = loop.create_future()
+        self._gate_future = fut
+        self._gate_options = options
+        self._gate_active = True
+        self._input_prompt = prompt_text
+        self._invalidate()
+        return fut
+
+    def _select_gate_option(self, index: int) -> None:
+        if not (0 <= index < len(self._gate_options)):
+            return
+        label = self._gate_options[index].get("label", str(index))
+        fut, self._gate_future = self._gate_future, None
+        self._gate_active = False
+        self._gate_options = []
+        if fut is not None and not fut.done():
+            fut.set_result(label)            # exact label — _match_human_option gives priority
+        self._refocus_narrative()
+        self._invalidate()
+
     def human_input_fn(self):
+        # Live gate dispatch: on_event stashes the pending gate from the
+        # human_gate_pending event the executor emits just before this call.
+        if self._pending_gate is not None:
+            prompt, options = self._pending_gate
+            self._pending_gate = None
+            return self.request_gate_choice(prompt, options)
         return self.request_line("> ")
+
+    def human_output_fn(self, text: str) -> None:
+        # run_human_gate (gates.py:91-103) writes the gate banner/prompt/options
+        # AND its validation feedback through output_fn. The prompt/options are
+        # already shown as the GateNode + inline selector, so drop them; surface
+        # the validation/retry parentheticals ("(no match…)", "(ambiguous…)") in
+        # the footer so a rejected entry isn't invisible.
+        t = text.strip()
+        if t.startswith("(") and t.endswith(")"):
+            self.status_note = t[1:-1]
+            self._invalidate()
 
     def _on_accept(self, buff) -> bool:
         self._submit_input(buff.text)
@@ -619,6 +666,11 @@ class NarrativeApp:
             self.new_below_count += 1
             self.cursor_line = min(self.cursor_line, max(0, len(self._lines) - 1))
         self._invalidate()
+        # Stash pending gate info so human_input_fn can route to the selector
+        # (outside the builder block — reads the event directly, design §7.5 / Task 31)
+        if event.get("type") == "human_gate_pending":
+            p = event.get("payload") or {}
+            self._pending_gate = (p.get("prompt", ""), list(p.get("options") or []))
 
     async def clock_tick(self) -> None:
         """~1s tick so the footer's elapsed timer advances between events

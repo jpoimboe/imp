@@ -45,3 +45,43 @@ def test_user_chat_input_fn_takes_a_question_and_returns_awaitable() -> None:
         app._submit_input("yes")
         assert await fut == "yes"
     asyncio.run(go())
+
+
+def test_gate_option_request_resolves_with_selected_label() -> None:
+    import asyncio
+    async def go():
+        app = NarrativeApp(_tree(), live=True, mouse=False)
+        fut = asyncio.ensure_future(app.request_gate_choice(
+            "Merge?", [{"label": "Merge"}, {"label": "Back to implement"}]))
+        await asyncio.sleep(0)
+        assert app._gate_active is True
+        app._select_gate_option(1)          # picks "Back to implement"
+        assert await fut == "Back to implement"
+        assert app._gate_active is False
+    asyncio.run(go())
+
+
+def test_human_gate_dispatch_routes_input_fn_to_selector() -> None:
+    # Goes through human_input_fn (what run_change actually calls), NOT
+    # request_gate_choice directly — this is the path the wiring gap broke.
+    import asyncio
+    async def go():
+        app = NarrativeApp(_tree(), live=True, mouse=False)
+        # Engine emits human_gate_pending, then calls human_input_fn:
+        app.on_event({"id": "g", "agent_id": None, "type": "human_gate_pending",
+                      "payload": {"phase": "review", "prompt": "Merge?",
+                                  "options": [{"label": "Merge"}, {"label": "Back"}]}})
+        fut = asyncio.ensure_future(app.human_input_fn())
+        await asyncio.sleep(0)
+        assert app._gate_active is True          # routed to the selector, not a bare line
+        app._select_gate_option(0)
+        assert await fut == "Merge"
+    asyncio.run(go())
+
+
+def test_human_output_fn_surfaces_validation_feedback() -> None:
+    app = NarrativeApp(_tree(), live=True, mouse=False)
+    app.human_output_fn("─── HUMAN GATE ───")     # decorative → ignored
+    assert app.status_note == ""
+    app.human_output_fn("  (no match for 'xyz'; try again)")
+    assert "no match" in app.status_note          # validation feedback surfaced
