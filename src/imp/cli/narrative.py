@@ -511,4 +511,25 @@ NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
 
 
 def _open_subagent_fold(self: NarrativeBuilder, event: dict, p: dict) -> None:
-    raise NotImplementedError  # replaced in Task 6
+    """A `task` tool_call opens a SubagentFold (never part of a burst — §5.3
+    rule 2). Routing key is "sub:" + the tool_call EVENT id; the closing
+    `task` tool_result is matched by the tool_use BLOCK id (payload['id']).
+
+    NOTE: routing is SINGLE-LEVEL. A grandchild's `sub:<id2>` events are not
+    delegated into this fold's nested builder (the top builder only knows its
+    own registered child ids). This is currently safe because spawned subagents
+    receive `subagent_defs={}` (subagents.py:104) and `dispatch_task` rejects
+    undeclared names (subagents.py:57-61), so subagents cannot spawn subagents.
+    Spec §5.2 ("an expanded subagent is itself a narrative with its own … sub
+    folds") implies nesting; if the engine ever enables it, routing must become
+    recursive/prefix-aware and a nested-subagent fixture added."""
+    self._flush_burst()
+    event_id = str(event.get("id", ""))
+    block_id = str(p.get("id", ""))
+    inp = p.get("input") or {}
+    fold = SubagentFold(
+        subagent_name=str(inp.get("subagent_name", "?")),
+        event_id=event_id, block_id=block_id, nested=NarrativeBuilder())
+    self._append(fold)
+    self._sub_by_agent_id[f"sub:{event_id}"] = fold
+    self._open_sub_by_block[block_id] = fold

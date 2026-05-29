@@ -278,3 +278,78 @@ def test_tool_killed_marks_the_matching_call_in_burst() -> None:
     step = _only_step(tree)
     burst = [c for c in step.children if isinstance(c, nv.ToolBurstFold)][0]
     assert burst.calls[0].killed is True
+
+
+def test_read_task_grep_splits_into_three_nodes() -> None:
+    # design §5.3 edge (a): a run [read_file, task, grep] yields
+    # ToolBurstFold(read_file), SubagentFold, ToolBurstFold(grep).
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="read_file",
+            input={"path": "x"}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1", content="data", error=False),
+        # task tool_call: EVENT id "tk1", tool_use block id "b2".
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer", "task_description": "review it"}),
+        _ev("3", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status":"Success"}', error=False),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b3", name="grep",
+            input={"pattern": "foo"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b3", content="hit", error=False),
+    ))
+    step = _only_step(tree)
+    kinds = [type(c).__name__ for c in step.children
+             if isinstance(c, (nv.ToolBurstFold, nv.SubagentFold))]
+    assert kinds == ["ToolBurstFold", "SubagentFold", "ToolBurstFold"]
+    sub = [c for c in step.children if isinstance(c, nv.SubagentFold)][0]
+    assert sub.subagent_name == "reviewer"
+    assert sub.running is False            # closed by the task tool_result
+    assert sub.event_id == "tk1"
+    assert sub.block_id == "b2"
+
+
+def test_interleaved_sub_events_route_into_fold_without_breaking_burst() -> None:
+    # design §5.3 edge (b): the subagent's sub: events sit BETWEEN the parent's
+    # task tool_call and its tool_result. They must build the nested tree and
+    # must NOT corrupt the parent's surrounding content.
+    tree = nv.build_tree(_step_events(
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        # subagent's own stream (agent_id = sub:tk1):
+        _ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
+            model="m", system_prompt="SYS", tools_schema=[], params={}, max_tool_calls=50),
+        _ev("s2", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={"input_tokens": 7, "output_tokens": 2},
+            raw={"content": [{"type": "text", "text": "subagent says hi"}]}),
+        # parent's task tool_result closes the fold:
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+        # parent content after the subagent — must attach to the step, not the fold:
+        _ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={"input_tokens": 3, "output_tokens": 1},
+            raw={"content": [{"type": "text", "text": "parent resumes"}]}),
+    ))
+    step = _only_step(tree)
+    sub = [c for c in step.children if isinstance(c, nv.SubagentFold)][0]
+    # Nested tree has the subagent's content (no phase/step — subagents emit none).
+    nested_kinds = [type(c).__name__ for c in sub.tree.root.children]
+    assert "StepContextNode" in nested_kinds and "AgentTextNode" in nested_kinds
+    assert sub.event_count == 2            # the two sub: events
+    assert sub.running is False
+    # The parent text after the fold is a sibling of the fold, not inside it.
+    after = [c for c in step.children if isinstance(c, nv.AgentTextNode)]
+    assert len(after) == 1 and after[0].text == "parent resumes"
+    # Subagent tokens count toward the change total (F2): 7+3 in, 2+1 out.
+    assert tree.tokens.input == 10 and tree.tokens.output == 3
+
+
+def test_subagent_running_until_task_result_arrives() -> None:
+    tree = nv.build_tree(_step_events(
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("s1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={}, raw={"content": []}),
+    ))   # NB: no task tool_result yet
+    step = _only_step(tree)
+    sub = [c for c in step.children if isinstance(c, nv.SubagentFold)][0]
+    assert sub.running is True
+    assert sub.outcome is None
