@@ -108,6 +108,12 @@ class AgentInvocation:
     # gate fail: the already-formatted feedback string to inject on resume
     # (design §4). None on every fresh run and every non-targeted step.
     retry_feedback: str | None = None
+    # When True, a resumed transcript that ends in a successful complete_step is
+    # balanced with a SUCCESS-shaped tool_result (the agent's accepted work is
+    # superseded, not failed). Set by the executor for every re-entry into a
+    # context: resume step. retry_feedback (above) now means "optional wrapper
+    # text appended on that balancing user turn"; None = balance only.
+    balance_on_resume: bool = False
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}

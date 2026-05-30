@@ -34,6 +34,15 @@ class _FakeProvider:
         return _FakeRunner(self._output)
 
 
+def _register_fake(output: dict) -> None:
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _FakeProvider(output, model=model),
+    )
+
+
 def _seed_minimal_workflow(
     root: Path,
     *,
@@ -41,11 +50,8 @@ def _seed_minimal_workflow(
     step_name: str = "w",
     agent_stem: str = "writer",
 ) -> tuple[Change, str, str]:
-    """Create a minimal workflow on disk and snapshot it into a Change.
-
-    Returns ``(change, phase_name, step_name)`` so callers that need to
-    construct expected agent_ids can read the names back rather than hardcode.
-    """
+    """Create a minimal single-step workflow on disk and snapshot it into a
+    Change. Returns ``(change, phase_name, step_name)``."""
     wf_dir = root / ".imp" / "workflows" / "default"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
@@ -54,10 +60,12 @@ def _seed_minimal_workflow(
         "go {{ change.id }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
-        f"name: t\ndescription: t\nphases: [{phase_name}]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        f"{phase_name}:\n  steps:\n"
-        f"    - {{name: {step_name}, file: agents/{agent_stem}.md, model_role: default}}\n"
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        f"  - name: {phase_name}\n"
+        "    steps:\n"
+        f"      - {{name: {step_name}, file: agents/{agent_stem}.md, model_role: default}}\n"
     )
     config = root / ".imp" / "config.yaml"
     config.write_text(
@@ -67,134 +75,302 @@ def _seed_minimal_workflow(
     return change, phase_name, step_name
 
 
-@pytest.mark.anyio
-async def test_run_change_completes_minimal_workflow(tmp_path: Path, monkeypatch) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
+# ── Minimal completion + transcript lifecycle ───────────────────────────────
 
-    from imp.providers import resolve
-    resolve.reset_providers_for_tests()
-    resolve.register_provider(
-        "fake", env_check=lambda: True,
-        factory=lambda model: _FakeProvider({"status": "Success"}, model=model),
-    )
+
+@pytest.mark.anyio
+async def test_run_change_completes_minimal_workflow(tmp_path: Path) -> None:
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
 
     state = State.load(change.state_dir)
     assert state.status == "completed"
+    assert state.step is None
 
 
 @pytest.mark.anyio
-async def test_step_level_human_gate_uses_renderer(tmp_path: Path) -> None:
-    """A step-level human gate must render through the renderer's
-    human_output_fn, not directly to print."""
-    from imp.providers import resolve
+async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
+    """A single agent step with no rules → continue → COMPLETED, and the
+    steps/ tree is removed at completion."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
 
-    # Workflow with a step-level human gate (gate inside the step).
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    assert not (change.change_dir / "steps").exists()
+
+
+# ── set: mutation persistence ───────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
+    """A rule with `set: {review_done: true}` updates state.vars; reload State
+    and confirm the mutation persisted."""
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
     )
     (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "only:\n"
-        "  steps:\n"
-        "    - name: w\n"
-        "      file: agents/writer.md\n"
-        "      model_role: default\n"
-        "      gates:\n"
-        "        - type: human\n"
-        "          prompt: ok?\n"
-        "          options: [{label: Yes, action: {kind: continue}}]\n"
+        "name: t\ndescription: t\n"
+        "vars: {review_done: {type: bool, default: false}}\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: w\n"
+        "        file: agents/writer.md\n"
+        "        model_role: default\n"
+        "        rules:\n"
+        "          - {else: true, continue: true, set: {review_done: true}}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
     change = Change.create(tmp_path, title="t")
+    _register_fake({"status": "Success"})
 
-    resolve.reset_providers_for_tests()
-    resolve.register_provider(
-        "fake", env_check=lambda: True,
-        factory=lambda model: _FakeProvider({"status": "Success"}, model=model),
-    )
-
-    captured: list[str] = []
-    result = await run_change(
-        change,
-        on_event=lambda _e: None,
-        human_input_fn=lambda: "1",
-        human_output_fn=lambda msg: captured.append(msg),
-    )
+    result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    # The "─── HUMAN GATE ───" prefix must have flowed through the captured fn.
-    assert any("HUMAN GATE" in line for line in captured)
+
+    state = State.load(change.state_dir)
+    assert state.vars["review_done"] is True
+
+
+# ── branch routing on a var ─────────────────────────────────────────────────
+
+
+def _seed_branch_loop_workflow(root: Path) -> Change:
+    """writer(agent, context: resume) sets review_done=true; a branch step
+    continues while review_done is false, and gotos the trailing `done` phase
+    once it's true."""
+    wf = root / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "vars: {review_done: {type: bool, default: false}}\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: writer\n"
+        "        file: agents/writer.md\n"
+        "        model_role: default\n"
+        "        context: resume\n"
+        "        rules:\n"
+        "          - {else: true, continue: true, set: {review_done: true}}\n"
+        "      - name: route\n"
+        "        rules:\n"
+        "          - {if: 'review_done', goto: done}\n"
+        "          - {else: true, goto: writer}\n"
+        "  - name: done\n"
+        "    steps: []\n"
+    )
+    (root / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+    )
+    return Change.create(root, title="t")
 
 
 @pytest.mark.anyio
-async def test_human_gate_pending_emitted_once_before_action(
+async def test_branch_routes_on_var(tmp_path: Path) -> None:
+    change = _seed_branch_loop_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.COMPLETED
+
+    # The branch step's step_started payload reports kind == "branch".
+    branch_started = [
+        e for e in events
+        if e["type"] == "step_started"
+        and e["payload"].get("step") == "route"
+    ]
+    assert branch_started, "branch step never started"
+    assert branch_started[0]["payload"]["kind"] == "branch"
+
+
+# ── backward goto loop counting + max_loops trip ────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_backward_goto_increments_loop_count_and_trips_max_loops(
     tmp_path: Path,
 ) -> None:
-    """`human_gate_pending` is emitted exactly once per gate invocation,
-    immediately before `gate_evaluated`. Re-prompts on invalid input do not
-    re-emit."""
-    from imp.engine.change import Change
-    from imp.engine.executor import run_change
-
+    """A reviewer agent that always gotos backward to the writer, with
+    max_loops: 2 → after exhausting, the run PAUSES and loop_counts reflects
+    the cap."""
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n"
+    )
     (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "only:\n"
-        "  steps: []\n"
-        "  gates:\n"
-        "    - type: human\n"
-        "      prompt: Continue?\n"
-        "      options:\n"
-        "        - {label: Yes, action: {kind: continue}}\n"
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 10}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - {name: writer, file: agents/writer.md, model_role: default}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        model_role: default\n"
+        "        max_loops: 2\n"
+        "        rules:\n"
+        "          - {if: {verdict: rework}, goto: writer, feedback: false}\n"
+        "          - {else: true, continue: true}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
     change = Change.create(tmp_path, title="t")
 
-    # Drive the human gate: first an empty answer (re-prompt), then "1".
-    answers = iter(["", "1"])
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+
+    class _Runner:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            if self._name == "reviewer":
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "verdict": "rework"}}
+            else:
+                yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner(invocation.agent_def.name)
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+
+    state = State.load(change.state_dir)
+    assert state.status == "paused"
+    # max_loops: 2 → loop trips on the 3rd backward goto (n == 3 > 2).
+    assert state.loop_counts["reviewer"] == 3
+
+
+# ── goto into an empty trailing phase completes ─────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
+    """The last real step gotos a trailing empty phase → COMPLETED."""
+    wf = tmp_path / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: work\n"
+        "    steps:\n"
+        "      - name: w\n"
+        "        file: agents/writer.md\n"
+        "        model_role: default\n"
+        "        rules:\n"
+        "          - {else: true, goto: done}\n"
+        "  - name: done\n"
+        "    steps: []\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+    )
+    change = Change.create(tmp_path, title="t")
+    _register_fake({"status": "Success"})
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    assert State.load(change.state_dir).step is None
+
+
+# ── step_completed / step_started payload shapes ────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_step_completed_payload_has_action_dict_and_kind(
+    tmp_path: Path,
+) -> None:
+    """step_completed.payload.action == {"verb": "continue"} and the agent
+    step_started.payload carries all of {step, kind, phase}."""
+    change, phase, step = _seed_minimal_workflow(
+        tmp_path, phase_name="myphase", step_name="mystep", agent_stem="writer",
+    )
+    _register_fake({"status": "Success"})
+
     events: list[dict] = []
+    result = await run_change(change, on_event=events.append)
+    assert result is RunResult.COMPLETED
 
-    await run_change(
-        change,
-        on_event=events.append,
-        human_input_fn=lambda: next(answers),
-        human_output_fn=lambda _msg: None,
+    started = next(
+        e for e in events
+        if e["type"] == "step_started" and e["payload"].get("step") == step
     )
+    for key in ("step", "kind", "phase"):
+        assert key in started["payload"], key
+    assert started["payload"]["kind"] == "agent"
+    assert started["payload"]["phase"] == phase
 
-    pendings = [e for e in events if e["type"] == "human_gate_pending"]
-    assert len(pendings) == 1, (
-        f"expected 1 human_gate_pending event, got {len(pendings)}; "
-        f"all types: {[e['type'] for e in events]}"
+    completed = next(e for e in events if e["type"] == "step_completed")
+    assert completed["payload"]["action"] == {"verb": "continue"}
+    assert completed["payload"]["kind"] == "agent"
+
+
+# ── agent_id chaining ───────────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
+    tmp_path: Path,
+) -> None:
+    change, phase, step = _seed_minimal_workflow(
+        tmp_path, phase_name="myphase", step_name="mystep", agent_stem="worker",
     )
-    pending_idx = events.index(pendings[0])
-    gate_eval_idx = next(
-        i for i, e in enumerate(events)
-        if e["type"] == "gate_evaluated" and e["payload"].get("kind") == "human"
-    )
-    assert pending_idx < gate_eval_idx
-    payload = pendings[0]["payload"]
-    assert payload["phase"] == "only"
-    assert payload["prompt"] == "Continue?"
-    assert payload["options"] == [{"label": "Yes"}]
+    _register_fake({"status": "Success"})
+
+    await run_change(change, on_event=lambda _e: None)
+    events = list(change.event_log().read())
+    started = next(e for e in events if e["type"] == "step_started")
+    output = next(e for e in events if e["type"] == "agent_output")
+    assert started["agent_id"] is None
+    assert output["agent_id"] == f"step:{phase}/{step}"
+
+
+# ── error handling: fatal / auth / rate-limit / incomplete ──────────────────
 
 
 class _FatalToolErrorRunner:
-    """Yields a single fatal_tool_error event then stops, simulating a
-    provider that caught FatalToolError from a tool invocation."""
-
     def __init__(self, *, tool: str = "task", message: str = "boom") -> None:
         self._tool = tool
         self._message = message
@@ -213,16 +389,7 @@ class _FatalToolErrorRunner:
 
 
 @pytest.mark.anyio
-async def test_fatal_tool_error_pauses_without_retry(
-    tmp_path: Path,
-) -> None:
-    """A runner-emitted error with kind='fatal_tool_error' must halt the
-    workflow immediately (status=paused) without burning step retries.
-
-    Concretely: the step in _seed_minimal_workflow has max_retries=1.
-    Old behavior treated all errors as retryable, so the runner.run()
-    would fire twice before pause-on-max-retries kicked in. With fatal
-    classification it fires exactly once."""
+async def test_fatal_tool_error_pauses_without_retry(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
@@ -241,23 +408,15 @@ async def test_fatal_tool_error_pauses_without_retry(
             return runner
 
     resolve.register_provider(
-        "fake", env_check=lambda: True,
-        factory=lambda _m: _FatalProvider(),
+        "fake", env_check=lambda: True, factory=lambda _m: _FatalProvider(),
     )
 
     events: list[dict] = []
     result = await run_change(change, on_event=events.append)
     assert result is RunResult.PAUSED
+    assert State.load(change.state_dir).status == "paused"
+    assert runner.run_count == 1
 
-    state = State.load(change.state_dir)
-    assert state.status == "paused"
-
-    # runner.run() was invoked exactly once: no retry on fatal errors.
-    assert runner.run_count == 1, (
-        f"fatal_tool_error should not retry; ran {runner.run_count} times"
-    )
-
-    # The fatal_tool_error event is in the log (audit trail).
     fatal_events = [e for e in events
                     if e["type"] == "error"
                     and e.get("payload", {}).get("kind") == "fatal_tool_error"]
@@ -266,10 +425,6 @@ async def test_fatal_tool_error_pauses_without_retry(
 
 
 class _CategoryErrorRunner:
-    """Yields a single classified error event then stops. Mimics a
-    provider that classified an SDK exception and emitted the
-    category-tagged error event."""
-
     def __init__(self, *, category: str, kind: str, message: str) -> None:
         self._category = category
         self._kind = kind
@@ -289,11 +444,7 @@ class _CategoryErrorRunner:
 
 
 @pytest.mark.anyio
-async def test_auth_error_pauses_without_burning_retries(
-    tmp_path: Path,
-) -> None:
-    """A category=auth error must Pause immediately, identical to the
-    legacy fatal_tool_error path but driven by the new policy."""
+async def test_auth_error_pauses_without_burning_retries(tmp_path: Path) -> None:
     change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
@@ -317,17 +468,11 @@ async def test_auth_error_pauses_without_burning_retries(
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    assert runner.run_count == 1, (
-        f"auth error should not retry; ran {runner.run_count} times"
-    )
-
-    state = State.load(change.state_dir)
-    assert state.status == "paused"
+    assert runner.run_count == 1
+    assert State.load(change.state_dir).status == "paused"
 
 
 class _RateLimitThenSuccessRunner:
-    """First call yields a rate_limit error; subsequent calls succeed."""
-
     def __init__(self, output: dict) -> None:
         self._output = output
         self.run_count = 0
@@ -351,9 +496,6 @@ class _RateLimitThenSuccessRunner:
 async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    """A rate_limit error must trigger a backoff sleep + retry that does
-    NOT increment state.step_attempt. After the first sleep, the second
-    invocation returns agent_output and the workflow completes."""
     from imp.engine import error_policy
     monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
 
@@ -376,20 +518,14 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.COMPLETED
-    assert runner.run_count == 2, (
-        f"expected exactly 2 invocations (1 rate-limit + 1 success); "
-        f"got {runner.run_count}"
-    )
+    assert runner.run_count == 2
 
     state = State.load(change.state_dir)
     assert state.step_attempt == 0
 
 
 @pytest.mark.anyio
-async def test_rate_limit_exhaustion_pauses(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    """4 consecutive rate_limit events → Pause (schedule exhausted)."""
+async def test_rate_limit_exhaustion_pauses(tmp_path: Path, monkeypatch) -> None:
     from imp.engine import error_policy
     monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
 
@@ -414,148 +550,92 @@ async def test_rate_limit_exhaustion_pauses(
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED
-    assert runner.run_count == 5, (
-        f"expected 5 invocations (4 rate-limited with backoff + 1 final "
-        f"where decide() exhausts the schedule and returns Pause); "
-        f"got {runner.run_count}"
-    )
+    assert runner.run_count == 5
 
 
 @pytest.mark.anyio
-async def test_agent_gate_rate_limit_backs_off_without_phase_attempt(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    """Same backoff property in the gate path: a rate_limit error from
-    the agent-gate runner must sleep + retry without incrementing
-    state.phase_attempt."""
-    from imp.engine import error_policy
-    monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
-
-    # Workflow with one trivial step + one agent-gate. The step runner
-    # always succeeds; the gate runner rate-limits once then succeeds.
-    wf = tmp_path / ".imp" / "workflows" / "default"
-    (wf / "agents").mkdir(parents=True)
-    (wf / "agents" / "writer.md").write_text(
-        "---\nname: writer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
-    )
-    (wf / "agents" / "gater.md").write_text(
-        "---\nname: gater\ntools: [complete_step]\n"
-        "output:\n"
-        "  status: {type: enum, values: [Success, Error]}\n"
-        "  verdict: {type: enum, values: [Yes, No]}\n---\ngo\n"
-    )
-    (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "only:\n"
-        "  steps:\n"
-        "    - {name: w, file: agents/writer.md, model_role: default}\n"
-        "  gates:\n"
-        "    - type: agent\n"
-        "      file: agents/gater.md\n"
-        "      model_role: default\n"
-        "      decide:\n"
-        "        - {when: {verdict: Yes}, action: {kind: continue}}\n"
-        "        - {else: true, action: {kind: retry}}\n"
-    )
-    (tmp_path / ".imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
-    )
-    change = Change.create(tmp_path, title="t")
+async def test_agent_incomplete_error_pauses(tmp_path: Path) -> None:
+    """A runner that emits an agent_incomplete error makes the step Pause
+    (fatal), not retry."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
-    gate_calls = [0]
-
-    class _AlternatingRunner:
-        """Step path: always succeed.
-        Gate path: 1st call rate-limits, 2nd call yields verdict=Yes."""
-
-        def __init__(self, *, kind: str) -> None:
-            self._kind = kind
-
+    class _IncompleteRunner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-            if self._kind == "gater":
-                gate_calls[0] += 1
-                if gate_calls[0] == 1:
-                    yield {"type": "error", "payload": {
-                        "category": "rate_limit",
-                        "kind": "RateLimitError",
-                        "message": "429",
-                    }}
-                    return
-                yield {"type": "agent_output", "payload": {"status": "Success", "verdict": "Yes"}}
-                return
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
+            yield {"type": "error", "payload": {
+                "category": "agent_incomplete",
+                "kind": "no_complete_step_after_nudges",
+                "message": "x",
+            }}
 
         async def interrupt(self) -> None:
             pass
 
-    class _AltProvider:
+    class _IncompleteProvider:
         name = "fake"
         model = "m"
 
         def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
-            return _AlternatingRunner(kind=invocation.agent_def.name)
+            return _IncompleteRunner()
 
     resolve.register_provider(
-        "fake", env_check=lambda: True, factory=lambda _m: _AltProvider(),
+        "fake", env_check=lambda: True, factory=lambda _m: _IncompleteProvider(),
     )
 
     result = await run_change(change, on_event=lambda _e: None)
-    assert result is RunResult.COMPLETED
-    assert gate_calls[0] == 2, (
-        f"expected 2 gate invocations (rate-limit then success); got {gate_calls[0]}"
-    )
+    assert result is RunResult.PAUSED
 
-    state = State.load(change.state_dir)
-    assert state.phase_attempt == 0
+
+# ── retries exhaust into on_max_retries (Pause) ─────────────────────────────
 
 
 @pytest.mark.anyio
-async def test_step_events_carry_step_agent_id_and_step_started_seeds_chain(
-    tmp_path: Path,
-) -> None:
-    change, phase, step = _seed_minimal_workflow(
-        tmp_path, phase_name="myphase", step_name="mystep", agent_stem="worker",
-    )
+async def test_agent_missing_output_exhausts_to_pause(tmp_path: Path) -> None:
+    """A runner that never yields agent_output exhausts max_retries (1) and
+    pauses via on_max_retries (default Pause)."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
+
+    runner_calls = {"n": 0}
+
+    class _EmptyRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            runner_calls["n"] += 1
+            if False:
+                yield {}  # pragma: no cover — make this an async generator
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _EmptyProvider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _EmptyRunner()
+
     resolve.register_provider(
-        "fake", env_check=lambda: True,
-        factory=lambda model: _FakeProvider({"status": "Success"}, model=model),
+        "fake", env_check=lambda: True, factory=lambda _m: _EmptyProvider(),
     )
 
-    await run_change(change, on_event=lambda _e: None)
-    events = list(change.event_log().read())
-    started = next(e for e in events if e["type"] == "step_started")
-    output = next(e for e in events if e["type"] == "agent_output")
-    assert started["agent_id"] is None
-    assert output["agent_id"] == f"step:{phase}/{step}"
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.PAUSED
+    # max_retries=1 → initial attempt + 1 retry = 2 invocations before pause.
+    assert runner_calls["n"] == 2
+    assert State.load(change.state_dir).status == "paused"
 
 
-def test_gate_dir_allocator_never_reclaims_wiped_n(tmp_path: Path) -> None:
-    from imp.engine.executor import _next_gate_invocation_dir
-    gates = tmp_path / "gates"
-    d1 = _next_gate_invocation_dir(gates, "lint")
-    d1.mkdir(parents=True)
-    assert d1.name == "lint-1"
-    # Simulate success-wipe of lint-1.
-    import shutil
-    shutil.rmtree(d1)
-    d2 = _next_gate_invocation_dir(gates, "lint")
-    assert d2.name == "lint-2"            # NOT lint-1 again
+# ── completion instruction + continuation wiring ────────────────────────────
 
 
 @pytest.mark.anyio
 async def test_system_prompt_carries_completion_instruction_and_continuation(
     tmp_path: Path,
 ) -> None:
-    """The executor appends the schema-derived completion instruction to the
-    system prompt and wires a non-interactive nudge continuation_fn."""
     from imp.providers import resolve
 
     wf = tmp_path / ".imp" / "workflows" / "default"
@@ -568,9 +648,12 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "go\n"
     )
     (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [a]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "a:\n  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: a\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
@@ -580,9 +663,6 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
     captured: dict[str, AgentInvocation] = {}
 
     class _CapRunner:
-        def __init__(self, inv: AgentInvocation) -> None:
-            self._inv = inv
-
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             captured["inv"] = invocation
             yield {"type": "agent_output",
@@ -598,7 +678,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
             self.model = model
 
         def create_runner(self, invocation: AgentInvocation) -> _CapRunner:
-            return _CapRunner(invocation)
+            return _CapRunner()
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -609,11 +689,9 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
     assert result is RunResult.COMPLETED
 
     inv = captured["inv"]
-    # Change 5: instruction injected, naming the tool + enum values.
     assert "complete_step" in inv.system_prompt
     for token in ("status", "Success", "Error", "verdict", "approve", "rework"):
         assert token in inv.system_prompt, token
-    # Change 3: non-interactive step gets a nudge closure that exhausts to None.
     assert inv.continuation_fn is not None
     assert inv.continuation_fn("prose") is not None   # nudge 1
     assert inv.continuation_fn("prose") is not None   # nudge 2
@@ -624,11 +702,6 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
 async def test_interactive_end_of_turn_emits_awaiting_user_input(
     tmp_path: Path,
 ) -> None:
-    """An interactive agent that ends its turn without complete_step is asking
-    the user. The executor emits `awaiting_user_input` (carrying the question)
-    immediately BEFORE blocking on user_chat_input_fn — this is the signal
-    out-of-process drivers key on, since provider-native stop_reason is
-    unreliable (claude_code logs None on every per-block AssistantMessage)."""
     import inspect as _inspect
 
     from imp.providers import resolve
@@ -641,10 +714,12 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
         "ask\n"
     )
     (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [a]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "a:\n  steps:\n    - {name: w, file: agents/asker.md, "
-        "model_role: default, interactive: true}\n"
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: a\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/asker.md, model_role: default, interactive: true}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
@@ -654,12 +729,7 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
     events: list[dict] = []
 
     class _AskRunner:
-        def __init__(self, inv: AgentInvocation) -> None:
-            self._inv = inv
-
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-            # Simulate the agent ending its turn with a question (no
-            # complete_step). Real providers call continuation_fn here.
             reply = invocation.continuation_fn("What outcome do you want?")
             if _inspect.isawaitable(reply):
                 reply = await reply
@@ -676,7 +746,7 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
             self.model = model
 
         def create_runner(self, invocation: AgentInvocation) -> _AskRunner:
-            return _AskRunner(invocation)
+            return _AskRunner()
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -684,17 +754,13 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
     )
 
     def _chat(_q: str) -> str:
-        # The awaiting marker MUST already be in the stream by the time the
-        # engine reads input — proves emit-before-block ordering.
         assert any(e.get("type") == "awaiting_user_input" for e in events), (
             "awaiting_user_input must be emitted before user_chat_input_fn reads"
         )
         return "sure, go ahead"
 
     result = await run_change(
-        change,
-        on_event=lambda e: events.append(e),
-        user_chat_input_fn=_chat,
+        change, on_event=events.append, user_chat_input_fn=_chat,
     )
     assert result is RunResult.COMPLETED
 
@@ -703,211 +769,38 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
     assert awaiting[0]["payload"]["prompt"] == "What outcome do you want?"
 
 
-@pytest.mark.anyio
-async def test_agent_incomplete_error_pauses(tmp_path: Path) -> None:
-    """A runner that emits an agent_incomplete error makes the step Pause
-    (fatal), not retry."""
-    from imp.providers import resolve
+# ── agent-rule goto feeds back to the resumed target ────────────────────────
 
+
+@pytest.mark.anyio
+async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None:
+    """A reviewer agent that gotos backward (feedback: true) to a context:resume
+    coder makes the coder's NEXT invocation carry the reviewer's feedback
+    string. The reviewer flips to approve on its 2nd pass so the run completes."""
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
-    (wf / "agents" / "writer.md").write_text(
-        "---\nname: writer\ntools: [complete_step]\n"
+    (wf / "agents" / "coder.md").write_text(
+        "---\nname: coder\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
     )
-    (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [a]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "a:\n  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
-    )
-    (tmp_path / ".imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
-    )
-    change = Change.create(tmp_path, title="t")
-
-    class _IncompleteRunner:
-        def __init__(self, inv: AgentInvocation) -> None:
-            pass
-
-        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-            yield {"type": "error", "payload": {
-                "category": "agent_incomplete",
-                "kind": "no_complete_step_after_nudges",
-                "message": "x",
-            }}
-
-        async def interrupt(self) -> None:
-            pass
-
-    class _IncompleteProvider:
-        name = "fake"
-
-        def __init__(self, model: str = "m") -> None:
-            self.model = model
-
-        def create_runner(self, invocation: AgentInvocation) -> _IncompleteRunner:
-            return _IncompleteRunner(invocation)
-
-    resolve.reset_providers_for_tests()
-    resolve.register_provider(
-        "fake", env_check=lambda: True, factory=lambda model: _IncompleteProvider(model),
-    )
-
-    result = await run_change(change, on_event=lambda _e: None)
-    assert result is RunResult.PAUSED
-
-
-@pytest.mark.anyio
-async def test_step_transcript_persists_past_success_until_change_completion(
-    tmp_path: Path,
-) -> None:
-    change, _, _ = _seed_minimal_workflow(tmp_path)
-    from imp.providers import resolve
-    resolve.reset_providers_for_tests()
-
-    resolve.register_provider(
-        "fake", env_check=lambda: True,
-        factory=lambda model: _FakeProvider({"status": "Success"}, model=model),
-    )
-
-    result = await run_change(change, on_event=lambda _e: None)
-    assert result is RunResult.COMPLETED
-    # The success path no longer wipes; change completion removes the steps tree.
-    assert not (change.change_dir / "steps").exists()
-
-
-@pytest.mark.anyio
-async def test_failing_script_gate_feeds_back_then_clears(
-    tmp_path: Path, monkeypatch
-) -> None:
-    # Workflow: one phase, one step, with a step-level script gate that fails
-    # the first time and passes the second (toggled by a sentinel file).
-    wf_dir = tmp_path / ".imp" / "workflows" / "default"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "agents" / "writer.md").write_text(
-        "---\nname: writer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
-    )
-    gate_script = wf_dir / "gate.sh"
-    gate_script.write_text(
-        "#!/bin/sh\n"
-        'if [ -f "$IMP_ARTIFACTS_DIR/seen" ]; then exit 0; fi\n'
-        'touch "$IMP_ARTIFACTS_DIR/seen"\n'
-        'echo "first run fails" >&2\n'
-        "exit 1\n"
-    )
-    gate_script.chmod(0o755)
-    (wf_dir / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 2, on_max_retries: {kind: pause}}\n"
-        "only:\n  steps:\n"
-        "    - name: w\n      file: agents/writer.md\n      model_role: default\n"
-        "      gates:\n"
-        "        - type: script\n"
-        "          command: sh ./gate.sh\n"
-    )
-    (tmp_path / ".imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
-    )
-    change = Change.create(tmp_path, title="t")
-
-    from imp.providers import resolve
-    resolve.reset_providers_for_tests()
-    feedbacks: list[str | None] = []
-
-    class _RecordingRunner(_FakeRunner):
-        async def run(self, invocation):
-            feedbacks.append(invocation.retry_feedback)
-            async for ev in super().run(invocation):
-                yield ev
-
-    class _RecordingProvider(_FakeProvider):
-        def create_runner(self, invocation):
-            return _RecordingRunner(self._output)
-
-    resolve.register_provider(
-        "fake", env_check=lambda: True,
-        factory=lambda model: _RecordingProvider({"status": "Success"}, model=model),
-    )
-
-    result = await run_change(change, on_event=lambda _e: None)
-    assert result is RunResult.COMPLETED
-    # First invocation got no feedback; the retry got the script's failure.
-    assert feedbacks[0] is None
-    assert feedbacks[1] is not None and "gate.sh` failed" in feedbacks[1]
-    # Consumed: cleared on the engine's state.
-    assert State.load(change.state_dir).retry_feedback is None
-
-
-@pytest.mark.anyio
-async def test_resolve_target_step_unit(tmp_path: Path) -> None:
-    from imp.engine.executor import _resolve_target_step
-    from imp.engine.loader import load_workflow
-
-    # Two phases: design (steps: spec) and implement (steps: coder, doc).
-    wf_dir = tmp_path / ".imp" / "workflows" / "default"
-    (wf_dir / "agents").mkdir(parents=True)
-    for stem in ("spec", "coder", "doc"):
-        (wf_dir / "agents" / f"{stem}.md").write_text(
-            f"---\nname: {stem}\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
-        )
-    (wf_dir / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [design, implement]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "design:\n  steps:\n"
-        "    - {name: spec, file: agents/spec.md, model_role: default}\n"
-        "implement:\n  steps:\n"
-        "    - {name: coder, file: agents/coder.md, model_role: default}\n"
-        "    - {name: doc, file: agents/doc.md, model_role: default}\n"
-    )
-    wf = load_workflow(wf_dir)
-    from imp.engine.types import Goto, Retry
-
-    # step-gate retry → same step
-    assert _resolve_target_step(
-        wf, Retry(), current_phase="implement", current_step="coder") == "coder"
-    # phase-gate retry → first step of current phase
-    assert _resolve_target_step(
-        wf, Retry(), current_phase="implement", current_step=None) == "coder"
-    # goto → first step of target phase
-    assert _resolve_target_step(
-        wf, Goto(target="design"), current_phase="implement",
-        current_step="coder") == "spec"
-
-
-@pytest.mark.anyio
-async def test_goto_implement_resumes_coder_with_feedback_no_missing_output(
-    tmp_path: Path, monkeypatch
-) -> None:
-    wf_dir = tmp_path / ".imp" / "workflows" / "default"
-    (wf_dir / "agents").mkdir(parents=True)
-    for stem in ("coder", "doc"):
-        (wf_dir / "agents" / f"{stem}.md").write_text(
-            f"---\nname: {stem}\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
-        )
-    # Reviewer agent-gate: first pass Reject→goto implement, second pass Accept.
-    # Every agent's output schema must declare a `status` enum (validator V2),
-    # so the reviewer carries both `status` and the decide-matched `verdict`.
-    (wf_dir / "agents" / "reviewer.md").write_text(
+    (wf / "agents" / "reviewer.md").write_text(
         "---\nname: reviewer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "  verdict: {type: enum, values: [Accept, Reject]}\n---\ngo\n"
     )
-    (wf_dir / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [implement]\n"
-        "defaults: {max_retries: 3, on_max_retries: {kind: pause}}\n"
-        "implement:\n  steps:\n"
-        "    - {name: coder, file: agents/coder.md, model_role: default}\n"
-        "    - {name: doc, file: agents/doc.md, model_role: default}\n"
-        "  gates:\n"
-        "    - type: agent\n"
-        "      file: agents/reviewer.md\n"
-        "      model_role: default\n"
-        "      decide:\n"
-        "        - {when: {verdict: Reject}, action: {kind: goto, target: implement}}\n"
-        "        - {else: true, action: {kind: continue}}\n"
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: impl\n"
+        "    steps:\n"
+        "      - {name: coder, file: agents/coder.md, model_role: default, context: resume}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        model_role: default\n"
+        "        rules:\n"
+        "          - {if: {verdict: Reject}, goto: coder}\n"
+        "          - {else: true, continue: true}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
@@ -917,44 +810,46 @@ async def test_goto_implement_resumes_coder_with_feedback_no_missing_output(
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
 
-    # Per-agent canned outputs; the reviewer flips verdict on its 2nd run.
     runs: list[tuple[str, str | None]] = []   # (agent_id, retry_feedback)
     reviewer_calls = {"n": 0}
 
-    class _Runner(_FakeRunner):
-        def __init__(self, invocation):
-            self._inv = invocation
-        async def run(self, invocation):
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
             aid = invocation.agent_id
             runs.append((aid, invocation.retry_feedback))
-            if aid.startswith("gate:"):
+            if invocation.agent_def.name == "reviewer":
                 reviewer_calls["n"] += 1
                 verdict = "Reject" if reviewer_calls["n"] == 1 else "Accept"
                 yield {"type": "agent_output",
                        "payload": {"status": "Success", "verdict": verdict}}
             else:
                 yield {"type": "agent_output", "payload": {"status": "Success"}}
-        async def interrupt(self):
+
+        async def interrupt(self) -> None:
             pass
 
-    class _Provider(_FakeProvider):
-        def __init__(self, model="m"):
-            self.model = model
-        def create_runner(self, invocation):
-            return _Runner(invocation)
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
 
     resolve.register_provider(
-        "fake", env_check=lambda: True, factory=lambda model: _Provider(model))
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider(),
+    )
 
     events: list[dict] = []
     result = await run_change(change, on_event=events.append)
     assert result is RunResult.COMPLETED
 
-    # The coder ran twice; its SECOND run carried the reviewer's feedback.
     coder_runs = [fb for (aid, fb) in runs if aid.endswith("/coder")]
     assert len(coder_runs) == 2
     assert coder_runs[0] is None
     assert coder_runs[1] is not None and "reviewer" in coder_runs[1]
+
+    # Feedback consumed: cleared on the engine's state.
+    assert State.load(change.state_dir).retry_feedback is None
 
     # No agent_output_missing surfaced anywhere.
     assert not any(

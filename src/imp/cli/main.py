@@ -161,7 +161,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             _write_change_lock(change)
             try:
                 print(f"Resuming Change {change.id}: {change.title!r}")
-                print(f"Phase: {state.phase}, step: {state.step}")
+                print(f"Step: {state.step}")
                 prompt = Prompt()
                 status = LiveStatus(sys.stdout)
                 driver = LiveDriver(stream=sys.stdout,
@@ -388,12 +388,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
         state = State.load(d / "state")
         last_activity = _last_event_timestamp(d / "events.jsonl")
         rows.append(
-            (meta["id"], state.status, state.phase or "-",
-             state.step or "-", last_activity, meta["title"])
+            (meta["id"], state.status, state.step or "-",
+             last_activity, meta["title"])
         )
-    print(f"{'ID':<4} {'STATUS':<10} {'PHASE':<12} {'STEP':<20} {'LAST_ACTIVITY':<20} TITLE")
+    print(f"{'ID':<4} {'STATUS':<10} {'STEP':<20} {'LAST_ACTIVITY':<20} TITLE")
     for row in rows:
-        print(f"{row[0]:<4} {row[1]:<10} {row[2]:<12} {row[3]:<20} {row[4]:<20} {row[5]}")
+        print(f"{row[0]:<4} {row[1]:<10} {row[2]:<20} {row[3]:<20} {row[4]}")
     return 0
 
 
