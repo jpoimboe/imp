@@ -115,8 +115,8 @@ def _v_resume_targets_are_agents(
     _v_goto_targets_in_shared_namespace reports those (and resolve_goto would
     otherwise raise an uncaught KeyError, since validators do not short-circuit).
     """
-    names = {p.name for p in workflow.phases} | {s.name for s in workflow.flat_steps()}
     flat = workflow.flat_steps()
+    names = {p.name for p in workflow.phases} | {s.name for s in flat}
 
     def check(action: object, source: object) -> None:
         if not (isinstance(action, Goto) and action.resume):
@@ -138,7 +138,7 @@ def _v_resume_targets_are_agents(
                 source,  # type: ignore[arg-type]
             ))
 
-    for step in workflow.flat_steps():
+    for step in flat:
         for rule in step.rules:
             check(rule.action, rule.source)
         for opt in step.options:
