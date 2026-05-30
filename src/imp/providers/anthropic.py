@@ -21,7 +21,7 @@ import os
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any, cast
 
-from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
+from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -330,7 +330,7 @@ class AnthropicAgentRunner:
         existing = transcript.load()
         if existing:
             messages = existing
-            tool_calls_used = count_tool_uses(messages)
+            tool_calls_used = 0  # per-invocation; never inherit history
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use when
             # the executor's pause check fires after `tool_result` was yielded
             # but before the user message was appended. Patch the transcript
@@ -403,15 +403,15 @@ class AnthropicAgentRunner:
                 system_prompt=invocation.system_prompt,
                 tools_schema=[_anthropic_tool_schema(t) for t in tools.values()],
                 params={"max_tokens": 8192},
-                max_tool_calls=invocation.max_tool_calls or 50)
+                max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
                     elog.append_user_message(agent_id=aid, message=m)
 
-        # Spec §6.5: agent_def.max_tool_calls or workflow.defaults.max_tool_calls or 50.
-        # The engine (Task 28) resolves the first two and passes the result via
-        # invocation.max_tool_calls; we default to 50 only if it's still None.
-        ceiling = invocation.max_tool_calls or 50
+        # max_tool_calls is opt-in; None means no cap. The engine resolves
+        # agent_def -> workflow.defaults -> None and passes the result via
+        # invocation.max_tool_calls.
+        ceiling = invocation.max_tool_calls  # may be None (no cap)
 
         while not self._cancel:
             anthropic_tools = [_anthropic_tool_schema(t) for t in tools.values()]
@@ -486,7 +486,7 @@ class AnthropicAgentRunner:
             tool_results: list[ToolResultBlock] = []
             ceiling_tripped = False
             for tu in tool_uses:
-                if tool_calls_used >= ceiling:
+                if ceiling is not None and tool_calls_used >= ceiling:
                     # Backfill error tool_results to preserve transcript invariant.
                     err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
                     block = ToolResultBlock(tu.id, err_text, is_error=True)

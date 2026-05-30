@@ -530,14 +530,15 @@ async def _run_agent_invocation(
         if name in workflow.agents
     }
 
-    # Spec §6.5 ceiling resolution: agent.max_tool_calls → defaults → 50.
-    # Use `is not None` (not `or`) so a literal 0 doesn't silently fall through.
+    # Spec ceiling resolution: agent.max_tool_calls -> workflow default -> None
+    # (NO default-50). The tool-call cap is opt-in only; when unset the
+    # loop_guard + complete_step + max_loops are the bounds.
     if agent_def.max_tool_calls is not None:
         resolved_max_tool_calls = agent_def.max_tool_calls
     elif workflow.defaults.max_tool_calls is not None:
         resolved_max_tool_calls = workflow.defaults.max_tool_calls
     else:
-        resolved_max_tool_calls = 50
+        resolved_max_tool_calls = None
 
     # step_started is an executor lifecycle event (not from the runner), so
     # agent_id=None — it does not anchor into the per-agent chain. Its id

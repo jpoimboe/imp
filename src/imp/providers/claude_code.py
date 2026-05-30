@@ -32,7 +32,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
+from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -713,7 +713,7 @@ class ClaudeCodeAgentRunner:
         existing = transcript.load()
         if existing:
             messages = existing
-            tool_calls_used = count_tool_uses(messages)
+            tool_calls_used = 0  # per-invocation; never inherit history
             # Mid-tool Ctrl+C (spec §6.15) can leave a dangling tool_use.
             # Persist a synthetic tool_result so the SEND_TO_LLM path has a
             # balanced transcript; emit `tool_result` events so `imp log`
@@ -790,12 +790,12 @@ class ClaudeCodeAgentRunner:
                 # input schemas; unlike anthropic/openai we don't pass them here.
                 tools_schema=[{"name": _canon_tool_name(n)} for n in tools],
                 params={"no-session-persistence": None},
-                max_tool_calls=invocation.max_tool_calls or 50)
+                max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
                     elog.append_user_message(agent_id=aid, message=m)
 
-        ceiling = invocation.max_tool_calls or 50
+        ceiling = invocation.max_tool_calls  # may be None (no cap)
 
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
@@ -846,7 +846,7 @@ class ClaudeCodeAgentRunner:
                                 # claude-side, decoupled from this iteration
                                 # loop. The ceiling becomes a *post hoc* fatal
                                 # check after the ResultMessage.
-                                if tool_calls_used >= ceiling:
+                                if ceiling is not None and tool_calls_used >= ceiling:
                                     ceil_msg = (
                                         f"tool_call_ceiling_exceeded (ceiling={ceiling})"
                                     )
@@ -913,7 +913,8 @@ class ClaudeCodeAgentRunner:
                                "payload": state.complete_step_args}
                         return
 
-                    if tool_calls_used >= ceiling and not state.complete_step_called:
+                    if (ceiling is not None and tool_calls_used >= ceiling
+                            and not state.complete_step_called):
                         yield {"type": "error", "payload": {
                             "category": "config",
                             "kind": "tool_call_ceiling_exceeded",

@@ -84,9 +84,9 @@ class LoopError(ProviderError):
 def make_error_event(exc: ProviderError, *, kind: str = "") -> dict[str, object]:
     """Build the canonical error event for a classified provider exception.
 
-    ``kind`` is informational (rendered nowhere today; preserved for
-    legacy descriptors like ``"transcript_invalid"``). When omitted,
-    defaults to the exception class name.
+    ``kind`` is informational (surfaced on the paused line via Fix A;
+    preserved for legacy descriptors like ``"transcript_invalid"``). When
+    omitted, defaults to the exception class name.
     """
     return {
         "type": "error",

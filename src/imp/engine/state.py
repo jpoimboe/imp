@@ -122,7 +122,7 @@ class EventLog(Protocol):
                             parent_id_override: str | None = None,
                             provider: str, model: str, system_prompt: Any,
                             tools_schema: Any, params: dict[str, Any],
-                            max_tool_calls: int) -> dict[str, Any]: ...
+                            max_tool_calls: int | None) -> dict[str, Any]: ...
     def append_user_message(self, *, agent_id: str | None,
                             message: Message) -> dict[str, Any]: ...
     def append_llm_response(self, *, agent_id: str | None, provider: str,
@@ -214,7 +214,7 @@ class _BaseEventLog:
                             parent_id_override: str | None = None,
                             provider: str, model: str, system_prompt: Any,
                             tools_schema: Any, params: dict[str, Any],
-                            max_tool_calls: int) -> dict[str, Any]:
+                            max_tool_calls: int | None) -> dict[str, Any]:
         return self._emit(
             agent_id=agent_id, type="step_context",
             parent_id_override=parent_id_override,

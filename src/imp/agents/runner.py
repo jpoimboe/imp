@@ -85,7 +85,7 @@ class AgentInvocation:
     fs_permissions: tuple[FsRule, ...]
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
-    # resolved by engine (Task 27a/28); None means "use executor default of 50"
+    # resolved by engine (Task 27a/28); None means no tool-count cap (opt-in only)
     max_tool_calls: int | None = None
     # Set by the executor when the step is interactive. Called by the providers'
     # PROMPT_USER resume path and the legacy end-of-turn fallback to read the
