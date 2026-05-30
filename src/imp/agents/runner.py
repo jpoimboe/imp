@@ -37,6 +37,14 @@ class ToolResultBlock:
     is_error: bool = False
     type: Literal["tool_result"] = "tool_result"
 
+    def __post_init__(self) -> None:
+        # The Claude Code SDK can hand us is_error=None (an explicit null, not a
+        # missing attr). None serializes to JSON null, which the Anthropic API
+        # rejects on replay. Coerce once here — the constructor is the single
+        # boundary every persistence/replay path funnels through. frozen+slots
+        # forbids normal assignment, so use object.__setattr__.
+        object.__setattr__(self, "is_error", bool(self.is_error))
+
 
 ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock
 
