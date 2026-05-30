@@ -50,7 +50,10 @@ def action_text(action: Any) -> str:
     if isinstance(action, dict):
         verb = str(action.get("verb", "unknown"))
         if verb == "goto" and action.get("target"):
-            return f"goto({action['target']})"
+            text = f"goto({action['target']})"
+            if action.get("resume"):
+                text += " [resume]"
+            return text
         return verb
     return str(action)
 

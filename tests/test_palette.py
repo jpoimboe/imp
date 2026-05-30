@@ -47,6 +47,20 @@ def test_action_display_text() -> None:
     assert pal.action_text("continue") == "continue"     # bare string fallback
 
 
+def test_action_text_goto_resume_marker() -> None:
+    assert pal.action_text(
+        {"verb": "goto", "target": "coder", "resume": True}) == "goto(coder) [resume]"
+    # resume false (or absent) renders the plain goto
+    assert pal.action_text(
+        {"verb": "goto", "target": "coder", "resume": False}) == "goto(coder)"
+    assert pal.action_text({"verb": "goto", "target": "coder"}) == "goto(coder)"
+
+
+def test_action_text_resume_keeps_goto_color() -> None:
+    # the verb stays "goto", so accent coloring is unaffected by resume
+    assert pal.accent_color({"verb": "goto", "target": "coder", "resume": True}) == "cyan"
+
+
 def test_fold_glyphs_default_unicode() -> None:
     assert pal.fold_glyph(expanded=False) == "▸"
     assert pal.fold_glyph(expanded=True) == "▾"

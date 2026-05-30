@@ -859,6 +859,17 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     )
 
 
+def test_action_payload_goto_carries_resume_bool() -> None:
+    from imp.engine.executor import _action_payload
+    from imp.engine.types import Continue, Goto
+    assert _action_payload(Goto("coder", resume=True)) == {
+        "verb": "goto", "target": "coder", "resume": True}
+    assert _action_payload(Goto("coder")) == {
+        "verb": "goto", "target": "coder", "resume": False}
+    # non-goto actions are unchanged
+    assert _action_payload(Continue()) == {"verb": "continue"}
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

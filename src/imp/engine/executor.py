@@ -331,7 +331,7 @@ def _action_payload(action: Action) -> dict[str, Any]:
     if isinstance(action, Pause):
         return {"verb": "pause"}
     if isinstance(action, Goto):
-        return {"verb": "goto", "target": action.target}
+        return {"verb": "goto", "target": action.target, "resume": action.resume}
     return {"verb": "unknown"}
 
 
