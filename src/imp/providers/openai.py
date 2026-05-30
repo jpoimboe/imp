@@ -114,15 +114,11 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     for name in invocation.agent_def.tools:
         if name == "complete_step":
             continue
-        if name == "ask_user" and not invocation.interactive:
-            continue
         if name == "task":
             continue
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
-    if invocation.interactive and "ask_user" in invocation.agent_def.tools:
-        out["ask_user"] = reg["ask_user"]
     if "task" in invocation.agent_def.tools:
         out["task"] = make_task_tool()
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)

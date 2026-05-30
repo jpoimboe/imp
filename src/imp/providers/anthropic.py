@@ -114,16 +114,12 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     for name in invocation.agent_def.tools:
         if name == "complete_step":
             continue
-        if name == "ask_user" and not invocation.interactive:
-            continue  # filtered
         if name == "task":
             # Handled specially below; do NOT pull from registry.
             continue
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
-    if invocation.interactive and "ask_user" in invocation.agent_def.tools:
-        out["ask_user"] = reg["ask_user"]
     if "task" in invocation.agent_def.tools:
         # Always register `task` if the agent declares it. If subagent_defs is
         # empty, dispatch_task raises a clear "subagent X not declared" error

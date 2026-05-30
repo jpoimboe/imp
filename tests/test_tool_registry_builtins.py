@@ -10,8 +10,8 @@ def test_all_builtins_registered() -> None:
         "glob", "grep", "ls",
         "bash",
         "write_todos",
-        "ask_user",
         "query_events", "web_fetch", "git_diff",
     }
     missing = expected - reg.keys()
     assert not missing, f"missing built-in tools: {sorted(missing)}"
+    assert "ask_user" not in reg, "ask_user should no longer be a built-in tool"

@@ -104,7 +104,6 @@ __all__ = ["Tool", "clear_registry", "get_registry", "imp_tool", "register_tool"
 def _register_builtins() -> None:
     """Import all built-in tool modules so their @imp_tool decorations fire."""
     from imp.agents.tools import (  # noqa: F401
-        ask_user,
         bash,
         fs,
         git_diff,
