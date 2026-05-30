@@ -50,6 +50,7 @@ class State:
     loop_counts: dict[str, int] = field(default_factory=dict)
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
+    resume_pending: str | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
@@ -70,6 +71,7 @@ class State:
             "loop_counts": self.loop_counts,
             "current_step": self.current_step.to_dict() if self.current_step else None,
             "retry_feedback": self.retry_feedback,
+            "resume_pending": self.resume_pending,
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:

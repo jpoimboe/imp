@@ -148,6 +148,29 @@ def test_state_round_trip_retry_feedback_defaults_none(tmp_path: Path) -> None:
     assert State.load(tmp_path).retry_feedback is None
 
 
+def test_state_resume_pending_roundtrip(tmp_path: Path) -> None:
+    s = State(change_id=1, step="coder", step_attempt=0, status="running",
+              resume_pending="coder")
+    s.save(tmp_path)
+    back = State.load(tmp_path)
+    assert back.resume_pending == "coder"
+
+
+def test_state_resume_pending_defaults_none() -> None:
+    s = State(change_id=1, step=None, step_attempt=0, status="running")
+    assert s.resume_pending is None
+
+
+def test_state_load_forward_compatible_without_resume_pending(tmp_path: Path) -> None:
+    # An older state.json (written before this field existed) still loads.
+    (tmp_path / "state.json").write_text(json.dumps({
+        "change_id": 1, "step": "coder", "step_attempt": 0, "status": "running",
+        "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
+    }))
+    back = State.load(tmp_path)
+    assert back.resume_pending is None
+
+
 def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
     tmp_path: Path,
 ) -> None:
