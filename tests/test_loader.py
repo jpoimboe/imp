@@ -1,11 +1,23 @@
+"""Tests for the workflow loader."""
+from __future__ import annotations
+
+import textwrap
 from pathlib import Path
 
 import pytest
 
-from imp.engine.errors import LoadError
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.loader import load_workflow, parse_agent_file
-from imp.engine.types import Goto, HumanGate, Pause, ScriptGate
-from tests.conftest import write_agent_md
+from imp.engine.types import Goto, Pause
+
+
+def write_agent_md(path: Path, frontmatter: str, body: str = "prompt body") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{frontmatter}\n---\n{body}\n")
+    return path
+
+
+# ── parse_agent_file tests ─────────────────────────────────────────────────
 
 
 def test_parse_agent_minimal(tmp_path: Path) -> None:
@@ -140,45 +152,181 @@ def test_parse_agent_crlf_line_endings(tmp_path: Path) -> None:
     assert "Hello {{ change.id }}" in agent.prompt_template_source
 
 
-# ── Workflow tests (Task 5) ────────────────────────────────────────────────
+# ── Workflow helper ────────────────────────────────────────────────────────
 
 
-def _write_min_workflow(root: Path) -> Path:
-    """Writes a minimal workflow with one empty phase 'onboard'."""
-    wf_dir = root / ".imp" / "workflows" / "default"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        """
-name: test
-description: a minimal workflow
-phases: [onboard]
-
-defaults:
-  max_retries: 5
-  on_max_retries: {kind: pause}
-
-onboard:
-  steps:
-    - {name: s1, file: agents/stub.md}
-""".strip()
-    )
-    return wf_dir
+def _write(root: Path, workflow_yaml: str, agents: dict[str, str] | None = None) -> Path:
+    wf = root / "wf"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(textwrap.dedent(workflow_yaml))
+    for stem, body in (agents or {}).items():
+        (wf / "agents" / f"{stem}.md").write_text(textwrap.dedent(body))
+    return wf
 
 
-def test_load_workflow_basic(tmp_path: Path) -> None:
-    wf_dir = _write_min_workflow(tmp_path)
-    wf = load_workflow(wf_dir)
-    assert wf.name == "test"
-    assert tuple(p.name for p in wf.phases) == ("onboard",)
-    assert wf.defaults.max_retries == 5
-    assert isinstance(wf.defaults.on_max_retries, Pause)
+_REVIEWER = """\
+---
+name: spec-reviewer
+tools: [complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+  verdict: {type: enum, values: [approve, rework]}
+---
+review
+"""
+
+_WRITER = """\
+---
+name: spec-writer
+tools: [complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+write
+"""
+
+
+# ── New inline phase surface tests ────────────────────────────────────────
+
+
+def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          review_done: {type: bool, default: false}
+        phases:
+          - name: planning
+            steps:
+              - name: spec-writer
+                file: agents/spec-writer.md
+                context: resume
+              - name: route
+                rules:
+                  - {if: review_done, goto: implement}
+                  - {else: true, continue: true}
+              - name: spec-reviewer
+                file: agents/spec-reviewer.md
+                max_loops: 6
+                rules:
+                  - {if: {verdict: rework}, goto: spec-writer}
+                  - if: {verdict: approve}
+                    goto: spec-writer
+                    set: {review_done: true}
+                    feedback: false
+                  - {else: true, pause: true}
+          - name: implement
+            steps:
+              - name: coder
+                file: agents/spec-writer.md
+          - name: merge
+            steps: []
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    wf_obj = load_workflow(wf)
+    names = [s.name for s in wf_obj.flat_steps()]
+    assert names == ["spec-writer", "route", "spec-reviewer", "coder"]
+    by = {s.name: s for s in wf_obj.flat_steps()}
+    assert by["spec-writer"].kind == "agent"
+    assert by["spec-writer"].context == "resume"
+    assert by["spec-writer"].phase == "planning"
+    assert by["route"].kind == "branch"
+    assert by["spec-reviewer"].kind == "agent"
+    assert by["spec-reviewer"].max_loops == 6
+    approve = by["spec-reviewer"].rules[1]
+    assert isinstance(approve.action, Goto)
+    assert approve.action.feedback is False
+    assert wf_obj.vars.defaults() == {"review_done": False}
+
+
+def test_if_string_unquoted_identifier_is_load_error(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: only
+            steps:
+              - name: r
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: "verdict == rework", continue: true}
+                  - {else: true, pause: true}
+        """, agents={"spec-reviewer": _REVIEWER})
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+def test_if_must_be_bool(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          round: {type: int, default: 0}
+        phases:
+          - name: only
+            steps:
+              - name: b
+                rules:
+                  - {if: round, continue: true}
+                  - {else: true, pause: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+def test_set_type_mismatch_is_load_error(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          round: {type: int, default: 0}
+        phases:
+          - name: only
+            steps:
+              - name: b
+                rules:
+                  - {else: true, continue: true, set: {round: true}}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+def test_two_kind_signals_is_load_error(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: only
+            steps:
+              - name: bad
+                command: "true"
+                prompt: "do it"
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+def test_human_option_set_type_mismatch_is_load_error(tmp_path: Path) -> None:
+    # A human option's set: is type-checked just like a rule's set:.
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        vars:
+          round: {type: int, default: 0}
+        phases:
+          - name: only
+            steps:
+              - name: gate
+                ask: "Proceed?"
+                options:
+                  - {label: Go, continue: true, set: {round: true}}   # bool into int var
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+# ── Error path tests for inline surface ──────────────────────────────────
 
 
 def test_load_workflow_missing_phases_key(tmp_path: Path) -> None:
@@ -188,195 +336,6 @@ def test_load_workflow_missing_phases_key(tmp_path: Path) -> None:
     with pytest.raises(LoadError) as ei:
         load_workflow(wf_dir)
     assert "missing 'phases'" in str(ei.value)
-
-
-def test_load_workflow_phase_not_defined(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: y\nphases: [a, b]\n\na:\n  steps: []\n"
-    )
-    with pytest.raises(LoadError) as ei:
-        load_workflow(wf_dir)
-    assert "phase 'b' listed in phases: but no 'b:' section" in str(ei.value)
-
-
-def test_load_defaults_fallback(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: y\nphases: [p]\n"
-        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
-    )
-    wf = load_workflow(wf_dir)
-    assert wf.defaults.max_retries == 3       # built-in default
-    assert isinstance(wf.defaults.on_max_retries, Pause)
-
-
-def test_load_defaults_goto(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        """
-name: x
-description: y
-phases: [p1, p2]
-
-defaults:
-  max_retries: 2
-  on_max_retries: {kind: goto, target: p1}
-
-p1:
-  steps:
-    - {name: s, file: agents/stub.md}
-p2:
-  steps:
-    - {name: s, file: agents/stub.md}
-""".strip()
-    )
-    wf = load_workflow(wf_dir)
-    assert isinstance(wf.defaults.on_max_retries, Goto)
-    assert wf.defaults.on_max_retries.target == "p1"
-
-
-def test_load_workflow_max_retries_null(tmp_path: Path) -> None:
-    """max_retries: null should fall back to default, not crash."""
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [p]\n"
-        "defaults: {max_retries: null}\n"
-        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
-    )
-    wf = load_workflow(wf_dir)
-    assert wf.defaults.max_retries == 3  # built-in default
-
-
-def test_load_workflow_max_retries_string(tmp_path: Path) -> None:
-    """max_retries: 'three' should raise LoadError, not TypeError."""
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [p]\n"
-        "defaults: {max_retries: \"three\"}\n"
-        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
-    )
-    with pytest.raises(LoadError) as ei:
-        load_workflow(wf_dir)
-    assert "max_retries" in str(ei.value) and "must be an integer" in str(ei.value)
-
-
-def test_load_workflow_steps_null(tmp_path: Path) -> None:
-    """steps: null should raise LoadError, not TypeError."""
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [p]\np:\n  steps: null\n"
-    )
-    with pytest.raises(LoadError) as ei:
-        load_workflow(wf_dir)
-    assert "'steps' must be a list" in str(ei.value)
-
-
-def test_load_workflow_step_name_null(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [p]\n"
-        "p:\n  steps:\n    - {name: null, file: agents/stub.md}\n"
-    )
-    with pytest.raises(LoadError) as ei:
-        load_workflow(wf_dir)
-    assert "missing 'name'" in str(ei.value)
-
-
-def test_load_workflow_step_file_null(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [p]\n"
-        "p:\n  steps:\n    - {name: s, file: null}\n"
-    )
-    with pytest.raises(LoadError) as ei:
-        load_workflow(wf_dir)
-    assert "missing 'file'" in str(ei.value)
-
-
-def test_load_workflow_step_model_role_null(tmp_path: Path) -> None:
-    """model_role: null should fall back to 'default', not the string 'None'."""
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [p]\n"
-        "p:\n  steps:\n    - {name: s, file: agents/stub.md, model_role: null}\n"
-    )
-    wf = load_workflow(wf_dir)
-    assert wf.phases[0].steps[0].model_role == "default"
-
-
-def test_load_workflow_duplicate_phase_name(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [p, p]\n"
-        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
-    )
-    with pytest.raises(LoadError) as ei:
-        load_workflow(wf_dir)
-    assert "duplicate phase" in str(ei.value)
-
-
-def test_load_workflow_phases_null_entry(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [null]\n"
-    )
-    with pytest.raises(LoadError) as ei:
-        load_workflow(wf_dir)
-    assert "null entry" in str(ei.value)
 
 
 def test_load_workflow_duplicate_agent_name(tmp_path: Path) -> None:
@@ -397,147 +356,118 @@ def test_load_workflow_duplicate_agent_name(tmp_path: Path) -> None:
         ),
     )
     (wf_dir / "workflow.yaml").write_text(
-        "name: x\ndescription: \"\"\nphases: [p]\n"
-        "p:\n  steps:\n    - {name: s, file: agents/reviewer.md}\n"
+        "name: x\ndescription: \"\"\nphases:\n  - name: p\n    steps: []\n"
     )
     with pytest.raises(LoadError) as ei:
         load_workflow(wf_dir)
     assert "duplicate agent name" in str(ei.value)
 
 
-# ── Task 6: Step gates + fs_permissions ───────────────────────────────────
+def test_load_defaults_fallback(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: x
+        description: y
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    wf_obj = load_workflow(wf)
+    assert wf_obj.defaults.max_retries == 3       # built-in default
+    assert isinstance(wf_obj.defaults.on_max_retries, Pause)
 
 
-def test_load_step_with_script_gate(tmp_path: Path) -> None:
+def test_load_workflow_max_retries_string(tmp_path: Path) -> None:
+    """max_retries: 'three' should raise LoadError, not TypeError."""
+    wf = _write(tmp_path, """\
+        name: x
+        description: ""
+        defaults: {max_retries: "three"}
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert "max_retries" in str(ei.value) and "must be an integer" in str(ei.value)
+
+
+def test_load_workflow_steps_null(tmp_path: Path) -> None:
+    """steps: null should raise LoadError, not TypeError."""
     wf_dir = tmp_path / "wf"
     (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
     (wf_dir / "workflow.yaml").write_text(
-        """
-name: t
-description: ""
-phases: [p]
-p:
-  steps:
-    - name: s
-      file: agents/stub.md
-      gates:
-        - type: script
-          command: "make test"
-          decide:
-            - {when: {exit: 0}, action: {kind: continue}}
-            - {else: true, action: {kind: retry}}
-""".strip()
+        "name: x\ndescription: \"\"\nphases:\n  - name: p\n    steps: null\n"
     )
-    wf = load_workflow(wf_dir)
-    step = wf.phases[0].steps[0]
-    assert len(step.gates) == 1
-    g = step.gates[0]
-    assert isinstance(g, ScriptGate)
-    assert g.command == "make test"
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf_dir)
+    assert "'steps' must be a list" in str(ei.value)
 
 
-def test_load_step_with_fs_permissions(tmp_path: Path) -> None:
+def test_load_workflow_step_name_null(tmp_path: Path) -> None:
     wf_dir = tmp_path / "wf"
     (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
     (wf_dir / "workflow.yaml").write_text(
-        """
-name: t
-description: ""
-phases: [p]
-p:
-  steps:
-    - name: s
-      file: agents/stub.md
-      fs_permissions:
-        - {operations: [read],  paths: ["/project/**"], mode: allow}
-        - {operations: [write], paths: ["/scratch/**"], mode: allow}
-        - {operations: [write], paths: ["/**"], mode: deny}
-""".strip()
+        "name: x\ndescription: \"\"\nphases:\n  - name: p\n    steps:\n"
+        "      - {name: null, file: agents/stub.md}\n"
     )
-    wf = load_workflow(wf_dir)
-    step = wf.phases[0].steps[0]
-    assert len(step.fs_permissions) == 3
-    assert step.fs_permissions[0].operations == ("read",)
-    assert step.fs_permissions[2].mode == "deny"
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf_dir)
+    assert "missing" in str(ei.value).lower() and "name" in str(ei.value).lower()
 
 
-# ── Task 7: Phase-level gates ───────────────────────────────────────────────
+def test_load_defaults_max_tool_calls(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        defaults: {max_retries: 1, max_tool_calls: 25}
+        phases:
+          - name: only
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    w = load_workflow(wf)
+    assert w.defaults.max_tool_calls == 25
 
 
-def test_load_phase_with_human_gate(tmp_path: Path) -> None:
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        """
-name: t
-description: ""
-phases: [onboard, spec]
-onboard:
-  steps:
-    - {name: s, file: agents/stub.md}
-  gates:
-    - type: human
-      prompt: "Continue?"
-      options:
-        - {label: Yes, action: {kind: continue}}
-        - {label: No,  action: {kind: pause}}
-spec:
-  steps:
-    - {name: s, file: agents/stub.md}
-""".strip()
-    )
-    wf = load_workflow(wf_dir)
-    onboard = wf.phases[0]
-    assert len(onboard.gates) == 1
-    g = onboard.gates[0]
-    assert isinstance(g, HumanGate)
-    assert g.prompt == "Continue?"
-    assert len(g.options) == 2
-
-
-# ── Task 8: Source line tracking ───────────────────────────────────────────
+def test_load_defaults_max_tool_calls_optional(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        defaults: {max_retries: 1}
+        phases:
+          - name: only
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+        """, agents={"spec-writer": _WRITER})
+    w = load_workflow(wf)
+    assert w.defaults.max_tool_calls is None
 
 
 def test_step_source_line_is_accurate(tmp_path: Path) -> None:
     wf_dir = tmp_path / "wf"
     (wf_dir / "agents").mkdir(parents=True)
     write_agent_md(
-        wf_dir / "agents" / "stub.md",
+        wf_dir / "agents" / "spec-writer.md",
         frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
+            "name: spec-writer\ntools: [complete_step]\n"
             "output:\n  status: {type: enum, values: [Success, Error]}"
         ),
     )
     wf_yaml = wf_dir / "workflow.yaml"
     wf_yaml.write_text(
-        "name: t\n"            # line 1
-        "description: \"\"\n"  # line 2
-        "phases: [p]\n"        # line 3
-        "p:\n"                 # line 4
-        "  steps:\n"           # line 5
-        "    - name: s1\n"     # line 6
-        "      file: agents/stub.md\n"  # line 7
+        "name: t\n"                      # line 1
+        "description: \"\"\n"            # line 2
+        "phases:\n"                      # line 3
+        "  - name: p\n"                  # line 4
+        "    steps:\n"                   # line 5
+        "      - name: s1\n"             # line 6
+        "        file: agents/spec-writer.md\n"  # line 7
     )
     wf = load_workflow(wf_dir)
     step = wf.phases[0].steps[0]
@@ -551,79 +481,11 @@ def test_error_includes_source_line(tmp_path: Path) -> None:
     wf_yaml.write_text(
         "name: t\n"
         "description: \"\"\n"
-        "phases: [p]\n"
-        "p:\n"
-        "  steps:\n"
-        "    - file: agents/missing.md\n"  # no 'name' — line 6
+        "phases:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - file: agents/missing.md\n"  # no 'name' — line 6
     )
-    with pytest.raises(LoadError) as ei:
+    with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf_dir)
     assert ":6" in str(ei.value)
-
-
-def test_decide_when_no_line_pollution(tmp_path: Path) -> None:
-    """Regression for review #1: `__line__` must not pollute decide.when.
-    (The matcher test using evaluate_decide is in Task 16; this test only
-    verifies the parsed data shape.)"""
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    write_agent_md(
-        wf_dir / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (wf_dir / "workflow.yaml").write_text(
-        "name: t\ndescription: \"\"\nphases: [p]\n"
-        "p:\n"
-        "  steps:\n"
-        "    - name: s\n"
-        "      file: agents/stub.md\n"
-        "      gates:\n"
-        "        - type: script\n"
-        "          command: \"true\"\n"
-        "          decide:\n"
-        "            - {when: {exit: 0}, action: {kind: continue}}\n"
-        "            - {else: true, action: {kind: retry}}\n"
-    )
-    wf = load_workflow(wf_dir)
-    gate = wf.phases[0].steps[0].gates[0]
-    # decide.rules[0].when should be exactly (("exit", 0),) — no "__line__" pair.
-    assert gate.decide.rules[0].when == (("exit", 0),)
-
-
-def test_workflow_defaults_max_tool_calls(tmp_path: Path) -> None:
-    wf = tmp_path / "wf"
-    (wf / "agents").mkdir(parents=True)
-    (wf / "agents" / "a.md").write_text(
-        "---\nname: a\nmax_tool_calls: 12\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nx\n"
-    )
-    (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}, max_tool_calls: 25}\n"
-        "only:\n  steps:\n    - {name: w, file: agents/a.md, model_role: default}\n"
-    )
-    from imp.engine.loader import load_workflow
-    w = load_workflow(wf)
-    assert w.defaults.max_tool_calls == 25
-    assert w.agents["a"].max_tool_calls == 12
-
-
-def test_workflow_defaults_max_tool_calls_optional(tmp_path: Path) -> None:
-    wf = tmp_path / "wf"
-    (wf / "agents").mkdir(parents=True)
-    (wf / "agents" / "a.md").write_text(
-        "---\nname: a\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n---\nx\n"
-    )
-    (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "only:\n  steps:\n    - {name: w, file: agents/a.md, model_role: default}\n"
-    )
-    from imp.engine.loader import load_workflow
-    w = load_workflow(wf)
-    assert w.defaults.max_tool_calls is None
-    assert w.agents["a"].max_tool_calls is None

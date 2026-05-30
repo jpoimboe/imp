@@ -2,7 +2,7 @@
 
 Build order in this file:
   Task 4 - parse_agent_file
-  Tasks 5-7 - workflow YAML parsing
+  Tasks 5-7 - workflow YAML parsing (now unified step model, cutover 2/6)
   Task 8 - source location tracking
 """
 
@@ -18,25 +18,38 @@ import yaml
 from imp.engine._yaml import LineLoader, loc
 from imp.engine._yaml import items as _items
 from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.expr import (
+    Binary,
+    BoolLit,
+    Expr,
+    ExprError,
+    ExprType,
+    IntLit,
+    Name,
+    StrLit,
+    TypeEnv,
+    require_bool,
+    require_type,
+)
+from imp.engine.expr import (
+    parse as parse_expr,
+)
 from imp.engine.schema import parse_output_schema
 from imp.engine.types import (
     Action,
     AgentDef,
-    AgentGate,
     Continue,
-    Decide,
     FsRule,
-    Gate,
     Goto,
-    HumanGate,
     HumanOption,
+    Mutation,
     Pause,
     Phase,
-    Retry,
     Rule,
-    ScriptGate,
     SourceLoc,
     Step,
+    VarDecl,
+    Vars,
     Workflow,
     WorkflowDefaults,
 )
@@ -112,57 +125,250 @@ def parse_agent_file(path: Path) -> AgentDef:
     )
 
 
-# ── Workflow parsing (Task 5) ──────────────────────────────────────────────
+# ── Workflow parsing ──────────────────────────────────────────────────────────
 
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_ON_MAX_RETRIES: Action = Pause()
 
+# Map agent output-schema field types to ExprType.
+_SCHEMA_TO_EXPR: dict[str, ExprType] = {
+    "int": "int",
+    "string": "string",
+    "bool": "bool",
+    "enum": "string",
+}
+_SCRIPT_OUTPUT_TYPES: dict[str, ExprType] = {
+    "exit": "int",
+    "stdout": "string",
+    "stderr": "string",
+}
 
-def _parse_action(
-    raw: dict[str, Any] | None, fallback_source: SourceLoc, yaml_path: Path | None = None
-) -> Action:
-    if raw is None:
-        raise LoadError("missing action", fallback_source)
-    if not isinstance(raw, dict):
+
+def _output_types_for_step(
+    step_kind: str, agent: AgentDef | None
+) -> dict[str, ExprType] | None:
+    """The expr output-env types for one step. None means branch/human (no output)."""
+    if step_kind == "agent" and agent is not None:
+        out: dict[str, ExprType] = {}
+        for f in agent.output_schema.fields:
+            if f.type == "object":
+                continue  # object outputs are not addressable in if:/set: (deferred)
+            out[f.name] = _SCHEMA_TO_EXPR[f.type]
+        return out
+    if step_kind == "script":
+        return dict(_SCRIPT_OUTPUT_TYPES)
+    return None  # branch, human
+
+
+# ── Kind inference ────────────────────────────────────────────────────────────
+
+_KIND_SIGNALS = {
+    "agent": ("file", "prompt"),
+    "script": ("command",),
+    "human": ("ask",),
+}
+
+
+def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
+    present = {
+        kind for kind, keys in _KIND_SIGNALS.items() if any(k in raw for k in keys)
+    }
+    has_rules = "rules" in raw
+    if len(present) > 1:
         raise LoadError(
-            f"action must be a mapping, got {type(raw).__name__}", fallback_source
+            f"step has conflicting kind signals {sorted(present)}; "
+            "a node carries exactly one of file/prompt, command, ask",
+            source,
         )
-    source = loc(yaml_path, raw) if yaml_path is not None else fallback_source
-    kind = raw.get("kind")
-    if kind == "continue":
+    inferred = next(iter(present), None) or ("branch" if has_rules else None)
+    if inferred is None:
+        raise LoadError(
+            "step has no kind signal (need one of file/prompt, command, ask, or rules)",
+            source,
+        )
+    explicit = raw.get("kind")
+    if explicit is not None and explicit != inferred:
+        raise LoadError(
+            f"declared kind {explicit!r} disagrees with the keys present "
+            f"(inferred {inferred!r})",
+            source,
+        )
+    return inferred
+
+
+# ── Expression parsing ────────────────────────────────────────────────────────
+
+
+def _typed_literal(value: Any, source: SourceLoc) -> Expr:
+    if isinstance(value, bool):
+        return BoolLit(value)
+    if isinstance(value, int):
+        return IntLit(value)
+    if isinstance(value, str):
+        return StrLit(value)
+    raise LoadError(f"unsupported literal {value!r} in if: mapping", source)
+
+
+def _parse_if(raw_if: Any, source: SourceLoc) -> Expr:
+    """`if:` is either a mapping (typed-literal equality, ANDed) or a string expr."""
+    if isinstance(raw_if, str):
+        try:
+            return parse_expr(raw_if)
+        except ExprError as e:
+            raise LoadError(f"invalid expression: {e}", source) from e
+    if isinstance(raw_if, dict):
+        terms: list[Expr] = []
+        for k, v in _items(raw_if):
+            terms.append(Binary("==", Name(str(k)), _typed_literal(v, source)))
+        if not terms:
+            raise LoadError("if: mapping is empty", source)
+        expr = terms[0]
+        for t in terms[1:]:
+            expr = Binary("and", expr, t)
+        return expr
+    raise LoadError("if: must be a mapping or a string expression", source)
+
+
+def _parse_set(raw_set: Any, source: SourceLoc) -> Mutation:
+    if not isinstance(raw_set, dict):
+        raise LoadError("set: must be a mapping of var to expression", source)
+    pairs: list[tuple[str, Expr]] = []
+    for var_name, rhs in _items(raw_set):
+        expr = _coerce_rhs(rhs, source)
+        pairs.append((str(var_name), expr))
+    return tuple(pairs)
+
+
+def _coerce_rhs(rhs: Any, source: SourceLoc) -> Expr:
+    """A set: RHS is a string expression, or a bare typed literal."""
+    if isinstance(rhs, str):
+        try:
+            return parse_expr(rhs)
+        except ExprError as e:
+            raise LoadError(f"invalid set: expression: {e}", source) from e
+    return _typed_literal(rhs, source)
+
+
+# ── Action verb + rule parsing ────────────────────────────────────────────────
+
+
+def _parse_verb(raw: dict[str, Any], source: SourceLoc) -> Action:
+    verbs = [v for v in ("continue", "goto", "pause") if v in raw]
+    if len(verbs) != 1:
+        raise LoadError(
+            f"a rule/option needs exactly one action verb (continue/goto/pause); "
+            f"found {verbs}",
+            source,
+        )
+    verb = verbs[0]
+    if verb == "continue":
+        if raw["continue"] is not True:
+            raise LoadError("continue: must be true", source)
         return Continue()
-    if kind == "retry":
-        return Retry()
-    if kind == "pause":
+    if verb == "pause":
+        if raw["pause"] is not True:
+            raise LoadError("pause: must be true", source)
         return Pause()
-    if kind == "goto":
-        if "target" not in raw:
-            raise LoadError("goto action missing 'target'", source)
-        return Goto(target=str(raw["target"]))
-    raise LoadError(
-        f"unknown action kind {kind!r}",
-        source,
-        hint="valid kinds: continue, retry, pause, goto",
+    target = raw["goto"]
+    if not isinstance(target, str):
+        raise LoadError("goto: must name a phase or step", source)
+    feedback = raw.get("feedback", True)
+    if not isinstance(feedback, bool):
+        raise LoadError("feedback: must be true or false", source)
+    return Goto(target=target, feedback=feedback)
+
+
+def _parse_rules(
+    raw_rules: Any, source: SourceLoc, yaml_path: Path
+) -> tuple[Rule, ...]:
+    if not isinstance(raw_rules, list) or not raw_rules:
+        raise LoadError("rules: must be a non-empty list", source)
+    rules: list[Rule] = []
+    for entry in raw_rules:
+        if not isinstance(entry, dict):
+            raise LoadError("each rule must be a mapping", source)
+        rsrc = loc(yaml_path, entry)
+        action = _parse_verb(entry, rsrc)
+        mutations = _parse_set(entry["set"], rsrc) if "set" in entry else ()
+        if entry.get("else") is True:
+            condition: Expr | None = None
+        elif "if" in entry:
+            condition = _parse_if(entry["if"], rsrc)
+        else:
+            raise LoadError("a rule needs `if:` or `else: true`", rsrc)
+        rules.append(Rule(condition=condition, action=action,
+                          mutations=mutations, source=rsrc))
+    return tuple(rules)
+
+
+# ── Vars parsing ──────────────────────────────────────────────────────────────
+
+_VAR_TYPES: dict[str, ExprType] = {"bool": "bool", "int": "int", "string": "string"}
+
+
+def _parse_vars(raw: Any, source: SourceLoc, yaml_path: Path) -> Vars:
+    if raw is None:
+        return Vars(decls=())
+    if not isinstance(raw, dict):
+        raise LoadError("vars: must be a mapping of name to {type, default}", source)
+    decls: list[VarDecl] = []
+    for name, spec in _items(raw):
+        vsrc = loc(yaml_path, spec) if isinstance(spec, dict) else source
+        if not isinstance(spec, dict) or "type" not in spec:
+            raise LoadError(f"var {name!r} needs a 'type'", vsrc)
+        vtype = spec["type"]
+        if vtype not in _VAR_TYPES:
+            raise LoadError(
+                f"var {name!r} type must be bool/int/string, got {vtype!r}", vsrc)
+        default = spec.get("default", {"bool": False, "int": 0, "string": ""}[vtype])
+        _check_default_type(name, vtype, default, vsrc)
+        decls.append(VarDecl(name=str(name), type=_VAR_TYPES[vtype],
+                             default=default, source=vsrc))
+    return Vars(decls=tuple(decls))
+
+
+def _check_default_type(name: str, vtype: str, default: object, source: SourceLoc) -> None:
+    ok = (
+        (vtype == "bool" and isinstance(default, bool))
+        or (vtype == "int" and isinstance(default, int) and not isinstance(default, bool))
+        or (vtype == "string" and isinstance(default, str))
     )
+    if not ok:
+        raise LoadError(
+            f"var {name!r} default {default!r} does not match type {vtype}", source)
+
+
+# ── Int resolution ────────────────────────────────────────────────────────────
+
+
+def _resolve_int(
+    raw: dict[str, Any], key: str, default: int | None, source: SourceLoc, where: str
+) -> int | None:
+    """Resolve an integer knob with null tolerance; reject non-int / bool / negative."""
+    if key not in raw:
+        return default
+    val = raw[key]
+    if val is None:
+        return default
+    if not isinstance(val, int) or isinstance(val, bool):
+        raise LoadError(
+            f"{where}: {key!r} must be an integer, got {type(val).__name__}",
+            source,
+        )
+    if val < 0:
+        raise LoadError(f"{where}: {key!r} must be >= 0", source)
+    return val
 
 
 def _resolve_max_retries(
     raw: dict[str, Any], default: int, source: SourceLoc, where: str
 ) -> int:
     """Resolve max_retries with null tolerance; reject non-int values cleanly."""
-    if "max_retries" not in raw:
-        return default
-    val = raw["max_retries"]
-    if val is None:
-        return default
-    if not isinstance(val, int) or isinstance(val, bool):
-        raise LoadError(
-            f"{where}: 'max_retries' must be an integer, got {type(val).__name__}",
-            source,
-        )
-    if val < 0:
-        raise LoadError(f"{where}: 'max_retries' must be >= 0", source)
-    return val
+    result = _resolve_int(raw, "max_retries", default, source, where)
+    return result if result is not None else default
+
+
+# ── Defaults parsing ──────────────────────────────────────────────────────────
 
 
 def _parse_defaults(
@@ -170,12 +376,13 @@ def _parse_defaults(
 ) -> WorkflowDefaults:
     if raw is None:
         return WorkflowDefaults(
-            max_retries=DEFAULT_MAX_RETRIES, on_max_retries=DEFAULT_ON_MAX_RETRIES
+            max_retries=DEFAULT_MAX_RETRIES,
+            on_max_retries=DEFAULT_ON_MAX_RETRIES,
         )
     defaults_source = loc(yaml_path, raw) if yaml_path is not None else source
     max_retries = _resolve_max_retries(raw, DEFAULT_MAX_RETRIES, defaults_source, "defaults")
     on_max = (
-        _parse_action(raw["on_max_retries"], defaults_source, yaml_path)
+        _parse_on_max_retries(raw["on_max_retries"], defaults_source)
         if "on_max_retries" in raw
         else DEFAULT_ON_MAX_RETRIES
     )
@@ -187,153 +394,103 @@ def _parse_defaults(
             f"'max_tool_calls' must be a positive integer; got {mtc_raw!r}",
             defaults_source,
         )
+    max_loops_val = _resolve_int(raw, "max_loops", 10, defaults_source, "defaults")
+    max_loops = max_loops_val if max_loops_val is not None else 10
     return WorkflowDefaults(
-        max_retries=max_retries, on_max_retries=on_max, max_tool_calls=mtc_raw,
+        max_retries=max_retries,
+        on_max_retries=on_max,
+        max_tool_calls=mtc_raw,
+        max_loops=max_loops,
     )
 
 
-def load_workflow(
-    workflow_dir: Path,
-    configured_roles: frozenset[str] | None = None,
-) -> Workflow:
-    """Parse <workflow_dir>/workflow.yaml + agents/*.md into a Workflow.
-
-    Task 5 wires phases/defaults only. Step gates + fs_permissions land in
-    Tasks 6-7; validators run in Task 9.
-    """
-    yaml_path = workflow_dir / "workflow.yaml"
-    if not yaml_path.exists():
-        raise LoadError(
-            f"workflow.yaml not found in {workflow_dir}",
-            SourceLoc(file=yaml_path, line=1),
-        )
-    try:
-        raw = yaml.load(yaml_path.read_text(), Loader=LineLoader) or {}
-    except yaml.YAMLError as e:
-        raise LoadError(
-            f"invalid YAML: {e}", SourceLoc(file=yaml_path, line=1)
-        ) from e
+def _parse_on_max_retries(raw: Any, source: SourceLoc) -> Action:
+    """Parse defaults.on_max_retries as a new verb-style mapping
+    ({pause: true} / {continue: true} / {goto: target})."""
     if not isinstance(raw, dict):
         raise LoadError(
-            "workflow.yaml root must be a mapping",
-            SourceLoc(file=yaml_path, line=1),
+            f"on_max_retries must be a mapping, got {type(raw).__name__}", source
         )
+    return _parse_verb(raw, source)
 
-    root_source = loc(yaml_path, raw)
-    if "phases" not in raw:
-        raise LoadError("missing 'phases' list", root_source)
-    if not isinstance(raw["phases"], list) or not raw["phases"]:
-        raise LoadError("'phases' must be a non-empty list", root_source)
 
-    defaults = _parse_defaults(raw.get("defaults"), root_source, yaml_path)
+# ── Context parsing ───────────────────────────────────────────────────────────
 
-    # Pre-parse agent files in agents/ so steps can reference by relative path.
-    agents: dict[str, AgentDef] = {}
-    agents_dir = workflow_dir / "agents"
-    if agents_dir.is_dir():
-        for md in sorted(agents_dir.glob("*.md")):
-            agent = parse_agent_file(md)
-            if agent.name in agents:
-                raise LoadError(
-                    f"duplicate agent name {agent.name!r} "
-                    f"(also declared in {agents[agent.name].source_path})",
-                    agent.source,
-                )
-            agents[agent.name] = agent
 
-    seen_phases: set[str] = set()
-    phase_objs: list[Phase] = []
-    for pname in raw["phases"]:
-        if pname is None:
-            raise LoadError("phases list contains a null entry", root_source)
-        pname = str(pname)
-        if pname in seen_phases:
-            raise LoadError(f"duplicate phase {pname!r} in phases: list", root_source)
-        seen_phases.add(pname)
-        if pname not in raw:
-            raise LoadError(
-                f"phase {pname!r} listed in phases: but no '{pname}:' section",
-                root_source,
-            )
-        phase_objs.append(
-            _parse_phase(pname, raw[pname], workflow_dir, defaults, yaml_path)
-        )
-
-    workflow = Workflow(
-        name=str(raw.get("name", workflow_dir.name)),
-        description=str(raw.get("description", "")),
-        phases=tuple(phase_objs),
-        defaults=defaults,
-        agents=agents,
-        workflow_dir=workflow_dir,
-        source=root_source,
+def _parse_context(value: Any, source: SourceLoc) -> str:
+    if value is None:
+        return "fresh"
+    if value in ("fresh", "resume"):
+        return str(value)
+    raise LoadError(
+        f"context must be 'fresh' or 'resume', got {value!r}", source
     )
 
-    # Run validators and print warnings; raise on errors.
-    from imp.engine.validators import validate
-    errors, warnings = validate(workflow, configured_roles=configured_roles)
-    if errors:
-        raise LoadErrors(errors=errors, warnings=warnings)
-    # success path: print warnings only when no errors
-    for w in warnings:
-        print(str(w), file=sys.stderr)
-    return workflow
+
+# ── Human options parsing ─────────────────────────────────────────────────────
 
 
-def _parse_decide(
-    raw: list[dict[str, Any]] | None, source: SourceLoc, yaml_path: Path | None = None
-) -> Decide:
-    if not raw:
-        raise LoadError("decide block is empty", source)
-    if not isinstance(raw, list):
-        raise LoadError(
-            f"decide block must be a list, got {type(raw).__name__}", source
-        )
-    rules: list[Rule] = []
-    for entry in raw:
-        if not isinstance(entry, dict):
-            raise LoadError("decide rule must be a mapping", source)
-        rule_source = loc(yaml_path, entry) if yaml_path is not None else source
-        if "action" not in entry:
-            raise LoadError("decide rule missing 'action'", rule_source)
-        action = _parse_action(entry["action"], rule_source, yaml_path)
-        if entry.get("else") is True:
-            rules.append(Rule(when=(), is_else=True, action=action, source=rule_source))
-            continue
-        if "when" not in entry:
-            raise LoadError(
-                "decide rule needs 'when:' map or 'else: true'", rule_source
-            )
-        when_map = entry["when"]
-        if not isinstance(when_map, dict):
-            raise LoadError("'when' must be a mapping", rule_source)
-        when_pairs = tuple((str(k), v) for k, v in _items(when_map))
-        if not when_pairs:
-            raise LoadError(
-                "decide rule 'when' is empty — use 'else: true' for catch-all",
-                rule_source,
-            )
-        rules.append(
-            Rule(
-                when=when_pairs,
-                is_else=False,
-                action=action,
-                source=rule_source,
-            )
-        )
-    return Decide(rules=tuple(rules), source=source)
+def _parse_human_options(
+    raw_options: Any, source: SourceLoc, yaml_path: Path
+) -> tuple[HumanOption, ...]:
+    if raw_options is None:
+        return ()
+    if not isinstance(raw_options, list):
+        raise LoadError("options: must be a list", source)
+    options: list[HumanOption] = []
+    for o in raw_options:
+        if not isinstance(o, dict):
+            raise LoadError("each option must be a mapping", source)
+        osrc = loc(yaml_path, o)
+        if "label" not in o or not isinstance(o["label"], str):
+            raise LoadError("option missing a string 'label'", osrc)
+        action = _parse_verb(o, osrc)
+        mutations = _parse_set(o["set"], osrc) if "set" in o else ()
+        options.append(HumanOption(
+            label=str(o["label"]),
+            action=action,
+            mutations=mutations,
+            source=osrc,
+        ))
+    return tuple(options)
 
 
-def _default_script_decide(source: SourceLoc) -> Decide:
-    """Default for script gates without explicit decide: exit 0 → continue,
-    else → retry."""
-    return Decide(
-        rules=(
-            Rule(when=(("exit", 0),), is_else=False, action=Continue(), source=source),
-            Rule(when=(), is_else=True, action=Retry(), source=source),
-        ),
-        source=source,
-    )
+# ── Type-checking ─────────────────────────────────────────────────────────────
+
+
+def _typecheck_step_exprs(
+    step: Step,
+    agents: dict[str, AgentDef],
+    var_types: dict[str, ExprType],
+    source: SourceLoc,
+) -> None:
+    agent = agents.get(step.file.stem) if (step.kind == "agent" and step.file) else None
+    output_types = _output_types_for_step(step.kind, agent)
+    env = TypeEnv(vars=var_types, output=output_types)
+    try:
+        for rule in step.rules:
+            if rule.condition is not None:
+                require_bool(rule.condition, env)
+            for mut_name, mut_expr in rule.mutations:
+                if mut_name not in var_types:
+                    raise LoadError(
+                        f"set: target {mut_name!r} is not a declared var", rule.source
+                    )
+                require_type(mut_expr, env, var_types[mut_name])
+        for opt in step.options:
+            for mut_name, mut_expr in opt.mutations:
+                if mut_name not in var_types:
+                    raise LoadError(
+                        f"set: target {mut_name!r} is not a declared var", opt.source
+                    )
+                require_type(mut_expr, env, var_types[mut_name])
+    except LoadError:
+        raise
+    except ExprError as e:
+        raise LoadError(str(e), step.source) from e
+
+
+# ── Fs permissions ────────────────────────────────────────────────────────────
 
 
 def _parse_fs_rule(
@@ -366,178 +523,177 @@ def _parse_fs_rule(
     return FsRule(operations=ops, paths=paths, mode=mode, source=source)  # type: ignore[arg-type]
 
 
-def _parse_gate(
-    raw: dict[str, Any], workflow_dir: Path, fallback_source: SourceLoc,
-    yaml_path: Path | None = None
-) -> Gate:
-    if not isinstance(raw, dict) or "type" not in raw:
-        raise LoadError("gate must be a mapping with 'type'", fallback_source)
-    source = loc(yaml_path, raw) if yaml_path is not None else fallback_source
-    gtype = raw["type"]
-    if gtype == "human":
-        prompt = str(raw.get("prompt") or "")
-        opts_raw = raw.get("options") or []
-        if not isinstance(opts_raw, list):
-            raise LoadError("human gate 'options' must be a list", source)
-        options: list[HumanOption] = []
-        for opt in opts_raw:
-            if not isinstance(opt, dict) or "label" not in opt or "action" not in opt:
-                raise LoadError(
-                    "human gate option needs 'label' and 'action'", source
-                )
-            opt_source = loc(yaml_path, opt) if yaml_path is not None else source
-            options.append(
-                HumanOption(
-                    label=str(opt["label"]),
-                    action=_parse_action(opt["action"], opt_source, yaml_path),
-                    source=opt_source,
-                )
-            )
-        return HumanGate(prompt=prompt, options=tuple(options), source=source)
-    if gtype == "script":
-        if "command" not in raw or raw["command"] is None:
-            raise LoadError("script gate missing 'command'", source)
-        decide = (
-            _parse_decide(raw["decide"], source, yaml_path)
-            if "decide" in raw
-            else _default_script_decide(source)
-        )
-        timeout_raw = raw.get("timeout")
-        timeout_seconds: int | None = None
-        if timeout_raw is not None:
-            if not isinstance(timeout_raw, int) or isinstance(timeout_raw, bool):
-                raise LoadError(
-                    "script gate 'timeout' must be an integer", source
-                )
-            timeout_seconds = timeout_raw
-        return ScriptGate(
-            command=str(raw["command"]),
-            cwd=str(raw["cwd"]) if raw.get("cwd") is not None else None,
-            timeout_seconds=timeout_seconds,
-            decide=decide,
-            source=source,
-        )
-    if gtype == "agent":
-        if "file" not in raw or raw["file"] is None:
-            raise LoadError("agent gate missing 'file'", source)
-        if "decide" not in raw:
-            raise LoadError("agent gate missing 'decide'", source)
-        return AgentGate(
-            file=workflow_dir / str(raw["file"]),
-            model_role=str(raw.get("model_role") or "default"),
-            fs_permissions=tuple(
-                _parse_fs_rule(r, source, yaml_path) for r in (raw.get("fs_permissions") or [])
-            ),
-            decide=_parse_decide(raw["decide"], source, yaml_path),
-            source=source,
-        )
-    raise LoadError(
-        f"unknown gate type {gtype!r}",
-        source,
-        hint="valid types: human, script, agent",
-    )
-
-
-def _parse_phase(
-    name: str,
-    raw: dict[str, Any],
-    workflow_dir: Path,
-    defaults: WorkflowDefaults,
-    yaml_path: Path,
-) -> Phase:
-    fallback_source = SourceLoc(file=yaml_path, line=1)
-    if not isinstance(raw, dict):
-        raise LoadError(f"phase {name!r} must be a mapping", fallback_source)
-    source = loc(yaml_path, raw)
-    if "steps" not in raw:
-        raise LoadError(f"phase {name!r} missing 'steps'", source)
-
-    steps_raw = raw["steps"]
-    if not isinstance(steps_raw, list):
-        raise LoadError(
-            f"phase {name!r}: 'steps' must be a list, got {type(steps_raw).__name__}",
-            source,
-        )
-    steps = tuple(
-        _parse_step(s, workflow_dir, defaults, yaml_path) for s in steps_raw
-    )
-
-    gates_raw = raw.get("gates") or []
-    if not isinstance(gates_raw, list):
-        raise LoadError(
-            f"phase {name!r}: 'gates' must be a list, got {type(gates_raw).__name__}",
-            source,
-        )
-    gates = tuple(_parse_gate(g, workflow_dir, source, yaml_path) for g in gates_raw)
-
-    return Phase(
-        name=name,
-        steps=steps,
-        gates=gates,
-        max_retries=_resolve_max_retries(raw, defaults.max_retries, source, f"phase {name!r}"),
-        on_max_retries=(
-            _parse_action(raw["on_max_retries"], source, yaml_path)
-            if "on_max_retries" in raw
-            else defaults.on_max_retries
-        ),
-        source=source,
-    )
+# ── Step parsing ──────────────────────────────────────────────────────────────
 
 
 def _parse_step(
     raw: dict[str, Any],
+    phase_name: str,
     workflow_dir: Path,
     defaults: WorkflowDefaults,
+    agents: dict[str, AgentDef],
+    var_types: dict[str, ExprType],
     yaml_path: Path,
 ) -> Step:
-    fallback_source = SourceLoc(file=yaml_path, line=1)
+    fallback = SourceLoc(file=yaml_path, line=1)
     if not isinstance(raw, dict):
-        raise LoadError(f"step must be a mapping, got {type(raw).__name__}", fallback_source)
+        raise LoadError(f"step must be a mapping, got {type(raw).__name__}", fallback)
     source = loc(yaml_path, raw)
-    if "name" not in raw or raw["name"] is None:
-        raise LoadError("step missing 'name'", source)
-    if not isinstance(raw["name"], str):
-        raise LoadError(
-            f"step 'name' must be a string, got {type(raw['name']).__name__}",
-            source,
-        )
-    if "file" not in raw or raw["file"] is None:
-        raise LoadError(f"step {raw['name']!r} missing 'file'", source)
-    if not isinstance(raw["file"], str):
-        raise LoadError(
-            f"step {raw['name']!r}: 'file' must be a string", source,
-        )
-    model_role_raw = raw.get("model_role")
-    model_role = "default" if model_role_raw is None else str(model_role_raw)
+    if not raw.get("name") or not isinstance(raw["name"], str):
+        raise LoadError("step missing a string 'name'", source)
+    name = raw["name"]
+    kind = _infer_kind(raw, source)
 
-    fs_perms_raw = raw.get("fs_permissions") or []
-    if not isinstance(fs_perms_raw, list):
-        raise LoadError(
-            f"step {raw['name']!r}: 'fs_permissions' must be a list", source,
-        )
-    fs_perms = tuple(_parse_fs_rule(r, source, yaml_path) for r in fs_perms_raw)
+    max_loops_val = _resolve_int(raw, "max_loops", defaults.max_loops, source, name)
+    max_loops = max_loops_val if max_loops_val is not None else defaults.max_loops
+    on_max = defaults.on_max_retries  # on_max_retries is not a per-step YAML knob
 
-    gates_raw = raw.get("gates") or []
-    if not isinstance(gates_raw, list):
-        raise LoadError(
-            f"step {raw['name']!r}: 'gates' must be a list", source,
-        )
-    gates = tuple(_parse_gate(g, workflow_dir, source, yaml_path) for g in gates_raw)
+    rules: tuple[Rule, ...] = ()
+    options: tuple[HumanOption, ...] = ()
 
-    return Step(
-        name=raw["name"],
-        file=workflow_dir / raw["file"],
-        interactive=bool(raw.get("interactive", False)),
-        model_role=model_role,
-        fs_permissions=fs_perms,
-        gates=gates,
-        max_retries=_resolve_max_retries(
-            raw, defaults.max_retries, source, f"step {raw['name']!r}"
-        ),
-        on_max_retries=(
-            _parse_action(raw["on_max_retries"], source, yaml_path)
-            if "on_max_retries" in raw
-            else defaults.on_max_retries
-        ),
-        source=source,
+    if kind == "human":
+        if "rules" in raw:
+            raise LoadError(f"human step {name!r} uses options:, not rules:", source)
+        options = _parse_human_options(raw.get("options"), source, yaml_path)
+        step = Step(name=name, phase=phase_name, kind="human", rules=(),
+                    options=options, on_max_retries=on_max, max_loops=max_loops,
+                    source=source, ask=str(raw.get("ask") or ""))
+        # Type-check human option set: mutations (output is None for a human step).
+        _typecheck_step_exprs(step, agents, var_types, source)
+        return step
+
+    if "rules" in raw:
+        rules = _parse_rules(raw["rules"], source, yaml_path)
+    elif kind in ("script", "branch"):
+        raise LoadError(f"{kind} step {name!r} requires a rules: block", source)
+    # agent with no rules means continue-on-success (rules stays ())
+
+    if kind == "agent":
+        file = (workflow_dir / raw["file"]) if raw.get("file") else None
+        step = Step(
+            name=name, phase=phase_name, kind="agent", rules=rules, options=(),
+            on_max_retries=on_max, max_loops=max_loops, source=source,
+            file=file, prompt=(str(raw["prompt"]) if raw.get("prompt") else None),
+            model_role=str(raw.get("model_role") or "default"),
+            fs_permissions=tuple(
+                _parse_fs_rule(r, source, yaml_path)
+                for r in (raw.get("fs_permissions") or [])
+            ),
+            interactive=bool(raw.get("interactive", False)),
+            max_tool_calls=raw.get("max_tool_calls"),
+            context=_parse_context(raw.get("context"), source),  # type: ignore[arg-type]
+            max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
+        )
+    elif kind == "script":
+        step = Step(
+            name=name, phase=phase_name, kind="script", rules=rules, options=(),
+            on_max_retries=on_max, max_loops=max_loops, source=source,
+            command=str(raw["command"]),
+            cwd=str(raw["cwd"]) if raw.get("cwd") else None,
+            timeout_seconds=raw.get("timeout"),
+        )
+    else:  # branch
+        step = Step(
+            name=name, phase=phase_name, kind="branch", rules=rules, options=(),
+            on_max_retries=on_max, max_loops=max_loops, source=source,
+        )
+
+    # Type-check every if:/set: against this step's env (output and vars).
+    _typecheck_step_exprs(step, agents, var_types, source)
+    return step
+
+
+# ── Workflow loader ───────────────────────────────────────────────────────────
+
+
+def load_workflow(
+    workflow_dir: Path,
+    configured_roles: frozenset[str] | None = None,
+) -> Workflow:
+    """Parse <workflow_dir>/workflow.yaml + agents/*.md into a Workflow."""
+    yaml_path = workflow_dir / "workflow.yaml"
+    if not yaml_path.exists():
+        raise LoadError(
+            f"workflow.yaml not found in {workflow_dir}",
+            SourceLoc(file=yaml_path, line=1),
+        )
+    try:
+        raw = yaml.load(yaml_path.read_text(), Loader=LineLoader) or {}
+    except yaml.YAMLError as e:
+        raise LoadError(
+            f"invalid YAML: {e}", SourceLoc(file=yaml_path, line=1)
+        ) from e
+    if not isinstance(raw, dict):
+        raise LoadError(
+            "workflow.yaml root must be a mapping",
+            SourceLoc(file=yaml_path, line=1),
+        )
+
+    root_source = loc(yaml_path, raw)
+    if "phases" not in raw:
+        raise LoadError("missing 'phases' list", root_source)
+
+    defaults = _parse_defaults(raw.get("defaults"), root_source, yaml_path)
+
+    # Pre-parse agent files in agents/ so steps can reference by relative path.
+    agents: dict[str, AgentDef] = {}
+    agents_dir = workflow_dir / "agents"
+    if agents_dir.is_dir():
+        for md in sorted(agents_dir.glob("*.md")):
+            agent = parse_agent_file(md)
+            if agent.name in agents:
+                raise LoadError(
+                    f"duplicate agent name {agent.name!r} "
+                    f"(also declared in {agents[agent.name].source_path})",
+                    agent.source,
+                )
+            agents[agent.name] = agent
+
+    # vars (top-level, optional)
+    vars_obj = _parse_vars(raw.get("vars"), root_source, yaml_path)
+    var_types = vars_obj.types()
+
+    # phases: inline list-of-objects
+    raw_phases = raw["phases"]
+    if not isinstance(raw_phases, list) or not raw_phases:
+        raise LoadError("'phases' must be a non-empty list of {name, steps}", root_source)
+    phase_objs: list[Phase] = []
+    for praw in raw_phases:
+        if not isinstance(praw, dict) or "name" not in praw or "steps" not in praw:
+            raise LoadError("each phase needs 'name' and 'steps'", root_source)
+        psrc = loc(yaml_path, praw)
+        pname = str(praw["name"])
+        steps_raw = praw["steps"]
+        if not isinstance(steps_raw, list):
+            raise LoadError(f"phase {pname!r}: 'steps' must be a list", psrc)
+        steps = tuple(
+            _parse_step(s, pname, workflow_dir, defaults, agents, var_types, yaml_path)
+            for s in steps_raw
+        )
+        phase_objs.append(Phase(name=pname, steps=steps, source=psrc))
+
+    workflow = Workflow(
+        name=str(raw.get("name", workflow_dir.name)),
+        description=str(raw.get("description", "")),
+        phases=tuple(phase_objs),
+        vars=vars_obj,
+        defaults=defaults,
+        agents=agents,
+        workflow_dir=workflow_dir,
+        source=root_source,
     )
+
+    # Run validators and print warnings; raise on errors.
+    # validators.py is rewritten in task 3/6; guard against import failure until then.
+    try:
+        from imp.engine.validators import validate
+    except ImportError:
+        # validators.py still references the old model; skip until task 3 rewrites it.
+        return workflow
+    errors, warnings = validate(workflow, configured_roles=configured_roles)
+    if errors:
+        raise LoadErrors(errors=errors, warnings=warnings)
+    # success path: print warnings only when no errors
+    for w in warnings:
+        print(str(w), file=sys.stderr)
+    return workflow
