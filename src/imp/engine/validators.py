@@ -26,6 +26,7 @@ def validate(
     _v_agent_files_exist_and_named(workflow, errors)
     _v_status_enum_present(workflow, errors)
     _v_goto_targets_in_shared_namespace(workflow, errors)
+    _v_resume_targets_are_agents(workflow, errors)
     _v_unique_step_names_disjoint_from_phases(workflow, errors)
     _v_rules_end_in_else(workflow, errors)
     _v_required_blocks_per_kind(workflow, errors)
@@ -94,6 +95,46 @@ def _v_goto_targets_in_shared_namespace(
             errors.append(LoadError(
                 f"goto target {action.target!r} is not a phase or step "
                 f"{sorted(names)}",
+                source,  # type: ignore[arg-type]
+            ))
+
+    for step in workflow.flat_steps():
+        for rule in step.rules:
+            check(rule.action, rule.source)
+        for opt in step.options:
+            check(opt.action, opt.source)
+    check(workflow.defaults.on_max_retries, workflow.source)
+
+
+def _v_resume_targets_are_agents(
+    workflow: Workflow, errors: list[LoadError]
+) -> None:
+    """A `resume:` edge (Goto with resume=True) must resolve to an agent step.
+    Phase targets resolve to the phase's first step; an empty (trailing) phase
+    has no step to resume and is rejected. Unknown targets are skipped here —
+    _v_goto_targets_in_shared_namespace reports those (and resolve_goto would
+    otherwise raise an uncaught KeyError, since validators do not short-circuit).
+    """
+    names = {p.name for p in workflow.phases} | {s.name for s in workflow.flat_steps()}
+    flat = workflow.flat_steps()
+
+    def check(action: object, source: object) -> None:
+        if not (isinstance(action, Goto) and action.resume):
+            return
+        if action.target not in names:
+            return  # reported by _v_goto_targets_in_shared_namespace
+        idx = workflow.resolve_goto(action.target)
+        if idx >= len(flat):
+            errors.append(LoadError(
+                f"resume target {action.target!r} is an empty phase with no "
+                f"step to resume",
+                source,  # type: ignore[arg-type]
+            ))
+            return
+        if flat[idx].kind != "agent":
+            errors.append(LoadError(
+                f"resume target {action.target!r} resolves to a "
+                f"{flat[idx].kind!r} step; resume: requires an agent step",
                 source,  # type: ignore[arg-type]
             ))
 

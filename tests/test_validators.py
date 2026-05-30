@@ -413,3 +413,106 @@ def test_human_step_without_options_is_error(tmp_path: Path) -> None:
         """)
     with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf)
+
+
+# ── _v_resume_targets_are_agents ──────────────────────────────────────────────
+
+
+def test_resume_to_agent_target_loads(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/stub.md
+              - name: gate
+                file: agents/stub.md
+                rules:
+                  - {if: {status: Success}, resume: w}
+                  - {else: true, continue: true}
+        """, agents={"stub": _OK_AGENT})
+    load_workflow(wf)   # no raise
+
+
+def test_resume_to_script_target_is_rejected(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/stub.md
+              - name: chk
+                command: ./x.sh
+                rules:
+                  - {if: {exit: 0}, continue: true}
+                  - {else: true, resume: chk}
+        """, agents={"stub": _OK_AGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert any("resume" in str(e) and "agent" in str(e) for e in ei.value.errors)
+
+
+def test_resume_to_empty_phase_is_rejected(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: gate
+                file: agents/stub.md
+                rules:
+                  - {else: true, resume: done}
+          - name: done
+            steps: []
+        """, agents={"stub": _OK_AGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert any("resume" in str(e) and "empty phase" in str(e) for e in ei.value.errors)
+
+
+def test_resume_to_unknown_target_is_clean_load_error_not_keyerror(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: gate
+                file: agents/stub.md
+                rules:
+                  - {else: true, resume: ghost}
+        """, agents={"stub": _OK_AGENT})
+    # If the validator called resolve_goto without a namespace guard, this would
+    # raise an uncaught KeyError instead of LoadErrors.
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert any("ghost" in str(e) for e in ei.value.errors)
+
+
+def test_resume_in_defaults_on_max_retries_to_non_agent_is_rejected(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        defaults:
+          on_max_retries: {resume: chk}
+        phases:
+          - name: a
+            steps:
+              - name: gate
+                file: agents/stub.md
+                rules:
+                  - {if: {status: Success}, continue: true}
+                  - {else: true, pause: true}
+              - name: chk
+                command: ./x.sh
+                rules:
+                  - {else: true, continue: true}
+        """, agents={"stub": _OK_AGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert any("resume" in str(e) and "agent" in str(e) for e in ei.value.errors)
