@@ -291,3 +291,113 @@ class _Parser:
 def parse(text: str) -> Expr:
     """Tokenize + parse a string expression into an AST. Raises ExprSyntaxError."""
     return _Parser(_tokenize(text), text).parse()
+
+
+# -- static type inference (load time) -------------------------------------------------------
+
+from collections.abc import Mapping  # noqa: E402  (kept with the type stage)
+
+
+@dataclass(frozen=True, slots=True)
+class TypeEnv:
+    """Static symbol environment for one step's `if:`/`set:` expressions.
+
+    `output` is None inside a `branch` (no step output): a bare name then
+    resolves to a var only, and `output.X` is an error.
+    """
+    vars: Mapping[str, ExprType]
+    output: Mapping[str, ExprType] | None
+
+
+_ARITH = {"+", "-", "*", "/"}
+_ORDER = {"<", "<=", ">", ">="}
+_EQ = {"==", "!="}
+
+
+def infer_type(expr: Expr, env: TypeEnv) -> ExprType:
+    """Return the static type of `expr`, or raise ExprTypeError."""
+    match expr:
+        case IntLit():
+            return "int"
+        case StrLit():
+            return "string"
+        case BoolLit():
+            return "bool"
+        case Name(name=nm):
+            in_out = env.output is not None and nm in env.output
+            in_var = nm in env.vars
+            if in_out and in_var:
+                raise ExprTypeError(
+                    f"name {nm!r} is both an output field and a var; "
+                    f"disambiguate with output.{nm} or var.{nm}"
+                )
+            if in_out:
+                return env.output[nm]  # type: ignore[index]
+            if in_var:
+                return env.vars[nm]
+            raise ExprTypeError(f"unknown identifier {nm!r}")
+        case OutputRef(field=f):
+            if env.output is None:
+                raise ExprTypeError(
+                    f"output.{f} is not available here (this node has no step output)"
+                )
+            if f not in env.output:
+                raise ExprTypeError(f"unknown output field {f!r}")
+            return env.output[f]
+        case VarRef(name=nm):
+            if nm not in env.vars:
+                raise ExprTypeError(f"unknown var {nm!r}")
+            return env.vars[nm]
+        case Unary(op="-", operand=o):
+            t = infer_type(o, env)
+            if t != "int":
+                raise ExprTypeError(f"unary '-' requires int, got {t}")
+            return "int"
+        case Unary(op="not", operand=o):
+            t = infer_type(o, env)
+            if t != "bool":
+                raise ExprTypeError(f"'not' requires bool, got {t}")
+            return "bool"
+        case Binary(op=op, left=lhs, right=rhs):
+            lt = infer_type(lhs, env)
+            rt = infer_type(rhs, env)
+            if op in _ARITH:
+                if lt != "int" or rt != "int":
+                    raise ExprTypeError(
+                        f"'{op}' requires int operands, got {lt} and {rt}"
+                    )
+                return "int"
+            if op in _ORDER:
+                if lt != "int" or rt != "int":
+                    raise ExprTypeError(
+                        f"'{op}' requires int operands, got {lt} and {rt}"
+                    )
+                return "bool"
+            if op in _EQ:
+                if lt != rt:
+                    raise ExprTypeError(
+                        f"'{op}' requires matching types, got {lt} and {rt}"
+                    )
+                return "bool"
+            if op in ("and", "or"):
+                if lt != "bool" or rt != "bool":
+                    raise ExprTypeError(
+                        f"'{op}' requires bool operands, got {lt} and {rt}"
+                    )
+                return "bool"
+            raise ExprTypeError(f"unknown operator {op!r}")
+    raise ExprTypeError(f"cannot type expression {expr!r}")
+
+
+def require_bool(expr: Expr, env: TypeEnv) -> None:
+    """Enforce `if:` must be boolean-typed. Raises ExprTypeError otherwise."""
+    t = infer_type(expr, env)
+    if t != "bool":
+        raise ExprTypeError(f"condition must be boolean, got {t}")
+
+
+def require_type(expr: Expr, env: TypeEnv, expected: ExprType) -> None:
+    """Enforce a `set:` right-hand side matches its target var's type."""
+    t = infer_type(expr, env)
+    if t != expected:
+        raise ExprTypeError(f"expression result is {t}, expected {expected}")

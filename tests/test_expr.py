@@ -14,10 +14,14 @@ from imp.engine.expr import (
     Name,
     OutputRef,
     StrLit,
+    TypeEnv,
     Unary,
     VarRef,
     _tokenize,
+    infer_type,
     parse,
+    require_bool,
+    require_type,
 )
 
 
@@ -147,3 +151,78 @@ def test_parse_keyword_in_primary_is_error() -> None:
 def test_parse_unbalanced_paren_is_error() -> None:
     with pytest.raises(ExprSyntaxError):
         parse("(1 + 2")
+
+
+def _env(vars: dict | None = None, output: dict | None = None) -> TypeEnv:
+    return TypeEnv(vars=vars or {}, output=output)
+
+
+def test_infer_literals() -> None:
+    assert infer_type(parse("1"), _env()) == "int"
+    assert infer_type(parse("'x'"), _env()) == "string"
+    assert infer_type(parse("true"), _env()) == "bool"
+
+
+def test_infer_arithmetic_is_int() -> None:
+    env = _env(vars={"round": "int"})
+    assert infer_type(parse("round + 1"), env) == "int"
+
+
+def test_infer_comparison_is_bool() -> None:
+    env = _env(vars={"round": "int"})
+    assert infer_type(parse("round > 0"), env) == "bool"
+
+
+def test_infer_bare_name_resolves_output_then_var() -> None:
+    env = _env(vars={"review_done": "bool"}, output={"verdict": "string"})
+    assert infer_type(parse("verdict == 'approve'"), env) == "bool"
+    assert infer_type(parse("review_done"), env) == "bool"
+
+
+def test_infer_ambiguous_bare_name_is_error() -> None:
+    env = _env(vars={"verdict": "string"}, output={"verdict": "string"})
+    with pytest.raises(ExprTypeError):
+        infer_type(parse("verdict"), env)
+
+
+def test_infer_unknown_identifier_is_error() -> None:
+    with pytest.raises(ExprTypeError):
+        infer_type(parse("nope"), _env(vars={"round": "int"}))
+
+
+def test_infer_output_ref_in_branch_is_error() -> None:
+    # branch: output is None
+    with pytest.raises(ExprTypeError):
+        infer_type(parse("output.x"), _env(vars={"x": "int"}, output=None))
+
+
+def test_infer_arithmetic_on_non_int_is_error() -> None:
+    env = _env(vars={"name": "string"})
+    with pytest.raises(ExprTypeError):
+        infer_type(parse("name + 1"), env)
+
+
+def test_infer_equality_type_mismatch_is_error() -> None:
+    env = _env(vars={"round": "int"})
+    with pytest.raises(ExprTypeError):
+        infer_type(parse("round == 'x'"), env)
+
+
+def test_infer_and_requires_bool() -> None:
+    env = _env(vars={"round": "int"})
+    with pytest.raises(ExprTypeError):
+        infer_type(parse("round and true"), env)
+
+
+def test_require_bool_rejects_non_bool() -> None:
+    env = _env(vars={"round": "int"})
+    require_bool(parse("round > 0"), env)        # ok
+    with pytest.raises(ExprTypeError):
+        require_bool(parse("round"), env)        # `if: round` is illegal
+
+
+def test_require_type_checks_set_target() -> None:
+    env = _env(vars={"round": "int"})
+    require_type(parse("round + 1"), env, "int")        # ok
+    with pytest.raises(ExprTypeError):
+        require_type(parse("true"), env, "int")          # bool into int var
