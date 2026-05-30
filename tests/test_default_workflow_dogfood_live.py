@@ -615,10 +615,18 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"engine state committed to history (should be gitignored): {imp_paths}"
     )
 
-    # ── Commit count (corroborating) ───────────────────────────────────
-    # The sentinel task is single-task by construction, so seed + one coder
-    # commit == 2. Relax this if the dogfood task ever becomes multi-task and
-    # rely on the no-rework assertion above for rework detection.
+    # ── Commit count (corroborating, NOT authoritative) ────────────────
+    # Sanity floor only: seed + at least one coder commit (>= 2). The
+    # no-rework EDGE assertion above is the AUTHORITATIVE rework signal —
+    # rely on it, not on an exact count. A healthy single-task run may
+    # legitimately produce MORE than one coder commit: the coder commits
+    # atomically per change, so e.g. an "add a marker" task can land as
+    # "add the import" + "add the marker" (observed: a clean live dogfood
+    # run produced 2 coder commits, 3 total, with zero rework edges and no
+    # .imp/ in history). An exact `== 2` falsely failed that healthy run.
+    # The original bug (a rework LOOP committing .imp/**) is caught by the
+    # no-rework + no-.imp-in-history gates above, which a stray extra commit
+    # count cannot mask.
     log_oneline = subprocess.run(
         ["git", "log", "--oneline"],
         cwd=tmp_path, capture_output=True, text=True, timeout=10, check=True,
@@ -626,9 +634,9 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     commit_count = len([
         ln for ln in log_oneline.stdout.splitlines() if ln.strip()
     ])
-    assert commit_count == 2, (
-        f"expected exactly 2 commits (seed + coder's single-task commit), got "
-        f"{commit_count} — a rework/retry loop likely produced extra commits:\n"
+    assert commit_count >= 2, (
+        f"expected at least 2 commits (seed + >=1 coder commit), got "
+        f"{commit_count} — the coder appears not to have committed:\n"
         f"{log_oneline.stdout}"
     )
 
