@@ -693,3 +693,19 @@ def test_summarize_result_empty_list_is_empty_string() -> None:
     step = _only_step(tree)
     burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
     assert burst.calls[0].result == ""
+
+
+def test_summarize_result_flattens_subagent_fold_outcome() -> None:
+    # The parent's task tool_result closes the subagent fold; its content can be
+    # a block list and must flatten into the fold outcome, not a repr.
+    tree = nv.build_tree(_step_events(
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content=[{"type": "text", "text": "subagent done"}], error=False),
+    ))
+    step = _only_step(tree)
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert sub.running is False
+    assert sub.outcome == "subagent done"
+    assert "[{'" not in sub.outcome
