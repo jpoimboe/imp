@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from imp.engine.expr import Expr, ExprType
+
 
 @dataclass(frozen=True, slots=True)
 class SourceLoc:
@@ -20,7 +22,7 @@ class SourceLoc:
         return f"{self.file}:{self.line}"
 
 
-# ── Actions ────────────────────────────────────────────────────────────────
+# ── Actions (internal -- never serialized into YAML) ─────────────────────────
 
 @dataclass(frozen=True, slots=True)
 class Action:
@@ -34,7 +36,7 @@ class Continue(Action):
 
 @dataclass(frozen=True, slots=True)
 class Retry(Action):
-    pass
+    """Engine-internal error recovery only -- never authored in YAML."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,38 +47,61 @@ class Pause(Action):
 @dataclass(frozen=True, slots=True)
 class Goto(Action):
     target: str
+    feedback: bool = True       # feedback: false suppresses the wrapper on this edge
 
 
-# ── Decide blocks ──────────────────────────────────────────────────────────
+# ── Mutations & rules ─────────────────────────────────────────────────────────
+
+# A set: clause -- ordered (var_name, expression) pairs applied before a jump.
+Mutation = tuple[tuple[str, Expr], ...]
+
 
 @dataclass(frozen=True, slots=True)
 class Rule:
-    """One rule inside a decide: block.
-
-    Exactly one of `when` (non-empty dict of field→value to match) or `is_else`
-    (catch-all) must be set.
-    """
-    when: tuple[tuple[str, object], ...]  # immutable dict-as-pairs; () for else
-    is_else: bool
+    """One rule in a rules: block. `condition is None` means else (catch-all)."""
+    condition: Expr | None
     action: Action
+    mutations: Mutation
     source: SourceLoc
 
-    def __post_init__(self) -> None:
-        if self.is_else and self.when:
-            raise ValueError("Rule: is_else=True must have empty when")
-        if not self.is_else and not self.when:
-            raise ValueError(
-                "Rule: empty when without is_else=True is a black hole"
-            )
+    @property
+    def is_else(self) -> bool:
+        return self.condition is None
 
 
 @dataclass(frozen=True, slots=True)
-class Decide:
-    rules: tuple[Rule, ...]
+class HumanOption:
+    label: str
+    action: Action
+    mutations: Mutation
     source: SourceLoc
 
 
-# ── Output schema (agent's structured output contract) ─────────────────────
+# ── Variables ─────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True, slots=True)
+class VarDecl:
+    name: str
+    type: ExprType                 # "int" | "bool" | "string"
+    default: object
+    source: SourceLoc
+
+
+@dataclass(frozen=True, slots=True)
+class Vars:
+    decls: tuple[VarDecl, ...]
+
+    def types(self) -> dict[str, ExprType]:
+        return {d.name: d.type for d in self.decls}
+
+    def defaults(self) -> dict[str, object]:
+        return {d.name: d.default for d in self.decls}
+
+    def names(self) -> frozenset[str]:
+        return frozenset(d.name for d in self.decls)
+
+
+# ── Output schema (agent's structured output contract) ────────────────────────
 
 @dataclass(frozen=True, slots=True)
 class OutputField:
@@ -101,7 +126,7 @@ class OutputSchema:
         return frozenset(f.name for f in self.fields)
 
 
-# ── Filesystem permissions (parsed but unused in Plan 1; validated only) ───
+# ── Filesystem permissions (parsed but unused in Plan 1; validated only) ──────
 
 @dataclass(frozen=True, slots=True)
 class FsRule:
@@ -111,80 +136,7 @@ class FsRule:
     source: SourceLoc
 
 
-# ── Gates ──────────────────────────────────────────────────────────────────
-
-@dataclass(frozen=True, slots=True)
-class Gate:
-    """Base for gates. Concrete subclasses below."""
-    source: SourceLoc
-
-
-@dataclass(frozen=True, slots=True)
-class HumanOption:
-    label: str
-    action: Action
-    source: SourceLoc
-
-
-@dataclass(frozen=True, slots=True)
-class HumanGate(Gate):
-    prompt: str
-    options: tuple[HumanOption, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class ScriptGate(Gate):
-    command: str
-    cwd: str | None
-    timeout_seconds: int | None
-    decide: Decide  # default decide is constructed by loader when omitted
-
-
-@dataclass(frozen=True, slots=True)
-class AgentGate(Gate):
-    """Agent-as-gate. Plan 1 parses + validates this but does NOT execute it
-    (no real LLM yet). The executor raises NotImplementedError on dispatch.
-    """
-    file: Path
-    model_role: str
-    fs_permissions: tuple[FsRule, ...]
-    decide: Decide
-
-
-@dataclass(frozen=True, slots=True)
-class StubGate(Gate):
-    """Test-only gate that returns a fixed action. Not exposed in workflow YAML;
-    used by unit tests to exercise the executor without spinning up agents.
-    """
-    action: Action
-
-
-# ── Steps & phases ─────────────────────────────────────────────────────────
-
-@dataclass(frozen=True, slots=True)
-class Step:
-    name: str
-    file: Path                              # absolute path into workflow snapshot
-    interactive: bool
-    model_role: str
-    fs_permissions: tuple[FsRule, ...]
-    gates: tuple[Gate, ...]                 # () = implicit continue-on-success
-    max_retries: int                        # resolved from defaults if omitted
-    on_max_retries: Action                  # resolved from defaults if omitted
-    source: SourceLoc
-
-
-@dataclass(frozen=True, slots=True)
-class Phase:
-    name: str
-    steps: tuple[Step, ...]
-    gates: tuple[Gate, ...]                 # phase-level gates run after all steps
-    max_retries: int
-    on_max_retries: Action
-    source: SourceLoc
-
-
-# ── Agent definition (parsed from .md) ─────────────────────────────────────
+# ── Agent definition (parsed from .md) ────────────────────────────────────────
 
 @dataclass(frozen=True, slots=True)
 class AgentDef:
@@ -199,36 +151,100 @@ class AgentDef:
     max_tool_calls: int | None = None
 
 
-# ── Workflow root ──────────────────────────────────────────────────────────
+# ── Steps & phases ────────────────────────────────────────────────────────────
+
+Kind = Literal["agent", "script", "human", "branch"]
+Context = Literal["fresh", "resume"]
+
+
+@dataclass(frozen=True, slots=True)
+class Step:
+    name: str                       # globally unique; disjoint from phase names
+    phase: str                      # owning container (set by loader from structure)
+    kind: Kind
+    rules: tuple[Rule, ...]         # () for human; required for script/branch; optional for agent
+    options: tuple[HumanOption, ...]  # human only; () otherwise
+    on_max_retries: Action          # action on max_loops (and, for agents, max_retries) exhaustion
+    max_loops: int
+    source: SourceLoc
+    # agent-only
+    file: Path | None = None
+    prompt: str | None = None
+    model_role: str = "default"
+    fs_permissions: tuple[FsRule, ...] = ()
+    interactive: bool = False
+    max_tool_calls: int | None = None
+    context: Context = "fresh"
+    max_retries: int = 0
+    # script-only
+    command: str | None = None
+    cwd: str | None = None
+    timeout_seconds: int | None = None
+    # human-only
+    ask: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Phase:
+    name: str
+    steps: tuple[Step, ...]
+    source: SourceLoc
+
+
+# ── Workflow root ─────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True, slots=True)
 class WorkflowDefaults:
     max_retries: int
     on_max_retries: Action
     max_tool_calls: int | None = None
+    max_loops: int = 10
 
 
 @dataclass(frozen=True, slots=True)
 class Workflow:
-    """`agents` is a plain dict for V0; callers must treat it as immutable.
-    Plan 2 will wrap it in `MappingProxyType` for runtime enforcement.
-    """
+    """`agents` is a plain dict for V0; callers must treat it as immutable."""
     name: str
     description: str
     phases: tuple[Phase, ...]
+    vars: Vars
     defaults: WorkflowDefaults
-    agents: dict[str, AgentDef] = field(hash=False)  # name → def
+    agents: dict[str, AgentDef] = field(hash=False)
     workflow_dir: Path
     source: SourceLoc
 
-    def phase_index(self, name: str) -> int | None:
-        for i, p in enumerate(self.phases):
-            if p.name == name:
+    def flat_steps(self) -> tuple[Step, ...]:
+        return tuple(s for p in self.phases for s in p.steps)
+
+    def step_index(self, name: str) -> int | None:
+        for i, s in enumerate(self.flat_steps()):
+            if s.name == name:
                 return i
         return None
 
-    def next_phase(self, name: str) -> str | None:
-        idx = self.phase_index(name)
-        if idx is None or idx + 1 >= len(self.phases):
-            return None
-        return self.phases[idx + 1].name
+    def phase_of(self, step_name: str) -> str | None:
+        for p in self.phases:
+            for s in p.steps:
+                if s.name == step_name:
+                    return p.name
+        return None
+
+    def resolve_goto(self, target: str) -> int:
+        """Flat index of a goto target. A phase target resolves to its first
+        step's flat index; an EMPTY phase target resolves to len(flat_steps())
+        -- an out-of-range index the executor reads as 'terminate' (an empty
+        phase is always trailing, guaranteed by validation). Raises KeyError on
+        an unknown target (validation forbids that statically)."""
+        flat = self.flat_steps()
+        for i, s in enumerate(flat):
+            if s.name == target:
+                return i
+        for p in self.phases:
+            if p.name == target:
+                if not p.steps:
+                    return len(flat)
+                first_name = p.steps[0].name
+                for i, s in enumerate(flat):
+                    if s.name == first_name:
+                        return i
+        raise KeyError(target)
