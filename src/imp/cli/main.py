@@ -21,6 +21,9 @@ from typing import Any
 import anyio
 
 from imp.cli.init import run_init
+from imp.cli.live_driver import LiveDriver
+from imp.cli.live_status import LiveStatus
+from imp.cli.palette import should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit
 from imp.engine.change import Change
@@ -76,28 +79,40 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             try:
                 print(f"Created Change {change.id}: {change.title!r}")
                 prompt = Prompt()
-                _emit_line, _print_text = _stream_sinks()
+                status = LiveStatus(sys.stdout)
+                driver = LiveDriver(stream=sys.stdout,
+                                    color=should_use_color(sys.stdout),
+                                    width=_term_width(), status=status)
                 coord = InterruptCoordinator()
                 rc = 0
+
+                async def _ask_line() -> str:
+                    with status.suspend():
+                        return await prompt.ask_async("> ")
+
                 async with anyio.create_task_group() as tg:
                     tg.start_soon(coord.run_signal_receiver)
+                    tg.start_soon(status.tick)
                     try:
                         result = await run_change(
                             change,
-                            on_event=_emit_line,
-                            human_input_fn=lambda: prompt.ask_async("> "),
-                            human_output_fn=_print_text,
-                            user_chat_input_fn=lambda _q: prompt.ask_async("> "),
+                            on_event=driver.on_event,
+                            human_input_fn=_ask_line,
+                            human_output_fn=driver.print_chrome,
+                            user_chat_input_fn=lambda _q: _ask_line(),
                             coordinator=coord,
                         )
                     except (LoadError, LoadErrors) as e:
+                        driver.finish()
                         print(f"imp: {e}", file=sys.stderr)
                         rc = 2
                     except EOFError:
+                        driver.finish()
                         pause_and_exit(change, reason="ctrl-d")
                         print(f"\nChange {change.id}: paused (ctrl-d)")
                         rc = 130
                     else:
+                        driver.finish()
                         if coord.should_pause:
                             pause_and_exit(change, reason="ctrl-c")
                             print(f"\nChange {change.id}: paused (ctrl-c)")
@@ -106,6 +121,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                             print(f"Change {change.id}: {result.value}")
                             rc = 0 if result is RunResult.COMPLETED else 1
                     finally:
+                        status.reset()
                         tg.cancel_scope.cancel()
                 return rc
             finally:

@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
+from tests.conftest import write_agent_md
 
 # ── Task-17: resume uses _stream_sinks, not ChatRenderer ─────────────────────
 
@@ -246,3 +247,55 @@ def test_cmd_log_no_changes_yet_returns_rc_2(
     assert rc == 2
     err = capsys.readouterr().err
     assert "no Changes" in err
+
+
+def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
+    """imp new routes events through LiveDriver: a stubbed run_change that emits
+    a phase renders the phase name via the folded renderer (no raw JSON)."""
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.executor import RunResult
+
+    project = tmp_path
+    (project / ".imp").mkdir()
+    # Change.create snapshots+validates a default workflow before run_change
+    # runs, so seed a minimal valid one.
+    src = project / ".imp" / "workflows" / "default"
+    (src / "agents").mkdir(parents=True)
+    write_agent_md(
+        src / "agents" / "stub.md",
+        frontmatter=(
+            "name: stub\ntools: [complete_step]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    (src / "workflow.yaml").write_text(
+        "name: t\ndescription: \"\"\nphases: [p]\n"
+        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
+    )
+    (project / ".imp" / "config.yaml").write_text(
+        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
+    )
+
+    async def fake_run_change(change, **kwargs):
+        on_event = kwargs["on_event"]
+        on_event({"id": "1", "agent_id": None, "type": "change_created",
+                  "payload": {"change_id": change.id, "title": change.title}})
+        on_event({"id": "2", "agent_id": None, "type": "phase_started",
+                  "payload": {"phase": "design"}})
+        return RunResult.COMPLETED
+
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(m, "run_change", fake_run_change)
+
+    buf = io.StringIO()
+    args = argparse.Namespace(title="demo")
+    with redirect_stdout(buf):
+        rc = anyio.run(m._async_cmd_new, args)
+    out = buf.getvalue()
+    assert rc == 0
+    assert "#" in out and "design" in out
+    assert "{" not in out          # narrative, not raw json
