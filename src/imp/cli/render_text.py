@@ -1,5 +1,5 @@
 # src/imp/cli/render_text.py
-"""Plain-text narrative view (--no-tui / non-TTY). Walks a NarrativeTree and
+"""Plain-text narrative view (imp log / non-TTY). Walks a NarrativeTree and
 yields wrapped ANSI lines. No rich — plain wrapped text only (design §3, §6).
 
 Default: folds render as one-line summaries; agent/user prose in full.

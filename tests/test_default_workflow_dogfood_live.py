@@ -243,14 +243,11 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     # the user's local subscription (keyring). No env injection.
 
     master, slave = pty.openpty()
-    # --no-tui is REQUIRED: this driver answers gates with line input ("1\n")
-    # and reads progress from events.jsonl. Without it, `imp new` sees a TTY
-    # (the PTY slave) and launches the full-screen TUI, whose arrow-key gate
-    # selector never consumes "1\n" — the review "Merge?" gate would hang,
-    # repainting forever, until the deadline. The PTY itself is still needed so
-    # the text path's prompt_toolkit prompt has a TTY. Mirrors test_human_gate_pty.
+    # imp answers gates with line input ("1\n") — the only mode now that the
+    # TUI is gone. The PTY itself is still needed so the text path's
+    # prompt_toolkit prompt has a TTY. Mirrors test_human_gate_pty.
     proc = subprocess.Popen(
-        [sys.executable, "-m", "imp", "new", "--no-tui", title],
+        [sys.executable, "-m", "imp", "new", title],
         cwd=tmp_path,
         stdin=slave,
         stdout=slave,

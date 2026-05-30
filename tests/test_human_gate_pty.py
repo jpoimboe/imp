@@ -70,7 +70,7 @@ def test_human_gate_via_real_pty(tmp_path: Path) -> None:
     master, slave = pty.openpty()
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "imp", "new", "--no-tui", "pty-test"],
+            [sys.executable, "-m", "imp", "new", "pty-test"],
             cwd=tmp_path,
             stdin=slave,
             stdout=slave,
