@@ -29,18 +29,22 @@ def test_should_use_color_requires_tty_and_no_NO_COLOR(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize("action,expected", [
-    ("continue", "green"), ("retry", "yellow"), ("pause", "cyan"),
-    ({"kind": "goto", "target": "impl"}, "cyan"),
-    ({"kind": "unknown"}, None), ("mystery", None),
+    ({"verb": "continue"}, "green"), ({"verb": "pause"}, "cyan"),
+    ({"verb": "goto", "target": "impl"}, "cyan"),
+    ({"verb": "unknown"}, None),
+    # bare strings still tolerated (legacy/fallback path)
+    ("continue", "green"), ("retry", "yellow"), ("mystery", None),
 ])
 def test_accent_color_for_action(action, expected) -> None:
     assert pal.accent_color(action) == expected
 
 
 def test_action_display_text() -> None:
-    assert pal.action_text("continue") == "continue"
-    assert pal.action_text({"kind": "goto", "target": "impl"}) == "goto(impl)"
-    assert pal.action_text({"kind": "pause"}) == "pause"
+    assert pal.action_text({"verb": "continue"}) == "continue"
+    assert pal.action_text({"verb": "goto", "target": "impl"}) == "goto(impl)"
+    assert pal.action_text({"verb": "pause"}) == "pause"
+    assert pal.action_text({"verb": "goto"}) == "goto"   # no target → bare verb
+    assert pal.action_text("continue") == "continue"     # bare string fallback
 
 
 def test_fold_glyphs_default_unicode() -> None:

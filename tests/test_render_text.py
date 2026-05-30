@@ -25,10 +25,10 @@ def _ev(eid, etype, agent_id=None, **payload):
 def test_header_phase_step_outcome_render() -> None:
     out = "\n".join(_lines([
         _ev("1", "change_created", change_id=7, title="add auth"),
-        _ev("2", "phase_started", phase="design"),
-        _ev("3", "step_started", step="spec", model="m", provider="anthropic"),
-        _ev("4", "step_completed", step="spec", action="continue"),
-        _ev("5", "phase_completed", phase="design"),
+        _ev("3", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("4", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
     ]))
     assert "#7" in out and "add auth" in out
     assert "design" in out
@@ -39,8 +39,8 @@ def test_header_phase_step_outcome_render() -> None:
 def test_agent_text_rendered_in_full_not_truncated() -> None:
     long = "This is a long agent message. " * 10
     out = "\n".join(_lines([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
             stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": long}]}),
@@ -52,8 +52,8 @@ def test_agent_text_rendered_in_full_not_truncated() -> None:
 
 def test_collapsed_folds_show_one_line_summaries() -> None:
     out = "\n".join(_lines([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "thinking", agent_id="step:p/s", content="x" * 120),
         _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
         _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="ok", error=False),
@@ -71,8 +71,8 @@ def test_collapsed_folds_show_one_line_summaries() -> None:
 
 def test_collapsed_subagent_and_step_context_summaries() -> None:
     out = "\n".join(_lines([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
             model="claude", system_prompt="S", tools_schema=[{"name": "a"}, {"name": "b"}],
             params={}, max_tool_calls=50),
@@ -87,21 +87,23 @@ def test_collapsed_subagent_and_step_context_summaries() -> None:
     assert "▸ task → reviewer · 1 events" in out
 
 
-def test_gate_and_error_lines() -> None:
+def test_human_gate_and_error_lines() -> None:
     out = "\n".join(_lines([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "gate_evaluated", kind="script", context={"exit": 0},
-            action={"kind": "continue"}),
-        _ev("3", "error", category="auth", message="bad key"),
+        _ev("1", "step_started", step="merge", kind="human", phase="p"),
+        _ev("2", "human_prompt_pending", step="merge", phase="p",
+            ask="Approve?", options=[{"label": "yes"}]),
+        _ev("3", "step_completed", step="merge", kind="human",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("4", "error", category="auth", message="bad key"),
     ]))
-    assert "script gate" in out and "continue" in out
+    assert "human gate" in out and "continue" in out
     assert "bad key" in out
 
 
 def test_full_mode_expands_tools_thinking_and_subagent() -> None:
     out = "\n".join(_lines([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "thinking", agent_id="step:p/s", content="deep thoughts here"),
         _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
             input={"command": "ls -la"}),
@@ -124,8 +126,8 @@ def test_full_mode_expands_tools_thinking_and_subagent() -> None:
 
 def test_full_mode_expands_step_context_config_dump() -> None:
     out = "\n".join(_lines([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic", model="claude",
             system_prompt="SYSTEM PROMPT TEXT", tools_schema=[{"name": "bash"}],
             params={"max_tokens": 8192}, max_tool_calls=50),
@@ -137,8 +139,8 @@ def test_full_mode_expands_step_context_config_dump() -> None:
 def test_step_context_collapsed_even_in_default_mode() -> None:
     # design §5.1: step_context is folded by default in BOTH views.
     out = "\n".join(_lines([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic", model="claude",
             system_prompt="SYSTEM PROMPT TEXT", tools_schema=[], params={}, max_tool_calls=50),
     ], full=False))
@@ -172,11 +174,12 @@ def test_snapshot_full(monkeypatch) -> None:
 
 def test_header_line_matches_render_for_phase_and_step() -> None:
     phase = nv.PhaseNode(name="design")
-    step = nv.StepNode(name="spec", interactive=True)
-    gate = nv.StepNode(name="approve", kind="agent_gate")
+    step = nv.StepNode(name="spec", kind="agent", interactive=True)
+    human = nv.StepNode(name="approve", kind="human")
     assert rt.header_line(phase, depth=0, color=False) == "design"
     assert rt.header_line(step, depth=1, color=False) == "  spec (interactive)"
-    assert rt.header_line(gate, depth=2, color=False) == "    agent_gate: approve"
+    # Every kind renders as the bare step name (no special-case label).
+    assert rt.header_line(human, depth=2, color=False) == "    approve"
 
 
 def test_agent_text_is_bold_when_color_enabled() -> None:
@@ -204,7 +207,7 @@ def test_nonempty_thinking_keeps_summary() -> None:
 def test_render_gate_recap_false_is_header_only() -> None:
     gate = nv.GateNode(kind="human", prompt="Approve?",
                        options=[{"label": "yes"}, {"label": "no"}],
-                       action={"kind": "continue"})
+                       action={"verb": "continue"})
     header_only = list(rt._render_gate(gate, depth=1, color=False, width=80, recap=False))
     assert header_only == ["  human gate → continue"]
 
@@ -212,7 +215,7 @@ def test_render_gate_recap_false_is_header_only() -> None:
 def test_render_gate_recap_true_includes_prompt_and_options() -> None:
     gate = nv.GateNode(kind="human", prompt="Approve?",
                        options=[{"label": "yes"}, {"label": "no"}],
-                       action={"kind": "continue"})
+                       action={"verb": "continue"})
     full = list(rt._render_gate(gate, depth=1, color=False, width=80))
     assert full[0] == "  human gate → continue"
     assert any("Approve?" in ln for ln in full)
@@ -220,7 +223,7 @@ def test_render_gate_recap_true_includes_prompt_and_options() -> None:
 
 
 def test_render_gate_colors_resolved_action() -> None:
-    gate = nv.GateNode(kind="human", action={"kind": "continue"})
+    gate = nv.GateNode(kind="human", action={"verb": "continue"})
     out = list(rt._render_gate(gate, depth=0, color=True, width=80, recap=False))
     # continue -> green accent (pal._ACCENT["continue"])
     assert out[0].startswith("\x1b[32m")

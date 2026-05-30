@@ -1,6 +1,5 @@
 {"id": "e1", "agent_id": null, "type": "change_created", "payload": {"change_id": 1, "title": "add auth"}}
-{"id": "e2", "agent_id": null, "type": "phase_started", "payload": {"phase": "design"}}
-{"id": "e3", "agent_id": null, "type": "step_started", "payload": {"step": "spec", "model": "claude-sonnet-4-6", "provider": "anthropic", "tools": ["bash", "read_file"], "interactive": false}}
+{"id": "e3", "agent_id": null, "type": "step_started", "payload": {"step": "spec", "kind": "agent", "phase": "design", "model": "claude-sonnet-4-6", "provider": "anthropic", "tools": ["bash", "read_file"], "interactive": false}}
 {"id": "e4", "agent_id": "step:design/spec", "type": "step_context", "payload": {"provider": "anthropic", "model": "claude-sonnet-4-6", "system_prompt": "You are a spec writer. Draft a detailed specification.", "tools_schema": [{"name": "bash"}, {"name": "read_file"}], "params": {"max_tokens": 8192}, "max_tool_calls": 50}}
 {"id": "e5", "agent_id": "step:design/spec", "type": "llm_response", "payload": {"provider": "anthropic", "model": "claude-sonnet-4-6", "raw": {"content": [{"type": "text", "text": "Drafting the spec."}]}, "usage": {"input_tokens": 100, "output_tokens": 20}, "stop_reason": "end_turn"}}
 {"id": "e6", "agent_id": "step:design/spec", "type": "thinking", "payload": {"content": "I need to consider the auth requirements carefully before writing the spec. Let me think about OAuth2 vs API keys."}}
@@ -15,20 +14,12 @@
 {"id": "e14", "agent_id": "step:design/spec", "type": "tool_result", "payload": {"id": "b9", "content": "{\"status\": \"Success\", \"summary\": \"Spec approved\"}", "error": false}}
 {"id": "e15", "agent_id": "step:design/spec", "type": "user_message", "payload": {"content": [{"type": "text", "text": "Please add a section on token expiry."}]}}
 {"id": "e16", "agent_id": "step:design/spec", "type": "agent_output", "payload": {"status": "Success", "summary": "Spec drafted"}}
-{"id": "e17", "agent_id": null, "type": "step_completed", "payload": {"step": "spec", "action": "retry"}}
-{"id": "e18", "agent_id": null, "type": "step_started", "payload": {"step": "spec", "model": "claude-sonnet-4-6", "provider": "anthropic", "tools": ["bash"], "interactive": false}}
-{"id": "e19", "agent_id": null, "type": "step_completed", "payload": {"step": "spec", "action": "continue"}}
-{"id": "e20", "agent_id": null, "type": "human_gate_pending", "payload": {"prompt": "Approve the design spec?", "options": [{"label": "yes"}, {"label": "no"}]}}
-{"id": "e21", "agent_id": null, "type": "gate_evaluated", "payload": {"kind": "human", "action": {"kind": "continue"}}}
-{"id": "e22", "agent_id": null, "type": "step_started", "payload": {"kind": "agent_gate", "gate_stem": "spec-lint", "model": "claude-sonnet-4-6", "provider": "anthropic", "interactive": false}}
-{"id": "e23", "agent_id": "gate:design/spec-lint-1", "type": "step_context", "payload": {"provider": "anthropic", "model": "claude-sonnet-4-6", "system_prompt": "Lint the spec for issues.", "tools_schema": [], "params": {}, "max_tool_calls": 10}}
-{"id": "e24", "agent_id": "gate:design/spec-lint-1", "type": "llm_response", "payload": {"provider": "anthropic", "model": "claude-sonnet-4-6", "raw": {"content": [{"type": "text", "text": "No lint issues found."}]}, "usage": {"input_tokens": 30, "output_tokens": 5}, "stop_reason": "end_turn"}}
-{"id": "e25", "agent_id": null, "type": "gate_evaluated", "payload": {"kind": "agent", "gate": "spec-lint", "action": {"kind": "continue"}}}
-{"id": "e26", "agent_id": null, "type": "gate_evaluated", "payload": {"kind": "script", "context": {"exit": 0}, "action": {"kind": "continue"}}}
-{"id": "e27", "agent_id": null, "type": "phase_completed", "payload": {"phase": "design"}}
-{"id": "e28", "agent_id": null, "type": "phase_started", "payload": {"phase": "implement"}}
-{"id": "e29", "agent_id": null, "type": "step_started", "payload": {"step": "build", "model": "claude-sonnet-4-6", "provider": "anthropic", "tools": ["bash"], "interactive": false}}
-{"id": "e30", "agent_id": null, "type": "error", "payload": {"category": "provider", "message": "rate limited"}}
-{"id": "e31", "agent_id": null, "type": "runner_warning", "payload": {"message": "dropped block"}}
-{"id": "e32", "agent_id": null, "type": "workflow_paused", "payload": {"reason": "ctrl-c"}}
-{"id": "e33", "agent_id": null, "type": "step_exhausted", "payload": {"step": "build"}}
+{"id": "e17", "agent_id": null, "type": "step_completed", "payload": {"step": "spec", "kind": "agent", "action": {"verb": "continue"}, "var_mutations": {}}}
+{"id": "e18", "agent_id": null, "type": "step_started", "payload": {"step": "approve", "kind": "human", "phase": "design", "interactive": false}}
+{"id": "e19", "agent_id": null, "type": "human_prompt_pending", "payload": {"step": "approve", "phase": "design", "ask": "Approve the design spec?", "options": [{"label": "yes"}, {"label": "no"}]}}
+{"id": "e20", "agent_id": null, "type": "step_completed", "payload": {"step": "approve", "kind": "human", "action": {"verb": "continue"}, "var_mutations": {}}}
+{"id": "e21", "agent_id": null, "type": "step_started", "payload": {"step": "build", "kind": "agent", "phase": "implement", "model": "claude-sonnet-4-6", "provider": "anthropic", "tools": ["bash"], "interactive": false}}
+{"id": "e22", "agent_id": null, "type": "error", "payload": {"category": "provider", "message": "rate limited"}}
+{"id": "e23", "agent_id": null, "type": "runner_warning", "payload": {"message": "dropped block"}}
+{"id": "e24", "agent_id": null, "type": "phase_exhausted", "payload": {"phase": "implement"}}
+{"id": "e25", "agent_id": null, "type": "workflow_paused", "payload": {"reason": "ctrl-c"}}

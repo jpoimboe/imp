@@ -56,10 +56,11 @@ def test_malformed_events_become_error_nodes_and_never_abort() -> None:
          "payload": {"change_id": 1, "title": "ok"}},
         None,                                   # not a dict
         {"agent_id": None, "payload": {}},      # missing "type"
-        {"id": "e4", "type": "phase_started", "payload": {"phase": "design"}},
+        {"id": "e4", "type": "step_started",
+         "payload": {"step": "spec", "kind": "agent", "phase": "design"}},
     ])
     # The two malformed items become ErrorNode children at root scope; the
-    # build continues and the phase still opens.
+    # build continues and the (derived) phase still opens.
     errs = [c for c in tree.root.children if isinstance(c, nv.ErrorNode)]
     assert len(errs) == 2
     assert any(isinstance(c, nv.PhaseNode) for c in tree.root.children)
@@ -80,36 +81,61 @@ def _ev(eid, etype, agent_id=None, **payload):
     return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
 
 
-def test_phase_and_step_nest_and_close() -> None:
+def test_phase_derived_from_step_started_payload() -> None:
     tree = nv.build_tree([
         _ev("1", "change_created", change_id=1, title="x"),
-        _ev("2", "phase_started", phase="design"),
-        _ev("3", "step_started", step="spec", model="m", provider="anthropic",
-            interactive=False),
-        _ev("4", "step_completed", step="spec", action="continue"),
-        _ev("5", "phase_completed", phase="design"),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic", interactive=False),
+        _ev("3", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
     ])
+    # A PhaseNode named "design" is DERIVED from step_started.payload.phase, with
+    # the spec step nested under it.
     phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
     assert len(phases) == 1
     phase = phases[0]
     assert phase.name == "design"
-    assert phase.closed is True
     steps = [c for c in phase.children if isinstance(c, nv.StepNode)]
     assert len(steps) == 1
     step = steps[0]
     assert step.name == "spec"
-    assert step.kind is None
+    assert step.kind == "agent"
     assert step.closed is True
     assert isinstance(step.outcome, nv.OutcomeLine)
-    assert step.outcome.action == "continue"
+    assert step.outcome.action == {"verb": "continue"}
+
+
+def test_consecutive_steps_in_same_phase_share_one_phase_node() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("2", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("3", "step_started", step="lint", kind="script", phase="design"),
+        _ev("4", "step_completed", step="lint", kind="script",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert len(phases) == 1                       # same phase → one node
+    assert [s.name for s in phases[0].children
+            if isinstance(s, nv.StepNode)] == ["spec", "lint"]
+
+
+def test_phase_change_derives_a_new_phase_node() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("2", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("3", "step_started", step="build", kind="agent", phase="implement"),
+    ])
+    names = [c.name for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert names == ["design", "implement"]
 
 
 def test_open_step_is_a_valid_terminal_state() -> None:
     # User-pause path emits no step_completed (design §5.1). The step stays open.
     tree = nv.build_tree([
-        _ev("1", "phase_started", phase="design"),
-        _ev("2", "step_started", step="spec", model="m", provider="anthropic",
-            interactive=False),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic", interactive=False),
         _ev("3", "workflow_paused", reason="ctrl-c"),
     ])
     phase = tree.root.children[0]
@@ -119,57 +145,12 @@ def test_open_step_is_a_valid_terminal_state() -> None:
     assert tree.root.status == "paused"
 
 
-def test_agent_gate_inside_open_step_pushes_and_pops_container() -> None:
-    # Order from executor: step opens, runs; then a step-level AGENT gate emits
-    # its own step_started(kind=agent_gate) while the step is still open; the
-    # gate closes via gate_evaluated(kind=agent); then the step completes.
-    tree = nv.build_tree([
-        _ev("1", "phase_started", phase="design"),
-        _ev("2", "step_started", step="spec", model="m", provider="anthropic",
-            interactive=False),
-        _ev("3", "step_started", kind="agent_gate", gate_stem="spec-lint",
-            model="m", provider="anthropic", interactive=False),
-        _ev("4", "gate_evaluated", kind="agent", gate="spec-lint",
-            action={"kind": "continue"}),
-        _ev("5", "step_completed", step="spec", action="continue"),
-    ])
-    phase = tree.root.children[0]
-    step = phase.children[0]
-    assert step.name == "spec" and step.kind is None and step.closed is True
-    # The agent gate is a StepNode-shaped container nested inside the step.
-    gate_containers = [c for c in step.children if isinstance(c, nv.StepNode)]
-    assert len(gate_containers) == 1
-    gc = gate_containers[0]
-    assert gc.kind == "agent_gate"
-    assert gc.name == "spec-lint"
-    assert gc.closed is True
-    assert isinstance(gc.outcome, nv.OutcomeLine)
-    assert gc.outcome.action == {"kind": "continue"}
-
-
-def test_phase_level_agent_gate_attaches_to_phase() -> None:
-    tree = nv.build_tree([
-        _ev("1", "phase_started", phase="design"),
-        _ev("2", "step_started", step="spec", model="m", provider="anthropic",
-            interactive=False),
-        _ev("3", "step_completed", step="spec", action="continue"),
-        _ev("4", "step_started", kind="agent_gate", gate_stem="review",
-            model="m", provider="anthropic", interactive=False),
-        _ev("5", "gate_evaluated", kind="agent", gate="review",
-            action={"kind": "continue"}),
-    ])
-    phase = tree.root.children[0]
-    containers = [c for c in phase.children if isinstance(c, nv.StepNode)]
-    assert [c.name for c in containers] == ["spec", "review"]
-    assert containers[1].kind == "agent_gate"
-
-
 def test_user_message_text_extracted_inline_without_heavy_import() -> None:
     import sys
     sys.modules.pop("imp.cli.render_helpers", None)
     tree = nv.build_tree([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "user_message", agent_id="step:p/s", role="user",
             content=[{"type": "text", "text": "go ahead"},
                      {"type": "text", "text": " now"}]),
@@ -186,8 +167,8 @@ def test_user_message_text_extracted_inline_without_heavy_import() -> None:
 
 def test_thinking_and_step_context_become_collapsible_folds() -> None:
     tree = nv.build_tree([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
             model="m", system_prompt="SYS", tools_schema=[{"name": "a"}],
             params={"max_tokens": 8192}, max_tool_calls=50),
@@ -205,8 +186,8 @@ def test_thinking_and_step_context_become_collapsible_folds() -> None:
 
 def test_agent_text_node_holds_payload_and_parses_lazily() -> None:
     tree = nv.build_tree([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "llm_response", agent_id="step:p/s", provider="anthropic",
             model="m", stop_reason="end_turn",
             usage={"input_tokens": 1, "output_tokens": 1},
@@ -222,10 +203,11 @@ def test_agent_text_node_holds_payload_and_parses_lazily() -> None:
 
 
 def _step_events(*content):
-    return [_ev("p", "phase_started", phase="p"),
-            _ev("s", "step_started", step="s", model="m", provider="anthropic"),
+    return [_ev("s", "step_started", step="s", kind="agent", phase="p",
+                model="m", provider="anthropic"),
             *content,
-            _ev("c", "step_completed", step="s", action="continue")]
+            _ev("c", "step_completed", step="s", kind="agent",
+                action={"verb": "continue"}, var_mutations={})]
 
 
 def _only_step(tree):
@@ -356,64 +338,40 @@ def test_subagent_running_until_task_result_arrives() -> None:
     assert sub.outcome is None
 
 
-def test_human_gate_pending_then_evaluated_builds_one_gate_node() -> None:
+def test_human_prompt_annotates_open_step_and_resolves_on_completed() -> None:
+    # A human step emits step_started(kind=human) FIRST (opening the phase +
+    # StepNode), then human_prompt_pending ANNOTATES that open step with a single
+    # GateNode (no second step node). The resolved route arrives via the step's
+    # step_completed.action (a dict) — there is no gate_evaluated event.
     tree = nv.build_tree([
-        _ev("1", "phase_started", phase="review"),
-        _ev("2", "human_gate_pending", phase="review", prompt="Merge?",
-            options=[{"label": "Merge"}, {"label": "Back"}]),
-        _ev("3", "gate_evaluated", kind="human", action={"kind": "continue"}),
+        _ev("1", "step_started", step="merge", kind="human", phase="review"),
+        _ev("2", "human_prompt_pending", step="merge", phase="review",
+            ask="Merge?", options=[{"label": "Merge"}, {"label": "Back"}]),
+        _ev("3", "step_completed", step="merge", kind="human",
+            action={"verb": "goto", "target": "implement"}, var_mutations={}),
     ])
     phase = tree.root.children[0]
-    gates = [c for c in phase.children if isinstance(c, nv.GateNode)]
-    assert len(gates) == 1
+    steps = [c for c in phase.children if isinstance(c, nv.StepNode)]
+    assert len(steps) == 1                            # NO duplicate node
+    step = steps[0]
+    assert step.kind == "human" and step.closed is True
+    gates = [c for c in step.children if isinstance(c, nv.GateNode)]
+    assert len(gates) == 1                            # one annotating gate
     g = gates[0]
     assert g.kind == "human"
     assert g.prompt == "Merge?"
     assert [o["label"] for o in g.options] == ["Merge", "Back"]
-    assert g.action == {"kind": "continue"}
-
-
-def test_script_gate_evaluated_builds_leaf_gate_node() -> None:
-    tree = nv.build_tree([
-        _ev("1", "phase_started", phase="review"),
-        _ev("2", "gate_evaluated", kind="script", context={"exit": 0},
-            action={"kind": "continue"}),
-    ])
-    g = next(c for c in tree.root.children[0].children if isinstance(c, nv.GateNode))
-    assert g.kind == "script"
-    assert g.context == {"exit": 0}
-    assert g.action == {"kind": "continue"}
-
-
-def test_stub_gate_evaluated_builds_leaf_gate_node() -> None:
-    tree = nv.build_tree([
-        _ev("1", "phase_started", phase="review"),
-        _ev("2", "gate_evaluated", kind="stub", action={"kind": "goto",
-            "target": "implement"}),
-    ])
-    g = next(c for c in tree.root.children[0].children if isinstance(c, nv.GateNode))
-    assert g.kind == "stub"
-    assert g.action == {"kind": "goto", "target": "implement"}
-
-
-def test_step_level_human_gate_nests_inside_open_step() -> None:
-    # Step gates run inside _execute_step, before step_completed → step is open.
-    tree = nv.build_tree([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
-        _ev("3", "gate_evaluated", kind="stub", action={"kind": "continue"}),
-        _ev("4", "step_completed", step="s", action="continue"),
-    ])
-    step = tree.root.children[0].children[0]
-    assert any(isinstance(c, nv.GateNode) for c in step.children)
+    assert g.action == {"verb": "goto", "target": "implement"}   # resolved
+    assert step.outcome.action == {"verb": "goto", "target": "implement"}
 
 
 def test_error_event_becomes_error_node() -> None:
     tree = nv.build_tree([
-        _ev("1", "phase_started", phase="p"),
+        _ev("1", "step_started", step="s", kind="agent", phase="p"),
         _ev("2", "error", category="auth", message="Invalid API key"),
     ])
-    errs = [c for c in tree.root.children[0].children if isinstance(c, nv.ErrorNode)]
+    step = tree.root.children[0].children[0]
+    errs = [c for c in step.children if isinstance(c, nv.ErrorNode)]
     assert len(errs) == 1
     assert errs[0].category == "auth"
     assert errs[0].message == "Invalid API key"
@@ -422,8 +380,8 @@ def test_error_event_becomes_error_node() -> None:
 
 def test_runner_warning_is_styled_non_terminal_error_node() -> None:
     tree = nv.build_tree([
-        _ev("1", "phase_started", phase="p"),
-        _ev("2", "step_started", step="s", model="m", provider="anthropic"),
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
         _ev("3", "runner_warning", agent_id="step:p/s",
             message="dropped a malformed block"),
     ])
@@ -436,19 +394,20 @@ def test_unknown_and_legacy_types_fall_through_to_fallback_line() -> None:
     # Legacy types the engine no longer emits (design §5.1) get no structural
     # meaning — they fall through, never crash, never drop.
     tree = nv.build_tree([
-        _ev("1", "phase_started", phase="p"),
+        _ev("1", "step_started", step="s", kind="agent", phase="p"),
         _ev("2", "phase_exhausted", phase="p"),         # legacy
         _ev("3", "never_heard_of_this", foo="bar"),     # unknown
     ])
-    fbs = [c for c in tree.root.children[0].children if isinstance(c, nv.FallbackLine)]
+    step = tree.root.children[0].children[0]
+    fbs = [c for c in step.children if isinstance(c, nv.FallbackLine)]
     assert {f.event_type for f in fbs} == {"phase_exhausted", "never_heard_of_this"}
     assert fbs[1].payload == {"foo": "bar"}
 
 
 INTERLEAVED_LOG = [
     _ev("c", "change_created", change_id=1, title="parity"),
-    _ev("p", "phase_started", phase="impl"),
-    _ev("s", "step_started", step="build", model="m", provider="anthropic"),
+    _ev("s", "step_started", step="build", kind="agent", phase="impl",
+        model="m", provider="anthropic"),
     _ev("b1c", "tool_call", agent_id="step:impl/build", id="b1", name="read_file",
         input={"path": "x"}),
     _ev("b1r", "tool_result", agent_id="step:impl/build", id="b1", content="data", error=False),
@@ -463,8 +422,8 @@ INTERLEAVED_LOG = [
         content='{"status":"Success"}', error=False),
     _ev("g1c", "tool_call", agent_id="step:impl/build", id="b3", name="grep", input={}),
     _ev("g1r", "tool_result", agent_id="step:impl/build", id="b3", content="hit", error=False),
-    _ev("done", "step_completed", step="build", action="continue"),
-    _ev("pc", "phase_completed", phase="impl"),
+    _ev("done", "step_completed", step="build", kind="agent",
+        action={"verb": "continue"}, var_mutations={}),
 ]
 
 
@@ -484,7 +443,7 @@ def test_incremental_equals_batch_on_interleaved_log() -> None:
 def test_parity_holds_with_open_step_when_paused() -> None:
     # A live-then-paused log has an open StepNode; a batch replay of the same
     # log shows it open too. Both are correct (design §5.1 / §11).
-    log = [*INTERLEAVED_LOG[:-2], _ev("wp", "workflow_paused", reason="ctrl-c")]
+    log = [*INTERLEAVED_LOG[:-1], _ev("wp", "workflow_paused", reason="ctrl-c")]
     batch = nv.build_tree(log)
     b = nv.NarrativeBuilder()
     for e in log:
@@ -495,10 +454,12 @@ def test_parity_holds_with_open_step_when_paused() -> None:
 def test_resume_reentry_reuses_phase_and_resets_step() -> None:
     seed = [
         _ev("c", "change_created", change_id=1, title="t"),
-        _ev("p", "phase_started", phase="design"),
-        _ev("s1", "step_started", step="spec", model="m", provider="anthropic"),
-        _ev("s1c", "step_completed", step="spec", action="continue"),
-        _ev("s2", "step_started", step="build", model="m", provider="anthropic"),
+        _ev("s1", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("s1c", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("s2", "step_started", step="build", kind="agent", phase="design",
+            model="m", provider="anthropic"),
         _ev("ll1", "llm_response", agent_id="step:design/build", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "partial attempt"}]}),
@@ -506,56 +467,58 @@ def test_resume_reentry_reuses_phase_and_resets_step() -> None:
         _ev("wr", "workflow_resumed"),
     ]
     live = [
-        _ev("p2", "phase_started", phase="design"),        # re-emitted on resume
-        _ev("s2b", "step_started", step="build", model="m", provider="anthropic"),
+        # re-emitted on resume — same phase + step → re-enters, does not duplicate
+        _ev("s2b", "step_started", step="build", kind="agent", phase="design",
+            model="m", provider="anthropic"),
         _ev("ll2", "llm_response", agent_id="step:design/build", provider="anthropic",
             model="m", stop_reason="end_turn", usage={},
             raw={"content": [{"type": "text", "text": "fresh complete"}]}),
-        _ev("s2c", "step_completed", step="build", action="continue"),
-        _ev("pc", "phase_completed", phase="design"),
+        _ev("s2c", "step_completed", step="build", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
     ]
     tree = nv.build_tree(seed + live)
     phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
     assert len(phases) == 1                              # design NOT duplicated
-    assert phases[0].closed is True
     steps = [c for c in phases[0].children if isinstance(c, nv.StepNode)]
     assert [s.name for s in steps] == ["spec", "build"]  # build NOT duplicated
     build = steps[1]
     texts = [c.text for c in build.children if isinstance(c, nv.AgentTextNode)]
     assert texts == ["fresh complete"]                   # partial replaced by re-run
     assert build.closed is True
-    assert build.outcome.action == "continue"
+    assert build.outcome.action == {"verb": "continue"}
 
 
 def test_goto_loop_keeps_separate_phase_iterations() -> None:
-    # No workflow_resumed marker → two design nodes (faithful loop iterations).
+    # No workflow_resumed marker → a goto that re-enters design after it has been
+    # left open keeps two faithful design iterations. The intervening "implement"
+    # step closes the first design phase scope, so the second design step_started
+    # derives a fresh PhaseNode.
     events = [
-        _ev("p1", "phase_started", phase="design"),
-        _ev("s1", "step_started", step="spec", model="m", provider="anthropic"),
-        _ev("s1c", "step_completed", step="spec", action="continue"),
-        _ev("g", "gate_evaluated", kind="stub",
-            action={"kind": "goto", "target": "design"}),   # loop back, phase left open
-        _ev("p2", "phase_started", phase="design"),         # second iteration
-        _ev("s2", "step_started", step="spec", model="m", provider="anthropic"),
-        _ev("s2c", "step_completed", step="spec", action="continue"),
-        _ev("pc", "phase_completed", phase="design"),
+        _ev("s1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("s1c", "step_completed", step="spec", kind="agent",
+            action={"verb": "goto", "target": "implement"}, var_mutations={}),
+        _ev("s2", "step_started", step="build", kind="agent", phase="implement"),
+        _ev("s2c", "step_completed", step="build", kind="agent",
+            action={"verb": "goto", "target": "design"}, var_mutations={}),
+        _ev("s3", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("s3c", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
     ]
     tree = nv.build_tree(events)
-    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
-    assert len(phases) == 2                              # both iterations preserved
+    names = [c.name for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert names == ["design", "implement", "design"]   # both design iterations
 
 
 def test_resume_into_a_new_phase_does_not_reuse() -> None:
-    # Interrupted phase completed and advanced; resume re-emits a DIFFERENT phase.
+    # Interrupted phase advanced; resume re-emits a step in a DIFFERENT phase.
     seed = [
-        _ev("p1", "phase_started", phase="design"),
-        _ev("s1", "step_started", step="spec", model="m", provider="anthropic"),
-        _ev("s1c", "step_completed", step="spec", action="continue"),
-        _ev("pc", "phase_completed", phase="design"),     # design CLOSED
+        _ev("s1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("s1c", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
         _ev("wp", "workflow_paused", reason="ctrl-c"),
         _ev("wr", "workflow_resumed"),
     ]
-    live = [_ev("p2", "phase_started", phase="implement")]
+    live = [_ev("s2", "step_started", step="build", kind="agent", phase="implement")]
     tree = nv.build_tree(seed + live)
     names = [c.name for c in tree.root.children if isinstance(c, nv.PhaseNode)]
     assert names == ["design", "implement"]              # implement is genuinely new
@@ -565,8 +528,8 @@ def test_current_activity_reports_open_burst() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "phase_started", phase="design"),
-        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="step:design/spec", id="b1",
            name="read_file", input={"path": "config.py"}),
     ]:
@@ -580,8 +543,8 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "phase_started", phase="design"),
-        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
     ]:
         b.add(e)
     assert b.current_burst is None
@@ -598,8 +561,8 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "phase_started", phase="design"),
-        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
         ev("4", "tool_call", agent_id="step:design/spec", id="t1",
            name="task", input={"subagent_name": "coder"}),
         ev("5", "tool_call", agent_id="sub:4", id="n1",

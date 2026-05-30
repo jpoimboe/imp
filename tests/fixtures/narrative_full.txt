@@ -21,23 +21,15 @@ design
         tools:
       The spec looks good. Auth flows are clearly defined.
     > Please add a section on token expiry.
-    → retry
-  spec
     → continue
-  human gate → continue
-    Approve the design spec?
-    - yes
-    - no
-  agent_gate: spec-lint
-    ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
-      system_prompt:
-        Lint the spec for issues.
-      tools:
-    No lint issues found.
+  approve
+    human gate → continue
+      Approve the design spec?
+      - yes
+      - no
     → continue
-  script gate → continue
 implement
   build
     error: [provider] rate limited
     warning: dropped block
-    step_exhausted  step=build
+    phase_exhausted  phase=implement

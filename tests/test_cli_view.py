@@ -40,16 +40,14 @@ def test_resume_renders_through_live_driver_without_replay(tmp_path, monkeypatch
     (change_dir / "artifacts").mkdir()
     (change_dir / "events.jsonl").write_text("")
     (change_dir / "change.json").write_text(json.dumps({"id": 1, "title": "resume-test"}))
-    state = State(change_id=1, status="paused", phase="design", step="spec",
-                  step_attempt=0, phase_attempt=0)
+    state = State(change_id=1, status="paused", step="spec", step_attempt=0)
     state.save(change_dir / "state")
 
     async def fake_run_change(change, **kwargs):
         on_event = kwargs["on_event"]
-        on_event({"id": "r1", "agent_id": None, "type": "phase_started",
-                  "payload": {"phase": "design"}})
         on_event({"id": "r2", "agent_id": None, "type": "step_started",
-                  "payload": {"step": "spec", "model": "m", "provider": "anthropic"}})
+                  "payload": {"step": "spec", "kind": "agent", "phase": "design",
+                              "model": "m", "provider": "anthropic"}})
         return RunResult.COMPLETED
 
     monkeypatch.chdir(tmp_path)
@@ -96,8 +94,9 @@ def test_cli_log_pipes_through_narrative(
         + json.dumps({
             "id": "e2", "agent_id": None,
             "timestamp": "2026-05-27T10:00:01+00:00",
-            "type": "phase_started",
-            "payload": {"phase": "onboard"},
+            "type": "step_started",
+            "payload": {"step": "s", "kind": "agent", "phase": "onboard",
+                        "model": "m", "provider": "anthropic"},
         }) + "\n",
     )
     monkeypatch.chdir(project)
@@ -109,7 +108,7 @@ def test_cli_log_pipes_through_narrative(
     # Narrative header: "#1  smoke"
     assert "#1" in out
     assert "smoke" in out
-    # Phase rendered by name
+    # Phase rendered by name (derived from step_started.payload.phase)
     assert "onboard" in out
     # No raw JSON braces in narrative rendering
     assert "{" not in out
@@ -134,8 +133,9 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
         + json.dumps({
             "id": "e2", "agent_id": None,
             "timestamp": "2026-05-27T10:00:02+00:00",
-            "type": "phase_started",
-            "payload": {"phase": "onboard"},
+            "type": "step_started",
+            "payload": {"step": "s", "kind": "agent", "phase": "onboard",
+                        "model": "m", "provider": "anthropic"},
         }) + "\n",
     )
     monkeypatch.chdir(tmp_path)
@@ -173,8 +173,9 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
         + json.dumps({
             "id": "e2", "agent_id": None,
             "timestamp": "2026-05-27T10:00:01+00:00",
-            "type": "phase_started",
-            "payload": {"phase": "spec"},
+            "type": "step_started",
+            "payload": {"step": "s", "kind": "agent", "phase": "spec",
+                        "model": "m", "provider": "anthropic"},
         }) + "\n",
     )
 
@@ -260,8 +261,8 @@ def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
         ),
     )
     (src / "workflow.yaml").write_text(
-        "name: t\ndescription: \"\"\nphases: [p]\n"
-        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
+        "name: t\ndescription: \"\"\n"
+        "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
     (project / ".imp" / "config.yaml").write_text(
         "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
@@ -271,8 +272,9 @@ def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
         on_event = kwargs["on_event"]
         on_event({"id": "1", "agent_id": None, "type": "change_created",
                   "payload": {"change_id": change.id, "title": change.title}})
-        on_event({"id": "2", "agent_id": None, "type": "phase_started",
-                  "payload": {"phase": "design"}})
+        on_event({"id": "2", "agent_id": None, "type": "step_started",
+                  "payload": {"step": "s", "kind": "agent", "phase": "design",
+                              "model": "x", "provider": "anthropic"}})
         return RunResult.COMPLETED
 
     monkeypatch.chdir(project)

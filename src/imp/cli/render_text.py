@@ -52,7 +52,7 @@ def header_line(node: Any, *, depth: int, color: bool) -> str:
     color stay identical in both paths."""
     if isinstance(node, nv.PhaseNode):
         return _line(node.name, depth, color, *pal.NODE_COLORS["phase"])
-    label = f"agent_gate: {node.name}" if node.kind == "agent_gate" else node.name
+    label = node.name
     if node.interactive:
         label += " (interactive)"
     return _line(label, depth, color, *pal.NODE_COLORS["step"])

@@ -60,8 +60,8 @@ class PhaseNode:
 
 @dataclass
 class StepNode:
-    name: str                          # step name, or gate stem for agent gates
-    kind: str | None = None            # None=normal step; "agent_gate"=gate container
+    name: str                          # step name
+    kind: str | None = None            # agent | script | human | branch
     interactive: bool = False
     model: str | None = None
     provider: str | None = None
@@ -173,7 +173,7 @@ class StepContextNode:
 
 @dataclass
 class OutcomeLine:
-    action: Any                        # str (step_completed) | dict (gate_evaluated)
+    action: Any                        # dict {verb, target?} from step_completed
     collapsible = False
 
 
@@ -208,10 +208,9 @@ class NarrativeBuilder:
         self._root = WorkflowNode()
         self._tokens = TokenTotals()
         self._current_phase: PhaseNode | None = None
-        # Stack of open StepNode containers. A normal step pushes one; an agent
-        # gate that runs *inside* a still-open step pushes a second (design
-        # §5.3 — nested agent-gate container). step_completed / gate_evaluated
-        # (kind=agent) pop.
+        # Stack of open StepNode containers. step_started pushes one;
+        # step_completed pops it. Every kind (agent/script/human/branch) is a
+        # normal step — there is no nested gate container.
         self._step_stack: list[StepNode] = []
         self._current_burst: ToolBurstFold | None = None
         # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
@@ -303,11 +302,8 @@ class NarrativeBuilder:
         self._current_burst = None
 
     def _pop_step(self, name: str | None) -> StepNode | None:
-        """Pop the top open step. The top is always the right target: a normal step
-        is alone on the stack, and an agent-gate container is pushed *above* its
-        enclosing step, so its closing gate_evaluated pops the gate, not the step.
-        `name` is accepted for symmetry with the event payload but intentionally
-        unused (closing is best-effort — design §5.1)."""
+        """Pop the top open step. `name` is accepted for symmetry with the event
+        payload but intentionally unused (closing is best-effort — design §5.1)."""
         if not self._step_stack:
             return None
         return self._step_stack.pop()
@@ -341,70 +337,64 @@ def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 
-def _h_phase_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    self._flush_burst()
-    name = p.get("phase", "?")
-    # Resume re-entry: reuse the still-open current phase rather than appending a
-    # twin. Keyed on self._resuming (the workflow_resumed boundary) — NOT on
-    # name-match alone, so goto loops (no marker) still create new nodes. Keep
-    # _resuming True so the re-emitted step_started below can also re-enter.
-    if (self._resuming and self._current_phase is not None
-            and not self._current_phase.closed
+def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
+    """Derive the phase grouping from step_started.payload.phase. When the phase
+    name changes from the current open one, lazily create a PhaseNode, append it
+    to the workflow root, and make it the current scope. There are no
+    phase_started/phase_completed events — phase is purely DERIVED here."""
+    if (self._current_phase is not None and not self._current_phase.closed
             and self._current_phase.name == name):
-        self._step_stack.clear()
         return
-    self._resuming = False
     phase = PhaseNode(name=name)
     self._root.children.append(phase)
     self._current_phase = phase
     self._step_stack.clear()
 
 
-def _h_phase_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    self._flush_burst()
-    self._step_stack.clear()
-    if self._current_phase is not None:
-        self._current_phase.closed = True
-
-
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
-    is_gate = p.get("kind") == "agent_gate"
-    name = p.get("gate_stem", "?") if is_gate else p.get("step", "?")
-    # The first step_started after a resume re-enters the interrupted step. The
-    # executor re-runs it from scratch, so reuse the open StepNode and RESET its
-    # content (the fresh re-run supersedes the interrupted partial). Consume the
-    # re-entry window regardless of whether a match is found.
+    name = p.get("step", "?")
+    kind = p.get("kind")
+    phase = p.get("phase", "?")
+    # Resume re-entry: the first step_started after a resume re-enters the
+    # interrupted step in the still-open phase. The executor re-runs it from
+    # scratch, so reuse the open StepNode and RESET its content (the fresh re-run
+    # supersedes the interrupted partial). Consume the re-entry window regardless
+    # of whether a match is found.
     resuming, self._resuming = self._resuming, False
-    if resuming and not is_gate and self._current_phase is not None:
+    if (resuming and self._current_phase is not None
+            and not self._current_phase.closed
+            and self._current_phase.name == phase):
         existing = next(
             (c for c in self._current_phase.children
-             if isinstance(c, StepNode) and c.kind is None
-             and c.name == name and not c.closed), None)
+             if isinstance(c, StepNode) and c.name == name and not c.closed), None)
         if existing is not None:
             existing.children.clear()
             existing.outcome = None
             existing.closed = False
+            existing.kind = kind
             existing.model = p.get("model")
             existing.provider = p.get("provider")
             existing.interactive = bool(p.get("interactive", False))
             self._step_stack = [existing]
             return
-    if is_gate:
-        node = StepNode(name=name, kind="agent_gate", model=p.get("model"),
-                        provider=p.get("provider"),
-                        interactive=bool(p.get("interactive", False)))
-    else:
-        node = StepNode(name=name, kind=None, model=p.get("model"),
-                        provider=p.get("provider"),
-                        interactive=bool(p.get("interactive", False)))
+    _ensure_phase(self, phase)
+    node = StepNode(name=name, kind=kind, model=p.get("model"),
+                    provider=p.get("provider"),
+                    interactive=bool(p.get("interactive", False)))
     self._append(node)
     self._step_stack.append(node)
 
 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
-    outcome = OutcomeLine(action=p.get("action"))
+    action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
+    # A human step's resolved route arrives here (no separate gate_evaluated). If
+    # this step opened a human prompt, stamp its resolved action onto that gate.
+    if self._pending_human_gate is not None:
+        self._pending_human_gate.action = action
+        self._pending_human_gate = None
+    outcome = OutcomeLine(action=action)
     node = self._pop_step(p.get("step"))
     if node is not None:
         node.outcome = outcome
@@ -412,8 +402,6 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         node.closed = True
 
 
-NarrativeBuilder._HANDLERS["phase_started"] = _h_phase_started
-NarrativeBuilder._HANDLERS["phase_completed"] = _h_phase_completed
 NarrativeBuilder._HANDLERS["step_started"] = _h_step_started
 NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 
@@ -433,33 +421,19 @@ NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
 NarrativeBuilder._HANDLERS["workflow_resumed"] = _h_workflow_resumed
 
 
-def _h_human_gate_pending(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _h_human_prompt_pending(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any],
+) -> None:
+    # A human step already emitted step_started (kind=human), so _h_step_started
+    # opened its phase + StepNode. This event only ANNOTATES that open step with
+    # the prompt/options — it does NOT open a second node. The resolved route
+    # arrives via the step's step_completed.action (a dict), which both closes
+    # the StepNode and stamps the gate (see _h_step_completed).
     self._flush_burst()
-    gate = GateNode(kind="human", prompt=str(p.get("prompt", "")),
+    gate = GateNode(kind="human", prompt=str(p.get("ask", "")),
                     options=list(p.get("options") or []))
     self._append(gate)
     self._pending_human_gate = gate
-
-
-def _h_gate_evaluated(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    self._flush_burst()
-    kind = str(p.get("kind", "?"))
-    action = p.get("action")
-    if kind == "agent":
-        # Closes the open agent-gate container StepNode (opened by its
-        # step_started kind=agent_gate — Task 3).
-        outcome = OutcomeLine(action=action)
-        node = self._pop_step(None)
-        if node is not None:
-            node.outcome = outcome
-            node.children.append(outcome)
-            node.closed = True
-        return
-    if kind == "human" and self._pending_human_gate is not None:
-        self._pending_human_gate.action = action
-        self._pending_human_gate = None
-        return
-    self._append(GateNode(kind=kind, action=action, context=p.get("context")))
 
 
 def _h_awaiting_user_input(
@@ -472,8 +446,7 @@ def _h_awaiting_user_input(
     return None
 
 
-NarrativeBuilder._HANDLERS["human_gate_pending"] = _h_human_gate_pending
-NarrativeBuilder._HANDLERS["gate_evaluated"] = _h_gate_evaluated
+NarrativeBuilder._HANDLERS["human_prompt_pending"] = _h_human_prompt_pending
 NarrativeBuilder._HANDLERS["awaiting_user_input"] = _h_awaiting_user_input
 
 

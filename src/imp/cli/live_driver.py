@@ -16,7 +16,8 @@ _current_phase (a scope-closer event pops those BEFORE this post-add() walk runs
 Not-final children (the only things that block a cursor):
   - an open ToolBurstFold (still builder.current_burst),
   - a SubagentFold with running == True,
-  - an unresolved human GateNode (action is None) — deferred until gate_evaluated.
+  - an unresolved human GateNode (action is None) — deferred until the human
+    step's step_completed stamps the resolved route onto it.
 Everything else is final on append.
 """
 from __future__ import annotations
@@ -121,7 +122,7 @@ class LiveDriver:
         if isinstance(node, nv.SubagentFold):
             return not node.running
         if isinstance(node, nv.GateNode) and node.kind == "human":
-            return node.action is not None     # deferred until gate_evaluated
+            return node.action is not None     # deferred until step_completed
         return True
 
     def _emit_leaf(self, node: Any, depth: int) -> None:
