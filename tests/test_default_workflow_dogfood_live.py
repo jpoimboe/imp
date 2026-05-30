@@ -95,17 +95,19 @@ def _can_pty() -> bool:
         return False
 
 
-def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, int]]:
-    """Return [(phase_name, gate_index), ...] for every human gate declared
-    in workflow.yaml. The driver uses len(...) to know how many human gates
-    should fire end-to-end."""
+def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, str]]:
+    """Return [(phase_name, step_name), ...] for every human step (carrying
+    `ask:`/`options:`) declared in the unified-surface workflow.yaml. The driver
+    uses len(...) to know how many human prompts should fire end-to-end."""
     data = yaml.safe_load(wf_yaml.read_text())
-    out: list[tuple[str, int]] = []
+    out: list[tuple[str, str]] = []
     for phase in data.get("phases", []):
-        gates = (data.get(phase) or {}).get("gates") or []
-        for idx, g in enumerate(gates):
-            if g.get("type") == "human":
-                out.append((phase, idx))
+        if not isinstance(phase, dict):
+            continue
+        pname = str(phase.get("name", ""))
+        for step in phase.get("steps") or []:
+            if isinstance(step, dict) and ("ask" in step or "options" in step):
+                out.append((pname, str(step.get("name", ""))))
     return out
 
 
@@ -361,13 +363,13 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
             for ev in _tail_events():
                 etype = ev.get("type")
                 payload = ev.get("payload") or {}
-                if etype == "human_gate_pending":
+                if etype == "human_prompt_pending":
                     phase = payload.get("phase", "?")
                     if not any(p == phase for p, _ in expected_gates):
                         proc.kill()
                         proc.wait()
                         pytest.fail(
-                            f"engine emitted human_gate_pending for phase "
+                            f"engine emitted human_prompt_pending for phase "
                             f"{phase!r} not in yaml-declared human gates "
                             f"{expected_gates}; workflow.yaml/parse drift?"
                         )
