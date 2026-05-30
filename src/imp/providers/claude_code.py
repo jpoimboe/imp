@@ -71,7 +71,7 @@ _QUOTA_PATTERNS = (
 # Matches "API Error: <code>" surfaced by the claude CLI as assistant text when
 # the underlying Anthropic API returns a 4xx. Conservative: only 4xx (not 5xx)
 # are classified — 5xx is transient and falls back to existing retry/nudge.
-_API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})")
+_API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
 
 def _classify_agent_text(text: str) -> perr.ProviderError | None:

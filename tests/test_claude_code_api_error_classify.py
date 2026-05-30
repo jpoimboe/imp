@@ -43,3 +43,13 @@ def test_make_error_event_carries_api_kind() -> None:
     ev = perr.make_error_event(exc, kind=getattr(exc, "kind", ""))
     assert ev["payload"]["category"] == "api"
     assert ev["payload"]["kind"] == "http_400"
+
+
+def test_four_digit_code_not_misclassified() -> None:
+    # "API Error: 4001" must NOT be read as a 4xx (no grabbing the first 3 digits).
+    assert _classify_agent_text("API Error: 4001 weird") is None
+
+
+def test_3xx_code_not_classified() -> None:
+    # 3xx falls through both the 429 and 4xx branches -> None.
+    assert _classify_agent_text("API Error: 301 moved") is None
