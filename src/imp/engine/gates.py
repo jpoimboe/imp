@@ -1,48 +1,55 @@
-"""Gate evaluation: decide block evaluator, script gate runner, human gate runner."""
-
+"""Step-body helpers: run a script step, run a human step, evaluate a rules block."""
 from __future__ import annotations
 
 import inspect
 import os
 import subprocess
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from imp.engine.types import Action, Decide, HumanGate, HumanOption, ScriptGate
+from imp.engine.expr import EvalEnv, evaluate
+from imp.engine.types import Action, Continue, HumanOption, Rule, Step
 
 
-class DecideNoMatch(Exception):
-    """No decide rule matched and no else: true fallback present."""
+@dataclass(frozen=True, slots=True)
+class RuleMatch:
+    action: Action
+    rule: Rule | None                       # None for the continue-on-success default
+    var_mutations: dict[str, object]        # applied set: results (for the event payload)
 
 
-def evaluate_decide(decide: Decide, context: dict[str, Any]) -> Action:
-    """Return the first matching rule's action. Multi-field matches AND.
+def evaluate_rules(
+    rules: tuple[Rule, ...], *, vars: dict[str, Any], output: dict[str, Any] | None,
+) -> RuleMatch:
+    """First matching rule wins; apply its set: mutations and return them.
 
-    Raise DecideNoMatch if nothing matched and no else: true fallback exists.
+    No rules means continue-on-success (the agent default). The loader guarantees a
+    trailing else, so a non-empty block always matches.
     """
-    for rule in decide.rules:
-        if rule.is_else:
-            return rule.action
-        matched = True
-        for key, expected in rule.when:
-            if context.get(key) != expected:
-                matched = False
-                break
-        if matched:
-            return rule.action
-    raise DecideNoMatch(f"no rule matched and no else: true; context={context}")
+    if not rules:
+        return RuleMatch(action=Continue(), rule=None, var_mutations={})
+    env = EvalEnv(vars=vars, output=output)
+    for rule in rules:
+        if rule.condition is None or bool(evaluate(rule.condition, env)):
+            applied: dict[str, object] = {}
+            for var_name, expr in rule.mutations:
+                applied[var_name] = evaluate(expr, env)
+            return RuleMatch(action=rule.action, rule=rule, var_mutations=applied)
+    # unreachable given the trailing-else invariant
+    raise AssertionError("no rule matched and no else (validator should have caught this)")
 
 
-def run_script_gate(
-    gate: ScriptGate, *, cwd: Path, env_extra: dict[str, str] | None = None,
-) -> tuple[Action, dict[str, Any]]:
-    """Run the script, capture exit/stdout/stderr, evaluate decide.
+def apply_human_option(option: HumanOption, *, vars: dict[str, Any]) -> dict[str, object]:
+    env = EvalEnv(vars=vars, output=None)
+    return {name: evaluate(expr, env) for name, expr in option.mutations}
 
-    The `cwd` argument is the Change's workflow snapshot dir (so relative
-    `command:` paths like `./scripts/lint.sh` resolve against the snapshot);
-    the gate's own `cwd:` overrides if set. The project root is exposed to the
-    script via the IMP_PROJECT_ROOT env var (see engine_env), not via cwd.
+
+def run_script(
+    step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run a script step; return {exit, stdout, stderr} for rule evaluation.
 
     `shell=True` is intentional and not a security issue: workflow YAML is part
     of the trusted code base (snapshotted at imp new, gitted, peer-reviewed)
@@ -52,60 +59,41 @@ def run_script_gate(
     `env_extra` is merged on top of the current process environment so that
     engine-level variables (e.g. IMP_ARTIFACTS_DIR) are visible to scripts.
     """
+    # The loader only constructs script steps with a non-None command; this
+    # assert is purely for mypy (command: str | None in Step's type).
+    assert step.command is not None, "script step must have a command"
     env = os.environ.copy()
     if env_extra:
         env.update(env_extra)
     proc = subprocess.run(
-        gate.command,
-        shell=True,
-        cwd=gate.cwd or str(cwd),
-        capture_output=True,
-        text=True,
-        timeout=gate.timeout_seconds,
-        check=False,
-        env=env,
+        step.command, shell=True, cwd=step.cwd or str(cwd),
+        capture_output=True, text=True, timeout=step.timeout_seconds,
+        check=False, env=env,
     )
-    context = {
-        "exit": proc.returncode,
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-    }
-    return evaluate_decide(gate.decide, context), context
+    return {"exit": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
 
 
-async def run_human_gate(
-    gate: HumanGate,
-    *,
-    input_fn: Callable[[], str | Awaitable[str]],
+async def run_human(
+    step: Step, *, input_fn: Callable[[], str | Awaitable[str]],
     output_fn: Callable[[str], None],
-) -> tuple[Action, HumanOption]:
-    """Prompt the user with the gate's options. Returns the chosen action.
-
-    Matching rules:
-      - Numeric input -> 1-based option index
-      - Otherwise case-insensitive label prefix match
-      - Empty input or ambiguous prefix -> re-prompt
-
-    ``input_fn`` may return either a plain ``str`` or an ``Awaitable[str]``
-    (e.g. ``lambda: prompt.ask_async("> ")``). The coroutine is awaited
-    automatically so callers don't need to change their signature.
-    """
+) -> HumanOption:
+    """Prompt with the step's options; return the chosen HumanOption (carries
+    the action verb + set:)."""
     while True:
-        output_fn("─── HUMAN GATE ──────────────────────────────────────")
-        output_fn(gate.prompt)
-        for i, opt in enumerate(gate.options, start=1):
+        output_fn("--- HUMAN ---------------------------------------------------")
+        output_fn(step.ask or "")
+        for i, opt in enumerate(step.options, start=1):
             output_fn(f"  {i}) {opt.label}")
         output_fn("")
         result = input_fn()
         if inspect.isawaitable(result):
             result = await result
-        raw = result.strip()
-        match = _match_human_option(raw, gate.options, output_fn)
-        if match is not None:
-            return match.action, match
+        chosen = _match_option(result.strip(), step.options, output_fn)
+        if chosen is not None:
+            return chosen
 
 
-def _match_human_option(
+def _match_option(
     raw: str, options: tuple[HumanOption, ...], output_fn: Callable[[str], None]
 ) -> HumanOption | None:
     if not raw:
