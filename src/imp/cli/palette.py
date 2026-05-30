@@ -69,7 +69,6 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "warning": ("yellow",),
     "user": ("blue",),
     "agent": ("bold",),            # LLM prose emphasis (was colorless)
-    "ask_user": ("bold", "cyan"),  # ask_user question prompt block
 }
 
 _FOLD_UNICODE = {"collapsed": "▸", "expanded": "▾"}

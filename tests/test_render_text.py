@@ -184,6 +184,7 @@ def test_agent_text_is_bold_when_color_enabled() -> None:
     node._cache = _FakeRendered(["hello world"])
     out = list(rt._render(node, depth=0, full=False, color=True, width=80))
     assert out and out[0].startswith("\x1b[1m")   # bold prefix from NODE_COLORS["agent"]
+    assert "\x1b[36m" not in out[0]               # NOT the removed bold-cyan ask_user block
     assert "hello world" in out[0]
 
 
@@ -223,28 +224,6 @@ def test_render_gate_colors_resolved_action() -> None:
     out = list(rt._render_gate(gate, depth=0, color=True, width=80, recap=False))
     # continue -> green accent (pal._ACCENT["continue"])
     assert out[0].startswith("\x1b[32m")
-
-
-def test_ask_user_renders_question_block_and_answer() -> None:
-    node = nv.AskUserNode(question="Which port?", answer="8080")
-    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
-    text = "\n".join(out)
-    assert "Which port?" in text
-    assert "> 8080" in text
-
-
-def test_ask_user_renders_question_only_when_no_answer() -> None:
-    node = nv.AskUserNode(question="Which port?")
-    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
-    text = "\n".join(out)
-    assert "Which port?" in text
-    assert ">" not in text  # no answer echo yet
-
-
-def test_ask_user_question_is_emphasized_with_color() -> None:
-    node = nv.AskUserNode(question="Go?")
-    out = list(rt._render(node, depth=0, full=False, color=True, width=80))
-    assert out[0].startswith("\x1b[1m\x1b[36m")  # bold cyan = NODE_COLORS["ask_user"]
 
 
 def test_snapshot_covers_every_node_type() -> None:

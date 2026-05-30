@@ -162,29 +162,6 @@ def test_header_emitted_on_change_created() -> None:
 from imp.cli.render_text import render_tree as _rt_full  # noqa: E402
 
 
-def test_ask_user_emitted_before_input_callback_and_once() -> None:
-    """The question must be visible when the prompt blocks. We model the engine's
-    synchronous append-before-block: feeding the ask_user tool_call to on_event
-    must emit the question block immediately, before any answer arrives."""
-    drv, out = _driver()
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "phase_started", phase="design"),
-        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
-    ]:
-        drv.on_event(e)
-    before = "\n".join(_body(out))
-    assert "Which port?" not in before
-    drv.on_event(ev("4", "tool_call", agent_id="a", id="q1", name="ask_user",
-                    input={"question": "Which port?"}))
-    after = _body(out)
-    q_lines = [ln for ln in after if "Which port?" in ln]
-    assert len(q_lines) == 1                      # emitted exactly once, on append
-    # The answer arrives later and must NOT be re-rendered as a node line live.
-    drv.on_event(ev("5", "tool_result", agent_id="a", id="q1", content="8080"))
-    assert not any("> 8080" in ln for ln in _body(out))
-
-
 def test_human_gate_header_only_live_full_in_log() -> None:
     events = [
         ev("1", "change_created", change_id=1, title="x"),

@@ -103,13 +103,6 @@ class UserMessageNode:
 
 
 @dataclass
-class AskUserNode:
-    question: str
-    answer: str | None = None          # filled by the matching tool_result
-    collapsible = False
-
-
-@dataclass
 class ThinkingFold:
     content: str
     collapsible = True
@@ -226,9 +219,6 @@ class NarrativeBuilder:
         # open subagent folds keyed by tool_use block id (to close on the
         # parent's `task` tool_result, which carries the block id, not event id)
         self._open_sub_by_block: dict[str, SubagentFold] = {}
-        # open ask_user nodes keyed by tool_use block id, so the matching
-        # tool_result can attach the answer instead of orphaning into a burst.
-        self._ask_user_by_block: dict[str, AskUserNode] = {}
         self._pending_human_gate: GateNode | None = None
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
@@ -531,15 +521,6 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
     if p.get("name") == "task":
         _open_subagent_fold(self, event, p)     # defined in Task 6
         return
-    if p.get("name") == "ask_user":
-        # ask_user is the LLM talking to the user; render it as a first-class
-        # prompt block, never a dim burst member. The question is a non-tool
-        # boundary, so close any open burst first.
-        self._flush_burst()
-        node = AskUserNode(question=str((p.get("input") or {}).get("question", "")))
-        self._append(node)
-        self._ask_user_by_block[str(p.get("id", ""))] = node
-        return
     burst = _ensure_burst(self)
     burst.calls.append(ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
@@ -554,14 +535,6 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         fold.running = False
         fold.is_error = bool(p.get("error", False))
         fold.outcome = _summarize_result(p.get("content"))
-        return
-    # ask_user answer? There is NO user_message event for it — the answer is
-    # logged only as this tool_result. Attach it to the node and return BEFORE
-    # the orphan branch, which would otherwise render a spurious burst line
-    # (the ask_user call already cleared the open burst).
-    ask = self._ask_user_by_block.pop(rid, None)
-    if ask is not None:
-        ask.answer = _summarize_result(p.get("content"))
         return
     # Normal burst result: pair with the matching open call.
     burst = self._current_burst
@@ -717,6 +690,4 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "action": node.action}
     if isinstance(node, FallbackLine):
         return {"t": t, "event_type": node.event_type, "payload": node.payload}
-    if isinstance(node, AskUserNode):
-        return {"t": t, "question": node.question, "answer": node.answer}
     return {"t": t}
