@@ -13,10 +13,9 @@ import os
 import shlex
 import subprocess
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import anyio
 
@@ -229,26 +228,6 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
-
-
-def _stream_sinks() -> tuple[Callable[[dict[str, Any]], None], Callable[[str], None]]:
-    """Return (on_event, output) callbacks that stream the text view to stdout.
-    Shared by `imp new` and `imp resume`."""
-    from imp.cli.palette import should_use_color
-    from imp.cli.render_text import stream_event
-    color = should_use_color(sys.stdout)
-
-    def emit_line(event: dict[str, Any]) -> None:
-        block = stream_event(event, color=color, width=_term_width())
-        if block is not None:
-            print(block)
-            sys.stdout.flush()
-
-    def output(text: str) -> None:
-        print(text)
-        sys.stdout.flush()
-
-    return emit_line, output
 
 
 def _term_width() -> int:

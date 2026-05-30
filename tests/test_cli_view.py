@@ -13,7 +13,7 @@ import pytest
 from imp.cli.main import main
 from tests.conftest import write_agent_md
 
-# ── Task-17: resume uses _stream_sinks, not ChatRenderer ─────────────────────
+# ── resume renders through LiveDriver (no replay) ────────────────────────────
 
 def test_replay_current_step_removed() -> None:
     """_replay_current_step must be deleted after Task 17."""
