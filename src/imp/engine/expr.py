@@ -401,3 +401,86 @@ def require_type(expr: Expr, env: TypeEnv, expected: ExprType) -> None:
     t = infer_type(expr, env)
     if t != expected:
         raise ExprTypeError(f"expression result is {t}, expected {expected}")
+
+
+# -- runtime evaluation -------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class EvalEnv:
+    """Runtime values for one step's expression evaluation.
+
+    `output` is None inside a branch. Types are trusted: infer_type ran at load,
+    so evaluate does no type-checking -- only the runtime-only division-by-zero
+    guard can fire here. A bare name is looked up in `output` first, then `vars`;
+    a name in BOTH is already a load error (see infer_type), so this lookup order
+    only ever resolves the disjoint case -- it is not a precedence rule authors
+    can rely on.
+    """
+    vars: Mapping[str, object]
+    output: Mapping[str, object] | None
+
+
+def evaluate(expr: Expr, env: EvalEnv) -> object:
+    """Evaluate a (load-time type-checked) expression to an int / bool / str."""
+    match expr:
+        case IntLit(value=v):
+            return v
+        case StrLit(value=v):
+            return v
+        case BoolLit(value=v):
+            return v
+        case Name(name=nm):
+            if env.output is not None and nm in env.output:
+                return env.output[nm]
+            if nm in env.vars:
+                return env.vars[nm]
+            raise ExprEvalError(f"unknown identifier {nm!r}")
+        case OutputRef(field=f):
+            if env.output is None or f not in env.output:
+                raise ExprEvalError(f"unknown output field {f!r}")
+            return env.output[f]
+        case VarRef(name=nm):
+            if nm not in env.vars:
+                raise ExprEvalError(f"unknown var {nm!r}")
+            return env.vars[nm]
+        case Unary(op="-", operand=o):
+            return -evaluate(o, env)  # type: ignore[operator]
+        case Unary(op="not", operand=o):
+            return not evaluate(o, env)
+        case Binary(op="and", left=lhs, right=rhs):
+            # Short-circuit: a false left operand never evaluates the right, so a
+            # guarded division (`divisor != 0 and n / divisor > 1`) cannot throw.
+            return bool(evaluate(lhs, env)) and bool(evaluate(rhs, env))
+        case Binary(op="or", left=lhs, right=rhs):
+            return bool(evaluate(lhs, env)) or bool(evaluate(rhs, env))
+        case Binary(op=op, left=lhs, right=rhs):
+            return _binop(op, evaluate(lhs, env), evaluate(rhs, env))
+    raise ExprEvalError(f"cannot evaluate {expr!r}")
+
+
+def _binop(op: str, a: object, b: object) -> object:
+    if op == "+":
+        return a + b  # type: ignore[operator]
+    if op == "-":
+        return a - b  # type: ignore[operator]
+    if op == "*":
+        return a * b  # type: ignore[operator]
+    if op == "/":
+        if b == 0:
+            raise ExprEvalError("division by zero")
+        return a // b  # type: ignore[operator]  # floor division
+    if op == "==":
+        return a == b
+    if op == "!=":
+        return a != b
+    if op == "<":
+        return a < b  # type: ignore[operator]
+    if op == "<=":
+        return a <= b  # type: ignore[operator]
+    if op == ">":
+        return a > b  # type: ignore[operator]
+    if op == ">=":
+        return a >= b  # type: ignore[operator]
+    # `and`/`or` are short-circuited in evaluate() and never reach here.
+    raise ExprEvalError(f"unknown operator {op!r}")

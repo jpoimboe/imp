@@ -6,6 +6,7 @@ import pytest
 from imp.engine.expr import (
     Binary,
     BoolLit,
+    EvalEnv,
     ExprError,
     ExprEvalError,
     ExprSyntaxError,
@@ -18,6 +19,7 @@ from imp.engine.expr import (
     Unary,
     VarRef,
     _tokenize,
+    evaluate,
     infer_type,
     parse,
     require_bool,
@@ -226,3 +228,58 @@ def test_require_type_checks_set_target() -> None:
     require_type(parse("round + 1"), env, "int")        # ok
     with pytest.raises(ExprTypeError):
         require_type(parse("true"), env, "int")          # bool into int var
+
+
+def _eval(text: str, vars: dict | None = None, output: dict | None = None) -> object:
+    return evaluate(parse(text), EvalEnv(vars=vars or {}, output=output))
+
+
+def test_eval_arithmetic() -> None:
+    assert _eval("round + 1", vars={"round": 2}) == 3
+    assert _eval("2 * 3 + 1") == 7
+
+
+def test_eval_floor_division() -> None:
+    assert _eval("7 / 2") == 3
+    assert _eval("-7 / 2") == -4          # floor, not truncation
+
+
+def test_eval_division_by_zero_raises() -> None:
+    with pytest.raises(ExprEvalError):
+        _eval("1 / 0")
+
+
+def test_eval_comparison_and_boolean() -> None:
+    assert _eval("round > 0", vars={"round": 1}) is True
+    assert _eval("round > 0 and review_done",
+                 vars={"round": 1, "review_done": True}) is True
+    assert _eval("not review_done", vars={"review_done": False}) is True
+
+
+def test_eval_and_or_short_circuit() -> None:
+    # A false left operand of `and` must NOT evaluate the right -- so a guarded
+    # division by zero never throws. This is the whole point of a guard.
+    assert _eval("divisor != 0 and n / divisor > 1",
+                 vars={"divisor": 0, "n": 10}) is False
+    # A true left operand of `or` short-circuits the right the same way.
+    assert _eval("divisor == 0 or n / divisor > 1",
+                 vars={"divisor": 0, "n": 10}) is True
+
+
+def test_eval_equality_typed_literal() -> None:
+    assert _eval("verdict == 'rework'", output={"verdict": "rework"}) is True
+    assert _eval("verdict == 'rework'", output={"verdict": "approve"}) is False
+
+
+def test_eval_bare_name_prefers_output() -> None:
+    # name resolution mirrors infer_type: output then vars, output wins by lookup order
+    assert _eval("count + 1", output={"count": 4}) == 5
+
+
+def test_eval_output_ref_and_var_ref() -> None:
+    assert _eval("output.major_count > 0", output={"major_count": 2}) is True
+    assert _eval("var.round", vars={"round": 9}) == 9
+
+
+def test_eval_unary_minus() -> None:
+    assert _eval("-round", vars={"round": 5}) == -5
