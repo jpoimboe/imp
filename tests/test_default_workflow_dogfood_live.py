@@ -278,7 +278,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     buf = bytearray()
     gates_answered = 0
     asks_answered = 0
-    in_interactive_step = False
     events_seen_bytes = 0
     ask_questions: list[str] = []
     start_time = time.time()
@@ -305,21 +304,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                 if TRACE_PTY:
                     sys.stderr.buffer.write(chunk)
                     sys.stderr.buffer.flush()
-
-    def _last_agent_text(raw: Any) -> str | None:
-        """Best-effort question text for the debug log only (not asserted on).
-        Reads the anthropic/claude_code raw shape {content: [block-dicts], ...};
-        returns None for OpenAI's {choices: [...]} shape, which is harmless —
-        the answer is still written and asks_answered still increments."""
-        if not isinstance(raw, dict):
-            return None
-        parts = [
-            b.get("text", "")
-            for b in (raw.get("content") or [])
-            if isinstance(b, dict) and b.get("type") == "text"
-        ]
-        text = " ".join(p for p in parts if p).strip()
-        return text or None
 
     def _tail_events() -> list[dict[str, Any]]:
         nonlocal events_seen_bytes, events_first_seen_at
@@ -394,24 +378,14 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                         f"(phase={phase})",
                         file=sys.stderr, flush=True,
                     )
-                elif etype == "step_started":
-                    in_interactive_step = bool(payload.get("interactive", False))
-                elif (
-                    etype == "llm_response"
-                    and in_interactive_step
-                    and payload.get("stop_reason") in ("end_turn", "stop")
-                ):
+                elif etype == "awaiting_user_input":
                     # Interactive agent ended its turn with a question (no tool
-                    # call). Feed an answer into the PTY; the engine is now
-                    # blocking on user_chat_input_fn for the user's reply.
-                    #
-                    # stop_reason is provider-native (logged verbatim):
-                    #   anthropic  -> "end_turn"  (tool call: "tool_use")
-                    #   openai     -> "stop"      (tool call: "tool_calls")
-                    #   claude_code-> "end_turn"  (Anthropic-backed)
-                    # The set {"end_turn","stop"} is disjoint from every tool-call
-                    # value, so a complete_step turn never matches here.
-                    question = _last_agent_text(payload.get("raw"))
+                    # call). The engine emits this immediately before blocking on
+                    # user_chat_input_fn (executor.py _interactive), so writing
+                    # the answer now lands the bytes before prompt_async reads
+                    # them. This is provider-agnostic — unlike llm_response
+                    # stop_reason, which claude_code logs as None on every turn.
+                    question = payload.get("prompt") or ""
                     if question:
                         ask_questions.append(question)
                     os.write(
@@ -499,7 +473,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     )
     assert asks_answered >= 1, (
         "interactive spec phase should produce at least one end-of-turn "
-        "question (interactive llm_response with stop_reason=end_turn); saw 0"
+        "question (an awaiting_user_input event); saw 0"
     )
 
     # ── Dogfood-specific verification ──────────────────────────────────
