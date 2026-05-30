@@ -73,7 +73,7 @@ async def dispatch_task(
     )
 
     # Carryover important #1: render the subagent's Jinja template, same way
-    # executor._execute_step renders the parent's. The PromptContext reads the
+    # executor._route_agent renders the parent's. The PromptContext reads the
     # live events.jsonl for this Change so {{ events.<step>.<field> }} works.
     # Prompt rendering uses a SEPARATE read-only JsonlEventLog, NOT
     # ctx.event_log. ctx.event_log is the shared WRITE instance that fans

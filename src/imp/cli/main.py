@@ -170,8 +170,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 coord = InterruptCoordinator()
                 rc = 0
                 # Append the resume marker exactly once (for the persisted log /
-                # imp log). NO replay: the engine re-emits phase_started +
-                # step_started + the step body, which the driver renders fresh
+                # imp log). NO replay: the engine picks up from the current step
+                # cursor, re-emitting step_started + the step body fresh
                 # (design "Resume — no replay").
                 change.event_log().append(
                     agent_id=None, type="workflow_resumed", payload={})

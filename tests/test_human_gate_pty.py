@@ -38,21 +38,22 @@ pytestmark = pytest.mark.skipif(not _can_pty(), reason="pty not available")
 def _seed_zero_step_workflow(tmp_path: Path) -> None:
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
+    # New inline-surface format: human step uses ask:/options: directly.
+    # on_max_retries uses verb-style: {pause: true}.
     (wf / "workflow.yaml").write_text(textwrap.dedent("""\
         name: t
         description: t
-        phases: [only]
-        defaults: {max_retries: 1, on_max_retries: {kind: pause}}
-        only:
-          steps: []
-          gates:
-            - type: human
-              prompt: "pick one"
-              options:
-                - {label: yes, action: {kind: continue}}
-                - {label: no, action: {kind: pause}}
+        defaults: {max_retries: 1, max_loops: 6, on_max_retries: {pause: true}}
+        phases:
+          - name: only
+            steps:
+              - name: pick
+                ask: "pick one"
+                options:
+                  - {label: yes, continue: true}
+                  - {label: no, pause: true}
     """))
-    # No LLM calls happen (no steps), but the loader requires a default role.
+    # No LLM calls happen (no agent steps), but the loader requires a default role.
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n"
         "  default: {prefer: [{provider: anthropic, model: claude-3-5-haiku-20241022}]}\n"

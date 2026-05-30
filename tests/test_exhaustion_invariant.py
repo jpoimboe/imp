@@ -1,9 +1,13 @@
 # tests/test_exhaustion_invariant.py
-"""Locks design §5.1: when a step's Retry exceeds max_retries, the LAST event
-for that step is step_completed action="retry" — the swapped on_max_retries
-action is NEVER logged as a completion event. The renderer therefore cannot and
-does not style "exhausted" specially. Regressed twice in git history; this is
-the guard."""
+"""Locks the unified-step-model exhaustion behaviour (design §5.1):
+
+When a step exhausts max_retries, the executor emits exactly ONE
+step_completed event with action.verb == on_max_retries.verb (typically
+"pause"). There is NO separate "step_exhausted" or "phase_exhausted" event,
+and no per-retry step_completed events — retries recurse silently.
+The only outwardly-visible signal of exhaustion is the resulting
+workflow_paused event. Regressed twice in git history; this is the guard.
+"""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -17,8 +21,8 @@ from imp.engine.executor import RunResult, run_change
 
 class _NoOutputRunner:
     """Yields no agent_output event — the agent finishes without calling
-    complete_step. This is the retryable (non-fatal) path: executor.py:413
-    detects agent_output is None and emits step_completed action="retry"."""
+    complete_step. This is the retryable (non-fatal) path: executor.py
+    detects agent_output is None and increments step_attempt."""
 
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
         # Yield nothing; the async generator exits normally.
@@ -30,13 +34,10 @@ class _NoOutputRunner:
 
 
 @pytest.mark.anyio
-async def test_exhausted_step_emits_only_retry_completions(tmp_path: Path) -> None:
-    """Characterization lock: exhausted step emits step_completed action="retry"
-    for every attempt and never emits a distinct exhaustion-completion event.
-    workflow_paused is the only visible signal of exhaustion."""
-    # Build a minimal on-disk workflow using the same pattern as test_executor.py.
-    # The workflow has max_retries=1 and on_max_retries=Pause (via workflow.yaml
-    # defaults), so 2 retryable failures exhaust the step and trigger a pause.
+async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> None:
+    """Characterization lock: exhausted step emits exactly one step_completed
+    with action.verb == 'pause' (the on_max_retries action) and no spurious
+    exhaustion events. workflow_paused is the only visible side-effect."""
     wf_dir = tmp_path / ".imp" / "workflows" / "default"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / "worker.md").write_text(
@@ -44,11 +45,15 @@ async def test_exhausted_step_emits_only_retry_completions(tmp_path: Path) -> No
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
         "go {{ change.id }}\n"
     )
+    # New inline-surface format: phases is a list of {name, steps}.
+    # on_max_retries uses verb-style: {pause: true}.
     (wf_dir / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "only:\n  steps:\n"
-        "    - {name: build, file: agents/worker.md, model_role: default}\n"
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6, on_max_retries: {pause: true}}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: build, file: agents/worker.md, model_role: default}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
@@ -86,11 +91,20 @@ async def test_exhausted_step_emits_only_retry_completions(tmp_path: Path) -> No
     ]
     assert completions, "step must emit at least one step_completed"
 
-    # Every completion — including the last — is action="retry"; exhaustion is
-    # never a distinct completion event.
-    assert all(c["payload"]["action"] == "retry" for c in completions), (
-        f"expected all step_completed to have action='retry', got: "
+    # In the unified-step model, retries are silent (no step_completed per retry).
+    # Exhaustion emits exactly ONE step_completed with action.verb == on_max_retries verb.
+    # With on_max_retries={pause: true}, that is {"verb": "pause"}.
+    assert len(completions) == 1, (
+        f"expected exactly 1 step_completed (exhaustion), got {len(completions)}: "
         f"{[c['payload']['action'] for c in completions]}"
+    )
+    exhaustion_action = completions[0]["payload"]["action"]
+    assert isinstance(exhaustion_action, dict), (
+        f"action must be a dict, got {type(exhaustion_action)}: {exhaustion_action!r}"
+    )
+    assert exhaustion_action.get("verb") == "pause", (
+        f"exhaustion step_completed must have action.verb='pause', "
+        f"got: {exhaustion_action!r}"
     )
 
     types = [e.get("type") for e in events]

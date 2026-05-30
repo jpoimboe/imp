@@ -277,65 +277,61 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path) -> None:
     )
 
 
-# ── Test 3: Gate monotonic agent_id ──────────────────────────────────────────
+# ── Test 3: Backward goto emits step_started for each loop iteration ─────────
 
 @pytest.mark.anyio
-async def test_two_gates_g_succeeds_h_retries_distinct_gate_agent_ids(tmp_path: Path) -> None:
-    """Step S with gate G that continues, then gate H that retries once (step
-    re-runs). Assert the log contains gate agent_ids 'gate:a/reviewer-1'
-    AND 'gate:a/reviewer-2' (NOT reviewer-1 twice).
+async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -> None:
+    """A two-step workflow where step `check` gotos back to `work` once (loop),
+    then check continues. Assert that step_started is emitted for both loop
+    iterations of `work` and `check`, and that each step_started carries the
+    correct step/phase/kind payload.
 
-    NARROWED: We use a workflow where the gate retries once then continues,
-    driving run_change with the fake provider. The gate runs twice (retry→continue),
-    producing reviewer-1 and reviewer-2 agent_ids. This verifies the monotonic
-    allocator produces distinct IDs across gate re-runs.
-
-    The narrowing is necessary because the engine's phase-gate retry does NOT
-    use agent-gate agent_ids named 'G' and 'H' — rather it uses the gate's
-    file stem. We instead verify that a single gate that runs twice gets
-    distinct agent_ids (reviewer-1 then reviewer-2).
+    This replaces the old gate-monotonic-agent_id test: in the unified-step
+    model there are no gates, so the invariant being locked is that the
+    executor emits a fresh step_started event for every step execution
+    (including re-executions caused by backward goto loops).
     """
     from imp.engine.change import Change
     from imp.engine.executor import RunResult, run_change
     from imp.providers import resolve
 
-    # Build a workflow with writer step + one agent gate that retries once
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
-    (wf / "agents" / "writer.md").write_text(
-        "---\nname: writer\ntools: [complete_step]\n"
+    (wf / "agents" / "worker.md").write_text(
+        "---\nname: worker\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
     )
-    (wf / "agents" / "reviewer.md").write_text(
-        "---\nname: reviewer\ntools: [complete_step]\n"
+    (wf / "agents" / "checker.md").write_text(
+        "---\nname: checker\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "  verdict: {type: enum, values: [approve, rework]}\n---\nreview\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ncheck\n"
     )
+    # Two-step phase: work → check; check can goto work (loop) or continue.
+    # max_loops=6 allows at least one backward goto before tripping.
     (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [a]\n"
-        "defaults: {max_retries: 2, on_max_retries: {kind: pause}}\n"
-        "a:\n"
-        "  steps:\n"
-        "    - {name: w, file: agents/writer.md, model_role: default}\n"
-        "  gates:\n"
-        "    - type: agent\n"
-        "      file: agents/reviewer.md\n"
-        "      model_role: default\n"
-        "      decide:\n"
-        "        - {when: {verdict: approve}, action: {kind: continue}}\n"
-        "        - {when: {verdict: rework}, action: {kind: retry}}\n"
-        "        - {else: true, action: {kind: pause}}\n"
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6, on_max_retries: {pause: true}}\n"
+        "phases:\n"
+        "  - name: a\n"
+        "    steps:\n"
+        "      - {name: work, file: agents/worker.md, model_role: default}\n"
+        "      - name: check\n"
+        "        file: agents/checker.md\n"
+        "        model_role: default\n"
+        "        rules:\n"
+        "          - {if: {verdict: approve}, continue: true}\n"
+        "          - {if: {verdict: rework}, goto: work}\n"
+        "          - {else: true, pause: true}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
     change = Change.create(tmp_path, title="t")
 
-    # Sequence: writer succeeds, reviewer retries once, then writer succeeds
-    # again, reviewer approves.
+    # Sequence: work succeeds, check → rework (goto work), work again, check → approve
     call_num = [0]
 
-    class _FakeRunner:
+    class _LocalFakeRunner:
         def __init__(self, output: dict) -> None:
             self._output = output
 
@@ -354,14 +350,16 @@ async def test_two_gates_g_succeeds_h_retries_distinct_gate_agent_ids(tmp_path: 
         def create_runner(self, invocation: AgentInvocation):
             call_num[0] += 1
             n = call_num[0]
-            if n == 1:  # writer first run
-                return _FakeRunner({"status": "Success"})
-            elif n == 2:  # reviewer first run → rework (retry phase)
-                return _FakeRunner({"status": "Success", "verdict": "rework"})
-            elif n == 3:  # writer second run (phase retried)
-                return _FakeRunner({"status": "Success"})
-            else:  # reviewer second run → approve
-                return _FakeRunner({"status": "Success", "verdict": "approve"})
+            if n == 1:
+                return _LocalFakeRunner({"status": "Success"})           # work run 1
+            elif n == 2:
+                # check step → rework → goto work
+                return _LocalFakeRunner({"status": "Success", "verdict": "rework"})
+            elif n == 3:
+                return _LocalFakeRunner({"status": "Success"})           # work run 2
+            else:
+                # check step → approve → continue
+                return _LocalFakeRunner({"status": "Success", "verdict": "approve"})
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -372,47 +370,41 @@ async def test_two_gates_g_succeeds_h_retries_distinct_gate_agent_ids(tmp_path: 
     result = await run_change(change, on_event=collected_events.append)
     assert result is RunResult.COMPLETED, f"expected COMPLETED, got {result}"
 
-    # Read the full event log from disk
     events = list(change.event_log().read())
 
-    # Find all gate agent_ids
-    gate_agent_ids = sorted({
-        e["agent_id"] for e in events
-        if isinstance(e.get("agent_id"), str)
-        and e["agent_id"].startswith("gate:")
-    })
-    assert len(gate_agent_ids) >= 2, (
-        f"expected at least 2 distinct gate agent_ids, got {gate_agent_ids}"
+    # Verify step_started events: work should appear twice, check should appear twice.
+    started_steps = [
+        e["payload"]["step"]
+        for e in events
+        if e.get("type") == "step_started"
+        and e.get("payload", {}).get("step") in ("work", "check")
+    ]
+    assert started_steps.count("work") >= 2, (
+        f"expected at least 2 step_started for 'work' (loop re-run), got: {started_steps}"
     )
-    # Both reviewer-1 and reviewer-2 must appear
-    assert any("reviewer-1" in gid for gid in gate_agent_ids), (
-        f"'reviewer-1' not found in gate agent_ids: {gate_agent_ids}"
-    )
-    assert any("reviewer-2" in gid for gid in gate_agent_ids), (
-        f"'reviewer-2' not found in gate agent_ids: {gate_agent_ids}"
-    )
-    # They must be distinct (not the same string)
-    reviewer_ids = [gid for gid in gate_agent_ids if "reviewer" in gid]
-    assert len(reviewer_ids) == len(set(reviewer_ids)), (
-        f"gate agent_ids not distinct: {reviewer_ids}"
+    assert started_steps.count("check") >= 2, (
+        f"expected at least 2 step_started for 'check' (loop re-run), got: {started_steps}"
     )
 
-    # Each gate agent_id must have a corresponding agent_output event that
-    # was emitted by the executor (via _emit_event with the gate's agent_id).
-    # Note: the fake runner only yields agent_output directly (no step_context),
-    # so we verify agent_output event chains — not step_context chains.
-    # For real runners, step_context would also appear here.
-    for gid in gate_agent_ids:
-        ao = next((e for e in events
-                   if e["type"] == "agent_output" and e["agent_id"] == gid), None)
-        assert ao is not None, f"no agent_output for gate agent_id {gid!r}"
-        # There must be a corresponding step_started event (agent_id=None) nearby
-        # The executor always emits step_started before the agent_output.
-        started = next(
-            (e for e in events if e["type"] == "step_started"),
-            None,
-        )
-        assert started is not None, "no step_started events found in log"
+    # Each step_started must carry kind="agent" and phase="a".
+    for e in events:
+        step_in_wf = e.get("payload", {}).get("step") in ("work", "check")
+        if e.get("type") == "step_started" and step_in_wf:
+            payload = e["payload"]
+            assert payload.get("kind") == "agent", (
+                f"step_started payload missing kind='agent': {payload}"
+            )
+            assert payload.get("phase") == "a", (
+                f"step_started payload missing phase='a': {payload}"
+            )
+
+    # Verify step_completed events carry action as a dict with a verb key.
+    for e in events:
+        if e.get("type") == "step_completed":
+            action = e.get("payload", {}).get("action")
+            assert isinstance(action, dict) and "verb" in action, (
+                f"step_completed action must be a dict with 'verb', got: {action!r}"
+            )
 
 
 # ── Test 4: Resume does not re-emit step_context / initial user_message ───────

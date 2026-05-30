@@ -39,10 +39,15 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
         "---\n"
         "Call complete_step with status=Success. Do not call any other tool.\n"
     )
+    # New inline-surface format: phases is a list of {name, steps}.
+    # on_max_retries uses verb-style: {pause: true}.
     (wf / "workflow.yaml").write_text(
-        "name: live-cc\ndescription: One-step test\nphases: [a]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "a:\n  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
+        "name: live-cc\ndescription: One-step test\n"
+        "defaults: {max_retries: 1, max_loops: 6, on_max_retries: {pause: true}}\n"
+        "phases:\n"
+        "  - name: a\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer: [{provider: claude_code, model: claude-sonnet-4-5}]\n"

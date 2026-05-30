@@ -56,9 +56,12 @@ async def test_one_step_walk_against_openai(
         "Call complete_step with status=Success. Do not call any other tool.\n"
     )
     (wf / "workflow.yaml").write_text(
-        "name: live-openai\ndescription: One-step test\nphases: [a]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "a:\n  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
+        "name: live-openai\ndescription: One-step test\n"
+        "defaults: {max_retries: 1, max_loops: 6, on_max_retries: {pause: true}}\n"
+        "phases:\n"
+        "  - name: a\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer: [{provider: openai, model: gpt-4o-mini}]\n"

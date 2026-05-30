@@ -57,11 +57,11 @@ def _seed_project(tmp_path: Path) -> None:
     (wf / "workflow.yaml").write_text(textwrap.dedent("""\
         name: t
         description: t
-        phases: [only]
-        defaults: {max_retries: 2, on_max_retries: {kind: pause}}
-        only:
-          steps:
-            - {name: w, file: agents/writer.md, model_role: default}
+        defaults: {max_retries: 2, max_loops: 6, on_max_retries: {pause: true}}
+        phases:
+          - name: only
+            steps:
+              - {name: w, file: agents/writer.md, model_role: default}
     """))
     (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
         roles:

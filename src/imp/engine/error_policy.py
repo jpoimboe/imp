@@ -7,8 +7,8 @@ provider-emitted ``error`` event.
 The retry-with-backoff categories use a separate attempt counter from
 ``step.max_retries`` — a flaky network shouldn't burn through the
 agent's "you have 3 chances to produce valid output" budget. Counter
-lives in local executor variables; see ``_execute_step`` /
-``_run_agent_gate`` in ``executor.py``.
+lives in local executor variables; see ``_route_agent`` /
+``_run_agent_invocation`` in ``executor.py``.
 """
 
 from __future__ import annotations

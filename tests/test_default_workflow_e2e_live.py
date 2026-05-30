@@ -49,9 +49,12 @@ async def test_live_minimal_change_completes_one_step(
         "You are testing imp. Call complete_step with status=Success and a one-word note.\n"
     )
     (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
-        "only:\n  steps:\n    - {name: w, file: agents/writer.md, model_role: default}\n"
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6, on_max_retries: {pause: true}}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer: [{provider: anthropic, model: claude-sonnet-4-6}]\n"

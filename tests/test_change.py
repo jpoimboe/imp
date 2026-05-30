@@ -15,9 +15,13 @@ def _seed_workflow(project: Path) -> None:
             "output:\n  status: {type: enum, values: [Success, Error]}"
         ),
     )
+    # New inline-surface format: phases is a list of {name, steps}.
     (src / "workflow.yaml").write_text(
-        "name: t\ndescription: \"\"\nphases: [p]\n"
-        "p:\n  steps:\n    - {name: s, file: agents/stub.md}\n"
+        "name: t\ndescription: \"\"\n"
+        "phases:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - {name: s, file: agents/stub.md}\n"
     )
     (project / ".imp" / "config.yaml").write_text(
         "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
@@ -31,8 +35,10 @@ def test_create_change_allocates_id_1(tmp_path: Path) -> None:
     assert (tmp_path / ".imp" / "changes" / "1" / "workflow" / "workflow.yaml").exists()
     assert (tmp_path / ".imp" / "changes" / "1" / "change.json").exists()
     state = State.load(tmp_path / ".imp" / "changes" / "1" / "state")
-    assert state.phase == "p"
-    assert state.step is None
+    # In the unified-step model, State has no phase field; step cursor points to
+    # the first step ("s") at creation, and status is "running".
+    assert state.step == "s"
+    assert state.status == "running"
 
 
 def test_create_change_increments(tmp_path: Path) -> None:
@@ -48,7 +54,7 @@ def test_snapshot_is_isolated(tmp_path: Path) -> None:
     # Mutate the live workflow; snapshot should not change.
     (tmp_path / ".imp" / "workflows" / "default" / "workflow.yaml").write_text("BROKEN")
     snap = ch.workflow_dir / "workflow.yaml"
-    assert "phases: [p]" in snap.read_text()
+    assert "phases:" in snap.read_text()
 
 
 def test_load_existing_change(tmp_path: Path) -> None:

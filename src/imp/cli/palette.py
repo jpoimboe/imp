@@ -28,9 +28,9 @@ def should_use_color(stream: Any) -> bool:
     return bool(getattr(stream, "isatty", lambda: False)()) and "NO_COLOR" not in os.environ
 
 
-# §9 accent: the ONLY action verbs the stream emits are continue/retry/pause/
-# goto/unknown (executor._action_payload). Dead keys (next/loop/exhausted) are
-# intentionally omitted — they never fire.
+# §9 accent: the ONLY action verbs the stream emits are continue/pause/
+# goto/unknown (executor._action_payload). Dead keys (retry/next/loop/exhausted)
+# are intentionally omitted — they never fire in the unified-step model.
 _ACCENT: dict[str, str] = {
     "continue": "green", "retry": "yellow", "pause": "cyan", "goto": "cyan",
 }

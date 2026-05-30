@@ -37,10 +37,15 @@ def _seed_workflow_with_max_retries_3(root: Path) -> Change:
         "---\nname: writer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
     )
+    # New inline-surface format: phases is a list of {name, steps}.
+    # on_max_retries uses verb-style: {pause: true}.
     (wf / "workflow.yaml").write_text(
-        "name: t\ndescription: t\nphases: [only]\n"
-        "defaults: {max_retries: 3, on_max_retries: {kind: pause}}\n"
-        "only:\n  steps: [{name: w, file: agents/writer.md, model_role: default}]\n"
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 3, max_loops: 6, on_max_retries: {pause: true}}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
     (root / ".imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
