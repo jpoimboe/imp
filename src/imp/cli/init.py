@@ -207,13 +207,15 @@ def run_init(
         "# imp local state — keep secrets and per-Change data out of git\n"
         "config.yaml\n"
         "changes/\n"
-        "lock\n"
+        "lock*\n"
+        "workflows/\n"
     )
 
     project_gi = project_root / ".gitignore"
-    add_lines = [".imp/config.yaml", ".imp/changes/", ".imp/lock"]
+    add_lines = [".imp/"]
     existing = project_gi.read_text() if project_gi.exists() else ""
-    needs_append = [line for line in add_lines if line not in existing]
+    existing_lines = {ln.strip() for ln in existing.splitlines()}
+    needs_append = [line for line in add_lines if line.strip() not in existing_lines]
     if needs_append:
         sep = "" if existing.endswith("\n") or not existing else "\n"
         project_gi.write_text(

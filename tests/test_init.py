@@ -53,7 +53,7 @@ def test_appends_to_project_gitignore(tmp_path: Path) -> None:
     )
     text = (tmp_path / ".gitignore").read_text()
     assert "foo/" in text  # didn't clobber
-    assert ".imp/config.yaml" in text or ".imp/changes/" in text
+    assert ".imp/" in text  # wholesale engine-state ignore
 
 
 def test_init_idempotent_refuses_existing(tmp_path: Path) -> None:
