@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from imp.agents.runner import Message
+    from imp.providers.config import ProviderModel
 
 import filelock
 
@@ -51,12 +52,26 @@ class State:
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
+    resolved_roles: dict[str, ProviderModel] | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
+        from imp.providers.config import ProviderModel  # local: avoid import cycle
         data = json.loads((state_dir / "state.json").read_text())
         cur = data.pop("current_step", None)
-        return cls(**data, current_step=CurrentStep.from_dict(cur) if cur else None)
+        raw_rr = data.pop("resolved_roles", None)
+        # Preserve None (not yet resolved) vs a dict (resolved). A `... or {}`
+        # would map null→{}, defeating the executor's `is None` compute-if-absent
+        # check. None still avoids the `.items()`-on-None crash because we guard.
+        resolved_roles = (
+            {role: ProviderModel(**pm) for role, pm in raw_rr.items()}
+            if raw_rr is not None else None
+        )
+        return cls(
+            **data,
+            current_step=CurrentStep.from_dict(cur) if cur else None,
+            resolved_roles=resolved_roles,
+        )
 
     def save(self, state_dir: Path) -> None:
         """Atomic write: tmp file in same dir, fsync, rename."""
@@ -72,6 +87,11 @@ class State:
             "current_step": self.current_step.to_dict() if self.current_step else None,
             "retry_feedback": self.retry_feedback,
             "resume_pending": self.resume_pending,
+            "resolved_roles": (
+                {r: {"provider": pm.provider, "model": pm.model}
+                 for r, pm in self.resolved_roles.items()}
+                if self.resolved_roles is not None else None
+            ),
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:

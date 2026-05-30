@@ -171,6 +171,33 @@ def test_state_load_forward_compatible_without_resume_pending(tmp_path: Path) ->
     assert back.resume_pending is None
 
 
+def test_state_resolved_roles_roundtrip(tmp_path):
+    from imp.engine.state import State
+    from imp.providers.config import ProviderModel
+    s = State(
+        change_id=1, step="a", step_attempt=0, status="running",
+        resolved_roles={
+            "code": ProviderModel(provider="anthropic", model="haiku"),
+            "code_review": ProviderModel(provider="openai", model="gpt-5.2"),
+        },
+    )
+    s.save(tmp_path)
+    loaded = State.load(tmp_path)
+    assert loaded.resolved_roles is not None
+    assert loaded.resolved_roles["code"] == ProviderModel("anthropic", "haiku")
+    assert loaded.resolved_roles["code_review"].model == "gpt-5.2"
+
+
+def test_state_resolved_roles_none_preserved(tmp_path):
+    """A fresh State persists resolved_roles=null and loads back as None, so the
+    executor's compute-if-absent (`is None`) check still fires after a resume."""
+    from imp.engine.state import State
+    s = State(change_id=1, step="a", step_attempt=0, status="running")
+    assert s.resolved_roles is None
+    s.save(tmp_path)
+    assert State.load(tmp_path).resolved_roles is None
+
+
 def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
     tmp_path: Path,
 ) -> None:
