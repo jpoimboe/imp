@@ -191,6 +191,17 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
     assert "Invalid API key" in payload["message"]
 
 
+def test_real_sdk_accepts_cache_control() -> None:
+    """Guard: the kwarg-capture test uses a fake that swallows **kwargs.
+    This pins the real anthropic SDK contract our runner depends on."""
+    import inspect
+
+    from anthropic.resources.messages import AsyncMessages
+
+    params = inspect.signature(AsyncMessages.create).parameters
+    assert "cache_control" in params
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

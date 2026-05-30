@@ -425,6 +425,7 @@ class AnthropicAgentRunner:
                 tools=anthropic_tools,
                 messages=[_message_to_anthropic(m) for m in messages],
                 max_tokens=8192,
+                cache_control={"type": "ephemeral"},
             )
 
             raw = _serialize_anthropic_response(response)

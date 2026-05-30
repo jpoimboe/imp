@@ -334,6 +334,25 @@ async def test_ceiling_trip_mid_batch_preserves_transcript_invariant(tmp_path: P
     assert state is not ResumeState.DANGLING_TOOL_USE
 
 
+@pytest.mark.anyio
+async def test_create_passes_cache_control(tmp_path: Path) -> None:
+    """Every messages.create() call must carry cache_control to enable
+    Anthropic automatic prompt caching."""
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        text("calling complete_step"),
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+    )])
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path)):
+        pass
+
+    assert fake.messages.calls, "no create() call was made"
+    for call in fake.messages.calls:
+        assert call["cache_control"] == {"type": "ephemeral"}
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
