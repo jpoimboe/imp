@@ -47,3 +47,26 @@ def test_load_config_no_file(tmp_path: Path) -> None:
     with pytest.raises(LoadError) as ei:
         load_config(tmp_path)
     assert "config.yaml not found" in str(ei.value)
+
+
+def test_config_parses_model_rules(tmp_path):
+    from imp.providers.config import load_config
+    imp = tmp_path / ".imp"
+    imp.mkdir()
+    (imp / "config.yaml").write_text(
+        "model_rules:\n  code_review:\n    differ_provider_from: code\n"
+        "roles:\n"
+        "  default:\n    prefer:\n      - {provider: anthropic, model: m}\n")
+    cfg = load_config(tmp_path)
+    assert cfg.model_rules["code_review"].differ_provider_from == "code"
+
+
+def test_config_model_rules_defaults_empty(tmp_path):
+    from imp.providers.config import load_config
+    imp = tmp_path / ".imp"
+    imp.mkdir()
+    (imp / "config.yaml").write_text(
+        "roles:\n"
+        "  default:\n    prefer:\n      - {provider: anthropic, model: m}\n")
+    cfg = load_config(tmp_path)
+    assert cfg.model_rules == {}

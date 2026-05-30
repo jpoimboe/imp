@@ -10,7 +10,8 @@ import yaml
 
 from imp.engine._yaml import items
 from imp.engine.errors import LoadError
-from imp.engine.types import SourceLoc
+from imp.engine.model_rules import parse_role_constraints
+from imp.engine.types import RoleConstraint, SourceLoc
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,7 @@ class Config:
     """
     roles: dict[str, RoleConfig] = field(hash=False)
     source: SourceLoc = field(hash=False)
+    model_rules: dict[str, RoleConstraint] = field(hash=False, default_factory=dict)
 
     def role_names(self) -> frozenset[str]:
         return frozenset(self.roles)
@@ -95,4 +97,6 @@ def load_config(project_root: Path) -> Config:
             )
         roles[name] = RoleConfig(name=name, prefer=tuple(models))
 
-    return Config(roles=roles, source=SourceLoc(file=path, line=1))
+    model_rules = parse_role_constraints(raw.get("model_rules"), path)
+    return Config(roles=roles, source=SourceLoc(file=path, line=1),
+                  model_rules=model_rules)
