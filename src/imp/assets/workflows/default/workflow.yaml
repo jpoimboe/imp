@@ -1,94 +1,97 @@
 name: standard-feature
 description: |
-  Standard imp workflow: spec → plan → implement → review → merge.
+  Standard imp workflow: spec -> plan -> implement -> review -> merge.
   spec is an interactive brainstorm with the user.
-
-phases: [spec, plan, implement, review, merge]
 
 defaults:
   max_retries: 3
-  on_max_retries: {kind: pause}
+  max_loops: 6
 
-spec:
-  steps:
-    - name: spec-writer
-      file: agents/spec-writer.md
-      model_role: spec
-      interactive: true
-      max_tool_calls: 10
-      fs_permissions:
-        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
-        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
-        - {operations: [write], paths: ["/**"], mode: deny}
-      gates:
-        - type: script
-          command: ./scripts/check-artifact.sh spec
-          decide:
-            - {when: {exit: 0}, action: {kind: continue}}
-            - {else: true, action: {kind: retry}}
-  gates:
-    - type: agent
-      file: agents/spec-reviewer.md
-      model_role: spec_review
-      decide:
-        - {when: {verdict: approve},  action: {kind: continue}}
-        - {when: {verdict: rework},   action: {kind: retry}}
-        - {else: true, action: {kind: pause}}
+phases:
+  - name: spec
+    steps:
+      - name: spec-writer
+        file: agents/spec-writer.md
+        model_role: spec
+        interactive: true
+        context: resume
+        max_tool_calls: 10
+        fs_permissions:
+          - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+          - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+          - {operations: [write], paths: ["/**"], mode: deny}
 
-plan:
-  steps:
-    - name: plan-writer
-      file: agents/plan-writer.md
-      model_role: default
-      fs_permissions:
-        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
-        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
-        - {operations: [write], paths: ["/**"], mode: deny}
-      gates:
-        - type: script
-          command: ./scripts/check-artifact.sh plan
-          decide:
-            - {when: {exit: 0}, action: {kind: continue}}
-            - {else: true, action: {kind: retry}}
+      - name: spec-check
+        command: ./scripts/check-artifact.sh spec
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, goto: spec-writer}
 
-implement:
-  steps:
-    - name: coder
-      file: agents/coder.md
-      model_role: code
-      fs_permissions:
-        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
-        - {operations: [write], paths: ["/project/**"], mode: allow}
-        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
-      gates:
-        - type: script
-          command: ./scripts/run-tests.sh
-          decide:
-            - {when: {exit: 0}, action: {kind: continue}}
-            - {else: true, action: {kind: retry}}
-    - name: documenter
-      file: agents/documenter.md
-      model_role: code
-      fs_permissions:
-        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
-        - {operations: [write], paths: ["/project/**"], mode: allow}
-        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+      - name: spec-reviewer
+        file: agents/spec-reviewer.md
+        model_role: spec_review
+        rules:
+          - {if: {verdict: approve}, continue: true}
+          - {if: {verdict: rework},  goto: spec-writer}
+          - {else: true, pause: true}
 
-review:
-  steps: []
-  gates:
-    - type: agent
-      file: agents/code-reviewer.md
-      model_role: code_review
-      decide:
-        - {when: {verdict: approve}, action: {kind: continue}}
-        - {when: {verdict: rework},  action: {kind: goto, target: implement}}
-        - {else: true, action: {kind: pause}}
-    - type: human
-      prompt: "Merge?"
-      options:
-        - {label: Merge,             action: {kind: continue}}
-        - {label: Back to implement, action: {kind: goto, target: implement}}
+  - name: plan
+    steps:
+      - name: plan-writer
+        file: agents/plan-writer.md
+        model_role: default
+        context: resume
+        fs_permissions:
+          - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+          - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+          - {operations: [write], paths: ["/**"], mode: deny}
 
-merge:
-  steps: []
+      - name: plan-check
+        command: ./scripts/check-artifact.sh plan
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, goto: plan-writer}
+
+  - name: implement
+    steps:
+      - name: coder
+        file: agents/coder.md
+        model_role: code
+        context: resume
+        fs_permissions:
+          - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+          - {operations: [write], paths: ["/project/**"], mode: allow}
+          - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+
+      - name: run-tests
+        command: ./scripts/run-tests.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, goto: coder}
+
+      - name: documenter
+        file: agents/documenter.md
+        model_role: code
+        fs_permissions:
+          - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+          - {operations: [write], paths: ["/project/**"], mode: allow}
+          - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+
+  - name: review
+    steps:
+      - name: code-reviewer
+        file: agents/code-reviewer.md
+        model_role: code_review
+        rules:
+          - {if: {verdict: approve}, continue: true}
+          - {if: {verdict: rework},  goto: implement}
+          - {else: true, pause: true}
+
+      - name: merge-gate
+        ask: "Merge?"
+        options:
+          - {label: Merge,             continue: true}
+          - {label: Back to implement, goto: implement}
+
+  - name: merge
+    steps: []
