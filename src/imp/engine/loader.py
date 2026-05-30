@@ -253,11 +253,11 @@ def _coerce_rhs(rhs: Any, source: SourceLoc) -> Expr:
 
 
 def _parse_verb(raw: dict[str, Any], source: SourceLoc) -> Action:
-    verbs = [v for v in ("continue", "goto", "pause") if v in raw]
+    verbs = [v for v in ("continue", "goto", "pause", "resume") if v in raw]
     if len(verbs) != 1:
         raise LoadError(
-            f"a rule/option needs exactly one action verb (continue/goto/pause); "
-            f"found {verbs}",
+            f"a rule/option needs exactly one action verb "
+            f"(continue/goto/pause/resume); found {verbs}",
             source,
         )
     verb = verbs[0]
@@ -269,13 +269,14 @@ def _parse_verb(raw: dict[str, Any], source: SourceLoc) -> Action:
         if raw["pause"] is not True:
             raise LoadError("pause: must be true", source)
         return Pause()
-    target = raw["goto"]
+    # goto: and resume: both route to a target Goto; resume continues the transcript.
+    target = raw[verb]
     if not isinstance(target, str):
-        raise LoadError("goto: must name a phase or step", source)
+        raise LoadError(f"{verb}: must name a phase or step", source)
     feedback = raw.get("feedback", True)
     if not isinstance(feedback, bool):
         raise LoadError("feedback: must be true or false", source)
-    return Goto(target=target, feedback=feedback)
+    return Goto(target=target, feedback=feedback, resume=(verb == "resume"))
 
 
 def _parse_rules(

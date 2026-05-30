@@ -489,3 +489,73 @@ def test_error_includes_source_line(tmp_path: Path) -> None:
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf_dir)
     assert ":6" in str(ei.value)
+
+
+# ── resume: verb tests ────────────────────────────────────────────────────────
+
+
+def test_resume_verb_parses_to_goto_with_resume_true(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: {verdict: rework}, resume: w}
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    wf_obj = load_workflow(wf)
+    by = {s.name: s for s in wf_obj.flat_steps()}
+    act = by["gate"].rules[0].action
+    assert isinstance(act, Goto)
+    assert act.target == "w"
+    assert act.resume is True
+
+
+def test_resume_honors_feedback_false(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - if: {verdict: rework}
+                    resume: w
+                    feedback: false
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    wf_obj = load_workflow(wf)
+    act = {s.name: s for s in wf_obj.flat_steps()}["gate"].rules[0].action
+    assert isinstance(act, Goto)
+    assert act.resume is True
+    assert act.feedback is False
+
+
+def test_resume_and_goto_are_mutually_exclusive(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: {verdict: rework}, resume: w, goto: w}
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert "resume" in str(ei.value)
