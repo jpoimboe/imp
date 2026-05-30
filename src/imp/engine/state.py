@@ -15,7 +15,7 @@ import tempfile
 import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
@@ -43,22 +43,19 @@ class CurrentStep:
 @dataclass
 class State:
     change_id: int
-    phase: str | None
     step: str | None
     step_attempt: int
-    phase_attempt: int
     status: Status
+    vars: dict[str, Any] = field(default_factory=dict)
+    loop_counts: dict[str, int] = field(default_factory=dict)
     current_step: CurrentStep | None = None
-    retry_feedback: dict[str, str] | None = None
+    retry_feedback: dict[str, Any] | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
         data = json.loads((state_dir / "state.json").read_text())
         cur = data.pop("current_step", None)
-        return cls(
-            **data,
-            current_step=CurrentStep.from_dict(cur) if cur else None,
-        )
+        return cls(**data, current_step=CurrentStep.from_dict(cur) if cur else None)
 
     def save(self, state_dir: Path) -> None:
         """Atomic write: tmp file in same dir, fsync, rename."""
@@ -66,9 +63,11 @@ class State:
         target = state_dir / "state.json"
         payload = {
             "change_id": self.change_id,
-            "phase": self.phase, "step": self.step,
-            "step_attempt": self.step_attempt, "phase_attempt": self.phase_attempt,
+            "step": self.step,
+            "step_attempt": self.step_attempt,
             "status": self.status,
+            "vars": self.vars,
+            "loop_counts": self.loop_counts,
             "current_step": self.current_step.to_dict() if self.current_step else None,
             "retry_feedback": self.retry_feedback,
         }

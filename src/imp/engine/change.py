@@ -89,13 +89,14 @@ class Change:
         workflow = load_workflow(
             change_dir / "workflow", configured_roles=configured_roles
         )
+        flat = workflow.flat_steps()
         initial = State(
             change_id=new_id,
-            phase=workflow.phases[0].name,
-            step=None,
+            step=flat[0].name if flat else None,
             step_attempt=0,
-            phase_attempt=0,
             status="running",
+            vars=dict(workflow.vars.defaults()),
+            loop_counts={},
         )
         initial.save(change_dir / "state")
 
