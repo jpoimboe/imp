@@ -658,3 +658,38 @@ def test_summarize_result_flattens_text_block_list_in_burst() -> None:
     burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
     assert burst.calls[0].result == "ok, go ahead"
     assert "[{'" not in burst.calls[0].result
+
+
+def test_summarize_result_mixed_blocks_fuse_with_no_separator() -> None:
+    # Consecutive blocks fuse with NO separator: "see" + [image] -> "see[image]".
+    # This is intentional and must not be "fixed" into a "\n" join.
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1",
+            content=[{"type": "text", "text": "see"}, {"type": "image"}],
+            error=False),
+    ))
+    step = _only_step(tree)
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    assert burst.calls[0].result == "see[image]"
+
+
+def test_summarize_result_non_text_only_block_list_renders_type_tag() -> None:
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1",
+            content=[{"type": "tool_reference", "tool_name": "x"}], error=False),
+    ))
+    step = _only_step(tree)
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    assert burst.calls[0].result == "[tool_reference]"
+
+
+def test_summarize_result_empty_list_is_empty_string() -> None:
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1", content=[], error=False),
+    ))
+    step = _only_step(tree)
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    assert burst.calls[0].result == ""
