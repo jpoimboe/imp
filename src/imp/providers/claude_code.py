@@ -99,6 +99,37 @@ def _text_of(message: Any) -> str:
     return "\n".join(parts)
 
 
+def _subprocess_diag(client: Any) -> dict[str, Any]:
+    """Best-effort extraction of subprocess exit/stderr from an SDK client for
+    the no_result_message error detail. The SDK's transport surface is not a
+    stable contract, so probe defensively and return {} when nothing is found.
+
+    Keys are 'exit' and 'stderr_tail' — deliberately disjoint from
+    'retry_after_seconds', which the executor reads from detail (executor.py).
+
+    SDK inspection (claude_agent_sdk, installed 2026-05-30):
+      ClaudeSDKClient._transport → SubprocessCLITransport (when connected)
+      SubprocessCLITransport does NOT expose 'returncode' or 'stderr_tail' as
+      public attributes. The process returncode lives at _process.returncode
+      (private, anyio.Process). No public stderr_tail attribute exists.
+      The _transport is set to None by disconnect() in __aexit__, so by the
+      time the fallthrough emit runs the transport is already gone. The helper
+      therefore returns {} against today's SDK — the enrichment is intentionally
+      forward-compatible plumbing. The fake-shape (returncode/stderr_tail on
+      _transport) tests the plumbing path for future SDK versions that may
+      expose these attributes.
+    """
+    out: dict[str, Any] = {}
+    transport = getattr(client, "_transport", None) or client
+    rc = getattr(transport, "returncode", None)
+    if isinstance(rc, int):
+        out["exit"] = rc
+    tail = getattr(transport, "stderr_tail", None)
+    if tail:
+        out["stderr_tail"] = str(tail)[-2000:]
+    return out
+
+
 # ── Per-run state captured by tool wrappers and read by the receive loop ─────
 
 
@@ -745,6 +776,7 @@ class ClaudeCodeAgentRunner:
 
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
+            self._client = client
             await client.query(_stream_history(messages))
 
             async for sdk_msg in client.receive_response():
@@ -934,11 +966,21 @@ class ClaudeCodeAgentRunner:
                     }}
                     return
 
-        # Fell out of the receive loop without seeing a ResultMessage.
+        # Fell out of the receive loop without seeing a ResultMessage. Enrich
+        # with subprocess diagnostics so a real SDK crash is distinguishable
+        # from a benign EOF. Classification stays `network` (retryable).
+        # self._client was captured at `async with client_ctx as client:` entry
+        # (before __aexit__/disconnect clears _transport); _subprocess_diag
+        # probes best-effort and returns {} when nothing is found.
+        diag = _subprocess_diag(self._client)
+        message = "SDK closed without yielding a ResultMessage"
+        if diag:
+            message = f"{message} (exit={diag.get('exit')})"
         yield {"type": "error", "payload": {
             "category": "network",
             "kind": "no_result_message",
-            "message": "SDK closed without yielding a ResultMessage",
+            "message": message,
+            "detail": diag,
         }}
 
     async def interrupt(self) -> None:
