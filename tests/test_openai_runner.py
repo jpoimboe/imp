@@ -443,3 +443,54 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
     assert events[-1]["type"] == "error"
     assert events[-1]["payload"]["category"] == "agent_incomplete"
     assert calls["n"] == 2
+
+
+@pytest.mark.anyio
+async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
+    """Every create() call within one invocation passes the same
+    prompt_cache_key, equal to f"{change_id}:{agent_id}"."""
+    (tmp_path / "art").mkdir()
+    (tmp_path / "data.txt").write_text("payload")
+    fake = FakeAsyncOpenAI([
+        completion(message(
+            tool_calls=[tool_call("u1", "read_file",
+                                  {"path": "/project/data.txt"})])),
+        completion(message(
+            tool_calls=[tool_call("c1", "complete_step",
+                                  {"status": "Success", "note": "ok"})])),
+    ])
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path)):
+        pass
+
+    calls = fake.chat.completions.calls
+    assert len(calls) == 2, f"expected 2 create() calls, got {len(calls)}"
+    keys = [c["prompt_cache_key"] for c in calls]
+    assert keys == ["1:step:p/s", "1:step:p/s"]
+
+
+@pytest.mark.anyio
+async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
+    """A different change_id yields a different prompt_cache_key, so two
+    concurrent changes running the same step don't share a routing slot."""
+    from dataclasses import replace
+
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncOpenAI([
+        completion(message(
+            tool_calls=[tool_call("c1", "complete_step",
+                                  {"status": "Success", "note": "ok"})])),
+    ])
+    inv = _inv(tmp_path)
+    inv = replace(
+        inv,
+        change_context=ChangeContext(
+            change_id=2, project_root=tmp_path, artifacts_dir=tmp_path / "art"),
+    )
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    async for _ in runner.run(inv):
+        pass
+
+    assert fake.chat.completions.calls[0]["prompt_cache_key"] == "2:step:p/s"

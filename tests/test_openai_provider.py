@@ -300,6 +300,17 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
     assert payload["category"] == "auth"
 
 
+def test_real_sdk_accepts_prompt_cache_key() -> None:
+    """Guard: the kwarg-capture tests use a fake that swallows **kwargs.
+    This pins the real openai SDK contract our runner depends on."""
+    import inspect
+
+    from openai.resources.chat.completions import AsyncCompletions
+
+    params = inspect.signature(AsyncCompletions.create).parameters
+    assert "prompt_cache_key" in params
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
