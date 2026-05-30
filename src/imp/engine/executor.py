@@ -165,7 +165,16 @@ async def run_change(
             else:
                 state.loop_counts.pop(step.name, None)       # forward goto resets
             state.step = flat[target_idx].name
-            state.resume_pending = flat[target_idx].name if action.resume else None
+            if action.resume:
+                # Single-shot reset: a resumed step must not inherit a stale
+                # retry count. Done HERE (the navigation point that sets
+                # resume_pending), not in _route_agent — is_resume stays True
+                # across internal retries, so resetting per entry would let a
+                # persistent error retry forever.
+                state.step_attempt = 0
+                state.resume_pending = flat[target_idx].name
+            else:
+                state.resume_pending = None
         else:
             raise AssertionError(f"unexpected action {action!r}")
 
@@ -340,6 +349,10 @@ async def _route_agent(
     if result.paused:
         return Pause(), None, {}
     if result.fatal:
+        # Defense in depth: reset the retry count when pausing fatally, matching
+        # the success/exhaustion resets. Runs once (at the pause), unlike the
+        # resume reset which is gated on the navigation point.
+        state.step_attempt = 0
         pause = Pause(
             reason=result.error.category if result.error else None,
             kind=result.error.kind if result.error else None,
