@@ -119,50 +119,48 @@ def repair_dangling_tool_use_on_resume(
     return repair
 
 
-def inject_retry_feedback(
-    messages: list[Message],
-    transcript: Transcript,
-    elog: EventLog,
-    agent_id: str,
-    text: str,
-) -> Message:
-    """Balance the trailing dangling tool_use and append gate feedback as ONE
-    user turn so `classify_resume` returns SEND_TO_LLM (design §5).
+def balance_success_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str, wrapper_text: str | None = None,
+) -> Message | None:
+    """Balance a resumed transcript that ends in a successful complete_step.
 
     The targeted step's transcript ends with a SUCCESSFUL `complete_step`
-    tool_use. For that block synthesize a NON-error, success-shaped result —
-    `repair_dangling_tool_use_on_resume`'s `is_error=True` "interrupted" content
-    would tell the agent its own success failed. Any other trailing tool_use is
-    a genuine interruption and gets the same error-flavored content the repair
-    helper uses. The feedback `TextBlock` rides on the SAME user message (not a
-    second consecutive user message) to preserve Anthropic role alternation.
+    tool_use (no tool_result). Synthesize a NON-error, success-shaped result for
+    it (the repair helper's is_error=True 'interrupted' content would tell the
+    agent its own accepted work failed). Any *other* trailing tool_use is a real
+    interruption and gets error-flavored content. When `wrapper_text` is given,
+    it rides on the SAME user message (Anthropic role-alternation). Returns the
+    appended Message, or None when there is no trailing tool_use to balance AND
+    no wrapper to add (caller then falls back to repair / plain resume).
 
-    Emits a single `user_message` audit event for the injected turn.
+    This is a property of (resume target, previously completed): it fires on the
+    default feedback-true backward goto, a branch-fired goto, and the
+    feedback:false handback alike -- independent of whether wrapper_text is set.
     """
     last = messages[-1] if messages else None
     tool_uses = (
         [b for b in last.content if isinstance(b, ToolUseBlock)]
-        if last is not None and last.role == "assistant"
-        else []
+        if last is not None and last.role == "assistant" else []
     )
     result_blocks: list[ToolResultBlock] = []
     for tu in tool_uses:
         if tu.name == "complete_step":
             result_blocks.append(ToolResultBlock(
                 tool_use_id=tu.id,
-                content="previous step output recorded; superseded by the feedback below",
-                is_error=False,
-            ))
+                content="previous step output recorded; superseded by the feedback below"
+                        if wrapper_text else "previous step output recorded; resuming",
+                is_error=False))
         else:
             result_blocks.append(ToolResultBlock(
                 tool_use_id=tu.id,
-                content=_synthetic_tool_result_content(tu.name),
-                is_error=True,
-            ))
-    injected = Message(
-        role="user",
-        content=(*result_blocks, TextBlock(text=text)),
-    )
+                content=_synthetic_tool_result_content(tu.name), is_error=True))
+    if not result_blocks and not wrapper_text:
+        return None
+    blocks: list[TextBlock | ToolResultBlock] = list(result_blocks)
+    if wrapper_text:
+        blocks.append(TextBlock(text=wrapper_text))
+    injected = Message(role="user", content=tuple(blocks))
     messages.append(injected)
     transcript.append(injected)
     elog.append_user_message(agent_id=agent_id, message=injected)

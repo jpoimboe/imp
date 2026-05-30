@@ -49,7 +49,7 @@ from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.transcript import (
     Transcript,
-    inject_retry_feedback,
+    balance_success_on_resume,
     repair_dangling_tool_use_on_resume,
 )
 from imp.engine.schema import validate_agent_output
@@ -665,9 +665,10 @@ class ClaudeCodeAgentRunner:
             # Persist a synthetic tool_result so the SEND_TO_LLM path has a
             # balanced transcript; emit `tool_result` events so `imp log`
             # shows what the agent sees on the next turn.
-            if invocation.retry_feedback is not None:
-                inject_retry_feedback(
-                    messages, transcript, elog, aid, invocation.retry_feedback)
+            if invocation.balance_on_resume:
+                balance_success_on_resume(
+                    messages, transcript, elog, aid,
+                    wrapper_text=invocation.retry_feedback)
             else:
                 repair = repair_dangling_tool_use_on_resume(messages, transcript)
                 if repair is not None:

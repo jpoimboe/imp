@@ -5,7 +5,7 @@ from pathlib import Path
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from imp.agents.transcript import Transcript, inject_retry_feedback
+from imp.agents.transcript import Transcript, balance_success_on_resume
 from imp.engine.state import InMemoryEventLog
 
 
@@ -20,7 +20,7 @@ def test_append_then_load_round_trip(tmp_path: Path) -> None:
     m2 = Message(
         role="assistant",
         content=(
-            TextBlock(text="reading…"),
+            TextBlock(text="reading..."),
             ToolUseBlock(id="t1", name="read_file", input={"path": "/p/x"}),
         ),
     )
@@ -60,7 +60,7 @@ def test_inject_after_complete_step_yields_single_nonerror_user_turn(
         t.append(m)
     elog = InMemoryEventLog()
 
-    injected = inject_retry_feedback(msgs, t, elog, "step:p/s", "the test failed")
+    injected = balance_success_on_resume(msgs, t, elog, "step:p/s", wrapper_text="the test failed")
 
     # Exactly one new trailing user message.
     assert msgs[-1] is injected
@@ -90,9 +90,51 @@ def test_inject_after_genuine_interrupt_uses_error_result(tmp_path: Path) -> Non
         t.append(m)
     elog = InMemoryEventLog()
 
-    injected = inject_retry_feedback(msgs, t, elog, "step:p/s", "feedback")
+    injected = balance_success_on_resume(msgs, t, elog, "step:p/s", wrapper_text="feedback")
 
     results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
     assert len(results) == 1 and results[0].tool_use_id == "b1"
-    assert results[0].is_error is True          # genuine interrupt → error-flavored
+    assert results[0].is_error is True          # genuine interrupt -> error-flavored
     assert classify_resume(msgs, interactive=False) is ResumeState.SEND_TO_LLM
+
+
+def _completed(tmp_path: Path) -> tuple[list[Message], Transcript]:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="begin"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(
+                    id="tu1", name="complete_step", input={"status": "Success"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    return msgs, t
+
+
+def test_balance_without_wrapper_emits_success_shaped_result(tmp_path: Path) -> None:
+    msgs, t = _completed(tmp_path)
+    elog = InMemoryEventLog()
+    out = balance_success_on_resume(msgs, t, elog, "step:x", wrapper_text=None)
+    assert out is not None
+    result = msgs[-1]
+    assert result.role == "user"
+    blocks = [b for b in result.content if isinstance(b, ToolResultBlock)]
+    assert blocks and blocks[0].is_error is False         # success-shaped, not "interrupted"
+    assert not any(isinstance(b, TextBlock) for b in result.content)  # no wrapper
+
+
+def test_balance_with_wrapper_rides_on_same_user_turn(tmp_path: Path) -> None:
+    msgs, t = _completed(tmp_path)
+    elog = InMemoryEventLog()
+    balance_success_on_resume(msgs, t, elog, "step:x", wrapper_text="not accepted")
+    texts = [b for b in msgs[-1].content if isinstance(b, TextBlock)]
+    results = [b for b in msgs[-1].content if isinstance(b, ToolResultBlock)]
+    assert results[0].is_error is False
+    assert texts and texts[0].text == "not accepted"      # same user message
+
+
+def test_balance_noop_when_no_trailing_tool_use(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [Message(role="user", content=(TextBlock(text="hi"),))]
+    t.append(msgs[0])
+    assert balance_success_on_resume(msgs, t, InMemoryEventLog(), "x", wrapper_text=None) is None

@@ -205,6 +205,7 @@ async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) 
         events_path=tmp_path / "events.jsonl",
         agent_id="step:p/s", event_log=log,
         retry_feedback="Gate `test` failed (exit 1). FAIL: assertion",
+        balance_on_resume=True,
     )
 
     yielded = [ev async for ev in runner.run(inv)]
