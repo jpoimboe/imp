@@ -97,3 +97,40 @@ def test_workflow_flat_steps_and_goto_resolution() -> None:
 def test_workflow_defaults_max_loops_default() -> None:
     d = WorkflowDefaults(max_retries=3, on_max_retries=Pause())
     assert d.max_loops == 10
+
+
+def test_role_constraint_defaults_and_fields():
+    from imp.engine.types import RoleConstraint
+    c = RoleConstraint(differ_provider_from="code")
+    assert c.differ_provider_from == "code"
+    assert c.source is None
+    assert RoleConstraint().differ_provider_from is None
+
+
+def test_agentdef_model_role_defaults_to_none():
+    from pathlib import Path
+
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+    a = AgentDef(
+        name="x", description="", tools=frozenset(), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error")),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    assert a.model_role is None  # CRITICAL: None, not "default"
+
+
+def test_workflow_model_rules_defaults_to_empty():
+    from pathlib import Path
+
+    from imp.engine.types import (
+        SourceLoc, Vars, Workflow, WorkflowDefaults,
+    )
+    from imp.engine.types import Pause
+    wf = Workflow(
+        name="w", description="", phases=(), vars=Vars(decls=()),
+        defaults=WorkflowDefaults(max_retries=0, on_max_retries=Pause()),
+        agents={}, workflow_dir=Path("."), source=SourceLoc(file=Path("w"), line=1))
+    assert wf.model_rules == {}

@@ -138,6 +138,18 @@ class FsRule:
     source: SourceLoc
 
 
+# ── Cross-role model constraints (model_rules:) ───────────────────────────────
+
+@dataclass(frozen=True, slots=True)
+class RoleConstraint:
+    """One role's cross-role model constraint. `differ_provider_from` names
+    another role whose resolved *provider* this role should differ from (a soft
+    preference; see providers/resolve.resolve_roles). `None` means no constraint.
+    """
+    differ_provider_from: str | None = None
+    source: SourceLoc | None = None
+
+
 # ── Agent definition (parsed from .md) ────────────────────────────────────────
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +163,11 @@ class AgentDef:
     source_path: Path
     source: SourceLoc
     max_tool_calls: int | None = None
+    # The role this agent wants WHEN RUN AS A SUBAGENT (and a default a
+    # top-level step may override via its own model_role:). MUST default to None
+    # — not the string "default" that Step.model_role uses — so dispatch_task
+    # can tell "inherit parent" (None) from "use the 'default' role".
+    model_role: str | None = None
 
 
 # ── Steps & phases ────────────────────────────────────────────────────────────
@@ -212,6 +229,7 @@ class Workflow:
     agents: dict[str, AgentDef] = field(hash=False)
     workflow_dir: Path
     source: SourceLoc
+    model_rules: dict[str, RoleConstraint] = field(hash=False, default_factory=dict)
 
     def flat_steps(self) -> tuple[Step, ...]:
         return tuple(s for p in self.phases for s in p.steps)
