@@ -593,12 +593,35 @@ def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         call_id=rid, name=str(p.get("name", "tool")), input={}, killed=True))
 
 
+def _flatten_block(b: Any) -> str:
+    # Read the block type with b["type"] / b.get("type") — `type` is the Python
+    # builtin; do not use a bare `type` name here.
+    if isinstance(b, dict):
+        if b.get("type") == "text":
+            # `or ""` hardens against a malformed {"type":"text","text":null}
+            # block: returning None here would make the "".join() below raise.
+            # Real text blocks always carry a str; this just preserves the old
+            # str() fallback's never-raise property.
+            return b.get("text") or ""
+        if "type" in b:
+            return f"[{b['type']}]"
+        return str(b)        # dict with no type: unknown shape, preserve info
+    return str(b)            # non-dict element: preserve info
+
+
 def _summarize_result(content: Any) -> str:
     """Full underlying result text, newlines preserved. The view decides how to
-    wrap/elide; the model keeps the whole thing (the 'full messages' goal)."""
+    wrap/elide; the node keeps the whole thing (the 'full messages' goal)."""
     if content is None:
         return ""
-    return content if isinstance(content, str) else str(content)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Flatten a provider content-block list. Join with "" (no separator),
+        # matching the text extractors but as a superset: non-text blocks are
+        # surfaced as [<type>] tags rather than silently dropped.
+        return "".join(_flatten_block(b) for b in content)
+    return str(content)      # safety net for any other shape (unchanged)
 
 
 NarrativeBuilder._HANDLERS["tool_call"] = _h_tool_call

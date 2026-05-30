@@ -644,3 +644,17 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
         b.add(e)
     act = b.current_activity()
     assert act is not None and "task → coder" in act and "executor.py" in act
+
+
+def test_summarize_result_flattens_text_block_list_in_burst() -> None:
+    # A tool_result whose content is a provider content-block list must render
+    # as the underlying text, never as a Python repr of the list.
+    tree = nv.build_tree(_step_events(
+        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
+        _ev("2", "tool_result", agent_id="step:p/s", id="b1",
+            content=[{"type": "text", "text": "ok, go ahead"}], error=False),
+    ))
+    step = _only_step(tree)
+    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
+    assert burst.calls[0].result == "ok, go ahead"
+    assert "[{'" not in burst.calls[0].result
