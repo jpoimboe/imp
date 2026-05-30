@@ -14,8 +14,6 @@ class FatalToolError(Exception):
     that into an immediate ``Pause`` — no retries, no wasted LLM calls.
 
     Use for:
-    - ``ask_user`` invoked in a non-interactive step (workflow.yaml missing
-      ``interactive: true``, or ``user_input_fn`` not wired through).
     - subagent ``task`` spawn requested but no spawn fn installed.
     - Any other condition where the agent has no way to recover and the
       problem is in the runtime configuration, not the agent's reasoning.

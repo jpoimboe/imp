@@ -34,7 +34,8 @@ class ToolContext:
     running_processes: list[Any] = field(default_factory=list)
     # The change being processed; used by subagent dispatch to propagate change_id.
     change_context: Any = None
-    # When the runner serves ask_user requests, it injects this callable.
+    # The runner injects this callable so the PROMPT_USER resume path can read
+    # the user's reply when an interactive transcript ends on assistant text.
     user_input_fn: Any = None
     # Shared EventLog WRITE instance, set by the parent runner at the same site
     # it sets spawn_subagent. dispatch_task threads this into the subagent's

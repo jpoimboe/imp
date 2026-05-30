@@ -79,12 +79,13 @@ class AgentInvocation:
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     # resolved by engine (Task 27a/28); None means "use executor default of 50"
     max_tool_calls: int | None = None
-    # Set by the executor when the step is interactive. Called by ask_user and
-    # by the providers' PROMPT_USER resume path. May return either a `str` or
-    # an `Awaitable[str]`; both call-sites await-if-awaitable.
+    # Set by the executor when the step is interactive. Called by the providers'
+    # PROMPT_USER resume path and the legacy end-of-turn fallback to read the
+    # user's reply. May return either a `str` or an `Awaitable[str]`; both
+    # call-sites await-if-awaitable.
     user_input_fn: Callable[[str], str | Awaitable[str]] | None = None
     # Set by the executor for the END-OF-TURN resume — distinct from
-    # user_input_fn, which serves the PROMPT_USER / ask_user mid-turn path.
+    # user_input_fn, which serves the PROMPT_USER resume path.
     # Called with the agent's last text; returns the next user-message text to
     # inject and continue, or None to stop (→ agent_incomplete). None means
     # "no end-of-turn resume wired" (legacy/test); providers then fall back to

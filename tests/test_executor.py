@@ -195,7 +195,7 @@ class _FatalToolErrorRunner:
     """Yields a single fatal_tool_error event then stops, simulating a
     provider that caught FatalToolError from a tool invocation."""
 
-    def __init__(self, *, tool: str = "ask_user", message: str = "boom") -> None:
+    def __init__(self, *, tool: str = "task", message: str = "boom") -> None:
         self._tool = tool
         self._message = message
         self.run_count = 0
@@ -229,8 +229,8 @@ async def test_fatal_tool_error_pauses_without_retry(
     resolve.reset_providers_for_tests()
 
     runner = _FatalToolErrorRunner(
-        tool="ask_user",
-        message="ask_user invoked but user_input_fn is not installed",
+        tool="task",
+        message="subagent task spawn requested but no spawn fn installed",
     )
 
     class _FatalProvider:
@@ -262,7 +262,7 @@ async def test_fatal_tool_error_pauses_without_retry(
                     if e["type"] == "error"
                     and e.get("payload", {}).get("kind") == "fatal_tool_error"]
     assert len(fatal_events) == 1
-    assert fatal_events[0]["payload"]["tool"] == "ask_user"
+    assert fatal_events[0]["payload"]["tool"] == "task"
 
 
 class _CategoryErrorRunner:
