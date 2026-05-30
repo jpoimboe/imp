@@ -122,6 +122,11 @@ class AgentInvocation:
     # is_resume (a `resume:` edge). retry_feedback (above) now means "optional
     # wrapper text appended on that balancing user turn"; None = balance only.
     balance_on_resume: bool = False
+    # role → ProviderModel, the run's global resolution map. Threaded by the
+    # executor into every AgentInvocation; copied onto ToolContext so
+    # dispatch_task can place a subagent on its model_role's resolved provider.
+    # Typed Any to avoid importing ProviderModel here.
+    resolved_roles: dict[str, Any] | None = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}

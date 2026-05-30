@@ -120,3 +120,11 @@ def test_tool_context_has_event_log_field(tmp_path) -> None:
     sentinel = object()
     ctx.event_log = sentinel
     assert ctx.event_log is sentinel
+
+
+def test_tool_context_resolved_roles_defaults_none(tmp_path):
+    from imp.agents.tools.context import ToolContext
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "e.jsonl")
+    assert ctx.resolved_roles is None

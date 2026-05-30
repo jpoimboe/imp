@@ -45,6 +45,8 @@ class ToolContext:
     event_log: Any = None
     # Subagent dispatch hook (filled by runner; signature defined in subagents tool).
     spawn_subagent: Any = None
+    # role → ProviderModel; copied from invocation.resolved_roles by the runner.
+    resolved_roles: dict[str, Any] | None = None
     # invocation_id counter for disambiguating same-named subagent invocations
     _subagent_counter: int = 0
 

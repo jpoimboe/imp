@@ -131,3 +131,24 @@ def test_diagnostics_holds_warnings_and_thinkings() -> None:
     d = Diagnostics(block_warnings=("w1",), thinkings=("t1", "t2"))
     assert d.block_warnings == ("w1",)
     assert d.thinkings == ("t1", "t2")
+
+
+def test_agent_invocation_resolved_roles_defaults_none():
+    from pathlib import Path
+
+    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+    a = AgentDef(
+        name="x", description="", tools=frozenset(), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error")),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    inv = AgentInvocation(
+        agent_def=a, provider_name="p", model_name="m", system_prompt="",
+        initial_messages=(), change_context=ChangeContext(1, Path("."), Path(".")),
+        interactive=False, transcript_dir=Path("."), fs_permissions=(),
+        events_path=Path("e.jsonl"))
+    assert inv.resolved_roles is None
