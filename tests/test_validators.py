@@ -1,449 +1,347 @@
+"""Validator tests — new unified-step-model surface."""
+from __future__ import annotations
+
+import textwrap
 from pathlib import Path
 
 import pytest
 
-from imp.engine.errors import LoadErrors
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.loader import load_workflow
 
 
-def _make_workflow(
-    tmp: Path,
-    agents: dict[str, str] | None = None,
-    workflow_yaml: str = "",
-) -> Path:
-    """Write a workflow dir; `agents` maps filename → frontmatter+body."""
-    wf_dir = tmp / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
-    for fname, content in (agents or {}).items():
-        (wf_dir / "agents" / fname).write_text(content)
-    (wf_dir / "workflow.yaml").write_text(workflow_yaml)
-    return wf_dir
+def _wf(tmp_path: Path, body: str, agents: dict[str, str] | None = None) -> Path:
+    wf = tmp_path / "wf"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(textwrap.dedent(body))
+    for stem, b in (agents or {}).items():
+        (wf / "agents" / f"{stem}.md").write_text(textwrap.dedent(b))
+    return wf
 
 
-_OK_AGENT = (
-    "---\n"
-    "name: stub\n"
-    "tools: [complete_step]\n"
-    "output:\n"
-    "  status: {type: enum, values: [Success, Error]}\n"
-    "---\nprompt body\n"
-)
+# ── Reusable agent frontmatter snippets ──────────────────────────────────────
+
+_OK_AGENT = """\
+---
+name: stub
+tools: [complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
+_WRITE_FILE_AGENT = """\
+---
+name: writer
+tools: [write_file, complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
+_READ_ONLY_AGENT = """\
+---
+name: reader
+tools: [read_file, complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
 
 
-def test_v1_step_file_missing(tmp_path: Path) -> None:
-    wf = _make_workflow(
-        tmp_path,
-        agents={},  # no agents
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps:\n    - {name: s, file: agents/missing.md}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+# ── new cases from spec (Step 1) ─────────────────────────────────────────────
+
+
+def test_goto_unknown_target_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: only
+            steps:
+              - name: b
+                rules:
+                  - {else: true, goto: nowhere}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf)
-    assert any("agent file not found" in str(e) for e in ei.value.errors)
+
+
+def test_step_name_collides_with_phase_name_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: review
+            steps:
+              - name: review
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+def test_duplicate_step_name_across_phases_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - {name: dup, rules: [{else: true, continue: true}]}
+          - name: b
+            steps:
+              - {name: dup, rules: [{else: true, continue: true}]}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+def test_rules_without_else_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        vars: {x: {type: bool, default: false}}
+        phases:
+          - name: only
+            steps:
+              - name: b
+                rules:
+                  - {if: x, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+def test_non_trailing_empty_phase_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps: []
+          - name: b
+            steps:
+              - {name: s, rules: [{else: true, continue: true}]}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+def test_inline_prompt_agent_is_rejected_this_milestone(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: only
+            steps:
+              - name: a
+                prompt: "do the thing"
+                rules:
+                  - {else: true, continue: true}
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)
+
+
+# ── goto valid target resolves to phase or step name ─────────────────────────
+
+
+def test_goto_phase_target_is_valid(tmp_path: Path) -> None:
+    """goto: <phase-name> is valid in the shared namespace."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: loop
+            steps:
+              - name: b
+                rules:
+                  - {else: true, goto: loop}
+        """)
+    load_workflow(wf)  # must not raise
+
+
+def test_goto_step_target_is_valid(tmp_path: Path) -> None:
+    """goto: <step-name> is valid in the shared namespace."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: first
+                rules:
+                  - {else: true, continue: true}
+              - name: second
+                rules:
+                  - {else: true, goto: first}
+        """)
+    load_workflow(wf)  # must not raise
+
+
+# ── _v_status_enum_present ────────────────────────────────────────────────────
 
 
 def test_v2_status_missing(tmp_path: Path) -> None:
-    bad = (
-        "---\nname: bad\ntools: [complete_step]\n"
-        "output:\n  summary: {type: string}\n"  # no 'status' field
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"bad.md": bad},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps:\n    - {name: s, file: agents/bad.md}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+    bad_agent = """\
+        ---
+        name: bad
+        tools: [complete_step]
+        output:
+          summary: {type: string}
+        ---
+        body
+        """
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/bad.md
+        """, agents={"bad": textwrap.dedent(bad_agent)})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any("must declare 'status' as enum" in str(e) for e in ei.value.errors)
 
 
-def test_v4_decide_when_unknown_field(tmp_path: Path) -> None:
-    agent_md = (
-        "---\nname: reviewer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    stub_md = (
-        "---\nname: stub\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"reviewer.md": agent_md, "stub.md": stub_md},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps: [{name: s, file: agents/stub.md}]\n"
-            "  gates:\n"
-            "    - type: agent\n"
-            "      file: agents/reviewer.md\n"
-            "      decide:\n"
-            "        - {when: {nonexistent: 1}, action: {kind: continue}}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+# ── _v_agent_files_exist_and_named ───────────────────────────────────────────
+
+
+def test_agent_file_missing_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/missing.md
+        """)
+    with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
-    assert any("'when.nonexistent'" in str(e) for e in ei.value.errors)
-
-
-def test_v5_goto_unknown_phase(tmp_path: Path) -> None:
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p1]\n"
-            "p1:\n"
-            "  steps: [{name: s, file: agents/stub.md}]\n"
-            "  gates:\n"
-            "    - type: human\n"
-            "      prompt: 'go'\n"
-            "      options:\n"
-            "        - {label: yes, action: {kind: goto, target: missing}}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("goto target 'missing'" in str(e) for e in ei.value.errors)
-
-
-def test_v7_human_gate_empty_options(tmp_path: Path) -> None:
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps: [{name: s, file: agents/stub.md}]\n"
-            "  gates:\n"
-            "    - {type: human, prompt: q, options: []}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("at least one option" in str(e) for e in ei.value.errors)
-
-
-def test_v8_duplicate_step_names(tmp_path: Path) -> None:
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps:\n"
-            "    - {name: s, file: agents/stub.md}\n"
-            "    - {name: s, file: agents/stub.md}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("duplicate step name" in str(e) for e in ei.value.errors)
-
-
-def test_v9_on_max_retries_is_retry(tmp_path: Path) -> None:
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "defaults:\n"
-            "  max_retries: 2\n"
-            "  on_max_retries: {kind: retry}\n"
-            "p:\n  steps: [{name: s, file: agents/stub.md}]\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("cannot itself be 'retry'" in str(e) for e in ei.value.errors)
-
-
-def test_v11_fs_permissions_bad_paths(tmp_path: Path) -> None:
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps:\n"
-            "    - name: s\n"
-            "      file: agents/stub.md\n"
-            "      fs_permissions:\n"
-            "        - {operations: [read], paths: ['../escape'], mode: allow}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("'..'" in str(e) for e in ei.value.errors)
+    assert any("agent file not found" in str(e) for e in ei.value.errors)
 
 
 def test_v14_filename_must_match_name(tmp_path: Path) -> None:
-    """agents/coder.md declaring name: not-coder → error."""
-    mismatched = (
-        "---\nname: not-coder\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"coder.md": mismatched},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps: [{name: s, file: agents/coder.md}]\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+    """agents/coder.md declaring name: not-coder raises an error."""
+    mismatched = """\
+        ---
+        name: not-coder
+        tools: [complete_step]
+        output:
+          status: {type: enum, values: [Success, Error]}
+        ---
+        body
+        """
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/coder.md
+        """, agents={"coder": textwrap.dedent(mismatched)})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any("filename stem is 'coder'" in str(e) for e in ei.value.errors)
 
 
-def test_v13_error_decide_no_else(tmp_path: Path) -> None:
-    agent_md = (
-        "---\nname: reviewer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"reviewer.md": agent_md, "stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps: [{name: s, file: agents/stub.md}]\n"
-            "  gates:\n"
-            "    - type: agent\n"
-            "      file: agents/reviewer.md\n"
-            "      decide:\n"
-            "        - {when: {status: Success}, action: {kind: continue}}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("no terminal 'else: true'" in str(e) for e in ei.value.errors)
+# ── _v_fs_permissions_paths ───────────────────────────────────────────────────
 
 
-def test_v13_decide_with_else_loads(tmp_path: Path) -> None:
-    agent_md = (
-        "---\nname: reviewer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"reviewer.md": agent_md, "stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps: [{name: s, file: agents/stub.md}]\n"
-            "  gates:\n"
-            "    - type: agent\n"
-            "      file: agents/reviewer.md\n"
-            "      decide:\n"
-            "        - {when: {status: Success}, action: {kind: continue}}\n"
-            "        - {else: true, action: {kind: pause}}\n"
-        ),
-    )
-    load_workflow(wf)  # must not raise
-
-
-def test_v1_step_gate_agent_file_missing(tmp_path: Path) -> None:
-    """AgentGate inside a step's gates should also have its file checked."""
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps:\n"
-            "    - name: s\n"
-            "      file: agents/stub.md\n"
-            "      gates:\n"
-            "        - type: agent\n"
-            "          file: agents/missing.md\n"
-            "          decide:\n"
-            "            - {else: true, action: {kind: continue}}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("agent gate file not found" in str(e) for e in ei.value.errors)
-
-
-def test_v11_step_gate_agent_fs_permissions(tmp_path: Path) -> None:
-    """AgentGate's fs_permissions inside step.gates should be validated."""
-    reviewer = (
-        "---\nname: reviewer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT, "reviewer.md": reviewer},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps:\n"
-            "    - name: s\n"
-            "      file: agents/stub.md\n"
-            "      gates:\n"
-            "        - type: agent\n"
-            "          file: agents/reviewer.md\n"
-            "          fs_permissions:\n"
-            "            - {operations: [read], paths: ['../escape'], mode: allow}\n"
-            "          decide:\n"
-            "            - {else: true, action: {kind: continue}}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+def test_v11_fs_permissions_bad_paths(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/stub.md
+                fs_permissions:
+                  - {operations: [read], paths: ['../escape'], mode: allow}
+        """, agents={"stub": _OK_AGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any("'..'" in str(e) for e in ei.value.errors)
 
 
 def test_v11_dotted_filename_allowed(tmp_path: Path) -> None:
-    """Paths with '..' inside a filename (not as a path component) should not be flagged."""
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps:\n"
-            "    - name: s\n"
-            "      file: agents/stub.md\n"
-            "      fs_permissions:\n"
-            "        - {operations: [read], paths: ['/var/log/app..log'], mode: allow}\n"
-        ),
-    )
-    load_workflow(wf)  # no raise
+    """Paths with '..' inside a filename component should NOT be flagged."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/stub.md
+                fs_permissions:
+                  - {operations: [read], paths: ['/var/log/app..log'], mode: allow}
+        """, agents={"stub": _OK_AGENT})
+    load_workflow(wf)  # must not raise
 
 
-def test_v12_step_gate_agent_model_role_unconfigured(tmp_path: Path) -> None:
-    reviewer = (
-        "---\nname: reviewer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT, "reviewer.md": reviewer},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps:\n"
-            "    - name: s\n"
-            "      file: agents/stub.md\n"
-            "      gates:\n"
-            "        - type: agent\n"
-            "          file: agents/reviewer.md\n"
-            "          model_role: missing-role\n"
-            "          decide:\n"
-            "            - {else: true, action: {kind: continue}}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf, configured_roles=frozenset({"default"}))
-    assert any("'missing-role'" in str(e) for e in ei.value.errors)
-
-
-def test_v14_step_gate_agent_name_mismatch(tmp_path: Path) -> None:
-    """An agent gate in a step referencing a misnamed agent file should fire V14."""
-    mismatched = (
-        "---\nname: not-reviewer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT, "reviewer.md": mismatched},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n  steps:\n"
-            "    - name: s\n"
-            "      file: agents/stub.md\n"
-            "      gates:\n"
-            "        - type: agent\n"
-            "          file: agents/reviewer.md\n"
-            "          decide:\n"
-            "            - {else: true, action: {kind: continue}}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
-        load_workflow(wf)
-    assert any("filename stem is 'reviewer'" in str(e) for e in ei.value.errors)
+# ── _v_model_role_configured ──────────────────────────────────────────────────
 
 
 def test_v12_model_role_unconfigured(tmp_path: Path) -> None:
-    """When configured_roles is supplied, V12 flags references to unconfigured roles."""
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps:\n"
-            "    - {name: s, file: agents/stub.md, model_role: missing-role}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+    """When configured_roles is supplied, an unconfigured role is an error."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/stub.md
+                model_role: missing-role
+        """, agents={"stub": _OK_AGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf, configured_roles=frozenset({"default"}))
     assert any("'missing-role'" in str(e) for e in ei.value.errors)
 
 
-# ── V15: write_tool_needs_write_permission ─────────────────────────────────
-
-_WRITE_FILE_AGENT = (
-    "---\n"
-    "name: writer\n"
-    "tools: [write_file, complete_step]\n"
-    "output:\n"
-    "  status: {type: enum, values: [Success, Error]}\n"
-    "---\nprompt body\n"
-)
-
-_READ_ONLY_AGENT = (
-    "---\n"
-    "name: reader\n"
-    "tools: [read_file, complete_step]\n"
-    "output:\n"
-    "  status: {type: enum, values: [Success, Error]}\n"
-    "---\nprompt body\n"
-)
+# ── _v_write_tool_needs_write_permission ──────────────────────────────────────
 
 
 def test_v15_pass_write_file_with_write_permission(tmp_path: Path) -> None:
-    """A step declaring write_file AND an allow-write fs_permissions rule → no error."""
-    wf = _make_workflow(
-        tmp_path,
-        agents={"writer.md": _WRITE_FILE_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps:\n"
-            "    - name: s\n"
-            "      file: agents/writer.md\n"
-            "      fs_permissions:\n"
-            "        - {operations: [read], paths: ['/artifacts/**'], mode: allow}\n"
-            "        - {operations: [write], paths: ['/artifacts/**'], mode: allow}\n"
-        ),
-    )
+    """A step declaring write_file AND an allow-write fs_permissions rule -> no error."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/writer.md
+                fs_permissions:
+                  - {operations: [read], paths: ['/artifacts/**'], mode: allow}
+                  - {operations: [write], paths: ['/artifacts/**'], mode: allow}
+        """, agents={"writer": _WRITE_FILE_AGENT})
     load_workflow(wf)  # must not raise
 
 
 def test_v15_fail_write_file_no_fs_permissions(tmp_path: Path) -> None:
-    """Bug 2 shape: agent has write_file but step has NO fs_permissions → error."""
-    wf = _make_workflow(
-        tmp_path,
-        agents={"writer.md": _WRITE_FILE_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps:\n"
-            "    - {name: s, file: agents/writer.md}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+    """Agent has write_file but step has NO fs_permissions -> error."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/writer.md
+        """, agents={"writer": _WRITE_FILE_AGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any(
         "write_file" in str(e) and "no fs_permissions" in str(e)
@@ -452,21 +350,19 @@ def test_v15_fail_write_file_no_fs_permissions(tmp_path: Path) -> None:
 
 
 def test_v15_fail_write_file_only_read_permission(tmp_path: Path) -> None:
-    """Agent has write_file but fs_permissions only allows read → error."""
-    wf = _make_workflow(
-        tmp_path,
-        agents={"writer.md": _WRITE_FILE_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps:\n"
-            "    - name: s\n"
-            "      file: agents/writer.md\n"
-            "      fs_permissions:\n"
-            "        - {operations: [read], paths: ['/artifacts/**'], mode: allow}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+    """Agent has write_file but fs_permissions only allows read -> error."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/writer.md
+                fs_permissions:
+                  - {operations: [read], paths: ['/artifacts/**'], mode: allow}
+        """, agents={"writer": _WRITE_FILE_AGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any(
         "write_file" in str(e) and "no fs_permissions" in str(e)
@@ -475,47 +371,45 @@ def test_v15_fail_write_file_only_read_permission(tmp_path: Path) -> None:
 
 
 def test_v15_pass_no_write_file_tool_empty_permissions(tmp_path: Path) -> None:
-    """A step that does NOT declare write_file → no error even with empty fs_permissions."""
-    wf = _make_workflow(
-        tmp_path,
-        agents={"reader.md": _READ_ONLY_AGENT},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps:\n"
-            "    - {name: s, file: agents/reader.md}\n"
-        ),
-    )
+    """A step that does NOT declare write_file -> no error even with empty fs_permissions."""
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/reader.md
+        """, agents={"reader": _READ_ONLY_AGENT})
     load_workflow(wf)  # must not raise
 
 
-def test_v15_fail_agent_gate_write_file_no_permission(tmp_path: Path) -> None:
-    """An AgentGate with write_file but no write fs_permissions triggers the same error."""
-    gate_agent = (
-        "---\n"
-        "name: gate-writer\n"
-        "tools: [write_file, complete_step]\n"
-        "output:\n"
-        "  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n"
-    )
-    wf = _make_workflow(
-        tmp_path,
-        agents={"stub.md": _OK_AGENT, "gate-writer.md": gate_agent},
-        workflow_yaml=(
-            "name: t\ndescription: \"\"\nphases: [p]\n"
-            "p:\n"
-            "  steps: [{name: s, file: agents/stub.md}]\n"
-            "  gates:\n"
-            "    - type: agent\n"
-            "      file: agents/gate-writer.md\n"
-            "      decide:\n"
-            "        - {else: true, action: {kind: continue}}\n"
-        ),
-    )
-    with pytest.raises(LoadErrors) as ei:
+# ── _v_required_blocks_per_kind ───────────────────────────────────────────────
+
+
+def test_script_step_without_rules_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                command: "true"
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf)
-    assert any(
-        "write_file" in str(e) and "no fs_permissions" in str(e)
-        for e in ei.value.errors
-    )
+
+
+def test_human_step_without_options_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: h
+                ask: "Proceed?"
+        """)
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf)

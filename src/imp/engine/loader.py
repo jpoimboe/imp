@@ -684,16 +684,10 @@ def load_workflow(
     )
 
     # Run validators and print warnings; raise on errors.
-    # validators.py is rewritten in task 3/6; guard against import failure until then.
-    try:
-        from imp.engine.validators import validate
-    except ImportError:
-        # validators.py still references the old model; skip until task 3 rewrites it.
-        return workflow
+    from imp.engine.validators import validate
     errors, warnings = validate(workflow, configured_roles=configured_roles)
     if errors:
         raise LoadErrors(errors=errors, warnings=warnings)
-    # success path: print warnings only when no errors
     for w in warnings:
         print(str(w), file=sys.stderr)
     return workflow
