@@ -35,6 +35,13 @@ def test_goto_default_feedback_true() -> None:
     assert Goto(target="x", feedback=False).feedback is False
 
 
+def test_goto_resume_defaults_false_and_affects_equality() -> None:
+    assert Goto(target="x").resume is False
+    assert Goto(target="x", resume=True).resume is True
+    # resume participates in value equality (frozen dataclass)
+    assert Goto(target="x") != Goto(target="x", resume=True)
+
+
 def test_rule_is_else_when_condition_none() -> None:
     r = Rule(condition=None, action=Continue(), mutations=(), source=loc())
     assert r.is_else is True

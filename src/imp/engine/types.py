@@ -48,6 +48,7 @@ class Pause(Action):
 class Goto(Action):
     target: str
     feedback: bool = True       # feedback: false suppresses the wrapper on this edge
+    resume: bool = False        # set by the `resume:` verb; continues the target's transcript
 
 
 # ── Mutations & rules ─────────────────────────────────────────────────────────
