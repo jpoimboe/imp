@@ -34,6 +34,7 @@ from imp.engine.expr import (
 from imp.engine.expr import (
     parse as parse_expr,
 )
+from imp.engine.model_rules import find_constraint_cycle, parse_role_constraints
 from imp.engine.schema import parse_output_schema
 from imp.engine.types import (
     Action,
@@ -112,6 +113,9 @@ def parse_agent_file(path: Path) -> AgentDef:
             source,
         )
 
+    mr_raw = fm.get("model_role")
+    model_role = str(mr_raw) if mr_raw is not None else None
+
     return AgentDef(
         name=str(fm["name"]),
         description=str(fm.get("description", "")),
@@ -122,6 +126,7 @@ def parse_agent_file(path: Path) -> AgentDef:
         source_path=path,
         source=source,
         max_tool_calls=mtc_raw,
+        model_role=model_role,
     )
 
 
@@ -659,6 +664,17 @@ def load_workflow(
         )
         phase_objs.append(Phase(name=pname, steps=steps, source=psrc))
 
+    model_rules = parse_role_constraints(raw.get("model_rules"), yaml_path)
+    # Best-effort workflow-only cycle pre-check for a fast authoring error. The
+    # authoritative check is in resolve_roles, on the workflow+config MERGED
+    # graph (config may add an edge this pre-check can't see).
+    wf_cycle = find_constraint_cycle(model_rules)
+    if wf_cycle is not None:
+        raise LoadError(
+            "model_rules constraint cycle: " + " -> ".join(wf_cycle),
+            root_source,
+        )
+
     workflow = Workflow(
         name=str(raw.get("name", workflow_dir.name)),
         description=str(raw.get("description", "")),
@@ -668,6 +684,7 @@ def load_workflow(
         agents=agents,
         workflow_dir=workflow_dir,
         source=root_source,
+        model_rules=model_rules,
     )
 
     # Run validators and print warnings; raise on errors.

@@ -560,3 +560,59 @@ def test_resume_and_goto_are_mutually_exclusive(tmp_path: Path) -> None:
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert "resume" in str(ei.value)
+
+
+def test_parse_agent_file_model_role_absent_is_none(tmp_path):
+    from imp.engine.loader import parse_agent_file
+    p = tmp_path / "x.md"
+    p.write_text(
+        "---\nname: x\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    agent = parse_agent_file(p)
+    assert agent.model_role is None
+
+
+def test_parse_agent_file_model_role_present(tmp_path):
+    from imp.engine.loader import parse_agent_file
+    p = tmp_path / "x.md"
+    p.write_text(
+        "---\nname: x\nmodel_role: code_review\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    agent = parse_agent_file(p)
+    assert agent.model_role == "code_review"
+
+
+def test_load_workflow_parses_model_rules(tmp_path):
+    from imp.engine.loader import load_workflow
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "agents" / "a.md").write_text(
+        "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "model_rules:\n  code_review:\n    differ_provider_from: code\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/a.md, model_role: code}\n")
+    wf = load_workflow(wf_dir)
+    assert wf.model_rules["code_review"].differ_provider_from == "code"
+
+
+def test_load_workflow_rejects_constraint_cycle(tmp_path):
+    from imp.engine.errors import LoadError, LoadErrors
+    from imp.engine.loader import load_workflow
+    wf_dir = tmp_path / "wf"
+    (wf_dir / "agents").mkdir(parents=True)
+    (wf_dir / "agents" / "a.md").write_text(
+        "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
+        "---\nbody\n")
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "model_rules:\n"
+        "  x:\n    differ_provider_from: y\n"
+        "  y:\n    differ_provider_from: x\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/a.md}\n")
+    with pytest.raises((LoadError, LoadErrors), match="cycle"):
+        load_workflow(wf_dir)
