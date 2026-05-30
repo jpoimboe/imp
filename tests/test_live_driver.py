@@ -157,3 +157,111 @@ def test_header_emitted_on_change_created() -> None:
     drv, out = _driver()
     drv.on_event(ev("1", "change_created", change_id=7, title="add auth"))
     assert _body(out)[0] == "#7  add auth"
+
+
+from imp.cli.render_text import render_tree as _rt_full  # noqa: E402
+
+
+def test_ask_user_emitted_before_input_callback_and_once() -> None:
+    """The question must be visible when the prompt blocks. We model the engine's
+    synchronous append-before-block: feeding the ask_user tool_call to on_event
+    must emit the question block immediately, before any answer arrives."""
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+    ]:
+        drv.on_event(e)
+    before = "\n".join(_body(out))
+    assert "Which port?" not in before
+    drv.on_event(ev("4", "tool_call", agent_id="a", id="q1", name="ask_user",
+                    input={"question": "Which port?"}))
+    after = _body(out)
+    q_lines = [ln for ln in after if "Which port?" in ln]
+    assert len(q_lines) == 1                      # emitted exactly once, on append
+    # The answer arrives later and must NOT be re-rendered as a node line live.
+    drv.on_event(ev("5", "tool_result", agent_id="a", id="q1", content="8080"))
+    assert not any("> 8080" in ln for ln in _body(out))
+
+
+def test_human_gate_header_only_live_full_in_log() -> None:
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("4", "human_gate_pending", agent_id="a", prompt="Approve plan?",
+           options=[{"label": "yes"}, {"label": "no"}]),
+        ev("5", "gate_evaluated", agent_id="a", kind="human",
+           action={"kind": "continue"}),
+        ev("6", "step_completed", step="spec", action="continue"),
+        ev("7", "phase_completed", phase="design"),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    # The pending state must NEVER appear; the resolved header must.
+    assert not any("pending" in ln for ln in body)
+    assert any("human gate → continue" in ln for ln in body)
+    # Live trims the prompt/options recap...
+    assert not any("Approve plan?" in ln for ln in body)
+    # ...but imp log keeps the full node.
+    log_body = list(_rt_full(nv.build_tree(events), full=False, color=False, width=80))
+    assert any("Approve plan?" in ln for ln in log_body)
+
+
+def test_human_gate_blocks_following_nodes_until_resolved() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("4", "human_gate_pending", agent_id="a", prompt="ok?", options=[]),
+        ev("5", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "after gate"}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    # Gate unresolved -> nothing after it (including the prose) is emitted yet.
+    assert not any("after gate" in ln for ln in _body(out))
+    assert not any("human gate" in ln for ln in _body(out))
+    drv.on_event(ev("6", "gate_evaluated", agent_id="a", kind="human",
+                    action={"kind": "continue"}))
+    body = _body(out)
+    gate_i = next(i for i, ln in enumerate(body) if "human gate → continue" in ln)
+    prose_i = next(i for i, ln in enumerate(body) if "after gate" in ln)
+    assert gate_i < prose_i                       # tree order preserved
+
+
+def test_agent_gate_children_render_at_depth_three() -> None:
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("4", "step_started", agent_id="a", kind="agent_gate", gate_stem="review"),
+        ev("5", "gate_evaluated", agent_id="a", kind="agent",
+           action={"kind": "continue"}),
+        ev("6", "step_completed", step="spec", action="continue"),
+        ev("7", "phase_completed", phase="design"),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert _body(out) == _render_body(events)     # depth 3 outcome matches imp log
+
+
+def test_finish_flushes_open_burst_at_pause() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "phase_started", phase="design"),
+        ev("3", "step_started", step="spec", model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="b1", name="read_file", input={"p": "1"}),
+        ev("5", "tool_result", agent_id="a", id="b1", content="ok"),
+    ]:
+        drv.on_event(e)
+    assert not any("tools ·" in ln for ln in _body(out))   # still open
+    drv.finish()
+    assert any("1 tools" in ln for ln in _body(out))       # flushed on finish
