@@ -120,3 +120,28 @@ def test_fresh_guard_does_not_trip_on_first_turn() -> None:
     # fresh per run() — so a fresh guard's first observe is always None.
     assert LoopGuard().observe(_err_turn("first turn after resume")) is None
     assert LoopGuard().observe(_text_turn("resumed prose")) is None
+
+
+def test_new_errored_write_id_is_progress_then_same_id_is_not() -> None:
+    # A write-class tool whose RESULT errored still counts as progress the first
+    # time its tool_use_id is seen (a fresh write attempt is forward motion).
+    # The SAME id on later turns is no longer progress, so no_progress then
+    # accumulates normally.
+    g = LoopGuard()
+    errored_write = TurnRecord(
+        assistant_text="", has_complete_step=False,
+        tools=[ToolOutcome(name="write_file", tool_use_id="w1",
+                           input={"path": "a.py"}, is_error=True)])
+    # First sighting of id "w1": progress -> None, and it should reset/keep the
+    # no_progress counter from tripping.
+    assert g.observe(errored_write) is None
+    # The same errored write id repeated should NOT be treated as progress, so
+    # after enough repeats a detector trips.  The signature is constant (failed
+    # tool, same name+input), so repeated_failure (K=3) trips before
+    # no_progress (N=6): turns 2/3/4 accumulate repeat_count 1/2/3 and the
+    # 4th observe (3rd non-progress) returns repeated_failure.
+    last = None
+    for _ in range(DEFAULT_NOPROGRESS_N + 1):
+        last = g.observe(errored_write)
+    assert last is not None
+    assert getattr(last, "kind", "") == "repeated_failure"
