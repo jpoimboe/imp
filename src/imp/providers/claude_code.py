@@ -574,7 +574,7 @@ class ClaudeCodeAgentRunner:
         self.model = model_name
         self._client_factory = client_factory
         self._user_input_fn = user_input_fn
-        self._client: Any = None
+        self._last_no_result_diag: dict[str, Any] = {}
         self._cancel = False
         self._ctx: ToolContext | None = None
 
@@ -776,7 +776,6 @@ class ClaudeCodeAgentRunner:
 
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
-            self._client = client
             await client.query(_stream_history(messages))
 
             async for sdk_msg in client.receive_response():
@@ -966,13 +965,18 @@ class ClaudeCodeAgentRunner:
                     }}
                     return
 
-        # Fell out of the receive loop without seeing a ResultMessage. Enrich
-        # with subprocess diagnostics so a real SDK crash is distinguishable
-        # from a benign EOF. Classification stays `network` (retryable).
-        # self._client was captured at `async with client_ctx as client:` entry
-        # (before __aexit__/disconnect clears _transport); _subprocess_diag
-        # probes best-effort and returns {} when nothing is found.
-        diag = _subprocess_diag(self._client)
+            # receive_response() exhausted without a ResultMessage. Capture
+            # subprocess diagnostics here, while the transport is still live
+            # (before __aexit__ runs disconnect() and nulls _transport).
+            # Against today's SDK SubprocessCLITransport does not expose
+            # returncode/stderr_tail, so this returns {}; the capture is
+            # forward-compatible for when the SDK adds those attributes.
+            self._last_no_result_diag = _subprocess_diag(client)
+
+        # Fell out of the async-with block without yielding a ResultMessage.
+        # Use the diagnostics captured inside the block (transport was live).
+        # Classification stays `network` (retryable).
+        diag = self._last_no_result_diag
         message = "SDK closed without yielding a ResultMessage"
         if diag:
             message = f"{message} (exit={diag.get('exit')})"
