@@ -621,6 +621,89 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
 
 
 @pytest.mark.anyio
+async def test_interactive_end_of_turn_emits_awaiting_user_input(
+    tmp_path: Path,
+) -> None:
+    """An interactive agent that ends its turn without complete_step is asking
+    the user. The executor emits `awaiting_user_input` (carrying the question)
+    immediately BEFORE blocking on user_chat_input_fn — this is the signal
+    out-of-process drivers key on, since provider-native stop_reason is
+    unreliable (claude_code logs None on every per-block AssistantMessage)."""
+    import inspect as _inspect
+
+    from imp.providers import resolve
+
+    wf = tmp_path / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "asker.md").write_text(
+        "---\nname: asker\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "ask\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\nphases: [a]\n"
+        "defaults: {max_retries: 1, on_max_retries: {kind: pause}}\n"
+        "a:\n  steps:\n    - {name: w, file: agents/asker.md, "
+        "model_role: default, interactive: true}\n"
+    )
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+    )
+    change = Change.create(tmp_path, title="t")
+
+    events: list[dict] = []
+
+    class _AskRunner:
+        def __init__(self, inv: AgentInvocation) -> None:
+            self._inv = inv
+
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            # Simulate the agent ending its turn with a question (no
+            # complete_step). Real providers call continuation_fn here.
+            reply = invocation.continuation_fn("What outcome do you want?")
+            if _inspect.isawaitable(reply):
+                reply = await reply
+            assert reply == "sure, go ahead"
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _AskProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _AskRunner:
+            return _AskRunner(invocation)
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _AskProvider(model),
+    )
+
+    def _chat(_q: str) -> str:
+        # The awaiting marker MUST already be in the stream by the time the
+        # engine reads input — proves emit-before-block ordering.
+        assert any(e.get("type") == "awaiting_user_input" for e in events), (
+            "awaiting_user_input must be emitted before user_chat_input_fn reads"
+        )
+        return "sure, go ahead"
+
+    result = await run_change(
+        change,
+        on_event=lambda e: events.append(e),
+        user_chat_input_fn=_chat,
+    )
+    assert result is RunResult.COMPLETED
+
+    awaiting = [e for e in events if e.get("type") == "awaiting_user_input"]
+    assert len(awaiting) == 1, [e.get("type") for e in events]
+    assert awaiting[0]["payload"]["prompt"] == "What outcome do you want?"
+
+
+@pytest.mark.anyio
 async def test_agent_incomplete_error_pauses(tmp_path: Path) -> None:
     """A runner that emits an agent_incomplete error makes the step Pause
     (fatal), not retry."""

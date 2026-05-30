@@ -462,8 +462,19 @@ def _h_gate_evaluated(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     self._append(GateNode(kind=kind, action=action, context=p.get("context")))
 
 
+def _h_awaiting_user_input(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any],
+) -> None:
+    # Programmatic marker that the engine is blocking for an interactive
+    # end-of-turn reply. The question already rendered as agent text and the
+    # reply renders as the next user_message, so render nothing here — this
+    # exists for out-of-process drivers, not the human narrative.
+    return None
+
+
 NarrativeBuilder._HANDLERS["human_gate_pending"] = _h_human_gate_pending
 NarrativeBuilder._HANDLERS["gate_evaluated"] = _h_gate_evaluated
+NarrativeBuilder._HANDLERS["awaiting_user_input"] = _h_awaiting_user_input
 
 
 def _user_message_text(payload: dict[str, Any]) -> str:

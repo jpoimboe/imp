@@ -243,6 +243,8 @@ def _build_continuation_fn(
     interactive: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     instruction: str,
+    log: EventLog,
+    agent_id: str | None,
 ) -> Callable[[str], str | None | Awaitable[str | None]] | None:
     """Build the end-of-turn continuation hook the provider calls when an
     agent ends a turn without complete_step.
@@ -259,7 +261,14 @@ def _build_continuation_fn(
         if user_chat_input_fn is None:
             return None
 
-        def _interactive(_last_text: str) -> str | Awaitable[str]:
+        def _interactive(last_text: str) -> str | Awaitable[str]:
+            # The agent ended its turn without complete_step → it is asking the
+            # user. Announce the block (mirrors human_gate_pending) BEFORE we
+            # read input, so out-of-process drivers know input is awaited.
+            # Provider-native stop_reason can't carry this — claude_code streams
+            # per-block AssistantMessages and logs stop_reason=None on each.
+            _emit(log, "awaiting_user_input", {"prompt": last_text},
+                  agent_id=agent_id)
             return user_chat_input_fn("")
 
         return _interactive
@@ -339,6 +348,8 @@ async def _run_agent_invocation(
         interactive=interactive,
         user_chat_input_fn=user_chat_input_fn,
         instruction=instruction,
+        log=log,
+        agent_id=agent_id,
     )
 
     # Resolve subagents into their AgentDefs
