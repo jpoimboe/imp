@@ -4,9 +4,9 @@ its rules block is evaluated, and the resulting Action moves (or terminates)
 the cursor.
 
 The engine owns state.json + events.jsonl. The runner owns transcript.jsonl.
-A context: fresh agent step wipes its transcript dir on entry; a context: resume
-step keeps it and balances a trailing complete_step. The whole steps/ tree is
-removed at change completion.
+An agent step entered fresh (no resume marker) wipes its transcript dir on
+entry; a step entered via a `resume:` edge keeps it and balances a trailing
+complete_step. The whole steps/ tree is removed at change completion.
 """
 
 from __future__ import annotations
@@ -255,10 +255,9 @@ async def _route_agent(
     agent_def = workflow.agents[step.file.stem]
     transcript_dir = change.change_dir / "steps" / step.phase / step.name
 
-    # Coexistence (Task 6): honor BOTH the navigation-time is_resume marker and
-    # the legacy static step.context flag. step.context is deleted in Task 7,
-    # after which keep == is_resume alone.
-    keep = is_resume or step.context == "resume"
+    # Navigation-driven: keep the transcript only when this entry was reached
+    # via a `resume:` edge (the resume_pending marker == this step).
+    keep = is_resume
     if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)

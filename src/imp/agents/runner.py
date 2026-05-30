@@ -110,9 +110,9 @@ class AgentInvocation:
     retry_feedback: str | None = None
     # When True, a resumed transcript that ends in a successful complete_step is
     # balanced with a SUCCESS-shaped tool_result (the agent's accepted work is
-    # superseded, not failed). Set by the executor for every re-entry into a
-    # context: resume step. retry_feedback (above) now means "optional wrapper
-    # text appended on that balancing user turn"; None = balance only.
+    # superseded, not failed). Set by the executor for every re-entry driven by
+    # is_resume (a `resume:` edge). retry_feedback (above) now means "optional
+    # wrapper text appended on that balancing user turn"; None = balance only.
     balance_on_resume: bool = False
 
 

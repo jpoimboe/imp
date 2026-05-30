@@ -27,12 +27,17 @@ def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:
 
 def test_bundled_workflow_loads_and_producers_resume() -> None:
     from imp.assets import default_workflow_dir
+    from imp.engine.types import Goto
     wf_dir = default_workflow_dir()
     wf = load_workflow(wf_dir)
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["spec-writer"].context == "resume"
-    assert by["plan-writer"].context == "resume"
-    assert by["coder"].context == "resume"
-    assert by["spec-reviewer"].kind == "agent"
-    assert by["spec-check"].kind == "script"      # the named former script gate
+    # producer back-edges resume their target's conversation
+    assert isinstance(by["spec-check"].rules[-1].action, Goto)
+    assert by["spec-check"].rules[-1].action.resume is True       # -> spec-writer
+    assert by["plan-check"].rules[-1].action.resume is True       # -> plan-writer
+    assert by["run-tests"].rules[-1].action.resume is True        # -> coder
+    assert by["spec-reviewer"].rules[1].action.resume is True     # rework -> spec-writer
+    # phase jumps clear (plain goto)
+    assert by["code-reviewer"].rules[1].action.resume is False    # rework -> implement
+    assert by["spec-check"].kind == "script"
     assert wf.phases[-1].name == "merge" and wf.phases[-1].steps == ()

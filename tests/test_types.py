@@ -69,7 +69,7 @@ def test_vars_helpers() -> None:
 
 def test_workflow_flat_steps_and_goto_resolution() -> None:
     planning = Phase(name="planning", source=loc(), steps=(
-        _agent("spec-writer", "planning", context="resume"),
+        _agent("spec-writer", "planning"),
         Step(name="route", phase="planning", kind="branch",
              rules=(Rule(condition=Name("review_done"), action=Goto("implement"),
                          mutations=(), source=loc()),
@@ -77,7 +77,7 @@ def test_workflow_flat_steps_and_goto_resolution() -> None:
              options=(), on_max_retries=Pause(), max_loops=10, source=loc()),
     ))
     implement = Phase(name="implement", source=loc(), steps=(
-        _agent("coder", "implement", context="resume"),
+        _agent("coder", "implement"),
     ))
     merge = Phase(name="merge", source=loc(), steps=())  # trailing empty
     wf = Workflow(

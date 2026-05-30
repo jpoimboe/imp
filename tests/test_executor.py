@@ -146,9 +146,9 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
 
 
 def _seed_branch_loop_workflow(root: Path) -> Change:
-    """writer(agent, context: resume) sets review_done=true; a branch step
-    continues while review_done is false, and gotos the trailing `done` phase
-    once it's true."""
+    """writer(agent); the branch loops back via resume: writer. writer sets
+    review_done=true; a branch step continues while review_done is false, and
+    gotos the trailing `done` phase once it's true."""
     wf = root / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
@@ -165,13 +165,12 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
         "      - name: writer\n"
         "        file: agents/writer.md\n"
         "        model_role: default\n"
-        "        context: resume\n"
         "        rules:\n"
         "          - {else: true, continue: true, set: {review_done: true}}\n"
         "      - name: route\n"
         "        rules:\n"
         "          - {if: 'review_done', goto: done}\n"
-        "          - {else: true, goto: writer}\n"
+        "          - {else: true, resume: writer}\n"
         "  - name: done\n"
         "    steps: []\n"
     )
@@ -774,7 +773,7 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
 
 @pytest.mark.anyio
 async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None:
-    """A reviewer agent that gotos backward (feedback: true) to a context:resume
+    """A reviewer agent that gotos backward (feedback: true) to a resume:-targeted
     coder makes the coder's NEXT invocation carry the reviewer's feedback
     string. The reviewer flips to approve on its 2nd pass so the run completes."""
     wf = tmp_path / ".imp" / "workflows" / "default"
@@ -794,12 +793,12 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
         "phases:\n"
         "  - name: impl\n"
         "    steps:\n"
-        "      - {name: coder, file: agents/coder.md, model_role: default, context: resume}\n"
+        "      - {name: coder, file: agents/coder.md, model_role: default}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
         "        model_role: default\n"
         "        rules:\n"
-        "          - {if: {verdict: Reject}, goto: coder}\n"
+        "          - {if: {verdict: Reject}, resume: coder}\n"
         "          - {else: true, continue: true}\n"
     )
     (tmp_path / ".imp" / "config.yaml").write_text(
@@ -1052,4 +1051,61 @@ async def test_resume_is_constant_across_error_retry(tmp_path: Path) -> None:
     assert result is RunResult.COMPLETED
     coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
     # entry1 fresh; entry2 + its retry (entry3) both resumed -> all keep True
+    assert coder_balances == [False, True, True]
+
+
+@pytest.mark.anyio
+async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
+    """S1: a step entered via resume: that pauses mid-run keeps resume_pending in
+    state.json, so the next run_change re-entry continues (does not wipe)."""
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    runs: list = []
+    counts = {"coder": 0, "reviewer": 0}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation):
+            runs.append((invocation.agent_id, invocation.balance_on_resume))
+            if invocation.agent_def.name == "coder":
+                counts["coder"] += 1
+                # entry 1 (fresh) ok; entry 2 (resumed) pauses fatally; entry 3
+                # (resumed re-entry after reload) ok.
+                if counts["coder"] == 2:
+                    yield {"type": "error", "payload": {
+                        "category": "agent_incomplete",
+                        "kind": "no_complete_step_after_nudges", "message": "x"}}
+                    return
+                yield {"type": "agent_output", "payload": {"status": "Success"}}
+            else:
+                counts["reviewer"] += 1
+                verdict = "rework" if counts["reviewer"] == 1 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "verdict": verdict}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    # First run: coder#1 ok -> reviewer rework -> resume:coder -> coder#2 pauses.
+    first = await run_change(change, on_event=lambda _e: None)
+    assert first is RunResult.PAUSED
+    paused = State.load(change.state_dir)
+    assert paused.step == "coder"
+    assert paused.resume_pending == "coder"      # marker survived the pause
+
+    # Second run: reloads, coder is still the resume target -> continues.
+    second = await run_change(change, on_event=lambda _e: None)
+    assert second is RunResult.COMPLETED
+    coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
+    # entry1 fresh; entry2 (paused) resumed; entry3 (post-reload) resumed
     assert coder_balances == [False, True, True]

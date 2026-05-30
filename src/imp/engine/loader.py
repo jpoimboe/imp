@@ -415,19 +415,6 @@ def _parse_on_max_retries(raw: Any, source: SourceLoc) -> Action:
     return _parse_verb(raw, source)
 
 
-# ── Context parsing ───────────────────────────────────────────────────────────
-
-
-def _parse_context(value: Any, source: SourceLoc) -> str:
-    if value is None:
-        return "fresh"
-    if value in ("fresh", "resume"):
-        return str(value)
-    raise LoadError(
-        f"context must be 'fresh' or 'resume', got {value!r}", source
-    )
-
-
 # ── Human options parsing ─────────────────────────────────────────────────────
 
 
@@ -582,7 +569,6 @@ def _parse_step(
             ),
             interactive=bool(raw.get("interactive", False)),
             max_tool_calls=raw.get("max_tool_calls"),
-            context=_parse_context(raw.get("context"), source),  # type: ignore[arg-type]
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
         )
     elif kind == "script":

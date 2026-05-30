@@ -14,7 +14,6 @@ phases:
         file: agents/spec-writer.md
         model_role: spec
         interactive: true
-        context: resume
         max_tool_calls: 10
         fs_permissions:
           - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
@@ -25,14 +24,14 @@ phases:
         command: ./scripts/check-artifact.sh spec
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, goto: spec-writer}
+          - {else: true, resume: spec-writer}
 
       - name: spec-reviewer
         file: agents/spec-reviewer.md
         model_role: spec_review
         rules:
           - {if: {verdict: approve}, continue: true}
-          - {if: {verdict: rework},  goto: spec-writer}
+          - {if: {verdict: rework},  resume: spec-writer}
           - {else: true, pause: true}
 
   - name: plan
@@ -40,7 +39,6 @@ phases:
       - name: plan-writer
         file: agents/plan-writer.md
         model_role: default
-        context: resume
         fs_permissions:
           - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
           - {operations: [write], paths: ["/artifacts/**"], mode: allow}
@@ -50,14 +48,13 @@ phases:
         command: ./scripts/check-artifact.sh plan
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, goto: plan-writer}
+          - {else: true, resume: plan-writer}
 
   - name: implement
     steps:
       - name: coder
         file: agents/coder.md
         model_role: code
-        context: resume
         fs_permissions:
           - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
           - {operations: [write], paths: ["/project/**"], mode: allow}
@@ -67,7 +64,7 @@ phases:
         command: ./scripts/run-tests.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, goto: coder}
+          - {else: true, resume: coder}
 
       - name: documenter
         file: agents/documenter.md

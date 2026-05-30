@@ -32,7 +32,6 @@ def validate(
     _v_required_blocks_per_kind(workflow, errors)
     _v_empty_phase_is_last(workflow, errors)
     _v_agent_has_file(workflow, errors)
-    _v_agent_only_fields(workflow, errors)
     _v_fs_permissions_paths(workflow, errors)
     if configured_roles is not None:
         _v_model_role_configured(workflow, configured_roles, errors)
@@ -199,13 +198,6 @@ def _v_agent_has_file(workflow: Workflow, errors: list[LoadError]) -> None:
             errors.append(LoadError(
                 f"agent step {step.name!r} uses inline prompt:, which is not "
                 "supported yet -- use file: agents/<name>.md", step.source))
-
-
-def _v_agent_only_fields(workflow: Workflow, errors: list[LoadError]) -> None:
-    for step in workflow.flat_steps():
-        if step.kind != "agent" and step.context != "fresh":
-            errors.append(LoadError(
-                f"context: is only valid on agent steps ({step.name!r})", step.source))
 
 
 def _v_fs_permissions_paths(workflow: Workflow, errors: list[LoadError]) -> None:

@@ -155,7 +155,6 @@ class AgentDef:
 # ── Steps & phases ────────────────────────────────────────────────────────────
 
 Kind = Literal["agent", "script", "human", "branch"]
-Context = Literal["fresh", "resume"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +174,6 @@ class Step:
     fs_permissions: tuple[FsRule, ...] = ()
     interactive: bool = False
     max_tool_calls: int | None = None
-    context: Context = "fresh"
     max_retries: int = 0
     # script-only
     command: str | None = None

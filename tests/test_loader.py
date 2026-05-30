@@ -200,7 +200,6 @@ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
             steps:
               - name: spec-writer
                 file: agents/spec-writer.md
-                context: resume
               - name: route
                 rules:
                   - {if: review_done, goto: implement}
@@ -209,7 +208,7 @@ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
                 file: agents/spec-reviewer.md
                 max_loops: 6
                 rules:
-                  - {if: {verdict: rework}, goto: spec-writer}
+                  - {if: {verdict: rework}, resume: spec-writer}
                   - if: {verdict: approve}
                     goto: spec-writer
                     set: {review_done: true}
@@ -227,7 +226,9 @@ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
     assert names == ["spec-writer", "route", "spec-reviewer", "coder"]
     by = {s.name: s for s in wf_obj.flat_steps()}
     assert by["spec-writer"].kind == "agent"
-    assert by["spec-writer"].context == "resume"
+    rework = by["spec-reviewer"].rules[0]
+    assert isinstance(rework.action, Goto)
+    assert rework.action.resume is True
     assert by["spec-writer"].phase == "planning"
     assert by["route"].kind == "branch"
     assert by["spec-reviewer"].kind == "agent"
