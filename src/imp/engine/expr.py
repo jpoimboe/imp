@@ -91,3 +91,74 @@ class Binary(Expr):
     op: str          # + - * /  ==  !=  <  <=  >  >=  and  or
     left: Expr
     right: Expr
+
+
+# ── tokenizer ───────────────────────────────────────────────────────────────
+
+_TWO_CHAR = {"==", "!=", "<=", ">="}
+
+
+@dataclass(frozen=True, slots=True)
+class _Tok:
+    kind: str   # INT STR NAME OP DOT LPAREN RPAREN EOF
+    value: str
+
+
+def _tokenize(text: str) -> list[_Tok]:
+    toks: list[_Tok] = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c.isspace():
+            i += 1
+            continue
+        if c in "'\"":
+            quote = c
+            j = i + 1
+            buf: list[str] = []
+            while j < n and text[j] != quote:
+                buf.append(text[j])
+                j += 1
+            if j >= n:
+                raise ExprSyntaxError(f"unterminated string literal in {text!r}")
+            toks.append(_Tok("STR", "".join(buf)))
+            i = j + 1
+            continue
+        if c.isdigit():
+            j = i
+            while j < n and text[j].isdigit():
+                j += 1
+            toks.append(_Tok("INT", text[i:j]))
+            i = j
+            continue
+        if c.isalpha() or c == "_":
+            j = i
+            while j < n and (text[j].isalnum() or text[j] == "_"):
+                j += 1
+            toks.append(_Tok("NAME", text[i:j]))
+            i = j
+            continue
+        two = text[i : i + 2]
+        if two in _TWO_CHAR:
+            toks.append(_Tok("OP", two))
+            i += 2
+            continue
+        if c == "(":
+            toks.append(_Tok("LPAREN", c))
+            i += 1
+            continue
+        if c == ")":
+            toks.append(_Tok("RPAREN", c))
+            i += 1
+            continue
+        if c == ".":
+            toks.append(_Tok("DOT", c))
+            i += 1
+            continue
+        if c in "+-*/<>":
+            toks.append(_Tok("OP", c))
+            i += 1
+            continue
+        raise ExprSyntaxError(f"unexpected character {c!r} in {text!r}")
+    toks.append(_Tok("EOF", ""))
+    return toks
