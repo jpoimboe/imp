@@ -119,11 +119,33 @@ def _ignore_for_copy(_dir: str, names: list[str]) -> set[str]:
             or n.endswith(".egg-info")}
 
 
-def _seed_dogfood_project(tmp_path: Path, provider: str) -> None:
-    """Copy imp source into tmp_path, init git, bootstrap .imp/ via run_init."""
+def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
+    """Copy imp source into tmp_path, init git, bootstrap .imp/, and create an
+    ISOLATED venv whose `imp` is the temp copy (not the editable host repo).
+
+    Returns the venv's python interpreter path. Callers MUST spawn the engine
+    (and anything that re-imports imp) under this interpreter, and must prepend
+    its bin/ to PATH so the copy's `make test` resolves python3 to it.
+    """
     shutil.copytree(PROJECT_ROOT, tmp_path, ignore=_ignore_for_copy,
                     dirs_exist_ok=True)
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+    # Bootstrap .imp/ via the real init code path with injected I/O — BEFORE the
+    # initial commit. run_init both (a) appends `.imp/` to the project
+    # .gitignore and (b) writes .imp/ working state. Running it pre-commit means
+    # the single seed commit captures the gitignore append while `.imp/`
+    # (wholesale-ignored by Fix D) contributes NOTHING to history — so the
+    # post-run "clean working tree" and "no .imp/ in history" hygiene gates
+    # (Task 14) hold on a healthy run, and commit_count stays 2 (seed + coder).
+    from imp.cli.init import run_init
+    run_init(
+        project_root=tmp_path,
+        input_fn=lambda _prompt: "",
+        output_fn=lambda _line: None,
+        picker_fn=lambda _available: [provider],
+    )
+
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(
         ["git",
@@ -132,18 +154,44 @@ def _seed_dogfood_project(tmp_path: Path, provider: str) -> None:
          "commit", "-q", "-m", "initial"],
         cwd=tmp_path, check=True,
     )
-
-    # Bootstrap .imp/ via the real init code path with injected I/O.
-    # (`imp init` has no flags — it always launches a TUI picker and
-    # prompts for env-var names. run_init accepts callbacks so callers
-    # can drive it without a TTY.)
-    from imp.cli.init import run_init
-    run_init(
-        project_root=tmp_path,
-        input_fn=lambda _prompt: "",
-        output_fn=lambda _line: None,
-        picker_fn=lambda _available: [provider],
+    # Sanity: with Fix D's wholesale `.imp/` ignore, the seed commit must not
+    # contain any .imp/ path (the no-.imp-in-history gate depends on this).
+    tracked_imp = subprocess.run(
+        ["git", "ls-files", ".imp/"],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
     )
+    assert not tracked_imp.stdout.strip(), (
+        f"seed commit tracked .imp/ paths (Fix D gitignore wrong?):\n"
+        f"{tracked_imp.stdout}"
+    )
+
+    # Isolated venv: --system-site-packages reuses host deps (fast); editable
+    # install of the COPY (--no-deps) puts the copy's src/ ahead of the host
+    # editable path-entry on THIS venv's sys.path, so only `imp` is overridden.
+    venv_dir = tmp_path / ".venv"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)],
+        check=True,
+    )
+    venv_python = venv_dir / "bin" / "python"
+    subprocess.run(
+        [str(venv_python), "-m", "pip", "install", "-e", str(tmp_path),
+         "--no-deps", "-q"],
+        check=True,
+    )
+
+    # Pre-flight: prove the venv's `imp` is the copy, not the real repo. Fail
+    # loudly BEFORE running the (expensive, live) workflow.
+    probe = subprocess.run(
+        [str(venv_python), "-c", "import imp, sys; sys.stdout.write(imp.__file__)"],
+        capture_output=True, text=True, check=True,
+    )
+    resolved = Path(probe.stdout.strip()).resolve()
+    assert str(resolved).startswith(str(tmp_path.resolve())), (
+        f"venv imp resolves to {resolved}, not under the temp copy {tmp_path}; "
+        f"import isolation failed — the host editable repo is shadowing it."
+    )
+    return venv_python
 
 
 # ── Skip predicates ────────────────────────────────────────────────────────
@@ -195,8 +243,8 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
             "claude_code opted in but `claude` CLI not on PATH"
         )
 
-    # Seed the project: copy imp source, git init, run_init.
-    _seed_dogfood_project(tmp_path, provider)
+    # Seed the project: copy imp source, git init, run_init, isolated venv.
+    venv_python = _seed_dogfood_project(tmp_path, provider)
 
     wf_yaml = tmp_path / ".imp" / "workflows" / "default" / "workflow.yaml"
     expected_gates = _walk_yaml_human_gates(wf_yaml)
@@ -244,12 +292,20 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     # claude_code: requires only `claude` on PATH; CLI handles auth via
     # the user's local subscription (keyring). No env injection.
 
+    # Make every descendant (bash tool, make, pytest) resolve python3 to the
+    # isolated venv. run-tests.sh runs `make test` BEFORE it reads IMP_PYTHON,
+    # and the copy's Makefile uses $(PYTHON) ?= python3 from PATH — so PATH is
+    # the load-bearing channel. IMP_PYTHON is set too for the non-Makefile branch.
+    venv_bin = str(venv_python.parent)
+    env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
+    env["IMP_PYTHON"] = str(venv_python)
+
     master, slave = pty.openpty()
     # imp answers gates with line input ("1\n") — the only mode now that the
     # TUI is gone. The PTY itself is still needed so the text path's
     # prompt_toolkit prompt has a TTY. Mirrors test_human_gate_pty.
     proc = subprocess.Popen(
-        [sys.executable, "-m", "imp", "new", title],
+        [str(venv_python), "-m", "imp", "new", title],
         cwd=tmp_path,
         stdin=slave,
         stdout=slave,
@@ -514,7 +570,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     # ── imp log smoke ──────────────────────────────────────────────────
 
     log_out = subprocess.run(
-        [sys.executable, "-m", "imp", "log", "1"],
+        [str(venv_python), "-m", "imp", "log", "1"],
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert log_out.returncode == 0, (
@@ -523,7 +579,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     assert log_out.stdout.strip(), "imp log produced empty stdout"
 
     log_full = subprocess.run(
-        [sys.executable, "-m", "imp", "log", "1", "--full"],
+        [str(venv_python), "-m", "imp", "log", "1", "--full"],
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert log_full.returncode == 0, (
