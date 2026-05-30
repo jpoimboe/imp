@@ -873,3 +873,183 @@ def test_action_payload_goto_carries_resume_bool() -> None:
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def _seed_back_edge_workflow(root: Path, verb: str) -> Change:
+    """coder(agent) -> reviewer(agent). reviewer rules: on rework, <verb>: coder;
+    else continue. `verb` is 'goto' or 'resume'."""
+    wf = root / ".imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "coder.md").write_text(
+        "---\nname: coder\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n")
+    (wf / "agents" / "reviewer.md").write_text(
+        "---\nname: reviewer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n"
+        "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n")
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: impl\n"
+        "    steps:\n"
+        "      - {name: coder, file: agents/coder.md, model_role: default}\n"
+        "      - name: reviewer\n"
+        "        file: agents/reviewer.md\n"
+        "        model_role: default\n"
+        "        rules:\n"
+        f"          - {{if: {{verdict: rework}}, {verb}: coder}}\n"
+        "          - {else: true, continue: true}\n")
+    (root / ".imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n")
+    return Change.create(root, title="t")
+
+
+def _register_capturing(coder_behavior, reviewer_verdicts: list[str], runs: list) -> None:
+    """Register a fake provider. `runs` collects
+    (agent_id, balance_on_resume, retry_feedback) per invocation.
+    `coder_behavior(n)` returns one of: ("output", payload) | ("incomplete", None).
+    `reviewer_verdicts` is consumed one per reviewer invocation."""
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    counts = {"coder": 0, "reviewer": 0}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation):
+            runs.append((invocation.agent_id, invocation.balance_on_resume,
+                         invocation.retry_feedback))
+            name = invocation.agent_def.name
+            if name == "coder":
+                counts["coder"] += 1
+                kind, payload = coder_behavior(counts["coder"])
+                if kind == "incomplete":
+                    yield {"type": "error", "payload": {
+                        "category": "agent_incomplete",
+                        "kind": "no_complete_step_after_nudges", "message": "x"}}
+                    return
+                yield {"type": "agent_output", "payload": payload}
+            else:
+                counts["reviewer"] += 1
+                verdict = reviewer_verdicts[counts["reviewer"] - 1]
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "verdict": verdict}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+
+@pytest.mark.anyio
+async def test_resume_edge_keeps_transcript(tmp_path: Path) -> None:
+    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    runs: list = []
+    _register_capturing(lambda _n: ("output", {"status": "Success"}),
+                        ["rework", "approve"], runs)
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    coder_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/coder")]
+    # first entry fresh, second entry (via resume:) keeps the transcript
+    assert coder_balances == [False, True]
+
+
+@pytest.mark.anyio
+async def test_goto_edge_starts_target_fresh(tmp_path: Path) -> None:
+    change = _seed_back_edge_workflow(tmp_path, verb="goto")
+    runs: list = []
+    _register_capturing(lambda _n: ("output", {"status": "Success"}),
+                        ["rework", "approve"], runs)
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    coder_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/coder")]
+    # both entries fresh: a plain goto never resumes
+    assert coder_balances == [False, False]
+
+
+@pytest.mark.anyio
+async def test_resume_marker_is_one_shot(tmp_path: Path) -> None:
+    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    runs: list = []
+    _register_capturing(lambda _n: ("output", {"status": "Success"}),
+                        ["rework", "approve"], runs)
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    # The reviewer that runs AFTER the resumed coder is a fresh entry (no marker).
+    reviewer_balances = [bal for (aid, bal, _fb) in runs if aid.endswith("/reviewer")]
+    assert reviewer_balances == [False, False]
+    # Marker is cleared by completion.
+    assert State.load(change.state_dir).resume_pending is None
+
+
+@pytest.mark.anyio
+async def test_resume_forwards_feedback_to_target(tmp_path: Path) -> None:
+    """F2: a resume: edge with feedback (default true) delivers the wrapper text
+    to the resumed agent's next invocation."""
+    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    runs: list = []
+    _register_capturing(lambda _n: ("output", {"status": "Success"}),
+                        ["rework", "approve"], runs)
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
+    assert coder_feedback[0] is None                  # first entry: no feedback
+    assert coder_feedback[1] is not None              # resumed entry carries it
+    assert "reviewer" in coder_feedback[1]
+
+
+@pytest.mark.anyio
+async def test_resume_is_constant_across_error_retry(tmp_path: Path) -> None:
+    """F1: a resumed coder that errors once then succeeds keeps balance_on_resume
+    True on both attempts of the resumed entry (the threaded is_resume param is
+    constant across the error recursion; the marker is never read in _route_agent)."""
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    runs: list = []
+    counts = {"coder": 0, "reviewer": 0}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation):
+            runs.append((invocation.agent_id, invocation.balance_on_resume))
+            if invocation.agent_def.name == "coder":
+                counts["coder"] += 1
+                # entry 1 (fresh) ok; entry 2 (resumed) errors once (missing
+                # output -> RetryNow), entry 3 (retry of resumed) ok.
+                if counts["coder"] == 2:
+                    yield {"type": "error", "payload": {
+                        "category": "agent_output_missing",
+                        "kind": "missing", "message": "x"}}
+                    return
+                yield {"type": "agent_output", "payload": {"status": "Success"}}
+            else:
+                counts["reviewer"] += 1
+                verdict = "rework" if counts["reviewer"] == 1 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "verdict": verdict}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
+    # entry1 fresh; entry2 + its retry (entry3) both resumed -> all keep True
+    assert coder_balances == [False, True, True]

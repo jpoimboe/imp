@@ -93,12 +93,13 @@ async def run_change(
             return _complete(change, state, log)            # terminal
         idx = index_of[state.step]
         step = flat[idx]
+        is_resume = (state.resume_pending == state.step)
 
         # var_mutations was ALREADY applied to state.vars and logged inside the
         # _route_* body — run_change receives it for visibility only and must NOT
         # re-apply it (double-apply trap). The third element is otherwise unused.
         action, feedback_text, _var_mutations = await _dispatch_step(
-            step, workflow, config, change, state, log,
+            step, workflow, config, change, state, log, is_resume=is_resume,
             human_input_fn=human_input_fn, human_output_fn=human_output_fn,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator)
 
@@ -117,6 +118,7 @@ async def run_change(
             if nxt >= len(flat):
                 return _complete(change, state, log)
             state.step = flat[nxt].name
+            state.resume_pending = None
         elif isinstance(action, Goto):
             target_idx = workflow.resolve_goto(action.target)
             if target_idx >= len(flat):                      # empty trailing phase
@@ -133,6 +135,7 @@ async def run_change(
             else:
                 state.loop_counts.pop(step.name, None)       # forward goto resets
             state.step = flat[target_idx].name
+            state.resume_pending = flat[target_idx].name if action.resume else None
         else:
             raise AssertionError(f"unexpected action {action!r}")
 
@@ -154,7 +157,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
 
 async def _dispatch_step(
     step: Step, workflow: Workflow, config: Config, change: Change,
-    state: State, log: EventLog, *,
+    state: State, log: EventLog, *, is_resume: bool,
     human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
@@ -176,7 +179,7 @@ async def _dispatch_step(
     return await _route_agent(
         step, workflow, config, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
-        wrapper_text=wrapper_text)
+        wrapper_text=wrapper_text, is_resume=is_resume)
 
 
 def _emit_started(log: EventLog, step: Step, **extra: Any) -> dict[str, Any]:
@@ -244,7 +247,7 @@ async def _route_agent(
     step: Step, workflow: Workflow, config: Config, change: Change,
     state: State, log: EventLog, *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
-    coordinator: Any, wrapper_text: str | None,
+    coordinator: Any, wrapper_text: str | None, is_resume: bool,
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
@@ -252,13 +255,17 @@ async def _route_agent(
     agent_def = workflow.agents[step.file.stem]
     transcript_dir = change.change_dir / "steps" / step.phase / step.name
 
-    if step.context == "fresh":
+    # Coexistence (Task 6): honor BOTH the navigation-time is_resume marker and
+    # the legacy static step.context flag. step.context is deleted in Task 7,
+    # after which keep == is_resume alone.
+    keep = is_resume or step.context == "resume"
+    if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = False
         opening = wrapper_text or "begin"                  # fresh-seed via initial_messages
         retry_wrapper: str | None = None
-    else:  # resume — keep the transcript, balance a trailing complete_step
+    else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = True
         opening = "begin"
@@ -310,7 +317,8 @@ async def _route_agent(
             return step.on_max_retries, None, {}     # Pause (validator forbids Retry here)
         return await _route_agent(step, workflow, config, change, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
-                                  coordinator=coordinator, wrapper_text=wrapper_text)
+                                  coordinator=coordinator, wrapper_text=wrapper_text,
+                                  is_resume=is_resume)
 
     state.step_attempt = 0
     match = evaluate_rules(step.rules, vars=state.vars, output=agent_output)
