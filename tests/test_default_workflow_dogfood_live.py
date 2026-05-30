@@ -285,7 +285,9 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"print({sentinel!r}, file=sys.stderr). Add `import sys` at the "
         f"top of the file if not already imported. Do not refactor the "
         f"function, do not move the print into a helper, do not change "
-        f"anything else."
+        f"anything else. Land ALL of these edits (the import and the print) "
+        f"in a SINGLE atomic git commit — do not split them across multiple "
+        f"commits."
     )
 
     env = dict(os.environ)
@@ -615,18 +617,16 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"engine state committed to history (should be gitignored): {imp_paths}"
     )
 
-    # ── Commit count (corroborating, NOT authoritative) ────────────────
-    # Sanity floor only: seed + at least one coder commit (>= 2). The
-    # no-rework EDGE assertion above is the AUTHORITATIVE rework signal —
-    # rely on it, not on an exact count. A healthy single-task run may
-    # legitimately produce MORE than one coder commit: the coder commits
-    # atomically per change, so e.g. an "add a marker" task can land as
-    # "add the import" + "add the marker" (observed: a clean live dogfood
-    # run produced 2 coder commits, 3 total, with zero rework edges and no
-    # .imp/ in history). An exact `== 2` falsely failed that healthy run.
-    # The original bug (a rework LOOP committing .imp/**) is caught by the
-    # no-rework + no-.imp-in-history gates above, which a stray extra commit
-    # count cannot mask.
+    # ── Commit count ───────────────────────────────────────────────────
+    # The task title explicitly instructs the coder to land ALL edits (the
+    # import + the print) in a SINGLE atomic commit, so a clean run is seed
+    # + one coder commit == 2. The no-rework EDGE assertion above remains the
+    # AUTHORITATIVE signal for the original bug (a rework LOOP committing
+    # .imp/**); this count is a tighter corroborating check that also catches
+    # the coder splitting one logical task across multiple commits (which the
+    # single-commit instruction is meant to prevent). If a future dogfood task
+    # legitimately spans multiple commits, relax this to `>= 2` and lean on the
+    # no-rework + no-.imp-in-history gates.
     log_oneline = subprocess.run(
         ["git", "log", "--oneline"],
         cwd=tmp_path, capture_output=True, text=True, timeout=10, check=True,
@@ -634,10 +634,10 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     commit_count = len([
         ln for ln in log_oneline.stdout.splitlines() if ln.strip()
     ])
-    assert commit_count >= 2, (
-        f"expected at least 2 commits (seed + >=1 coder commit), got "
-        f"{commit_count} — the coder appears not to have committed:\n"
-        f"{log_oneline.stdout}"
+    assert commit_count == 2, (
+        f"expected exactly 2 commits (seed + coder's single atomic commit), "
+        f"got {commit_count} — the coder split the task across commits or a "
+        f"rework/retry loop produced extras:\n{log_oneline.stdout}"
     )
 
     # Artifacts present.
