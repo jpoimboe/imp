@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -797,6 +798,27 @@ class ClaudeCodeAgentRunner:
 
         ceiling = invocation.max_tool_calls  # may be None (no cap)
 
+        # Loop guard (Fix H). claude_code streams ONE logical turn as multiple
+        # AssistantMessage objects (thinking, then text, then tool_use) — see
+        # _merge_assistant_fragments. Accumulate the whole turn into pending_*
+        # and flush EXACTLY ONCE at the ResultMessage boundary (true end-of-turn).
+        guard = LoopGuard()
+        pending_text = ""
+        pending_tools: dict[str, ToolOutcome] = {}
+        pending_complete = False
+
+        def _flush_pending() -> TurnRecord | None:
+            nonlocal pending_text, pending_tools, pending_complete
+            if not pending_text and not pending_tools and not pending_complete:
+                return None
+            rec = TurnRecord(assistant_text=pending_text,
+                             tools=list(pending_tools.values()),
+                             has_complete_step=pending_complete)
+            pending_text = ""
+            pending_tools = {}
+            pending_complete = False
+            return rec
+
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
             await client.query(_stream_history(messages))
@@ -823,6 +845,12 @@ class ClaudeCodeAgentRunner:
                     transcript.append(imp_msg)
 
                     if imp_msg.role == "assistant":
+                        turn_text = "".join(
+                            b.text for b in imp_msg.content
+                            if isinstance(b, TextBlock))
+                        if turn_text:
+                            pending_text = (
+                                pending_text + turn_text if pending_text else turn_text)
                         if cls_name == "AssistantMessage":
                             raw = _serialize_claude_code_message(sdk_msg)
                             elog.append_llm_response(
@@ -857,6 +885,15 @@ class ClaudeCodeAgentRunner:
                                     continue
                                 tool_calls_used += 1
                                 canon = _canon_tool_name(b.name)
+                                # Accumulate for the loop guard BEFORE the task
+                                # early-continue so task turns are still tracked.
+                                # is_error defaults True until the following
+                                # UserMessage tool_result lands and flips it.
+                                if canon == "complete_step":
+                                    pending_complete = True
+                                pending_tools[b.id] = ToolOutcome(
+                                    name=canon, tool_use_id=b.id,
+                                    input=b.input, is_error=True)
                                 if canon == "task":
                                     # tool_call for task is appended inside the
                                     # MCP wrapper (_impl) using __tool_use_id__,
@@ -872,6 +909,8 @@ class ClaudeCodeAgentRunner:
                         for b in imp_msg.content:
                             if isinstance(b, ToolResultBlock):
                                 elog.append_tool_result(agent_id=aid, block=b)
+                                if b.tool_use_id in pending_tools:
+                                    pending_tools[b.tool_use_id].is_error = b.is_error
 
                 # Drain any bash kills detected by the MCP wrapper.
                 while state.killed_tool_uses:
@@ -892,6 +931,19 @@ class ClaudeCodeAgentRunner:
                     return
 
                 if cls_name == "ResultMessage":
+                    # Loop guard: ResultMessage is the true end-of-turn marker,
+                    # so flush the accumulated turn here EXACTLY ONCE (a turn
+                    # ending in complete_step set pending_complete → progress →
+                    # never trips). Observe before the end-of-turn handling so a
+                    # detected loop wins over a nudge.
+                    flushed = _flush_pending()
+                    if flushed is not None:
+                        loop_err = guard.observe(flushed)
+                        if loop_err is not None:
+                            yield perr.make_error_event(
+                                loop_err, kind=getattr(loop_err, "kind", ""))
+                            return
+
                     # End-of-turn:
                     #   a) complete_step captured → emit agent_output, return
                     #   b) interactive mode → prompt user, send another query

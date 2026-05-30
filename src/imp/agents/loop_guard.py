@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from imp.providers.errors import LoopError
+if TYPE_CHECKING:
+    from imp.providers.errors import LoopError
 
 WRITE_CLASS_TOOLS = frozenset({"write_file", "edit_file", "bash"})
 DEFAULT_REPEAT_K = 3
@@ -70,6 +71,12 @@ class LoopGuard:
         Both detectors hold per-invocation state only (they never consult
         reloaded history), so resume cannot trip them spuriously.
         """
+        # Lazy import: importing imp.providers.errors at module scope pulls in
+        # the imp.providers package __init__, which eagerly imports the provider
+        # modules — and those import this module, forming an import cycle. Import
+        # the error type here, at first use, after both modules are loaded.
+        from imp.providers.errors import LoopError
+
         if self._is_progress(record):
             self._repeat_count = 0
             self._noprogress_count = 0

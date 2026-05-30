@@ -22,6 +22,7 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from typing import Any, cast
 
 from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -528,6 +529,7 @@ class OpenAIAgentRunner:
         # is required: agent_id alone is change-agnostic, so concurrent changes
         # running the same step would collide on one routing slot.
         prompt_cache_key = f"{invocation.change_context.change_id}:{aid}"
+        guard = LoopGuard()
 
         while not self._cancel:
             client = self._get_client()
@@ -574,6 +576,12 @@ class OpenAIAgentRunner:
                     messages.append(user_msg)
                     transcript.append(user_msg)
                     elog.append_user_message(agent_id=aid, message=user_msg)
+                    loop_err = guard.observe(TurnRecord(
+                        assistant_text=last_text, tools=[], has_complete_step=False))
+                    if loop_err is not None:
+                        yield perr.make_error_event(
+                            loop_err, kind=getattr(loop_err, "kind", ""))
+                        return
                     continue
                 # Legacy/test fallback: no continuation_fn wired by the executor.
                 if invocation.interactive and ctx.user_input_fn is not None:
@@ -691,6 +699,24 @@ class OpenAIAgentRunner:
                     "kind": "tool_call_ceiling_exceeded",
                     "ceiling": ceiling,
                 }}
+                return
+
+            by_id = {tu.id: tu for tu in tool_uses}
+            record = TurnRecord(
+                assistant_text="".join(
+                    b.text for b in assistant_msg.content if isinstance(b, TextBlock)),
+                tools=[
+                    ToolOutcome(
+                        name=by_id[b.tool_use_id].name if b.tool_use_id in by_id else "",
+                        tool_use_id=b.tool_use_id,
+                        input=by_id[b.tool_use_id].input if b.tool_use_id in by_id else {},
+                        is_error=b.is_error)
+                    for b in tool_results
+                ],
+                has_complete_step=False)
+            loop_err = guard.observe(record)
+            if loop_err is not None:
+                yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
                 return
 
         # cancelled (interrupt)

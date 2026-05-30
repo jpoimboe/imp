@@ -478,11 +478,14 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
     """continuation_fn returning None after N nudges yields agent_incomplete."""
     (tmp_path / "art").mkdir()
 
-    # Three turns of prose — agent never calls complete_step.
+    # Three turns of DISTINCT prose — agent never calls complete_step. Distinct
+    # so the loop_guard's repeated_failure detector (identical-signature x K)
+    # doesn't fire; with only 3 turns the no_progress detector (N=6) also stays
+    # below threshold, so the nudge-exhaustion path is what terminates the run.
     scripted = [
-        assistant(text("prose")), result(),
-        assistant(text("prose")), result(),
-        assistant(text("prose")), result(),
+        assistant(text("prose one")), result(),
+        assistant(text("prose two")), result(),
+        assistant(text("prose three")), result(),
     ]
 
     def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
