@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import shutil
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -67,6 +68,11 @@ _QUOTA_PATTERNS = (
     "Credit balance is too low",
 )
 
+# Matches "API Error: <code>" surfaced by the claude CLI as assistant text when
+# the underlying Anthropic API returns a 4xx. Conservative: only 4xx (not 5xx)
+# are classified — 5xx is transient and falls back to existing retry/nudge.
+_API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})")
+
 
 def _classify_agent_text(text: str) -> perr.ProviderError | None:
     """Detect known claude CLI terminal-error patterns in agent text.
@@ -76,6 +82,11 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
     conservatively chosen: false negatives fall back to existing
     retry behavior; false positives would convert recoverable agent
     confusion into fatal pause.
+
+    Auth/quota patterns are checked first so they win when both substrings
+    appear. The API-error regex matches "API Error: <code>" for 4xx codes:
+    429 → RateLimitError; other 4xx → ApiError with kind="http_<code>";
+    5xx → None (transient, leave to retry).
     """
     for pat in _AUTH_PATTERNS:
         if pat in text:
@@ -83,6 +94,17 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
     for pat in _QUOTA_PATTERNS:
         if pat in text:
             return perr.QuotaError(f"claude CLI: {pat}")
+    m = _API_ERROR_RE.search(text)
+    if m:
+        code = int(m.group(1))
+        if code == 429:
+            return perr.RateLimitError(f"claude CLI: {text[:200]}")
+        if 400 <= code < 500:
+            exc = perr.ApiError(f"claude CLI: {text[:200]}")
+            # Carried through to make_error_event(kind=...) at the call sites so
+            # the event records kind="http_400" rather than the class name.
+            exc.kind = f"http_{code}"  # type: ignore[attr-defined]
+            return exc
     return None
 
 
@@ -720,7 +742,8 @@ class ClaudeCodeAgentRunner:
                     last_text = _text_of(messages[-1])
                 classified = _classify_agent_text(last_text)
                 if classified is not None:
-                    yield perr.make_error_event(classified)
+                    yield perr.make_error_event(
+                        classified, kind=getattr(classified, "kind", ""))
                     return
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",
@@ -918,7 +941,8 @@ class ClaudeCodeAgentRunner:
                     if not invocation.interactive:
                         classified = _classify_agent_text(last_text)
                         if classified is not None:
-                            yield perr.make_error_event(classified)
+                            yield perr.make_error_event(
+                                classified, kind=getattr(classified, "kind", ""))
                             return
 
                     cont = invocation.continuation_fn
