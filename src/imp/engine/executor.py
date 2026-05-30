@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -57,6 +58,27 @@ from imp.providers.resolve import resolve_role
 EventCallback = Callable[[dict[str, Any]], None]
 HumanInputFn = Callable[[], str | Awaitable[str]]
 HumanOutputFn = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class ErrorInfo:
+    """The classified error that drove a fatal/backoff/retry decision, plumbed
+    out of _run_agent_invocation so the caller can record it on Pause and on
+    the agent_retry event. None on the success path."""
+    category: str
+    kind: str | None
+
+
+@dataclass(frozen=True)
+class AgentRunResult:
+    """Replaces the old bool-only 5-tuple from _run_agent_invocation. Carrying
+    a dataclass avoids arity bugs across its seven return statements."""
+    output: dict[str, Any] | None
+    errored: bool
+    paused: bool
+    fatal: bool
+    delay: float | None
+    error: ErrorInfo | None = None
 
 
 class RunResult(Enum):
@@ -106,7 +128,15 @@ async def run_change(
         if coordinator.should_pause or isinstance(action, Pause):
             state.status = "paused"
             state.save(change.state_dir)
-            _emit(log, "workflow_paused", {})
+            # action may be Continue/Goto on a coordinator interrupt (no .reason).
+            reason, kind = (
+                (action.reason, action.kind) if isinstance(action, Pause)
+                else ("interrupt", None)
+            )
+            payload: dict[str, Any] = {"reason": reason}
+            if kind is not None:
+                payload["kind"] = kind
+            _emit(log, "workflow_paused", payload)
             return RunResult.PAUSED
         if isinstance(action, Retry):
             raise AssertionError("Retry must not escape _dispatch_step")
@@ -276,7 +306,7 @@ async def _route_agent(
 
     backoff = 0
     while True:
-        agent_output, errored, paused, fatal, delay = await _run_agent_invocation(
+        result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
             fs_permissions=step.fs_permissions, model_role=step.model_role,
             workflow=workflow, config=config, change=change, state=state, log=log,
@@ -292,41 +322,58 @@ async def _route_agent(
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
             initial_messages=initial)
-        if delay is None:
+        if result.delay is None:
             break
         backoff += 1
-        await anyio.sleep(delay)
+        # Self-healed-retry visibility (agent_retry): surface the backoff so a
+        # transient network/rate_limit error that recovers doesn't look like a
+        # failure. category comes from the plumbed ErrorInfo.
+        _emit(log, "agent_retry", {
+            "category": result.error.category if result.error else "unknown",
+            "attempt": backoff,
+            "backoff_seconds": result.delay,
+        }, agent_id=None)
+        await anyio.sleep(result.delay)
         if coordinator.should_pause:
             return Pause(), None, {}
 
-    if paused:
+    if result.paused:
         return Pause(), None, {}
-    if fatal:
+    if result.fatal:
+        pause = Pause(
+            reason=result.error.category if result.error else None,
+            kind=result.error.kind if result.error else None,
+        )
         _emit(log, "step_completed",
               {"step": step.name, "kind": "agent",
-               "action": _action_payload(Pause()), "var_mutations": {}})
-        return Pause(), None, {}
-    if errored or agent_output is None:
+               "action": _action_payload(pause), "var_mutations": {}})
+        return pause, None, {}
+    if result.errored or result.output is None:
         state.step_attempt += 1
         if state.step_attempt > step.max_retries:
             state.step_attempt = 0
+            on_max = step.on_max_retries
+            # on_max_retries is a configured action; when it is a Pause, stamp it
+            # with THIS frame's classification (the just-failed attempt).
+            if isinstance(on_max, Pause) and result.error is not None:
+                on_max = Pause(reason=result.error.category, kind=result.error.kind)
             _emit(log, "step_completed",
                   {"step": step.name, "kind": "agent",
-                   "action": _action_payload(step.on_max_retries), "var_mutations": {}})
-            return step.on_max_retries, None, {}     # Pause (validator forbids Retry here)
+                   "action": _action_payload(on_max), "var_mutations": {}})
+            return on_max, None, {}     # Pause (validator forbids Retry here)
         return await _route_agent(step, workflow, config, change, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, wrapper_text=wrapper_text,
                                   is_resume=is_resume)
 
     state.step_attempt = 0
-    match = evaluate_rules(step.rules, vars=state.vars, output=agent_output)
+    match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
     state.vars.update(match.var_mutations)
     state.current_step = None
     state.save(change.state_dir)
     action, _, muts = _finish(log, step, match)
     feedback = (
-        format_agent_feedback(step.name, agent_output)
+        format_agent_feedback(step.name, result.output)
         if isinstance(action, Goto) and action.feedback else None
     )
     return action, feedback, muts
@@ -413,22 +460,24 @@ async def _run_agent_invocation(
     prior_backoff_attempts: int = 0,
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
-) -> tuple[dict[str, Any] | None, bool, bool, bool, float | None]:
+) -> AgentRunResult:
     """Run an agent step to completion.
 
-    Returns ``(agent_output, errored, paused, fatal, backoff_delay)`` where:
-    - ``agent_output`` is the validated output dict, or ``None`` if errored/paused.
+    Returns an ``AgentRunResult`` whose fields are:
+    - ``output`` is the validated output dict, or ``None`` if errored/paused.
     - ``errored`` is ``True`` when the run produced an error that warrants a retry.
     - ``paused`` is ``True`` when the coordinator requested a pause mid-run.
     - ``fatal`` is ``True`` when error_policy.decide returned Pause for the
       error's category; the caller turns this into ``Pause`` directly so the
       user sees the failure immediately and we don't burn LLM calls on retries
       that can't possibly succeed.
-    - ``backoff_delay`` is a non-None float when error_policy.decide returned
+    - ``delay`` is a non-None float when error_policy.decide returned
       RetryWithBackoff for the error's category. The caller is expected to
-      ``await anyio.sleep(backoff_delay)`` and re-invoke this function with
+      ``await anyio.sleep(delay)`` and re-invoke this function with
       an incremented ``prior_backoff_attempts``. None means "no backoff
       requested" (success, pause, or RetryNow).
+    - ``error`` carries the classified category/kind on the fatal/backoff/retry
+      paths so the caller can stamp it on Pause and on the agent_retry event.
 
     The caller is responsible for:
     - setting/clearing ``state.current_step``
@@ -524,6 +573,7 @@ async def _run_agent_invocation(
             if event["type"] == "error":
                 payload = event.get("payload") or {}
                 category = payload.get("category", "unknown")
+                kind = payload.get("kind")
                 retry_after = (payload.get("detail") or {}).get("retry_after_seconds")
                 decision = error_policy.decide(
                     category,
@@ -531,19 +581,23 @@ async def _run_agent_invocation(
                     hint_delay_seconds=retry_after,
                 )
                 if isinstance(decision, error_policy.Pause):
-                    return None, True, False, True, None
+                    return AgentRunResult(None, True, False, True, None,
+                                          ErrorInfo(category, kind))
                 if isinstance(decision, error_policy.RetryWithBackoff):
-                    return None, True, False, False, decision.delay_seconds
+                    return AgentRunResult(None, True, False, False,
+                                          decision.delay_seconds,
+                                          ErrorInfo(category, kind))
                 # RetryNow (agent_output_missing today)
-                return None, True, False, False, None
+                return AgentRunResult(None, True, False, False, None,
+                                      ErrorInfo(category, kind))
             if coordinator.should_pause:
                 # Coordinator triggered mid-step. Runner's interrupt() has fired.
-                return None, False, True, False, None
+                return AgentRunResult(None, False, True, False, None)
     finally:
         coordinator.detach_runner()
 
     if agent_output is None:
-        return None, True, False, False, None
+        return AgentRunResult(None, True, False, False, None)
 
     try:
         validate_agent_output(agent_output, agent_def.output_schema)
@@ -554,9 +608,10 @@ async def _run_agent_invocation(
             "kind": "output_validation",
             "message": f"output validation: {e}",
         }, agent_id=None)
-        return None, True, False, False, None
+        return AgentRunResult(None, True, False, False, None,
+                              ErrorInfo("agent_output_missing", "output_validation"))
 
-    return agent_output, False, False, False, None
+    return AgentRunResult(agent_output, False, False, False, None)
 
 
 def _emit(log: EventLog, type_: str, payload: dict[str, Any], *,

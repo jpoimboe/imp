@@ -409,6 +409,12 @@ NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._root.status = "paused"
+    reason = p.get("reason")
+    if reason:
+        kind = p.get("kind")
+        suffix = f" ({kind})" if kind else ""
+        self._append(ErrorNode(
+            message=f"paused: {reason}{suffix}", category=reason, is_warning=False))
 
 
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

@@ -41,7 +41,8 @@ class Retry(Action):
 
 @dataclass(frozen=True, slots=True)
 class Pause(Action):
-    pass
+    reason: str | None = None
+    kind: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
