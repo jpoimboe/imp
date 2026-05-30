@@ -22,6 +22,8 @@ Category = Literal[
     "context_window",
     "rate_limit",
     "network",
+    "api",
+    "loop",
     "agent_output_missing",
     "agent_incomplete",
     "unknown",
@@ -64,6 +66,19 @@ class RateLimitError(ProviderError):
 
 class NetworkError(ProviderError):
     category: Category = "network"
+
+
+class ApiError(ProviderError):
+    """A hard API error (e.g. claude CLI surfacing 'API Error: 400 ...' as
+    plain assistant text). Distinct from `config` so the text-surfaced case is
+    recognized at all; maps to Pause."""
+    category: Category = "api"
+
+
+class LoopError(ProviderError):
+    """The loop_guard detected a repeated-failure or no-progress loop within a
+    single agent invocation. Maps to Pause."""
+    category: Category = "loop"
 
 
 def make_error_event(exc: ProviderError, *, kind: str = "") -> dict[str, object]:

@@ -44,6 +44,8 @@ _POLICY: dict[Category, type[Pause] | type[RetryNow] | type[RetryWithBackoff]] =
     "context_window":       Pause,
     "rate_limit":           RetryWithBackoff,
     "network":              RetryWithBackoff,
+    "api":                  Pause,
+    "loop":                 Pause,
     "agent_output_missing": RetryNow,
     "agent_incomplete":     Pause,
     "unknown":              Pause,
