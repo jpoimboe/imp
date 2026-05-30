@@ -41,7 +41,12 @@ def classify_resume(messages: list[Message], *, interactive: bool) -> ResumeStat
 
 
 def count_tool_uses(messages: list[Message]) -> int:
-    """For the tool-call ceiling guard (spec §6.5)."""
+    """Count tool_use blocks across all assistant messages in a transcript.
+
+    Formerly seeded the per-resume tool-call ceiling; the ceiling is now opt-in
+    and per-invocation, so no provider calls this internally. Retained as a
+    utility (exported via ``imp.agents``) for diagnostic/external use.
+    """
     return sum(
         1
         for m in messages
