@@ -95,6 +95,19 @@ def _can_pty() -> bool:
         return False
 
 
+def _read_all_events(events_file: Path) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    if not events_file.exists():
+        return out
+    for line in events_file.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        with contextlib.suppress(json.JSONDecodeError):
+            out.append(json.loads(line))
+    return out
+
+
 def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, str]]:
     """Return [(phase_name, step_name), ...] for every human step (carrying
     `ask:`/`options:`) declared in the unified-surface workflow.yaml. The driver
@@ -548,7 +561,64 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"clobbered it.\nLast 500 chars of bash.py:\n{bash_src[-500:]}"
     )
 
-    # At least one commit beyond the initial seed commit.
+    # ── No rework (authoritative) ──────────────────────────────────────
+    # The direct signal that something unexpected happened is a REWORK
+    # navigation EDGE — NOT a raw count of `step_started` (which re-emits on
+    # every agent invocation, including self-healed backoff retries). The robust
+    # signal is the rework EDGE: a step_completed whose action targets the
+    # implement phase / coder step via goto/resume. A clean single-task run
+    # produces NONE (run-tests passes → continue, reviewer approves → continue).
+    #
+    # Rework edges per workflow.yaml (verified against source):
+    #   - run-tests: {else: resume: coder}
+    #       → step_completed payload action = {"verb":"goto","target":"coder","resume":True}
+    #   - code-reviewer: {if verdict rework, goto: implement}
+    #       → step_completed payload action = {"verb":"goto","target":"implement","resume":False}
+    #   - merge-gate: {label: Back to implement, goto: implement}
+    #       → step_completed payload action = {"verb":"goto","target":"implement","resume":False}
+    # Both edge types use verb="goto"; `resume:` edges encode as goto+resume=True
+    # (verified against _action_payload in src/imp/engine/executor.py).
+    all_events = _read_all_events(events_file)
+    rework_edges = [
+        e for e in all_events
+        if e.get("type") == "step_completed"
+        and (e.get("payload") or {}).get("action", {}).get("verb") == "goto"
+        and (e.get("payload") or {}).get("action", {}).get("target")
+            in {"implement", "coder"}
+    ]
+    assert not rework_edges, (
+        f"REWORK/retry edge(s) detected (goto implement / resume coder) — "
+        f"a clean single-task run has none: "
+        f"{[(e.get('payload') or {}).get('step') for e in rework_edges]}"
+    )
+
+    # ── Clean working tree ─────────────────────────────────────────────
+    # Catches uncommitted /project edits and stray engine state. Holds on a
+    # healthy run because the seed runs run_init BEFORE the initial commit and
+    # Fix D ignores `.imp/` wholesale, so `.imp/` never dirties the tree.
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=10, check=True,
+    )
+    assert not porcelain.stdout.strip(), (
+        f"working tree not clean after dogfood run:\n{porcelain.stdout}"
+    )
+
+    # ── No engine state in history ─────────────────────────────────────
+    committed = subprocess.run(
+        ["git", "log", "--name-only", "--pretty=format:%H", "--reverse"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=10, check=True,
+    )
+    imp_paths = [ln for ln in committed.stdout.splitlines()
+                 if ln.startswith(".imp/")]
+    assert not imp_paths, (
+        f"engine state committed to history (should be gitignored): {imp_paths}"
+    )
+
+    # ── Commit count (corroborating) ───────────────────────────────────
+    # The sentinel task is single-task by construction, so seed + one coder
+    # commit == 2. Relax this if the dogfood task ever becomes multi-task and
+    # rely on the no-rework assertion above for rework detection.
     log_oneline = subprocess.run(
         ["git", "log", "--oneline"],
         cwd=tmp_path, capture_output=True, text=True, timeout=10, check=True,
@@ -556,8 +626,9 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     commit_count = len([
         ln for ln in log_oneline.stdout.splitlines() if ln.strip()
     ])
-    assert commit_count >= 2, (
-        f"expected >=2 commits (initial + coder's), got {commit_count}:\n"
+    assert commit_count == 2, (
+        f"expected exactly 2 commits (seed + coder's single-task commit), got "
+        f"{commit_count} — a rework/retry loop likely produced extra commits:\n"
         f"{log_oneline.stdout}"
     )
 
