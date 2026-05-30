@@ -17,6 +17,7 @@ from imp.engine.expr import (
     Unary,
     VarRef,
     _tokenize,
+    parse,
 )
 
 
@@ -81,3 +82,68 @@ def test_tokenize_unterminated_string_raises() -> None:
 def test_tokenize_unexpected_char_raises() -> None:
     with pytest.raises(ExprSyntaxError):
         _tokenize("a % b")  # '%' is deferred / unsupported
+
+
+def test_parse_precedence_mul_over_add() -> None:
+    # 1 + 2 * 3  ==  1 + (2 * 3)
+    assert parse("1 + 2 * 3") == Binary("+", IntLit(1), Binary("*", IntLit(2), IntLit(3)))
+
+
+def test_parse_and_or_precedence() -> None:
+    # a or b and c  ==  a or (b and c)
+    assert parse("a or b and c") == Binary(
+        "or", Name("a"), Binary("and", Name("b"), Name("c"))
+    )
+
+
+def test_parse_not_binds_tighter_than_and() -> None:
+    # not a and b  ==  (not a) and b
+    assert parse("not a and b") == Binary("and", Unary("not", Name("a")), Name("b"))
+
+
+def test_parse_comparison_and_arithmetic() -> None:
+    # round + 1 > 3  ==  (round + 1) > 3
+    assert parse("round + 1 > 3") == Binary(
+        ">", Binary("+", Name("round"), IntLit(1)), IntLit(3)
+    )
+
+
+def test_parse_parens_override() -> None:
+    assert parse("(1 + 2) * 3") == Binary("*", Binary("+", IntLit(1), IntLit(2)), IntLit(3))
+
+
+def test_parse_output_and_var_refs() -> None:
+    assert parse("output.major_count") == OutputRef("major_count")
+    assert parse("var.round") == VarRef("round")
+
+
+def test_parse_literals() -> None:
+    assert parse("true") == BoolLit(True)
+    assert parse("false") == BoolLit(False)
+    assert parse("'rework'") == StrLit("rework")
+    assert parse("-5") == Unary("-", IntLit(5))
+
+
+def test_parse_equality_against_quoted_string() -> None:
+    # The string form of the `if:` mapping rule {verdict: rework}
+    assert parse("verdict == 'rework'") == Binary("==", Name("verdict"), StrLit("rework"))
+
+
+def test_parse_chained_comparison_is_syntax_error() -> None:
+    with pytest.raises(ExprSyntaxError):
+        parse("1 < 2 < 3")
+
+
+def test_parse_trailing_garbage_is_error() -> None:
+    with pytest.raises(ExprSyntaxError):
+        parse("1 2")
+
+
+def test_parse_keyword_in_primary_is_error() -> None:
+    with pytest.raises(ExprSyntaxError):
+        parse("and")
+
+
+def test_parse_unbalanced_paren_is_error() -> None:
+    with pytest.raises(ExprSyntaxError):
+        parse("(1 + 2")

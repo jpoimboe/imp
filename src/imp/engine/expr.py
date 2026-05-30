@@ -162,3 +162,132 @@ def _tokenize(text: str) -> list[_Tok]:
         raise ExprSyntaxError(f"unexpected character {c!r} in {text!r}")
     toks.append(_Tok("EOF", ""))
     return toks
+
+
+# ── parser ──────────────────────────────────────────────────────────────────
+
+_CMP = {"==", "!=", "<", "<=", ">", ">="}
+
+
+class _Parser:
+    def __init__(self, toks: list[_Tok], text: str) -> None:
+        self._toks = toks
+        self._i = 0
+        self._text = text
+
+    def _peek(self) -> _Tok:
+        return self._toks[self._i]
+
+    def _advance(self) -> _Tok:
+        t = self._toks[self._i]
+        self._i += 1
+        return t
+
+    def _expect(self, kind: str) -> _Tok:
+        t = self._peek()
+        if t.kind != kind:
+            raise ExprSyntaxError(
+                f"expected {kind}, got {t.kind} {t.value!r} in {self._text!r}"
+            )
+        return self._advance()
+
+    def _is_keyword(self, word: str) -> bool:
+        t = self._peek()
+        return t.kind == "NAME" and t.value == word
+
+    def parse(self) -> Expr:
+        e = self._or()
+        if self._peek().kind != "EOF":
+            t = self._peek()
+            raise ExprSyntaxError(f"unexpected trailing {t.value!r} in {self._text!r}")
+        return e
+
+    def _or(self) -> Expr:
+        left = self._and()
+        while self._is_keyword("or"):
+            self._advance()
+            left = Binary("or", left, self._and())
+        return left
+
+    def _and(self) -> Expr:
+        left = self._not()
+        while self._is_keyword("and"):
+            self._advance()
+            left = Binary("and", left, self._not())
+        return left
+
+    def _not(self) -> Expr:
+        if self._is_keyword("not"):
+            self._advance()
+            return Unary("not", self._not())
+        return self._comparison()
+
+    def _comparison(self) -> Expr:
+        left = self._add()
+        t = self._peek()
+        if t.kind == "OP" and t.value in _CMP:
+            self._advance()
+            right = self._add()
+            t2 = self._peek()
+            if t2.kind == "OP" and t2.value in _CMP:
+                raise ExprSyntaxError(
+                    f"chained comparison not allowed in {self._text!r}"
+                )
+            return Binary(t.value, left, right)
+        return left
+
+    def _add(self) -> Expr:
+        left = self._mul()
+        while self._peek().kind == "OP" and self._peek().value in ("+", "-"):
+            op = self._advance().value
+            left = Binary(op, left, self._mul())
+        return left
+
+    def _mul(self) -> Expr:
+        left = self._unary()
+        while self._peek().kind == "OP" and self._peek().value in ("*", "/"):
+            op = self._advance().value
+            left = Binary(op, left, self._unary())
+        return left
+
+    def _unary(self) -> Expr:
+        t = self._peek()
+        if t.kind == "OP" and t.value == "-":
+            self._advance()
+            return Unary("-", self._unary())
+        return self._primary()
+
+    def _primary(self) -> Expr:
+        t = self._peek()
+        if t.kind == "INT":
+            self._advance()
+            return IntLit(int(t.value))
+        if t.kind == "STR":
+            self._advance()
+            return StrLit(t.value)
+        if t.kind == "LPAREN":
+            self._advance()
+            e = self._or()
+            self._expect("RPAREN")
+            return e
+        if t.kind == "NAME":
+            self._advance()
+            if t.value in ("true", "false"):
+                return BoolLit(t.value == "true")
+            if t.value in ("and", "or", "not"):
+                raise ExprSyntaxError(
+                    f"unexpected keyword {t.value!r} in {self._text!r}"
+                )
+            if t.value in ("output", "var") and self._peek().kind == "DOT":
+                self._advance()  # consume DOT
+                field = self._expect("NAME").value
+                return OutputRef(field) if t.value == "output" else VarRef(field)
+            return Name(t.value)
+        raise ExprSyntaxError(
+            f"unexpected token {t.value!r} ({t.kind}) in {self._text!r}"
+        )
+
+
+def parse(text: str) -> Expr:
+    """Tokenize + parse a string expression into an AST. Raises ExprSyntaxError."""
+    return _Parser(_tokenize(text), text).parse()
