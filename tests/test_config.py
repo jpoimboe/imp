@@ -70,3 +70,42 @@ def test_config_model_rules_defaults_empty(tmp_path):
         "  default:\n    prefer:\n      - {provider: anthropic, model: m}\n")
     cfg = load_config(tmp_path)
     assert cfg.model_rules == {}
+
+
+def test_config_model_tiers_absent_is_none(tmp_path: Path) -> None:
+    (tmp_path / ".imp").mkdir()
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.model_tiers is None
+
+
+def test_config_model_tiers_parsed(tmp_path: Path) -> None:
+    (tmp_path / ".imp").mkdir()
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "model_tiers: [balanced, powerful]\n"
+        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.model_tiers == ("balanced", "powerful")
+
+
+def test_config_model_tiers_empty_list_is_off(tmp_path: Path) -> None:
+    (tmp_path / ".imp").mkdir()
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "model_tiers: []\n"
+        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.model_tiers == ()        # present-but-empty: off, not None
+
+
+def test_config_model_tiers_duplicate_raises(tmp_path: Path) -> None:
+    (tmp_path / ".imp").mkdir()
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "model_tiers: [fast, fast]\n"
+        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    with pytest.raises(LoadError, match="duplicate"):
+        load_config(tmp_path)
