@@ -32,7 +32,7 @@ _PROVIDER_MODELS: dict[str, dict[str, str]] = {
         "quick":     "claude-haiku-4-5-20251001",
     },
     "openai": {
-        "thinking": "gpt-5",
+        "thinking": "gpt-5.2",
         "coding":   "gpt-5",
         "quick":    "gpt-5-mini",
     },
@@ -42,14 +42,14 @@ _PROVIDER_MODELS: dict[str, dict[str, str]] = {
 # at init time, and omitted from the informational `providers:` block.
 _PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code"})
 
-_ROLE_TIERS = {
+_ROLE_TIERS: dict[str, str | dict[str, str]] = {
     "default":       "coding",
     "spec":          "thinking",
     "spec_review":   "thinking",
     "design":        "thinking",
     "design_review": "thinking",
-    "code":          "coding",
-    "code_review":   "thinking",
+    "code":          "quick",
+    "code_review":   {"default": "coding", "openai": "thinking"},
     "test":          "coding",
     "review":        "thinking",
     "quick":         "quick",
@@ -65,7 +65,14 @@ def _build_role_map(
     for role, tier in _ROLE_TIERS.items():
         prefer = []
         for prov in providers:
-            model = _PROVIDER_MODELS[prov][tier]
+            # tier is either a plain tier string (uniform across providers) or a
+            # {provider: tier} mapping that MUST carry a 'default' for any
+            # enabled provider not named explicitly (e.g. claude_code).
+            if isinstance(tier, dict):
+                prov_tier = tier[prov] if prov in tier else tier["default"]
+            else:
+                prov_tier = tier
+            model = _PROVIDER_MODELS[prov][prov_tier]
             prefer.append({"provider": prov, "model": model})
         roles[role] = {"prefer": prefer}
     return {

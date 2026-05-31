@@ -124,3 +124,28 @@ def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
             input_fn=_inputs(),
             output_fn=lambda _msg: None,
         )
+
+
+def test_init_code_and_code_review_prefer_heads(tmp_path: Path) -> None:
+    """Generated config: code prefer-head = haiku; code_review Anthropic entry =
+    sonnet; code_review OpenAI entry = gpt-5.2 (the 1-vendor column resolves as
+    specified; the constraint handles the 2-vendor column)."""
+    run_init(tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
+             picker_fn=lambda _a: ["anthropic", "openai"])
+    cfg = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    code = cfg["roles"]["code"]["prefer"]
+    review = cfg["roles"]["code_review"]["prefer"]
+    assert code[0] == {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"}
+    assert review[0] == {"provider": "anthropic", "model": "claude-sonnet-4-6"}
+    assert {"provider": "openai", "model": "gpt-5.2"} in review
+
+
+def test_init_code_review_handles_claude_code_via_default_tier(tmp_path: Path) -> None:
+    """A {provider: tier} mapping must include a 'default' tier so providers not
+    named explicitly (e.g. claude_code) still resolve."""
+    run_init(tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
+             picker_fn=lambda _a: ["claude_code", "openai"])
+    cfg = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    review = {e["provider"]: e["model"] for e in cfg["roles"]["code_review"]["prefer"]}
+    assert review["claude_code"] == "claude-sonnet-4-6"  # default tier = coding
+    assert review["openai"] == "gpt-5.2"                  # openai tier = thinking
