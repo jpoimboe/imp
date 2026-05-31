@@ -35,22 +35,16 @@ def _run(script: str, *args: str, env_extra: dict[str, str] | None = None,
 
 
 def test_check_artifact_passes_when_file_exists_and_nonempty(tmp_path: Path) -> None:
-    """The script exits 0 when $IMP_ARTIFACTS_DIR/<name>.md is non-empty."""
+    """The script exits 0 when the given path points to a non-empty file."""
     (tmp_path / "spec.md").write_text("# Spec\n\nReal content.\n")
-    proc = _run(
-        "check-artifact.sh", "spec",
-        env_extra={"IMP_ARTIFACTS_DIR": str(tmp_path)},
-    )
+    proc = _run("check-artifact.sh", str(tmp_path / "spec.md"))
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "ok" in proc.stdout
 
 
 def test_check_artifact_fails_when_file_missing(tmp_path: Path) -> None:
     """The script exits non-zero when the artifact doesn't exist."""
-    proc = _run(
-        "check-artifact.sh", "design",
-        env_extra={"IMP_ARTIFACTS_DIR": str(tmp_path)},
-    )
+    proc = _run("check-artifact.sh", str(tmp_path / "nope.md"))
     assert proc.returncode != 0
     assert "missing" in proc.stderr
 
@@ -58,24 +52,19 @@ def test_check_artifact_fails_when_file_missing(tmp_path: Path) -> None:
 def test_check_artifact_fails_when_file_empty(tmp_path: Path) -> None:
     """The script exits non-zero when the artifact is empty (zero bytes)."""
     (tmp_path / "plan.md").write_text("")
-    proc = _run(
-        "check-artifact.sh", "plan",
-        env_extra={"IMP_ARTIFACTS_DIR": str(tmp_path)},
-    )
+    proc = _run("check-artifact.sh", str(tmp_path / "plan.md"))
     assert proc.returncode != 0
     assert "empty" in proc.stderr
 
 
-def test_check_artifact_fails_when_env_not_set() -> None:
-    """The script exits non-zero (with clear message) when the engine
-    forgot to set IMP_ARTIFACTS_DIR."""
-    env = {k: v for k, v in os.environ.items() if k != "IMP_ARTIFACTS_DIR"}
+def test_check_artifact_fails_when_no_arg() -> None:
+    """The script exits non-zero when called with no path argument
+    (the ${1:?...} guard fires)."""
     proc = subprocess.run(
-        [str(_scripts_dir() / "check-artifact.sh"), "spec"],
-        env=env, capture_output=True, text=True, check=False,
+        [str(_scripts_dir() / "check-artifact.sh")],
+        capture_output=True, text=True, check=False,
     )
     assert proc.returncode != 0
-    assert "IMP_ARTIFACTS_DIR" in proc.stderr
 
 
 # ── run-tests.sh robustness (Bug Q) ──────────────────────────────────────────
