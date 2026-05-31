@@ -9,6 +9,7 @@ from imp.engine.types import (
     AgentDef,
     FsRule,
     Goto,
+    SourceLoc,
     Workflow,
 )
 
@@ -237,7 +238,7 @@ def _v_model_role_configured(
 ) -> None:
     seen: set[tuple[str, str]] = set()
 
-    def check(role: str, source: object) -> None:
+    def check(role: str, source: SourceLoc | None) -> None:
         if role in configured:
             return
         key = (role, str(source))
@@ -247,14 +248,29 @@ def _v_model_role_configured(
         errors.append(
             LoadError(
                 f"model_role {role!r} is not configured in .imp/config.yaml",
-                source,  # type: ignore[arg-type]
+                source,
                 hint=f"configured roles: {sorted(configured)}",
             )
         )
 
     for step in workflow.flat_steps():
-        if step.kind == "agent":
-            check(step.model_role, step.source)
+        if step.kind != "agent":
+            continue
+        check(step.model_role, step.source)
+        # Subagent frontmatter roles reachable one level deep.
+        if step.file is not None:
+            agent = workflow.agents.get(step.file.stem)
+            if agent is not None:
+                for sub_name in agent.subagents:
+                    sub = workflow.agents.get(sub_name)
+                    if sub is not None and sub.model_role is not None:
+                        check(sub.model_role, sub.source)
+
+    # Workflow-level constraint targets (early convenience only; resolve_roles is
+    # the backstop for config-introduced targets it never sees).
+    for _role, constraint in workflow.model_rules.items():
+        if constraint.differ_provider_from is not None:
+            check(constraint.differ_provider_from, constraint.source or workflow.source)
 
 
 def _v_write_tool_needs_write_permission(
