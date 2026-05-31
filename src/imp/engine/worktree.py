@@ -67,6 +67,32 @@ def current_branch(root: Path) -> str:
     return _git_ok(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
 
 
+def branch_exists(control_root: Path, branch: str) -> bool:
+    """Public so the CLI can pre-check slug availability (spec §3.1 — git
+    branch-uniqueness IS the collision check)."""
+    return _git(
+        control_root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+    ).returncode == 0
+
+
+def create_worktree(control_root: Path, slug: str, base: str) -> Path:
+    """`git worktree add -b imp/<slug> .imp/worktrees/<slug> <base>` (spec §4).
+    Branch collision surfaces as BranchExists so the caller can retry (random
+    slug) or report a clean error (title-derived slug)."""
+    rel = Path(".imp") / "worktrees" / slug
+    branch = f"imp/{slug}"
+    with RepoGitLock(control_root).acquire():
+        if branch_exists(control_root, branch):
+            raise BranchExists(branch)
+        proc = _git(control_root, "worktree", "add", "-b", branch, str(rel), base)
+        if proc.returncode != 0:
+            # already-exists races collapse to BranchExists; anything else bubbles
+            if "already exists" in proc.stderr:
+                raise BranchExists(branch)
+            raise RuntimeError(f"git worktree add failed: {proc.stderr.strip()}")
+    return (control_root / rel).resolve()
+
+
 class RepoGitLock:
     """Short-held file lock in the control root, acquired around every
     shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""

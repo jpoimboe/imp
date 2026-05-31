@@ -64,3 +64,30 @@ def test_repo_git_lock_serializes(tmp_path: Path) -> None:
         assert (tmp_path / ".imp" / "repo.lock").exists()
     with lock.acquire():  # re-acquire after release
         pass
+
+
+def test_create_worktree(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    path = wt.create_worktree(tmp_path, "add-oauth", "main")
+    assert path == tmp_path / ".imp" / "worktrees" / "add-oauth"
+    assert path.is_dir()
+    assert (path / "README.md").exists()  # checked out from main
+    branches = _git(tmp_path, "branch", "--list", "imp/add-oauth").stdout
+    assert "imp/add-oauth" in branches
+
+
+def test_create_worktree_branch_collision(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "dup", "main")
+    with pytest.raises(wt.BranchExists):
+        wt.create_worktree(tmp_path, "dup", "main")
+
+
+def test_find_control_root_from_inside_worktree(tmp_path: Path) -> None:
+    # The resume path relies on resolving the control root from INSIDE a linked
+    # worktree (spec §5.3) — not just a subdir of the main checkout.
+    _init_repo(tmp_path)
+    wpath = wt.create_worktree(tmp_path, "feat", "main")
+    assert wt.find_control_root(wpath) == tmp_path.resolve()
+    sub = wpath / ".imp" / "change"; sub.mkdir(parents=True)
+    assert wt.find_control_root(sub) == tmp_path.resolve()
