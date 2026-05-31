@@ -438,3 +438,41 @@ async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -
 
     with pytest.raises(ValueError, match="fast, powerful"):
         await dispatch_task(ctx, "reviewer", "go", model_tier="turbo")
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
+    """Parent on anthropic; model_tier='powerful' resolves to openai/gpt-5.2 —
+    the subagent jumps vendor to the tier's resolved model."""
+    from imp.providers.config import ProviderModel
+
+    captured: dict = {}
+
+    async def fake_spawn(sub_invocation: AgentInvocation):
+        captured["inv"] = sub_invocation
+
+        async def _gen():
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        return _gen()
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent("reviewer")}   # no static model_role
+    ctx.provider_name = "anthropic"                         # parent vendor
+    ctx.model_name = "claude-sonnet-4-6"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.spawn_subagent = fake_spawn
+    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.model_tiers = ("fast", "balanced", "powerful")
+    ctx.resolved_roles = {
+        "fast": ProviderModel("anthropic", "claude-haiku-4-5-20251001"),
+        "balanced": ProviderModel("anthropic", "claude-sonnet-4-6"),
+        "powerful": ProviderModel("openai", "gpt-5.2"),
+    }
+
+    out = await dispatch_task(ctx, "reviewer", "hard problem", model_tier="powerful")
+    assert json.loads(out) == {"status": "Success"}
+    inv = captured["inv"]
+    assert inv.provider_name == "openai"
+    assert inv.model_name == "gpt-5.2"

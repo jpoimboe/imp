@@ -628,3 +628,87 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
     assert calls["n"] == 2
     user_msgs = [e for e in log.read() if e["type"] == "user_message"]
     assert len(user_msgs) == 3  # initial "go" + 2 nudges
+
+
+@pytest.mark.anyio
+async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
+    """Full provider path: the model emits a `task` call carrying
+    model_tier='powerful'; the runner must forward it so the subagent spawns on
+    the powerful tier's resolved (cross-vendor) model. A dropped forward would
+    inherit the parent's anthropic model and fail the assertion."""
+    import dataclasses
+    import json as _json
+
+    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+    from imp.providers import resolve as _resolve
+    from imp.providers.config import ProviderModel
+
+    (tmp_path / "art").mkdir()
+
+    class _RecordingRunner:
+        def __init__(self, name: str, model: str) -> None:
+            self.name, self.model = name, model
+
+        async def run(self, invocation):  # type: ignore[override]
+            yield {"type": "agent_output", "payload": {
+                "status": "Success", "ran_on": self.name, "model": self.model}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _RecordingProvider:
+        def __init__(self, name: str, model: str) -> None:
+            self.name, self.model = name, model
+
+        def create_runner(self, invocation):
+            return _RecordingRunner(self.name, self.model)
+
+    reviewer_def = AgentDef(
+        name="reviewer", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("r.md"), line=1)),
+        prompt_template_source="review", source_path=Path("r.md"),
+        source=SourceLoc(file=Path("r.md"), line=1))   # no model_role
+    parent_def = dataclasses.replace(
+        _agent_def(tools=frozenset({"complete_step", "task"})),
+        subagents=("reviewer",))
+
+    log = InMemoryEventLog()
+    inv = dataclasses.replace(
+        _inv(tmp_path, event_log=log),
+        agent_def=parent_def,
+        subagent_defs={"reviewer": reviewer_def},
+        model_tiers=("powerful",),
+        resolved_roles={"powerful": ProviderModel("openai", "gpt-5.2")})
+
+    parent_fake = FakeAsyncAnthropic([
+        response(tool_use("t1", "task", {
+            "subagent_name": "reviewer", "task_description": "hard one",
+            "model_tier": "powerful"})),
+        response(tool_use("pc", "complete_step", {"status": "Success"})),
+    ])
+
+    _resolve.reset_providers_for_tests()
+    _resolve.register_provider(
+        "openai", env_check=lambda: True,
+        factory=lambda m: _RecordingProvider("openai", m))
+    _resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda m: _RecordingProvider("anthropic", m))
+    try:
+        runner = AnthropicAgentRunner(
+            model_name="claude-sonnet-4-6", client_factory=lambda: parent_fake)
+        events = [e async for e in runner.run(inv)]
+        assert events[-1]["type"] == "agent_output"
+
+        task_result = next(
+            e for e in log.read()
+            if e["type"] == "tool_result" and e["payload"].get("id") == "t1")
+        child = _json.loads(task_result["payload"]["content"])
+        assert child["ran_on"] == "openai"      # forwarded → tier vendor
+        assert child["model"] == "gpt-5.2"      # forwarded → tier model
+    finally:
+        _resolve.reset_providers_for_tests()
