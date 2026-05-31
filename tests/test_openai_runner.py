@@ -223,9 +223,13 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_runs_subagent_via_task(tmp_path: Path) -> None:
-    """task tool dispatches to a same-provider child runner; result flows back
-    as the parent's tool_result content."""
+    """task tool dispatches to a same-provider child runner via the resolve
+    registry; result flows back as the parent's tool_result content."""
+    import json
     from dataclasses import replace
+
+    from imp.providers import resolve as _resolve
+    from imp.providers.openai import OpenAIProvider
 
     (tmp_path / "art").mkdir()
 
@@ -254,7 +258,7 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
 
     # Sequence:
     #   1. parent emits task(sub, ...)
-    #   2. sub emits complete_step(status=Success)
+    #   2. sub emits complete_step(status=Success)  ← consumed from fake queue
     #   3. parent receives JSON tool_result, emits complete_step
     fake = FakeAsyncOpenAI([
         # parent turn 1
@@ -276,6 +280,18 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
         )),
     ])
 
+    # Register a fake openai provider so spawn_subagent_via_registry builds the
+    # child runner with the same shared fake client (not a real network client).
+    # Without this, the registry path resolves "openai" to the real factory,
+    # which builds an OpenAI client with a stub key and makes a real network
+    # call that returns 401.
+    _resolve.register_provider(
+        "openai", env_check=lambda: True,
+        factory=lambda m: OpenAIProvider(
+            model_name=m, client_factory=lambda: fake,
+        ),
+    )
+
     log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini",
@@ -292,6 +308,19 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     log_types = [e["type"] for e in log.read()]
     assert "tool_call" in log_types
     assert "tool_result" in log_types
+    # Verify the subagent's output actually flowed back as the task tool_result.
+    # If dispatch regressed (e.g. spawn_subagent_via_registry never called), the
+    # task tool_result would be an error string, not the subagent's JSON output.
+    task_result_ev = next(
+        e for e in log.read()
+        if e["type"] == "tool_result" and e["payload"].get("id") == "p1"
+    )
+    parsed = json.loads(task_result_ev["payload"]["content"])
+    assert parsed.get("status") == "Success"
+    # All three fake responses must have been consumed: parent turn 1, sub turn
+    # 1, parent turn 2. If the subagent ran on the real client instead of fake,
+    # the sub's queued response would remain unconsumed here.
+    assert len(fake.chat.completions.calls) == 3
 
 
 @pytest.mark.anyio
