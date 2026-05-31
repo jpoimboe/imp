@@ -74,8 +74,7 @@ def test_agent_invocation_audit_fields_default_safely(tmp_path) -> None:
             source=SourceLoc(file=Path("a.md"), line=1)),
         provider_name="anthropic", model_name="m", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="x"),)),),
-        change_context=ChangeContext(change_id=1, project_root=tmp_path,
-                                     artifacts_dir=tmp_path),
+        change_context=ChangeContext(slug="test", title="Test", project_root=tmp_path),
         interactive=False, transcript_dir=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
@@ -104,8 +103,7 @@ def test_agent_invocation_has_continuation_fn_default_none() -> None:
         agent_def=agent_def, provider_name="anthropic", model_name="m",
         system_prompt="x",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(change_id=1, project_root=Path("."),
-                                     artifacts_dir=Path(".")),
+        change_context=ChangeContext(slug="test", title="Test", project_root=Path(".")),
         interactive=False, transcript_dir=Path("."),
         fs_permissions=(), events_path=Path("e.jsonl"),
     )
@@ -116,8 +114,7 @@ def test_agent_invocation_has_continuation_fn_default_none() -> None:
         agent_def=agent_def, provider_name="anthropic", model_name="m",
         system_prompt="x",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(change_id=1, project_root=Path("."),
-                                     artifacts_dir=Path(".")),
+        change_context=ChangeContext(slug="test", title="Test", project_root=Path(".")),
         interactive=False, transcript_dir=Path("."),
         fs_permissions=(), events_path=Path("e.jsonl"),
         continuation_fn=lambda last: captured.append(last) or "nudge",
@@ -157,7 +154,7 @@ def test_agent_invocation_resolved_roles_defaults_none():
         source=SourceLoc(file=Path("a.md"), line=1))
     inv = AgentInvocation(
         agent_def=a, provider_name="p", model_name="m", system_prompt="",
-        initial_messages=(), change_context=ChangeContext(1, Path("."), Path(".")),
+        initial_messages=(), change_context=ChangeContext(slug="x", title="x", project_root=Path(".")),
         interactive=False, transcript_dir=Path("."), fs_permissions=(),
         events_path=Path("e.jsonl"))
     assert inv.resolved_roles is None

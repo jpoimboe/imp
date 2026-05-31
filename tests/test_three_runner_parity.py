@@ -84,8 +84,7 @@ def _shared_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentI
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            change_id=1, project_root=tmp_path,
-            artifacts_dir=tmp_path / "art",
+            slug="test", title="Test", project_root=tmp_path,
         ),
         interactive=False,
         transcript_dir=tmp_path / f"step-{provider_name}",

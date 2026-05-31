@@ -25,16 +25,18 @@ def anyio_backend() -> str:
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    artifacts = tmp_path / "art"
-    artifacts.mkdir()
-    return ToolContext(
-        project_root=tmp_path, artifacts_dir=artifacts,
+    ctx = ToolContext(
+        project_root=tmp_path,
         fs_permissions=(FsRule(
             operations=("read", "write"), paths=("/project/**",), mode="allow",
             source=SourceLoc(file=Path("w.yaml"), line=1),
         ),),
         events_path=tmp_path / "events.jsonl",
     )
+    ctx.change_context = ChangeContext(
+        slug="test-change", title="Test Change", project_root=tmp_path,
+    )
+    return ctx
 
 
 def _passthrough_decorator(name: str, description: str, schema):  # type: ignore[no-untyped-def]
@@ -125,7 +127,7 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
     ctx.subagent_defs = {"sub": sub_def}
     ctx.parent_transcript_dir = tmp_path / "parent"
     ctx.change_context = ChangeContext(
-        change_id=1, project_root=tmp_path, artifacts_dir=ctx.artifacts_dir,
+        slug="test-change", title="Test Change", project_root=tmp_path,
     )
 
     async def fake_spawn(_inv: object) -> object:

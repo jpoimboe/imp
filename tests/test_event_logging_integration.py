@@ -13,6 +13,8 @@ AnthropicAgentRunner with a FakeAsyncAnthropic client:
 from __future__ import annotations
 
 import dataclasses
+import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -27,11 +29,53 @@ from imp.agents.runner import (
 )
 from imp.agents.tools import get_registry  # noqa: F401 - ensures tools registered
 from imp.agents.transcript import Transcript
+from imp.engine.change import Change
 from imp.engine.replay import build_messages_from_events, reconstruct_request_for_response
-from imp.engine.state import InMemoryEventLog, JsonlEventLog
+from imp.engine.state import InMemoryEventLog, JsonlEventLog, State
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
+
+
+def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
+    """Construct a Change directly on disk without git worktrees."""
+    from imp.engine.loader import load_workflow
+    from imp.providers.config import load_config
+
+    src_wf = root / ".imp" / "workflows" / "default"
+    change_dir = root / ".imp" / "change"
+    change_dir.mkdir(parents=True, exist_ok=True)
+    dest_wf = change_dir / "workflow"
+    if dest_wf.exists():
+        shutil.rmtree(dest_wf)
+    shutil.copytree(src_wf, dest_wf)
+    (change_dir / "state").mkdir(exist_ok=True)
+    (change_dir / "change.json").write_text(json.dumps({
+        "slug": slug, "title": title, "base_branch": "main",
+    }, indent=2, sort_keys=True))
+
+    configured_roles: list[str] = []
+    try:
+        configured_roles = load_config(root).role_names()
+    except Exception:
+        pass
+
+    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    flat = workflow.flat_steps()
+    State(
+        slug=slug, step=flat[0].name if flat else None, step_attempt=0,
+        status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
+    ).save(change_dir / "state")
+
+    change = Change(
+        slug=slug, title=title, base_branch="main",
+        control_root=root, project_root=root, change_dir=change_dir,
+    )
+    change.event_log().append(
+        agent_id=None, type="change_created",
+        payload={"slug": slug, "title": title},
+    )
+    return change
 
 # ── shared helpers ────────────────────────────────────────────────────────────
 
@@ -95,7 +139,7 @@ def _inv(
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            change_id=1, project_root=tmp_path, artifacts_dir=tmp_path / "art"),
+            slug="test", title="Test", project_root=tmp_path),
         interactive=interactive, transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                mode="allow",
@@ -333,10 +377,11 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
         "          - {if: {verdict: rework}, goto: work}\n"
         "          - {else: true, pause: true}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    change = Change.create(tmp_path, title="t")
+    change = _make_change(tmp_path)
 
     # Sequence: work succeeds, check → rework (goto work), work again, check → approve
     call_num = [0]

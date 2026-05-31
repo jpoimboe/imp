@@ -24,13 +24,13 @@ def _ev(eid, etype, agent_id=None, **payload):
 
 def test_header_phase_step_outcome_render() -> None:
     out = "\n".join(_lines([
-        _ev("1", "change_created", change_id=7, title="add auth"),
+        _ev("1", "change_created", slug="add-auth-7", title="add auth"),
         _ev("3", "step_started", step="spec", kind="agent", phase="design",
             model="m", provider="anthropic"),
         _ev("4", "step_completed", step="spec", kind="agent",
             action={"verb": "continue"}, var_mutations={}),
     ]))
-    assert "#7" in out and "add auth" in out
+    assert "#add-auth-7" in out and "add auth" in out
     assert "design" in out
     assert "spec" in out
     assert "✓ spec" in out          # merged breadcrumb (was: "continue" in out)

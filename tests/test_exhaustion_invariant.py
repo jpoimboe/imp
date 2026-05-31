@@ -10,13 +10,58 @@ workflow_paused event. Regressed twice in git history; this is the guard.
 """
 from __future__ import annotations
 
+import json
+import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
+from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
+from imp.engine.state import State
+
+
+def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
+    """Construct a Change directly on disk without git worktrees."""
+    from imp.engine.loader import load_workflow
+    from imp.providers.config import load_config
+
+    src_wf = root / ".imp" / "workflows" / "default"
+    change_dir = root / ".imp" / "change"
+    change_dir.mkdir(parents=True, exist_ok=True)
+    dest_wf = change_dir / "workflow"
+    if dest_wf.exists():
+        shutil.rmtree(dest_wf)
+    shutil.copytree(src_wf, dest_wf)
+    (change_dir / "state").mkdir(exist_ok=True)
+    (change_dir / "change.json").write_text(json.dumps({
+        "slug": slug, "title": title, "base_branch": "main",
+    }, indent=2, sort_keys=True))
+
+    configured_roles: list[str] = []
+    try:
+        configured_roles = load_config(root).role_names()
+    except Exception:
+        pass
+
+    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    flat = workflow.flat_steps()
+    State(
+        slug=slug, step=flat[0].name if flat else None, step_attempt=0,
+        status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
+    ).save(change_dir / "state")
+
+    change = Change(
+        slug=slug, title=title, base_branch="main",
+        control_root=root, project_root=root, change_dir=change_dir,
+    )
+    change.event_log().append(
+        agent_id=None, type="change_created",
+        payload={"slug": slug, "title": title},
+    )
+    return change
 
 
 class _NoOutputRunner:
@@ -43,7 +88,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
     (wf_dir / "agents" / "worker.md").write_text(
         "---\nname: worker\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.id }}\n"
+        "go {{ change.slug }}\n"
     )
     # New inline-surface format: phases is a list of {name, steps}.
     # on_max_retries uses verb-style: {pause: true}.
@@ -55,7 +100,8 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "    steps:\n"
         "      - {name: build, file: agents/worker.md, model_role: default}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
 
@@ -74,9 +120,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "fake", env_check=lambda: True, factory=lambda _m: _NoOutputProvider(),
     )
 
-    from imp.engine.change import Change
-
-    change = Change.create(tmp_path, title="t")
+    change = _make_change(tmp_path)
 
     result = await run_change(change, on_event=lambda _e: None)
     assert result is RunResult.PAUSED

@@ -64,7 +64,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         provider_name="openai", model_name="gpt-4",
         system_prompt="be terse", initial_messages=(),
         change_context=ChangeContext(
-            change_id=1, project_root=tmp_path, artifacts_dir=tmp_path,
+            slug="test", title="Test", project_root=tmp_path,
         ),
         interactive=False, transcript_dir=tmp_path / "step",
         fs_permissions=(), events_path=tmp_path / "events.jsonl",

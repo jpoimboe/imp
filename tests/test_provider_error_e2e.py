@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -9,6 +11,47 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
+
+
+def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
+    """Construct a Change directly on disk without git worktrees."""
+    from imp.engine.loader import load_workflow
+    from imp.providers.config import load_config
+
+    src_wf = root / ".imp" / "workflows" / "default"
+    change_dir = root / ".imp" / "change"
+    change_dir.mkdir(parents=True, exist_ok=True)
+    dest_wf = change_dir / "workflow"
+    if dest_wf.exists():
+        shutil.rmtree(dest_wf)
+    shutil.copytree(src_wf, dest_wf)
+    (change_dir / "state").mkdir(exist_ok=True)
+    (change_dir / "change.json").write_text(json.dumps({
+        "slug": slug, "title": title, "base_branch": "main",
+    }, indent=2, sort_keys=True))
+
+    configured_roles: list[str] = []
+    try:
+        configured_roles = load_config(root).role_names()
+    except Exception:
+        pass
+
+    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    flat = workflow.flat_steps()
+    State(
+        slug=slug, step=flat[0].name if flat else None, step_attempt=0,
+        status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
+    ).save(change_dir / "state")
+
+    change = Change(
+        slug=slug, title=title, base_branch="main",
+        control_root=root, project_root=root, change_dir=change_dir,
+    )
+    change.event_log().append(
+        agent_id=None, type="change_created",
+        payload={"slug": slug, "title": title},
+    )
+    return change
 
 
 class _AuthErrorRunner:
@@ -47,10 +90,11 @@ def _seed_workflow_with_max_retries_3(root: Path) -> Change:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
-    (root / ".imp" / "config.yaml").write_text(
+    (root / "imp").mkdir(parents=True, exist_ok=True)
+    (root / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
     )
-    return Change.create(root, title="t")
+    return _make_change(root)
 
 
 @pytest.mark.anyio

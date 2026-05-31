@@ -264,7 +264,8 @@ def _route_script(
     _emit_started(log, step)
     out = run_script(step, cwd=change.workflow_dir,
                      env_extra=engine_env(project_root=change.project_root,
-                                          artifacts_dir=change.artifacts_dir))
+                                          change_slug=change.slug,
+                                          change_title=change.title))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, match)
@@ -513,13 +514,10 @@ async def _run_agent_invocation(
     assert state.resolved_roles is not None  # set by run_change before dispatch
     provider = provider_from_model(state.resolved_roles[model_role])
 
-    artifacts_dir = change.artifacts_dir
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-
     rendered = render_prompt(
         agent_def.prompt_template_source, build_context(
-            change_id=change.id, change_title=change.title,
-            artifacts_dir=artifacts_dir, event_log=log,
+            change_slug=change.slug, change_title=change.title,
+            event_log=log,
         ),
     )
 
@@ -571,7 +569,7 @@ async def _run_agent_invocation(
         system_prompt=rendered,
         initial_messages=initial_messages,
         change_context=ChangeContext(
-            change_id=change.id, project_root=change.project_root, artifacts_dir=artifacts_dir,
+            slug=change.slug, title=change.title, project_root=change.project_root,
         ),
         interactive=interactive,
         transcript_dir=transcript_dir,

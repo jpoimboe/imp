@@ -48,7 +48,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            change_id=1, project_root=tmp_path, artifacts_dir=tmp_path / "art"),
+            slug="test", title="Test", project_root=tmp_path),
         interactive=interactive, transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                mode="allow",
@@ -197,7 +197,7 @@ async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) 
         model_name="claude-sonnet-4-6", system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            change_id=1, project_root=tmp_path, artifacts_dir=tmp_path / "art"),
+            slug="test", title="Test", project_root=tmp_path),
         interactive=False, transcript_dir=inv_dir,
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                mode="allow",

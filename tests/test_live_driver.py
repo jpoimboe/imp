@@ -155,8 +155,8 @@ def test_empty_thinking_dropped_in_live_path() -> None:
 
 def test_header_emitted_on_change_created() -> None:
     drv, out = _driver()
-    drv.on_event(ev("1", "change_created", change_id=7, title="add auth"))
-    assert _body(out)[0] == "#7  add auth"
+    drv.on_event(ev("1", "change_created", slug="add-auth-7", title="add auth"))
+    assert _body(out)[0] == "#add-auth-7  add auth"
 
 
 from imp.cli.render_text import render_tree as _rt_full  # noqa: E402

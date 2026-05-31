@@ -29,7 +29,7 @@ def _agent(name: str) -> AgentDef:
                                 values=("Success", "Error"), required=True),),
             source=SourceLoc(file=Path("a.md"), line=1),
         ),
-        prompt_template_source="hi {{ change.id }}",
+        prompt_template_source="hi {{ change.slug }}",
         source_path=Path("a.md"),
         source=SourceLoc(file=Path("a.md"), line=1),
     )
@@ -43,7 +43,7 @@ def anyio_backend():
 def test_task_tool_invoke_raises_sentinel(tmp_path: Path) -> None:
     """`.invoke()` must never be called — runner special-cases name=='task'."""
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
     tool = make_task_tool()
@@ -70,7 +70,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
         return _gen()
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}
@@ -79,7 +79,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
     ctx.change_context = ChangeContext(
-        change_id=42, project_root=tmp_path, artifacts_dir=tmp_path,
+        slug="change-42", title="Change 42", project_root=tmp_path,
     )
 
     out = await dispatch_task(ctx, "reviewer", "please review")
@@ -89,13 +89,13 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     assert inv.agent_def.name == "reviewer"
     assert inv.interactive is False
     assert inv.provider_name == "anthropic"
-    assert inv.change_context.change_id == 42
+    assert inv.change_context.slug == "change-42"
 
 
 @pytest.mark.anyio
 async def test_dispatch_task_unknown_subagent_raises(tmp_path: Path) -> None:
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
     ctx.subagent_defs = {}
@@ -125,21 +125,19 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
             ),),
             source=SourceLoc(file=Path("sub.md"), line=1),
         ),
-        prompt_template_source="hello change-{{ change.id }}",
+        prompt_template_source="hello {{ change.slug }}",
         source_path=Path("sub.md"),
         source=SourceLoc(file=Path("sub.md"), line=1),
     )
 
-    artifacts = tmp_path / "art"
-    artifacts.mkdir()
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=artifacts,
+        project_root=tmp_path,
         fs_permissions=(), events_path=tmp_path / "events.jsonl",
         subagent_defs={"sub": sub_def},
         provider_name="anthropic", model_name="claude-sonnet-4-6",
         parent_transcript_dir=tmp_path / "parent",
         change_context=ChangeContext(
-            change_id=7, project_root=tmp_path, artifacts_dir=artifacts,
+            slug="change-7", title="Change 7", project_root=tmp_path,
         ),
     )
 
@@ -179,7 +177,7 @@ async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> 
         return _gen()
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
         subagent_defs={"helper": _agent("helper")},
         parent_transcript_dir=tmp_path / "steps" / "p" / "s",
@@ -218,14 +216,14 @@ async def test_dispatch_task_uses_subagent_model_role(tmp_path: Path) -> None:
         model_role="code_review")
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": sub}
     ctx.provider_name = "anthropic"      # parent vendor
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
     ctx.resolved_roles = {"code_review": ProviderModel("openai", "gpt-5.2")}
 
     await dispatch_task(ctx, "reviewer", "review please")
@@ -247,14 +245,14 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
         return _gen()
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}  # model_role None
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
 
     await dispatch_task(ctx, "reviewer", "go")
     inv = captured["inv"]
@@ -316,14 +314,14 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
         source_path=sub.source_path, source=sub.source, model_role="code_review")
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": sub}
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
     ctx.model_tiers = ("powerful",)
     ctx.resolved_roles = {
         "code_review": ProviderModel("openai", "gpt-5.2"),     # frontmatter target
@@ -358,14 +356,14 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
         source_path=sub.source_path, source=sub.source, model_role="code_review")
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": sub}
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
     ctx.model_tiers = ("powerful",)
     ctx.resolved_roles = {
         "code_review": ProviderModel("openai", "gpt-5.2"),
@@ -400,14 +398,14 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
         source_path=sub.source_path, source=sub.source, model_role="code_review")
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": sub}
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
     ctx.model_tiers = ("powerful",)
     ctx.resolved_roles = {
         "code_review": ProviderModel("openai", "gpt-5.2"),
@@ -425,14 +423,14 @@ async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -
     from imp.providers.config import ProviderModel
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = lambda _inv: None  # type: ignore[assignment]
-    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
     ctx.model_tiers = ("fast", "powerful")
     ctx.resolved_roles = {"powerful": ProviderModel("anthropic", "opus")}
 
@@ -456,14 +454,14 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
         return _gen()
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}   # no static model_role
     ctx.provider_name = "anthropic"                         # parent vendor
     ctx.model_name = "claude-sonnet-4-6"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
     ctx.model_tiers = ("fast", "balanced", "powerful")
     ctx.resolved_roles = {
         "fast": ProviderModel("anthropic", "claude-haiku-4-5-20251001"),

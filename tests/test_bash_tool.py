@@ -7,19 +7,21 @@ from pathlib import Path
 import anyio
 
 import imp.agents.tools.bash  # noqa: F401
+from imp.agents.runner import ChangeContext
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    artifacts = tmp_path / "_artifacts"
-    artifacts.mkdir()
-    return ToolContext(
+    ctx = ToolContext(
         project_root=tmp_path,
-        artifacts_dir=artifacts,
         fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
+    ctx.change_context = ChangeContext(
+        slug="test-change", title="Test Change", project_root=tmp_path,
+    )
+    return ctx
 
 
 def _run_bash(ctx, args):
@@ -55,11 +57,11 @@ def test_bash_exposes_imp_project_root(tmp_path: Path) -> None:
     assert str(tmp_path) in out["stdout"]
 
 
-def test_bash_exposes_imp_artifacts_dir(tmp_path: Path) -> None:
+def test_bash_exposes_imp_change_slug(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_ARTIFACTS_DIR"}))
+    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_CHANGE_SLUG"}))
     assert out["returncode"] == 0
-    assert str(ctx.artifacts_dir) in out["stdout"]
+    assert "test-change" in out["stdout"]
 
 
 def test_bash_registers_and_clears_running_processes(tmp_path: Path) -> None:

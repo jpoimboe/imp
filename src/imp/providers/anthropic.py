@@ -296,7 +296,6 @@ class AnthropicAgentRunner:
         tools = _build_tools(invocation)
         ctx = ToolContext(
             project_root=invocation.change_context.project_root,
-            artifacts_dir=invocation.change_context.artifacts_dir,
             fs_permissions=invocation.fs_permissions,
             events_path=invocation.events_path,
             subagent_defs=invocation.subagent_defs,

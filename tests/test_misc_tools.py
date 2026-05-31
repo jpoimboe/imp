@@ -14,10 +14,8 @@ from imp.engine.state import JsonlEventLog
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    artifacts = tmp_path / "_artifacts"
-    artifacts.mkdir()
     return ToolContext(
-        project_root=tmp_path, artifacts_dir=artifacts,
+        project_root=tmp_path,
         fs_permissions=(), events_path=tmp_path / "events.jsonl",
     )
 

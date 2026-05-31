@@ -6,10 +6,66 @@ from pathlib import Path
 
 import pytest
 
+import json
+import shutil
+
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
+
+
+def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
+    """Construct a Change directly on disk without git worktrees.
+
+    The test sets up the workflow under root/.imp/workflows/default BEFORE
+    calling _make_change; this helper copies it into the change dir and seeds
+    the State so run_change can be invoked immediately.
+    """
+    from imp.engine.loader import load_workflow
+    from imp.providers.config import load_config
+
+    src_wf = root / ".imp" / "workflows" / "default"
+    change_dir = root / ".imp" / "change"
+    change_dir.mkdir(parents=True, exist_ok=True)
+    dest_wf = change_dir / "workflow"
+    if dest_wf.exists():
+        shutil.rmtree(dest_wf)
+    shutil.copytree(src_wf, dest_wf)
+    (change_dir / "state").mkdir(exist_ok=True)
+
+    # Write change metadata
+    (change_dir / "change.json").write_text(json.dumps({
+        "slug": slug, "title": title, "base_branch": "main",
+    }, indent=2, sort_keys=True))
+
+    configured_roles: list[str] = []
+    try:
+        configured_roles = load_config(root).role_names()
+    except Exception:
+        pass
+
+    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    flat = workflow.flat_steps()
+    from imp.engine.state import State as _State
+    _State(
+        slug=slug,
+        step=flat[0].name if flat else None,
+        step_attempt=0,
+        status="running",
+        vars=dict(workflow.vars.defaults()),
+        loop_counts={},
+    ).save(change_dir / "state")
+
+    change = Change(
+        slug=slug, title=title, base_branch="main",
+        control_root=root, project_root=root, change_dir=change_dir,
+    )
+    change.event_log().append(
+        agent_id=None, type="change_created",
+        payload={"slug": slug, "title": title},
+    )
+    return change
 
 
 class _FakeRunner:
@@ -57,7 +113,7 @@ def _seed_minimal_workflow(
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
         f"---\nname: {agent_stem}\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
-        "go {{ change.id }}\n"
+        "go {{ change.slug }}\n"
     )
     (wf_dir / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -67,11 +123,12 @@ def _seed_minimal_workflow(
         "    steps:\n"
         f"      - {{name: {step_name}, file: agents/{agent_stem}.md, model_role: default}}\n"
     )
-    config = root / ".imp" / "config.yaml"
+    config = root / "imp" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    change = Change.create(root, title="t")
+    change = _make_change(root)
     return change, phase_name, step_name
 
 
@@ -129,10 +186,11 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
         "        rules:\n"
         "          - {else: true, continue: true, set: {review_done: true}}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    change = Change.create(tmp_path, title="t")
+    change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_change(change, on_event=lambda _e: None)
@@ -174,10 +232,11 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
         "  - name: done\n"
         "    steps: []\n"
     )
-    (root / ".imp" / "config.yaml").write_text(
+    (root / "imp").mkdir(parents=True, exist_ok=True)
+    (root / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    return Change.create(root, title="t")
+    return _make_change(root)
 
 
 @pytest.mark.anyio
@@ -235,10 +294,11 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "          - {if: {verdict: rework}, goto: writer, feedback: false}\n"
         "          - {else: true, continue: true}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    change = Change.create(tmp_path, title="t")
+    change = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -303,10 +363,11 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
         "  - name: done\n"
         "    steps: []\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    change = Change.create(tmp_path, title="t")
+    change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
     result = await run_change(change, on_event=lambda _e: None)
@@ -654,10 +715,11 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    change = Change.create(tmp_path, title="t")
+    change = _make_change(tmp_path)
 
     captured: dict[str, AgentInvocation] = {}
 
@@ -720,10 +782,11 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
         "    steps:\n"
         "      - {name: w, file: agents/asker.md, model_role: default, interactive: true}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    change = Change.create(tmp_path, title="t")
+    change = _make_change(tmp_path)
 
     events: list[dict] = []
 
@@ -801,10 +864,11 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
         "          - {if: {verdict: Reject}, resume: coder}\n"
         "          - {else: true, continue: true}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
     )
-    change = Change.create(tmp_path, title="t")
+    change = _make_change(tmp_path)
 
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -932,9 +996,10 @@ def _seed_back_edge_workflow(root: Path, verb: str) -> Change:
         "        rules:\n"
         f"          - {{if: {{verdict: rework}}, {verb}: coder}}\n"
         "          - {else: true, continue: true}\n")
-    (root / ".imp" / "config.yaml").write_text(
+    (root / "imp").mkdir(parents=True, exist_ok=True)
+    (root / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n")
-    return Change.create(root, title="t")
+    return _make_change(root)
 
 
 def _register_capturing(coder_behavior, reviewer_verdicts: list[str], runs: list) -> None:

@@ -41,12 +41,12 @@ def test_build_tree_empty_yields_root_only() -> None:
     assert tree.root.children == []
 
 
-def test_change_created_sets_id_and_title() -> None:
+def test_change_created_sets_slug_and_title() -> None:
     tree = nv.build_tree([
         {"id": "e1", "agent_id": None, "type": "change_created",
-         "payload": {"change_id": 7, "title": "add auth"}},
+         "payload": {"slug": "add-auth", "title": "add auth"}},
     ])
-    assert tree.root.change_id == 7
+    assert tree.root.slug == "add-auth"
     assert tree.root.title == "add auth"
 
 

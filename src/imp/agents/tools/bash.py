@@ -37,7 +37,9 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
     cwd_path = cwd or str(ctx.project_root)
     env = {
         **os.environ,
-        **engine_env(project_root=ctx.project_root, artifacts_dir=ctx.artifacts_dir),
+        **engine_env(project_root=ctx.project_root,
+                     change_slug=ctx.change_context.slug if ctx.change_context else "",
+                     change_title=ctx.change_context.title if ctx.change_context else ""),
     }
     # POSIX: start_new_session=True makes the child a new session leader so
     # SIGTERM to the PG affects the whole tree. Windows: this kwarg is ignored

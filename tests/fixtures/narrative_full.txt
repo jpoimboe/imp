@@ -1,4 +1,4 @@
-#1  add auth  (paused)
+#add-auth  add auth  (paused)
 roles resolved:
   code        → anthropic/claude-haiku-4-5-20251001
   code_review → openai/gpt-5.2   (differ from code: tier 1, vendor jump)
