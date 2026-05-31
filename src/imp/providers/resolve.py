@@ -231,14 +231,14 @@ def resolve_roles(
             available,
             key=lambda ie: (_differ_tier(ie[1], tpm.provider, tpm.model), ie[0]),
         )[1]
-        tier = _differ_tier(chosen, tpm.provider, tpm.model)
+        chosen_tier = _differ_tier(chosen, tpm.provider, tpm.model)
         pm = ProviderModel(provider=chosen.provider, model=chosen.model)
         resolved[role] = pm
         details[role] = {
             "provider": pm.provider,
             "model": pm.model,
             "constraint": "differ_provider_from",
-            "differ_tier": tier,
+            "differ_tier": chosen_tier,
             "differ_from": target,
         }
 
