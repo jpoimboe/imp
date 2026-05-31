@@ -127,7 +127,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         # empty, dispatch_task raises a clear "subagent X not declared" error
         # the first time the LLM invokes `task` — much better than silently
         # advertising no tool at all and letting the LLM fumble.
-        out["task"] = make_task_tool()
+        out["task"] = make_task_tool(invocation.model_tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     return out
 
@@ -308,6 +308,7 @@ class AnthropicAgentRunner:
         ctx.change_context = invocation.change_context  # for subagent dispatch
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_roles = invocation.resolved_roles
+        ctx.model_tiers = invocation.model_tiers
         ctx.event_log = elog                       # shared write instance
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
@@ -499,6 +500,7 @@ class AnthropicAgentRunner:
                         result_str = await dispatch_task(
                             ctx, tu.input["subagent_name"], tu.input["task_description"],
                             tool_call_event_id=tc_ev["id"],
+                            model_tier=tu.input.get("model_tier"),
                         )
                     except Exception as e:
                         err_text = f"{type(e).__name__}: {e}"

@@ -195,7 +195,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
     if "task" in invocation.agent_def.tools:
-        out["task"] = make_task_tool()
+        out["task"] = make_task_tool(invocation.model_tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     return out
 
@@ -283,16 +283,20 @@ def _wrap_one(
                 # this guard is defensive (no-log → tool_call_event_id="" →
                 # subagent agent_id="sub:" with a broken parent link).
                 if ctx.event_log is not None:
+                    task_input: dict[str, Any] = {
+                        "subagent_name": args["subagent_name"],
+                        "task_description": args["task_description"],
+                    }
+                    if args.get("model_tier"):
+                        task_input["model_tier"] = args["model_tier"]
                     tc_ev = ctx.event_log.append_tool_call(
                         agent_id=state.agent_id,
-                        block=ToolUseBlock(
-                            id=tu_id, name="task",
-                            input={"subagent_name": args["subagent_name"],
-                                   "task_description": args["task_description"]}))
+                        block=ToolUseBlock(id=tu_id, name="task", input=task_input))
                     tc_event_id = tc_ev["id"]
                 result = await dispatch_task(
                     ctx, args["subagent_name"], args["task_description"],
                     tool_call_event_id=tc_event_id,
+                    model_tier=args.get("model_tier"),
                 )
                 return _tool_response(result, is_error=False)
             if name == "complete_step":
@@ -672,6 +676,7 @@ class ClaudeCodeAgentRunner:
         ctx.change_context = invocation.change_context
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_roles = invocation.resolved_roles
+        ctx.model_tiers = invocation.model_tiers
         ctx.event_log = elog
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
