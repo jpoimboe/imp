@@ -30,7 +30,7 @@ class ToolContext:
     parent_transcript_dir: Path | None = None
     interactive: bool = False
     running_processes: list[Any] = field(default_factory=list)
-    # The change being processed; used by subagent dispatch to propagate change_id.
+    # The change being processed; used by subagent dispatch to propagate slug/title.
     change_context: Any = None
     # Live State of the running Change; the rename_change tool sets
     # pending_rename on it. None for subagents (no rename authority).

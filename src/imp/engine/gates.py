@@ -57,7 +57,7 @@ def run_script(
     and the workflow author are the same trust principal in V0.
 
     `env_extra` is merged on top of the current process environment so that
-    engine-level variables (e.g. IMP_ARTIFACTS_DIR) are visible to scripts.
+    engine-level variables (e.g. IMP_CHANGE_SLUG) are visible to scripts.
     """
     # The loader only constructs script steps with a non-None command; this
     # assert is purely for mypy (command: str | None in Step's type).
