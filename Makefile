@@ -34,11 +34,11 @@ install: ## Editable install of imp + dev deps (pytest, ruff, mypy).
 
 .PHONY: test
 test: ## Fast test suite (skips live-API tests). What CI runs.
-	$(PYTEST) -q
+	IMP_LIVE_PROVIDERS= $(PYTEST) -q
 
 .PHONY: test-verbose
 test-verbose: ## Same as `test` but with -v.
-	$(PYTEST) -v
+	IMP_LIVE_PROVIDERS= $(PYTEST) -v
 
 _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
