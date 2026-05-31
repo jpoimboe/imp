@@ -8,10 +8,8 @@ build/
 .ruff_cache/
 .venv/
 
-# imp-managed state (Changes are local-only; config has secrets)
-.imp/changes/
-.imp/config.yaml
-.imp/lock
+# imp-managed internal state (gitignored wholesale; committed config/workflows live in imp/)
+.imp/
 
 # Plan 2 additions
 spikes/
