@@ -409,28 +409,40 @@ def _last_event_timestamp(events_path: Path) -> str:
         return "-"
 
 
-def _cmd_status(args: argparse.Namespace) -> int:
-    project = _project_root()
-    changes_root = project / ".imp" / "changes"
-    if not changes_root.is_dir():
-        print("No Changes yet.")
-        return 0
-    valid_dirs = [
-        d for d in changes_root.iterdir()
-        if d.is_dir() and d.name.isdigit()
-    ]
+# Spec §10: status shows only in-flight Changes; completed ones live in the
+# journal (a merged Change's worktree is removed).
+_INFLIGHT = ("running", "paused", "merge_blocked")
+
+
+def _status_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
     rows = []
-    for d in sorted(valid_dirs, key=lambda p: int(p.name)):
-        meta = json.loads((d / "change.json").read_text())
-        state = State.load(d / "state")
-        last_activity = _last_event_timestamp(d / "events.jsonl")
-        rows.append(
-            (meta["id"], state.status, state.step or "-",
-             last_activity, meta["title"])
-        )
-    print(f"{'ID':<4} {'STATUS':<10} {'STEP':<20} {'LAST_ACTIVITY':<20} TITLE")
-    for row in rows:
-        print(f"{row[0]:<4} {row[1]:<10} {row[2]:<20} {row[3]:<20} {row[4]}")
+    for slug in _list_change_worktrees(control):
+        cdir = control / ".imp" / "worktrees" / slug / ".imp" / "change"
+        meta = json.loads((cdir / "change.json").read_text())
+        state = State.load(cdir / "state")
+        if state.status not in _INFLIGHT:
+            continue
+        last = _last_event_timestamp(cdir / "events.jsonl")
+        rows.append((slug, state.status, state.step or "-", last, meta["title"]))
+    return rows
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    try:
+        control = _control_root()
+    except worktree.PreconditionError:
+        print("No in-flight Changes.")
+        print("\nCompleted Changes are in the journal: git log refs/imp/journal")
+        return 0
+    rows = _status_rows(control)
+    if not rows:
+        print("No in-flight Changes.")
+    else:
+        print(f"{'SLUG':<24} {'STATUS':<12} {'STEP':<18} {'LAST_ACTIVITY':<20} TITLE")
+        for r in rows:
+            print(f"{r[0]:<24} {r[1]:<12} {r[2]:<18} {r[3]:<20} {r[4]}")
+    # Completed Changes live in the journal (spec §5 item 5, §10).
+    print("\nCompleted Changes are in the journal: git log refs/imp/journal")
     return 0
 
 
