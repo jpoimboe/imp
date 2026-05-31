@@ -18,7 +18,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 from imp.agents.classify import ResumeState, classify_resume
@@ -47,6 +47,7 @@ from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
+from imp.providers.resolve import spawn_subagent_via_registry
 
 
 def _classify_openai_exception(exc: BaseException) -> perr.ProviderError:
@@ -356,23 +357,6 @@ class OpenAIAgentRunner:
                 self._client = openai.AsyncOpenAI()
         return self._client
 
-    def _make_spawn_subagent(self) -> Any:
-        """Same pattern as anthropic._make_spawn_subagent: spawn a same-class
-        child for the task tool. Provider constraint per spec §6.13: subagent
-        runs on the same provider as parent."""
-        client_factory = self._client_factory
-        user_input_fn = self._user_input_fn
-
-        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
-            child = OpenAIAgentRunner(
-                model_name=sub_invocation.model_name,
-                client_factory=client_factory,
-                user_input_fn=user_input_fn,
-            )
-            return child.run(sub_invocation)
-
-        return _spawn
-
     async def _close_client(self) -> None:
         """Close the underlying SDK client if we own it and it supports close().
 
@@ -431,7 +415,8 @@ class OpenAIAgentRunner:
             interactive=invocation.interactive,
         )
         ctx.change_context = invocation.change_context
-        ctx.spawn_subagent = self._make_spawn_subagent()
+        ctx.spawn_subagent = spawn_subagent_via_registry
+        ctx.resolved_roles = invocation.resolved_roles
         ctx.event_log = elog                       # shared write instance
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn

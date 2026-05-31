@@ -18,7 +18,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from typing import Any, cast
 
 from imp.agents.classify import ResumeState, classify_resume
@@ -46,6 +46,7 @@ from imp.agents.transcript import (
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers.base import Provider
+from imp.providers.resolve import spawn_subagent_via_registry
 
 
 def _classify_anthropic_exception(exc: BaseException) -> perr.ProviderError:
@@ -248,23 +249,6 @@ class AnthropicAgentRunner:
                 self._client = anthropic.AsyncAnthropic()
         return self._client
 
-    def _make_spawn_subagent(self) -> Any:
-        """Closure that creates a same-class child runner for the task tool.
-
-        Returns an async callable that takes a sub_invocation and returns the
-        child runner's event AsyncIterator. Same provider, same model — V1
-        constraint per spec §6.13.
-        """
-        client_factory = self._client_factory
-
-        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
-            child = AnthropicAgentRunner(
-                model_name=sub_invocation.model_name, client_factory=client_factory,
-            )
-            return child.run(sub_invocation)
-
-        return _spawn
-
     async def _close_client(self) -> None:
         """Close the underlying SDK client if we own it and it supports close().
 
@@ -322,7 +306,8 @@ class AnthropicAgentRunner:
             interactive=invocation.interactive,
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
-        ctx.spawn_subagent = self._make_spawn_subagent()
+        ctx.spawn_subagent = spawn_subagent_via_registry
+        ctx.resolved_roles = invocation.resolved_roles
         ctx.event_log = elog                       # shared write instance
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn

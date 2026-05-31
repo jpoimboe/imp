@@ -225,6 +225,17 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path) -> None:
                            {"status": "Success", "note": "done"})),
     ])
 
+    # Register a fake anthropic provider so spawn_subagent_via_registry
+    # builds the child runner with the same client fake (not a real network client).
+    from imp.providers import resolve as _resolve
+    from imp.providers.anthropic import AnthropicProvider
+    _resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda m: AnthropicProvider(
+            model_name=m, client_factory=lambda: shared_fake,
+        ),
+    )
+
     runner = AnthropicAgentRunner(
         model_name="claude-sonnet-4-6",
         client_factory=lambda: shared_fake,

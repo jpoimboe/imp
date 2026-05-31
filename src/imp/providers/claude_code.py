@@ -28,7 +28,7 @@ import json
 import re
 import shutil
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -58,6 +58,7 @@ from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
+from imp.providers.resolve import spawn_subagent_via_registry
 
 _AUTH_PATTERNS = (
     "Invalid API key",
@@ -639,20 +640,6 @@ class ClaudeCodeAgentRunner:
         from claude_agent_sdk import ClaudeSDKClient
         return ClaudeSDKClient(opts)
 
-    def _make_spawn_subagent(self) -> Any:
-        client_factory = self._client_factory
-        user_input_fn = self._user_input_fn
-
-        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
-            child = ClaudeCodeAgentRunner(
-                model_name=sub_invocation.model_name,
-                client_factory=client_factory,
-                user_input_fn=user_input_fn,
-            )
-            return child.run(sub_invocation)
-
-        return _spawn
-
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         try:
             async for ev in self._run_loop(invocation):
@@ -683,7 +670,8 @@ class ClaudeCodeAgentRunner:
             interactive=invocation.interactive,
         )
         ctx.change_context = invocation.change_context
-        ctx.spawn_subagent = self._make_spawn_subagent()
+        ctx.spawn_subagent = spawn_subagent_via_registry
+        ctx.resolved_roles = invocation.resolved_roles
         ctx.event_log = elog
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn
