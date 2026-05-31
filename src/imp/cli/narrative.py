@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, ClassVar
 
 
@@ -40,6 +41,10 @@ class TokenTotals:
 # `collapsible` is a class attribute (not a dataclass field) so isinstance-free
 # code can ask `node.collapsible`. The TUI memo keys on id(node), so nodes carry
 # no explicit id field.
+
+_PROSE_THRESHOLD = 80  # issues 5/6: string output fields longer than this (or
+                       # multi-line) render as a bold prose block; shorter scalars
+                       # and *_path fields fold into the breadcrumb.
 
 @dataclass
 class WorkflowNode:
@@ -176,6 +181,27 @@ class StepContextNode:
 @dataclass
 class OutcomeLine:
     action: Any                        # dict {verb, target?} from step_completed
+    collapsible = False
+
+
+@dataclass
+class LiteralTextNode:
+    """A plain string output field (e.g. coder.summary, reviewer notes) surfaced
+    as bold agent-style prose. Distinct from AgentTextNode, which holds a provider
+    payload and lazily parses it — this node carries a ready string (issues 5/6)."""
+    text: str
+    collapsible = False
+
+
+@dataclass
+class BreadcrumbLine:
+    """The merged per-step completion line: `✓ <step> · <N>s` with short scalar
+    output fields and a `· → <action>` suffix (omitted for a plain `continue`).
+    Replaces the rendered OutcomeLine at step completion (issue 3)."""
+    step_name: str
+    elapsed_s: float | None
+    action: Any                        # dict {verb, target?} from step_completed
+    extras: list[str] = field(default_factory=list)
     collapsible = False
 
 
@@ -470,6 +496,40 @@ def _user_message_text(payload: dict[str, Any]) -> str:
         if isinstance(b, dict) and b.get("type") == "text")
 
 
+def _is_prose_field(key: str, value: Any) -> bool:
+    """True for a free-text output field that should render as a bold prose block
+    rather than fold into the breadcrumb (issues 5/6)."""
+    return (isinstance(value, str) and not key.endswith("_path")
+            and ("\n" in value or len(value) > _PROSE_THRESHOLD))
+
+
+def _breadcrumb_extras(args: Any) -> list[str]:
+    """Short scalar output fields (`status`, `verdict`, `*_path`, numbers, bools,
+    short strings) folded into the breadcrumb as `key=value`. Prose fields and
+    non-scalar values (dicts/lists) are skipped."""
+    if not isinstance(args, dict):
+        return []
+    out: list[str] = []
+    for k, v in args.items():
+        if _is_prose_field(k, v):
+            continue
+        if isinstance(v, (str, int, float, bool)):
+            out.append(f"{k}={v}")
+    return out
+
+
+def _elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
+    """Diff two ISO-8601 timestamps (state.py writes datetime.now(UTC).isoformat()).
+    Returns None when either endpoint is missing or unparseable (issue 3)."""
+    if not start_ts or not isinstance(end_ts, str) or not end_ts:
+        return None
+    try:
+        return (datetime.fromisoformat(end_ts)
+                - datetime.fromisoformat(start_ts)).total_seconds()
+    except (ValueError, TypeError):
+        return None
+
+
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._append(UserMessageNode(text=_user_message_text(p)))
@@ -694,6 +754,11 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "payload": node.payload}
     if isinstance(node, OutcomeLine):
         return {"t": t, "action": node.action}
+    if isinstance(node, LiteralTextNode):
+        return {"t": t, "text": node.text}
+    if isinstance(node, BreadcrumbLine):
+        return {"t": t, "step_name": node.step_name, "elapsed_s": node.elapsed_s,
+                "action": node.action, "extras": node.extras}
     if isinstance(node, FallbackLine):
         return {"t": t, "event_type": node.event_type, "payload": node.payload}
     return {"t": t}

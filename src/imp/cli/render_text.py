@@ -77,6 +77,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             yield pal.ansi(line, *pal.NODE_COLORS["agent"], enabled=color)
         return
 
+    if isinstance(node, nv.LiteralTextNode):
+        for line in _wrap(node.text, width, depth):
+            yield pal.ansi(line, *pal.NODE_COLORS["agent"], enabled=color)
+        return
+
     if isinstance(node, nv.UserMessageNode):
         for line in _wrap(f"> {node.text}", width, depth):
             yield pal.ansi(line, *pal.NODE_COLORS["user"], enabled=color)
@@ -116,6 +121,19 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         ac = pal.accent_color(node.action)
         codes = (ac,) if ac else ()
         yield _line(f"→ {text}", depth, color, *codes)
+        return
+
+    if isinstance(node, nv.BreadcrumbLine):
+        parts = [f"✓ {node.step_name}"]
+        if node.elapsed_s is not None:
+            parts.append(f"{int(node.elapsed_s)}s")
+        parts.extend(node.extras)
+        verb_text = pal.action_text(node.action) if node.action is not None else None
+        if verb_text and verb_text != "continue":
+            parts.append(f"→ {verb_text}")
+        ac = pal.accent_color(node.action)
+        codes = (ac,) if ac else ()
+        yield _line(" · ".join(parts), depth, color, *codes)
         return
 
     if isinstance(node, nv.ErrorNode):

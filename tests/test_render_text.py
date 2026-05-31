@@ -248,3 +248,31 @@ def test_snapshot_covers_every_node_type() -> None:
                 "UserMessageNode", "ThinkingFold", "ToolBurstFold", "SubagentFold",
                 "GateNode", "ErrorNode", "StepContextNode", "OutcomeLine", "FallbackLine"}
     assert required <= seen, f"fixture missing node types: {required - seen}"
+
+
+def test_literal_text_node_renders_as_bold_agent_prose() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli import render_text as rt
+    node = nv.LiteralTextNode(text="line one\nline two")
+    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+    assert any("line one" in ln for ln in out)
+    assert any("line two" in ln for ln in out)
+
+
+def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli import render_text as rt
+    # plain continue: no "→ continue" suffix
+    bc = nv.BreadcrumbLine(step_name="spec", elapsed_s=12.4,
+                           action={"verb": "continue"}, extras=[])
+    out = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert "✓ spec" in out and "12s" in out
+    assert "→ continue" not in out
+    # non-continue action: suffix appended; extras folded in
+    bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
+                            action={"verb": "goto", "target": "implement"},
+                            extras=["status=Success"])
+    out2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
+    assert "✓ code-reviewer" in out2 and "41s" in out2
+    assert "status=Success" in out2
+    assert "→ goto(implement)" in out2

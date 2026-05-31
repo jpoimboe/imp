@@ -657,3 +657,13 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     reused = b._step_stack[-1]
     assert reused is step                      # same node reused
     assert reused.start_ts == "2026-05-30T10:05:00+00:00"
+
+
+def test_structural_repr_covers_new_node_types() -> None:
+    lit = nv.LiteralTextNode(text="hi")
+    bc = nv.BreadcrumbLine(step_name="s", elapsed_s=1.0,
+                           action={"verb": "continue"}, extras=["status=Success"])
+    assert nv.structural_repr(lit) == {"t": "LiteralTextNode", "text": "hi"}
+    assert nv.structural_repr(bc) == {
+        "t": "BreadcrumbLine", "step_name": "s", "elapsed_s": 1.0,
+        "action": {"verb": "continue"}, "extras": ["status=Success"]}
