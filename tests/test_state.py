@@ -198,6 +198,23 @@ def test_state_resolved_roles_none_preserved(tmp_path):
     assert State.load(tmp_path).resolved_roles is None
 
 
+def test_state_round_trips_model_tiers(tmp_path) -> None:
+    from imp.engine.state import State
+    s = State(change_id=1, step="x", step_attempt=0, status="running",
+              model_tiers=("fast", "powerful"))
+    s.save(tmp_path)
+    loaded = State.load(tmp_path)
+    assert loaded.model_tiers == ("fast", "powerful")
+
+
+def test_state_model_tiers_defaults_none(tmp_path) -> None:
+    from imp.engine.state import State
+    s = State(change_id=1, step="x", step_attempt=0, status="running")
+    s.save(tmp_path)
+    loaded = State.load(tmp_path)
+    assert loaded.model_tiers is None
+
+
 def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
     tmp_path: Path,
 ) -> None:

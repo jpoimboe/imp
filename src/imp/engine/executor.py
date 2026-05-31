@@ -41,6 +41,7 @@ from imp.engine.gates import (
     run_script,
 )
 from imp.engine.loader import load_workflow
+from imp.engine.model_tiers import effective_model_tiers
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
@@ -113,6 +114,7 @@ async def run_change(
     if state.resolved_roles is None:
         resolved, details = resolve_roles(workflow, config)
         state.resolved_roles = resolved
+        state.model_tiers = effective_model_tiers(workflow, config)
         state.save(change.state_dir)
         _emit(log, "roles_resolved", {"roles": details}, agent_id=None)
 
@@ -585,6 +587,7 @@ async def _run_agent_invocation(
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
         resolved_roles=state.resolved_roles,
+        model_tiers=state.model_tiers or (),
     )
 
     runner = provider.create_runner(invocation)

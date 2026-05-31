@@ -53,6 +53,7 @@ class State:
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
     resolved_roles: dict[str, ProviderModel] | None = None
+    model_tiers: tuple[str, ...] | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
@@ -67,10 +68,13 @@ class State:
             {role: ProviderModel(**pm) for role, pm in raw_rr.items()}
             if raw_rr is not None else None
         )
+        raw_mt = data.pop("model_tiers", None)
+        model_tiers = tuple(raw_mt) if raw_mt is not None else None
         return cls(
             **data,
             current_step=CurrentStep.from_dict(cur) if cur else None,
             resolved_roles=resolved_roles,
+            model_tiers=model_tiers,
         )
 
     def save(self, state_dir: Path) -> None:
@@ -91,6 +95,9 @@ class State:
                 {r: {"provider": pm.provider, "model": pm.model}
                  for r, pm in self.resolved_roles.items()}
                 if self.resolved_roles is not None else None
+            ),
+            "model_tiers": (
+                list(self.model_tiers) if self.model_tiers is not None else None
             ),
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
