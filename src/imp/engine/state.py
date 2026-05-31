@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 import filelock
 
-Status = Literal["running", "paused", "completed", "errored"]
+Status = Literal["running", "paused", "completed", "errored", "merge_blocked"]
 
 
 @dataclass
@@ -43,7 +43,7 @@ class CurrentStep:
 
 @dataclass
 class State:
-    change_id: int
+    slug: str
     step: str | None
     step_attempt: int
     status: Status
@@ -52,6 +52,7 @@ class State:
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
+    pending_rename: str | None = None
     resolved_roles: dict[str, ProviderModel] | None = None
     model_tiers: tuple[str, ...] | None = None
 
@@ -82,7 +83,7 @@ class State:
         state_dir.mkdir(parents=True, exist_ok=True)
         target = state_dir / "state.json"
         payload = {
-            "change_id": self.change_id,
+            "slug": self.slug,
             "step": self.step,
             "step_attempt": self.step_attempt,
             "status": self.status,
@@ -91,6 +92,7 @@ class State:
             "current_step": self.current_step.to_dict() if self.current_step else None,
             "retry_feedback": self.retry_feedback,
             "resume_pending": self.resume_pending,
+            "pending_rename": self.pending_rename,
             "resolved_roles": (
                 {r: {"provider": pm.provider, "model": pm.model}
                  for r, pm in self.resolved_roles.items()}

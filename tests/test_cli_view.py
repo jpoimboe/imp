@@ -41,7 +41,7 @@ def test_resume_renders_through_live_driver_without_replay(tmp_path, monkeypatch
     (change_dir / "artifacts").mkdir()
     (change_dir / "events.jsonl").write_text("")
     (change_dir / "change.json").write_text(json.dumps({"id": 1, "title": "resume-test"}))
-    state = State(change_id=1, status="paused", step="spec", step_attempt=0)
+    state = State(slug="c1", status="paused", step="spec", step_attempt=0)
     state.save(change_dir / "state")
 
     async def fake_run_change(change, **kwargs):
