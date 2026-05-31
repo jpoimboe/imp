@@ -23,7 +23,7 @@ _DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80) -> Iterator[str]:
     root = tree.root
-    head = f"#{root.change_id if root.change_id is not None else '?'}  {root.title}".rstrip()
+    head = f"#{root.slug if root.slug is not None else '?'}  {root.title}".rstrip()
     if root.status != "running":
         head = f"{head}  ({root.status})"
     yield pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)

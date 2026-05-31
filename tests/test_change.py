@@ -1,65 +1,33 @@
+# tests/test_change.py
 from pathlib import Path
 
 from imp.engine.change import Change
 from imp.engine.state import State
-from tests.conftest import write_agent_md
+from tests.conftest import _seed_control
 
 
-def _seed_workflow(project: Path) -> None:
-    src = project / ".imp" / "workflows" / "default"
-    (src / "agents").mkdir(parents=True)
-    write_agent_md(
-        src / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    # New inline-surface format: phases is a list of {name, steps}.
-    (src / "workflow.yaml").write_text(
-        "name: t\ndescription: \"\"\n"
-        "phases:\n"
-        "  - name: p\n"
-        "    steps:\n"
-        "      - {name: s, file: agents/stub.md}\n"
-    )
-    (project / ".imp" / "config.yaml").write_text(
-        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
-    )
+def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Add OAuth", slug="add-oauth", base_branch="main")
+    assert ch.slug == "add-oauth"
+    assert ch.base_branch == "main"
+    wtpath = tmp_path / ".imp" / "worktrees" / "add-oauth"
+    assert ch.project_root == wtpath
+    assert (wtpath / ".imp" / "change" / "change.json").exists()
+    assert (wtpath / ".imp" / "change" / "workflow" / "workflow.yaml").exists()
+    state = State.load(wtpath / ".imp" / "change" / "state")
+    assert state.slug == "add-oauth" and state.step == "s" and state.status == "running"
 
 
-def test_create_change_allocates_id_1(tmp_path: Path) -> None:
-    _seed_workflow(tmp_path)
-    ch = Change.create(tmp_path, title="first")
-    assert ch.id == 1
-    assert (tmp_path / ".imp" / "changes" / "1" / "workflow" / "workflow.yaml").exists()
-    assert (tmp_path / ".imp" / "changes" / "1" / "change.json").exists()
-    state = State.load(tmp_path / ".imp" / "changes" / "1" / "state")
-    # In the unified-step model, State has no phase field; step cursor points to
-    # the first step ("s") at creation, and status is "running".
-    assert state.step == "s"
-    assert state.status == "running"
-
-
-def test_create_change_increments(tmp_path: Path) -> None:
-    _seed_workflow(tmp_path)
-    a = Change.create(tmp_path, title="a")
-    b = Change.create(tmp_path, title="b")
-    assert (a.id, b.id) == (1, 2)
+def test_load_change_by_slug(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    a = Change.create(tmp_path, title="X", slug="my-change", base_branch="main")
+    b = Change.load(tmp_path, "my-change")
+    assert b.slug == "my-change" and b.title == "X" and b.base_branch == "main"
 
 
 def test_snapshot_is_isolated(tmp_path: Path) -> None:
-    _seed_workflow(tmp_path)
-    ch = Change.create(tmp_path, title="x")
-    # Mutate the live workflow; snapshot should not change.
-    (tmp_path / ".imp" / "workflows" / "default" / "workflow.yaml").write_text("BROKEN")
-    snap = ch.workflow_dir / "workflow.yaml"
-    assert "phases:" in snap.read_text()
-
-
-def test_load_existing_change(tmp_path: Path) -> None:
-    _seed_workflow(tmp_path)
-    a = Change.create(tmp_path, title="x")
-    b = Change.load(tmp_path, a.id)
-    assert b.id == a.id
-    assert b.title == "x"
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", slug="iso", base_branch="main")
+    (tmp_path / "imp" / "workflows" / "default" / "workflow.yaml").write_text("BROKEN")
+    assert "phases:" in (ch.workflow_dir / "workflow.yaml").read_text()

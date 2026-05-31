@@ -48,7 +48,7 @@ _PROSE_THRESHOLD = 80  # issues 5/6: string output fields longer than this (or
 
 @dataclass
 class WorkflowNode:
-    change_id: int | None = None
+    slug: str | None = None
     title: str = ""
     status: str = "running"            # running | paused | completed
     children: list[Any] = field(default_factory=list)
@@ -367,7 +367,7 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
 # Handlers populate this in subsequent tasks; change_created lives here so the
 # skeleton test passes.
 def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    self._root.change_id = p.get("change_id")
+    self._root.slug = p.get("slug")
     self._root.title = p.get("title", "")
 
 
@@ -767,7 +767,7 @@ def structural_repr(node: Any) -> Any:
     §5.4 incremental==batch test and by future regression tests."""
     t = type(node).__name__
     if isinstance(node, WorkflowNode):
-        return {"t": t, "change_id": node.change_id, "title": node.title,
+        return {"t": t, "slug": node.slug, "title": node.title,
                 "status": node.status, "children": [structural_repr(c) for c in node.children]}
     if isinstance(node, PhaseNode):
         return {"t": t, "name": node.name, "closed": node.closed,

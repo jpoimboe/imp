@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,43 @@ def project_root(tmp_path: Path) -> Path:
     """An empty 'project' directory under tmp_path."""
     (tmp_path / ".imp").mkdir()
     return tmp_path
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
+    )
+
+
+def _init_repo(root: Path) -> None:
+    """A git repo with one commit on branch `main` and `.imp/` gitignored."""
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "t@t")
+    _git(root, "config", "user.name", "t")
+    (root / ".gitignore").write_text(".imp/\n")
+    (root / "README.md").write_text("seed\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "seed")
+
+
+def _seed_control(root: Path) -> None:
+    """A git repo with committed imp/config.yaml + imp/workflows/default."""
+    _init_repo(root)
+    src = root / "imp" / "workflows" / "default"
+    (src / "agents").mkdir(parents=True)
+    write_agent_md(
+        src / "agents" / "stub.md",
+        frontmatter=("name: stub\ntools: [complete_step]\n"
+                     "output:\n  status: {type: enum, values: [Success, Error]}"),
+    )
+    (src / "workflow.yaml").write_text(
+        "name: t\ndescription: \"\"\n"
+        "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
+    )
+    (root / "imp" / "config.yaml").write_text(
+        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
+    )
+    _git(root, "add", "-A"); _git(root, "commit", "-qm", "imp setup")
 
 
 def write_agent_md(path: Path, frontmatter: str, body: str = "prompt body") -> Path:

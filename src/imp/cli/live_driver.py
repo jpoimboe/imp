@@ -90,7 +90,7 @@ class LiveDriver:
     # -- emission -------------------------------------------------------------
     def _emit_header(self) -> None:
         root = self._builder.tree.root
-        head = (f"#{root.change_id if root.change_id is not None else '?'}  "
+        head = (f"#{root.slug if root.slug is not None else '?'}  "
                 f"{root.title}").rstrip()
         self._print_lines([pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=self._color)])
 
