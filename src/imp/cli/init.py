@@ -53,6 +53,9 @@ _ROLE_TIERS: dict[str, str | dict[str, str]] = {
     "test":          "coding",
     "review":        "thinking",
     "quick":         "quick",
+    "fast":          "quick",
+    "balanced":      "coding",
+    "powerful":      "thinking",
 }
 
 

@@ -149,3 +149,17 @@ def test_init_code_review_handles_claude_code_via_default_tier(tmp_path: Path) -
     review = {e["provider"]: e["model"] for e in cfg["roles"]["code_review"]["prefer"]}
     assert review["claude_code"] == "claude-sonnet-4-6"  # default tier = coding
     assert review["openai"] == "gpt-5.2"                  # openai tier = thinking
+
+
+def test_init_seeds_tier_roles(tmp_path: Path) -> None:
+    run_init(
+        tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
+        picker_fn=lambda _avail: ["anthropic"])
+    data = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    for tier in ("fast", "balanced", "powerful"):
+        assert tier in data["roles"], f"{tier} role not seeded"
+    models = {t: data["roles"][t]["prefer"][0]["model"] for t in
+              ("fast", "balanced", "powerful")}
+    assert models["fast"] == "claude-haiku-4-5-20251001"
+    assert models["balanced"] == "claude-sonnet-4-6"
+    assert models["powerful"] == "claude-opus-4-7"

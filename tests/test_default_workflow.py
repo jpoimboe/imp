@@ -27,6 +27,7 @@ def test_default_workflow_loads_with_default_roles(tmp_path: Path) -> None:
     configured = {
         "default", "spec", "spec_review",
         "code", "code_review",
+        "fast", "balanced", "powerful",
     }
     workflow = load_workflow(staged, configured_roles=configured)
     assert workflow.name == "standard-feature"

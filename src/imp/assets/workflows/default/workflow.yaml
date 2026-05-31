@@ -7,6 +7,8 @@ model_rules:
   code_review:
     differ_provider_from: code
 
+model_tiers: [fast, balanced, powerful]
+
 defaults:
   max_retries: 3
   max_loops: 6

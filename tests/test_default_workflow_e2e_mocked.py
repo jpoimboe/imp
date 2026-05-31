@@ -53,6 +53,9 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  spec_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  code:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  code_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  fast:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  balanced:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  powerful:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
     )
     return Change.create(tmp_path, title="e2e-default-workflow")
 

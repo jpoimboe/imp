@@ -56,3 +56,10 @@ def test_default_code_reviewer_agent_declares_model_role():
     agent = parse_agent_file(
         default_workflow_dir() / "agents" / "code-reviewer.md")
     assert agent.model_role == "code_review"
+
+
+def test_default_workflow_declares_tier_menu() -> None:
+    from imp.assets import default_workflow_dir
+    from imp.engine.loader import load_workflow
+    wf = load_workflow(default_workflow_dir())
+    assert wf.model_tiers == ("fast", "balanced", "powerful")

@@ -60,6 +60,9 @@ def _two_vendor_config() -> Config:
                                ("openai", "gpt-5-mini")]),
         "code_review": role("code_review", [("anthropic", "claude-sonnet-4-6"),
                                              ("openai", "gpt-5.2")]),
+        "fast":     role("fast",     [("anthropic", "claude-haiku-4-5-20251001")]),
+        "balanced": role("balanced", [("anthropic", "claude-sonnet-4-6")]),
+        "powerful": role("powerful", [("anthropic", "claude-opus-4-7")]),
     }
     return Config(roles=roles, source=_SRC,
                   model_rules=parse_role_constraints(None, Path("c.yaml")))

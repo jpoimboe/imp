@@ -276,6 +276,9 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"  spec_review: {role_line}\n"
         f"  code:        {role_line}\n"
         f"  code_review: {role_line}\n"
+        f"  fast:        {role_line}\n"
+        f"  balanced:    {role_line}\n"
+        f"  powerful:    {role_line}\n"
     )
 
     # Title carries the feature intent. Unique sentinel per run prevents
