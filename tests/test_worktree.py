@@ -203,3 +203,31 @@ def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
     # branch + change worktree untouched, no merge state lingering
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_journal_append_and_accumulate(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    stage = tmp_path / ".imp"; stage.mkdir(exist_ok=True)  # gitignored by _init_repo
+    f1 = stage / "events.jsonl"; f1.write_text('{"e":1}\n')
+    f2 = stage / "change.json"; f2.write_text('{"slug":"one"}')
+
+    # First journaled Change: ref does not exist yet -> root commit, no -p.
+    wt.journal_commit(tmp_path, "one", {"events.jsonl": f1, "change.json": f2})
+    assert _git(tmp_path, "show", "refs/imp/journal:one/change.json").stdout == '{"slug":"one"}'
+
+    # Second Change accumulates under its own slug dir.
+    f3 = stage / "two.jsonl"; f3.write_text('{"e":2}\n')
+    wt.journal_commit(tmp_path, "two", {"events.jsonl": f3})
+    assert _git(tmp_path, "show", "refs/imp/journal:two/events.jsonl").stdout == '{"e":2}\n'
+    assert _git(tmp_path, "show", "refs/imp/journal:one/change.json").returncode == 0
+    # Journal never touches base's working tree.
+    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_journal_not_on_code_history(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    f1 = tmp_path / "events.jsonl"; f1.write_text("x\n")
+    wt.journal_commit(tmp_path, "one", {"events.jsonl": f1})
+    # Orphan: no shared ancestor with main.
+    base = _git(tmp_path, "merge-base", "main", "refs/imp/journal").returncode
+    assert base != 0

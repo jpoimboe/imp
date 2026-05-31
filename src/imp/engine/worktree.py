@@ -8,6 +8,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -233,3 +235,57 @@ def _merge_detached(control_root: Path, slug: str, branch: str, base: str) -> Me
         return MergeResult("MERGED", commit)
     finally:
         _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
+
+
+def journal_commit(control_root: Path, slug: str, files: Mapping[str, Path]) -> None:
+    """Append one commit to refs/imp/journal (spec §4, §6) via plumbing — never
+    checks out the ref. Files land under <slug>/ in the journal tree. On the
+    very first journaled Change the ref doesn't exist, so commit-tree runs with
+    no -p (a root commit, starting the orphan history)."""
+    with RepoGitLock(control_root).acquire():
+        env = dict(os.environ)
+        # Keep the transient index inside .imp/ (gitignored) so it never shows as
+        # untracked even momentarily. Do NOT "simplify" the unlink dance below.
+        with tempfile.NamedTemporaryFile(dir=control_root / ".imp", delete=False) as tf:
+            index_file = tf.name
+        # CRITICAL: a 0-byte index makes `git update-index` fail with "index file
+        # smaller than expected". git treats a *missing* GIT_INDEX_FILE as an empty
+        # index, which is what the bootstrap (no-parent) path needs. So unlink the
+        # placeholder before any git command touches it.
+        os.unlink(index_file)
+        env["GIT_INDEX_FILE"] = index_file
+        try:
+            parent = _git(control_root, "rev-parse", "--verify", "--quiet",
+                          "refs/imp/journal")
+            have_parent = parent.returncode == 0
+            # Seed the temp index with the existing journal tree so prior slugs
+            # survive (read-tree is a no-op miss when the ref is absent).
+            if have_parent:
+                subprocess.run(["git", "read-tree", "refs/imp/journal"],
+                               cwd=control_root, env=env, check=True,
+                               capture_output=True, text=True)
+            for name, src in files.items():
+                blob = subprocess.run(
+                    ["git", "hash-object", "-w", "--stdin"], cwd=control_root,
+                    env=env, input=src.read_bytes(), capture_output=True, check=True,
+                ).stdout.decode().strip()
+                subprocess.run(
+                    ["git", "update-index", "--add", "--cacheinfo",
+                     f"100644,{blob},{slug}/{name}"],
+                    cwd=control_root, env=env, check=True, capture_output=True, text=True,
+                )
+            tree = subprocess.run(["git", "write-tree"], cwd=control_root, env=env,
+                                  check=True, capture_output=True, text=True).stdout.strip()
+            args = ["git", "commit-tree", tree, "-m", f"journal: {slug}"]
+            if have_parent:
+                args += ["-p", "refs/imp/journal"]
+            commit = subprocess.run(args, cwd=control_root, env=env, check=True,
+                                    capture_output=True, text=True).stdout.strip()
+            old = parent.stdout.strip() if have_parent else ""
+            # CAS for cheap insurance (moot under the lock).
+            cas = ["git", "update-ref", "refs/imp/journal", commit]
+            cas += [old] if have_parent else []
+            subprocess.run(cas, cwd=control_root, check=True,
+                           capture_output=True, text=True)
+        finally:
+            Path(index_file).unlink(missing_ok=True)
