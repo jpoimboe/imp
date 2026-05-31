@@ -292,3 +292,149 @@ def test_make_task_tool_openai_strict_round_trip() -> None:
     assert tier["type"] == ["string", "null"]
     assert None in tier["enum"]
     assert set(strict["required"]) == {"subagent_name", "task_description", "model_tier"}
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) -> None:
+    """A runtime model_tier wins over the subagent's static model_role."""
+    from imp.providers.config import ProviderModel
+
+    captured: dict = {}
+
+    async def fake_spawn(sub_invocation: AgentInvocation):
+        captured["inv"] = sub_invocation
+
+        async def _gen():
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        return _gen()
+
+    sub = _agent("reviewer")
+    sub = AgentDef(  # rebuild with a static model_role
+        name=sub.name, description=sub.description, tools=sub.tools,
+        subagents=sub.subagents, output_schema=sub.output_schema,
+        prompt_template_source=sub.prompt_template_source,
+        source_path=sub.source_path, source=sub.source, model_role="code_review")
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": sub}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "haiku"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.spawn_subagent = fake_spawn
+    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.model_tiers = ("powerful",)
+    ctx.resolved_roles = {
+        "code_review": ProviderModel("openai", "gpt-5.2"),     # frontmatter target
+        "powerful": ProviderModel("anthropic", "opus"),        # runtime tier target
+    }
+
+    await dispatch_task(ctx, "reviewer", "go", model_tier="powerful")
+    inv = captured["inv"]
+    assert inv.provider_name == "anthropic"   # powerful, not code_review's openai
+    assert inv.model_name == "opus"
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Path) -> None:
+    """The model declines to pick a tier (None) -> static model_role still applies."""
+    from imp.providers.config import ProviderModel
+
+    captured: dict = {}
+
+    async def fake_spawn(sub_invocation: AgentInvocation):
+        captured["inv"] = sub_invocation
+
+        async def _gen():
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        return _gen()
+
+    sub = _agent("reviewer")
+    sub = AgentDef(
+        name=sub.name, description=sub.description, tools=sub.tools,
+        subagents=sub.subagents, output_schema=sub.output_schema,
+        prompt_template_source=sub.prompt_template_source,
+        source_path=sub.source_path, source=sub.source, model_role="code_review")
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": sub}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "haiku"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.spawn_subagent = fake_spawn
+    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.model_tiers = ("powerful",)
+    ctx.resolved_roles = {
+        "code_review": ProviderModel("openai", "gpt-5.2"),
+        "powerful": ProviderModel("anthropic", "opus"),
+    }
+
+    await dispatch_task(ctx, "reviewer", "go", model_tier=None)
+    inv = captured["inv"]
+    assert inv.provider_name == "openai"      # fell through to frontmatter role
+    assert inv.model_name == "gpt-5.2"
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: Path) -> None:
+    """Defensive: an empty string is treated as 'inherit' via `model_tier or None`."""
+    from imp.providers.config import ProviderModel
+
+    captured: dict = {}
+
+    async def fake_spawn(sub_invocation: AgentInvocation):
+        captured["inv"] = sub_invocation
+
+        async def _gen():
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        return _gen()
+
+    sub = _agent("reviewer")
+    sub = AgentDef(
+        name=sub.name, description=sub.description, tools=sub.tools,
+        subagents=sub.subagents, output_schema=sub.output_schema,
+        prompt_template_source=sub.prompt_template_source,
+        source_path=sub.source_path, source=sub.source, model_role="code_review")
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": sub}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "haiku"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.spawn_subagent = fake_spawn
+    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.model_tiers = ("powerful",)
+    ctx.resolved_roles = {
+        "code_review": ProviderModel("openai", "gpt-5.2"),
+        "powerful": ProviderModel("anthropic", "opus"),
+    }
+
+    await dispatch_task(ctx, "reviewer", "go", model_tier="")
+    inv = captured["inv"]
+    assert inv.provider_name == "openai"      # fell through to frontmatter role
+    assert inv.model_name == "gpt-5.2"
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -> None:
+    from imp.providers.config import ProviderModel
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "haiku"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.spawn_subagent = lambda _inv: None  # type: ignore[assignment]
+    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.model_tiers = ("fast", "powerful")
+    ctx.resolved_roles = {"powerful": ProviderModel("anthropic", "opus")}
+
+    with pytest.raises(ValueError, match="fast, powerful"):
+        await dispatch_task(ctx, "reviewer", "go", model_tier="turbo")

@@ -74,7 +74,7 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
 
 async def dispatch_task(
     ctx: ToolContext, subagent_name: str, task_description: str,
-    *, tool_call_event_id: str = "",
+    *, tool_call_event_id: str = "", model_tier: str | None = None,
 ) -> str:
     if subagent_name not in ctx.subagent_defs:
         raise ValueError(
@@ -110,13 +110,32 @@ async def dispatch_task(
     )
     rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
 
-    # Choose the subagent's provider/model: its own model_role (resolved once,
-    # globally) when set and present in the run's resolved map; otherwise inherit
-    # the parent's. AgentInvocation is frozen, so this is decided BEFORE
-    # construction.
+    # Choose the subagent's provider/model. Precedence (design §5):
+    #   1. runtime model_tier — only when truthy AND in the resolved map.
+    #      The "inherit" signal is None: Anthropic omits the optional arg
+    #      (.get -> None); OpenAI strict forces model_tier into `required` but
+    #      nullable, so the model sends JSON null -> None to decline. ("" can't
+    #      come from a strict enum; `model_tier or None` coalesces it defensively.)
+    #   2. the subagent's static model_role: frontmatter (today's behavior).
+    #   3. inherit the parent's provider + model.
+    # Runtime tier OVERRIDES static frontmatter (§5): otherwise the parent's
+    # choice would be dead whenever a subagent declares a role. NOTE this means a
+    # tier deliberately bypasses any model_rules (differ_provider_from) constraint
+    # on the subagent's frontmatter role.
+    # AgentInvocation is frozen, so this is decided BEFORE construction.
     resolved = ctx.resolved_roles or {}
+    tier = model_tier or None           # None (or defensively "") -> inherit
+    if tier is not None and tier not in resolved:
+        valid = ", ".join(ctx.model_tiers) or "(no tiers configured)"
+        raise ValueError(
+            f"model_tier {tier!r} is not a configured tier; valid tiers: {valid}"
+        )
+
     mr = subagent_def.model_role
-    if mr is not None and mr in resolved:
+    if tier is not None:
+        pm = resolved[tier]
+        sub_provider, sub_model = pm.provider, pm.model
+    elif mr is not None and mr in resolved:
         pm = resolved[mr]
         sub_provider, sub_model = pm.provider, pm.model
     else:
