@@ -1,6 +1,7 @@
 # tests/test_resolve_roles.py
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -174,6 +175,37 @@ def test_empty_after_env_filter_raises_provider_unavailable():
              {"coder": _agent("coder"), "reviewer": _agent("reviewer")},
              model_rules={"code_review": RoleConstraint(differ_provider_from="code")})
     with pytest.raises(ProviderUnavailable):
+        resolve_roles(wf, cfg)
+
+
+def test_resolve_collects_and_resolves_tier_roles() -> None:
+    """A model_tiers role with no constraint is resolved + persisted via its
+    prefer list, even though no step/subagent references it."""
+    agents = {"writer": _agent("writer")}
+    wf = _wf([_step("s", "default", "writer")], agents)
+    wf = dataclasses.replace(wf, model_tiers=("fast", "powerful"))
+    cfg = _cfg({
+        "default": RoleConfig(name="default", prefer=(
+            ProviderModel("anthropic", "sonnet"),)),
+        "fast": RoleConfig(name="fast", prefer=(
+            ProviderModel("anthropic", "haiku"),)),
+        "powerful": RoleConfig(name="powerful", prefer=(
+            ProviderModel("anthropic", "opus"),)),
+    })
+    resolved, _details = resolve_roles(wf, cfg)
+    assert resolved["fast"] == ProviderModel("anthropic", "haiku")
+    assert resolved["powerful"] == ProviderModel("anthropic", "opus")
+
+
+def test_resolve_unconfigured_tier_role_raises() -> None:
+    agents = {"writer": _agent("writer")}
+    wf = _wf([_step("s", "default", "writer")], agents)
+    wf = dataclasses.replace(wf, model_tiers=("powerful",))
+    cfg = _cfg({
+        "default": RoleConfig(name="default", prefer=(
+            ProviderModel("anthropic", "sonnet"),)),
+    })  # 'powerful' deliberately missing
+    with pytest.raises(LoadError, match="powerful"):
         resolve_roles(wf, cfg)
 
 

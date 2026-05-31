@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from imp.engine.errors import LoadError
 from imp.engine.model_rules import find_constraint_cycle
+from imp.engine.model_tiers import effective_model_tiers
 from imp.providers.base import Provider
 from imp.providers.config import ProviderModel, RoleConfig
 
@@ -150,6 +151,13 @@ def resolve_roles(
             sub = workflow.agents.get(sub_name)
             if sub is not None and sub.model_role is not None:
                 roles.add(sub.model_role)
+
+    # Tiers are roles: every effective model_tiers entry must resolve + persist,
+    # so a runtime model_tier choice finds its provider/model in the map. This
+    # also makes step 4's unconfigured-role LoadError the authoritative backstop
+    # for tier roles (validators.py only flags them at change-creation time).
+    for tier in effective_model_tiers(workflow, config):
+        roles.add(tier)
 
     # 2. Merge constraints: workflow first, config overrides per role.
     merged: dict[str, RoleConstraint] = dict(workflow.model_rules)
