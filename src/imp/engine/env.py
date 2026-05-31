@@ -14,8 +14,18 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def engine_env(*, project_root: Path, artifacts_dir: Path) -> dict[str, str]:
+def engine_env(
+    *, project_root: Path, change_slug: str, change_title: str,
+) -> dict[str, str]:
+    """Return the environment variables the engine injects into every subprocess.
+
+    Variables:
+        IMP_PROJECT_ROOT  — absolute path of the project root on the host.
+        IMP_CHANGE_SLUG   — URL-safe identifier for the change (e.g. "add-oauth").
+        IMP_CHANGE_TITLE  — human-readable title for the change.
+    """
     return {
         "IMP_PROJECT_ROOT": str(project_root),
-        "IMP_ARTIFACTS_DIR": str(artifacts_dir),
+        "IMP_CHANGE_SLUG": change_slug,
+        "IMP_CHANGE_TITLE": change_title,
     }
