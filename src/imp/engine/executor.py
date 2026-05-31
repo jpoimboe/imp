@@ -11,6 +11,7 @@ complete_step. The whole steps/ tree is removed at change completion.
 
 from __future__ import annotations
 
+import os
 import shutil
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -103,98 +104,115 @@ async def run_change(
         from imp.cli.signals import InterruptCoordinator
         coordinator = InterruptCoordinator()
 
-    workflow = load_workflow(change.workflow_dir)
-    config = load_config(change.project_root)
-    log = JsonlEventLog(change.events_path, on_event=on_event)
-    state = State.load(change.state_dir)
+    prev_cwd = os.getcwd()
+    os.chdir(change.control_root)  # spec §5.3: engine cwd = control root, so a
+    # resume launched from inside a worktree never blocks `git worktree move`.
+    # NOTE: os.chdir is process-global — this hard-assumes one run_change per
+    # process (the foreground CLI model). Do not parallelize runs in-process
+    # without revisiting (all git calls already pass explicit control_root).
+    try:
+        workflow = load_workflow(change.workflow_dir)
+        config = load_config(change.control_root)
+        log = JsonlEventLog(change.events_path, on_event=on_event)
+        state = State.load(change.state_dir)
 
-    # Resolve roles once per run and persist, so resume never re-snapshots the
-    # environment (design "When it runs"). run_change re-executes on every
-    # resume, so guard on the persisted map.
-    if state.resolved_roles is None:
-        resolved, details = resolve_roles(workflow, config)
-        state.resolved_roles = resolved
-        state.model_tiers = effective_model_tiers(workflow, config)
-        state.save(change.state_dir)
-        _emit(log, "roles_resolved", {"roles": details}, agent_id=None)
-
-    flat = workflow.flat_steps()
-    index_of = {s.name: i for i, s in enumerate(flat)}
-
-    while True:
-        if state.step is None or index_of.get(state.step) is None:
-            return _complete(change, state, log)            # terminal
-        idx = index_of[state.step]
-        step = flat[idx]
-        is_resume = (state.resume_pending == state.step)
-
-        # var_mutations was ALREADY applied to state.vars and logged inside the
-        # _route_* body — run_change receives it for visibility only and must NOT
-        # re-apply it (double-apply trap). The third element is otherwise unused.
-        action, feedback_text, _var_mutations = await _dispatch_step(
-            step, workflow, change, state, log, is_resume=is_resume,
-            human_input_fn=human_input_fn, human_output_fn=human_output_fn,
-            user_chat_input_fn=user_chat_input_fn, coordinator=coordinator)
-
-        if coordinator.should_pause or isinstance(action, Pause):
-            state.status = "paused"
+        # Resolve roles once per run and persist, so resume never re-snapshots the
+        # environment (design "When it runs"). run_change re-executes on every
+        # resume, so guard on the persisted map.
+        if state.resolved_roles is None:
+            resolved, details = resolve_roles(workflow, config)
+            state.resolved_roles = resolved
+            state.model_tiers = effective_model_tiers(workflow, config)
             state.save(change.state_dir)
-            # action may be Continue/Goto on a coordinator interrupt (no .reason).
-            reason, kind = (
-                (action.reason, action.kind) if isinstance(action, Pause)
-                else ("interrupt", None)
-            )
-            payload: dict[str, Any] = {"reason": reason}
-            if kind is not None:
-                payload["kind"] = kind
-            _emit(log, "workflow_paused", payload)
-            return RunResult.PAUSED
-        if isinstance(action, Retry):
-            raise AssertionError("Retry must not escape _dispatch_step")
+            _emit(log, "roles_resolved", {"roles": details}, agent_id=None)
 
-        target_idx = None
-        if isinstance(action, Continue):
-            state.loop_counts.pop(step.name, None)          # forward advance resets
-            nxt = idx + 1
-            if nxt >= len(flat):
-                return _complete(change, state, log)
-            state.step = flat[nxt].name
-            state.resume_pending = None
-        elif isinstance(action, Goto):
-            target_idx = workflow.resolve_goto(action.target)
-            if target_idx >= len(flat):                      # empty trailing phase
-                return _complete(change, state, log)
-            if target_idx <= idx:                            # backward OR self → loop-counted
-                n = state.loop_counts.get(step.name, 0) + 1
-                state.loop_counts[step.name] = n
-                if n > step.max_loops:
-                    state.status = "paused"
-                    state.save(change.state_dir)
-                    _emit(log, "workflow_paused",
-                          {"reason": "max_loops", "step": step.name})
-                    return RunResult.PAUSED
-            else:
-                state.loop_counts.pop(step.name, None)       # forward goto resets
-            state.step = flat[target_idx].name
-            if action.resume:
-                # Single-shot reset: a resumed step must not inherit a stale
-                # retry count. Done HERE (the navigation point that sets
-                # resume_pending), not in _route_agent — is_resume stays True
-                # across internal retries, so resetting per entry would let a
-                # persistent error retry forever.
-                state.step_attempt = 0
-                state.resume_pending = flat[target_idx].name
-            else:
+        flat = workflow.flat_steps()
+        index_of = {s.name: i for i, s in enumerate(flat)}
+
+        while True:
+            if state.step is None or index_of.get(state.step) is None:
+                return _complete(change, state, log)            # terminal
+            idx = index_of[state.step]
+            step = flat[idx]
+            is_resume = (state.resume_pending == state.step)
+
+            # var_mutations was ALREADY applied to state.vars and logged inside the
+            # _route_* body — run_change receives it for visibility only and must NOT
+            # re-apply it (double-apply trap). The third element is otherwise unused.
+            action, feedback_text, _var_mutations = await _dispatch_step(
+                step, workflow, change, state, log, is_resume=is_resume,
+                human_input_fn=human_input_fn, human_output_fn=human_output_fn,
+                user_chat_input_fn=user_chat_input_fn, coordinator=coordinator)
+
+            if coordinator.should_pause or isinstance(action, Pause):
+                state.status = "paused"
+                state.save(change.state_dir)
+                # action may be Continue/Goto on a coordinator interrupt (no .reason).
+                reason, kind = (
+                    (action.reason, action.kind) if isinstance(action, Pause)
+                    else ("interrupt", None)
+                )
+                payload: dict[str, Any] = {"reason": reason}
+                if kind is not None:
+                    payload["kind"] = kind
+                _emit(log, "workflow_paused", payload)
+                return RunResult.PAUSED
+            if isinstance(action, Retry):
+                raise AssertionError("Retry must not escape _dispatch_step")
+
+            target_idx = None
+            if isinstance(action, Continue):
+                state.loop_counts.pop(step.name, None)          # forward advance resets
+                nxt = idx + 1
+                if nxt >= len(flat):
+                    return _complete(change, state, log)
+                state.step = flat[nxt].name
                 state.resume_pending = None
-        else:
-            raise AssertionError(f"unexpected action {action!r}")
+            elif isinstance(action, Goto):
+                target_idx = workflow.resolve_goto(action.target)
+                if target_idx >= len(flat):                      # empty trailing phase
+                    return _complete(change, state, log)
+                if target_idx <= idx:                            # backward OR self → loop-counted
+                    n = state.loop_counts.get(step.name, 0) + 1
+                    state.loop_counts[step.name] = n
+                    if n > step.max_loops:
+                        state.status = "paused"
+                        state.save(change.state_dir)
+                        _emit(log, "workflow_paused",
+                              {"reason": "max_loops", "step": step.name})
+                        return RunResult.PAUSED
+                else:
+                    state.loop_counts.pop(step.name, None)       # forward goto resets
+                state.step = flat[target_idx].name
+                if action.resume:
+                    # Single-shot reset: a resumed step must not inherit a stale
+                    # retry count. Done HERE (the navigation point that sets
+                    # resume_pending), not in _route_agent — is_resume stays True
+                    # across internal retries, so resetting per entry would let a
+                    # persistent error retry forever.
+                    state.step_attempt = 0
+                    state.resume_pending = flat[target_idx].name
+                else:
+                    state.resume_pending = None
+            else:
+                raise AssertionError(f"unexpected action {action!r}")
 
-        # stash optional wrapper feedback for the target step to consume
-        if (isinstance(action, Goto) and feedback_text is not None
-                and target_idx is not None and target_idx < len(flat)):
-            state.retry_feedback = {
-                "target_step": flat[target_idx].name, "text": feedback_text}
-        state.save(change.state_dir)
+            # stash optional wrapper feedback for the target step to consume
+            if (isinstance(action, Goto) and feedback_text is not None
+                    and target_idx is not None and target_idx < len(flat)):
+                state.retry_feedback = {
+                    "target_step": flat[target_idx].name, "text": feedback_text}
+            state.save(change.state_dir)
+
+            if state.pending_rename:
+                log = apply_pending_rename(change, state, log, on_event=on_event)
+    finally:
+        # prev_cwd may have been removed (e.g. resume from inside a worktree this
+        # run merged + tore down). Don't let the restore mask the result/exception.
+        try:
+            os.chdir(prev_cwd)
+        except OSError:
+            os.chdir(change.control_root)
 
 
 def _complete(change: Change, state: State, log: EventLog) -> RunResult:
@@ -203,6 +221,51 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.save(change.state_dir)
     shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
     return RunResult.COMPLETED
+
+
+def apply_pending_rename(
+    change: Change, state: State, log: EventLog, *, on_event: EventCallback | None,
+) -> EventLog:
+    """Apply state.pending_rename at a step boundary (spec §5.3). The worktree
+    move is safe here: steps are sequential (no live tool subprocess), and the
+    engine's cwd is the control root (set in run_change). Returns the event log
+    to use going forward (re-opened at the possibly-new path)."""
+    import json as _json
+
+    from imp.engine import worktree
+    from imp.engine.slug import slugify
+
+    name = state.pending_rename
+    assert name is not None
+    old = change.slug
+    new = slugify(name)
+    if new == old:
+        state.pending_rename = None
+        state.save(change.state_dir)
+        return log
+
+    new_path = worktree.rename(change.control_root, old, new)
+    if new_path is None:
+        state.pending_rename = None
+        state.save(change.state_dir)
+        _emit(log, "rename_blocked", {"requested": new})
+        return log
+
+    # Repoint in-memory paths onto the moved worktree.
+    change.slug = new
+    change.title = name
+    change.project_root = new_path
+    change.change_dir = new_path / ".imp" / "change"
+    meta_path = change.change_dir / "change.json"
+    meta = _json.loads(meta_path.read_text())          # preserves created_at
+    meta["slug"], meta["title"] = new, name
+    meta_path.write_text(_json.dumps(meta, indent=2, sort_keys=True))
+    state.slug = new
+    state.pending_rename = None
+    state.save(change.state_dir)
+    new_log = JsonlEventLog(change.events_path, on_event=on_event)
+    _emit(new_log, "change_renamed", {"old_slug": old, "new_slug": new, "title": name})
+    return new_log
 
 
 async def _dispatch_step(
