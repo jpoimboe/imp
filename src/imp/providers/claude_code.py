@@ -809,234 +809,257 @@ class ClaudeCodeAgentRunner:
 
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
-            await client.query(_stream_history(messages))
+            # FIRST query streams the prepared history; re-queries send a plain
+            # next_text string (asymmetry preserved from the pre-restructure
+            # code). Each outer iteration runs its OWN receive_response() so a
+            # follow-up turn is consumed from a fresh generator (issue 7:
+            # receive_response() terminates after the first ResultMessage).
+            next_query: Any = _stream_history(messages)
+            while True:
+                await client.query(next_query)
+                requery = False
 
-            async for sdk_msg in client.receive_response():
-                if self._cancel:
-                    yield {"type": "error", "payload": {
-                        "category": "config",
-                        "kind": "interrupted",
-                        "message": "runner cancelled by interrupt",
-                    }}
-                    return
-
-                cls_name = type(sdk_msg).__name__
-                imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)
-                for content in thinkings:
-                    elog.append(agent_id=aid, type="thinking",
-                                payload={"content": content})
-                for w in warns:
-                    elog.append(agent_id=aid, type="runner_warning",
-                                payload={"message": w})
-                if imp_msg is not None:
-                    messages.append(imp_msg)
-                    transcript.append(imp_msg)
-
-                    if imp_msg.role == "assistant":
-                        turn_text = "".join(
-                            b.text for b in imp_msg.content
-                            if isinstance(b, TextBlock))
-                        if turn_text:
-                            pending_text = (
-                                pending_text + turn_text if pending_text else turn_text)
-                        if cls_name == "AssistantMessage":
-                            raw = _serialize_claude_code_message(sdk_msg)
-                            elog.append_llm_response(
-                                agent_id=aid, provider=invocation.provider_name,
-                                model=self.model, raw=raw,
-                                usage=raw.get("usage") or {},
-                                stop_reason=raw.get("stop_reason"))
-                        for b in imp_msg.content:
-                            if isinstance(b, ToolUseBlock):
-                                # Dual-write `complete_step` state at the
-                                # runner level so the test fakes don't need
-                                # to drive the MCP wrapper. In production the
-                                # wrapper *also* sets these fields when the
-                                # SDK invokes it — idempotent write.
-                                if b.name == "complete_step":
-                                    state.complete_step_called = True
-                                    state.complete_step_args = b.input
-                                # Ceiling guard: observational here. With
-                                # Claude Code we can't prevent the (K+1)th
-                                # tool dispatch — MCP invocation is async
-                                # claude-side, decoupled from this iteration
-                                # loop. The ceiling becomes a *post hoc* fatal
-                                # check after the ResultMessage.
-                                if ceiling is not None and tool_calls_used >= ceiling:
-                                    ceil_msg = (
-                                        f"tool_call_ceiling_exceeded (ceiling={ceiling})"
-                                    )
-                                    elog.append_tool_result(
-                                        agent_id=aid,
-                                        block=ToolResultBlock(b.id, ceil_msg,
-                                                              is_error=True))
-                                    continue
-                                tool_calls_used += 1
-                                canon = _canon_tool_name(b.name)
-                                # Accumulate for the loop guard BEFORE the task
-                                # early-continue so task turns are still tracked.
-                                # is_error defaults True until the following
-                                # UserMessage tool_result lands and flips it.
-                                if canon == "complete_step":
-                                    pending_complete = True
-                                pending_tools[b.id] = ToolOutcome(
-                                    name=canon, tool_use_id=b.id,
-                                    input=b.input, is_error=True)
-                                if canon == "task":
-                                    # tool_call for task is appended inside the
-                                    # MCP wrapper (_impl) using __tool_use_id__,
-                                    # race-free. Don't double-append here.
-                                    continue
-                                elog.append_tool_call(
-                                    agent_id=aid,
-                                    block=ToolUseBlock(id=b.id, name=canon,
-                                                       input=b.input))
-                    elif imp_msg.role == "user":
-                        # ToolResultBlocks generated by claude calling our MCP
-                        # tools. Append the corresponding tool_result events.
-                        for b in imp_msg.content:
-                            if isinstance(b, ToolResultBlock):
-                                elog.append_tool_result(agent_id=aid, block=b)
-                                if b.tool_use_id in pending_tools:
-                                    pending_tools[b.tool_use_id].is_error = b.is_error
-
-                # Drain any bash kills detected by the MCP wrapper.
-                while state.killed_tool_uses:
-                    info = state.killed_tool_uses.pop(0)
-                    elog.append(agent_id=aid, type="tool_killed", payload=info)
-
-                # A tool raised FatalToolError → bail out instead of letting
-                # Claude burn more LLM calls trying to work around a runtime
-                # misconfiguration.
-                if state.fatal_tool_error is not None:
-                    tool_name, msg = state.fatal_tool_error
-                    yield {"type": "error", "payload": {
-                        "category": "config",
-                        "kind": "fatal_tool_error",
-                        "tool": tool_name,
-                        "message": msg,
-                    }}
-                    return
-
-                if cls_name == "ResultMessage":
-                    # Loop guard: ResultMessage is the true end-of-turn marker,
-                    # so flush the accumulated turn here EXACTLY ONCE (a turn
-                    # ending in complete_step set pending_complete → progress →
-                    # never trips). Observe before the end-of-turn handling so a
-                    # detected loop wins over a nudge.
-                    flushed = _flush_pending()
-                    if flushed is not None:
-                        loop_err = guard.observe(flushed)
-                        if loop_err is not None:
-                            yield perr.make_error_event(
-                                loop_err, kind=getattr(loop_err, "kind", ""))
-                            return
-
-                    # End-of-turn:
-                    #   a) complete_step captured → emit agent_output, return
-                    #   b) interactive mode → prompt user, send another query
-                    #   c) autonomous mode without complete_step → error
-                    if state.complete_step_called:
-                        try:
-                            validate_agent_output(
-                                state.complete_step_args,
-                                invocation.agent_def.output_schema,
-                            )
-                        except Exception as ve:
-                            yield {"type": "error", "payload": {
-                                "category": "agent_output_missing",
-                                "kind": "output_validation",
-                                "message": str(ve),
-                            }}
-                            return
-                        yield {"type": "agent_output",
-                               "payload": state.complete_step_args}
-                        return
-
-                    if (ceiling is not None and tool_calls_used >= ceiling
-                            and not state.complete_step_called):
+                async for sdk_msg in client.receive_response():
+                    if self._cancel:
                         yield {"type": "error", "payload": {
                             "category": "config",
-                            "kind": "tool_call_ceiling_exceeded",
-                            "ceiling": ceiling,
+                            "kind": "interrupted",
+                            "message": "runner cancelled by interrupt",
                         }}
                         return
 
-                    last_text = ""
-                    # Walk backward through the messages we appended to find
-                    # the most recent assistant message — that's where the
-                    # terminal CLI message lives.
-                    for prev in reversed(messages):
-                        if prev.role == "assistant":
-                            last_text = _text_of(prev)
-                            break
+                    cls_name = type(sdk_msg).__name__
+                    imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)
+                    for content in thinkings:
+                        elog.append(agent_id=aid, type="thinking",
+                                    payload={"content": content})
+                    for w in warns:
+                        elog.append(agent_id=aid, type="runner_warning",
+                                    payload={"message": w})
+                    if imp_msg is not None:
+                        messages.append(imp_msg)
+                        transcript.append(imp_msg)
 
-                    # Classify ONLY on the non-interactive path, before the
-                    # nudge: a surfaced provider error (auth/quota) must win
-                    # over a pointless nudge. Never classify an interactive
-                    # turn — its prose can legitimately contain auth/quota
-                    # substrings (see _classify_agent_text docstring). Note:
-                    # this now runs on each non-interactive nudge turn (up to
-                    # N+1), not just the terminal one — intentional, so an auth
-                    # failure surfaces on turn 1 instead of after N nudges.
-                    if not invocation.interactive:
-                        classified = _classify_agent_text(last_text)
-                        if classified is not None:
-                            yield perr.make_error_event(
-                                classified, kind=getattr(classified, "kind", ""))
+                        if imp_msg.role == "assistant":
+                            turn_text = "".join(
+                                b.text for b in imp_msg.content
+                                if isinstance(b, TextBlock))
+                            if turn_text:
+                                pending_text = (
+                                    pending_text + turn_text if pending_text else turn_text)
+                            if cls_name == "AssistantMessage":
+                                raw = _serialize_claude_code_message(sdk_msg)
+                                elog.append_llm_response(
+                                    agent_id=aid, provider=invocation.provider_name,
+                                    model=self.model, raw=raw,
+                                    usage=raw.get("usage") or {},
+                                    stop_reason=raw.get("stop_reason"))
+                            for b in imp_msg.content:
+                                if isinstance(b, ToolUseBlock):
+                                    # Dual-write `complete_step` state at the
+                                    # runner level so the test fakes don't need
+                                    # to drive the MCP wrapper. In production the
+                                    # wrapper *also* sets these fields when the
+                                    # SDK invokes it — idempotent write.
+                                    if b.name == "complete_step":
+                                        state.complete_step_called = True
+                                        state.complete_step_args = b.input
+                                    # Ceiling guard: observational here. With
+                                    # Claude Code we can't prevent the (K+1)th
+                                    # tool dispatch — MCP invocation is async
+                                    # claude-side, decoupled from this iteration
+                                    # loop. The ceiling becomes a *post hoc* fatal
+                                    # check after the ResultMessage.
+                                    if ceiling is not None and tool_calls_used >= ceiling:
+                                        ceil_msg = (
+                                            f"tool_call_ceiling_exceeded (ceiling={ceiling})"
+                                        )
+                                        elog.append_tool_result(
+                                            agent_id=aid,
+                                            block=ToolResultBlock(b.id, ceil_msg,
+                                                                  is_error=True))
+                                        continue
+                                    tool_calls_used += 1
+                                    canon = _canon_tool_name(b.name)
+                                    # Accumulate for the loop guard BEFORE the task
+                                    # early-continue so task turns are still tracked.
+                                    # is_error defaults True until the following
+                                    # UserMessage tool_result lands and flips it.
+                                    if canon == "complete_step":
+                                        pending_complete = True
+                                    pending_tools[b.id] = ToolOutcome(
+                                        name=canon, tool_use_id=b.id,
+                                        input=b.input, is_error=True)
+                                    if canon == "task":
+                                        # tool_call for task is appended inside the
+                                        # MCP wrapper (_impl) using __tool_use_id__,
+                                        # race-free. Don't double-append here.
+                                        continue
+                                    elog.append_tool_call(
+                                        agent_id=aid,
+                                        block=ToolUseBlock(id=b.id, name=canon,
+                                                           input=b.input))
+                        elif imp_msg.role == "user":
+                            # ToolResultBlocks generated by claude calling our MCP
+                            # tools. Append the corresponding tool_result events.
+                            for b in imp_msg.content:
+                                if isinstance(b, ToolResultBlock):
+                                    elog.append_tool_result(agent_id=aid, block=b)
+                                    if b.tool_use_id in pending_tools:
+                                        pending_tools[b.tool_use_id].is_error = b.is_error
+
+                    # Drain any bash kills detected by the MCP wrapper.
+                    while state.killed_tool_uses:
+                        info = state.killed_tool_uses.pop(0)
+                        elog.append(agent_id=aid, type="tool_killed", payload=info)
+
+                    # A tool raised FatalToolError → bail out instead of letting
+                    # Claude burn more LLM calls trying to work around a runtime
+                    # misconfiguration.
+                    if state.fatal_tool_error is not None:
+                        tool_name, msg = state.fatal_tool_error
+                        yield {"type": "error", "payload": {
+                            "category": "config",
+                            "kind": "fatal_tool_error",
+                            "tool": tool_name,
+                            "message": msg,
+                        }}
+                        return
+
+                    if cls_name == "ResultMessage":
+                        # Loop guard: ResultMessage is the true end-of-turn
+                        # marker, so flush the accumulated turn here EXACTLY ONCE
+                        # (a turn ending in complete_step set pending_complete →
+                        # progress → never trips). Observe before the end-of-turn
+                        # handling so a detected loop wins over a nudge.
+                        flushed = _flush_pending()
+                        if flushed is not None:
+                            loop_err = guard.observe(flushed)
+                            if loop_err is not None:
+                                yield perr.make_error_event(
+                                    loop_err, kind=getattr(loop_err, "kind", ""))
+                                return
+
+                        # End-of-turn:
+                        #   a) complete_step captured → emit agent_output, return
+                        #   b) interactive mode → prompt user, send another query
+                        #   c) autonomous mode without complete_step → error
+                        if state.complete_step_called:
+                            try:
+                                validate_agent_output(
+                                    state.complete_step_args,
+                                    invocation.agent_def.output_schema,
+                                )
+                            except Exception as ve:
+                                yield {"type": "error", "payload": {
+                                    "category": "agent_output_missing",
+                                    "kind": "output_validation",
+                                    "message": str(ve),
+                                }}
+                                return
+                            yield {"type": "agent_output",
+                                   "payload": state.complete_step_args}
                             return
 
-                    cont = invocation.continuation_fn
-                    if cont is not None:
-                        next_text = cont(last_text)
-                        if inspect.isawaitable(next_text):
-                            next_text = await next_text
-                        if next_text is None:
+                        if (ceiling is not None and tool_calls_used >= ceiling
+                                and not state.complete_step_called):
                             yield {"type": "error", "payload": {
-                                "category": "agent_incomplete",
-                                "kind": "no_complete_step_after_nudges",
-                                "message": "agent did not call complete_step after nudges",
-                                "detail": {"last_agent_text": last_text[:500]},
+                                "category": "config",
+                                "kind": "tool_call_ceiling_exceeded",
+                                "ceiling": ceiling,
                             }}
                             return
-                        user_msg = Message(
-                            role="user", content=(TextBlock(text=next_text),),
-                        )
-                        messages.append(user_msg)
-                        transcript.append(user_msg)
-                        elog.append_user_message(agent_id=aid, message=user_msg)
-                        await client.query(next_text)
-                        continue
 
-                    # Legacy/test fallback: no continuation_fn wired.
-                    if invocation.interactive and ctx.user_input_fn is not None:
-                        user_text = ctx.user_input_fn("")
-                        if inspect.isawaitable(user_text):
-                            user_text = await user_text
-                        user_msg = Message(
-                            role="user", content=(TextBlock(text=user_text),),
-                        )
-                        messages.append(user_msg)
-                        transcript.append(user_msg)
-                        elog.append_user_message(agent_id=aid, message=user_msg)
-                        await client.query(user_text)
-                        continue
+                        last_text = ""
+                        # Walk backward through the messages we appended to find
+                        # the most recent assistant message — that's where the
+                        # terminal CLI message lives.
+                        for prev in reversed(messages):
+                            if prev.role == "assistant":
+                                last_text = _text_of(prev)
+                                break
 
-                    yield {"type": "error", "payload": {
-                        "category": "agent_output_missing",
-                        "kind": "no_complete_step",
-                        "message": "agent finished without calling complete_step",
-                        "detail": {"last_agent_text": last_text[:500]},
-                    }}
-                    return
+                        # Classify ONLY on the non-interactive path, before the
+                        # nudge: a surfaced provider error (auth/quota) must win
+                        # over a pointless nudge. Never classify an interactive
+                        # turn — its prose can legitimately contain auth/quota
+                        # substrings (see _classify_agent_text docstring). Note:
+                        # this now runs on each non-interactive nudge turn (up to
+                        # N+1), not just the terminal one — intentional, so an
+                        # auth failure surfaces on turn 1 instead of after N
+                        # nudges.
+                        if not invocation.interactive:
+                            classified = _classify_agent_text(last_text)
+                            if classified is not None:
+                                yield perr.make_error_event(
+                                    classified, kind=getattr(classified, "kind", ""))
+                                return
 
-            # receive_response() exhausted without a ResultMessage. Capture
-            # subprocess diagnostics here, while the transport is still live
-            # (before __aexit__ runs disconnect() and nulls _transport).
-            # Against today's SDK SubprocessCLITransport does not expose
-            # returncode/stderr_tail, so this returns {}; the capture is
-            # forward-compatible for when the SDK adds those attributes.
-            self._last_no_result_diag = _subprocess_diag(client)
+                        cont = invocation.continuation_fn
+                        if cont is not None:
+                            next_text = cont(last_text)
+                            if inspect.isawaitable(next_text):
+                                next_text = await next_text
+                            if next_text is None:
+                                yield {"type": "error", "payload": {
+                                    "category": "agent_incomplete",
+                                    "kind": "no_complete_step_after_nudges",
+                                    "message": "agent did not call complete_step after nudges",
+                                    "detail": {"last_agent_text": last_text[:500]},
+                                }}
+                                return
+                            user_msg = Message(
+                                role="user", content=(TextBlock(text=next_text),),
+                            )
+                            messages.append(user_msg)
+                            transcript.append(user_msg)
+                            elog.append_user_message(agent_id=aid, message=user_msg)
+                            # Re-query on a FRESH receive_response() (issue 7):
+                            # break the inner loop so the outer while restarts.
+                            next_query = next_text
+                            requery = True
+                            break
+
+                        # Legacy/test fallback: no continuation_fn wired.
+                        if invocation.interactive and ctx.user_input_fn is not None:
+                            user_text = ctx.user_input_fn("")
+                            if inspect.isawaitable(user_text):
+                                user_text = await user_text
+                            user_msg = Message(
+                                role="user", content=(TextBlock(text=user_text),),
+                            )
+                            messages.append(user_msg)
+                            transcript.append(user_msg)
+                            elog.append_user_message(agent_id=aid, message=user_msg)
+                            # Re-query on a FRESH receive_response() (issue 7):
+                            # break the inner loop so the outer while restarts.
+                            next_query = user_text
+                            requery = True
+                            break
+
+                        yield {"type": "error", "payload": {
+                            "category": "agent_output_missing",
+                            "kind": "no_complete_step",
+                            "message": "agent finished without calling complete_step",
+                            "detail": {"last_agent_text": last_text[:500]},
+                        }}
+                        return
+
+                if requery:
+                    # A re-query was queued: loop back and run a fresh
+                    # receive_response() for the next turn.
+                    continue
+
+                # Inner loop drained WITHOUT a re-query and without a
+                # ResultMessage-driven return: receive_response() was exhausted
+                # with no ResultMessage this turn. Capture subprocess
+                # diagnostics here, while the transport is still live (before
+                # __aexit__ runs disconnect() and nulls _transport). Against
+                # today's SDK SubprocessCLITransport does not expose
+                # returncode/stderr_tail, so this returns {}; the capture is
+                # forward-compatible for when the SDK adds those attributes.
+                self._last_no_result_diag = _subprocess_diag(client)
+                break
 
         # Fell out of the async-with block without yielding a ResultMessage.
         # Use the diagnostics captured inside the block (transport was live).
