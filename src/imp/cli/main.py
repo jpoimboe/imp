@@ -157,8 +157,42 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                         print(f"\nChange {change.slug}: paused (ctrl-c)")
                         rc = 130
                     else:
-                        print(f"Change {change.slug}: {result.value}")
-                        rc = 0 if result is RunResult.COMPLETED else 1
+                        if result is RunResult.COMPLETED:
+                            # Print merge headline when the worktree was removed by
+                            # merge (worktree gone = merge gate was exercised).
+                            wt_path = change.control_root / ".imp" / "worktrees" / change.slug
+                            if not wt_path.exists():
+                                print(f"Merged {change.slug} into {change.base_branch}.")
+                            print(f"Change {change.slug}: {result.value}")
+                            rc = 0
+                        else:
+                            # PAUSED — check for merge_blocked and print remediation.
+                            final_state = State.load(change.state_dir)
+                            if final_state.status == "merge_blocked":
+                                # Read the reason from the last merge_blocked event.
+                                reason = None
+                                for ev in change.event_log().read():
+                                    if ev.get("type") == "merge_blocked":
+                                        reason = (ev.get("payload") or {}).get("reason")
+                                base = change.base_branch
+                                slug = change.slug
+                                if reason == "worktree_dirty":
+                                    print(f"Uncommitted work in the worktree; commit it, "
+                                          f"then `imp resume {slug}`.")
+                                elif reason == "base_dirty":
+                                    print(f"Uncommitted changes on `{base}`; commit or stash "
+                                          f"them, then `imp resume {slug}`.")
+                                elif reason == "conflict":
+                                    print(f"`imp/{slug}` doesn't auto-merge into `{base}`. "
+                                          f"imp can't resolve conflicts in this version — "
+                                          f"merge `imp/{slug}` into `{base}` manually, then "
+                                          f"the Change is done (its worktree at "
+                                          f"`.imp/worktrees/{slug}` can be removed).")
+                                else:
+                                    print(f"Change {change.slug}: merge_blocked. "
+                                          f"Resolve, then `imp resume {slug}`.")
+                            print(f"Change {change.slug}: {result.value}")
+                            rc = 1
                 finally:
                     status.reset()
                     tg.cancel_scope.cancel()
@@ -242,8 +276,42 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                         print(f"\nChange {change.slug}: paused (ctrl-c)")
                         rc = 130
                     else:
-                        print(f"Change {change.slug}: {result.value}")
-                        rc = 0 if result is RunResult.COMPLETED else 1
+                        if result is RunResult.COMPLETED:
+                            # Print merge headline when the worktree was removed by
+                            # merge (worktree gone = merge gate was exercised).
+                            wt_path = change.control_root / ".imp" / "worktrees" / change.slug
+                            if not wt_path.exists():
+                                print(f"Merged {change.slug} into {change.base_branch}.")
+                            print(f"Change {change.slug}: {result.value}")
+                            rc = 0
+                        else:
+                            # PAUSED — check for merge_blocked and print remediation.
+                            final_state = State.load(change.state_dir)
+                            if final_state.status == "merge_blocked":
+                                # Read the reason from the last merge_blocked event.
+                                reason = None
+                                for ev in change.event_log().read():
+                                    if ev.get("type") == "merge_blocked":
+                                        reason = (ev.get("payload") or {}).get("reason")
+                                base = change.base_branch
+                                slug = change.slug
+                                if reason == "worktree_dirty":
+                                    print(f"Uncommitted work in the worktree; commit it, "
+                                          f"then `imp resume {slug}`.")
+                                elif reason == "base_dirty":
+                                    print(f"Uncommitted changes on `{base}`; commit or stash "
+                                          f"them, then `imp resume {slug}`.")
+                                elif reason == "conflict":
+                                    print(f"`imp/{slug}` doesn't auto-merge into `{base}`. "
+                                          f"imp can't resolve conflicts in this version — "
+                                          f"merge `imp/{slug}` into `{base}` manually, then "
+                                          f"the Change is done (its worktree at "
+                                          f"`.imp/worktrees/{slug}` can be removed).")
+                                else:
+                                    print(f"Change {change.slug}: merge_blocked. "
+                                          f"Resolve, then `imp resume {slug}`.")
+                            print(f"Change {change.slug}: {result.value}")
+                            rc = 1
                 finally:
                     status.reset()
                     tg.cancel_scope.cancel()

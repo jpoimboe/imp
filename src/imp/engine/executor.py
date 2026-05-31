@@ -216,10 +216,71 @@ async def run_change(
 
 
 def _complete(change: Change, state: State, log: EventLog) -> RunResult:
+    """Terminal handler: marks the Change completed and, when ready_to_merge is
+    set in state.vars, performs the full merge phase: merge imp/<slug> into
+    base, journal the final artifacts, then remove the worktree (branch kept).
+
+    Contract change from the original stub:
+    - When ready_to_merge is NOT set: behaviour is identical to before — mark
+      completed, drop steps/, return COMPLETED.
+    - When ready_to_merge IS set: does git I/O (merge→journal→remove — three
+      separate lock acquisitions) and CAN return PAUSED with
+      state.status="merge_blocked" on worktree_dirty, CONFLICT, or BASE_DIRTY.
+      Crash safety: merge→journal→remove are ordered so the worst-case mid-
+      sequence crash leaves the merge commit already on base (durable) but the
+      worktree still present (a harmless leftover); resume re-enters here, sees
+      status=completed and worktree gone on success, or re-tries from state on
+      block — never data loss, never a double-merge (resume rejects completed).
+    """
+    # M4: a rename requested on the very last step never reached the boundary
+    # hook. Don't let it vanish silently — record why.
+    if state.pending_rename:
+        _emit(log, "rename_dropped", {"requested": state.pending_rename})
+        state.pending_rename = None
+    state.step = None  # terminal cursor (safe to persist early; status is NOT yet)
+
+    # CRITICAL ordering: never write status="completed" until the run has truly
+    # terminated successfully. A merge that blocks must leave a RESUMABLE status.
+    if not state.vars.get("ready_to_merge"):
+        # No merge gate: this is the terminal success — identical to old behaviour.
+        state.status = "completed"
+        state.save(change.state_dir)
+        shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
+        return RunResult.COMPLETED
+
+    from imp.engine import worktree
+
+    # H1 safety net: merge_to_base merges the committed branch tip only. Any
+    # uncommitted work would be SILENTLY LOST. Refuse — symmetric with
+    # BASE_DIRTY — so the user commits and `imp resume`s to retry.
+    if worktree.is_dirty(change.project_root):
+        state.status = "merge_blocked"
+        state.save(change.state_dir)
+        _emit(log, "merge_blocked",
+              {"reason": "worktree_dirty", "base": change.base_branch})
+        return RunResult.PAUSED
+
+    result = worktree.merge_to_base(change.control_root, change.slug, change.base_branch)
+    if result.status in ("CONFLICT", "BASE_DIRTY"):
+        state.status = "merge_blocked"
+        state.save(change.state_dir)
+        _emit(log, "merge_blocked",
+              {"reason": result.status.lower(), "base": change.base_branch})
+        return RunResult.PAUSED
+
+    # MERGED — only NOW terminal success. Base ref already advanced (durable).
+    # Mark completed, snapshot final state into the journal BEFORE removing the
+    # worktree, then drop the worktree (branch kept).
     state.status = "completed"
-    state.step = None
     state.save(change.state_dir)
-    shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
+    _emit(log, "change_merged",
+          {"base": change.base_branch, "commit": result.merge_commit})
+    worktree.journal_commit(change.control_root, change.slug, {
+        "events.jsonl": change.events_path,
+        "change.json": change.change_dir / "change.json",
+        "state.json": change.state_dir / "state.json",
+    })
+    worktree.remove_worktree(change.control_root, change.slug)  # steps/ goes with it
     return RunResult.COMPLETED
 
 
