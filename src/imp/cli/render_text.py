@@ -17,6 +17,8 @@ from imp.cli import palette as pal
 
 _INDENT = "  "          # two spaces per tree level
 
+_DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
+
 
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80) -> Iterator[str]:
@@ -142,6 +144,18 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         else:
             tag = f"[{node.category}] " if node.category else ""
             yield _line(f"error: {tag}{node.message}", depth, color, *pal.NODE_COLORS["error"])
+        return
+
+    if isinstance(node, nv.RolesResolvedNode):
+        yield _line("roles resolved:", depth, color)
+        width = max((len(r["role"]) for r in node.rows), default=0)
+        for r in node.rows:
+            line = f"  {r['role']:<{width}} → {r['provider']}/{r['model']}"
+            if r["differ_tier"] is not None:
+                label = _DIFFER_LABELS.get(r["differ_tier"], "?")
+                line += (f"   (differ from {r['differ_from']}: "
+                         f"tier {r['differ_tier']}, {label})")
+            yield _line(line, depth, color)
         return
 
     if isinstance(node, nv.FallbackLine):

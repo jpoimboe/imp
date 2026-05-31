@@ -278,6 +278,35 @@ def test_roles_resolved_attaches_at_root() -> None:
          "differ_tier": None, "differ_from": None}]
 
 
+def test_roles_resolved_renders_constrained_and_unconstrained() -> None:
+    node = nv.RolesResolvedNode(rows=[
+        {"role": "code", "provider": "anthropic", "model": "haiku",
+         "differ_tier": None, "differ_from": None},
+        {"role": "code_review", "provider": "openai", "model": "gpt-5.2",
+         "differ_tier": 1, "differ_from": "code"},
+        {"role": "spec", "provider": "anthropic", "model": "opus",
+         "differ_tier": 2, "differ_from": "code"},
+    ])
+    out = list(rt._render(node, depth=0, full=False, color=False, width=120))
+
+    assert out[0] == "roles resolved:"
+
+    # unconstrained: provider/model only, no differ annotation
+    code_line = next(ln for ln in out if ln.lstrip().startswith("code "))
+    assert "→ anthropic/haiku" in code_line
+    assert "differ from" not in code_line
+
+    # tier-1 constrained: vendor jump
+    cr_line = next(ln for ln in out if "code_review" in ln)
+    assert "→ openai/gpt-5.2" in cr_line
+    assert "(differ from code: tier 1, vendor jump)" in cr_line
+
+    # tier-2 constrained: same-vendor fallback
+    spec_line = next(ln for ln in out if ln.lstrip().startswith("spec"))
+    assert "→ anthropic/opus" in spec_line
+    assert "(differ from code: tier 2, same-vendor fallback)" in spec_line
+
+
 def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
     from imp.cli import narrative as nv
     from imp.cli import render_text as rt
