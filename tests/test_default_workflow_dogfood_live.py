@@ -357,7 +357,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     events_file = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
 
     TOTAL_TIMEOUT = 1800.0
-    PROGRESS_INTERVAL = 10.0
     EVENTS_FIRST_APPEAR_TIMEOUT = 30.0
     TRACE_PTY = os.environ.get("IMP_PTY_TRACE") == "1"
 
@@ -368,7 +367,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     ask_questions: list[str] = []
     start_time = time.time()
     deadline = start_time + TOTAL_TIMEOUT
-    last_progress = start_time
     events_first_seen_at: float | None = None
 
     print(
@@ -459,11 +457,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                         )
                     os.write(master, b"1\n")
                     gates_answered += 1
-                    print(
-                        f"[dogfood] answered human gate #{gates_answered} "
-                        f"(phase={phase})",
-                        file=sys.stderr, flush=True,
-                    )
                 elif etype == "awaiting_user_input":
                     # Interactive agent ended its turn with a question (no tool
                     # call). The engine emits this immediately before blocking on
@@ -479,11 +472,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                         b"looks good, proceed with reasonable defaults\n",
                     )
                     asks_answered += 1
-                    print(
-                        f"[dogfood] answered end-of-turn question #{asks_answered} "
-                        f"question={question!r}",
-                        file=sys.stderr, flush=True,
-                    )
                 elif etype == "workflow_paused":
                     # Pause fail-fast: the engine emits workflow_paused at
                     # executor.py:100/106 whenever it halts (including
@@ -499,18 +487,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                         f"asks_answered={asks_answered}\n"
                         f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
                     )
-
-            now = time.time()
-            if now - last_progress >= PROGRESS_INTERVAL:
-                last_progress = now
-                print(
-                    f"[dogfood] {now - start_time:.0f}s elapsed; "
-                    f"gates_answered={gates_answered}/{len(expected_gates)} "
-                    f"asks_answered={asks_answered} "
-                    f"events_bytes={events_seen_bytes} "
-                    f"pty_buf={len(buf)}B",
-                    file=sys.stderr, flush=True,
-                )
 
             if proc.poll() is not None:
                 for _ in range(20):
