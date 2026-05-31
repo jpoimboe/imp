@@ -192,7 +192,7 @@ def resolve_roles(
     for role in _topo_order(roles, active):
         if role not in config.roles:
             raise LoadError(
-                f"model_role {role!r} is not configured in .imp/config.yaml"
+                f"model_role {role!r} is not configured in imp/config.yaml"
             )
         role_cfg = config.roles[role]
         constraint = active.get(role)

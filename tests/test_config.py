@@ -7,8 +7,8 @@ from imp.providers.config import load_config
 
 
 def test_load_config_basic(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
         """
 roles:
   default: {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}
@@ -23,8 +23,8 @@ roles:
 
 
 def test_load_config_missing_default(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  code: {prefer: [{provider: anthropic, model: x}]}\n"
     )
     with pytest.raises(LoadError) as ei:
@@ -33,8 +33,8 @@ def test_load_config_missing_default(tmp_path: Path) -> None:
 
 
 def test_load_config_empty_prefer(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default: {prefer: []}\n"
     )
     with pytest.raises(LoadError) as ei:
@@ -43,7 +43,7 @@ def test_load_config_empty_prefer(tmp_path: Path) -> None:
 
 
 def test_load_config_no_file(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
+    (tmp_path / "imp").mkdir()
     with pytest.raises(LoadError) as ei:
         load_config(tmp_path)
     assert "config.yaml not found" in str(ei.value)
@@ -51,7 +51,7 @@ def test_load_config_no_file(tmp_path: Path) -> None:
 
 def test_config_parses_model_rules(tmp_path):
     from imp.providers.config import load_config
-    imp = tmp_path / ".imp"
+    imp = tmp_path / "imp"
     imp.mkdir()
     (imp / "config.yaml").write_text(
         "model_rules:\n  code_review:\n    differ_provider_from: code\n"
@@ -63,7 +63,7 @@ def test_config_parses_model_rules(tmp_path):
 
 def test_config_model_rules_defaults_empty(tmp_path):
     from imp.providers.config import load_config
-    imp = tmp_path / ".imp"
+    imp = tmp_path / "imp"
     imp.mkdir()
     (imp / "config.yaml").write_text(
         "roles:\n"
@@ -73,8 +73,8 @@ def test_config_model_rules_defaults_empty(tmp_path):
 
 
 def test_config_model_tiers_absent_is_none(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
     )
     cfg = load_config(tmp_path)
@@ -82,8 +82,8 @@ def test_config_model_tiers_absent_is_none(tmp_path: Path) -> None:
 
 
 def test_config_model_tiers_parsed(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
         "model_tiers: [balanced, powerful]\n"
         "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
     )
@@ -92,8 +92,8 @@ def test_config_model_tiers_parsed(tmp_path: Path) -> None:
 
 
 def test_config_model_tiers_empty_list_is_off(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
         "model_tiers: []\n"
         "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
     )
@@ -102,8 +102,8 @@ def test_config_model_tiers_empty_list_is_off(tmp_path: Path) -> None:
 
 
 def test_config_model_tiers_duplicate_raises(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
         "model_tiers: [fast, fast]\n"
         "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
     )

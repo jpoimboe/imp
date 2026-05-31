@@ -1,4 +1,4 @@
-"""Parse .imp/config.yaml. Plan 1 validates structure; Plan 2 resolves to models."""
+"""Parse imp/config.yaml. Plan 1 validates structure; Plan 2 resolves to models."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ class Config:
 
 
 def load_config(project_root: Path) -> Config:
-    path = project_root / ".imp" / "config.yaml"
+    path = project_root / "imp" / "config.yaml"
     if not path.exists():
         raise LoadError(
             "config.yaml not found",

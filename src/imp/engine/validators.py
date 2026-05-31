@@ -248,7 +248,7 @@ def _v_model_role_configured(
         seen.add(key)
         errors.append(
             LoadError(
-                f"model_role {role!r} is not configured in .imp/config.yaml",
+                f"model_role {role!r} is not configured in imp/config.yaml",
                 source,
                 hint=f"configured roles: {sorted(configured)}",
             )
@@ -285,7 +285,7 @@ def _v_model_tiers_configured(
             errors.append(
                 LoadError(
                     f"model_tiers entry {tier!r} is not a configured role "
-                    f"in .imp/config.yaml",
+                    f"in imp/config.yaml",
                     workflow.source,
                     hint=f"configured roles: {sorted(configured)}",
                 )
