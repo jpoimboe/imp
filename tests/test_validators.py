@@ -573,6 +573,35 @@ def test_v_model_role_configured_flags_subagent_role() -> None:
     assert any("ghost" in e.message for e in errors)
 
 
+def test_model_tiers_entry_not_configured_is_error() -> None:
+    from pathlib import Path
+
+    from imp.engine.types import (
+        Pause,
+        Phase,
+        SourceLoc,
+        Step,
+        Vars,
+        Workflow,
+        WorkflowDefaults,
+    )
+    from imp.engine.validators import validate
+
+    src = SourceLoc(file=Path("w.yaml"), line=1)
+    step = Step(name="s", phase="p", kind="script", rules=(
+        ), options=(), on_max_retries=Pause(), max_loops=6, source=src,
+        command="./x.sh")
+    wf = Workflow(
+        name="w", description="", phases=(Phase(name="p", steps=(step,), source=src),),
+        vars=Vars(decls=()),
+        defaults=WorkflowDefaults(max_retries=0, on_max_retries=Pause()),
+        agents={}, workflow_dir=Path("."), source=src,
+        model_tiers=("fast", "powerful"))
+    errors, _warnings = validate(wf, configured_roles=frozenset({"fast"}))
+    assert any("powerful" in e.message for e in errors)   # unconfigured -> flagged
+    assert not any("fast" in e.message for e in errors)   # configured -> not flagged
+
+
 def test_resume_in_defaults_on_max_retries_to_non_agent_is_rejected(tmp_path: Path) -> None:
     wf = _wf(tmp_path, """\
         name: t

@@ -36,6 +36,7 @@ def validate(
     _v_fs_permissions_paths(workflow, errors)
     if configured_roles is not None:
         _v_model_role_configured(workflow, configured_roles, errors)
+        _v_model_tiers_configured(workflow, configured_roles, errors)
     _v_write_tool_needs_write_permission(workflow, errors)
 
     return errors, warnings
@@ -271,6 +272,24 @@ def _v_model_role_configured(
     for _role, constraint in workflow.model_rules.items():
         if constraint.differ_provider_from is not None:
             check(constraint.differ_provider_from, constraint.source or workflow.source)
+
+
+def _v_model_tiers_configured(
+    workflow: Workflow, configured: frozenset[str], errors: list[LoadError]
+) -> None:
+    """Each model_tiers entry must name a configured role. Convenience only;
+    resolve_roles is the authoritative backstop (it also covers config-introduced
+    menus this creation-time check never sees)."""
+    for tier in workflow.model_tiers:
+        if tier not in configured:
+            errors.append(
+                LoadError(
+                    f"model_tiers entry {tier!r} is not a configured role "
+                    f"in .imp/config.yaml",
+                    workflow.source,
+                    hint=f"configured roles: {sorted(configured)}",
+                )
+            )
 
 
 def _v_write_tool_needs_write_permission(
