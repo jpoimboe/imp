@@ -659,6 +659,22 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     assert reused.start_ts == "2026-05-30T10:05:00+00:00"
 
 
+def test_agent_output_stashes_args_and_emits_prose_for_long_fields() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
+    # agent_output fires before step_completed; long summary -> prose node,
+    # short scalar + path -> NOT prose (folded later into the breadcrumb).
+    b.add(_ev("2", "agent_output", agent_id="step:build/coder",
+              summary="A long summary. " * 10, status="Success",
+              plan_path="docs/plan.md"))
+    step = b._step_stack[-1]
+    assert step.agent_output["status"] == "Success"
+    lits = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
+    assert len(lits) == 1
+    assert lits[0].text.startswith("A long summary.")
+
+
 def test_structural_repr_covers_new_node_types() -> None:
     lit = nv.LiteralTextNode(text="hi")
     bc = nv.BreadcrumbLine(step_name="s", elapsed_s=1.0,

@@ -553,9 +553,17 @@ def _h_step_context(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 
 def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # design §5.1: agent_output is the executor's step-result capture consumed
-    # by templating; it has NO node. The visible outcome is the OutcomeLine.
-    return
+    # agent_output (= complete_step args) fires BEFORE step_completed. Stash the
+    # args on the open StepNode so _h_step_completed can fold short scalars into
+    # the breadcrumb, and surface each long/multi-line free-text field as a bold
+    # prose block now (issues 5/6). Enum/scalar/*_path fields are not prose.
+    if not self._step_stack:
+        return
+    step = self._step_stack[-1]
+    step.agent_output = p
+    for k, v in p.items():
+        if _is_prose_field(k, v):
+            self._append(LiteralTextNode(text=v))
 
 
 NarrativeBuilder._HANDLERS["user_message"] = _h_user_message
