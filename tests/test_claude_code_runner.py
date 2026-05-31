@@ -562,6 +562,37 @@ def test_fake_receive_response_segments_per_result_message() -> None:
     assert anyio.run(drain_round) == []
 
 
+@pytest.mark.anyio
+async def test_interactive_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> None:
+    """An interactive turn ending without complete_step re-queries; turn 2 calls
+    complete_step. With per-turn receive_response() this must NOT surface a
+    no_result_message error (issue 7 regression)."""
+    (tmp_path / "art").mkdir()
+
+    # Round 1: prose only (a question) + result. Round 2: complete_step + result.
+    scripted = [
+        assistant(text("Should I proceed?")), result(),
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})), result(),
+    ]
+
+    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    inv = replace(inv, interactive=True,
+                  continuation_fn=lambda _last: "looks good, proceed")
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=fake_client_factory,
+    )
+    events = [e async for e in runner.run(inv)]
+
+    kinds = [e["type"] for e in events]
+    assert "error" not in kinds, f"unexpected error event(s): {events}"
+    assert kinds[-1] == "agent_output"
+
+
 def test_claude_code_provider_registered_and_resolves() -> None:
     """The claude_code provider is registered eagerly; resolve_role picks it up
     when claude is on PATH."""
