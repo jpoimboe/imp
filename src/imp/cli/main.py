@@ -11,6 +11,7 @@ import contextlib
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -231,10 +232,11 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _term_width() -> int:
-    try:
-        return os.get_terminal_size().columns
-    except OSError:
-        return 80
+    # shutil.get_terminal_size honors $COLUMNS and substitutes the fallback when
+    # the OS reports columns <= 0 (e.g. a winsize-0 PTY), unlike
+    # os.get_terminal_size which returns a literal 0 and floors wrapping to 8
+    # chars (issue 2). Defense-in-depth with the dogfood PTY winsize fix.
+    return shutil.get_terminal_size((80, 24)).columns
 
 
 def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:

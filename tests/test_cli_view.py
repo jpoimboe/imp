@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import sys
 from contextlib import redirect_stdout
@@ -288,3 +289,12 @@ def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
     assert rc == 0
     assert "#" in out and "design" in out
     assert "{" not in out          # narrative, not raw json
+
+
+def test_term_width_floors_to_80_when_columns_nonpositive(monkeypatch) -> None:
+    from imp.cli import main as cli_main
+    monkeypatch.delenv("COLUMNS", raising=False)
+    # Inner query reports 0 columns (winsize-0 PTY); shutil's `or fallback[0]`
+    # must substitute 80.
+    monkeypatch.setattr(os, "get_terminal_size", lambda fd: os.terminal_size((0, 24)))
+    assert cli_main._term_width() == 80
