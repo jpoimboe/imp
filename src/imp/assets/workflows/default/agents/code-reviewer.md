@@ -1,6 +1,7 @@
 ---
 name: code-reviewer
 description: Review the implementation against the spec.
+model_role: code_review
 tools: [complete_step, read_file, glob, grep, bash, query_events, git_diff]
 output:
   status: {type: enum, values: [Success, Error]}

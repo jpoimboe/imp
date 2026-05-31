@@ -3,6 +3,10 @@ description: |
   Standard imp workflow: spec -> plan -> implement -> review -> merge.
   spec is an interactive brainstorm with the user.
 
+model_rules:
+  code_review:
+    differ_provider_from: code
+
 defaults:
   max_retries: 3
   max_loops: 6

@@ -41,3 +41,18 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["code-reviewer"].rules[1].action.resume is False    # rework -> implement
     assert by["spec-check"].kind == "script"
     assert wf.phases[-1].name == "merge" and wf.phases[-1].steps == ()
+
+
+def test_default_workflow_has_code_review_constraint():
+    from imp.assets import default_workflow_dir
+    from imp.engine.loader import load_workflow
+    wf = load_workflow(default_workflow_dir())
+    assert wf.model_rules["code_review"].differ_provider_from == "code"
+
+
+def test_default_code_reviewer_agent_declares_model_role():
+    from imp.assets import default_workflow_dir
+    from imp.engine.loader import parse_agent_file
+    agent = parse_agent_file(
+        default_workflow_dir() / "agents" / "code-reviewer.md")
+    assert agent.model_role == "code_review"
