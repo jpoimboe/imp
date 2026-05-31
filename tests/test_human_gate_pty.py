@@ -13,12 +13,15 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import subprocess
 import sys
 import textwrap
 import time
 from pathlib import Path
 
 import pytest
+
+from tests.conftest import _git, _init_repo
 
 
 def _can_pty() -> bool:
@@ -35,8 +38,11 @@ def _can_pty() -> bool:
 pytestmark = pytest.mark.skipif(not _can_pty(), reason="pty not available")
 
 
-def _seed_zero_step_workflow(tmp_path: Path) -> None:
-    wf = tmp_path / ".imp" / "workflows" / "default"
+def _seed_human_gate_workflow(root: Path) -> None:
+    """Set up a git repo with a human-gate-only workflow at the path
+    Change.create now expects: imp/workflows/default."""
+    _init_repo(root)
+    wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     # New inline-surface format: human step uses ask:/options: directly.
     # on_max_retries uses verb-style: {pause: true}.
@@ -54,21 +60,23 @@ def _seed_zero_step_workflow(tmp_path: Path) -> None:
                   - {label: no, pause: true}
     """))
     # No LLM calls happen (no agent steps), but the loader requires a default role.
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (root / "imp" / "config.yaml").write_text(
         "roles:\n"
         "  default: {prefer: [{provider: anthropic, model: claude-3-5-haiku-20241022}]}\n"
     )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "imp setup")
 
 
 def test_human_gate_via_real_pty(tmp_path: Path) -> None:
     """Real prompt_toolkit through a pty — would have caught the
     asyncio-loop conflict found during V1 dogfood (Plan 3 Task 21)."""
     import pty
-    import subprocess
 
-    _seed_zero_step_workflow(tmp_path)
+    _seed_human_gate_workflow(tmp_path)
 
     master, slave = pty.openpty()
+    proc: subprocess.Popen[bytes] | None = None
     try:
         proc = subprocess.Popen(
             [sys.executable, "-m", "imp", "new", "pty-test"],
@@ -104,11 +112,15 @@ def test_human_gate_via_real_pty(tmp_path: Path) -> None:
     finally:
         with contextlib.suppress(OSError):
             os.close(master)
-        if proc.poll() is None:
+        if proc is not None and proc.poll() is None:
             proc.kill()
             proc.wait()
 
-    # Verify state completed.
-    state_path = tmp_path / ".imp" / "changes" / "1" / "state" / "state.json"
+    # Verify state completed: find the worktree for slug "pty-test".
+    # Change.create puts state at <control>/.imp/worktrees/<slug>/.imp/change/state/
+    state_path = (
+        tmp_path / ".imp" / "worktrees" / "pty-test" / ".imp" / "change" / "state"
+        / "state.json"
+    )
     state = json.loads(state_path.read_text())
     assert state["status"] == "completed", f"expected completed, got {state['status']!r}"

@@ -247,38 +247,22 @@ def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
 
     import imp.cli.main as m
     from imp.engine.executor import RunResult
+    from tests.conftest import _seed_control
 
-    project = tmp_path
-    (project / ".imp").mkdir()
-    # Change.create snapshots+validates a default workflow before run_change
-    # runs, so seed a minimal valid one.
-    src = project / ".imp" / "workflows" / "default"
-    (src / "agents").mkdir(parents=True)
-    write_agent_md(
-        src / "agents" / "stub.md",
-        frontmatter=(
-            "name: stub\ntools: [complete_step]\n"
-            "output:\n  status: {type: enum, values: [Success, Error]}"
-        ),
-    )
-    (src / "workflow.yaml").write_text(
-        "name: t\ndescription: \"\"\n"
-        "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
-    )
-    (project / ".imp" / "config.yaml").write_text(
-        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
-    )
+    # _seed_control initialises a git repo and commits imp/workflows/default +
+    # imp/config.yaml — the layout Change.create now expects.
+    _seed_control(tmp_path)
 
     async def fake_run_change(change, **kwargs):
         on_event = kwargs["on_event"]
         on_event({"id": "1", "agent_id": None, "type": "change_created",
-                  "payload": {"change_id": change.id, "title": change.title}})
+                  "payload": {"slug": change.slug, "title": change.title}})
         on_event({"id": "2", "agent_id": None, "type": "step_started",
                   "payload": {"step": "s", "kind": "agent", "phase": "design",
                               "model": "x", "provider": "anthropic"}})
         return RunResult.COMPLETED
 
-    monkeypatch.chdir(project)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
     buf = io.StringIO()

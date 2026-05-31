@@ -26,10 +26,13 @@ from imp.cli.live_status import LiveStatus
 from imp.cli.palette import should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit
+from imp.engine import worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
+from imp.engine.naming import random_title
 from imp.engine.project_root import find_project_root
+from imp.engine.slug import InvalidSlug, slugify
 from imp.engine.state import LockHeld, ProjectLock, State
 
 
@@ -37,16 +40,31 @@ def _project_root() -> Path:
     return find_project_root()
 
 
-def _write_change_lock(change: Change) -> None:
-    """Informational per-Change PID file (spec §5.5). Removed on exit. The
-    ProjectLock already enforces single-runner; this just gives `imp status`
-    something to display."""
-    (change.change_dir / "lock").write_text(str(os.getpid()))
+def _control_root() -> Path:
+    return worktree.find_control_root(Path.cwd())
 
 
-def _clear_change_lock(change: Change) -> None:
-    with contextlib.suppress(FileNotFoundError):
-        (change.change_dir / "lock").unlink()
+def _select_slug(control_root: Path, *, title: str | None) -> tuple[str, str]:
+    """Return (slug, title). Title-derived collision is a clean error; the
+    random-phrase default retries on the rare collision (spec §3.1)."""
+    if title is not None:
+        try:
+            slug = slugify(title)
+        except InvalidSlug:
+            print(f"imp: title {title!r} has no slug-able characters; pass a real title",
+                  file=sys.stderr)
+            raise SystemExit(2) from None
+        if worktree.branch_exists(control_root, f"imp/{slug}"):
+            print(f"imp: a Change named {slug!r} already exists; pick a different "
+                  "title", file=sys.stderr)
+            raise SystemExit(2)
+        return slug, title
+    for _ in range(20):
+        t = random_title()
+        slug = slugify(t)
+        if not worktree.branch_exists(control_root, f"imp/{slug}"):
+            return slug, t
+    raise SystemExit("imp: could not allocate a unique random name; retry")
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -64,73 +82,90 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
-    project = _project_root()
-    lock = ProjectLock(project / ".imp" / "lock")
     from imp.cli.signals import InterruptCoordinator
 
     try:
-        with lock.acquire():
-            try:
-                change = Change.create(project, title=args.title)
-            except (LoadError, LoadErrors) as e:
-                print(f"imp: {e}", file=sys.stderr)
+        control = _control_root()
+        worktree.check_preconditions(control)
+        worktree.ensure_imp_ignored(control)
+        base = worktree.current_branch(control)
+    except worktree.PreconditionError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+
+    change = None
+    for _ in range(20):
+        try:
+            slug, title = _select_slug(control, title=args.title)
+        except SystemExit:
+            return 2                                   # title collision/invalid (printed)
+        try:
+            change = Change.create(control, title=title, slug=slug, base_branch=base)
+            break
+        except (LoadError, LoadErrors) as e:
+            print(f"imp: {e}", file=sys.stderr)
+            return 2
+        except worktree.BranchExists:
+            if args.title is not None:                 # title-derived: clean error
+                print(f"imp: a Change named {slug!r} already exists", file=sys.stderr)
                 return 2
-            _write_change_lock(change)
-            try:
-                print(f"Created Change {change.id}: {change.title!r}")
-                prompt = Prompt()
-                status = LiveStatus(sys.stdout)
-                driver = LiveDriver(stream=sys.stdout,
-                                    color=should_use_color(sys.stdout),
-                                    width=_term_width(), status=status)
-                coord = InterruptCoordinator()
-                rc = 0
+            continue                                   # random: re-draw and retry
+    if change is None:
+        print("imp: could not allocate a unique Change name; retry", file=sys.stderr)
+        return 2
 
-                async def _ask_line() -> str:
-                    with status.suspend():
-                        return await prompt.ask_async("> ")
+    try:
+        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
+            print(f"Created Change {change.slug}: {change.title!r}")
+            prompt = Prompt()
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout,
+                                color=should_use_color(sys.stdout),
+                                width=_term_width(), status=status)
+            coord = InterruptCoordinator()
+            rc = 0
 
-                async with anyio.create_task_group() as tg:
-                    tg.start_soon(coord.run_signal_receiver)
-                    tg.start_soon(status.tick)
-                    try:
-                        result = await run_change(
-                            change,
-                            on_event=driver.on_event,
-                            human_input_fn=_ask_line,
-                            human_output_fn=driver.print_chrome,
-                            user_chat_input_fn=lambda _q: _ask_line(),
-                            coordinator=coord,
-                        )
-                    except (LoadError, LoadErrors) as e:
-                        driver.finish()
-                        print(f"imp: {e}", file=sys.stderr)
-                        rc = 2
-                    except EOFError:
-                        driver.finish()
-                        pause_and_exit(change, reason="ctrl-d")
-                        print(f"\nChange {change.id}: paused (ctrl-d)")
+            async def _ask_line() -> str:
+                with status.suspend():
+                    return await prompt.ask_async("> ")
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(coord.run_signal_receiver)
+                tg.start_soon(status.tick)
+                try:
+                    result = await run_change(
+                        change,
+                        on_event=driver.on_event,
+                        human_input_fn=_ask_line,
+                        human_output_fn=driver.print_chrome,
+                        user_chat_input_fn=lambda _q: _ask_line(),
+                        coordinator=coord,
+                    )
+                except (LoadError, LoadErrors) as e:
+                    driver.finish()
+                    print(f"imp: {e}", file=sys.stderr)
+                    rc = 2
+                except EOFError:
+                    driver.finish()
+                    pause_and_exit(change, reason="ctrl-d")
+                    print(f"\nChange {change.slug}: paused (ctrl-d)")
+                    rc = 130
+                else:
+                    driver.finish()
+                    if coord.should_pause:
+                        pause_and_exit(change, reason="ctrl-c")
+                        print(f"\nChange {change.slug}: paused (ctrl-c)")
                         rc = 130
                     else:
-                        driver.finish()
-                        if coord.should_pause:
-                            pause_and_exit(change, reason="ctrl-c")
-                            print(f"\nChange {change.id}: paused (ctrl-c)")
-                            rc = 130
-                        else:
-                            print(f"Change {change.id}: {result.value}")
-                            rc = 0 if result is RunResult.COMPLETED else 1
-                    finally:
-                        status.reset()
-                        tg.cancel_scope.cancel()
-                return rc
-            finally:
-                _clear_change_lock(change)
-    except LockHeld as lock_err:
-        print(
-            f"imp: another Change is running (lock held by pid {lock_err.held_by_pid})",
-            file=sys.stderr,
-        )
+                        print(f"Change {change.slug}: {result.value}")
+                        rc = 0 if result is RunResult.COMPLETED else 1
+                finally:
+                    status.reset()
+                    tg.cancel_scope.cancel()
+            return rc
+    except LockHeld as e:
+        print(f"imp: Change {change.slug} is already running (pid {e.held_by_pid})",
+              file=sys.stderr)
         return 2
 
 
