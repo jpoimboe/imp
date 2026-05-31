@@ -109,6 +109,7 @@ def _register_builtins() -> None:
         git_diff,
         nav,
         query_events,
+        rename_change,
         todos,
         web_fetch,
     )

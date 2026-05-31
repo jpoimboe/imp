@@ -581,6 +581,7 @@ async def _run_agent_invocation(
         continuation_fn=continuation_fn,
         agent_id=agent_id,
         event_log=log,
+        change_state=state,
         first_event_parent_id=started["id"],  # chains step_context.parent_id to step_started
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,

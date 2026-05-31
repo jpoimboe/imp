@@ -305,6 +305,7 @@ class AnthropicAgentRunner:
             interactive=invocation.interactive,
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
+        ctx.change_state = invocation.change_state
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_roles = invocation.resolved_roles
         ctx.model_tiers = invocation.model_tiers

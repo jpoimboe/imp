@@ -109,6 +109,9 @@ class AgentInvocation:
     # writes audit events through this; None means "construct a private
     # JsonlEventLog over events_path" (legacy/test fallback).
     event_log: Any = None
+    # Live engine State for the rename_change tool to mutate. Any to avoid an
+    # import cycle. None for subagents / legacy tests.
+    change_state: Any = None
     # parent_id override for this agent's FIRST emitted event (step_context):
     # the spawning step_started id (steps/gates) or task tool_call id (subagents).
     first_event_parent_id: str | None = None
