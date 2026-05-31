@@ -69,14 +69,18 @@ def _walk_object(node: dict[str, Any]) -> dict[str, Any]:
 def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
     """Widen `type: T` to `type: [T, "null"]`. Idempotent if already nullable,
     including the `anyOf: [{...}, {"type": "null"}]` form Pydantic emits for
-    `Optional[T]`."""
+    `Optional[T]`. When the property is an enum, `null` is appended to the enum
+    too — otherwise the widened `["...","null"]` type permits a value the enum
+    forbids and OpenAI strict mode rejects the schema."""
     t = schema.get("type")
     if isinstance(t, list):
         if "null" not in t:
             schema["type"] = [*t, "null"]
+        _append_null_to_enum(schema)
         return schema
     if isinstance(t, str):
         schema["type"] = [t, "null"]
+        _append_null_to_enum(schema)
         return schema
     # No top-level `type`. If it's already nullable via anyOf (Pydantic's
     # form for Optional[T]), leave it alone.
@@ -87,3 +91,11 @@ def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
         return schema
     # Otherwise wrap in anyOf.
     return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _append_null_to_enum(schema: dict[str, Any]) -> None:
+    """If `schema` carries an `enum`, ensure `None` is one of its members so a
+    nullable enum stays internally consistent. Idempotent."""
+    enum = schema.get("enum")
+    if isinstance(enum, list) and None not in enum:
+        schema["enum"] = [*enum, None]

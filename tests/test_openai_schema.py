@@ -120,6 +120,37 @@ def test_complete_step_schema_round_trip() -> None:
         assert _is_nullable(prop), f"{opt} not nullable: {prop}"
 
 
+def test_optional_enum_gets_null_appended() -> None:
+    """An optional enum, widened to nullable, must include null in its enum
+    list — otherwise OpenAI strict mode rejects the schema."""
+    src = {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "subagent_name": {"type": "string"},
+            "model_tier": {"type": "string", "enum": ["fast", "powerful"]},
+        },
+        "required": ["subagent_name"],   # model_tier optional
+    }
+    out = to_openai_strict(src)
+    tier = out["properties"]["model_tier"]
+    assert tier["type"] == ["string", "null"]
+    assert None in tier["enum"]
+    assert tier["enum"] == ["fast", "powerful", None]
+
+
+def test_nullable_enum_append_idempotent() -> None:
+    """Running the transform twice does not append null twice."""
+    src = {
+        "type": "object", "additionalProperties": False,
+        "properties": {"model_tier": {"type": "string", "enum": ["fast"]}},
+        "required": [],
+    }
+    once = to_openai_strict(src)
+    twice = to_openai_strict(once)
+    assert twice == once
+    assert once["properties"]["model_tier"]["enum"] == ["fast", None]
+
+
 def _is_nullable(prop: dict) -> bool:
     """A property is nullable if its `type` is a list including 'null', OR
     if it has an `anyOf` containing a `{"type": "null"}` variant."""
