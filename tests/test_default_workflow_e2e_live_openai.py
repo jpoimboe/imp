@@ -33,6 +33,15 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture(autouse=True)
+def _ensure_builtin_providers() -> None:
+    # The provider registry is import-time global state; other tests clear it
+    # via reset_providers_for_tests() teardown. Restore the built-ins so this
+    # live test is independent of pytest-randomly ordering.
+    from imp.providers import register_builtin_providers
+    register_builtin_providers()
+
+
 @pytest.mark.skipif(
     not opted_in("openai"),
     reason="openai not in IMP_LIVE_PROVIDERS",
