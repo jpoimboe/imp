@@ -100,3 +100,23 @@ def test_remove_worktree_keeps_branch(tmp_path: Path) -> None:
     assert not path.exists()
     # Branch is KEPT (spec §4, §5 item 5).
     assert "imp/gone" in _git(tmp_path, "branch", "--list", "imp/gone").stdout
+
+
+def test_rename_moves_branch_and_worktree(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "old", "main")
+    new_path = wt.rename(tmp_path, "old", "new")
+    assert new_path == tmp_path / ".imp" / "worktrees" / "new"
+    assert new_path.is_dir()
+    assert not (tmp_path / ".imp" / "worktrees" / "old").exists()
+    assert "imp/new" in _git(tmp_path, "branch", "--list", "imp/new").stdout
+    assert "imp/old" not in _git(tmp_path, "branch", "--list", "imp/old").stdout
+
+
+def test_rename_collision_returns_none(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "a", "main")
+    wt.create_worktree(tmp_path, "b", "main")
+    # imp/b already exists -> change nothing, return None (spec §4).
+    assert wt.rename(tmp_path, "a", "b") is None
+    assert (tmp_path / ".imp" / "worktrees" / "a").is_dir()

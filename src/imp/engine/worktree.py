@@ -100,6 +100,35 @@ def remove_worktree(control_root: Path, slug: str) -> None:
         _git_ok(control_root, "worktree", "remove", str(rel))
 
 
+def rename(control_root: Path, old: str, new: str) -> Path | None:
+    """Rename branch + worktree dir (spec §4). Returns the new path, or None on
+    collision (imp/<new> already exists) having changed nothing — the caller
+    keeps running on the old slug."""
+    new_rel = Path(".imp") / "worktrees" / new
+    with RepoGitLock(control_root).acquire():
+        if branch_exists(control_root, f"imp/{new}"):
+            return None
+        bm = _git(control_root, "branch", "-m", f"imp/{old}", f"imp/{new}")
+        if bm.returncode != 0:
+            return None
+        mv = _git(
+            control_root, "worktree", "move",
+            str(Path(".imp") / "worktrees" / old), str(new_rel),
+        )
+        if mv.returncode != 0:
+            # Roll the branch rename back so identity stays consistent.
+            rb = _git(control_root, "branch", "-m", f"imp/{new}", f"imp/{old}")
+            if rb.returncode != 0:
+                # Extremely unlikely under the lock; surface it rather than leave
+                # branch/worktree identity inconsistent and silent.
+                raise RuntimeError(
+                    f"rename rollback failed: branch is imp/{new} but worktree is "
+                    f"still imp/{old}; reconcile manually ({rb.stderr.strip()})"
+                )
+            return None
+    return (control_root / new_rel).resolve()
+
+
 class RepoGitLock:
     """Short-held file lock in the control root, acquired around every
     shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""
