@@ -175,90 +175,82 @@ def _cmd_new(args: argparse.Namespace) -> int:
 
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
-    project = _project_root()
-    lock = ProjectLock(project / ".imp" / "lock")
     from imp.cli.signals import InterruptCoordinator
 
+    control = _control_root()
     try:
-        with lock.acquire():
-            try:
-                change = Change.load(project, args.change_id)
-            except (LoadError, LoadErrors) as err:
-                print(f"imp: {err}", file=sys.stderr)
-                return 2
-            state = State.load(change.state_dir)
-            if state.status not in ("paused", "errored"):
-                print(
-                    f"imp: Change {change.id} status is {state.status!r}; "
-                    "nothing to resume",
-                    file=sys.stderr,
-                )
-                return 2
-            _write_change_lock(change)
-            try:
-                print(f"Resuming Change {change.id}: {change.title!r}")
-                print(f"Step: {state.step}")
-                prompt = Prompt()
-                status = LiveStatus(sys.stdout)
-                driver = LiveDriver(stream=sys.stdout,
-                                    color=should_use_color(sys.stdout),
-                                    width=_term_width(), status=status)
-                coord = InterruptCoordinator()
-                rc = 0
-                # Append the resume marker exactly once (for the persisted log /
-                # imp log). NO replay: the engine picks up from the current step
-                # cursor, re-emitting step_started + the step body fresh
-                # (design "Resume — no replay").
-                change.event_log().append(
-                    agent_id=None, type="workflow_resumed", payload={})
-                state.status = "running"
-                state.save(change.state_dir)
-
-                async def _ask_line() -> str:
-                    with status.suspend():
-                        return await prompt.ask_async("> ")
-
-                async with anyio.create_task_group() as tg:
-                    tg.start_soon(coord.run_signal_receiver)
-                    tg.start_soon(status.tick)
-                    try:
-                        result = await run_change(
-                            change,
-                            on_event=driver.on_event,
-                            human_input_fn=_ask_line,
-                            human_output_fn=driver.print_chrome,
-                            user_chat_input_fn=lambda _q: _ask_line(),
-                            coordinator=coord,
-                        )
-                    except (LoadError, LoadErrors) as e:
-                        driver.finish()
-                        print(f"imp: {e}", file=sys.stderr)
-                        rc = 2
-                    except EOFError:
-                        driver.finish()
-                        pause_and_exit(change, reason="ctrl-d")
-                        print(f"\nChange {change.id}: paused (ctrl-d)")
-                        rc = 130
-                    else:
-                        driver.finish()
-                        if coord.should_pause:
-                            pause_and_exit(change, reason="ctrl-c")
-                            print(f"\nChange {change.id}: paused (ctrl-c)")
-                            rc = 130
-                        else:
-                            print(f"Change {change.id}: {result.value}")
-                            rc = 0 if result is RunResult.COMPLETED else 1
-                    finally:
-                        status.reset()
-                        tg.cancel_scope.cancel()
-                return rc
-            finally:
-                _clear_change_lock(change)
-    except LockHeld as lock_err:
+        change = Change.load(control, args.slug)
+    except (LoadError, LoadErrors) as err:
+        print(f"imp: {err}", file=sys.stderr)
+        return 2
+    state = State.load(change.state_dir)
+    if state.status not in ("paused", "errored", "merge_blocked"):
         print(
-            f"imp: another Change is running (lock held by pid {lock_err.held_by_pid})",
+            f"imp: Change {change.slug} status is {state.status!r}; "
+            "nothing to resume",
             file=sys.stderr,
         )
+        return 2
+    try:
+        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
+            print(f"Resuming Change {change.slug}: {change.title!r}")
+            prompt = Prompt()
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout,
+                                color=should_use_color(sys.stdout),
+                                width=_term_width(), status=status)
+            coord = InterruptCoordinator()
+            rc = 0
+            # Append the resume marker exactly once (for the persisted log /
+            # imp log). NO replay: the engine picks up from the current step
+            # cursor, re-emitting step_started + the step body fresh
+            # (design "Resume — no replay").
+            change.event_log().append(
+                agent_id=None, type="workflow_resumed", payload={})
+            state.status = "running"
+            state.save(change.state_dir)
+
+            async def _ask_line() -> str:
+                with status.suspend():
+                    return await prompt.ask_async("> ")
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(coord.run_signal_receiver)
+                tg.start_soon(status.tick)
+                try:
+                    result = await run_change(
+                        change,
+                        on_event=driver.on_event,
+                        human_input_fn=_ask_line,
+                        human_output_fn=driver.print_chrome,
+                        user_chat_input_fn=lambda _q: _ask_line(),
+                        coordinator=coord,
+                    )
+                except (LoadError, LoadErrors) as e:
+                    driver.finish()
+                    print(f"imp: {e}", file=sys.stderr)
+                    rc = 2
+                except EOFError:
+                    driver.finish()
+                    pause_and_exit(change, reason="ctrl-d")
+                    print(f"\nChange {change.slug}: paused (ctrl-d)")
+                    rc = 130
+                else:
+                    driver.finish()
+                    if coord.should_pause:
+                        pause_and_exit(change, reason="ctrl-c")
+                        print(f"\nChange {change.slug}: paused (ctrl-c)")
+                        rc = 130
+                    else:
+                        print(f"Change {change.slug}: {result.value}")
+                        rc = 0 if result is RunResult.COMPLETED else 1
+                finally:
+                    status.reset()
+                    tg.cancel_scope.cancel()
+            return rc
+    except LockHeld as e:
+        print(f"imp: Change {change.slug} is already running (pid {e.held_by_pid})",
+              file=sys.stderr)
         return 2
 
 
@@ -355,25 +347,33 @@ def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
                 pass
 
 
+def _list_change_worktrees(control: Path) -> list[str]:
+    """Slugs of in-flight Change worktrees under .imp/worktrees/ (excludes the
+    transient .merge-* scratch dirs)."""
+    root = control / ".imp" / "worktrees"
+    if not root.is_dir():
+        return []
+    return sorted(p.name for p in root.iterdir()
+                  if p.is_dir() and not p.name.startswith(".")
+                  and (p / ".imp" / "change" / "change.json").exists())
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
 
-    project = _project_root()
-    change_id = args.change_id
-    if change_id is None:
-        changes_root = project / ".imp" / "changes"
-        if not changes_root.is_dir():
-            print("imp: no Changes yet", file=sys.stderr)
+    control = _control_root()
+    slug = args.slug
+    if slug is None:
+        wts = _list_change_worktrees(control)
+        if not wts:
+            print("No in-flight Changes. Completed Changes: git log refs/imp/journal",
+                  file=sys.stderr)
             return 2
-        ids = sorted(int(d.name) for d in changes_root.iterdir()
-                     if d.is_dir() and d.name.isdigit())
-        if not ids:
-            print("imp: no Changes yet", file=sys.stderr)
-            return 2
-        change_id = ids[-1]
+        slug = max(wts, key=lambda s: (control / ".imp" / "worktrees" / s
+                                       / ".imp" / "change" / "events.jsonl").stat().st_mtime)
     try:
-        change = Change.load(project, change_id)
+        change = Change.load(control, slug)
     except LoadError as err:
         print(f"imp: {err}", file=sys.stderr)
         return 2
@@ -447,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
-    p_resume.add_argument("change_id", type=int)
+    p_resume.add_argument("slug")
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(
@@ -456,10 +456,10 @@ def main(argv: list[str] | None = None) -> int:
         description=(
             "Show the narrative for a Change as plain text. --full starts every "
             "fold expanded. Set NO_COLOR=1 to disable colors. "
-            "Tip: imp log N --full | grep ... for line-oriented scripting."
+            "Tip: imp log <slug> --full | grep ... for line-oriented scripting."
         ),
     )
-    p_log.add_argument("change_id", type=int, nargs="?")
+    p_log.add_argument("slug", nargs="?")
     p_log.add_argument(
         "--full", action="store_true",
         help="Render every event (no tool-burst collapse).",

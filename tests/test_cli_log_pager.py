@@ -21,30 +21,43 @@ import pytest
 from imp.cli.main import main
 
 
-def test_no_pager_flag_parses(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-) -> None:
-    """`imp log --no-pager` parses without error and exits 0 against a
-    minimal Change. This locks in the argparse wiring before _page_or_print
-    exists."""
-    cdir = tmp_path / ".imp" / "changes" / "1"
-    cdir.mkdir(parents=True)
-    (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "smoke"}))
-    (cdir / "events.jsonl").write_text(
+def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
+    """Create a minimal on-disk worktree for a Change under control/.imp/worktrees/<slug>."""
+    wt = control / ".imp" / "worktrees" / slug
+    change_dir = wt / ".imp" / "change"
+    change_dir.mkdir(parents=True)
+    (change_dir / "change.json").write_text(
+        json.dumps({"slug": slug, "title": title, "base_branch": "main"}),
+    )
+    (change_dir / "events.jsonl").write_text(
         json.dumps({
             "timestamp": "2026-05-27T10:00:00+00:00",
             "type": "change_created",
-            "payload": {"change_id": 1, "title": "smoke"},
+            "payload": {"slug": slug, "title": title},
         }) + "\n",
     )
+    return wt
+
+
+def test_no_pager_flag_parses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`imp log --no-pager <slug>` parses without error and exits 0 against a
+    minimal Change. This locks in the argparse wiring before _page_or_print
+    exists."""
+    import imp.cli.main as m
+
+    slug = "my-smoke"
+    _make_change_worktree(tmp_path, slug, "smoke")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
 
-    rc = main(["log", "--no-pager", "1"])
+    rc = main(["log", "--no-pager", slug])
     assert rc == 0
     out = capsys.readouterr().out
-    # Narrative view renders change_created as "#1  <title>", not the event type string.
-    assert "#1" in out and "smoke" in out
+    # Narrative view renders change_created; title "smoke" should appear.
+    assert "smoke" in out
 
 
 def _fake_tty_stdout(monkeypatch: pytest.MonkeyPatch, *, isatty: bool) -> None:
@@ -397,21 +410,16 @@ def test_main_log_invokes_pager_on_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """End-to-end: `main(["log", "1"])` against a tmp project with one
+    """End-to-end: `main(["log", "<slug>"])` against a tmp project with one
     Change, stdout faked as a TTY, Popen mocked → Popen called exactly
     once and nothing was printed to capsys (the helper went down the
     pager path, not the print fallback)."""
-    cdir = tmp_path / ".imp" / "changes" / "1"
-    cdir.mkdir(parents=True)
-    (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "smoke"}))
-    (cdir / "events.jsonl").write_text(
-        json.dumps({
-            "timestamp": "2026-05-27T10:00:00+00:00",
-            "type": "change_created",
-            "payload": {"change_id": 1, "title": "smoke"},
-        }) + "\n",
-    )
+    import imp.cli.main as m
+
+    slug = "my-smoke"
+    _make_change_worktree(tmp_path, slug, "smoke")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.delenv("PAGER", raising=False)
     _fake_tty_stdout(monkeypatch, isatty=True)
@@ -421,7 +429,7 @@ def test_main_log_invokes_pager_on_tty(
     proc.wait = MagicMock(return_value=0)
 
     with patch("imp.cli.main.subprocess.Popen", return_value=proc) as popen:
-        rc = main(["log", "1"])
+        rc = main(["log", slug])
 
     assert rc == 0
     assert popen.call_count == 1, "_cmd_log must route TTY output through _page_or_print"
@@ -429,8 +437,8 @@ def test_main_log_invokes_pager_on_tty(
     assert capsys.readouterr().out == ""
     # Rendered lines reached the pager.
     writes = "".join(c.args[0] for c in proc.stdin.write.call_args_list)
-    # Narrative view renders change_created as "#1  <title>", not the event type string.
-    assert "#1" in writes and "smoke" in writes
+    # Narrative view renders change_created; title "smoke" should appear.
+    assert "smoke" in writes
     # Cleanup happened through the helper, not bypassed by some
     # alternate code path in _cmd_log.
     proc.stdin.close.assert_called_once()
@@ -442,31 +450,26 @@ def test_main_log_no_pager_flag_skips_pager_on_tty(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`main(["log", "--no-pager", "1"])` on a TTY → no Popen, inline print.
+    """`main(["log", "--no-pager", "<slug>"])` on a TTY → no Popen, inline print.
     Catches refactors that drop `args.no_pager` from the helper call."""
-    cdir = tmp_path / ".imp" / "changes" / "1"
-    cdir.mkdir(parents=True)
-    (cdir / "change.json").write_text(json.dumps({"id": 1, "title": "smoke"}))
-    (cdir / "events.jsonl").write_text(
-        json.dumps({
-            "timestamp": "2026-05-27T10:00:00+00:00",
-            "type": "change_created",
-            "payload": {"change_id": 1, "title": "smoke"},
-        }) + "\n",
-    )
+    import imp.cli.main as m
+
+    slug = "my-smoke"
+    _make_change_worktree(tmp_path, slug, "smoke")
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.delenv("PAGER", raising=False)
     _fake_tty_stdout(monkeypatch, isatty=True)
 
     with patch("imp.cli.main.subprocess.Popen") as popen:
-        rc = main(["log", "--no-pager", "1"])
+        rc = main(["log", "--no-pager", slug])
 
     assert rc == 0
     assert popen.call_count == 0
     out = capsys.readouterr().out
-    # Narrative view renders change_created as "#1  <title>", not the event type string.
-    assert "#1" in out and "smoke" in out
+    # Narrative view renders change_created; title "smoke" should appear.
+    assert "smoke" in out
 
 
 def test_keyboard_interrupt_in_wait_does_not_raise(
