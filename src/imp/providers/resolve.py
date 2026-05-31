@@ -130,7 +130,8 @@ def resolve_roles(
     Returns (resolved, details):
       resolved[role] = ProviderModel(provider, model)         -- persisted in State
       details[role]  = {"provider", "model", "constraint": str|None,
-                        "differ_tier": int|None}              -- for roles_resolved
+                        "differ_tier": int|None,
+                        "differ_from": str|None}              -- for roles_resolved
 
     This is the authoritative validator: it runs inside run_change where the
     change-creation validators do not, so it owns the unconfigured-role and
@@ -205,6 +206,7 @@ def resolve_roles(
                 "model": pm.model,
                 "constraint": None,
                 "differ_tier": None,
+                "differ_from": None,
             }
             continue
 
@@ -237,6 +239,7 @@ def resolve_roles(
             "model": pm.model,
             "constraint": "differ_provider_from",
             "differ_tier": tier,
+            "differ_from": target,
         }
 
     return resolved, details

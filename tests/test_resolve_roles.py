@@ -112,6 +112,7 @@ def test_no_constraint_matches_resolve_role():
     assert resolved["code"] == ProviderModel("anthropic", "haiku")
     assert details["code"]["constraint"] is None
     assert details["code"]["differ_tier"] is None
+    assert details["code"]["differ_from"] is None
 
 
 def test_table_two_vendors_jumps_vendor():
@@ -121,6 +122,7 @@ def test_table_two_vendors_jumps_vendor():
     assert resolved["code_review"] == ProviderModel("openai", "gpt-5.2")  # tier 1
     assert details["code_review"]["differ_tier"] == 1
     assert details["code_review"]["constraint"] == "differ_provider_from"
+    assert details["code_review"]["differ_from"] == "code"
 
 
 def test_table_one_vendor_falls_back_same_vendor_model():
