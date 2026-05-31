@@ -869,6 +869,39 @@ def test_action_payload_goto_carries_resume_bool() -> None:
     assert _action_payload(Continue()) == {"verb": "continue"}
 
 
+@pytest.mark.anyio
+async def test_run_change_computes_and_persists_resolved_roles(tmp_path):
+    """After a run, State carries resolved_roles and exactly one roles_resolved
+    event was emitted."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+
+    captured: list[dict] = []
+    await run_change(change, on_event=captured.append)
+
+    state = State.load(change.state_dir)
+    assert state.resolved_roles is not None
+    assert "default" in state.resolved_roles
+    resolved_events = [e for e in captured if e["type"] == "roles_resolved"]
+    assert len(resolved_events) == 1
+    assert "roles" in resolved_events[0]["payload"]
+
+
+@pytest.mark.anyio
+async def test_resume_reuses_resolved_roles_no_second_event(tmp_path):
+    """A second run_change re-entry reuses the persisted map and emits NO second
+    roles_resolved (compute-if-absent guard)."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    await run_change(change)
+
+    # Re-run run_change on the same (now-completed) change: it re-loads state,
+    # sees resolved_roles already set, and must not emit a second event.
+    captured: list[dict] = []
+    await run_change(change, on_event=captured.append)
+    assert [e for e in captured if e["type"] == "roles_resolved"] == []
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"

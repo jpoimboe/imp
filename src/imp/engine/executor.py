@@ -52,8 +52,8 @@ from imp.engine.types import (
     Step,
     Workflow,
 )
-from imp.providers.config import Config, load_config
-from imp.providers.resolve import resolve_role
+from imp.providers.config import load_config
+from imp.providers.resolve import provider_from_model, resolve_roles
 
 EventCallback = Callable[[dict[str, Any]], None]
 HumanInputFn = Callable[[], str | Awaitable[str]]
@@ -107,6 +107,15 @@ async def run_change(
     log = JsonlEventLog(change.events_path, on_event=on_event)
     state = State.load(change.state_dir)
 
+    # Resolve roles once per run and persist, so resume never re-snapshots the
+    # environment (design "When it runs"). run_change re-executes on every
+    # resume, so guard on the persisted map.
+    if state.resolved_roles is None:
+        resolved, details = resolve_roles(workflow, config)
+        state.resolved_roles = resolved
+        state.save(change.state_dir)
+        _emit(log, "roles_resolved", {"roles": details}, agent_id=None)
+
     flat = workflow.flat_steps()
     index_of = {s.name: i for i, s in enumerate(flat)}
 
@@ -121,7 +130,7 @@ async def run_change(
         # _route_* body — run_change receives it for visibility only and must NOT
         # re-apply it (double-apply trap). The third element is otherwise unused.
         action, feedback_text, _var_mutations = await _dispatch_step(
-            step, workflow, config, change, state, log, is_resume=is_resume,
+            step, workflow, change, state, log, is_resume=is_resume,
             human_input_fn=human_input_fn, human_output_fn=human_output_fn,
             user_chat_input_fn=user_chat_input_fn, coordinator=coordinator)
 
@@ -195,7 +204,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
 
 
 async def _dispatch_step(
-    step: Step, workflow: Workflow, config: Config, change: Change,
+    step: Step, workflow: Workflow, change: Change,
     state: State, log: EventLog, *, is_resume: bool,
     human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
@@ -216,7 +225,7 @@ async def _dispatch_step(
     if step.kind == "human":
         return await _route_human(step, state, log, human_input_fn, human_output_fn)
     return await _route_agent(
-        step, workflow, config, change, state, log,
+        step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
         wrapper_text=wrapper_text, is_resume=is_resume)
 
@@ -283,7 +292,7 @@ async def _route_human(
 
 
 async def _route_agent(
-    step: Step, workflow: Workflow, config: Config, change: Change,
+    step: Step, workflow: Workflow, change: Change,
     state: State, log: EventLog, *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
@@ -318,7 +327,7 @@ async def _route_agent(
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
             fs_permissions=step.fs_permissions, model_role=step.model_role,
-            workflow=workflow, config=config, change=change, state=state, log=log,
+            workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
             # MUST include "step" — _run_agent_invocation builds step_started as
             # {model, provider, tools, interactive, **extras}; the narrative tree
@@ -374,7 +383,7 @@ async def _route_agent(
                   {"step": step.name, "kind": "agent",
                    "action": _action_payload(on_max), "var_mutations": {}})
             return on_max, None, {}     # Pause (validator forbids Retry here)
-        return await _route_agent(step, workflow, config, change, state, log,
+        return await _route_agent(step, workflow, change, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, wrapper_text=wrapper_text,
                                   is_resume=is_resume)
@@ -460,7 +469,6 @@ async def _run_agent_invocation(
     fs_permissions: Any,
     model_role: str,
     workflow: Workflow,
-    config: Config,
     change: Change,
     state: State,
     log: EventLog,
@@ -497,8 +505,11 @@ async def _run_agent_invocation(
     - deciding what ``Action`` to return based on the output/errored/paused flags
     - cleaning up ``transcript_dir`` on success
     """
-    role = config.roles.get(model_role) or config.roles["default"]
-    provider = resolve_role(role)
+    # Resolution happened once up-front (run_change); look the role up in the
+    # persisted map and rebuild a live Provider from the stored strings. An
+    # unconfigured role would already have aborted the run in resolve_roles.
+    assert state.resolved_roles is not None  # set by run_change before dispatch
+    provider = provider_from_model(state.resolved_roles[model_role])
 
     artifacts_dir = change.artifacts_dir
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -573,6 +584,7 @@ async def _run_agent_invocation(
         first_event_parent_id=started["id"],  # chains step_context.parent_id to step_started
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
+        resolved_roles=state.resolved_roles,
     )
 
     runner = provider.create_runner(invocation)
