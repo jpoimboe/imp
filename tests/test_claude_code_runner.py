@@ -540,6 +540,28 @@ async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
     assert consulted["hit"] is False
 
 
+def test_fake_receive_response_segments_per_result_message() -> None:
+    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text
+
+    import anyio
+
+    scripted = [
+        assistant(text("turn one")), result(),
+        assistant(text("turn two")), result(),
+    ]
+    fake = FakeClaudeSDKClient(object(), scripted_messages=scripted)
+
+    async def drain_round() -> list[str]:
+        return [type(m).__name__ async for m in fake.receive_response()]
+
+    first = anyio.run(drain_round)
+    second = anyio.run(drain_round)
+    assert first == ["AssistantMessage", "ResultMessage"]
+    assert second == ["AssistantMessage", "ResultMessage"]
+    # Exhausted: a third call yields nothing.
+    assert anyio.run(drain_round) == []
+
+
 def test_claude_code_provider_registered_and_resolves() -> None:
     """The claude_code provider is registered eagerly; resolve_role picks it up
     when claude is on PATH."""

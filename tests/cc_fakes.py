@@ -92,6 +92,7 @@ class FakeClaudeSDKClient:
     def __init__(self, opts: Any, *, scripted_messages: list[Any]) -> None:
         self.opts = opts
         self._scripted = list(scripted_messages)
+        self._pos = 0
         self.queries: list[Any] = []  # whatever was passed to .query()
         self.closed = False
 
@@ -114,8 +115,16 @@ class FakeClaudeSDKClient:
             self.queries.append(prompt)
 
     async def receive_response(self) -> Any:
-        for msg in self._scripted:
+        # Mirror the real SDK: a single receive_response() call yields one turn's
+        # messages up to and INCLUDING the next ResultMessage, then terminates.
+        # The cursor persists, so the provider's next per-turn call resumes the
+        # script at the following message (issue 7).
+        while self._pos < len(self._scripted):
+            msg = self._scripted[self._pos]
+            self._pos += 1
             yield msg
+            if type(msg).__name__ == "ResultMessage":
+                return
 
     async def interrupt(self) -> None:
         pass
