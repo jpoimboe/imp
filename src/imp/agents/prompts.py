@@ -1,18 +1,16 @@
 """Prompt template rendering for agent .md bodies.
 
-Three namespaces (spec §7.5):
+Two namespaces (spec §7.5):
   events.<step-name>.<field> — validated agent_output of prior step
-  artifacts.<name>           — contents of artifacts/<name>.md
-  change.<field>             — change metadata
+  change.slug / change.title — change identity
 
-Missing artifacts and missing steps render as empty (lenient).
+Missing steps render as empty (lenient).
 Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import jinja2
@@ -33,18 +31,6 @@ class _EmptyOnMissing:
 
     def __str__(self) -> str:
         return ""
-
-
-class _ArtifactsNamespace:
-    def __init__(self, artifacts_dir: Path) -> None:
-        self._dir = artifacts_dir
-
-    def __getattr__(self, name: str) -> str:
-        return self[name]
-
-    def __getitem__(self, name: str) -> str:
-        p = self._dir / f"{name}.md"
-        return p.read_text() if p.exists() else ""
 
 
 class _StepEvents:
@@ -80,24 +66,22 @@ class _EventsNamespace:
 
 @dataclass(frozen=True, slots=True)
 class _ChangeNamespace:
-    id: int
+    slug: str
     title: str
 
 
 @dataclass(frozen=True, slots=True)
 class PromptContext:
     change: _ChangeNamespace
-    artifacts: _ArtifactsNamespace
     events: _EventsNamespace
 
 
 def build_context(
-    change_id: int, change_title: str, artifacts_dir: Path,
+    change_slug: str, change_title: str,
     event_log: EventLog,
 ) -> PromptContext:
     return PromptContext(
-        change=_ChangeNamespace(id=change_id, title=change_title),
-        artifacts=_ArtifactsNamespace(artifacts_dir),
+        change=_ChangeNamespace(slug=change_slug, title=change_title),
         events=_EventsNamespace(event_log),
     )
 
@@ -113,7 +97,7 @@ def render_prompt(template_source: str, ctx: PromptContext) -> str:
     """Render the template. Strict on top-level names; lenient inside namespaces."""
     try:
         return _env.from_string(template_source).render(
-            change=ctx.change, artifacts=ctx.artifacts, events=ctx.events,
+            change=ctx.change, events=ctx.events,
         )
     except jinja2.exceptions.UndefinedError as e:
         raise PromptRenderError(str(e)) from e

@@ -511,10 +511,10 @@ class OpenAIAgentRunner:
         system_message: dict[str, Any] = {"role": "system", "content": invocation.system_prompt}
         # Stable routing/affinity hint for OpenAI's automatic prompt cache.
         # Keyed to one growing conversation (one agent invocation within one
-        # change) so the prefix stays cache-resident turn-over-turn. change_id
+        # change) so the prefix stays cache-resident turn-over-turn. slug
         # is required: agent_id alone is change-agnostic, so concurrent changes
         # running the same step would collide on one routing slot.
-        prompt_cache_key = f"{invocation.change_context.change_id}:{aid}"
+        prompt_cache_key = f"{invocation.change_context.slug}:{aid}"
         guard = LoopGuard()
 
         while not self._cancel:

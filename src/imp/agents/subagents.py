@@ -91,7 +91,7 @@ async def dispatch_task(
 
     # Read change_context from ctx instead of fabricating it.
     cc = ctx.change_context or ChangeContext(
-        change_id=0, project_root=ctx.project_root, artifacts_dir=ctx.artifacts_dir,
+        slug="", title="", project_root=ctx.project_root,
     )
 
     # Carryover important #1: render the subagent's Jinja template, same way
@@ -103,9 +103,8 @@ async def dispatch_task(
     # here would conflate the write-fan-out log with a read-only snapshot
     # cursor. Keep them distinct.
     prompt_ctx = build_context(
-        change_id=cc.change_id,
-        change_title=f"Change {cc.change_id}",  # subagents don't see parent title
-        artifacts_dir=cc.artifacts_dir,
+        change_slug=cc.slug,
+        change_title=f"Change {cc.slug}",  # subagents don't see parent title
         event_log=JsonlEventLog(ctx.events_path),
     )
     rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
