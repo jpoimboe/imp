@@ -93,6 +93,13 @@ def create_worktree(control_root: Path, slug: str, base: str) -> Path:
     return (control_root / rel).resolve()
 
 
+def remove_worktree(control_root: Path, slug: str) -> None:
+    """`git worktree remove .imp/worktrees/<slug>`. Branch is KEPT (spec §4)."""
+    rel = Path(".imp") / "worktrees" / slug
+    with RepoGitLock(control_root).acquire():
+        _git_ok(control_root, "worktree", "remove", str(rel))
+
+
 class RepoGitLock:
     """Short-held file lock in the control root, acquired around every
     shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""

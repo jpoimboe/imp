@@ -91,3 +91,12 @@ def test_find_control_root_from_inside_worktree(tmp_path: Path) -> None:
     assert wt.find_control_root(wpath) == tmp_path.resolve()
     sub = wpath / ".imp" / "change"; sub.mkdir(parents=True)
     assert wt.find_control_root(sub) == tmp_path.resolve()
+
+
+def test_remove_worktree_keeps_branch(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    path = wt.create_worktree(tmp_path, "gone", "main")
+    wt.remove_worktree(tmp_path, "gone")
+    assert not path.exists()
+    # Branch is KEPT (spec §4, §5 item 5).
+    assert "imp/gone" in _git(tmp_path, "branch", "--list", "imp/gone").stdout
