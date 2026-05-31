@@ -9,7 +9,7 @@ output:
 
 You are updating documentation for the just-implemented change.
 
-Spec: {{ artifacts.spec }}
+Spec: `/project/imp/docs/specs/{{ change.slug }}.md`
 
 ## Workflow (do this exactly)
 

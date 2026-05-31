@@ -11,7 +11,8 @@ output:
 You are reviewing the spec.
 
 Change title (user's starting intent): {{ change.title }}
-Spec: {{ artifacts.spec }}
+
+Read the spec at `/project/imp/docs/specs/{{ change.slug }}.md`.
 
 Evaluate:
 - Does the spec address the change title and any clarifications added during spec rework?

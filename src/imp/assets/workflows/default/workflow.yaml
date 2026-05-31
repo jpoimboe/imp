@@ -9,6 +9,9 @@ model_rules:
 
 model_tiers: [fast, balanced, powerful]
 
+vars:
+  ready_to_merge: {type: bool, default: false}
+
 defaults:
   max_retries: 3
   max_loops: 6
@@ -22,12 +25,12 @@ phases:
         interactive: true
         max_tool_calls: 10
         fs_permissions:
-          - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
-          - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+          - {operations: [read],  paths: ["/project/**"], mode: allow}
+          - {operations: [write], paths: ["/project/imp/docs/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
 
       - name: spec-check
-        command: ./scripts/check-artifact.sh spec
+        command: ./scripts/check-artifact.sh "$IMP_PROJECT_ROOT/imp/docs/specs/$IMP_CHANGE_SLUG.md"
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
@@ -46,12 +49,12 @@ phases:
         file: agents/plan-writer.md
         model_role: default
         fs_permissions:
-          - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
-          - {operations: [write], paths: ["/artifacts/**"], mode: allow}
+          - {operations: [read],  paths: ["/project/**"], mode: allow}
+          - {operations: [write], paths: ["/project/imp/docs/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
 
       - name: plan-check
-        command: ./scripts/check-artifact.sh plan
+        command: ./scripts/check-artifact.sh "$IMP_PROJECT_ROOT/imp/docs/plans/$IMP_CHANGE_SLUG.md"
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
@@ -62,9 +65,8 @@ phases:
         file: agents/coder.md
         model_role: code
         fs_permissions:
-          - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+          - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/**"], mode: allow}
-          - {operations: [write], paths: ["/artifacts/**"], mode: allow}
 
       - name: run-tests
         command: ./scripts/run-tests.sh
@@ -76,9 +78,8 @@ phases:
         file: agents/documenter.md
         model_role: code
         fs_permissions:
-          - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
+          - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/**"], mode: allow}
-          - {operations: [write], paths: ["/artifacts/**"], mode: allow}
 
   - name: review
     steps:
@@ -93,7 +94,7 @@ phases:
       - name: merge-gate
         ask: "Merge?"
         options:
-          - {label: Merge,             continue: true}
+          - {label: Merge,             set: {ready_to_merge: true}, continue: true}
           - {label: Back to implement, goto: implement}
 
   - name: merge

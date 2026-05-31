@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -76,9 +77,19 @@ def anyio_backend():
     return "asyncio"
 
 
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
+    )
+
+
 def _seed_default_workflow(tmp_path: Path) -> Change:
     """Copy the shipped default workflow into the change root, then replace
-    the script-gate shells with `exit 0` stubs."""
+    the script-gate shells with `exit 0` stubs.
+
+    Also initializes a bare-minimum git repo so the merge gate (ready_to_merge)
+    can run `git status --porcelain` without failing.
+    """
     src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default"
     dst = tmp_path / ".imp" / "workflows" / "default"
     shutil.copytree(src, dst)
@@ -90,7 +101,7 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     # config.yaml: a single role for every model_role used by the workflow.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(
+    cfg_content = (
         "roles:\n"
         "  default:       {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  spec:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
@@ -101,6 +112,25 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  balanced:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  powerful:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
     )
+    cfg.write_text(cfg_content)
+
+    # Initialize a minimal git repo so `git status --porcelain` and
+    # merge_to_base work when the merge-gate sets ready_to_merge=true.
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
+    # Ignore both .imp/ (runtime state) and imp/ (test-only config) so that
+    # rewrites of imp/config.yaml in tests 2 and 3 don't dirty the worktree.
+    (tmp_path / ".gitignore").write_text(".imp/\nimp/\n")
+    (tmp_path / "README.md").write_text("seed\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "seed")
+    # Create the imp/<slug> branch and a git worktree at the expected path so
+    # merge_to_base and remove_worktree both succeed.
+    (tmp_path / ".imp" / "worktrees").mkdir(parents=True, exist_ok=True)
+    _git(tmp_path, "worktree", "add", "-q", "-b", "imp/test-change",
+         ".imp/worktrees/test-change", "main")
+
     return _make_change(tmp_path, title="e2e-default-workflow")
 
 
@@ -170,7 +200,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
 
     change = _seed_default_workflow(tmp_path)
     # Rewrite config to OpenAI provider for every role.
-    cfg = tmp_path / ".imp" / "config.yaml"
+    cfg = tmp_path / "imp" / "config.yaml"
     cfg.write_text(cfg.read_text().replace(
         "{provider: anthropic, model: claude-sonnet-4-6}",
         "{provider: openai, model: gpt-4o-mini}",
@@ -224,7 +254,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     )
 
     change = _seed_default_workflow(tmp_path)
-    cfg = tmp_path / ".imp" / "config.yaml"
+    cfg = tmp_path / "imp" / "config.yaml"
     cfg.write_text(cfg.read_text().replace(
         "{provider: anthropic, model: claude-sonnet-4-6}",
         "{provider: claude_code, model: claude-sonnet-4-5}",

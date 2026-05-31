@@ -13,7 +13,6 @@ CODER = (
 def test_coder_prompt_mentions_project_root_env() -> None:
     body = CODER.read_text()
     assert "$IMP_PROJECT_ROOT" in body
-    assert "$IMP_ARTIFACTS_DIR" in body
 
 
 def test_coder_prompt_warns_against_literal_project_in_bash() -> None:

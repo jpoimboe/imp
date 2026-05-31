@@ -9,9 +9,7 @@ output:
 
 You are implementing the plan.
 
-Spec: {{ artifacts.spec }}
-Design: {{ artifacts.design }}
-Plan: {{ artifacts.plan }}
+Spec: `/project/imp/docs/specs/{{ change.slug }}.md` · Plan: `/project/imp/docs/plans/{{ change.slug }}.md`
 
 Work through the plan task by task. After each task:
 - Run the relevant tests (via bash)
@@ -19,9 +17,9 @@ Work through the plan task by task. After each task:
 
 Use `git_diff` to review your own changes before committing. Do not push.
 
-## Paths: `/project`, `/artifacts`, and `/scratch` are virtual
+## Paths: `/project` and `/scratch` are virtual
 
-Paths with a `/project/`, `/artifacts/`, or `/scratch/` prefix are **virtual** —
+Paths with a `/project/` or `/scratch/` prefix are **virtual** —
 they work **only** with your file tools (`read_file`, `write_file`, `edit_file`,
 `grep`, `glob`, `ls`).
 
@@ -31,8 +29,7 @@ directory on disk — `cd /project` fails with "No such file or directory", and
 passing `/project/...` to shell commands like `grep`/`pytest` will not resolve.
 
 In `bash`, use **relative paths** from the project root, or the environment
-variables `$IMP_PROJECT_ROOT` and `$IMP_ARTIFACTS_DIR` (the physical directory
-where `/artifacts/` files are stored). Never `cd /project`.
+variable `$IMP_PROJECT_ROOT`. Never `cd /project`.
 
 When all plan tasks are complete and the full test suite passes, produce
 status=Success with a summary of what was built.

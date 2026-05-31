@@ -11,8 +11,7 @@ output:
 
 You are reviewing the implementation.
 
-Spec: {{ artifacts.spec }}
-Design: {{ artifacts.design }}
+Spec: `/project/imp/docs/specs/{{ change.slug }}.md`
 
 Inspect the diff (via git_diff). Evaluate:
 - Does the implementation satisfy the spec's acceptance criteria?
