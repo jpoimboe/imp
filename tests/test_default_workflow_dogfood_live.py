@@ -31,13 +31,16 @@ the subprocess env causes all live tests to skip via opted_in().
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import select
 import shutil
 import signal
+import struct
 import subprocess
 import sys
+import termios
 import time
 import uuid
 from pathlib import Path
@@ -316,6 +319,16 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     env["IMP_PYTHON"] = str(venv_python)
 
     master, slave = pty.openpty()
+    # Propagate a real terminal size onto the slave so imp's renderer wraps to a
+    # sensible width instead of flooring to 8 chars under a winsize-0 PTY (issue
+    # 2). Query the controlling terminal; fall back to 100x30 when stdout is not
+    # a TTY (CI) for determinism.
+    try:
+        cols, rows = os.get_terminal_size(sys.stdout.fileno())
+    except (OSError, ValueError):
+        cols, rows = 100, 30
+    winsize = struct.pack("HHHH", rows, cols, 0, 0)
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, winsize)
     # imp answers gates with line input ("1\n") — the only mode now that the
     # TUI is gone. The PTY itself is still needed so the text path's
     # prompt_toolkit prompt has a TTY. Mirrors test_human_gate_pty.
