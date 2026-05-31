@@ -47,6 +47,9 @@ class ToolContext:
     spawn_subagent: Any = None
     # role → ProviderModel; copied from invocation.resolved_roles by the runner.
     resolved_roles: dict[str, Any] | None = None
+    # The run's effective model-tier menu; copied from invocation.model_tiers by
+    # the provider. dispatch_task reads it only to name valid tiers on error.
+    model_tiers: tuple[str, ...] = ()
     # invocation_id counter for disambiguating same-named subagent invocations
     _subagent_counter: int = 0
 

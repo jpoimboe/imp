@@ -133,6 +133,15 @@ def test_diagnostics_holds_warnings_and_thinkings() -> None:
     assert d.thinkings == ("t1", "t2")
 
 
+def test_agent_invocation_has_model_tiers_field() -> None:
+    import dataclasses
+
+    from imp.agents.runner import AgentInvocation
+    fields = {f.name: f for f in dataclasses.fields(AgentInvocation)}
+    assert "model_tiers" in fields
+    assert fields["model_tiers"].default == ()
+
+
 def test_agent_invocation_resolved_roles_defaults_none():
     from pathlib import Path
 

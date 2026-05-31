@@ -128,3 +128,13 @@ def test_tool_context_resolved_roles_defaults_none(tmp_path):
         project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
         events_path=tmp_path / "e.jsonl")
     assert ctx.resolved_roles is None
+
+
+def test_tool_context_model_tiers_defaults_empty(tmp_path) -> None:
+    from imp.agents.tools.context import ToolContext
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    assert ctx.model_tiers == ()
+    ctx.model_tiers = ("fast", "powerful")
+    assert ctx.model_tiers == ("fast", "powerful")

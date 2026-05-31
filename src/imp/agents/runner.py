@@ -127,6 +127,10 @@ class AgentInvocation:
     # dispatch_task can place a subagent on its model_role's resolved provider.
     # Typed Any to avoid importing ProviderModel here.
     resolved_roles: dict[str, Any] | None = None
+    # The effective, config-overridden model-tier menu for this run (ordered
+    # cheapest->strongest). Copied onto ToolContext by the provider; surfaced to
+    # the model as the `task` tool's optional `model_tier` enum. () = feature off.
+    model_tiers: tuple[str, ...] = ()
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}
