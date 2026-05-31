@@ -246,8 +246,8 @@ def test_snapshot_covers_every_node_type() -> None:
     walk(tree.root)
     required = {"WorkflowNode", "PhaseNode", "StepNode", "AgentTextNode",
                 "UserMessageNode", "ThinkingFold", "ToolBurstFold", "SubagentFold",
-                "GateNode", "ErrorNode", "StepContextNode", "OutcomeLine", "FallbackLine",
-                "BreadcrumbLine"}
+                "GateNode", "ErrorNode", "StepContextNode", "OutcomeLine",
+                "FallbackLine", "RolesResolvedNode"}
     assert required <= seen, f"fixture missing node types: {required - seen}"
 
 
