@@ -8,7 +8,9 @@ from __future__ import annotations
 import os
 import subprocess
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import filelock
 
@@ -152,3 +154,62 @@ class RepoGitLock:
                 self.path.unlink(missing_ok=True)
             finally:
                 self._fl.release()
+
+
+@dataclass(frozen=True)
+class MergeResult:
+    status: Literal["MERGED", "CONFLICT", "BASE_DIRTY"]
+    merge_commit: str | None = None
+
+
+def _worktree_on_branch(control_root: Path, base: str) -> Path | None:
+    """Parse `git worktree list --porcelain`; return the worktree path checked
+    out on refs/heads/<base>, or None if base is checked out nowhere."""
+    out = _git_ok(control_root, "worktree", "list", "--porcelain")
+    cur: Path | None = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            cur = Path(line[len("worktree "):])
+        elif line == f"branch refs/heads/{base}" and cur is not None:
+            return cur
+    return None
+
+
+def is_dirty(worktree: Path) -> bool:
+    """True if the worktree has staged/unstaged/untracked changes. Public so
+    `_complete` can refuse to merge a Change with uncommitted work (spec relies
+    on agents committing incrementally — `.imp/` is gitignored, so this only
+    sees real tracked/untracked project files)."""
+    return bool(_git_ok(worktree, "status", "--porcelain").strip())
+
+
+def merge_to_base(control_root: Path, slug: str, base: str) -> MergeResult:
+    """Integrate imp/<slug> into <base> without ever desyncing a live checkout
+    (spec §4). Strategy branches on where <base> is checked out."""
+    branch = f"imp/{slug}"
+    with RepoGitLock(control_root).acquire():
+        live = _worktree_on_branch(control_root, base)
+        if live is not None:
+            if is_dirty(live):
+                return MergeResult("BASE_DIRTY")
+            return _merge_in_place(live, branch)
+        return _merge_detached(control_root, slug, branch, base)
+
+
+def _merge_in_place(worktree: Path, branch: str) -> MergeResult:
+    """Branch 1: advance ref + index + working tree atomically in the live
+    checkout. The up-front is_dirty(live) -> BASE_DIRTY check (in merge_to_base,
+    under the lock) is THE dirty-safety guard; `git merge` itself only partially
+    backstops the TOCTOU window (it refuses solely for files the merge would
+    touch, not for unrelated dirty files), so don't rely on the merge command
+    alone for dirty-safety."""
+    proc = _git(worktree, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
+    if proc.returncode != 0:
+        _git(worktree, "merge", "--abort")
+        return MergeResult("CONFLICT")
+    commit = _git_ok(worktree, "rev-parse", "HEAD").strip()
+    return MergeResult("MERGED", commit)
+
+
+def _merge_detached(control_root: Path, slug: str, branch: str, base: str) -> MergeResult:
+    raise NotImplementedError  # implemented in Task 8

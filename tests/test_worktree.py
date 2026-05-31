@@ -120,3 +120,36 @@ def test_rename_collision_returns_none(tmp_path: Path) -> None:
     # imp/b already exists -> change nothing, return None (spec §4).
     assert wt.rename(tmp_path, "a", "b") is None
     assert (tmp_path / ".imp" / "worktrees" / "a").is_dir()
+
+
+def _commit_on_branch(root: Path, branch: str, name: str, body: str) -> None:
+    """Add+commit one file directly in the change worktree the test already
+    created for <branch>, so the control root's checkout stays untouched."""
+    wtpath = root / ".imp" / "worktrees" / branch.removeprefix("imp/")
+    (wtpath / name).write_text(body)
+    _git(wtpath, "add", "-A")
+    _git(wtpath, "commit", "-qm", f"add {name}")
+
+
+def test_merge_base_checked_out_clean(tmp_path: Path) -> None:
+    _init_repo(tmp_path)  # control root sits on clean main
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+
+    result = wt.merge_to_base(tmp_path, "feat", "main")
+    assert result.status == "MERGED"
+    # main's working tree advanced together with the ref (no desync).
+    assert (tmp_path / "feature.txt").read_text() == "hi"
+    # REGRESSION (spec §11): control-root status is NOT a staged reversal.
+    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
+
+
+def test_merge_base_dirty_backs_off(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    (tmp_path / "README.md").write_text("dirty edit")  # uncommitted on main
+
+    result = wt.merge_to_base(tmp_path, "feat", "main")
+    assert result.status == "BASE_DIRTY"
+    assert not (tmp_path / "feature.txt").exists()  # nothing advanced
