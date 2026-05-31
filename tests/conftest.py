@@ -46,3 +46,27 @@ def write_agent_md(path: Path, frontmatter: str, body: str = "prompt body") -> P
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"---\n{frontmatter}\n---\n{body}\n")
     return path
+
+
+@pytest.fixture
+def provider_registry():
+    """Reset the provider registry before AND after the test, yielding a thin
+    register(...) wrapper over resolve.register_provider so tests keep their
+    bespoke factories while the fixture owns teardown.
+
+    Opt-in: name `provider_registry` as a test argument. Mirrors the
+    reset-on-both-sides shape of test_subagent_spawn.py's autouse `_providers`
+    fixture, but NON-autouse so only requesting tests are affected. The
+    before-yield reset means a converted test no longer detects a registry
+    polluted by a prior test (intentional parity with test_subagent_spawn.py);
+    the after-yield reset still prevents leakage onto the next test.
+    """
+    from imp.providers import resolve
+
+    resolve.reset_providers_for_tests()
+
+    def register(name, env_check, factory):
+        resolve.register_provider(name, env_check=env_check, factory=factory)
+
+    yield register
+    resolve.reset_providers_for_tests()
