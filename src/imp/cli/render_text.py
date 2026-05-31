@@ -148,9 +148,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.RolesResolvedNode):
         yield _line("roles resolved:", depth, color)
-        width = max((len(r["role"]) for r in node.rows), default=0)
+        col_w = max((len(r["role"]) for r in node.rows), default=0)  # role-name column
         for r in node.rows:
-            line = f"  {r['role']:<{width}} → {r['provider']}/{r['model']}"
+            # two-space sub-indent under the "roles resolved:" header
+            line = f"  {r['role']:<{col_w}} → {r['provider']}/{r['model']}"
             if r["differ_tier"] is not None:
                 label = _DIFFER_LABELS.get(r["differ_tier"], "?")
                 line += (f"   (differ from {r['differ_from']}: "
