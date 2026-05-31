@@ -81,7 +81,7 @@ class AgentInvocation:
     initial_messages: tuple[Message, ...]
     change_context: ChangeContext
     interactive: bool
-    transcript_dir: Path                   # .imp/changes/N/steps/<phase>/<step>/
+    transcript_dir: Path                   # .imp/change/steps/<phase>/<step>/
     fs_permissions: tuple[FsRule, ...]
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
