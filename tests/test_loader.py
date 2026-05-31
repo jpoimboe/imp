@@ -616,3 +616,47 @@ def test_load_workflow_rejects_constraint_cycle(tmp_path):
         "      - {name: s, file: agents/a.md}\n")
     with pytest.raises((LoadError, LoadErrors), match="cycle"):
         load_workflow(wf_dir)
+
+
+def test_load_workflow_parses_model_tiers(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    wf_dir.mkdir()
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "model_tiers: [fast, balanced, powerful]\n"
+        "phases:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
+    )
+    wf = load_workflow(wf_dir)
+    assert wf.model_tiers == ("fast", "balanced", "powerful")
+
+
+def test_load_workflow_model_tiers_absent_is_empty(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    wf_dir.mkdir()
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "phases:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
+    )
+    wf = load_workflow(wf_dir)
+    assert wf.model_tiers == ()
+
+
+def test_load_workflow_model_tiers_duplicate_raises(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    wf_dir.mkdir()
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "model_tiers: [fast, fast]\n"
+        "phases:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
+    )
+    with pytest.raises((LoadError, LoadErrors), match="duplicate"):
+        load_workflow(wf_dir)

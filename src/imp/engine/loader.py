@@ -35,6 +35,7 @@ from imp.engine.expr import (
     parse as parse_expr,
 )
 from imp.engine.model_rules import find_constraint_cycle, parse_role_constraints
+from imp.engine.model_tiers import parse_model_tiers
 from imp.engine.schema import parse_output_schema
 from imp.engine.types import (
     Action,
@@ -665,6 +666,7 @@ def load_workflow(
         phase_objs.append(Phase(name=pname, steps=steps, source=psrc))
 
     model_rules = parse_role_constraints(raw.get("model_rules"), yaml_path)
+    model_tiers = parse_model_tiers(raw.get("model_tiers"), root_source)
     # Best-effort workflow-only cycle pre-check for a fast authoring error. The
     # authoritative check is in resolve_roles, on the workflow+config MERGED
     # graph (config may add an edge this pre-check can't see).
@@ -685,6 +687,7 @@ def load_workflow(
         workflow_dir=workflow_dir,
         source=root_source,
         model_rules=model_rules,
+        model_tiers=model_tiers,
     )
 
     # Run validators and print warnings; raise on errors.

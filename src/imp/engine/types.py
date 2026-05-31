@@ -230,6 +230,7 @@ class Workflow:
     workflow_dir: Path
     source: SourceLoc
     model_rules: dict[str, RoleConstraint] = field(hash=False, default_factory=dict)
+    model_tiers: tuple[str, ...] = ()
 
     def flat_steps(self) -> tuple[Step, ...]:
         return tuple(s for p in self.phases for s in p.steps)
