@@ -229,63 +229,66 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path) -> None:
     # builds the child runner with the same client fake (not a real network client).
     from imp.providers import resolve as _resolve
     from imp.providers.anthropic import AnthropicProvider
+    _resolve.reset_providers_for_tests()
     _resolve.register_provider(
         "anthropic", env_check=lambda: True,
         factory=lambda m: AnthropicProvider(
             model_name=m, client_factory=lambda: shared_fake,
         ),
     )
+    try:
+        runner = AnthropicAgentRunner(
+            model_name="claude-sonnet-4-6",
+            client_factory=lambda: shared_fake,
+        )
+        events_out = [e async for e in runner.run(inv)]
+        assert events_out[-1]["type"] == "agent_output"
 
-    runner = AnthropicAgentRunner(
-        model_name="claude-sonnet-4-6",
-        client_factory=lambda: shared_fake,
-    )
-    events_out = [e async for e in runner.run(inv)]
-    assert events_out[-1]["type"] == "agent_output"
+        events = list(log.read())
 
-    events = list(log.read())
+        # Parent events must have agent_id 'step:p/s'
+        parent_events = [e for e in events if e.get("agent_id") == "step:p/s"]
+        assert parent_events, "no events with parent agent_id 'step:p/s'"
 
-    # Parent events must have agent_id 'step:p/s'
-    parent_events = [e for e in events if e.get("agent_id") == "step:p/s"]
-    assert parent_events, "no events with parent agent_id 'step:p/s'"
+        # Subagent events must have agent_id 'sub:<tool_call_id>'
+        sub_ctx_events = [
+            e for e in events
+            if e["type"] == "step_context"
+            and isinstance(e.get("agent_id"), str)
+            and e["agent_id"].startswith("sub:")
+        ]
+        assert sub_ctx_events, "no step_context with sub: agent_id found"
+        sub_ctx = sub_ctx_events[0]
+        sub_agent_id = sub_ctx["agent_id"]
+        tool_call_id = sub_agent_id[len("sub:"):]
 
-    # Subagent events must have agent_id 'sub:<tool_call_id>'
-    sub_ctx_events = [
-        e for e in events
-        if e["type"] == "step_context"
-        and isinstance(e.get("agent_id"), str)
-        and e["agent_id"].startswith("sub:")
-    ]
-    assert sub_ctx_events, "no step_context with sub: agent_id found"
-    sub_ctx = sub_ctx_events[0]
-    sub_agent_id = sub_ctx["agent_id"]
-    tool_call_id = sub_agent_id[len("sub:"):]
+        # The step_context's parent_id must equal the tool_call event id
+        # (The tool_call event for "t1" is the one that spawned the subagent)
+        tool_call_ev = next(
+            (e for e in events
+             if e["type"] == "tool_call"
+             and e.get("payload", {}).get("id") == "t1"),
+            None,
+        )
+        assert tool_call_ev is not None, "no tool_call event for t1"
+        assert tool_call_id == tool_call_ev["id"], (
+            f"subagent agent_id suffix {tool_call_id!r} != "
+            f"tool_call event id {tool_call_ev['id']!r}"
+        )
+        # sub_ctx.parent_id should point to the tool_call event id
+        assert sub_ctx["parent_id"] == tool_call_ev["id"], (
+            f"subagent step_context.parent_id {sub_ctx['parent_id']!r} "
+            f"!= tool_call event id {tool_call_ev['id']!r}"
+        )
 
-    # The step_context's parent_id must equal the tool_call event id
-    # (The tool_call event for "t1" is the one that spawned the subagent)
-    tool_call_ev = next(
-        (e for e in events
-         if e["type"] == "tool_call"
-         and e.get("payload", {}).get("id") == "t1"),
-        None,
-    )
-    assert tool_call_ev is not None, "no tool_call event for t1"
-    assert tool_call_id == tool_call_ev["id"], (
-        f"subagent agent_id suffix {tool_call_id!r} != "
-        f"tool_call event id {tool_call_ev['id']!r}"
-    )
-    # sub_ctx.parent_id should point to the tool_call event id
-    assert sub_ctx["parent_id"] == tool_call_ev["id"], (
-        f"subagent step_context.parent_id {sub_ctx['parent_id']!r} "
-        f"!= tool_call event id {tool_call_ev['id']!r}"
-    )
-
-    # build_messages_from_events filters to subagent stream only
-    sub_msgs = build_messages_from_events(events, agent_id=sub_agent_id)
-    assert len(sub_msgs) > 0, "no messages reconstructed for subagent"
-    assert sub_msgs[0].role == "user", (
-        f"expected first subagent message to be user, got {sub_msgs[0].role}"
-    )
+        # build_messages_from_events filters to subagent stream only
+        sub_msgs = build_messages_from_events(events, agent_id=sub_agent_id)
+        assert len(sub_msgs) > 0, "no messages reconstructed for subagent"
+        assert sub_msgs[0].role == "user", (
+            f"expected first subagent message to be user, got {sub_msgs[0].role}"
+        )
+    finally:
+        _resolve.reset_providers_for_tests()
 
 
 # ── Test 3: Backward goto emits step_started for each loop iteration ─────────

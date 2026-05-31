@@ -285,42 +285,45 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
     # Without this, the registry path resolves "openai" to the real factory,
     # which builds an OpenAI client with a stub key and makes a real network
     # call that returns 401.
+    _resolve.reset_providers_for_tests()
     _resolve.register_provider(
         "openai", env_check=lambda: True,
         factory=lambda m: OpenAIProvider(
             model_name=m, client_factory=lambda: fake,
         ),
     )
+    try:
+        log = InMemoryEventLog()
+        runner = OpenAIAgentRunner(
+            model_name="gpt-4o-mini",
+            client_factory=lambda: fake,
+        )
+        events = []
+        async for ev in runner.run(replace(inv, event_log=log)):
+            events.append(ev)
 
-    log = InMemoryEventLog()
-    runner = OpenAIAgentRunner(
-        model_name="gpt-4o-mini",
-        client_factory=lambda: fake,
-    )
-    events = []
-    async for ev in runner.run(replace(inv, event_log=log)):
-        events.append(ev)
-
-    # The terminal event is the parent's agent_output, NOT the subagent's.
-    assert events[-1]["type"] == "agent_output"
-    assert events[-1]["payload"] == {"status": "Success"}
-    # tool_call and tool_result go to the log, not the yield stream
-    log_types = [e["type"] for e in log.read()]
-    assert "tool_call" in log_types
-    assert "tool_result" in log_types
-    # Verify the subagent's output actually flowed back as the task tool_result.
-    # If dispatch regressed (e.g. spawn_subagent_via_registry never called), the
-    # task tool_result would be an error string, not the subagent's JSON output.
-    task_result_ev = next(
-        e for e in log.read()
-        if e["type"] == "tool_result" and e["payload"].get("id") == "p1"
-    )
-    parsed = json.loads(task_result_ev["payload"]["content"])
-    assert parsed.get("status") == "Success"
-    # All three fake responses must have been consumed: parent turn 1, sub turn
-    # 1, parent turn 2. If the subagent ran on the real client instead of fake,
-    # the sub's queued response would remain unconsumed here.
-    assert len(fake.chat.completions.calls) == 3
+        # The terminal event is the parent's agent_output, NOT the subagent's.
+        assert events[-1]["type"] == "agent_output"
+        assert events[-1]["payload"] == {"status": "Success"}
+        # tool_call and tool_result go to the log, not the yield stream
+        log_types = [e["type"] for e in log.read()]
+        assert "tool_call" in log_types
+        assert "tool_result" in log_types
+        # Verify the subagent's output actually flowed back as the task tool_result.
+        # If dispatch regressed (e.g. spawn_subagent_via_registry never called), the
+        # task tool_result would be an error string, not the subagent's JSON output.
+        task_result_ev = next(
+            e for e in log.read()
+            if e["type"] == "tool_result" and e["payload"].get("id") == "p1"
+        )
+        parsed = json.loads(task_result_ev["payload"]["content"])
+        assert parsed.get("status") == "Success"
+        # All three fake responses must have been consumed: parent turn 1, sub turn
+        # 1, parent turn 2. If the subagent ran on the real client instead of fake,
+        # the sub's queued response would remain unconsumed here.
+        assert len(fake.chat.completions.calls) == 3
+    finally:
+        _resolve.reset_providers_for_tests()
 
 
 @pytest.mark.anyio

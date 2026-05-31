@@ -414,33 +414,36 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path) -> None:
     # the child runner with the same client fake (not a real network client).
     from imp.providers import resolve as _resolve
     from imp.providers.anthropic import AnthropicProvider
+    _resolve.reset_providers_for_tests()
     _resolve.register_provider(
         "anthropic", env_check=lambda: True,
         factory=lambda m: AnthropicProvider(
             model_name=m, client_factory=lambda: parent_fake,
         ),
     )
+    try:
+        runner = AnthropicAgentRunner(
+            model_name="claude-sonnet-4-6",
+            client_factory=lambda: parent_fake,
+        )
+        events = [e async for e in runner.run(inv)]
+        assert events[-1]["type"] == "agent_output"
+        assert events[-1]["payload"]["status"] == "Success"
 
-    runner = AnthropicAgentRunner(
-        model_name="claude-sonnet-4-6",
-        client_factory=lambda: parent_fake,
-    )
-    events = [e async for e in runner.run(inv)]
-    assert events[-1]["type"] == "agent_output"
-    assert events[-1]["payload"]["status"] == "Success"
-
-    # tool_call + tool_result are now in the log, not the yield stream.
-    log_types = [e["type"] for e in log.read()]
-    assert "tool_call" in log_types
-    assert "tool_result" in log_types
-    # Find the task tool_result in the log and verify it has the subagent output.
-    task_result_ev = next(
-        e for e in log.read()
-        if e["type"] == "tool_result" and e["payload"].get("id") == "t1"
-    )
-    import json
-    parsed = json.loads(task_result_ev["payload"]["content"])
-    assert parsed.get("verdict") == "approve"
+        # tool_call + tool_result are now in the log, not the yield stream.
+        log_types = [e["type"] for e in log.read()]
+        assert "tool_call" in log_types
+        assert "tool_result" in log_types
+        # Find the task tool_result in the log and verify it has the subagent output.
+        task_result_ev = next(
+            e for e in log.read()
+            if e["type"] == "tool_result" and e["payload"].get("id") == "t1"
+        )
+        import json
+        parsed = json.loads(task_result_ev["payload"]["content"])
+        assert parsed.get("verdict") == "approve"
+    finally:
+        _resolve.reset_providers_for_tests()
 
 
 @pytest.mark.anyio
