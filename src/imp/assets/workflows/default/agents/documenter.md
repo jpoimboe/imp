@@ -1,7 +1,7 @@
 ---
 name: documenter
 description: Update README/CHANGELOG/docs as needed for this change.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, write_todos, query_events, git_diff]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, write_todos, query_events, git_diff]
 output:
   status: {type: enum, values: [Success, Error]}
   summary: {type: string, required: false}
@@ -24,7 +24,11 @@ Spec: `/project/imp/docs/specs/{{ change.slug }}.md`
    project doesn't already use.
 4. Make AT MOST one or two targeted `edit_file` or `write_file` calls
    to update the relevant docs.
-5. Produce the structured response with status=Success and a one-line
+5. If you changed any files, commit them with `bash`
+   (`git add -A && git commit -m "docs: ..."`). Do not push. Leave no
+   uncommitted changes behind — the engine refuses to merge a dirty
+   worktree. If you made no edits, skip this step.
+6. Produce the structured response with status=Success and a one-line
    summary of what you did (or why you skipped).
 
 ## Hard limits
