@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# Validate that a writer agent actually produced its artifact.
-# Usage: ./scripts/check-artifact.sh <artifact-name>
-#   e.g. ./scripts/check-artifact.sh spec    -> checks $IMP_ARTIFACTS_DIR/spec.md
+# Validate that a writer agent actually produced its output file.
+# Usage: ./scripts/check-artifact.sh <path>
+#   e.g. ./scripts/check-artifact.sh "imp/docs/specs/$IMP_CHANGE_SLUG.md"
 #
-# Catches the "agent claims status=Success but didn't actually write_file"
-# failure mode (Bug N from V0 dogfood — design-writer lied).
+# Catches the "agent claims status=Success but didn't actually write" failure.
+# The path is the REAL worktree path the prompt wrote (no /artifacts/ indirection).
 set -euo pipefail
-ARTIFACT="${1:?usage: check-artifact.sh <name>}"
-PATH_TO_CHECK="${IMP_ARTIFACTS_DIR:?IMP_ARTIFACTS_DIR not set by engine}/${ARTIFACT}.md"
-if [[ ! -s "$PATH_TO_CHECK" ]]; then
-  echo "artifact missing or empty: $PATH_TO_CHECK" >&2
+TARGET="${1:?usage: check-artifact.sh <path>}"
+if [[ ! -s "$TARGET" ]]; then
+  echo "artifact missing or empty: $TARGET" >&2
   exit 1
 fi
-echo "$ARTIFACT ok ($(wc -c < "$PATH_TO_CHECK") bytes)"
+echo "ok ($(wc -c < "$TARGET") bytes): $TARGET"
