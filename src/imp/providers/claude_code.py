@@ -1045,6 +1045,9 @@ class ClaudeCodeAgentRunner:
                         }}
                         return
 
+                # INVARIANT: any `break` from the inner async-for that intends to
+                # re-query MUST set requery=True first. A bare break falls through
+                # to the no-result diagnostic below and emits no_result_message.
                 if requery:
                     # A re-query was queued: loop back and run a fresh
                     # receive_response() for the next turn.
