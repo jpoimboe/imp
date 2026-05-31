@@ -1,7 +1,10 @@
-"""`imp init`: scaffold .imp/ in a project.
+"""`imp init`: scaffold imp/ in a project.
 
-Spec §8.2: ask for providers + env-var names; write config.yaml,
-workflows/default/, .gitignore; append to project .gitignore.
+Spec §8.2: ask for providers + env-var names; write imp/config.yaml,
+imp/workflows/default/; append .imp/ to project .gitignore.
+
+Committed config+workflows live under imp/ (tracked by git).
+Runtime state (changes, locks, etc.) lives under .imp/ (gitignored wholesale).
 
 The default role taxonomy (spec §8.2) is auto-populated based on enabled
 providers — no model selection question, just sensible defaults.
@@ -180,13 +183,13 @@ def run_init(
     output_fn: Callable[[str], None],
     picker_fn: Callable[[list[str]], list[str]] | None = None,
 ) -> None:
-    imp_dir = project_root / ".imp"
+    imp_dir = project_root / "imp"
     if imp_dir.exists():
         raise FileExistsError(
-            f".imp/ already exists at {imp_dir}; refusing to re-init"
+            f"imp/ already exists at {imp_dir}; refusing to re-init"
         )
 
-    output_fn(f"Setting up .imp/ in {project_root}")
+    output_fn(f"Setting up imp/ in {project_root}")
 
     available = list(_PROVIDER_MODELS.keys())
     pick = picker_fn or _interactive_provider_picker
@@ -213,14 +216,8 @@ def run_init(
         yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False)
     )
 
-    (imp_dir / ".gitignore").write_text(
-        "# imp local state — keep secrets and per-Change data out of git\n"
-        "config.yaml\n"
-        "changes/\n"
-        "lock*\n"
-        "workflows/\n"
-    )
-
+    # Internal state lives under .imp/ (gitignored wholesale). No per-.imp
+    # .gitignore — the project .gitignore ignores .imp/ entirely (spec §8).
     project_gi = project_root / ".gitignore"
     add_lines = [".imp/"]
     existing = project_gi.read_text() if project_gi.exists() else ""
@@ -234,9 +231,8 @@ def run_init(
 
     output_fn("")
     output_fn("Created:")
-    output_fn("  .imp/config.yaml      (gitignored)")
-    output_fn("  .imp/workflows/default/")
-    output_fn("  .imp/.gitignore")
-    output_fn("  .gitignore (appended)")
+    output_fn("  imp/config.yaml      (committed — env-var NAMES only, no secrets)")
+    output_fn("  imp/workflows/default/")
+    output_fn("  .gitignore (appended: .imp/)")
     output_fn("")
     output_fn("Try: imp new \"Your first change\"")

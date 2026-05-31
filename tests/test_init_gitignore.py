@@ -1,4 +1,4 @@
-"""Fix D: run_init gitignores .imp lock + workflows working state."""
+"""Fix D: run_init gitignores .imp/ wholesale; committed config under imp/."""
 
 from __future__ import annotations
 
@@ -16,12 +16,11 @@ def _init(tmp_path: Path) -> None:
     )
 
 
-def test_imp_gitignore_covers_filelock_and_workflows(tmp_path: Path) -> None:
+def test_imp_gitignore_covers_internal_state(tmp_path: Path) -> None:
     _init(tmp_path)
-    imp_gi = (tmp_path / ".imp" / ".gitignore").read_text()
-    # The real lock file is <path>.filelock — a bare "lock" rule misses it.
-    assert "lock*" in imp_gi
-    assert "workflows/" in imp_gi
+    # No per-.imp .gitignore anymore; the project .gitignore ignores .imp/ wholesale.
+    assert not (tmp_path / ".imp").exists()  # init no longer creates .imp/
+    assert ".imp/" in {ln.strip() for ln in (tmp_path / ".gitignore").read_text().splitlines()}
 
 
 def test_project_gitignore_ignores_imp_wholesale(tmp_path: Path) -> None:
@@ -56,8 +55,11 @@ def test_imp_dir_fully_ignored_after_init(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text(
         ".venv/\n.imp/changes/\n.imp/config.yaml\n.imp/lock\n")
     _init(tmp_path)
-    for p in (".imp/.gitignore", ".imp/workflows/default/workflow.yaml",
-              ".imp/config.yaml"):
+    # .imp/ is now ignored wholesale by the project .gitignore.
+    # Create a sentinel file inside .imp/ to test the ignore rule.
+    (tmp_path / ".imp").mkdir()
+    (tmp_path / ".imp" / "some-state").write_text("runtime state")
+    for p in (".imp/some-state",):
         r = subprocess.run(["git", "check-ignore", p], cwd=tmp_path,
                            capture_output=True, text=True)
         assert r.returncode == 0, f"{p} is NOT gitignored (rc={r.returncode})"

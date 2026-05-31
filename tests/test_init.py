@@ -26,7 +26,7 @@ def test_writes_config_workflows_gitignore(tmp_path: Path) -> None:
         input_fn=_inputs("ANTHROPIC_API_KEY"),
         output_fn=lambda _msg: None,
     )
-    cfg = tmp_path / ".imp" / "config.yaml"
+    cfg = tmp_path / "imp" / "config.yaml"
     assert cfg.is_file()
     data = yaml.safe_load(cfg.read_text())
     assert "roles" in data
@@ -34,13 +34,11 @@ def test_writes_config_workflows_gitignore(tmp_path: Path) -> None:
     prefer = data["roles"]["default"]["prefer"]
     assert prefer[0]["provider"] == "anthropic"
 
-    wf = tmp_path / ".imp" / "workflows" / "default" / "workflow.yaml"
+    wf = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
     assert wf.is_file()
 
-    imp_gitignore = tmp_path / ".imp" / ".gitignore"
-    assert imp_gitignore.is_file()
-    assert "config.yaml" in imp_gitignore.read_text()
-    assert "changes/" in imp_gitignore.read_text()
+    # No per-.imp .gitignore anymore; .imp/ is ignored wholesale by project .gitignore.
+    assert not (tmp_path / ".imp").exists()
 
 
 def test_appends_to_project_gitignore(tmp_path: Path) -> None:
@@ -57,8 +55,8 @@ def test_appends_to_project_gitignore(tmp_path: Path) -> None:
 
 
 def test_init_idempotent_refuses_existing(tmp_path: Path) -> None:
-    (tmp_path / ".imp").mkdir()
-    (tmp_path / ".imp" / "config.yaml").write_text("roles: {}\n")
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text("roles: {}\n")
     with pytest.raises(FileExistsError):
         run_init(
             project_root=tmp_path,
@@ -75,7 +73,7 @@ def test_supports_both_providers(tmp_path: Path) -> None:
         input_fn=_inputs("ANTHROPIC_API_KEY", "OPENAI_API_KEY"),
         output_fn=lambda _msg: None,
     )
-    data = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     has_openai = any(
         any(e["provider"] == "openai" for e in role["prefer"])
         for role in data["roles"].values()
@@ -95,7 +93,7 @@ def test_supports_claude_code(tmp_path: Path) -> None:
         input_fn=_no_input,
         output_fn=lambda _msg: None,
     )
-    data = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     assert data["roles"]["default"]["prefer"][0]["provider"] == "claude_code"
     assert "claude_code" not in data.get("providers", {})
 
@@ -132,7 +130,7 @@ def test_init_code_and_code_review_prefer_heads(tmp_path: Path) -> None:
     specified; the constraint handles the 2-vendor column)."""
     run_init(tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
              picker_fn=lambda _a: ["anthropic", "openai"])
-    cfg = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    cfg = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     code = cfg["roles"]["code"]["prefer"]
     review = cfg["roles"]["code_review"]["prefer"]
     assert code[0] == {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"}
@@ -145,7 +143,7 @@ def test_init_code_review_handles_claude_code_via_default_tier(tmp_path: Path) -
     named explicitly (e.g. claude_code) still resolve."""
     run_init(tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
              picker_fn=lambda _a: ["claude_code", "openai"])
-    cfg = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    cfg = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     review = {e["provider"]: e["model"] for e in cfg["roles"]["code_review"]["prefer"]}
     assert review["claude_code"] == "claude-sonnet-4-6"  # default tier = coding
     assert review["openai"] == "gpt-5.2"                  # openai tier = thinking
@@ -155,7 +153,7 @@ def test_init_seeds_tier_roles(tmp_path: Path) -> None:
     run_init(
         tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
         picker_fn=lambda _avail: ["anthropic"])
-    data = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     for tier in ("fast", "balanced", "powerful"):
         assert tier in data["roles"], f"{tier} role not seeded"
     models = {t: data["roles"][t]["prefer"][0]["model"] for t in
