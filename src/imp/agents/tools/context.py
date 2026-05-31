@@ -2,7 +2,6 @@
 
 Virtual path conventions:
   /project/<rel>   → <project_root>/<rel>
-  /artifacts/<rel> → <change_artifacts_dir>/<rel>
   /scratch/<rel>   → ToolContext.scratch dict (in-memory; lives for the step)
 """
 
@@ -20,7 +19,6 @@ from imp.engine.types import AgentDef, FsRule
 @dataclass
 class ToolContext:
     project_root: Path
-    artifacts_dir: Path
     fs_permissions: tuple[FsRule, ...]
     events_path: Path
     scratch: dict[str, str] = field(default_factory=dict)
@@ -61,13 +59,10 @@ class ToolContext:
         """Returns a real Path or None for /scratch/* (caller uses self.scratch)."""
         if virtual.startswith("/project/"):
             return self.project_root / virtual[len("/project/"):]
-        if virtual.startswith("/artifacts/"):
-            return self.artifacts_dir / virtual[len("/artifacts/"):]
         if virtual.startswith("/scratch/") or virtual == "/scratch":
             return None
         raise ValueError(
-            f"virtual path must start with /project/, /artifacts/, or /scratch/; "
-            f"got {virtual!r}"
+            f"virtual path must start with /project/ or /scratch/; got {virtual!r}"
         )
 
     def check_fs_permission(self, op: Literal["read", "write"], virtual: str) -> None:

@@ -14,7 +14,7 @@ from imp.agents.tools.context import ToolContext
     name="read_file",
     description=(
         "Read a file's contents. "
-        "Paths use /project/, /artifacts/, or /scratch/ prefixes."
+        "Paths use /project/ or /scratch/ prefixes."
     ),
 )
 def read_file(ctx: ToolContext, path: str) -> str:

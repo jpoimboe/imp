@@ -15,18 +15,14 @@ from imp.agents.tools.context import ToolContext
 
 
 def _virtual_prefix(path: str) -> tuple[str, str]:
-    """Returns (prefix, remainder). Prefix is one of /project, /artifacts."""
+    """Returns (prefix, remainder). Prefix is /project."""
     if path.startswith("/project"):
         return "/project", path[len("/project"):].lstrip("/")
-    if path.startswith("/artifacts"):
-        return "/artifacts", path[len("/artifacts"):].lstrip("/")
     raise ValueError(f"unsupported virtual path: {path!r}")
 
 
 def _real_root(ctx: ToolContext, prefix: str) -> Path:
-    if prefix == "/project":
-        return ctx.project_root
-    return ctx.artifacts_dir
+    return ctx.project_root
 
 
 @imp_tool(

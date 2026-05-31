@@ -22,9 +22,10 @@ def test_resolve_project_path(tmp_path: Path) -> None:
     assert ctx.resolve_path("/project/src/x.py") == tmp_path / "src" / "x.py"
 
 
-def test_resolve_artifacts_path(tmp_path: Path) -> None:
+def test_resolve_artifacts_path_rejected(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    assert ctx.resolve_path("/artifacts/spec.md") == ctx.artifacts_dir / "spec.md"
+    with pytest.raises(ValueError, match="/project/"):
+        ctx.resolve_path("/artifacts/spec.md")
 
 
 def test_resolve_scratch_returns_marker(tmp_path: Path) -> None:
@@ -46,26 +47,24 @@ def test_unknown_prefix_raises(tmp_path: Path) -> None:
 
 
 def test_check_fs_permission_passthrough(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path, rules=(_allow(("write",), ("/artifacts/**",)),))
-    ctx.check_fs_permission("write", "/artifacts/spec.md")  # ok
+    ctx_with_rule = _ctx(tmp_path, rules=(_allow(("write",), ("/project/**",)),))
+    ctx_with_rule.check_fs_permission("write", "/project/x.py")  # ok — rule matches
+    ctx_no_rules = _ctx(tmp_path)
     with pytest.raises(PermissionDenied):
-        ctx.check_fs_permission("write", "/project/x.py")
+        ctx_no_rules.check_fs_permission("write", "/project/x.py")  # denied — default-deny write
 
 
 def test_change_context_field(tmp_path: Path) -> None:
     from imp.agents.runner import ChangeContext
     ctx = _ctx(tmp_path)
     assert ctx.change_context is None
-    ctx.change_context = ChangeContext(change_id=7, project_root=tmp_path, artifacts_dir=tmp_path)
-    assert ctx.change_context.change_id == 7
+    ctx.change_context = ChangeContext(slug="chg-7", title="Test change", project_root=tmp_path)
+    assert ctx.change_context.project_root == tmp_path
 
 
 def _ctx(tmp_path: Path, rules: tuple[FsRule, ...] = ()) -> ToolContext:
-    artifacts = tmp_path / "_artifacts"
-    artifacts.mkdir()
     return ToolContext(
         project_root=tmp_path,
-        artifacts_dir=artifacts,
         fs_permissions=rules,
         events_path=tmp_path / "events.jsonl",
     )
@@ -75,7 +74,7 @@ def test_running_processes_starts_empty(tmp_path):
     from imp.agents.tools.context import ToolContext
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path,
+        project_root=tmp_path,
         fs_permissions=(), events_path=tmp_path / "events.jsonl",
     )
     assert ctx.running_processes == []
@@ -89,7 +88,7 @@ def test_terminate_running_processes_drains(tmp_path):
     from imp.agents.tools.context import ToolContext, terminate_running_processes
 
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path,
+        project_root=tmp_path,
         fs_permissions=(), events_path=tmp_path / "events.jsonl",
     )
 
@@ -113,7 +112,7 @@ def test_terminate_running_processes_drains(tmp_path):
 def test_tool_context_has_event_log_field(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
     )
     assert ctx.event_log is None
@@ -125,7 +124,7 @@ def test_tool_context_has_event_log_field(tmp_path) -> None:
 def test_tool_context_resolved_roles_defaults_none(tmp_path):
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "e.jsonl")
     assert ctx.resolved_roles is None
 
@@ -133,7 +132,7 @@ def test_tool_context_resolved_roles_defaults_none(tmp_path):
 def test_tool_context_model_tiers_defaults_empty(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
-        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     assert ctx.model_tiers == ()
     ctx.model_tiers = ("fast", "powerful")

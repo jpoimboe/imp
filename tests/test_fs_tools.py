@@ -15,18 +15,15 @@ from imp.engine.types import FsRule, SourceLoc
 def _allow_all(*ops: str) -> tuple[FsRule, ...]:
     return (FsRule(
         operations=tuple(ops),  # type: ignore[arg-type]
-        paths=("/project/**", "/artifacts/**"),
+        paths=("/project/**",),
         mode="allow",
         source=SourceLoc(file=Path("t.yaml"), line=1),
     ),)
 
 
 def _ctx(tmp_path: Path, *ops: str) -> ToolContext:
-    artifacts = tmp_path / "_artifacts"
-    artifacts.mkdir()
     return ToolContext(
         project_root=tmp_path,
-        artifacts_dir=artifacts,
         fs_permissions=_allow_all(*ops) if ops else (),
         events_path=tmp_path / "events.jsonl",
     )
