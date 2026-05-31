@@ -247,7 +247,7 @@ def test_snapshot_covers_every_node_type() -> None:
     required = {"WorkflowNode", "PhaseNode", "StepNode", "AgentTextNode",
                 "UserMessageNode", "ThinkingFold", "ToolBurstFold", "SubagentFold",
                 "GateNode", "ErrorNode", "StepContextNode", "OutcomeLine",
-                "FallbackLine", "RolesResolvedNode"}
+                "FallbackLine", "BreadcrumbLine", "RolesResolvedNode"}
     assert required <= seen, f"fixture missing node types: {required - seen}"
 
 
