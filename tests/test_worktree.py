@@ -138,6 +138,7 @@ def test_merge_base_checked_out_clean(tmp_path: Path) -> None:
 
     result = wt.merge_to_base(tmp_path, "feat", "main")
     assert result.status == "MERGED"
+    assert result.merge_commit == _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     # main's working tree advanced together with the ref (no desync).
     assert (tmp_path / "feature.txt").read_text() == "hi"
     # REGRESSION (spec §11): control-root status is NOT a staged reversal.
@@ -153,3 +154,52 @@ def test_merge_base_dirty_backs_off(tmp_path: Path) -> None:
     result = wt.merge_to_base(tmp_path, "feat", "main")
     assert result.status == "BASE_DIRTY"
     assert not (tmp_path / "feature.txt").exists()  # nothing advanced
+
+
+def test_merge_base_checked_out_nowhere(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    # Park the control root on another branch so `main` is checked out NOWHERE.
+    _git(tmp_path, "checkout", "-q", "-b", "parking")
+
+    base_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    result = wt.merge_to_base(tmp_path, "feat", "main")
+    assert result.status == "MERGED"
+    assert _git(tmp_path, "rev-parse", "main").stdout.strip() != base_before  # ref moved
+    assert result.merge_commit == _git(tmp_path, "rev-parse", "main").stdout.strip()
+    # scratch worktree cleaned up
+    assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()
+
+
+def test_merge_detached_conflict_cleans_scratch(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "README.md", "branch version")
+    # Advance main with a conflicting edit (control root is on main), then park
+    # the control root on another branch so main is checked out NOWHERE — this
+    # forces merge_to_base down the _merge_detached path.
+    (tmp_path / "README.md").write_text("base version")
+    _git(tmp_path, "commit", "-qam", "base edit")
+    _git(tmp_path, "checkout", "-q", "-b", "parking")  # main now checked out nowhere
+
+    result = wt.merge_to_base(tmp_path, "feat", "main")
+    assert result.status == "CONFLICT"
+    assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()  # scratch cleaned
+    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()             # branch worktree intact
+
+
+def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    # Conflict: both base and branch edit README.md differently.
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "README.md", "branch version")
+    # advance main (in place on the control root) with a conflicting edit
+    (tmp_path / "README.md").write_text("base version")
+    _git(tmp_path, "commit", "-qam", "base edit")
+
+    result = wt.merge_to_base(tmp_path, "feat", "main")
+    assert result.status == "CONFLICT"
+    # branch + change worktree untouched, no merge state lingering
+    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
+    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""

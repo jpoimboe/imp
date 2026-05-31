@@ -6,6 +6,7 @@ shared-repo mutation runs under RepoGitLock.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -212,4 +213,23 @@ def _merge_in_place(worktree: Path, branch: str) -> MergeResult:
 
 
 def _merge_detached(control_root: Path, slug: str, branch: str, base: str) -> MergeResult:
-    raise NotImplementedError  # implemented in Task 8
+    """Branch 3: <base> is checked out nowhere. Merge in a detached scratch
+    worktree at base's tip, then update-ref (safe — no live checkout to
+    desync), then remove the scratch."""
+    scratch_rel = Path(".imp") / "worktrees" / f".merge-{slug}"
+    scratch = control_root / scratch_rel
+    # A prior crash can leave a stale scratch that would make `worktree add`
+    # fail permanently; clear it first (best-effort) so retries can proceed.
+    _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
+    shutil.rmtree(scratch, ignore_errors=True)
+    _git_ok(control_root, "worktree", "add", "--detach", str(scratch_rel), base)
+    try:
+        proc = _git(scratch, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
+        if proc.returncode != 0:
+            _git(scratch, "merge", "--abort")
+            return MergeResult("CONFLICT")
+        commit = _git_ok(scratch, "rev-parse", "HEAD").strip()
+        _git_ok(control_root, "update-ref", f"refs/heads/{base}", commit)
+        return MergeResult("MERGED", commit)
+    finally:
+        _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
