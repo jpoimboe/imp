@@ -275,7 +275,7 @@ class NarrativeBuilder:
         burst = self._current_burst
         if burst is not None and burst.calls:
             last = burst.calls[-1]
-            arg = next(iter((last.input or {}).values()), "")
+            arg = _sanitize_activity_arg(next(iter((last.input or {}).values()), ""))
             head = f"{step} · " if step else ""
             return f"{head}{last.name} {arg} · {len(burst.calls)} tools".rstrip()
         if step is not None:
@@ -489,6 +489,18 @@ def _h_awaiting_user_input(
 
 NarrativeBuilder._HANDLERS["human_prompt_pending"] = _h_human_prompt_pending
 NarrativeBuilder._HANDLERS["awaiting_user_input"] = _h_awaiting_user_input
+
+
+def _sanitize_activity_arg(value: Any, *, limit: int = 50) -> str:
+    """Reduce a tool's first arg to a single short status-line token. For `bash`
+    the first arg is `command` — often a whole multi-line script — and the spinner
+    redraws it every 0.1s, flooding the terminal (issue 4). Collapse all whitespace
+    (including newlines) into single spaces, then truncate with an ellipsis."""
+    text = str(value)
+    collapsed = " ".join(text.split())
+    if len(collapsed) > limit:
+        return collapsed[:limit] + "…"
+    return collapsed
 
 
 def _user_message_text(payload: dict[str, Any]) -> str:

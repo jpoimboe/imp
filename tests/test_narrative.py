@@ -685,6 +685,20 @@ def test_structural_repr_covers_new_node_types() -> None:
         "action": {"verb": "continue"}, "extras": ["status=Success"]}
 
 
+def test_current_activity_collapses_multiline_bash_command() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
+    cmd = "python3 -c 'import sys\nprint(sys.version)\n" + "x" * 80 + "'"
+    b.add(_ev("2", "tool_call", agent_id="step:build/coder", id="t1",
+              name="bash", input={"command": cmd}))
+    activity = b.current_activity()
+    assert "\n" not in activity                       # single line only
+    assert "…" in activity                            # truncated
+    assert len(activity) < 120                         # not the whole script
+    assert "coder · bash" in activity
+
+
 def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))
