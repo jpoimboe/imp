@@ -33,7 +33,7 @@ def test_header_phase_step_outcome_render() -> None:
     assert "#7" in out and "add auth" in out
     assert "design" in out
     assert "spec" in out
-    assert "continue" in out
+    assert "✓ spec" in out          # merged breadcrumb (was: "continue" in out)
 
 
 def test_agent_text_rendered_in_full_not_truncated() -> None:

@@ -202,7 +202,7 @@ def test_human_gate_blocks_following_nodes_until_resolved() -> None:
                     action={"verb": "continue"}, var_mutations={}))
     body = _body(out)
     gate_i = next(i for i, ln in enumerate(body) if "human gate → continue" in ln)
-    outcome_i = next(i for i, ln in enumerate(body) if ln.strip() == "→ continue")
+    outcome_i = next(i for i, ln in enumerate(body) if ln.strip() == "✓ approve")
     assert gate_i < outcome_i                      # tree order preserved
 
 

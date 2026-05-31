@@ -683,3 +683,32 @@ def test_structural_repr_covers_new_node_types() -> None:
     assert nv.structural_repr(bc) == {
         "t": "BreadcrumbLine", "step_name": "s", "elapsed_s": 1.0,
         "action": {"verb": "continue"}, "extras": ["status=Success"]}
+
+
+def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    s = _ev("1", "step_started", step="coder", kind="agent", phase="build")
+    s["timestamp"] = "2026-05-30T10:00:00+00:00"
+    b.add(s)
+    b.add(_ev("2", "agent_output", agent_id="step:build/coder",
+              status="Success", plan_path="docs/plan.md"))
+    c = _ev("3", "step_completed", step="coder", kind="agent",
+            action={"verb": "continue"}, var_mutations={})
+    c["timestamp"] = "2026-05-30T10:00:42+00:00"
+    b.add(c)
+
+    phase = b.tree.root.children[0]
+    step = phase.children[0]
+    # outcome field preserved (existing tests assert on it)
+    assert isinstance(step.outcome, nv.OutcomeLine)
+    assert step.outcome.action == {"verb": "continue"}
+    # exactly one breadcrumb child, no standalone OutcomeLine child
+    bcs = [c for c in step.children if isinstance(c, nv.BreadcrumbLine)]
+    assert len(bcs) == 1
+    assert not any(isinstance(c, nv.OutcomeLine) for c in step.children)
+    bc = bcs[0]
+    assert bc.step_name == "coder"
+    assert bc.elapsed_s == 42.0
+    assert "status=Success" in bc.extras
+    assert "plan_path=docs/plan.md" in bc.extras

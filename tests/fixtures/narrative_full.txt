@@ -21,13 +21,13 @@ design
         tools:
       The spec looks good. Auth flows are clearly defined.
     > Please add a section on token expiry.
-    → continue
+    ✓ spec · status=Success · summary=Spec drafted
   approve
     human gate → continue
       Approve the design spec?
       - yes
       - no
-    → continue
+    ✓ approve
 implement
   build
     error: [provider] rate limited

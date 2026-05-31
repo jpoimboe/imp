@@ -425,11 +425,15 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     if self._pending_human_gate is not None:
         self._pending_human_gate.action = action
         self._pending_human_gate = None
-    outcome = OutcomeLine(action=action)
     node = self._pop_step(p.get("step"))
     if node is not None:
-        node.outcome = outcome
-        node.children.append(outcome)
+        # Preserve StepNode.outcome (existing tests assert on the field); the
+        # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
+        node.outcome = OutcomeLine(action=action)
+        elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
+        node.children.append(BreadcrumbLine(
+            step_name=node.name, elapsed_s=elapsed, action=action,
+            extras=_breadcrumb_extras(node.agent_output)))
         node.closed = True
 
 

@@ -7,13 +7,13 @@ design
     ▸ 2 tools · 1 bash · 1 read_file
     ▸ task → reviewer · 2 events · → {"status": "Success", "summary": "Spec a
     > Please add a section on token expiry.
-    → continue
+    ✓ spec · status=Success · summary=Spec drafted
   approve
     human gate → continue
       Approve the design spec?
       - yes
       - no
-    → continue
+    ✓ approve
 implement
   build
     error: [provider] rate limited
