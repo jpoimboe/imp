@@ -541,9 +541,9 @@ async def test_classified_auth_text_wins_over_nudge(tmp_path: Path) -> None:
 
 
 def test_fake_receive_response_segments_per_result_message() -> None:
-    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text
-
     import anyio
+
+    from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text
 
     scripted = [
         assistant(text("turn one")), result(),
