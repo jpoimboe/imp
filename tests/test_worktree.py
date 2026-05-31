@@ -231,3 +231,57 @@ def test_journal_not_on_code_history(tmp_path: Path) -> None:
     # Orphan: no shared ancestor with main.
     base = _git(tmp_path, "merge-base", "main", "refs/imp/journal").returncode
     assert base != 0
+
+
+def _make_worktree_and_check(root, slug="probe") -> bool:
+    """True iff a fresh worktree off base HEAD ignores .imp/."""
+    wt.create_worktree(root, slug, "main")
+    wpath = root / ".imp" / "worktrees" / slug
+    return _git(wpath, "check-ignore", ".imp/change").returncode == 0
+
+
+def test_ensure_imp_ignored_committed_rule_noop(tmp_path: Path) -> None:
+    _init_repo(tmp_path)  # .gitignore with .imp/ is COMMITTED -> durable
+    before = (tmp_path / ".gitignore").read_text()
+    wt.ensure_imp_ignored(tmp_path)
+    assert (tmp_path / ".gitignore").read_text() == before          # no new commit
+    assert _make_worktree_and_check(tmp_path)
+
+
+def test_ensure_imp_ignored_uncommitted_rule_is_made_durable(tmp_path: Path) -> None:
+    # The fresh-`imp init` shape: .imp/ appended to .gitignore but NOT committed.
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@t"); _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "README.md").write_text("x")
+    _git(tmp_path, "add", "-A"); _git(tmp_path, "commit", "-qm", "seed")
+    (tmp_path / ".gitignore").write_text(".imp/\n")  # uncommitted
+
+    wt.ensure_imp_ignored(tmp_path)
+    # Now durable AND the worktree actually ignores .imp/ (the real invariant).
+    assert _make_worktree_and_check(tmp_path)
+
+
+def test_ensure_imp_ignored_repairs_mis_set_committed_rule(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@t"); _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / ".gitignore").write_text(".imp/changes/\n.imp/config.yaml\n")  # sub-paths only
+    (tmp_path / "README.md").write_text("x")
+    _git(tmp_path, "add", "-A"); _git(tmp_path, "commit", "-qm", "seed")
+
+    wt.ensure_imp_ignored(tmp_path)
+    assert _make_worktree_and_check(tmp_path)
+
+
+def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@t"); _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / "README.md").write_text("x")
+    _git(tmp_path, "add", "-A"); _git(tmp_path, "commit", "-qm", "seed")
+    # Force the .gitignore commit to fail -> exercises the info/exclude fallback.
+    hook = tmp_path / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n"); hook.chmod(0o755)
+
+    wt.ensure_imp_ignored(tmp_path)
+    exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
+    assert ".imp/" in exclude.read_text()
+    assert _make_worktree_and_check(tmp_path)
