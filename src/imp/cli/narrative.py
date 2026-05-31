@@ -67,6 +67,8 @@ class StepNode:
     provider: str | None = None
     children: list[Any] = field(default_factory=list)
     outcome: OutcomeLine | None = None
+    start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
+    agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     closed: bool = False
     collapsible = False
 
@@ -376,12 +378,15 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.model = p.get("model")
             existing.provider = p.get("provider")
             existing.interactive = bool(p.get("interactive", False))
+            existing.start_ts = event.get("timestamp")
+            existing.agent_output = None
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase)
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
-                    interactive=bool(p.get("interactive", False)))
+                    interactive=bool(p.get("interactive", False)),
+                    start_ts=event.get("timestamp"))
     self._append(node)
     self._step_stack.append(node)
 

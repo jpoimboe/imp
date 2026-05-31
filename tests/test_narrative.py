@@ -636,3 +636,24 @@ def test_summarize_result_flattens_subagent_fold_outcome() -> None:
     assert sub.running is False
     assert sub.outcome == "subagent done"
     assert "[{'" not in sub.outcome
+
+
+def test_step_started_stashes_start_ts_normal_and_resume() -> None:
+    # Normal path: start_ts captured from the event's top-level timestamp.
+    e1 = _ev("1", "step_started", step="spec", kind="agent", phase="design")
+    e1["timestamp"] = "2026-05-30T10:00:00+00:00"
+    b = nv.NarrativeBuilder()
+    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(e1)
+    step = b._step_stack[-1]
+    assert step.start_ts == "2026-05-30T10:00:00+00:00"
+    assert step.agent_output is None
+
+    # Resume re-entry path reuses the open StepNode and must restamp start_ts.
+    b.add(_ev("2", "workflow_resumed"))
+    e3 = _ev("3", "step_started", step="spec", kind="agent", phase="design")
+    e3["timestamp"] = "2026-05-30T10:05:00+00:00"
+    b.add(e3)
+    reused = b._step_stack[-1]
+    assert reused is step                      # same node reused
+    assert reused.start_ts == "2026-05-30T10:05:00+00:00"
