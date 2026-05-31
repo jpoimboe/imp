@@ -123,12 +123,6 @@ def test_agentdef_model_role_defaults_to_none():
 
 
 def test_workflow_model_rules_defaults_to_empty():
-    from pathlib import Path
-
-    from imp.engine.types import (
-        SourceLoc, Vars, Workflow, WorkflowDefaults,
-    )
-    from imp.engine.types import Pause
     wf = Workflow(
         name="w", description="", phases=(), vars=Vars(decls=()),
         defaults=WorkflowDefaults(max_retries=0, on_max_retries=Pause()),
