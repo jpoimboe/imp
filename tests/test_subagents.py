@@ -192,3 +192,71 @@ async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> 
     assert captured["agent_id"] == "sub:tc-99"
     assert captured["event_log"] is shared
     assert captured["first_event_parent_id"] == "tc-99"
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_uses_subagent_model_role(tmp_path: Path) -> None:
+    """A subagent whose AgentDef.model_role is set resolves to that role's
+    provider/model from ctx.resolved_roles, NOT the parent's."""
+    from imp.providers.config import ProviderModel
+
+    captured: dict = {}
+
+    async def fake_spawn(sub_invocation: AgentInvocation):
+        captured["inv"] = sub_invocation
+
+        async def _gen():
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        return _gen()
+
+    sub = _agent("reviewer")
+    sub = AgentDef(  # rebuild with model_role set (AgentDef is frozen)
+        name=sub.name, description=sub.description, tools=sub.tools,
+        subagents=sub.subagents, output_schema=sub.output_schema,
+        prompt_template_source=sub.prompt_template_source,
+        source_path=sub.source_path, source=sub.source,
+        model_role="code_review")
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": sub}
+    ctx.provider_name = "anthropic"      # parent vendor
+    ctx.model_name = "haiku"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.spawn_subagent = fake_spawn
+    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+    ctx.resolved_roles = {"code_review": ProviderModel("openai", "gpt-5.2")}
+
+    await dispatch_task(ctx, "reviewer", "review please")
+    inv = captured["inv"]
+    assert inv.provider_name == "openai"     # jumped vendor, not parent's anthropic
+    assert inv.model_name == "gpt-5.2"
+    assert inv.resolved_roles == ctx.resolved_roles
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -> None:
+    captured: dict = {}
+
+    async def fake_spawn(sub_invocation: AgentInvocation):
+        captured["inv"] = sub_invocation
+
+        async def _gen():
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        return _gen()
+
+    ctx = ToolContext(
+        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent("reviewer")}  # model_role None
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "haiku"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.spawn_subagent = fake_spawn
+    ctx.change_context = ChangeContext(1, tmp_path, tmp_path)
+
+    await dispatch_task(ctx, "reviewer", "go")
+    inv = captured["inv"]
+    assert inv.provider_name == "anthropic"  # inherited
+    assert inv.model_name == "haiku"

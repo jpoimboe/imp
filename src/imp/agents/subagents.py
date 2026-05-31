@@ -88,10 +88,22 @@ async def dispatch_task(
     )
     rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
 
+    # Choose the subagent's provider/model: its own model_role (resolved once,
+    # globally) when set and present in the run's resolved map; otherwise inherit
+    # the parent's. AgentInvocation is frozen, so this is decided BEFORE
+    # construction.
+    resolved = ctx.resolved_roles or {}
+    mr = subagent_def.model_role
+    if mr is not None and mr in resolved:
+        pm = resolved[mr]
+        sub_provider, sub_model = pm.provider, pm.model
+    else:
+        sub_provider, sub_model = ctx.provider_name, ctx.model_name
+
     sub_inv = AgentInvocation(
         agent_def=subagent_def,
-        provider_name=ctx.provider_name,
-        model_name=ctx.model_name,
+        provider_name=sub_provider,
+        model_name=sub_model,
         system_prompt=rendered_prompt,
         initial_messages=(Message(
             role="user", content=(TextBlock(text=task_description),),
@@ -106,6 +118,7 @@ async def dispatch_task(
         agent_id=f"sub:{tool_call_event_id}",
         event_log=ctx.event_log,
         first_event_parent_id=tool_call_event_id if tool_call_event_id else None,
+        resolved_roles=ctx.resolved_roles,
     )
 
     gen = await ctx.spawn_subagent(sub_inv)
