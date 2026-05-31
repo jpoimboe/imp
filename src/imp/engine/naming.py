@@ -10,7 +10,6 @@ from __future__ import annotations
 import random
 from importlib.resources import files
 
-
 _WORDS: list[str] | None = None
 
 

@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from imp.cli.main import main
-from tests.conftest import write_agent_md
 
 # ── resume renders through LiveDriver (no replay) ────────────────────────────
 

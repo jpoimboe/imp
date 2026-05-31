@@ -1,10 +1,9 @@
 # tests/test_executor_merge.py — import _git/_seed_control from tests.conftest
 from pathlib import Path
 
-from imp.engine import worktree as wt
 from imp.engine.change import Change
 from imp.engine.executor import _complete
-from imp.engine.state import State, JsonlEventLog
+from imp.engine.state import JsonlEventLog, State
 from tests.conftest import _git, _seed_control
 
 
@@ -18,7 +17,8 @@ def test_complete_merges_journals_and_removes(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
-    _git(ch.project_root, "add", "-A"); _git(ch.project_root, "commit", "-qm", "feat")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "feat")
     state, log = _ready(ch)
 
     result = _complete(ch, state, log)
@@ -40,8 +40,10 @@ def test_complete_merge_blocked_on_conflict(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
     (ch.project_root / "README.md").write_text("branch")
-    _git(ch.project_root, "add", "-A"); _git(ch.project_root, "commit", "-qm", "b")
-    (tmp_path / "README.md").write_text("base"); _git(tmp_path, "commit", "-qam", "base")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "b")
+    (tmp_path / "README.md").write_text("base")
+    _git(tmp_path, "commit", "-qam", "base")
     state, log = _ready(ch)
 
     result = _complete(ch, state, log)
@@ -73,7 +75,8 @@ def test_merge_blocked_resumes_and_completes(tmp_path: Path) -> None:
     state, log = _ready(ch)
     assert _complete(ch, state, log).value == "paused"
 
-    _git(ch.project_root, "add", "-A"); _git(ch.project_root, "commit", "-qm", "f")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "f")
     state = State.load(ch.state_dir)
     state.status = "running"
     assert state.vars["ready_to_merge"] is True  # persisted across the block

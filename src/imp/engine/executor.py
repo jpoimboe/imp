@@ -113,7 +113,7 @@ async def run_change(
     try:
         workflow = load_workflow(change.workflow_dir)
         config = load_config(change.control_root)
-        log = JsonlEventLog(change.events_path, on_event=on_event)
+        log: EventLog = JsonlEventLog(change.events_path, on_event=on_event)
         state = State.load(change.state_dir)
 
         # Resolve roles once per run and persist, so resume never re-snapshots the

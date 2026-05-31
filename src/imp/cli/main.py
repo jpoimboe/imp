@@ -483,7 +483,7 @@ _INFLIGHT = ("running", "paused", "merge_blocked")
 
 
 def _status_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
-    rows = []
+    rows: list[tuple[str, str, str, str, str]] = []
     for slug in _list_change_worktrees(control):
         cdir = control / ".imp" / "worktrees" / slug / ".imp" / "change"
         meta = json.loads((cdir / "change.json").read_text())

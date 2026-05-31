@@ -89,7 +89,8 @@ def test_find_control_root_from_inside_worktree(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     wpath = wt.create_worktree(tmp_path, "feat", "main")
     assert wt.find_control_root(wpath) == tmp_path.resolve()
-    sub = wpath / ".imp" / "change"; sub.mkdir(parents=True)
+    sub = wpath / ".imp" / "change"
+    sub.mkdir(parents=True)
     assert wt.find_control_root(sub) == tmp_path.resolve()
 
 
@@ -207,16 +208,20 @@ def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
 
 def test_journal_append_and_accumulate(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    stage = tmp_path / ".imp"; stage.mkdir(exist_ok=True)  # gitignored by _init_repo
-    f1 = stage / "events.jsonl"; f1.write_text('{"e":1}\n')
-    f2 = stage / "change.json"; f2.write_text('{"slug":"one"}')
+    stage = tmp_path / ".imp"
+    stage.mkdir(exist_ok=True)  # gitignored by _init_repo
+    f1 = stage / "events.jsonl"
+    f1.write_text('{"e":1}\n')
+    f2 = stage / "change.json"
+    f2.write_text('{"slug":"one"}')
 
     # First journaled Change: ref does not exist yet -> root commit, no -p.
     wt.journal_commit(tmp_path, "one", {"events.jsonl": f1, "change.json": f2})
     assert _git(tmp_path, "show", "refs/imp/journal:one/change.json").stdout == '{"slug":"one"}'
 
     # Second Change accumulates under its own slug dir.
-    f3 = stage / "two.jsonl"; f3.write_text('{"e":2}\n')
+    f3 = stage / "two.jsonl"
+    f3.write_text('{"e":2}\n')
     wt.journal_commit(tmp_path, "two", {"events.jsonl": f3})
     assert _git(tmp_path, "show", "refs/imp/journal:two/events.jsonl").stdout == '{"e":2}\n'
     assert _git(tmp_path, "show", "refs/imp/journal:one/change.json").returncode == 0
@@ -226,7 +231,8 @@ def test_journal_append_and_accumulate(tmp_path: Path) -> None:
 
 def test_journal_not_on_code_history(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    f1 = tmp_path / "events.jsonl"; f1.write_text("x\n")
+    f1 = tmp_path / "events.jsonl"
+    f1.write_text("x\n")
     wt.journal_commit(tmp_path, "one", {"events.jsonl": f1})
     # Orphan: no shared ancestor with main.
     base = _git(tmp_path, "merge-base", "main", "refs/imp/journal").returncode
@@ -251,9 +257,11 @@ def test_ensure_imp_ignored_committed_rule_noop(tmp_path: Path) -> None:
 def test_ensure_imp_ignored_uncommitted_rule_is_made_durable(tmp_path: Path) -> None:
     # The fresh-`imp init` shape: .imp/ appended to .gitignore but NOT committed.
     _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "config", "user.email", "t@t"); _git(tmp_path, "config", "user.name", "t")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "README.md").write_text("x")
-    _git(tmp_path, "add", "-A"); _git(tmp_path, "commit", "-qm", "seed")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "seed")
     (tmp_path / ".gitignore").write_text(".imp/\n")  # uncommitted
 
     wt.ensure_imp_ignored(tmp_path)
@@ -263,10 +271,12 @@ def test_ensure_imp_ignored_uncommitted_rule_is_made_durable(tmp_path: Path) -> 
 
 def test_ensure_imp_ignored_repairs_mis_set_committed_rule(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "config", "user.email", "t@t"); _git(tmp_path, "config", "user.name", "t")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / ".gitignore").write_text(".imp/changes/\n.imp/config.yaml\n")  # sub-paths only
     (tmp_path / "README.md").write_text("x")
-    _git(tmp_path, "add", "-A"); _git(tmp_path, "commit", "-qm", "seed")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "seed")
 
     wt.ensure_imp_ignored(tmp_path)
     assert _make_worktree_and_check(tmp_path)
@@ -274,12 +284,15 @@ def test_ensure_imp_ignored_repairs_mis_set_committed_rule(tmp_path: Path) -> No
 
 def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
-    _git(tmp_path, "config", "user.email", "t@t"); _git(tmp_path, "config", "user.name", "t")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
     (tmp_path / "README.md").write_text("x")
-    _git(tmp_path, "add", "-A"); _git(tmp_path, "commit", "-qm", "seed")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "seed")
     # Force the .gitignore commit to fail -> exercises the info/exclude fallback.
     hook = tmp_path / ".git" / "hooks" / "pre-commit"
-    hook.write_text("#!/bin/sh\nexit 1\n"); hook.chmod(0o755)
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
 
     wt.ensure_imp_ignored(tmp_path)
     exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"

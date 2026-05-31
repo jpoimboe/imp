@@ -16,6 +16,7 @@ What this proves:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import subprocess
@@ -49,10 +50,8 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     }, indent=2, sort_keys=True))
 
     configured_roles: list[str] = []
-    try:
+    with contextlib.suppress(Exception):
         configured_roles = load_config(root).role_names()
-    except Exception:
-        pass
 
     workflow = load_workflow(dest_wf, configured_roles=configured_roles)
     flat = workflow.flat_steps()

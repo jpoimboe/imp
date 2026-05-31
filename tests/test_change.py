@@ -21,7 +21,7 @@ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
 
 def test_load_change_by_slug(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="X", slug="my-change", base_branch="main")
+    Change.create(tmp_path, title="X", slug="my-change", base_branch="main")
     b = Change.load(tmp_path, "my-change")
     assert b.slug == "my-change" and b.title == "X" and b.base_branch == "main"
 

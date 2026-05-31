@@ -154,7 +154,8 @@ def test_agent_invocation_resolved_roles_defaults_none():
         source=SourceLoc(file=Path("a.md"), line=1))
     inv = AgentInvocation(
         agent_def=a, provider_name="p", model_name="m", system_prompt="",
-        initial_messages=(), change_context=ChangeContext(slug="x", title="x", project_root=Path(".")),
+        initial_messages=(),
+        change_context=ChangeContext(slug="x", title="x", project_root=Path(".")),
         interactive=False, transcript_dir=Path("."), fs_permissions=(),
         events_path=Path("e.jsonl"))
     assert inv.resolved_roles is None

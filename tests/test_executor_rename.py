@@ -11,10 +11,10 @@ import pytest
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine import worktree as wt
 from imp.engine.change import Change
+from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, apply_pending_rename, run_change
 from imp.engine.state import State
 from tests.conftest import _git, _seed_control
-
 
 # ── Unit tests: apply_pending_rename ────────────────────────────────────────
 
@@ -137,7 +137,7 @@ def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> 
     (ch.workflow_dir / "workflow.yaml").write_text("}{ not yaml")  # loader raises mid-run
 
     cwd_before = os.getcwd()
-    with pytest.raises(Exception):
+    with pytest.raises(LoadError):
         anyio.run(run_change, ch)
     assert os.getcwd() == cwd_before                       # restored on error path
 

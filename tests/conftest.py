@@ -77,7 +77,8 @@ def _seed_control(root: Path) -> None:
     (root / "imp" / "config.yaml").write_text(
         "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
     )
-    _git(root, "add", "-A"); _git(root, "commit", "-qm", "imp setup")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "imp setup")
 
 
 def write_agent_md(path: Path, frontmatter: str, body: str = "prompt body") -> Path:
