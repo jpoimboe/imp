@@ -559,6 +559,7 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     # prose block now (issues 5/6). Enum/scalar/*_path fields are not prose.
     if not self._step_stack:
         return
+    self._flush_burst()
     step = self._step_stack[-1]
     step.agent_output = p
     for k, v in p.items():
