@@ -32,12 +32,34 @@ class TaskMustBeAwaited(Exception):
     """Sentinel raised if the runner forgets the special-case dispatch."""
 
 
-def make_task_tool() -> Tool:
+def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
     def _invoke(ctx: Any, **kwargs: Any) -> str:
         raise TaskMustBeAwaited(
             "runner must special-case tool_use.name=='task' and call "
             "agents.subagents.dispatch_task; do not invoke as a regular tool"
         )
+
+    # Off-path: reuse the shared constant unchanged so the no-tiers schema is
+    # byte-for-byte identical to pre-feature behavior.
+    schema = TASK_TOOL_SCHEMA
+    if tiers:
+        schema = {
+            "type": "object",
+            "properties": {
+                **TASK_TOOL_SCHEMA["properties"],
+                "model_tier": {
+                    "type": "string",
+                    "enum": list(tiers),
+                    "description": (
+                        "Capability tier for the subagent, listed cheapest->"
+                        "strongest. Pick by subtask difficulty; omit to inherit "
+                        "the caller's model."
+                    ),
+                },
+            },
+            # model_tier stays OPTIONAL: not added to required.
+            "required": list(TASK_TOOL_SCHEMA["required"]),
+        }
 
     return Tool(
         name="task",
@@ -45,7 +67,7 @@ def make_task_tool() -> Tool:
             "Dispatch a subtask to a named subagent. "
             "Returns the subagent's structured output as a JSON string."
         ),
-        input_schema=TASK_TOOL_SCHEMA,
+        input_schema=schema,
         fn=_invoke,
     )
 

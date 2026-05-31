@@ -260,3 +260,35 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     inv = captured["inv"]
     assert inv.provider_name == "anthropic"  # inherited
     assert inv.model_name == "haiku"
+
+
+def test_make_task_tool_no_tiers_is_unchanged() -> None:
+    """Off-path: the schema is identical to the shared TASK_TOOL_SCHEMA."""
+    tool = make_task_tool()
+    assert tool.input_schema is TASK_TOOL_SCHEMA
+    assert "model_tier" not in tool.input_schema["properties"]
+
+
+def test_make_task_tool_with_tiers_adds_optional_enum() -> None:
+    tool = make_task_tool(("fast", "balanced", "powerful"))
+    props = tool.input_schema["properties"]
+    assert props["model_tier"]["type"] == "string"
+    assert props["model_tier"]["enum"] == ["fast", "balanced", "powerful"]
+    # optional: NOT added to required
+    assert "model_tier" not in tool.input_schema["required"]
+    # original required args preserved
+    assert set(tool.input_schema["required"]) == {"subagent_name", "task_description"}
+    # shared constant not mutated
+    assert "model_tier" not in TASK_TOOL_SCHEMA["properties"]
+
+
+def test_make_task_tool_openai_strict_round_trip() -> None:
+    """The generated tier schema survives the OpenAI strict transform: the
+    optional enum becomes nullable AND null lands in the enum (Task 5)."""
+    from imp.providers._openai_schema import to_openai_strict
+    tool = make_task_tool(("fast", "powerful"))
+    strict = to_openai_strict(tool.input_schema)
+    tier = strict["properties"]["model_tier"]
+    assert tier["type"] == ["string", "null"]
+    assert None in tier["enum"]
+    assert set(strict["required"]) == {"subagent_name", "task_description", "model_tier"}
