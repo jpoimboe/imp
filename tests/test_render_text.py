@@ -260,6 +260,24 @@ def test_literal_text_node_renders_as_bold_agent_prose() -> None:
     assert any("line two" in ln for ln in out)
 
 
+def test_roles_resolved_attaches_at_root() -> None:
+    # Fired before any step_started (agent_id=None) → lands at the workflow root.
+    b = nv.NarrativeBuilder()
+    b.add({"id": "e1", "agent_id": None, "type": "change_created",
+           "payload": {"change_id": 1, "title": "t"}})
+    b.add({"id": "e2", "agent_id": None, "type": "roles_resolved",
+           "payload": {"roles": {
+               "code": {"provider": "anthropic", "model": "haiku",
+                        "constraint": None, "differ_tier": None,
+                        "differ_from": None}}}})
+    root = b.tree.root
+    nodes = [c for c in root.children if isinstance(c, nv.RolesResolvedNode)]
+    assert len(nodes) == 1
+    assert nodes[0].rows == [
+        {"role": "code", "provider": "anthropic", "model": "haiku",
+         "differ_tier": None, "differ_from": None}]
+
+
 def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
     from imp.cli import narrative as nv
     from imp.cli import render_text as rt

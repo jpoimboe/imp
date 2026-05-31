@@ -213,6 +213,15 @@ class FallbackLine:
 
 
 @dataclass
+class RolesResolvedNode:
+    """Run-level summary of once-per-run role resolution (the roles_resolved
+    event). Each row: {role, provider, model, differ_tier, differ_from}.
+    differ_tier/differ_from are None for unconstrained roles."""
+    rows: list[dict[str, Any]] = field(default_factory=list)
+    collapsible = False
+
+
+@dataclass
 class NarrativeTree:
     root: WorkflowNode
     tokens: TokenTotals
@@ -708,6 +717,21 @@ def _h_agent_retry(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
 NarrativeBuilder._HANDLERS["error"] = _h_error
 NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
+
+
+def _h_roles_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # Fires once at run start with agent_id=None, BEFORE any step_started, so the
+    # step stack is empty and _append lands this at the workflow root.
+    roles = p.get("roles") or {}
+    rows = [
+        {"role": role, "provider": d.get("provider"), "model": d.get("model"),
+         "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from")}
+        for role, d in roles.items()
+    ]
+    self._append(RolesResolvedNode(rows=rows))
+
+
+NarrativeBuilder._HANDLERS["roles_resolved"] = _h_roles_resolved
 
 
 def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
