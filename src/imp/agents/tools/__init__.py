@@ -111,7 +111,6 @@ def _register_builtins() -> None:
         query_events,
         rename_change,
         todos,
-        web_fetch,
     )
 
 

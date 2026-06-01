@@ -5,9 +5,6 @@ import json
 import subprocess
 from pathlib import Path
 
-import imp.agents.tools.git_diff
-import imp.agents.tools.query_events
-import imp.agents.tools.web_fetch  # noqa: F401
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.engine.state import JsonlEventLog
