@@ -3,6 +3,7 @@ name: final-review
 description: Interactive final gate — show the summary, take the user's comments, route merge or back-to-implement.
 tools: [complete_step, read_file, glob, grep, query_events]
 output:
+  status: {type: enum, values: [Success, Error]}
   decision: {type: enum, values: [merge, rework]}
   comments: {type: string}
 ---

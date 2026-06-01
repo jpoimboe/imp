@@ -3,6 +3,7 @@ name: plan-writer
 description: Write the next bite-sized plan (imp/plans/<slug>-plan-N.md) from the spec and progress, then commit it.
 tools: [complete_step, read_file, write_file, edit_file, glob, grep, query_events, web_search, commit]
 output:
+  status: {type: enum, values: [Success, Error]}
   plan_path: {type: string}
   plan_number: {type: int}
 ---

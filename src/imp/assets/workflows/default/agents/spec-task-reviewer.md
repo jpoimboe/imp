@@ -3,6 +3,7 @@ name: spec-task-reviewer
 description: Per-task spec-compliance review (read-only); reports severity-classified findings to the task-lead.
 tools: [complete_step, read_file, glob, grep, git_diff, bash, query_events]
 output:
+  status: {type: enum, values: [Success, Error]}
   findings: {type: string}
   blocking: {type: bool}
 ---

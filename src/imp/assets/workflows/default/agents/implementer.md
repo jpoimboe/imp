@@ -3,7 +3,8 @@ name: implementer
 description: Implement one task with TDD; apply the task-lead's directed fixes; commit (or amend) the task.
 tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, commit]
 output:
-  status: {type: enum, values: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]}
+  status: {type: enum, values: [Success, Error]}
+  result: {type: enum, values: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]}
   report: {type: string}
 ---
 
@@ -67,7 +68,7 @@ It is always OK to stop and say "this is too hard for me." Bad work is worse tha
 - The task involves restructuring existing code in ways the plan didn't anticipate
 - You've been reading file after file trying to understand the system without progress
 
-**How to escalate:** Report back with status BLOCKED or NEEDS_CONTEXT. Describe specifically what you're stuck on, what you've tried, and what kind of help you need. The task-lead can provide more context, re-dispatch with a more capable model, or break the task into smaller pieces.
+**How to escalate:** Report back with `result` BLOCKED or NEEDS_CONTEXT. Describe specifically what you're stuck on, what you've tried, and what kind of help you need. The task-lead can provide more context, re-dispatch with a more capable model, or break the task into smaller pieces.
 
 ## Commit Modes
 
@@ -123,15 +124,19 @@ If you find issues during self-review, fix them now before reporting.
 
 ## Report Format
 
-When done, report:
-- **Status:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+When done, call `complete_step(status="Success", result="<one of the four>", report="…")` where:
+- `status` is the engine completion signal: set `"Success"` on normal completion (even when reporting DONE_WITH_CONCERNS, BLOCKED, or NEEDS_CONTEXT in `result`); set `"Error"` only if you genuinely could not produce a usable result.
+- `result` carries your four-state self-report: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+
+Your report should include:
+- **Result:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
 - What you implemented (or what you attempted, if blocked)
 - What you tested and test results
 - Files changed
 - Self-review findings (if any)
 - Any issues or concerns
 
-Use DONE_WITH_CONCERNS if you completed the work but have doubts about correctness. Use BLOCKED if you cannot complete the task. Use NEEDS_CONTEXT if you need information that wasn't provided. Never silently produce work you're unsure about.
+Use DONE_WITH_CONCERNS in `result` if you completed the work but have doubts about correctness. Use BLOCKED if you cannot complete the task. Use NEEDS_CONTEXT if you need information that wasn't provided. Never silently produce work you're unsure about.
 
 ---
 

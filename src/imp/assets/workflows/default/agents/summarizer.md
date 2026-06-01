@@ -3,6 +3,7 @@ name: summarizer
 description: Emit a structured summary of the change — what was built, test status, open items, next steps — queryable via imp log.
 tools: [complete_step, read_file, glob, grep, bash, query_events, git_diff]
 output:
+  status: {type: enum, values: [Success, Error]}
   built: {type: string}
   test_status: {type: string}
   open_items: {type: string}

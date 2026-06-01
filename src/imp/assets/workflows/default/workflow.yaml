@@ -1,101 +1,174 @@
-name: standard-feature
+name: superpowers
 description: |
-  Standard imp workflow: spec -> plan -> implement -> review -> merge.
-  spec is an interactive brainstorm with the user.
+  Superpowers-ported workflow: spec -> (plan -> implement)* -> review -> merge.
+  The engine drives sequence; fresh per-step agents pull discipline skills on
+  demand. Ported from superpowers (MIT, Jesse Vincent).
 
 model_rules:
-  code_review:
-    differ_provider_from: code
+  # Provider diversity is BEST-EFFORT, not enforced: with a single configured
+  # provider these are soft preferences (resolve to the same provider, no error);
+  # they only deliver real cross-provider review when >=2 providers are configured.
+  spec_review:  {differ_provider_from: spec}
+  plan_review:  {differ_provider_from: plan}
+  # The whole-change author is the `implementer` subagent, dispatched at the
+  # `fast` tier (not a `model_role: code` step). So the final code-reviewer must
+  # differ from `fast` to see the change through a different provider (spec §11).
+  # NOTE: per-task reviewers (spec-task-reviewer/quality-reviewer at the `balanced`
+  # tier) get NO provider-diversity guarantee — model_rules govern step
+  # model_roles, not `task`-tier subagent dispatch. Accepted limitation of the C1
+  # design; the final code-reviewer carries the diversity guarantee for code.
+  code_review:  {differ_provider_from: fast}
 
+# Tiers ARE roles (resolve.py:160): `fast`/`balanced`/`powerful` must be defined
+# in config.yaml `roles:` or resolution LoadErrors — `imp init` scaffolds all three
+# (cli/init.py). Note the indirection: the role NAMED `fast` maps to each provider's
+# `quick` MODEL tier (init `_ROLE_TIERS["fast"]="quick"`); `task_lead`/implementer
+# talk in `fast`/`balanced`. `code_review differ_provider_from: fast` (above) relies
+# on `fast` being one of these configured roles.
 model_tiers: [fast, balanced, powerful]
 
 vars:
   ready_to_merge: {type: bool, default: false}
+  final_review:   {type: bool, default: true}
 
 defaults:
   max_retries: 3
   max_loops: 6
 
 phases:
+  # ── spec ──────────────────────────────────────────────────────────────
   - name: spec
     steps:
       - name: spec-writer
         file: agents/spec-writer.md
         model_role: spec
         interactive: true
-        max_tool_calls: 10
+        max_tool_calls: 30           # per step-entry (executor.py:673-709 resolves it per
+                                     # dispatch into a fresh runner); resets each drafting hand-back
+        max_loops: 8                 # bounds drafting/rename self-loops only
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
-          - {operations: [write], paths: ["/project/imp/docs/**"], mode: allow}
+          - {operations: [write], paths: ["/project/imp/specs/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
-
-      - name: spec-check
-        command: ./scripts/check-artifact.sh "$IMP_PROJECT_ROOT/imp/docs/specs/$IMP_CHANGE_SLUG.md"
         rules:
-          - {if: {exit: 0}, continue: true}
-          - {else: true, resume: spec-writer}
+          - {if: {phase: drafting}, resume: spec-writer}
+          - {else: true, continue: true}
 
       - name: spec-reviewer
         file: agents/spec-reviewer.md
         model_role: spec_review
+        max_loops: 6                 # bounds spec rework rounds
         rules:
-          - {if: {verdict: approve}, continue: true}
-          - {if: {verdict: rework},  resume: spec-writer}
-          - {else: true, pause: true}
+          - {if: {blocking: true}, resume: spec-writer}
+          - {else: true, continue: true}
 
+      - name: spec-commit-verify
+        command: ./scripts/spec-commit-verify.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, resume: spec-writer}
+
+  # ── plan (supercycle head) ───────────────────────────────────────────
   - name: plan
     steps:
       - name: plan-writer
         file: agents/plan-writer.md
-        model_role: default
+        model_role: plan
+        max_tool_calls: 40           # reads spec + existing plans + codebase before writing
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
-          - {operations: [write], paths: ["/project/imp/docs/**"], mode: allow}
+          - {operations: [write], paths: ["/project/imp/plans/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
 
-      - name: plan-check
-        command: ./scripts/check-artifact.sh "$IMP_PROJECT_ROOT/imp/docs/plans/$IMP_CHANGE_SLUG.md"
+      - name: plan-reviewer
+        file: agents/plan-reviewer.md
+        model_role: plan_review
+        max_loops: 6                 # bounds plan rework rounds
+        rules:
+          - {if: {blocking: true}, resume: plan-writer}
+          - {else: true, continue: true}
+
+      - name: plan-commit-verify
+        command: ./scripts/plan-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
+  # ── implement (C1 loop + supercycle tail) ────────────────────────────
   - name: implement
     steps:
-      - name: coder
-        file: agents/coder.md
-        model_role: code
+      - name: task-lead
+        file: agents/task-lead.md
+        model_role: task_lead
+        max_loops: 60                # tasks + deviations per plan (shared counter)
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
+          # implementer subagent inherits these. /project/** covers both code and
+          # /project/.imp/change/progress.md (** matches dotdirs, permissions.py:34-35).
           - {operations: [write], paths: ["/project/**"], mode: allow}
+          - {operations: [write], paths: ["/**"], mode: deny}   # no writes outside /project
+        rules:
+          - {if: {deviation: true}, resume: plan-writer}   # plan was wrong
+          - {if: {done: false},     goto: task-lead}        # next task, fresh
+          - {else: true, continue: true}                    # plan implemented
+
+      - name: commit-check
+        command: ./scripts/implement-commit-verify.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, resume: task-lead}   # clean tree / trailers / 1-commit-per-task
 
       - name: run-tests
         command: ./scripts/run-tests.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: coder}
+          - {else: true, resume: task-lead}   # carries test stderr as feedback
 
-      - name: documenter
-        file: agents/documenter.md
-        model_role: code
-        fs_permissions:
-          - {operations: [read],  paths: ["/project/**"], mode: allow}
-          - {operations: [write], paths: ["/project/**"], mode: allow}
+      - name: plan-cycle-check
+        file: agents/plan-cycle-check.md
+        model_role: task_lead        # balanced/Sonnet coverage judgment
+        max_loops: 10                # plans-per-spec bound
+        rules:
+          - {if: {more_plans: true}, goto: plan-writer}     # supercycle
+          - {else: true, continue: true}
 
+  # ── review ────────────────────────────────────────────────────────────
   - name: review
     steps:
+      - name: autosquash
+        command: ./scripts/autosquash.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, pause: true}   # rebase conflict → human resolves
+
       - name: code-reviewer
         file: agents/code-reviewer.md
         model_role: code_review
+        max_loops: 5                 # combined task_gap + plan_gap budget
         rules:
-          - {if: {verdict: approve}, continue: true}
-          - {if: {verdict: rework},  goto: implement}
+          - {if: {verdict: task_gap}, goto: implement}      # carries findings
+          - {if: {verdict: plan_gap}, goto: plan-writer}    # carries findings
+          - {else: true, continue: true}                    # approve
+
+      - name: summarizer
+        file: agents/summarizer.md
+        model_role: code_review
+
+      - name: final-review-gate
+        rules:
+          - {if: {final_review: false}, set: {ready_to_merge: true}, goto: merge}
+          - {else: true, continue: true}
+
+      - name: final-review
+        file: agents/final-review.md
+        model_role: task_lead
+        interactive: true
+        max_loops: 20                # interactive back-to-implement edge
+        rules:
+          - {if: {decision: merge},  set: {ready_to_merge: true}, continue: true}
+          - {if: {decision: rework}, goto: implement}        # carries comments
           - {else: true, pause: true}
 
-      - name: merge-gate
-        ask: "Merge?"
-        options:
-          - {label: Merge,             set: {ready_to_merge: true}, continue: true}
-          - {label: Back to implement, goto: implement}
-
+  # ── merge ───────────────────────────────────────────────────────────
   - name: merge
     steps: []

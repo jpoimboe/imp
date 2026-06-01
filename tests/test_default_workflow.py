@@ -25,12 +25,12 @@ def test_default_workflow_loads_with_default_roles(tmp_path: Path) -> None:
     shutil.copytree(default_workflow_dir(), staged)
     # Roles referenced by the default workflow
     configured = {
-        "default", "spec", "spec_review",
+        "default", "spec", "spec_review", "plan", "plan_review", "task_lead",
         "code", "code_review",
         "fast", "balanced", "powerful",
     }
     workflow = load_workflow(staged, configured_roles=configured)
-    assert workflow.name == "standard-feature"
+    assert workflow.name == "superpowers"
     assert [p.name for p in workflow.phases] == [
         "spec", "plan", "implement", "review", "merge",
     ]

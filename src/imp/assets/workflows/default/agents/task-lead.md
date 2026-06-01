@@ -4,6 +4,7 @@ description: Implement-phase controller — pick the next task, dispatch impleme
 tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task]
 subagents: [implementer, spec-task-reviewer, quality-reviewer]
 output:
+  status: {type: enum, values: [Success, Error]}
   done: {type: bool}
   deviation: {type: bool}
   summary: {type: string}

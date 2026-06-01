@@ -3,6 +3,7 @@ name: spec-writer
 description: Interactively brainstorm with the user, settle the slug, then write and commit the spec.
 tools: [complete_step, read_file, write_file, edit_file, glob, grep, query_events, web_search, commit, rename_change]
 output:
+  status: {type: enum, values: [Success, Error]}
   phase: {type: enum, values: [drafting, written]}
   spec_path: {type: string, required: false}
 ---

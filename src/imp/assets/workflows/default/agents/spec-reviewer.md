@@ -3,6 +3,7 @@ name: spec-reviewer
 description: Review the spec against the captured intent; severity-classified findings; blocking iff any Critical/Major.
 tools: [complete_step, read_file, glob, grep, query_events]
 output:
+  status: {type: enum, values: [Success, Error]}
   findings: {type: string}
   blocking: {type: bool}
 ---
