@@ -60,7 +60,11 @@ from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
-from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
+from imp.providers.web_native import (
+    WEB_TOOL_NAMES,
+    cc_enabled_web_builtins,
+    check_web_capability,
+)
 
 _AUTH_PATTERNS = (
     "Invalid API key",
@@ -629,7 +633,9 @@ class ClaudeCodeAgentRunner:
         # tool_use without a matching tool_result ("API Error: 400 due to
         # tool use concurrency issues"). Keep ToolSearch out of the deny
         # list while keeping every other built-in denied.
-        disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t != "ToolSearch"]
+        enabled_web = cc_enabled_web_builtins(invocation.agent_def)
+        exempt = {"ToolSearch", *enabled_web}
+        disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t not in exempt]
         return ClaudeAgentOptions(
             model=self.model,
             # Pin the `claude` subprocess to the change's project_root. Without
@@ -640,7 +646,7 @@ class ClaudeCodeAgentRunner:
             cwd=str(invocation.change_context.project_root),
             system_prompt=invocation.system_prompt,
             mcp_servers={"imp": mcp_server},
-            allowed_tools=[f"mcp__imp__{n}" for n in tool_names],
+            allowed_tools=[f"mcp__imp__{n}" for n in tool_names] + list(enabled_web),
             disallowed_tools=disallowed,
             setting_sources=[],
             strict_mcp_config=True,
