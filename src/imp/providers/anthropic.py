@@ -38,6 +38,7 @@ from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
+from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
@@ -119,6 +120,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         if name == "task":
             # Handled specially below; do NOT pull from registry.
             continue
+        if name == "load_skill":
+            # Auto-injected below; tolerate a redundant explicit declaration.
+            continue
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
@@ -129,6 +133,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         # advertising no tool at all and letting the LLM fumble.
         out["task"] = make_task_tool(invocation.model_tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
+    out["load_skill"] = make_load_skill_tool()
     return out
 
 
