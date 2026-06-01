@@ -118,7 +118,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(f"Created Change {change.slug}: {change.title!r}")
-            prompt = Prompt()
+            prompt = Prompt(skills_dir=change.workflow_dir / "skills")
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -228,7 +228,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(f"Resuming Change {change.slug}: {change.title!r}")
-            prompt = Prompt()
+            prompt = Prompt(skills_dir=change.workflow_dir / "skills")
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
