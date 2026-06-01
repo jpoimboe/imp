@@ -32,7 +32,8 @@ def handle_slash_line(
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, unknown, bad, or
     not-found commands (each prints via output_fn). Returns the skill body (str)
     for a successful /<name>, emitting a human-attributed skill_load event."""
-    cmd = text.lstrip().lstrip("/").split()[0] if text.strip() else ""
+    parts = text.lstrip().lstrip("/").split()
+    cmd = parts[0] if parts else ""
     skills_dir = change.workflow_dir / "skills"
 
     if cmd in ("", "help"):

@@ -94,6 +94,13 @@ class _NullStatus:
         return contextlib.nullcontext()
 
 
+def test_bare_slash_reprompts_with_help(tmp_path: Path) -> None:
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    assert handle_slash_line("/", change=change, output_fn=out.append) is REPROMPT
+    assert any("/help" in line for line in out)
+
+
 def test_ask_line_with_slash_passes_through_plain_text(tmp_path: Path) -> None:
     from imp.cli.slash import ask_line_with_slash
     change = _FakeChange(tmp_path)
