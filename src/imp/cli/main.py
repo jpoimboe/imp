@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +34,7 @@ from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.naming import random_title
 from imp.engine.project_root import find_project_root
-from imp.engine.slug import InvalidSlug, slugify
+from imp.engine.slug import InvalidSlug, dated_slug
 from imp.engine.state import LockHeld, ProjectLock, State
 
 
@@ -46,12 +46,18 @@ def _control_root() -> Path:
     return worktree.find_control_root(Path.cwd())
 
 
-def _select_slug(control_root: Path, *, title: str | None) -> tuple[str, str]:
-    """Return (slug, title). Title-derived collision is a clean error; the
-    random-phrase default retries on the rare collision (spec §3.1)."""
+def _select_slug(
+    control_root: Path, *, title: str | None, today: str | None = None,
+) -> tuple[str, str, bool]:
+    """Return (slug, title, auto_titled). The slug carries a YYYY-MM-DD- creation
+    date prefix (spec §12). A user title is authoritative (auto_titled=False); the
+    random-phrase default is provisional (auto_titled=True) and renamable by the
+    spec phase. Title-derived collision is a clean error; the random default
+    retries on the rare collision. `today` (YYYY-MM-DD) defaults to UTC today."""
+    date = today or datetime.now(UTC).strftime("%Y-%m-%d")
     if title is not None:
         try:
-            slug = slugify(title)
+            slug = dated_slug(title, date=date)
         except InvalidSlug:
             print(f"imp: title {title!r} has no slug-able characters; pass a real title",
                   file=sys.stderr)
@@ -60,12 +66,12 @@ def _select_slug(control_root: Path, *, title: str | None) -> tuple[str, str]:
             print(f"imp: a Change named {slug!r} already exists; pick a different "
                   "title", file=sys.stderr)
             raise SystemExit(2)
-        return slug, title
+        return slug, title, False
     for _ in range(20):
         t = random_title()
-        slug = slugify(t)
+        slug = dated_slug(t, date=date)
         if not worktree.branch_exists(control_root, f"imp/{slug}"):
-            return slug, t
+            return slug, t, True
     raise SystemExit("imp: could not allocate a unique random name; retry")
 
 
@@ -98,11 +104,12 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     change = None
     for _ in range(20):
         try:
-            slug, title = _select_slug(control, title=args.title)
+            slug, title, auto_titled = _select_slug(control, title=args.title)
         except SystemExit:
             return 2                                   # title collision/invalid (printed)
         try:
-            change = Change.create(control, title=title, slug=slug, base_branch=base)
+            change = Change.create(control, title=title, slug=slug,
+                                   base_branch=base, auto_titled=auto_titled)
             break
         except (LoadError, LoadErrors) as e:
             print(f"imp: {e}", file=sys.stderr)

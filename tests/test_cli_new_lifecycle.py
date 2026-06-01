@@ -9,19 +9,26 @@ from tests.conftest import _seed_control
 
 def test_select_slug_from_title(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    slug, title = _select_slug(tmp_path, title="Add OAuth Support")
-    assert slug == "add-oauth-support" and title == "Add OAuth Support"
+    slug, title, auto = _select_slug(tmp_path, title="Add OAuth Support",
+                                     today="2026-06-01")
+    assert slug == "2026-06-01-add-oauth-support"
+    assert title == "Add OAuth Support"
+    assert auto is False
 
 
 def test_select_slug_title_collision_errors(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    wt.create_worktree(tmp_path, "add-oauth", "main")
+    # Collision is on the *dated* slug now, so pre-create that exact branch.
+    wt.create_worktree(tmp_path, "2026-06-01-add-oauth", "main")
     with pytest.raises(SystemExit):
-        _select_slug(tmp_path, title="Add OAuth")
+        _select_slug(tmp_path, title="Add OAuth", today="2026-06-01")
 
 
 def test_select_slug_random_when_no_title(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    slug, title = _select_slug(tmp_path, title=None)
-    assert slug.count("-") == 2  # three words
+    slug, title, auto = _select_slug(tmp_path, title=None, today="2026-06-01")
+    assert slug.startswith("2026-06-01-")
+    name = slug[len("2026-06-01-"):]
+    assert name.count("-") == 2  # three words
     assert title.count(" ") == 2
+    assert auto is True
