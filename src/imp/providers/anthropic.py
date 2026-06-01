@@ -229,11 +229,17 @@ def _parse_anthropic_message(raw: dict[str, Any]) -> Message:
 
 def _extract_anthropic_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     """Render-only: thinking contents + unknown-block warnings."""
+    _WEB_BLOCK_TYPES = (
+        "server_tool_use", "web_search_tool_result", "web_fetch_tool_result")
     warnings: list[str] = []
     thinkings: list[str] = []
     for block in raw.get("content", []):
         kind = block.get("type")
         if kind in ("text", "tool_use"):
+            continue
+        if kind in _WEB_BLOCK_TYPES:
+            # Surfaced as normalized web events by _emit_anthropic_web_events
+            # (Task 8); not conversation history, not a warning.
             continue
         if kind == "thinking":
             thinkings.append(str(block.get("thinking", "") or ""))
