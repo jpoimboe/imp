@@ -26,6 +26,7 @@ from imp.cli.live_status import LiveStatus
 from imp.cli.palette import should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit
+from imp.cli.slash import ask_line_with_slash
 from imp.engine import worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
@@ -126,8 +127,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             rc = 0
 
             async def _ask_line() -> str:
-                with status.suspend():
-                    return await prompt.ask_async("> ")
+                return await ask_line_with_slash(prompt, status, change)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
@@ -245,8 +245,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             state.save(change.state_dir)
 
             async def _ask_line() -> str:
-                with status.suspend():
-                    return await prompt.ask_async("> ")
+                return await ask_line_with_slash(prompt, status, change)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
