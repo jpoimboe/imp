@@ -68,6 +68,7 @@ class _EventsNamespace:
 class _ChangeNamespace:
     slug: str
     title: str
+    auto_titled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,9 +80,12 @@ class PromptContext:
 def build_context(
     change_slug: str, change_title: str,
     event_log: EventLog,
+    *, change_auto_titled: bool = False,
 ) -> PromptContext:
     return PromptContext(
-        change=_ChangeNamespace(slug=change_slug, title=change_title),
+        change=_ChangeNamespace(
+            slug=change_slug, title=change_title, auto_titled=change_auto_titled,
+        ),
         events=_EventsNamespace(event_log),
     )
 

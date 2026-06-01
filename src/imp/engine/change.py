@@ -23,6 +23,7 @@ class Change:
     control_root: Path
     project_root: Path           # the worktree
     change_dir: Path             # <worktree>/.imp/change
+    auto_titled: bool = False    # provisional random slug (renamable in spec phase)
 
     @property
     def workflow_dir(self) -> Path:
@@ -42,6 +43,7 @@ class Change:
     @classmethod
     def create(
         cls, control_root: Path, *, title: str, slug: str, base_branch: str,
+        auto_titled: bool = False,
     ) -> Change:
         """Create branch+worktree (caller has already verified the slug is free
         and the gitignore precondition holds), then seed internal state inside
@@ -58,6 +60,7 @@ class Change:
 
         (change_dir / "change.json").write_text(json.dumps({
             "slug": slug, "title": title, "base_branch": base_branch,
+            "auto_titled": auto_titled,
             "created_at": datetime.now(UTC).isoformat(),
         }, indent=2, sort_keys=True))
 
@@ -75,6 +78,7 @@ class Change:
         change = cls(
             slug=slug, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, change_dir=change_dir,
+            auto_titled=auto_titled,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
@@ -95,4 +99,5 @@ class Change:
         return cls(
             slug=meta["slug"], title=meta["title"], base_branch=meta["base_branch"],
             control_root=control_root, project_root=wt_path, change_dir=change_dir,
+            auto_titled=meta.get("auto_titled", False),
         )
