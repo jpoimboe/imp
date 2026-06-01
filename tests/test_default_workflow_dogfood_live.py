@@ -250,7 +250,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     # Seed the project: copy imp source, git init, run_init, isolated venv.
     venv_python = _seed_dogfood_project(tmp_path, provider)
 
-    wf_yaml = tmp_path / ".imp" / "workflows" / "default" / "workflow.yaml"
+    wf_yaml = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
     expected_gates = _walk_yaml_human_gates(wf_yaml)
     assert expected_gates, "no human gates in workflow.yaml — test would never act"
 
