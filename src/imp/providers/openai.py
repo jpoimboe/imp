@@ -152,6 +152,18 @@ def _openai_tool_schema(t: Tool) -> dict[str, Any]:
     }
 
 
+def _responses_tool_schema(t: Tool) -> dict[str, Any]:
+    """Responses function-tool entry: flat shape (no nested `function` wrapper),
+    strict mode on. Replaces _openai_tool_schema at the Task 17 flip."""
+    return {
+        "type": "function",
+        "name": t.name,
+        "description": t.description,
+        "parameters": to_openai_strict(t.input_schema),
+        "strict": True,
+    }
+
+
 def _imp_to_openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
     """Convert an imp message list to OpenAI's flattened message list.
 
@@ -207,6 +219,46 @@ def _imp_to_openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
             continue
         # Plain user text (initial prompt, or interactive follow-up)
         out.append({"role": "user", "content": _join_text(m.content)})
+    return out
+
+
+def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
+    """Convert imp messages to Responses `input[]` items.
+
+    - assistant text  → {type:message, role:assistant, content:[output_text]}
+    - assistant tool_use → {type:function_call, call_id, name, arguments}
+    - user tool_result → {type:function_call_output, call_id, output}
+    - plain user/system text → {type:message, role, content:[input_text]}
+
+    The system prompt is passed separately via the `instructions` param (see
+    the call site), so `system` messages are skipped here.
+    """
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        if m.role == "system":
+            continue  # carried via `instructions`
+        if m.role == "assistant":
+            text = _join_text(m.content)
+            if text:
+                out.append({"type": "message", "role": "assistant",
+                            "content": [{"type": "output_text", "text": text}]})
+            for b in m.content:
+                if isinstance(b, ToolUseBlock):
+                    out.append({"type": "function_call", "call_id": b.id,
+                                "name": b.name, "arguments": json.dumps(b.input)})
+            continue
+        # user
+        tool_results = [b for b in m.content if isinstance(b, ToolResultBlock)]
+        if tool_results:
+            for tr in tool_results:
+                output = tr.content
+                if tr.is_error:
+                    output = f"[error] {output}"
+                out.append({"type": "function_call_output",
+                            "call_id": tr.tool_use_id, "output": output})
+            continue
+        out.append({"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": _join_text(m.content)}]})
     return out
 
 
