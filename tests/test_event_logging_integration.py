@@ -621,10 +621,11 @@ def test_parse_message_round_trips_thinking_signature_blockorder() -> None:
         "thinking block should not appear in reconstructed Message"
     )
 
-    # OpenAI path: simple text-only response
-    oraw = {"choices": [{"message": {
-        "content": "hi", "tool_calls": None, "refusal": None,
-    }}]}
+    # OpenAI path: simple text-only response (Responses output[] shape).
+    oraw = {"output": [{
+        "type": "message", "role": "assistant",
+        "content": [{"type": "output_text", "text": "hi"}],
+    }]}
     omsg = parse_message("openai", oraw)
     assert omsg.content[0].text == "hi", (
         f"expected openai text 'hi', got {omsg.content[0]}"

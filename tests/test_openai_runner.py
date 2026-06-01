@@ -19,7 +19,12 @@ from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.openai import OpenAIAgentRunner
-from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
+from tests.openai_fakes import (
+    FakeResponsesClient,
+    resp_function_call,
+    resp_message,
+    resp_response,
+)
 
 
 @pytest.fixture
@@ -70,12 +75,12 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
 @pytest.mark.anyio
 async def test_runs_to_complete_step(tmp_path: Path) -> None:
     (tmp_path / "art").mkdir()
-    fake = FakeAsyncOpenAI([
-        completion(message(
-            content="calling complete_step",
-            tool_calls=[tool_call("c1", "complete_step",
-                                  {"status": "Success", "note": "ok"})],
-        )),
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("calling complete_step"),
+            resp_function_call("c1", "complete_step",
+                               '{"status": "Success", "note": "ok"}'),
+        ),
     ])
 
     log = InMemoryEventLog()
@@ -97,6 +102,15 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
     assert "raw" in resp["payload"]
     assert resp["agent_id"] == "step:p/s"
     assert yielded[-1]["payload"] == {"status": "Success", "note": "ok"}
+    # The call carries the Responses surface: instructions/input/tools/store,
+    # no Chat Completions `messages`/`system`.
+    call = fake.responses.calls[0]
+    assert call["instructions"] == "be terse"
+    assert "input" in call
+    assert "tools" in call
+    assert call["store"] is False
+    assert "messages" not in call
+    assert "system" not in call
 
 
 @pytest.mark.anyio
@@ -122,11 +136,11 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
 
     # The runner sees the SEND_TO_LLM resume state; next call is the agent's
     # next turn — and it completes the step.
-    fake = FakeAsyncOpenAI([
-        completion(message(
-            content="done",
-            tool_calls=[tool_call("c1", "complete_step", {"status": "Success"})],
-        )),
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("done"),
+            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+        ),
     ])
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini",
@@ -147,13 +161,15 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_refusal_emits_runner_warning(tmp_path: Path) -> None:
-    """OpenAI's `refusal` field is not part of imp Message; should warn, not fail."""
+    """A function_call with malformed arguments warns, not fails; the turn has
+    no dispatchable tool_use (bad JSON → empty args still dispatches), so we use
+    a refusal item to exercise the warn-then-no-complete-step path."""
     (tmp_path / "art").mkdir()
 
-    fake = FakeAsyncOpenAI([
-        # First response: only a refusal. No tool_calls → runner falls through
-        # to "agent finished without complete_step" error (autonomous mode).
-        completion(message(content=None, refusal="I can't help with that.")),
+    fake = FakeResponsesClient([
+        # A refusal item: no message/function_call content → no tool_uses, so
+        # the runner falls through to "agent finished without complete_step".
+        resp_response({"type": "refusal", "refusal": "I can't help with that."}),
     ])
     log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
@@ -168,8 +184,7 @@ async def test_refusal_emits_runner_warning(tmp_path: Path) -> None:
     assert "runner_warning" in log_types
     warnings = [e for e in log.read() if e["type"] == "runner_warning"]
     assert any("refusal" in w["payload"]["message"] for w in warnings)
-    # No fatal — the final event is `error` (no complete_step), not `error` for
-    # an unknown block.
+    # No fatal — the final event is `error` (no complete_step).
     final = events[-1]
     assert final["type"] == "error"
     assert final["payload"]["kind"] == "no_complete_step"
@@ -193,21 +208,15 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
 
     # Two assistant turns, each issuing two tool_use blocks. After 2 calls
     # the ceiling trips on the 3rd; the rest are backfilled with errors.
-    fake = FakeAsyncOpenAI([
-        completion(message(
-            content=None,
-            tool_calls=[
-                tool_call("c1", "read_file", {"path": "/project/f.txt"}),
-                tool_call("c2", "read_file", {"path": "/project/f.txt"}),
-            ],
-        )),
-        completion(message(
-            content=None,
-            tool_calls=[
-                tool_call("c3", "read_file", {"path": "/project/f.txt"}),
-                tool_call("c4", "read_file", {"path": "/project/f.txt"}),
-            ],
-        )),
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_function_call("c1", "read_file", '{"path": "/project/f.txt"}'),
+            resp_function_call("c2", "read_file", '{"path": "/project/f.txt"}'),
+        ),
+        resp_response(
+            resp_function_call("c3", "read_file", '{"path": "/project/f.txt"}'),
+            resp_function_call("c4", "read_file", '{"path": "/project/f.txt"}'),
+        ),
     ])
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini",
@@ -220,6 +229,15 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
 
     errors = [e for e in events if e["type"] == "error"]
     assert any(e["payload"].get("kind") == "tool_call_ceiling_exceeded" for e in errors)
+    # The backfilled ceiling-error tool_result lands in the transcript.
+    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
+    err_results = [
+        b for m in loaded if m.role == "user"
+        for b in m.content
+        if isinstance(b, ToolResultBlock) and b.is_error
+        and "ceiling" in b.content
+    ]
+    assert err_results, "expected a backfilled ceiling-error tool_result"
 
 
 @pytest.mark.anyio
@@ -260,24 +278,24 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
     #   1. parent emits task(sub, ...)
     #   2. sub emits complete_step(status=Success)  ← consumed from fake queue
     #   3. parent receives JSON tool_result, emits complete_step
-    fake = FakeAsyncOpenAI([
+    fake = FakeResponsesClient([
         # parent turn 1
-        completion(message(
-            content="dispatching",
-            tool_calls=[tool_call("p1", "task",
-                                  {"subagent_name": "sub",
-                                   "task_description": "do work"})],
-        )),
+        resp_response(
+            resp_message("dispatching"),
+            resp_function_call("p1", "task",
+                               '{"subagent_name": "sub",'
+                               ' "task_description": "do work"}'),
+        ),
         # sub turn 1 (uses the same fake — order matters)
-        completion(message(
-            content="sub finishing",
-            tool_calls=[tool_call("s1", "complete_step", {"status": "Success"})],
-        )),
+        resp_response(
+            resp_message("sub finishing"),
+            resp_function_call("s1", "complete_step", '{"status": "Success"}'),
+        ),
         # parent turn 2
-        completion(message(
-            content="all done",
-            tool_calls=[tool_call("p2", "complete_step", {"status": "Success"})],
-        )),
+        resp_response(
+            resp_message("all done"),
+            resp_function_call("p2", "complete_step", '{"status": "Success"}'),
+        ),
     ])
 
     # Register a fake openai provider so spawn_subagent_via_registry builds the
@@ -319,7 +337,7 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
     # All three fake responses must have been consumed: parent turn 1, sub turn
     # 1, parent turn 2. If the subagent ran on the real client instead of fake,
     # the sub's queued response would remain unconsumed here.
-    assert len(fake.chat.completions.calls) == 3
+    assert len(fake.responses.calls) == 3
 
 
 @pytest.mark.anyio
@@ -330,7 +348,6 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
 
     from imp.agents.runner import Message, TextBlock
     from imp.agents.transcript import Transcript
-    from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
 
     (tmp_path / "art").mkdir()
     inv = _inv(tmp_path, interactive=True)
@@ -343,11 +360,11 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
         content=(TextBlock(text="anything else to clarify?"),),
     ))
 
-    fake = FakeAsyncOpenAI([
-        completion(message(
-            content="done",
-            tool_calls=[tool_call("c1", "complete_step", {"status": "Success"})],
-        )),
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("done"),
+            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+        ),
     ])
     user_inputs = iter(["nothing, proceed"])
     log = InMemoryEventLog()
@@ -384,11 +401,10 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
         tools=frozenset({"complete_step", "bash"}),
     ))
 
-    fake = FakeAsyncOpenAI([
-        completion(message(
-            content=None,
-            tool_calls=[tool_call("c1", "bash", {"command": "sleep 10"})],
-        )),
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_function_call("c1", "bash", '{"command": "sleep 10"}'),
+        ),
     ])
     log = InMemoryEventLog()
     runner = OpenAIAgentRunner(
@@ -433,10 +449,11 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     from dataclasses import replace
 
     (tmp_path / "art").mkdir()
-    fake = FakeAsyncOpenAI([
-        completion(message(content="prose, no tool call")),
-        completion(message(tool_calls=[tool_call("c1", "complete_step",
-                                                  {"status": "Success"})])),
+    fake = FakeResponsesClient([
+        resp_response(resp_message("prose, no tool call")),
+        resp_response(
+            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+        ),
     ])
     log = InMemoryEventLog()
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
@@ -452,8 +469,8 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
     from dataclasses import replace
 
     (tmp_path / "art").mkdir()
-    fake = FakeAsyncOpenAI(
-        [], default_response=completion(message(content="still prose")),
+    fake = FakeResponsesClient(
+        [], default_response=resp_response(resp_message("still prose")),
     )
     log = InMemoryEventLog()
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
@@ -470,6 +487,7 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
     events = [e async for e in runner.run(inv)]
     assert events[-1]["type"] == "error"
     assert events[-1]["payload"]["category"] == "agent_incomplete"
+    assert events[-1]["payload"]["kind"] == "no_complete_step_after_nudges"
     assert calls["n"] == 2
 
 
@@ -479,20 +497,21 @@ async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
     prompt_cache_key, equal to f"{change_slug}:{agent_id}"."""
     (tmp_path / "art").mkdir()
     (tmp_path / "data.txt").write_text("payload")
-    fake = FakeAsyncOpenAI([
-        completion(message(
-            tool_calls=[tool_call("u1", "read_file",
-                                  {"path": "/project/data.txt"})])),
-        completion(message(
-            tool_calls=[tool_call("c1", "complete_step",
-                                  {"status": "Success", "note": "ok"})])),
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_function_call("u1", "read_file", '{"path": "/project/data.txt"}'),
+        ),
+        resp_response(
+            resp_function_call("c1", "complete_step",
+                               '{"status": "Success", "note": "ok"}'),
+        ),
     ])
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
                                client_factory=lambda: fake)
     async for _ in runner.run(_inv(tmp_path)):
         pass
 
-    calls = fake.chat.completions.calls
+    calls = fake.responses.calls
     assert len(calls) == 2, f"expected 2 create() calls, got {len(calls)}"
     keys = [c["prompt_cache_key"] for c in calls]
     assert keys == ["test:step:p/s", "test:step:p/s"]
@@ -505,10 +524,11 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
     from dataclasses import replace
 
     (tmp_path / "art").mkdir()
-    fake = FakeAsyncOpenAI([
-        completion(message(
-            tool_calls=[tool_call("c1", "complete_step",
-                                  {"status": "Success", "note": "ok"})])),
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_function_call("c1", "complete_step",
+                               '{"status": "Success", "note": "ok"}'),
+        ),
     ])
     inv = _inv(tmp_path)
     inv = replace(
@@ -523,4 +543,4 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
     async for _ in runner.run(inv):
         pass
 
-    assert fake.chat.completions.calls[0]["prompt_cache_key"] == "test-2:step:p/s"
+    assert fake.responses.calls[0]["prompt_cache_key"] == "test-2:step:p/s"

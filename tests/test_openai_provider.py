@@ -22,11 +22,11 @@ from imp.agents.runner import (
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.openai import (
-    _imp_to_openai_messages,
-    _openai_message_to_imp,
-    _openai_tool_schema,
+    _imp_to_responses_input,
+    _parse_responses_message,
+    _responses_tool_schema,
 )
-from tests.openai_fakes import FakeFunction, FakeMessage, FakeToolCall
+from tests.openai_fakes import resp_function_call, resp_response
 
 
 def _make_httpx_resp(status_code: int = 400, headers: dict | None = None) -> object:
@@ -72,18 +72,20 @@ def _inv(tmp_path: Path) -> AgentInvocation:
     )
 
 
-def test_imp_to_openai_system_then_user() -> None:
-    out = _imp_to_openai_messages([
+def test_imp_to_responses_system_skipped_user_kept() -> None:
+    # The system prompt rides on the `instructions` param, so system messages
+    # are dropped from input[]; plain user text becomes an input_text message.
+    out = _imp_to_responses_input([
         Message(role="system", content=(TextBlock(text="be terse"),)),
         Message(role="user", content=(TextBlock(text="hi"),)),
     ])
     assert out == [
-        {"role": "system", "content": "be terse"},
-        {"role": "user", "content": "hi"},
+        {"type": "message", "role": "user",
+         "content": [{"type": "input_text", "text": "hi"}]},
     ]
 
 
-def test_imp_to_openai_assistant_with_tool_uses() -> None:
+def test_imp_to_responses_assistant_with_tool_uses() -> None:
     msg = Message(
         role="assistant",
         content=(
@@ -91,19 +93,19 @@ def test_imp_to_openai_assistant_with_tool_uses() -> None:
             ToolUseBlock(id="c1", name="complete_step", input={"status": "Success"}),
         ),
     )
-    out = _imp_to_openai_messages([msg])
-    assert len(out) == 1
-    entry = out[0]
-    assert entry["role"] == "assistant"
-    assert entry["content"] == "calling complete_step"
-    assert entry["tool_calls"][0]["id"] == "c1"
-    assert entry["tool_calls"][0]["function"]["name"] == "complete_step"
-    assert json.loads(entry["tool_calls"][0]["function"]["arguments"]) == {
-        "status": "Success",
-    }
+    out = _imp_to_responses_input([msg])
+    # One assistant output_text message, then a function_call item.
+    assert out[0] == {"type": "message", "role": "assistant",
+                      "content": [{"type": "output_text",
+                                   "text": "calling complete_step"}]}
+    fc = out[1]
+    assert fc["type"] == "function_call"
+    assert fc["call_id"] == "c1"
+    assert fc["name"] == "complete_step"
+    assert json.loads(fc["arguments"]) == {"status": "Success"}
 
 
-def test_imp_to_openai_user_with_tool_results_fans_out() -> None:
+def test_imp_to_responses_user_with_tool_results_fans_out() -> None:
     msg = Message(
         role="user",
         content=(
@@ -111,17 +113,18 @@ def test_imp_to_openai_user_with_tool_results_fans_out() -> None:
             ToolResultBlock(tool_use_id="c2", content="bad", is_error=True),
         ),
     )
-    out = _imp_to_openai_messages([msg])
+    out = _imp_to_responses_input([msg])
     assert len(out) == 2
-    assert out[0] == {"role": "tool", "tool_call_id": "c1", "content": "ok"}
-    # is_error → embedded prefix because OpenAI has no flag for it.
-    assert out[1]["role"] == "tool"
-    assert out[1]["tool_call_id"] == "c2"
-    assert out[1]["content"].startswith("[error]")
-    assert "bad" in out[1]["content"]
+    assert out[0] == {"type": "function_call_output",
+                      "call_id": "c1", "output": "ok"}
+    # is_error → embedded prefix because Responses has no flag for it.
+    assert out[1]["type"] == "function_call_output"
+    assert out[1]["call_id"] == "c2"
+    assert out[1]["output"].startswith("[error]")
+    assert "bad" in out[1]["output"]
 
 
-def test_openai_tool_schema_wraps_with_function() -> None:
+def test_responses_tool_schema_is_flat() -> None:
     schema = OutputSchema(
         fields=(
             OutputField(name="status", type="enum",
@@ -131,12 +134,13 @@ def test_openai_tool_schema_wraps_with_function() -> None:
         source=SourceLoc(file=Path("a.md"), line=1),
     )
     tool = make_complete_step_tool(schema)
-    wrapped = _openai_tool_schema(tool)
+    wrapped = _responses_tool_schema(tool)
     assert wrapped["type"] == "function"
-    assert wrapped["function"]["name"] == "complete_step"
-    assert wrapped["function"]["strict"] is True
+    assert wrapped["name"] == "complete_step"
+    assert "function" not in wrapped          # flat, no nested wrapper
+    assert wrapped["strict"] is True
     # Strict-mode discipline: optionals are nullable and in required.
-    params = wrapped["function"]["parameters"]
+    params = wrapped["parameters"]
     assert params["additionalProperties"] is False
     assert "note" in params["required"]
     # Pydantic emits Optional[T] as anyOf with a null variant; accept either
@@ -153,26 +157,19 @@ def test_openai_tool_schema_wraps_with_function() -> None:
 
 
 def test_round_trip_two_turn_conversation() -> None:
-    """Build an imp message list, convert to OpenAI, parse a canned OpenAI
-    response, then verify the resulting imp Message ends the conversation
-    correctly."""
-    # Imp-side: user said "go", assistant called complete_step.
+    """Build an imp message list, convert to Responses input[], parse a canned
+    Responses output, then verify the resulting imp Message ends the
+    conversation correctly."""
+    # Imp-side: user said "go".
     user = Message(role="user", content=(TextBlock(text="go"),))
-    out = _imp_to_openai_messages([user])
-    assert out == [{"role": "user", "content": "go"}]
+    out = _imp_to_responses_input([user])
+    assert out == [{"type": "message", "role": "user",
+                    "content": [{"type": "input_text", "text": "go"}]}]
 
-    fake_response = FakeMessage(
-        role="assistant", content=None,
-        tool_calls=[FakeToolCall(
-            id="c1", type="function",
-            function=FakeFunction(
-                name="complete_step",
-                arguments='{"status": "Success"}',
-            ),
-        )],
-    )
-    parsed, warns = _openai_message_to_imp(fake_response)
-    assert warns == []
+    raw = resp_response(
+        resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+    ).model_dump(mode="json")
+    parsed = _parse_responses_message(raw)
     tool_uses = [b for b in parsed.content if isinstance(b, ToolUseBlock)]
     assert len(tool_uses) == 1
     assert tool_uses[0].name == "complete_step"
@@ -268,7 +265,7 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
 
     from imp.providers.openai import OpenAIAgentRunner
 
-    class _ExplodingCompletions:
+    class _ExplodingResponses:
         async def create(self, **_kwargs):
             raise AuthenticationError(
                 message="Invalid API key",
@@ -276,11 +273,8 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
                 body=None,
             )
 
-    class _ExplodingChat:
-        completions = _ExplodingCompletions()
-
     class _ExplodingClient:
-        chat = _ExplodingChat()
+        responses = _ExplodingResponses()
 
         async def close(self):
             return None
@@ -301,15 +295,18 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
     assert payload["category"] == "auth"
 
 
-def test_real_sdk_accepts_prompt_cache_key() -> None:
+def test_real_sdk_accepts_responses_params() -> None:
     """Guard: the kwarg-capture tests use a fake that swallows **kwargs.
-    This pins the real openai SDK contract our runner depends on."""
+    This pins the real openai SDK contract our runner depends on — the
+    Responses create() must accept the params the flipped runner passes."""
     import inspect
 
-    from openai.resources.chat.completions import AsyncCompletions
+    from openai.resources.responses import AsyncResponses
 
-    params = inspect.signature(AsyncCompletions.create).parameters
-    assert "prompt_cache_key" in params
+    params = inspect.signature(AsyncResponses.create).parameters
+    for name in ("model", "input", "instructions", "tools", "store",
+                 "prompt_cache_key"):
+        assert name in params, f"responses.create missing {name!r}"
 
 
 @pytest.fixture

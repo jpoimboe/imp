@@ -2,7 +2,7 @@
 
 Loop:
   1. Build messages (transcript or initial_messages)
-  2. POST to chat.completions.create with declared tools
+  2. POST to responses.create (store=False) with declared tools
   3. Append assistant response to transcript; append llm_response to EventLog
   4. For each tool_call block: dispatch tool, append tool_result to EventLog
   5. complete_step catches StepComplete → validate, emit agent_output, return
@@ -49,7 +49,11 @@ from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
-from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
+from imp.providers.web_native import (
+    WEB_TOOL_NAMES,
+    check_web_capability,
+    openai_web_tool_specs,
+)
 
 
 def _classify_openai_exception(exc: BaseException) -> perr.ProviderError:
@@ -138,20 +142,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     return out
 
 
-def _openai_tool_schema(t: Tool) -> dict[str, Any]:
-    """Translate an imp Tool to OpenAI's function-call tool entry, with the
-    strict-mode transform applied to the parameters."""
-    return {
-        "type": "function",
-        "function": {
-            "name": t.name,
-            "description": t.description,
-            "parameters": to_openai_strict(t.input_schema),
-            "strict": True,
-        },
-    }
-
-
 def _responses_tool_schema(t: Tool) -> dict[str, Any]:
     """Responses function-tool entry: flat shape (no nested `function` wrapper),
     strict mode on. Replaces _openai_tool_schema at the Task 17 flip."""
@@ -162,64 +152,6 @@ def _responses_tool_schema(t: Tool) -> dict[str, Any]:
         "parameters": to_openai_strict(t.input_schema),
         "strict": True,
     }
-
-
-def _imp_to_openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
-    """Convert an imp message list to OpenAI's flattened message list.
-
-    Assistant messages with multiple tool_use blocks → ONE OpenAI assistant
-    message carrying all tool_calls.
-
-    User messages with multiple tool_result blocks → MULTIPLE OpenAI
-    `role: "tool"` messages, one per ToolResultBlock.
-    """
-    out: list[dict[str, Any]] = []
-    for m in messages:
-        if m.role == "system":
-            out.append({"role": "system", "content": _join_text(m.content)})
-            continue
-        if m.role == "assistant":
-            text = _join_text(m.content)
-            tool_calls = []
-            for b in m.content:
-                if isinstance(b, ToolUseBlock):
-                    tool_calls.append({
-                        "id": b.id,
-                        "type": "function",
-                        "function": {
-                            "name": b.name,
-                            "arguments": json.dumps(b.input),
-                        },
-                    })
-            entry: dict[str, Any] = {"role": "assistant"}
-            # OpenAI accepts `content: null` only when `tool_calls` is
-            # present; otherwise it 400s. Emit `""` when there's no text,
-            # regardless of tool_calls presence — accepted in all cases and
-            # avoids the latent bug a refusal-followed-by-continuation
-            # scenario would otherwise trigger.
-            entry["content"] = text if text else ""
-            if tool_calls:
-                entry["tool_calls"] = tool_calls
-            out.append(entry)
-            continue
-        # user
-        tool_results = [b for b in m.content if isinstance(b, ToolResultBlock)]
-        if tool_results:
-            for tr in tool_results:
-                content = tr.content
-                if tr.is_error:
-                    # OpenAI doesn't have an is_error flag on tool messages;
-                    # embed an explicit prefix so the model sees it.
-                    content = f"[error] {content}"
-                out.append({
-                    "role": "tool",
-                    "tool_call_id": tr.tool_use_id,
-                    "content": content,
-                })
-            continue
-        # Plain user text (initial prompt, or interactive follow-up)
-        out.append({"role": "user", "content": _join_text(m.content)})
-    return out
 
 
 def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
@@ -265,84 +197,6 @@ def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
 def _join_text(content: tuple[Any, ...]) -> str:
     """Concatenate TextBlock.text values; ignore other block types."""
     return "".join(b.text for b in content if isinstance(b, TextBlock))
-
-
-def _openai_message_to_imp(
-    msg: Any,
-) -> tuple[Message, list[str]]:
-    """Convert an OpenAI assistant message (SDK object form) to an imp Message
-    + warnings list.
-
-    Called from tests only; the production runner now reconstructs the assistant
-    Message from the serialized llm_response.raw via _parse_openai_message. This
-    helper is retained as a tested record of the SDK-object → imp Message surface.
-
-    Unknown shapes (e.g., msg.refusal — OpenAI's refusal field) become
-    runner_warning entries, never raise (unknown content block types translate
-    to a runner_warning rather than crashing the runner)."""
-    blocks: list[Any] = []
-    warnings: list[str] = []
-
-    text = getattr(msg, "content", None)
-    if text:
-        blocks.append(TextBlock(text=text))
-
-    tool_calls = getattr(msg, "tool_calls", None) or []
-    for tc in tool_calls:
-        tc_type = getattr(tc, "type", "function")
-        if tc_type != "function":
-            warnings.append(f"skipped tool_call type {tc_type!r}")
-            continue
-        fn = getattr(tc, "function", None)
-        if fn is None:
-            warnings.append("tool_call missing function block")
-            continue
-        try:
-            args = json.loads(fn.arguments) if fn.arguments else {}
-        except json.JSONDecodeError as e:
-            warnings.append(f"tool_call {tc.id!r} arguments not JSON: {e}")
-            args = {}
-        blocks.append(ToolUseBlock(id=tc.id, name=fn.name, input=args))
-
-    refusal = getattr(msg, "refusal", None)
-    if refusal:
-        warnings.append(f"skipped refusal: {refusal[:80]!r}")
-
-    return Message(role="assistant", content=tuple(blocks)), warnings
-
-
-def _serialize_openai_response(response: Any) -> dict[str, Any]:
-    """response → llm_response.raw dict. SDK .model_dump() preferred; fake
-    fallback introspects choices[0].message + usage."""
-    dump = getattr(response, "model_dump", None)
-    if callable(dump):
-        try:
-            return cast(dict[str, Any], dump(mode="json"))
-        except TypeError:
-            return cast(dict[str, Any], dump())
-    choice = response.choices[0]
-    msg = choice.message
-    tool_calls = []
-    for tc in getattr(msg, "tool_calls", None) or []:
-        fn = getattr(tc, "function", None)
-        tool_calls.append({
-            "id": getattr(tc, "id", None),
-            "type": getattr(tc, "type", "function"),
-            "function": {"name": getattr(fn, "name", None),
-                         "arguments": getattr(fn, "arguments", "")},
-        })
-    return {
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "content": getattr(msg, "content", None),
-                "tool_calls": tool_calls or None,
-                "refusal": getattr(msg, "refusal", None),
-            },
-            "finish_reason": getattr(choice, "finish_reason", None),
-        }],
-        "usage": _usage_dict(getattr(response, "usage", None)),
-    }
 
 
 def _serialize_responses_response(response: Any) -> dict[str, Any]:
@@ -398,26 +252,8 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
     if isinstance(usage, dict):
         return usage
     return {k: getattr(usage, k) for k in
-            ("prompt_tokens", "completion_tokens", "total_tokens")
+            ("input_tokens", "output_tokens", "total_tokens")
             if getattr(usage, k, None) is not None}
-
-
-def _parse_openai_message(raw: dict[str, Any]) -> Message:
-    msg = raw["choices"][0]["message"]
-    blocks: list[Any] = []
-    text = msg.get("content")
-    if text:
-        blocks.append(TextBlock(text=text))
-    for tc in msg.get("tool_calls") or []:
-        if tc.get("type", "function") != "function":
-            continue
-        fn = tc.get("function") or {}
-        try:
-            args = json.loads(fn.get("arguments") or "{}")
-        except json.JSONDecodeError:
-            args = {}
-        blocks.append(ToolUseBlock(id=tc["id"], name=cast(str, fn.get("name")), input=args))
-    return Message(role="assistant", content=tuple(blocks))
 
 
 def _extract_responses_diagnostics(raw: dict[str, Any]) -> Diagnostics:
@@ -437,22 +273,10 @@ def _extract_responses_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     return Diagnostics(block_warnings=tuple(warnings), thinkings=())
 
 
-def _extract_openai_diagnostics(raw: dict[str, Any]) -> Diagnostics:
-    msg = raw["choices"][0]["message"]
-    warnings: list[str] = []
-    for tc in msg.get("tool_calls") or []:
-        if tc.get("type", "function") != "function":
-            warnings.append(f"skipped tool_call type {tc.get('type')!r}")
-        else:
-            fn = tc.get("function") or {}
-            try:
-                json.loads(fn.get("arguments") or "{}")
-            except json.JSONDecodeError as e:
-                warnings.append(f"tool_call {tc.get('id')!r} arguments not JSON: {e}")
-    refusal = msg.get("refusal")
-    if refusal:
-        warnings.append(f"skipped refusal: {refusal[:80]!r}")
-    return Diagnostics(block_warnings=tuple(warnings), thinkings=())
+def _openai_stop_reason(raw: dict[str, Any]) -> str | None:
+    """Best-effort terminal marker for the llm_response event. Responses exposes
+    `status` at the top level; the fake omits it → None, which is fine."""
+    return raw.get("status")
 
 
 class OpenAIAgentRunner:
@@ -621,18 +445,16 @@ class OpenAIAgentRunner:
                 agent_id=aid, parent_id_override=invocation.first_event_parent_id,
                 provider=invocation.provider_name, model=self.model,
                 system_prompt=invocation.system_prompt,
-                tools_schema=[_openai_tool_schema(t) for t in tools.values()],
-                params={},
+                tools_schema=[_responses_tool_schema(t) for t in tools.values()],
+                params={"store": False},
                 max_tool_calls=invocation.max_tool_calls)
             for m in invocation.initial_messages:
                 if all(isinstance(b, TextBlock) for b in m.content):
                     elog.append_user_message(agent_id=aid, message=m)
 
         ceiling = invocation.max_tool_calls  # may be None (no cap)
-        openai_tools = [_openai_tool_schema(t) for t in tools.values()]
-        # OpenAI takes the system prompt as the first message rather than a
-        # separate parameter. Build the prefix once; reuse on each call.
-        system_message: dict[str, Any] = {"role": "system", "content": invocation.system_prompt}
+        openai_tools = [_responses_tool_schema(t) for t in tools.values()]
+        openai_tools.extend(openai_web_tool_specs(invocation.agent_def))
         # Stable routing/affinity hint for OpenAI's automatic prompt cache.
         # Keyed to one growing conversation (one agent invocation within one
         # change) so the prefix stays cache-resident turn-over-turn. slug
@@ -643,16 +465,18 @@ class OpenAIAgentRunner:
 
         while not self._cancel:
             client = self._get_client()
-            response = await client.chat.completions.create(
+            response = await client.responses.create(
                 model=self.model,
-                messages=[system_message, *_imp_to_openai_messages(messages)],
+                instructions=invocation.system_prompt,
+                input=_imp_to_responses_input(messages),
                 tools=openai_tools,
+                store=False,
                 prompt_cache_key=prompt_cache_key,
             )
 
-            raw = _serialize_openai_response(response)
-            assistant_msg = _parse_openai_message(raw)
-            diag = _extract_openai_diagnostics(raw)
+            raw = _serialize_responses_response(response)
+            assistant_msg = _parse_responses_message(raw)
+            diag = _extract_responses_diagnostics(raw)
             for w in diag.block_warnings:
                 elog.append(agent_id=aid, type="runner_warning",
                             payload={"message": w})
@@ -661,7 +485,7 @@ class OpenAIAgentRunner:
             elog.append_llm_response(
                 agent_id=aid, provider=invocation.provider_name, model=self.model,
                 raw=raw, usage=raw.get("usage") or {},
-                stop_reason=raw["choices"][0].get("finish_reason"))
+                stop_reason=_openai_stop_reason(raw))
 
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
             if not tool_uses:

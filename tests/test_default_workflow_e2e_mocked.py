@@ -194,8 +194,14 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
 async def test_full_default_workflow_completes_with_canned_openai(
     tmp_path: Path,
 ) -> None:
+    import json
+
     from imp.providers.openai import OpenAIProvider
-    from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
+    from tests.openai_fakes import (
+        FakeResponsesClient,
+        resp_function_call,
+        resp_response,
+    )
 
     change = _seed_default_workflow(tmp_path)
     # Rewrite config to OpenAI provider for every role.
@@ -205,15 +211,14 @@ async def test_full_default_workflow_completes_with_canned_openai(
         "{provider: openai, model: gpt-4o-mini}",
     ))
 
-    default_completion = completion(message(
-        content=None,
-        tool_calls=[tool_call("c0", "complete_step", {
+    default_completion = resp_response(
+        resp_function_call("c0", "complete_step", json.dumps({
             "status": "Success", "verdict": "approve",
             "summary": "ok", "notes": "ok",
             "spec": "stub", "plan": "stub",
-        })],
-    ))
-    fake = FakeAsyncOpenAI([], default_response=default_completion)
+        })),
+    )
+    fake = FakeResponsesClient([], default_response=default_completion)
 
     resolve.reset_providers_for_tests()
     resolve.register_provider(

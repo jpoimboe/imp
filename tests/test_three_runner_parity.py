@@ -44,16 +44,9 @@ from tests.cc_fakes import (
     tool_use as cc_tool_use,
 )
 from tests.openai_fakes import (
-    FakeAsyncOpenAI,
-)
-from tests.openai_fakes import (
-    completion as o_completion,
-)
-from tests.openai_fakes import (
-    message as o_message,
-)
-from tests.openai_fakes import (
-    tool_call as o_tool_call,
+    FakeResponsesClient,
+    resp_function_call,
+    resp_response,
 )
 
 
@@ -137,11 +130,11 @@ async def test_anthropic_runner_matches(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_openai_runner_matches(tmp_path: Path) -> None:
-    fake = FakeAsyncOpenAI([
-        o_completion(o_message(
-            content=None,
-            tool_calls=[o_tool_call("c1", "complete_step", EXPECTED)],
-        )),
+    import json
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_function_call("c1", "complete_step", json.dumps(EXPECTED)),
+        ),
     ])
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini", client_factory=lambda: fake,

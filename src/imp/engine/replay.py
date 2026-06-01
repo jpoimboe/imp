@@ -31,19 +31,19 @@ from imp.providers.claude_code import (
     _parse_claude_code_message,
 )
 from imp.providers.openai import (
-    _extract_openai_diagnostics,
-    _parse_openai_message,
+    _extract_responses_diagnostics,
+    _parse_responses_message,
 )
 
 _MESSAGE_PARSERS: dict[str, Callable[[dict[str, Any]], Message]] = {
     "anthropic": _parse_anthropic_message,
-    "openai": _parse_openai_message,
+    "openai": _parse_responses_message,
     "claude_code": _parse_claude_code_message,
 }
 
 _DIAGNOSTICS_EXTRACTORS: dict[str, Callable[[dict[str, Any]], Diagnostics]] = {
     "anthropic": _extract_anthropic_diagnostics,
-    "openai": _extract_openai_diagnostics,
+    "openai": _extract_responses_diagnostics,
     "claude_code": _extract_claude_code_diagnostics,
 }
 

@@ -77,16 +77,9 @@ from tests.cc_fakes import (
     user as cc_user,
 )
 from tests.openai_fakes import (
-    FakeAsyncOpenAI,
-)
-from tests.openai_fakes import (
-    completion as o_completion,
-)
-from tests.openai_fakes import (
-    message as o_message,
-)
-from tests.openai_fakes import (
-    tool_call as o_tool_call,
+    FakeResponsesClient,
+    resp_function_call,
+    resp_response,
 )
 
 
@@ -238,17 +231,17 @@ async def test_anthropic_load_skill_parity(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_openai_load_skill_parity(tmp_path: Path) -> None:
     """OpenAI: load_skill dispatches in-process, emits skill_load event."""
-    fake = FakeAsyncOpenAI([
+    import json
+    fake = FakeResponsesClient([
         # Turn 1: LLM calls load_skill — tool dispatched in-process
-        o_completion(o_message(
-            content=None,
-            tool_calls=[o_tool_call("tu1", "load_skill", {"name": "refactor"})],
-        )),
+        resp_response(
+            resp_function_call("tu1", "load_skill", '{"name": "refactor"}'),
+        ),
         # Turn 2: LLM calls complete_step — terminates the step
-        o_completion(o_message(
-            content=None,
-            tool_calls=[o_tool_call("tu2", "complete_step", COMPLETE_STEP_ARGS)],
-        )),
+        resp_response(
+            resp_function_call("tu2", "complete_step",
+                               json.dumps(COMPLETE_STEP_ARGS)),
+        ),
     ])
     runner = OpenAIAgentRunner(
         model_name="gpt-4o-mini", client_factory=lambda: fake,
