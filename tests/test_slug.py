@@ -2,7 +2,13 @@ import re
 
 import pytest
 
-from imp.engine.slug import MAX_SLUG_LEN, InvalidSlug, slugify
+from imp.engine.slug import (
+    MAX_SLUG_LEN,
+    InvalidSlug,
+    dated_slug,
+    slugify,
+    split_date_prefix,
+)
 
 
 def test_basic() -> None:
@@ -46,3 +52,28 @@ def test_three_word_phrase() -> None:
 def test_empty_after_strip_raises() -> None:
     with pytest.raises(InvalidSlug):
         slugify("!!!")
+
+
+def test_dated_slug_prepends_date() -> None:
+    assert dated_slug("Add OAuth", date="2026-06-01") == "2026-06-01-add-oauth"
+
+
+def test_dated_slug_caps_name_not_date() -> None:
+    # The name keeps the MAX_SLUG_LEN cap; the 11-char date prefix is added on
+    # top, so a long title never silently loses name chars to the prefix.
+    s = dated_slug("x" * 200, date="2026-06-01")
+    assert s == "2026-06-01-" + "x" * MAX_SLUG_LEN
+    assert len(s) == 11 + MAX_SLUG_LEN
+
+
+def test_dated_slug_empty_name_raises() -> None:
+    with pytest.raises(InvalidSlug):
+        dated_slug("!!!", date="2026-06-01")
+
+
+def test_split_date_prefix_roundtrip() -> None:
+    assert split_date_prefix("2026-06-01-add-oauth") == ("2026-06-01", "add-oauth")
+
+
+def test_split_date_prefix_absent() -> None:
+    assert split_date_prefix("add-oauth") == (None, "add-oauth")
