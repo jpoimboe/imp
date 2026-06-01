@@ -89,3 +89,59 @@ def test_log_no_slug_falls_through_to_journal(
         rc = main(["log", "--no-pager"])  # no slug, no in-flight worktrees
     assert rc == 0
     assert "Only One" in buf.getvalue()
+
+
+def test_status_shows_completed_section_from_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    # One in-flight, one merged-and-journaled.
+    Change.create(tmp_path, title="Live One", slug="live-one", base_branch="main")
+    Change.create(tmp_path, title="Gone One", slug="gone-one", base_branch="main")
+    _complete_and_journal(tmp_path, "gone-one")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "In-flight Changes" in out
+    assert "Completed Changes" in out
+    # in-flight slug appears under in-flight; merged slug under completed.
+    assert "live-one" in out
+    assert "gone-one" in out
+    # The merged Change shows its title + completed status, not blank columns.
+    assert "Gone One" in out
+    assert "completed" in out
+
+
+def test_status_inflight_takes_precedence_over_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """If a slug is BOTH a live worktree and in the journal (crash between
+    journal and remove), the completed section must not double-list it."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Both", slug="both", base_branch="main")
+    # Journal it but DON'T remove the worktree (simulates the crash window).
+    worktree.journal_commit(tmp_path, "both", {
+        "events.jsonl": ch.events_path,
+        "change.json": ch.change_dir / "change.json",
+        "state.json": ch.state_dir / "state.json",
+    })
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    completed = m._completed_rows(tmp_path)
+    assert [r[0] for r in completed] == []  # in-flight worktree wins
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out.count("both") == 1  # only in the in-flight section
