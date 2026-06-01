@@ -190,3 +190,35 @@ def test_replayed_text_carries_no_citation_metadata() -> None:
         assert "citations" not in b
     # Belt-and-suspenders: the serialized turn contains no citation-type marker.
     assert "web_search_result_location" not in json.dumps(wire)
+
+
+def test_emit_web_events_search_error_is_flagged() -> None:
+    raw = {"content": [
+        {"type": "server_tool_use", "id": "s1", "name": "web_search",
+         "input": {"query": "q"}},
+        {"type": "web_search_tool_result", "tool_use_id": "s1",
+         "content": {"type": "web_search_tool_result_error",
+                     "error_code": "max_uses_exceeded"}},
+    ]}
+    elog = InMemoryEventLog()
+    _emit_anthropic_web_events(raw, elog, "a")
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert results[0]["payload"]["error"] is True
+    assert "max_uses_exceeded" in results[0]["payload"]["content"]
+    assert "citations" not in results[0]["payload"]  # empty → omitted
+
+
+def test_emit_web_events_fetch_error_is_flagged() -> None:
+    raw = {"content": [
+        {"type": "server_tool_use", "id": "f1", "name": "web_fetch",
+         "input": {"url": "https://unavailable.test"}},
+        {"type": "web_fetch_tool_result", "tool_use_id": "f1",
+         "content": {"type": "web_fetch_tool_result_error",
+                     "error_code": "unavailable"}},
+    ]}
+    elog = InMemoryEventLog()
+    _emit_anthropic_web_events(raw, elog, "a")
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert results[0]["payload"]["error"] is True
+    assert "unavailable" in results[0]["payload"]["content"]
+    assert "citations" not in results[0]["payload"]  # empty → omitted

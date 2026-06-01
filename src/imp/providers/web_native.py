@@ -5,6 +5,12 @@
 Each runner's `_build_tools` skips them and routes here. The provider executes
 the call server-side (Anthropic/OpenAI) or CLI-side (Claude Code); imp only
 observes and logs the normalized events.
+
+The normalized contract across providers is the event shape plus the
+``citations`` array (only ``url`` is guaranteed present); the ``tool_result``
+``content`` field is best-effort audit text and is provider-dependent — for
+example, OpenAI's ``web_search_call`` carries no result payload, so its content
+derives only from any citations appended to the response text.
 """
 
 from __future__ import annotations

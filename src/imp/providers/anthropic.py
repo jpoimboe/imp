@@ -262,14 +262,33 @@ def _collect_text_citations(blocks: list[dict[str, Any]]) -> dict[str, dict[str,
     return out
 
 
+_WEB_ERROR_TYPES = frozenset({
+    "web_search_tool_result_error",
+    "web_fetch_tool_result_error",
+})
+
+
 def _normalize_web_result(
     block: dict[str, Any], text_cites: dict[str, dict[str, Any]],
-) -> tuple[str, list[dict[str, Any]]]:
-    """Return (audit_text, citations[{url,title?,cited_text?}]) for one
-    web_search_tool_result / web_fetch_tool_result block."""
+) -> tuple[str, list[dict[str, Any]], bool]:
+    """Return (audit_text, citations[{url,title?,cited_text?}], is_error) for one
+    web_search_tool_result / web_fetch_tool_result block.
+
+    Error variants — a dict whose ``type`` is one of ``_WEB_ERROR_TYPES`` or
+    that carries an ``error_code`` key — are returned with ``is_error=True``
+    and an empty citations list so the audit trail accurately reflects the
+    failure instead of recording a blank successful result.
+    """
     content = block.get("content")
     citations: list[dict[str, Any]] = []
     lines: list[str] = []
+
+    # --- error branch (BOTH search and fetch errors arrive as dicts) ---
+    if isinstance(content, dict) and (
+        content.get("type") in _WEB_ERROR_TYPES or "error_code" in content
+    ):
+        error_code = content.get("error_code")
+        return f"web error: {error_code}", [], True
 
     def _cite(url: str, title: Any) -> dict[str, Any]:
         c: dict[str, Any] = {"url": url}
@@ -280,7 +299,7 @@ def _normalize_web_result(
             c["cited_text"] = extra["cited_text"]
         return c
 
-    if isinstance(content, list):  # web_search_tool_result
+    if isinstance(content, list):  # web_search_tool_result (success)
         for r in content:
             if not isinstance(r, dict) or not r.get("url"):
                 continue
@@ -288,7 +307,7 @@ def _normalize_web_result(
             title = r.get("title")
             citations.append(_cite(url, title))
             lines.append(f"{title} — {url}" if title else url)
-    elif isinstance(content, dict):  # web_fetch_tool_result
+    elif isinstance(content, dict):  # web_fetch_tool_result (success)
         url = content.get("url") or ""
         doc = content.get("content")
         title = doc.get("title") if isinstance(doc, dict) else None
@@ -300,7 +319,7 @@ def _normalize_web_result(
             if (isinstance(source, dict) and source.get("type") == "text"
                     and isinstance(source.get("data"), str)):
                 lines.append(source["data"])
-    return "\n".join(lines), citations
+    return "\n".join(lines), citations, False
 
 
 def _emit_anthropic_web_events(
@@ -320,10 +339,11 @@ def _emit_anthropic_web_events(
                 block=ToolUseBlock(id=b.get("id", ""), name=b["name"],
                                    input=b.get("input") or {}))
         elif kind in ("web_search_tool_result", "web_fetch_tool_result"):
-            text, citations = _normalize_web_result(b, text_cites)
+            text, citations, is_error = _normalize_web_result(b, text_cites)
             elog.append_tool_result(
                 agent_id=aid,
-                block=ToolResultBlock(b.get("tool_use_id", ""), text),
+                block=ToolResultBlock(b.get("tool_use_id", ""), text,
+                                      is_error=is_error),
                 citations=citations)
 
 
