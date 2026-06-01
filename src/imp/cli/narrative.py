@@ -626,18 +626,19 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         fold.outcome = _summarize_result(p.get("content"))
         return
     # Normal burst result: pair with the matching open call.
+    footer = _format_citations_footer(p.get("citations"))
     burst = self._current_burst
     if burst is not None:
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
-                call.result = _summarize_result(p.get("content"))
+                call.result = _summarize_result(p.get("content")) + footer
                 call.is_error = bool(p.get("error", False))
                 return
     # Orphan result (malformed log): start/extend a burst with a "tool" entry.
     burst = _ensure_burst(self)
     burst.calls.append(ToolCall(
         call_id=rid, name="tool", input={},
-        result=_summarize_result(p.get("content")),
+        result=_summarize_result(p.get("content")) + footer,
         is_error=bool(p.get("error", False))))
 
 
@@ -669,6 +670,26 @@ def _flatten_block(b: Any) -> str:
             return f"[{b['type']}]"
         return str(b)        # dict with no type: unknown shape, preserve info
     return str(b)            # non-dict element: preserve info
+
+
+def _format_citations_footer(citations: Any) -> str:
+    """Render an optional citations array as a compact 'Sources:' footer.
+    Only `url` is guaranteed; `title` is shown when present. Returns "" when
+    there is nothing to show."""
+    if not citations:
+        return ""
+    lines: list[str] = []
+    for c in citations:
+        if not isinstance(c, dict):
+            continue
+        url = c.get("url")
+        if not url:
+            continue
+        title = c.get("title")
+        lines.append(f"- {title} — {url}" if title else f"- {url}")
+    if not lines:
+        return ""
+    return "\n\nSources:\n" + "\n".join(lines)
 
 
 def _summarize_result(content: Any) -> str:
