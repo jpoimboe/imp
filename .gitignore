@@ -14,3 +14,9 @@ build/
 # Plan 2 additions
 spikes/
 **/checkpoint.db
+
+# Editor / tool cruft
+.claude/
+*.swp
+*.swo
+*~
