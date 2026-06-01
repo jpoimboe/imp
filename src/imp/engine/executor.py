@@ -294,12 +294,16 @@ def apply_pending_rename(
     import json as _json
 
     from imp.engine import worktree
-    from imp.engine.slug import slugify
+    from imp.engine.slug import dated_slug, slugify, split_date_prefix
 
     name = state.pending_rename
     assert name is not None
     old = change.slug
-    new = slugify(name)
+    # Preserve the YYYY-MM-DD- creation-date prefix: it is part of the Change's
+    # identity and must not be dropped when the slug is re-derived from the new
+    # name (spec §12). A date-less slug (legacy/test) falls back to plain slugify.
+    date, _ = split_date_prefix(old)
+    new = dated_slug(name, date=date) if date else slugify(name)
     if new == old:
         state.pending_rename = None
         state.save(change.state_dir)
