@@ -149,6 +149,16 @@ def test_init_code_review_handles_claude_code_via_default_tier(tmp_path: Path) -
     assert review["openai"] == "gpt-5.2"                  # openai tier = thinking
 
 
+def test_init_scaffolds_plan_and_task_lead_roles(tmp_path: Path) -> None:
+    run_init(tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
+             picker_fn=lambda _a: ["anthropic"])
+    cfg = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    roles = cfg["roles"]
+    for role in ("plan", "plan_review", "task_lead"):
+        assert role in roles, f"{role} missing from scaffolded roles"
+        assert roles[role]["prefer"], f"{role} has an empty prefer list"
+
+
 def test_init_seeds_tier_roles(tmp_path: Path) -> None:
     run_init(
         tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
