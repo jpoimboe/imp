@@ -11,6 +11,7 @@ History is per-session in-memory; persisted history is a post-V0 feature.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 ESC_SENTINEL = "__IMP_ESC__"
@@ -40,7 +41,6 @@ class SlashCompleter:
     _BUILTINS = ("help", "skills")
 
     def __init__(self, skills_dir: Any) -> None:
-        from pathlib import Path
         self._skills_dir = Path(skills_dir)
 
     def get_completions(self, document: Any, complete_event: Any) -> Iterator[Any]:
