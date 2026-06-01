@@ -49,7 +49,8 @@ from typing import Any
 import pytest
 import yaml
 
-from tests._live import first_opted_in
+from imp.engine import journal
+from tests._live import _await_worktree, first_opted_in
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -96,19 +97,6 @@ def _can_pty() -> bool:
         return True
     except Exception:
         return False
-
-
-def _read_all_events(events_file: Path) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
-    if not events_file.exists():
-        return out
-    for line in events_file.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        with contextlib.suppress(json.JSONDecodeError):
-            out.append(json.loads(line))
-    return out
 
 
 def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, str]]:
@@ -346,6 +334,10 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     )
     os.close(slave)
 
+    TOTAL_TIMEOUT = 1800.0
+    EVENTS_FIRST_APPEAR_TIMEOUT = 30.0
+    TRACE_PTY = os.environ.get("IMP_PTY_TRACE") == "1"
+
     # SIGINT handling: hard-kill the subprocess PG so Ctrl-C is
     # unambiguous (raising KeyboardInterrupt from a signal handler is
     # unreliable inside pytest — some plugins swallow it).
@@ -357,17 +349,18 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         os._exit(130)
     _prev_sigint = signal.signal(signal.SIGINT, _on_sigint)
 
-    events_file = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
-
-    TOTAL_TIMEOUT = 1800.0
-    EVENTS_FIRST_APPEAR_TIMEOUT = 30.0
-    TRACE_PTY = os.environ.get("IMP_PTY_TRACE") == "1"
+    # Discover the Change worktree (created at startup, before any LLM call).
+    # Capture the slug NOW — the worktree is transient and is removed at merge.
+    change_wt = _await_worktree(tmp_path, timeout=EVENTS_FIRST_APPEAR_TIMEOUT)
+    slug = change_wt.name
+    events_file = change_wt / ".imp" / "change" / "events.jsonl"
 
     buf = bytearray()
     gates_answered = 0
     asks_answered = 0
     events_seen_bytes = 0
     ask_questions: list[str] = []
+    all_events_accum: list[dict[str, Any]] = []
     start_time = time.time()
     deadline = start_time + TOTAL_TIMEOUT
     events_first_seen_at: float | None = None
@@ -446,6 +439,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                 )
 
             for ev in _tail_events():
+                all_events_accum.append(ev)
                 etype = ev.get("type")
                 payload = ev.get("payload") or {}
                 if etype == "human_prompt_pending":
@@ -526,8 +520,12 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
     )
 
-    state_path = tmp_path / ".imp" / "changes" / "1" / "state" / "state.json"
-    state = json.loads(state_path.read_text())
+    # The worktree was removed at merge; completion status lives in the journal.
+    state_raw = journal.journal_show(tmp_path, slug, "state.json")
+    assert state_raw is not None, (
+        f"no journaled state.json for {slug!r}; merge/journal did not run"
+    )
+    state = json.loads(state_raw)
     assert state["status"] == "completed", (
         f"expected status=completed, got {state['status']!r}"
     )
@@ -572,7 +570,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     #       → step_completed payload action = {"verb":"goto","target":"implement","resume":False}
     # Both edge types use verb="goto"; `resume:` edges encode as goto+resume=True
     # (verified against _action_payload in src/imp/engine/executor.py).
-    all_events = _read_all_events(events_file)
+    all_events = all_events_accum
     rework_edges = [
         e for e in all_events
         if e.get("type") == "step_completed"
@@ -609,39 +607,32 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"engine state committed to history (should be gitignored): {imp_paths}"
     )
 
-    # ── Commit count ───────────────────────────────────────────────────
-    # The task title explicitly instructs the coder to land ALL edits (the
-    # import + the print) in a SINGLE atomic commit, so a clean run is seed
-    # + one coder commit == 2. The no-rework EDGE assertion above remains the
-    # AUTHORITATIVE signal for the original bug (a rework LOOP committing
-    # .imp/**); this count is a tighter corroborating check that also catches
-    # the coder splitting one logical task across multiple commits (which the
-    # single-commit instruction is meant to prevent). If a future dogfood task
-    # legitimately spans multiple commits, relax this to `>= 2` and lean on the
-    # no-rework + no-.imp-in-history gates.
-    log_oneline = subprocess.run(
-        ["git", "log", "--oneline"],
+    # ── Single atomic coder commit ─────────────────────────────────────
+    # Measured on the base branch after merge: exactly one non-merge commit
+    # touches the sentinel file. --no-merges excludes the --no-ff merge commit
+    # and sidesteps path-limited TREESAME history simplification around merges
+    # (which could otherwise report 1 or 2). Only the coder's single atomic
+    # commit touches src/imp/agents/tools/bash.py.
+    coder_commits = subprocess.run(
+        ["git", "log", "--no-merges", "--oneline", "--",
+         "src/imp/agents/tools/bash.py"],
         cwd=tmp_path, capture_output=True, text=True, timeout=10, check=True,
     )
-    commit_count = len([
-        ln for ln in log_oneline.stdout.splitlines() if ln.strip()
-    ])
-    assert commit_count == 2, (
-        f"expected exactly 2 commits (seed + coder's single atomic commit), "
-        f"got {commit_count} — the coder split the task across commits or a "
-        f"rework/retry loop produced extras:\n{log_oneline.stdout}"
+    n_coder = len([ln for ln in coder_commits.stdout.splitlines() if ln.strip()])
+    assert n_coder == 1, (
+        f"expected exactly 1 non-merge commit touching bash.py (the coder's "
+        f"single atomic commit), got {n_coder}:\n{coder_commits.stdout}"
     )
 
-    # Artifacts present.
-    artifacts_dir = tmp_path / ".imp" / "changes" / "1" / "artifacts"
-    for name in ("spec.md", "plan.md"):
-        path = artifacts_dir / name
+    # Artifacts present: the default workflow writes spec/plan INTO the worktree
+    # and commits them; merge-in-place lands them on the base branch at tmp_path.
+    for rel in (f"imp/docs/specs/{slug}.md", f"imp/docs/plans/{slug}.md"):
+        path = tmp_path / rel
         assert path.exists(), f"expected artifact {path} after dogfood run"
 
-    # ── imp log smoke ──────────────────────────────────────────────────
-
+    # ── imp log smoke (journal-read path: worktree is gone) ────────────
     log_out = subprocess.run(
-        [str(venv_python), "-m", "imp", "log", "1"],
+        [str(venv_python), "-m", "imp", "log", slug],
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert log_out.returncode == 0, (
@@ -650,7 +641,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     assert log_out.stdout.strip(), "imp log produced empty stdout"
 
     log_full = subprocess.run(
-        [str(venv_python), "-m", "imp", "log", "1", "--full"],
+        [str(venv_python), "-m", "imp", "log", slug, "--full"],
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert log_full.returncode == 0, (
@@ -661,3 +652,14 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     assert "tools" in log_out.stdout
     assert "tool_call" in log_full.stdout
     assert "    tools  " not in log_full.stdout
+
+    # ── imp status smoke: the completed slug appears under Completed Changes ──
+    status_out = subprocess.run(
+        [str(venv_python), "-m", "imp", "status"],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert status_out.returncode == 0, (
+        f"imp status rc={status_out.returncode}\nstderr: {status_out.stderr!r}"
+    )
+    assert "Completed Changes" in status_out.stdout, status_out.stdout
+    assert slug in status_out.stdout, status_out.stdout
