@@ -292,7 +292,11 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"function, do not move the print into a helper, do not change "
         f"anything else. Land ALL of these edits (the import and the print) "
         f"in a SINGLE atomic git commit — do not split them across multiple "
-        f"commits."
+        f"commits. This is a trivial two-line change: do NOT create, modify, "
+        f"or delete any test files; do NOT run pytest, make, or any "
+        f"diagnostic/verification scripts; do NOT touch any file other than "
+        f"src/imp/agents/tools/bash.py. After making the edit and committing, "
+        f"complete the step immediately — no verification is needed."
     )
 
     env = dict(os.environ)
