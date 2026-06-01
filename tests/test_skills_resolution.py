@@ -39,7 +39,9 @@ def test_load_skill_body_missing_dir_raises_not_found_not_oserror(tmp_path: Path
         load_skill_body(missing, "refactor")
 
 
-@pytest.mark.parametrize("bad", ["", ".", "..", "../config", "a/b", "/etc/passwd", "x\\y"])
+@pytest.mark.parametrize(
+    "bad", ["", "   ", "\t", ".", "..", "../config", "a/b", "/etc/passwd", "x\\y"]
+)
 def test_load_skill_body_rejects_traversal(tmp_path: Path, bad: str) -> None:
     skills = _skills(tmp_path)
     with pytest.raises(SkillNameError):

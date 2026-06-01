@@ -23,7 +23,7 @@ class SkillNotFound(Exception):
 def _safe_skill_path(skills_dir: Path, name: str) -> Path:
     """Resolve <skills_dir>/<name>.md, rejecting any name that could escape
     skills_dir. Raises SkillNameError for a malformed name."""
-    if not name or name in (".", ".."):
+    if not name.strip() or name.strip() in (".", ".."):
         raise SkillNameError(f"invalid skill name {name!r}")
     if name.startswith("/") or "/" in name or "\\" in name:
         raise SkillNameError(f"invalid skill name {name!r}")
