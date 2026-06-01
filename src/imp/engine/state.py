@@ -124,6 +124,7 @@ _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "llm_response": ("provider", "model", "raw", "usage", "stop_reason"),
     "tool_call": ("id", "name", "input"),
     "tool_result": ("id", "content", "error"),
+    "skill_load": ("name", "source"),
 }
 
 
