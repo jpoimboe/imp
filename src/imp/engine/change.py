@@ -65,14 +65,18 @@ class Change:
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
-        from imp.providers.config import load_config
+        from imp.providers.config import apply_var_overrides, load_config
 
-        configured_roles = load_config(control_root).role_names()
-        workflow = load_workflow(change_dir / "workflow", configured_roles=configured_roles)
+        config = load_config(control_root)
+        workflow = load_workflow(
+            change_dir / "workflow", configured_roles=config.role_names()
+        )
         flat = workflow.flat_steps()
         State(
             slug=slug, step=flat[0].name if flat else None, step_attempt=0,
-            status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
+            status="running",
+            vars=apply_var_overrides(workflow.vars, config.var_overrides),
+            loop_counts={},
         ).save(change_dir / "state")
 
         change = cls(
