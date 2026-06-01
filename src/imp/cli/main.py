@@ -17,6 +17,7 @@ import sys
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import anyio
 
@@ -425,10 +426,10 @@ def _list_change_worktrees(control: Path) -> list[str]:
                   and (p / ".imp" / "change" / "change.json").exists())
 
 
-def _parse_jsonl(raw: bytes) -> list[dict]:
+def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
     """Parse journaled events.jsonl bytes into event dicts, mirroring
     JsonlEventLog.read: malformed lines become {"_malformed": True, ...}."""
-    out: list[dict] = []
+    out: list[dict[str, Any]] = []
     for line in raw.decode("utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line:
@@ -440,7 +441,7 @@ def _parse_jsonl(raw: bytes) -> list[dict]:
     return out
 
 
-def _load_events_for_slug(control: Path, slug: str) -> list[dict] | None:
+def _load_events_for_slug(control: Path, slug: str) -> list[dict[str, Any]] | None:
     """Worktree first, journal second. Returns None if the slug is in neither.
 
     Worktree-first is necessary, not merely preferred: a slug lives in exactly
@@ -461,8 +462,7 @@ def _load_events_for_slug(control: Path, slug: str) -> list[dict] | None:
 
 def _resolve_default_slug(control: Path) -> str | None:
     """No-slug default: most-recent in-flight worktree, else most-recent
-    journaled slug (by last-event timestamp), else None. _journal_last_activity
-    was added in Step 4."""
+    journaled slug (by last-event timestamp), else None."""
     wts = _list_change_worktrees(control)
     if wts:
         return max(wts, key=lambda s: (control / ".imp" / "worktrees" / s
