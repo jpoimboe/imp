@@ -58,10 +58,14 @@ Report `findings` as classified prose, grouped by severity. If there are no issu
 
 Set `blocking = true` if any Critical or Major findings exist; `blocking = false` otherwise.
 
-Finish with:
+Finish with one of:
 
 ```
-complete_step(findings="…", blocking=true|false)
+# No blocking issues:
+complete_step(findings="No Critical/Major findings. Minor: …", blocking=false)
+
+# Blocking issues:
+complete_step(findings="Critical: … / Major: …", blocking=true)
 ```
 
 ---

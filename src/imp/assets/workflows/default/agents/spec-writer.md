@@ -37,17 +37,19 @@ Help the user turn their idea into a fully formed spec through focused collabora
 
 ## Slug Settling (imp-specific)
 
-The current slug is `{{ change.slug }}` and `auto_titled` is `{{ change.auto_titled }}`.
+The current slug is `{{ change.slug }}`.
 
-**If `auto_titled` is TRUE**, the slug is a provisional random phrase. Once you understand the change, pick a short descriptive name (lowercase, hyphen-separated, ≤5 words) and call `rename_change(name="…")`. You may refine it as scope clarifies.
+{% if change.auto_titled %}
+The slug is a provisional auto-generated name. Once you understand the change, pick a short descriptive name (lowercase, hyphen-separated, ≤5 words) and call `rename_change(name="…")`. You may refine it as scope clarifies.
 
 `rename_change` only applies at a step boundary. When you want a pending rename applied, finish your turn by calling `complete_step(phase="drafting")`. The engine applies the rename, then resumes you (conversation intact) under the new slug.
 
-**Iron rule: never call `rename_change` and write/commit the spec in the same turn.** Land the final rename via a `phase: drafting` hand-back first. Only on a later turn — with the slug settled and `auto_titled` effectively resolved — write and commit the spec.
+**Iron rule: never call `rename_change` and write/commit the spec in the same turn.** Land the final rename via a `phase: drafting` hand-back first. Only on a later turn — with the slug settled — write and commit the spec.
 
 Do NOT write `imp/specs/…md` at all until the slug is final. An early draft under a provisional slug would be left as an untracked file after the rename (the worktree moves, the old-slug file does not follow), which would dirty the tree and block the merge.
-
-**If `auto_titled` is FALSE**, the title is user-authoritative. Do NOT rename. Proceed straight to writing once you have enough.
+{% else %}
+The title is user-authoritative — do NOT rename. Proceed straight to writing once you have enough context.
+{% endif %}
 
 ## Writing the Spec (the `phase: written` turn)
 
@@ -82,7 +84,9 @@ complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")
 
 ## Rework Resumption
 
-If the spec-reviewer sends back findings (you will see them as an incoming message), address each finding, rewrite the spec, and amend the commit:
+**Recognizing a rework turn:** if your turn opens with injected feedback containing the spec-reviewer's findings — a message beginning "Your previous attempt completed but was not accepted. The spec-reviewer reviewed your work and did not accept it." followed by `findings:` and `blocking:` lines — you are in rework mode. Do NOT ask the user anything and do NOT end the turn with bare prose; go straight to editing the spec and end the turn tool-terminal (`commit(amend=true)` then `complete_step(phase="written", …)`).
+
+Address each finding, rewrite the spec, and amend the commit:
 
 ```
 commit(paths=["/project/imp/specs/{{ change.slug }}.md"], message="docs: add spec for {{ change.slug }}", amend=true)
@@ -93,7 +97,7 @@ The rework turn must be tool-terminal: end with the `commit(amend=true)` then `c
 
 ## Output
 
-- `phase: drafting` — you want a step hand-back (to apply a rename or to pause for user input across a step boundary)
+- `phase: drafting` — hand back at a step boundary to flush a pending `rename_change` (the engine applies it and resumes you under the new slug, conversation intact), or to continue drafting in a fresh step. This is NOT how you pause for user input — to ask the user, simply end your turn with the question as text and no tool call.
 - `phase: written` — spec is written, committed, and ready for review
 
 ---
