@@ -349,9 +349,24 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         os._exit(130)
     _prev_sigint = signal.signal(signal.SIGINT, _on_sigint)
 
+    def _teardown_proc() -> None:
+        signal.signal(signal.SIGINT, _prev_sigint)
+        with contextlib.suppress(OSError):
+            os.close(master)
+        if proc.poll() is None:
+            with contextlib.suppress(OSError, ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.kill()
+            proc.wait()
+
     # Discover the Change worktree (created at startup, before any LLM call).
     # Capture the slug NOW — the worktree is transient and is removed at merge.
-    change_wt = _await_worktree(tmp_path, timeout=EVENTS_FIRST_APPEAR_TIMEOUT)
+    # Guarded so a startup-crash timeout still tears down proc + PTY fd.
+    try:
+        change_wt = _await_worktree(tmp_path, timeout=EVENTS_FIRST_APPEAR_TIMEOUT)
+    except BaseException:
+        _teardown_proc()
+        raise
     slug = change_wt.name
     events_file = change_wt / ".imp" / "change" / "events.jsonl"
 
@@ -503,14 +518,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                 f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
             )
     finally:
-        signal.signal(signal.SIGINT, _prev_sigint)
-        with contextlib.suppress(OSError):
-            os.close(master)
-        if proc.poll() is None:
-            with contextlib.suppress(OSError, ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
-            proc.kill()
-            proc.wait()
+        _teardown_proc()
 
     rc = proc.wait(timeout=10)
     assert rc == 0, (
