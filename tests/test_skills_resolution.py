@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.skills import (
+    SkillError,
     SkillNameError,
     SkillNotFound,
     list_skill_names,
@@ -55,3 +56,16 @@ def test_list_skill_names_sorted_stems(tmp_path: Path) -> None:
 
 def test_list_skill_names_missing_dir_is_empty(tmp_path: Path) -> None:
     assert list_skill_names(tmp_path / "workflow" / "skills") == []
+
+
+def test_skill_errors_share_a_base(tmp_path: Path) -> None:
+    # Callers can catch the whole family with one `except SkillError`...
+    assert issubclass(SkillNameError, SkillError)
+    assert issubclass(SkillNotFound, SkillError)
+    # ...while SkillNameError keeps its ValueError identity.
+    assert issubclass(SkillNameError, ValueError)
+    skills = _skills(tmp_path)
+    with pytest.raises(SkillError):
+        load_skill_body(skills, "../escape")  # bad name -> SkillNameError
+    with pytest.raises(SkillError):
+        load_skill_body(skills, "nope")  # missing file -> SkillNotFound

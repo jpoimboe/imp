@@ -12,11 +12,17 @@ from __future__ import annotations
 from pathlib import Path
 
 
-class SkillNameError(ValueError):
+class SkillError(Exception):
+    """Base for every skill-resolution failure, so callers can catch the whole
+    family with one `except SkillError` (the subclasses keep their own identity
+    for callers that need to distinguish a bad name from a missing file)."""
+
+
+class SkillNameError(SkillError, ValueError):
     """The requested skill name is malformed (empty, dot, traversal, separator)."""
 
 
-class SkillNotFound(Exception):
+class SkillNotFound(SkillError):
     """No skill file exists for an otherwise-valid name (or skills/ is absent)."""
 
 

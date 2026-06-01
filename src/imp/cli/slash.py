@@ -11,8 +11,7 @@ from collections.abc import Callable
 from typing import Any
 
 from imp.agents.skills import (
-    SkillNameError,
-    SkillNotFound,
+    SkillError,
     list_skill_names,
     load_skill_body,
 )
@@ -45,7 +44,7 @@ def handle_slash_line(
 
     try:
         body = load_skill_body(skills_dir, cmd)
-    except (SkillNameError, SkillNotFound):
+    except SkillError:
         output_fn(f"no such skill: /{cmd}")
         _help(output_fn)
         return REPROMPT
