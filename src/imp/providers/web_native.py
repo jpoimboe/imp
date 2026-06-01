@@ -74,12 +74,12 @@ def anthropic_web_tool_specs(agent_def: AgentDef) -> list[dict[str, Any]]:
 
 def anthropic_beta_headers(agent_def: AgentDef) -> dict[str, str]:
     """Anthropic-beta opt-in header value(s) required by the declared web tools.
-    Returns {} when none are needed. VERIFY exact tokens in Task 6."""
-    betas: list[str] = []
-    if "web_fetch" in agent_def.tools:
-        betas.append("web-fetch-2025-09-10")
-    if betas:
-        return {"anthropic-beta": ",".join(betas)}
+    Returns {} when none are needed.
+
+    Verified against SDK 0.105.2 (Task 6): web_search_20250305 and
+    web_fetch_20250910 are both GA on the non-beta messages.create endpoint;
+    no extra headers are required for either tool type.
+    """
     return {}
 
 

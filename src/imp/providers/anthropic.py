@@ -48,7 +48,12 @@ from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
-from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
+from imp.providers.web_native import (
+    WEB_TOOL_NAMES,
+    anthropic_beta_headers,
+    anthropic_web_tool_specs,
+    check_web_capability,
+)
 
 
 def _classify_anthropic_exception(exc: BaseException) -> perr.ProviderError:
@@ -412,10 +417,14 @@ class AnthropicAgentRunner:
         ceiling = invocation.max_tool_calls  # may be None (no cap)
         guard = LoopGuard()
 
+        web_specs = anthropic_web_tool_specs(invocation.agent_def)
+        web_headers = anthropic_beta_headers(invocation.agent_def)
+
         while not self._cancel:
             anthropic_tools = [_anthropic_tool_schema(t) for t in tools.values()]
+            anthropic_tools.extend(web_specs)
             client = self._get_client()
-            response = await client.messages.create(
+            create_kwargs: dict[str, Any] = dict(
                 model=self.model,
                 system=invocation.system_prompt,
                 tools=anthropic_tools,
@@ -423,6 +432,9 @@ class AnthropicAgentRunner:
                 max_tokens=8192,
                 cache_control={"type": "ephemeral"},
             )
+            if web_headers:
+                create_kwargs["extra_headers"] = web_headers
+            response = await client.messages.create(**create_kwargs)
 
             raw = _serialize_anthropic_response(response)
             assistant_msg = _parse_anthropic_message(raw)
