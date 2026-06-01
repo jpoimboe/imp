@@ -455,14 +455,19 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         while time.time() < deadline:
             _drain_pty()
 
+            # Startup guard: fail only if events were NEVER seen. We key off
+            # events_first_seen_at (set by _tail_events on first sighting), not
+            # events_file.exists() — at merge the worktree (and events.jsonl) is
+            # removed, so a "currently absent" check would misfire on a healthy
+            # run that has merged, reporting a bogus "did not initialize".
             if (
-                not events_file.exists()
+                events_first_seen_at is None
                 and time.time() - start_time > EVENTS_FIRST_APPEAR_TIMEOUT
             ):
                 proc.kill()
                 proc.wait()
                 pytest.fail(
-                    f"events.jsonl did not appear within "
+                    f"events.jsonl never appeared within "
                     f"{EVENTS_FIRST_APPEAR_TIMEOUT}s of process start; "
                     f"engine did not initialize.\n"
                     f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
