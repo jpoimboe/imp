@@ -14,6 +14,7 @@ import pytest
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 from tests._live import opted_in
+from tests.conftest import _git
 
 
 @pytest.fixture
@@ -40,7 +41,11 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
         "claude_code opted in via IMP_LIVE_PROVIDERS but `claude` CLI "
         "not found on PATH"
     )
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / ".gitignore").write_text(".imp/\n")
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -58,10 +63,13 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer: [{provider: claude_code, model: claude-sonnet-4-5}]\n"
     )
-    change = Change.create(tmp_path, title="live-cc")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "seed")
+    change = Change.create(
+        tmp_path, title="live-cc", slug="live-cc", base_branch="main")
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED

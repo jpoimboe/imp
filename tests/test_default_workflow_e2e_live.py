@@ -8,6 +8,7 @@ import pytest
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 from tests._live import opted_in
+from tests.conftest import _git
 
 
 def _anthropic_key() -> str | None:
@@ -49,7 +50,11 @@ async def test_live_minimal_change_completes_one_step(
         "ANTHROPIC_API_KEY env var or ~/.anthropic-key file found"
     )
     monkeypatch.setenv("ANTHROPIC_API_KEY", key)
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "config", "user.email", "t@t")
+    _git(tmp_path, "config", "user.name", "t")
+    (tmp_path / ".gitignore").write_text(".imp/\n")
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -65,10 +70,13 @@ async def test_live_minimal_change_completes_one_step(
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer: [{provider: anthropic, model: claude-sonnet-4-6}]\n"
     )
-    change = Change.create(tmp_path, title="live-smoke")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "seed")
+    change = Change.create(
+        tmp_path, title="live-smoke", slug="live-smoke", base_branch="main")
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED
