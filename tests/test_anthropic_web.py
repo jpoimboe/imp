@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+# Live follow-up-turn acceptance check (§10 "Anthropic resend acceptance"):
+# performed and ACCEPTED during Task 6's live-verification window.  The
+# structural tests below (test_replayed_*) pin the necessary condition —
+# no citation metadata survives the TextBlock boundary — and supersede any
+# remaining owed action from that check.
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +18,7 @@ from imp.providers.anthropic import (
     AnthropicAgentRunner,
     _emit_anthropic_web_events,
     _extract_anthropic_diagnostics,
+    _message_to_anthropic,
     _parse_anthropic_message,
 )
 
@@ -160,3 +167,26 @@ def test_emit_web_events_fetch_with_document_title() -> None:
     results = [e for e in elog.read() if e["type"] == "tool_result"]
     assert results[0]["payload"]["citations"] == [
         {"url": "https://doc.test", "title": "Doc Title"}]
+
+
+def test_replayed_assistant_drops_origin_blocks_keeps_citation_text() -> None:
+    msg = _parse_anthropic_message(_WEB_RAW)
+    wire = _message_to_anthropic(msg)
+    types = {b["type"] for b in wire["content"]}
+    # Origin blocks gone; citation text retained.
+    assert "server_tool_use" not in types
+    assert "web_search_tool_result" not in types
+    assert "text" in types
+    assert any(b.get("text") == "Answer." for b in wire["content"])
+
+
+def test_replayed_text_carries_no_citation_metadata() -> None:
+    # The actual resend-safety invariant: no citation metadata survives the
+    # TextBlock boundary, so the replayed turn has no dangling
+    # web_search_result_location references for Anthropic to reject.
+    msg = _parse_anthropic_message(_WEB_RAW)
+    wire = _message_to_anthropic(msg)
+    for b in wire["content"]:
+        assert "citations" not in b
+    # Belt-and-suspenders: the serialized turn contains no citation-type marker.
+    assert "web_search_result_location" not in json.dumps(wire)
