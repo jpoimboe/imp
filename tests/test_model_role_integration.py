@@ -45,22 +45,27 @@ def _providers():
 
 def _two_vendor_config() -> Config:
     # Must list EVERY role the bundled workflow references — resolve_roles raises
-    # if a collected role is absent from config.  The real bundled workflow uses:
-    #   spec (spec-writer), spec_review (spec-reviewer), default (plan-writer),
-    #   code (coder + documenter), code_review (code-reviewer).
-    # No subagents declare model_role, so these five cover the full set.
+    # if a collected role is absent from config.  The superpowers workflow uses:
+    #   spec, spec_review, plan, plan_review, task_lead, code_review
+    #   + the three tier roles: fast, balanced, powerful.
+    # No subagents declare model_role, so these cover the full set.
+    # The diversity constraint is code_review differ_provider_from: fast
+    # (the implementer subagent dispatches at the `fast` tier).
     def role(name: str, prefer: list[tuple[str, str]]) -> RoleConfig:
         return RoleConfig(name=name, prefer=tuple(ProviderModel(*p) for p in prefer))
 
     roles: dict[str, RoleConfig] = {
-        "default": role("default", [("anthropic", "claude-opus-4-7")]),
-        "spec": role("spec", [("anthropic", "claude-opus-4-7")]),
+        "default":     role("default",     [("anthropic", "claude-opus-4-7")]),
+        "spec":        role("spec",        [("anthropic", "claude-opus-4-7")]),
         "spec_review": role("spec_review", [("anthropic", "claude-opus-4-7")]),
-        "code": role("code", [("anthropic", "claude-haiku-4-5-20251001"),
-                               ("openai", "gpt-5-mini")]),
+        "plan":        role("plan",        [("anthropic", "claude-opus-4-7")]),
+        "plan_review": role("plan_review", [("anthropic", "claude-opus-4-7")]),
+        "task_lead":   role("task_lead",   [("anthropic", "claude-sonnet-4-6")]),
         "code_review": role("code_review", [("anthropic", "claude-sonnet-4-6"),
-                                             ("openai", "gpt-5.2")]),
-        "fast":     role("fast",     [("anthropic", "claude-haiku-4-5-20251001")]),
+                                            ("openai", "gpt-5.2")]),
+        # fast is the implementer tier; code_review must differ from it.
+        "fast":     role("fast",     [("anthropic", "claude-haiku-4-5-20251001"),
+                                      ("openai", "gpt-5-mini")]),
         "balanced": role("balanced", [("anthropic", "claude-sonnet-4-6")]),
         "powerful": role("powerful", [("anthropic", "claude-opus-4-7")]),
     }
@@ -69,19 +74,23 @@ def _two_vendor_config() -> Config:
 
 
 def test_default_workflow_two_vendor_diversity() -> None:
+    # Two vendors: code_review must pick the provider that differs from `fast`.
+    # fast -> anthropic (primary), so code_review -> openai (diversity).
     _OPENAI[0] = True
     wf = load_workflow(default_workflow_dir())
     resolved, details = resolve.resolve_roles(wf, _two_vendor_config())
-    assert resolved["code"] == ProviderModel("anthropic", "claude-haiku-4-5-20251001")
+    assert resolved["fast"] == ProviderModel("anthropic", "claude-haiku-4-5-20251001")
     assert resolved["code_review"] == ProviderModel("openai", "gpt-5.2")
     assert resolved["spec"].model == "claude-opus-4-7"
     assert details["code_review"]["differ_tier"] == 1
 
 
 def test_default_workflow_one_vendor_falls_back_to_sonnet() -> None:
+    # One vendor (openai disabled): code_review falls back to anthropic/sonnet
+    # (its own first-preference) even though fast is also anthropic.
     _OPENAI[0] = False
     wf = load_workflow(default_workflow_dir())
     resolved, details = resolve.resolve_roles(wf, _two_vendor_config())
-    assert resolved["code"] == ProviderModel("anthropic", "claude-haiku-4-5-20251001")
+    assert resolved["fast"] == ProviderModel("anthropic", "claude-haiku-4-5-20251001")
     assert resolved["code_review"] == ProviderModel("anthropic", "claude-sonnet-4-6")
     assert details["code_review"]["differ_tier"] == 2

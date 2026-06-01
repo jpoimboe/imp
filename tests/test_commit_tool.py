@@ -101,7 +101,7 @@ def test_commit_fixup_targets_a_buried_commit(tmp_path: Path) -> None:
 def test_commit_fixup_and_amend_are_mutually_exclusive(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     ctx = _ctx(tmp_path, "2026-06-01-demo")
-    with pytest.raises(ValueError, match="amend.*fixup|fixup.*amend"):
+    with pytest.raises(ValueError, match=r"amend.*fixup|fixup.*amend"):
         commit(ctx, paths=[], message="", amend=True, fixup="HEAD")
 
 

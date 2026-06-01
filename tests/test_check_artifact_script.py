@@ -1,15 +1,16 @@
-import subprocess
-from pathlib import Path
+"""check-artifact.sh was removed in the superpowers workflow port.
 
-SCRIPT = Path("src/imp/assets/workflows/default/scripts/check-artifact.sh")
+Artifact validation is now done by spec-commit-verify.sh and
+plan-commit-verify.sh (see test_commit_verify_scripts.py for their tests).
+This file verifies those replacement scripts are present and executable.
+"""
+
+from imp.assets import default_workflow_dir
 
 
-def test_validates_passed_path(tmp_path: Path) -> None:
-    good = tmp_path / "spec.md"
-    good.write_text("content")
-    r = subprocess.run(["bash", str(SCRIPT), str(good)], capture_output=True, text=True)
-    assert r.returncode == 0, r.stderr
-
-    missing = tmp_path / "nope.md"
-    r2 = subprocess.run(["bash", str(SCRIPT), str(missing)], capture_output=True, text=True)
-    assert r2.returncode != 0
+def test_commit_verify_scripts_exist() -> None:
+    scripts = default_workflow_dir() / "scripts"
+    for name in ("spec-commit-verify.sh", "plan-commit-verify.sh"):
+        p = scripts / name
+        assert p.exists(), f"missing script: {p}"
+        assert p.stat().st_mode & 0o111, f"script not executable: {p}"

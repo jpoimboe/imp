@@ -32,14 +32,14 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     wf = load_workflow(wf_dir)
     by = {s.name: s for s in wf.flat_steps()}
     # producer back-edges resume their target's conversation
-    assert isinstance(by["spec-check"].rules[-1].action, Goto)
-    assert by["spec-check"].rules[-1].action.resume is True       # -> spec-writer
-    assert by["plan-check"].rules[-1].action.resume is True       # -> plan-writer
-    assert by["run-tests"].rules[-1].action.resume is True        # -> coder
-    assert by["spec-reviewer"].rules[1].action.resume is True     # rework -> spec-writer
+    assert isinstance(by["spec-commit-verify"].rules[-1].action, Goto)
+    assert by["spec-commit-verify"].rules[-1].action.resume is True   # -> spec-writer
+    assert by["plan-commit-verify"].rules[-1].action.resume is True   # -> plan-writer
+    assert by["run-tests"].rules[-1].action.resume is True            # -> task-lead
+    assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
     # phase jumps clear (plain goto)
-    assert by["code-reviewer"].rules[1].action.resume is False    # rework -> implement
-    assert by["spec-check"].kind == "script"
+    assert by["code-reviewer"].rules[1].action.resume is False    # rework -> plan-writer
+    assert by["spec-commit-verify"].kind == "script"
     assert wf.phases[-1].name == "merge" and wf.phases[-1].steps == ()
 
 
@@ -47,15 +47,21 @@ def test_default_workflow_has_code_review_constraint():
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
-    assert wf.model_rules["code_review"].differ_provider_from == "code"
+    # code_review must differ from fast (the implementer subagent tier) for
+    # cross-provider review; in the superpowers workflow the coder runs at the
+    # `fast` tier, so the reviewer is constrained against `fast` not `code`.
+    assert wf.model_rules["code_review"].differ_provider_from == "fast"
 
 
-def test_default_code_reviewer_agent_declares_model_role():
+def test_default_code_reviewer_step_declares_model_role():
+    # In the superpowers workflow model_role is assigned at the step level in
+    # workflow.yaml, not in the agent frontmatter.  Verify the step-level
+    # declaration is present and correct so code_review diversity wiring works.
     from imp.assets import default_workflow_dir
-    from imp.engine.loader import parse_agent_file
-    agent = parse_agent_file(
-        default_workflow_dir() / "agents" / "code-reviewer.md")
-    assert agent.model_role == "code_review"
+    from imp.engine.loader import load_workflow
+    wf = load_workflow(default_workflow_dir())
+    by = {s.name: s for s in wf.flat_steps()}
+    assert by["code-reviewer"].model_role == "code_review"
 
 
 def test_default_workflow_declares_tier_menu() -> None:

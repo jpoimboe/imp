@@ -70,7 +70,7 @@ def test_every_declared_tool_is_real() -> None:
 def test_no_orphan_agent_files() -> None:
     # Every agents/*.md is referenced by a step or declared as a subagent —
     # catches a deleted-but-referenced or created-but-unwired agent.
-    # Coupling note: this compares file STEMS to step file.stem ∪ subagent NAMES;
+    # Coupling note: this compares file STEMS to step file.stem U subagent NAMES;
     # the port keeps every agent's frontmatter `name:` == its filename stem, so the
     # two coincide. A future file whose name diverges from its stem would trip this.
     wf = _wf()

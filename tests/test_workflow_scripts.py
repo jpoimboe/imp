@@ -31,43 +31,11 @@ def _run(script: str, *args: str, env_extra: dict[str, str] | None = None,
     )
 
 
-# ── check-artifact.sh (Bug N infrastructure) ─────────────────────────────────
-
-
-def test_check_artifact_passes_when_file_exists_and_nonempty(tmp_path: Path) -> None:
-    """The script exits 0 when the given path points to a non-empty file."""
-    (tmp_path / "spec.md").write_text("# Spec\n\nReal content.\n")
-    proc = _run("check-artifact.sh", str(tmp_path / "spec.md"))
-    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert "ok" in proc.stdout
-
-
-def test_check_artifact_fails_when_file_missing(tmp_path: Path) -> None:
-    """The script exits non-zero when the artifact doesn't exist."""
-    proc = _run("check-artifact.sh", str(tmp_path / "nope.md"))
-    assert proc.returncode != 0
-    assert "missing" in proc.stderr
-
-
-def test_check_artifact_fails_when_file_empty(tmp_path: Path) -> None:
-    """The script exits non-zero when the artifact is empty (zero bytes)."""
-    (tmp_path / "plan.md").write_text("")
-    proc = _run("check-artifact.sh", str(tmp_path / "plan.md"))
-    assert proc.returncode != 0
-    assert "empty" in proc.stderr
-
-
-def test_check_artifact_fails_when_no_arg() -> None:
-    """The script exits non-zero when called with no path argument
-    (the ${1:?...} guard fires)."""
-    proc = subprocess.run(
-        [str(_scripts_dir() / "check-artifact.sh")],
-        capture_output=True, text=True, check=False,
-    )
-    assert proc.returncode != 0
-
-
 # ── run-tests.sh robustness (Bug Q) ──────────────────────────────────────────
+# Note: check-artifact.sh was removed in the superpowers workflow port.
+# Artifact validation is now handled by spec-commit-verify.sh and
+# plan-commit-verify.sh; see test_commit_verify_scripts.py for their tests.
+# The test_check_artifact_script.py file verifies those replacements exist.
 
 
 def test_run_tests_uses_python_m_pytest_not_bare_pytest(tmp_path: Path) -> None:

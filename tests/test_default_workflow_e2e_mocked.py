@@ -105,7 +105,9 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  default:       {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  spec:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  spec_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  code:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  plan:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  plan_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  task_lead:     {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  code_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  fast:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
         "  balanced:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
@@ -139,22 +141,56 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
 ) -> None:
     change = _seed_default_workflow(tmp_path)
 
-    # Default response: complete_step with all-fields-success. The fake's
-    # default_response is consulted whenever the canned list is empty.
+    # Default response: complete_step with ALL fields needed by any agent in the
+    # superpowers workflow. The fake's default_response is consulted whenever the
+    # canned list is empty.
     #
     # LOAD-BEARING: this strategy relies on `validate_agent_output` (in
     # src/imp/engine/schema.py:72) iterating `schema.fields` only — extra
     # keys in the output payload are silently ignored, not rejected. If a
     # future tightening makes the validator strict, this test breaks and
     # the fix is to construct per-agent canned responses instead.
+    #
+    # Fields that drive workflow routing (must produce a single-pass run):
+    #   verdict:approve    code-reviewer → continue (not task_gap/plan_gap)
+    #   decision:merge     final-review  → sets ready_to_merge=true, continue
+    #   phase:written      spec-writer   → not drafting, advances
+    #   done:true          task-lead     → plan fully implemented
+    #   deviation:false    task-lead     → no supercycle back to plan-writer
+    #   more_plans:false   plan-cycle-check → no supercycle, continue
+    #   blocking:false     spec/plan reviewers → no rework loop
     default = response(
         tool_use("c0", "complete_step", {
             "status": "Success",
+            # code-reviewer routing
             "verdict": "approve",
+            "findings": "none",
+            # final-review routing (superpowers workflow)
+            "decision": "merge",
+            "comments": "",
+            # spec-writer phase
+            "phase": "written",
+            "spec_path": "stub-spec.md",
+            # plan-writer
+            "plan_path": "stub-plan.md",
+            "plan_number": 1,
+            # task-lead loop control
+            "done": True,
+            "deviation": False,
             "summary": "ok",
-            "notes": "looks good",
-            "spec": "stub spec body",
-            "plan": "stub plan body",
+            # plan-cycle-check
+            "more_plans": False,
+            "rationale": "ok",
+            # reviewers
+            "blocking": False,
+            # summarizer
+            "built": "stub",
+            "test_status": "ok",
+            "open_items": "",
+            "next_steps": "",
+            # implementer
+            "result": "DONE",
+            "report": "ok",
         }),
         stop_reason="tool_use",
     )
@@ -169,7 +205,9 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
         ),
     )
 
-    # Auto-pick option 1 for every human gate (review: Merge?).
+    # The superpowers workflow has no classic human-gate prompts (no steps with
+    # options:). The final-review step is interactive=true but the fake provider
+    # returns complete_step immediately so human_input_fn is never called.
     answer_count = [0]
     def _human_input() -> str:
         answer_count[0] += 1
@@ -186,8 +224,10 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
         f"expected COMPLETED, got {result!r}; "
         f"human gates answered: {answer_count[0]}"
     )
-    # 1 human gate: review (Merge?).
-    assert answer_count[0] == 1
+    # No classic human gate in the superpowers workflow (final-review is an
+    # interactive agent, not a human-options gate, and the fake completes it
+    # directly with decision=merge).
+    assert answer_count[0] == 0
 
 
 @pytest.mark.anyio
@@ -213,9 +253,17 @@ async def test_full_default_workflow_completes_with_canned_openai(
 
     default_completion = resp_response(
         resp_function_call("c0", "complete_step", json.dumps({
-            "status": "Success", "verdict": "approve",
-            "summary": "ok", "notes": "ok",
-            "spec": "stub", "plan": "stub",
+            "status": "Success",
+            "verdict": "approve", "findings": "none",
+            "decision": "merge", "comments": "",
+            "phase": "written", "spec_path": "stub-spec.md",
+            "plan_path": "stub-plan.md", "plan_number": 1,
+            "done": True, "deviation": False, "summary": "ok",
+            "more_plans": False, "rationale": "ok",
+            "blocking": False,
+            "built": "stub", "test_status": "ok",
+            "open_items": "", "next_steps": "",
+            "result": "DONE", "report": "ok",
         })),
     )
     fake = FakeResponsesClient([], default_response=default_completion)
@@ -271,9 +319,17 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
             assistant(
                 text("ok"),
                 cc_tool_use("c0", "complete_step", {
-                    "status": "Success", "verdict": "approve",
-                    "summary": "ok", "notes": "ok",
-                    "spec": "stub", "plan": "stub",
+                    "status": "Success",
+                    "verdict": "approve", "findings": "none",
+                    "decision": "merge", "comments": "",
+                    "phase": "written", "spec_path": "stub-spec.md",
+                    "plan_path": "stub-plan.md", "plan_number": 1,
+                    "done": True, "deviation": False, "summary": "ok",
+                    "more_plans": False, "rationale": "ok",
+                    "blocking": False,
+                    "built": "stub", "test_status": "ok",
+                    "open_items": "", "next_steps": "",
+                    "result": "DONE", "report": "ok",
                 }),
             ),
             cc_result(),
