@@ -10,6 +10,7 @@ from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import (
     AnthropicAgentRunner,
+    _emit_anthropic_web_events,
     _extract_anthropic_diagnostics,
     _parse_anthropic_message,
 )
@@ -110,3 +111,52 @@ def test_server_tool_use_not_parsed_as_tool_use() -> None:
     # No dispatchable tool_use; the citation-bearing text survives.
     assert not any(isinstance(b, _TUB) for b in msg.content)
     assert any(getattr(b, "text", "") == "Answer." for b in msg.content)
+
+
+def test_emit_web_events_search_with_citations() -> None:
+    elog = InMemoryEventLog()
+    _emit_anthropic_web_events(_WEB_RAW, elog, "step:p/s")
+    events = list(elog.read())
+    calls = [e for e in events if e["type"] == "tool_call"]
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert [c["payload"]["name"] for c in calls] == ["web_search"]
+    assert calls[0]["payload"]["input"] == {"query": "imp agents"}
+    cites = results[0]["payload"]["citations"]
+    assert cites == [{"url": "https://a.test", "title": "A",
+                      "cited_text": "snippet"}]
+
+
+def test_emit_web_events_fetch_url_only() -> None:
+    raw = {"content": [
+        {"type": "server_tool_use", "id": "f1", "name": "web_fetch",
+         "input": {"url": "https://doc.test"}},
+        {"type": "web_fetch_tool_result", "tool_use_id": "f1",
+         "content": {"type": "web_fetch_result", "url": "https://doc.test",
+                     "retrieved_at": "2026-01-01T00:00:00Z",
+                     "content": {"type": "document", "title": None,
+                                 "source": {"type": "text", "data": "body text",
+                                            "media_type": "text/plain"}}}},
+    ]}
+    elog = InMemoryEventLog()
+    _emit_anthropic_web_events(raw, elog, "a")
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert results[0]["payload"]["citations"] == [{"url": "https://doc.test"}]
+    # Body text from the document source is captured in the audit content.
+    assert "body text" in results[0]["payload"]["content"]
+
+
+def test_emit_web_events_fetch_with_document_title() -> None:
+    raw = {"content": [
+        {"type": "server_tool_use", "id": "f2", "name": "web_fetch",
+         "input": {"url": "https://doc.test"}},
+        {"type": "web_fetch_tool_result", "tool_use_id": "f2",
+         "content": {"type": "web_fetch_result", "url": "https://doc.test",
+                     "content": {"type": "document", "title": "Doc Title",
+                                 "source": {"type": "text", "data": "b",
+                                            "media_type": "text/plain"}}}},
+    ]}
+    elog = InMemoryEventLog()
+    _emit_anthropic_web_events(raw, elog, "a")
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert results[0]["payload"]["citations"] == [
+        {"url": "https://doc.test", "title": "Doc Title"}]

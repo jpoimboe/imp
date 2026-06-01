@@ -248,6 +248,85 @@ def _extract_anthropic_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     return Diagnostics(block_warnings=tuple(warnings), thinkings=tuple(thinkings))
 
 
+def _collect_text_citations(blocks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """url -> {title?, cited_text?} from every text block's citations array."""
+    out: dict[str, dict[str, Any]] = {}
+    for b in blocks:
+        if b.get("type") != "text":
+            continue
+        for c in b.get("citations") or []:
+            url = c.get("url")
+            if not url:
+                continue
+            out[url] = {"title": c.get("title"), "cited_text": c.get("cited_text")}
+    return out
+
+
+def _normalize_web_result(
+    block: dict[str, Any], text_cites: dict[str, dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
+    """Return (audit_text, citations[{url,title?,cited_text?}]) for one
+    web_search_tool_result / web_fetch_tool_result block."""
+    content = block.get("content")
+    citations: list[dict[str, Any]] = []
+    lines: list[str] = []
+
+    def _cite(url: str, title: Any) -> dict[str, Any]:
+        c: dict[str, Any] = {"url": url}
+        if title:
+            c["title"] = title
+        extra = text_cites.get(url) or {}
+        if extra.get("cited_text"):
+            c["cited_text"] = extra["cited_text"]
+        return c
+
+    if isinstance(content, list):  # web_search_tool_result
+        for r in content:
+            if not isinstance(r, dict) or not r.get("url"):
+                continue
+            url = r["url"]
+            title = r.get("title")
+            citations.append(_cite(url, title))
+            lines.append(f"{title} — {url}" if title else url)
+    elif isinstance(content, dict):  # web_fetch_tool_result
+        url = content.get("url") or ""
+        doc = content.get("content")
+        title = doc.get("title") if isinstance(doc, dict) else None
+        if url:
+            citations.append(_cite(url, title))
+            lines.append(url)
+        if isinstance(doc, dict):
+            source = doc.get("source")
+            if (isinstance(source, dict) and source.get("type") == "text"
+                    and isinstance(source.get("data"), str)):
+                lines.append(source["data"])
+    return "\n".join(lines), citations
+
+
+def _emit_anthropic_web_events(
+    raw: dict[str, Any], elog: Any, aid: str,
+) -> None:
+    """Side-path emission of normalized web events from a serialized response.
+    Walks blocks in document order so each server_tool_use `tool_call` is
+    immediately followed by its `tool_result`. Never dispatches anything —
+    the provider already executed server-side."""
+    blocks = raw.get("content", [])
+    text_cites = _collect_text_citations(blocks)
+    for b in blocks:
+        kind = b.get("type")
+        if kind == "server_tool_use" and b.get("name") in ("web_search", "web_fetch"):
+            elog.append_tool_call(
+                agent_id=aid,
+                block=ToolUseBlock(id=b.get("id", ""), name=b["name"],
+                                   input=b.get("input") or {}))
+        elif kind in ("web_search_tool_result", "web_fetch_tool_result"):
+            text, citations = _normalize_web_result(b, text_cites)
+            elog.append_tool_result(
+                agent_id=aid,
+                block=ToolResultBlock(b.get("tool_use_id", ""), text),
+                citations=citations)
+
+
 class AnthropicAgentRunner:
     def __init__(
         self, model_name: str,
@@ -457,6 +536,7 @@ class AnthropicAgentRunner:
                 agent_id=aid, provider=invocation.provider_name, model=self.model,
                 raw=raw, usage=raw.get("usage") or {},
                 stop_reason=raw.get("stop_reason"))
+            _emit_anthropic_web_events(raw, elog, aid)
 
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
             if not tool_uses:
