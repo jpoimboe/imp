@@ -61,6 +61,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
 from imp.providers.web_native import (
+    CC_WEB_BUILTIN_TO_NORM,
     WEB_TOOL_NAMES,
     cc_enabled_web_builtins,
     check_web_capability,
@@ -528,6 +529,45 @@ def _extract_claude_code_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     return Diagnostics(block_warnings=tuple(warnings), thinkings=tuple(thinkings))
 
 
+def _parse_cc_web_citations(
+    norm_name: str, call_input: dict[str, Any], content: Any,
+) -> list[dict[str, Any]]:
+    """Parse citations from a CC web builtin result.
+
+    web_search: content is a string ending in `Links: [{"title","url"}, …]`.
+    web_fetch:  citation URL comes from the call's `url` input; the content is
+                the CLI's extracted summary (no structured links).
+
+    Known soft-failure (acceptable for an audit-only footer): we take the LAST
+    `Links:` marker via rfind, so fetched page text that itself contains a later
+    `Links:` substring can mislead the parser into [] or garbage. The format is
+    verification-gated in Step 1; this is a documented limitation, not a bug."""
+    if norm_name == "web_fetch":
+        url = call_input.get("url")
+        return [{"url": url}] if url else []
+    text = content if isinstance(content, str) else ""
+    marker = "Links:"
+    idx = text.rfind(marker)
+    if idx == -1:
+        return []
+    try:
+        arr = json.loads(text[idx + len(marker):].strip())
+    except (json.JSONDecodeError, ValueError):
+        return []
+    cites: list[dict[str, Any]] = []
+    for item in arr if isinstance(arr, list) else []:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not url:
+            continue
+        c: dict[str, Any] = {"url": url}
+        if item.get("title"):
+            c["title"] = item["title"]
+        cites.append(c)
+    return cites
+
+
 class _AsyncIter:
     """Wrap a sync generator as an async iterator for SDK consumption."""
 
@@ -816,6 +856,11 @@ class ClaudeCodeAgentRunner:
         pending_text = ""
         pending_tools: dict[str, ToolOutcome] = {}
         pending_complete = False
+        # Web builtin call ids: id -> (norm_name, call_input). Populated when a
+        # WebSearch/WebFetch ToolUseBlock is observed; consumed when the matching
+        # ToolResultBlock arrives so citations can be parsed and the result
+        # normalized without incrementing tool_calls_used.
+        web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
 
         def _flush_pending() -> TurnRecord | None:
             nonlocal pending_text, pending_tools, pending_complete
@@ -878,6 +923,19 @@ class ClaudeCodeAgentRunner:
                                     stop_reason=raw.get("stop_reason"))
                             for b in imp_msg.content:
                                 if isinstance(b, ToolUseBlock):
+                                    # Web builtins (§5.2): server/CLI-side, already
+                                    # executed. Short-circuit the ENTIRE ceiling
+                                    # block — emit a normalized tool_call, record
+                                    # the id for citation parsing, and do NOT
+                                    # increment tool_calls_used.
+                                    if b.name in CC_WEB_BUILTIN_TO_NORM:
+                                        norm = CC_WEB_BUILTIN_TO_NORM[b.name]
+                                        web_calls[b.id] = (norm, b.input)
+                                        elog.append_tool_call(
+                                            agent_id=aid,
+                                            block=ToolUseBlock(id=b.id, name=norm,
+                                                               input=b.input))
+                                        continue
                                     # Dual-write `complete_step` state at the
                                     # runner level so the test fakes don't need
                                     # to drive the MCP wrapper. In production the
@@ -926,6 +984,13 @@ class ClaudeCodeAgentRunner:
                             # tools. Append the corresponding tool_result events.
                             for b in imp_msg.content:
                                 if isinstance(b, ToolResultBlock):
+                                    if b.tool_use_id in web_calls:
+                                        norm, call_input = web_calls[b.tool_use_id]
+                                        cites = _parse_cc_web_citations(
+                                            norm, call_input, b.content)
+                                        elog.append_tool_result(
+                                            agent_id=aid, block=b, citations=cites)
+                                        continue
                                     elog.append_tool_result(agent_id=aid, block=b)
                                     if b.tool_use_id in pending_tools:
                                         pending_tools[b.tool_use_id].is_error = b.is_error
