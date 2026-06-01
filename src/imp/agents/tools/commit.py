@@ -29,14 +29,23 @@ def _git(cwd: str, *args: str, stdin: str | None = None) -> subprocess.Completed
         "Stage the given paths and create a git commit with your message. "
         "Auto-appends a `Change: <slug>` trailer (idempotent). Pass amend=true "
         "to fold review fixes into the current commit instead of making a new "
-        "one. paths are /project-relative (e.g. /project/imp/specs/x.md)."
+        "one. paths are /project-relative (e.g. /project/imp/specs/x.md). "
+        "Pass fixup=<commit-ish> to record a fix to an earlier (buried) commit; "
+        "it is folded by autosquash before review."
     ),
 )
-def commit(ctx: Any, paths: list[str], message: str, amend: bool = False) -> str:
+def commit(ctx: Any, paths: list[str], message: str, amend: bool = False,
+           fixup: str | None = None) -> str:
     if ctx.change_context is None or not ctx.change_context.slug:
         raise RuntimeError("commit requires an active Change context")
     slug = ctx.change_context.slug
     cwd = str(ctx.project_root)
+
+    if amend and fixup:
+        raise ValueError("commit: pass either amend or fixup, not both")
+
+    if fixup is not None and not paths:
+        raise ValueError("commit: fixup requires at least one path")
 
     # Resolve virtual /project paths to real worktree paths. No permission gate:
     # commit is not an fs boundary (spec §12). resolve_path RAISES on a non
@@ -56,6 +65,17 @@ def commit(ctx: Any, paths: list[str], message: str, amend: bool = False) -> str
         add = _git(cwd, "add", "--", *resolved)
         if add.returncode != 0:
             raise ValueError(f"git add failed: {add.stderr.strip()}")
+
+    if fixup is not None:
+        # Fixup commit: no trailer (autosquash folds it into <fixup>, which
+        # already carries the trailer). git supplies the `fixup! <subject>` msg.
+        done = _git(cwd, "commit", f"--fixup={fixup}")
+        if done.returncode != 0:
+            raise ValueError(
+                f"git commit --fixup failed: {done.stderr.strip() or done.stdout.strip()}"
+            )
+        head = _git(cwd, "rev-parse", "--short", "HEAD").stdout.strip()
+        return f"fixup {head} -> {fixup}: {len(resolved)} path(s); fold via autosquash"
 
     # Build the final message: append exactly one `Change:` trailer to the raw
     # agent message. Idempotency across amends comes from `--amend -m` replacing

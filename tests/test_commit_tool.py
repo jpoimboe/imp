@@ -73,3 +73,59 @@ def test_commit_surfaces_nothing_to_commit(tmp_path: Path) -> None:
     # No staged changes (the seed README is already committed by _init_repo).
     with pytest.raises(ValueError, match="git commit failed"):
         commit(ctx, paths=[], message="empty")
+
+
+def test_commit_fixup_targets_a_buried_commit(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    ctx = _ctx(tmp_path, "2026-06-01-demo")
+    (tmp_path / "f.txt").write_text("a\n")
+    commit(ctx, paths=["/project/f.txt"], message="feat: target task")
+    target = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    # Bury it under another commit so amend is not an option.
+    (tmp_path / "g.txt").write_text("x\n")
+    commit(ctx, paths=["/project/g.txt"], message="feat: later task")
+    # Fix the first task via fixup.
+    (tmp_path / "f.txt").write_text("a-fixed\n")
+    msg = commit(ctx, paths=["/project/f.txt"], message="", fixup=target)
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert subject.startswith("fixup! feat: target task")
+    assert "fixup" in msg
+
+
+def test_commit_fixup_and_amend_are_mutually_exclusive(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    ctx = _ctx(tmp_path, "2026-06-01-demo")
+    with pytest.raises(ValueError, match="amend.*fixup|fixup.*amend"):
+        commit(ctx, paths=[], message="", amend=True, fixup="HEAD")
+
+
+def test_commit_fixup_tag_anchor_has_no_prefix_collision(tmp_path: Path) -> None:
+    # MAJOR-1 regression: `:/imp-task-1-end` must target task 1, NOT the
+    # more-recently-committed task 10 (whose body contains the substring
+    # `imp-task-1`). The `-end` delimiter prevents the prefix collision.
+    _init_repo(tmp_path)
+    ctx = _ctx(tmp_path, "2026-06-01-demo")
+    (tmp_path / "a.txt").write_text("1\n")
+    commit(ctx, paths=["/project/a.txt"], message="feat: task one\n\nTask: imp-task-1-end")
+    (tmp_path / "b.txt").write_text("10\n")              # committed AFTER (most recent)
+    commit(ctx, paths=["/project/b.txt"], message="feat: task ten\n\nTask: imp-task-10-end")
+    (tmp_path / "a.txt").write_text("1-fixed\n")
+    commit(ctx, paths=["/project/a.txt"], message="", fixup=":/imp-task-1-end")
+    subject = subprocess.run(
+        ["git", "log", "-1", "--format=%s"], cwd=tmp_path,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert subject == "fixup! feat: task one"            # NOT "...task ten"
+
+
+def test_commit_fixup_requires_paths(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    ctx = _ctx(tmp_path, "2026-06-01-demo")
+    with pytest.raises(ValueError, match="fixup requires at least one path"):
+        commit(ctx, paths=[], message="", fixup="HEAD")
