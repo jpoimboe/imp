@@ -30,9 +30,15 @@ def handle_slash_line(
 ) -> object | str:
     """Dispatch a /-line. Returns REPROMPT for /help, /skills, unknown, bad, or
     not-found commands (each prints via output_fn). Returns the skill body (str)
-    for a successful /<name>, emitting a human-attributed skill_load event."""
-    parts = text.lstrip().lstrip("/").split()
-    cmd = parts[0] if parts else ""
+    for a successful /<name>, emitting a human-attributed skill_load event.
+
+    `/<name> <args>` loads skill <name> and appends the trailing argument text
+    after the body (blank-line separated), so `/refactor src/foo.py` submits the
+    refactor skill followed by `src/foo.py`. The argument rides the returned user
+    message; the attribution event stays {name, source}."""
+    tokens = text.lstrip().lstrip("/").split(None, 1)
+    cmd = tokens[0] if tokens else ""
+    args = tokens[1].strip() if len(tokens) > 1 else ""
     skills_dir = change.workflow_dir / "skills"
 
     if cmd in ("", "help"):
@@ -53,7 +59,7 @@ def handle_slash_line(
         agent_id=None, type="skill_load",
         payload={"name": cmd, "source": "human"},
     )
-    return body
+    return f"{body.rstrip()}\n\n{args}\n" if args else body
 
 
 def _list(skills_dir: Any, out: Callable[[str], None]) -> None:
@@ -70,7 +76,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
-    out("  /<name>            Load a skill into the conversation")
+    out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
     out("  ESC                Re-prompt without sending (interactive steps)")

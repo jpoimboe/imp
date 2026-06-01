@@ -132,3 +132,40 @@ def test_ask_line_with_slash_passes_through_esc(tmp_path: Path) -> None:
     prompt = _FakePrompt([ESC_SENTINEL])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
     assert line == ESC_SENTINEL
+
+
+def test_skill_args_appended_after_body(tmp_path: Path) -> None:
+    # `/refactor src/foo.py` loads skill `refactor` and appends the argument
+    # text after the body, separated by a blank line.
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/refactor src/foo.py", change=change, output_fn=out.append
+    )
+    assert result == "# Refactor\nstep one\n\nsrc/foo.py\n"
+
+
+def test_skill_args_preserve_internal_spacing_strip_edges(tmp_path: Path) -> None:
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line(
+        "/refactor   keep  this   ", change=change, output_fn=out.append
+    )
+    assert result == "# Refactor\nstep one\n\nkeep  this\n"
+
+
+def test_skill_without_args_returns_body_unchanged(tmp_path: Path) -> None:
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    result = handle_slash_line("/refactor", change=change, output_fn=out.append)
+    assert result == "# Refactor\nstep one\n"
+
+
+def test_skill_args_event_still_records_name_only(tmp_path: Path) -> None:
+    # The attribution event stays {name, source}; the argument rides the
+    # returned user message, not the event payload.
+    change = _FakeChange(tmp_path)
+    handle_slash_line("/refactor src/foo.py", change=change, output_fn=[].append)
+    events = [json.loads(line) for line in change._events.read_text().splitlines()]
+    loads = [e for e in events if e["type"] == "skill_load"]
+    assert loads[0]["payload"] == {"name": "refactor", "source": "human"}
