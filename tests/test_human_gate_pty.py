@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._live import _await_worktree
 from tests.conftest import _git, _init_repo
 
 
@@ -116,11 +117,11 @@ def test_human_gate_via_real_pty(tmp_path: Path) -> None:
             proc.kill()
             proc.wait()
 
-    # Verify state completed: find the worktree for slug "pty-test".
-    # Change.create puts state at <control>/.imp/worktrees/<slug>/.imp/change/state/
-    state_path = (
-        tmp_path / ".imp" / "worktrees" / "pty-test" / ".imp" / "change" / "state"
-        / "state.json"
-    )
+    # Verify state completed. `imp new pty-test` now produces a date-prefixed
+    # slug (YYYY-MM-DD-pty-test), so discover the single Change worktree rather
+    # than hardcoding the slug. Change.create puts state at
+    # <worktree>/.imp/change/state/state.json.
+    worktree = _await_worktree(tmp_path, timeout=5.0)
+    state_path = worktree / ".imp" / "change" / "state" / "state.json"
     state = json.loads(state_path.read_text())
     assert state["status"] == "completed", f"expected completed, got {state['status']!r}"
