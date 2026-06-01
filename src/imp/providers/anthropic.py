@@ -48,6 +48,7 @@ from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
+from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
 
 
 def _classify_anthropic_exception(exc: BaseException) -> perr.ProviderError:
@@ -114,11 +115,16 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     """
     reg = get_registry()
     out: dict[str, Tool] = {}
+    check_web_capability(invocation.provider_name, invocation.agent_def)
     for name in invocation.agent_def.tools:
         if name == "complete_step":
             continue
         if name == "task":
             # Handled specially below; do NOT pull from registry.
+            continue
+        if name in WEB_TOOL_NAMES:
+            # Reserved native-capability names (§4): never registry-looked-up;
+            # routed to the native-injection path in _run_loop.
             continue
         if name == "load_skill":
             # Auto-injected below; tolerate a redundant explicit declaration.

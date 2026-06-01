@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.engine.types import AgentDef, OutputSchema, SourceLoc
+from imp.providers import errors as perr
+from imp.providers.anthropic import _build_tools as anthropic_build
+from imp.providers.claude_code import _build_tools as cc_build
+from imp.providers.openai import _build_tools as openai_build
+
+
+def _agent(tools: frozenset[str]) -> AgentDef:
+    loc = SourceLoc(file=Path("a.md"), line=1)
+    return AgentDef(
+        name="t", description="", tools=tools, subagents=(),
+        output_schema=OutputSchema(fields=(), source=loc),
+        prompt_template_source="", source_path=Path("a.md"), source=loc)
+
+
+def _inv(provider: str, tools: frozenset[str]) -> AgentInvocation:
+    return AgentInvocation(
+        agent_def=_agent(tools), provider_name=provider, model_name="m",
+        system_prompt="s",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(slug="s", title="t", project_root=Path("/"),
+                                     workflow_dir=Path("/")),
+        interactive=False, transcript_dir=Path("/"),
+        fs_permissions=(), events_path=Path("/events.jsonl"))
+
+
+@pytest.mark.parametrize("build,provider", [
+    (anthropic_build, "anthropic"),
+    (cc_build, "claude_code"),
+    (openai_build, "openai"),
+])
+def test_web_search_is_skipped_not_registry_looked_up(build, provider) -> None:
+    tools = build(_inv(provider, frozenset({"complete_step", "web_search"})))
+    # web_search is reserved → never added to the tool dict.
+    assert "web_search" not in tools
+    assert "complete_step" in tools
+
+
+def test_openai_web_fetch_declaration_fails_loud() -> None:
+    with pytest.raises(perr.ConfigError):
+        openai_build(_inv("openai", frozenset({"complete_step", "web_fetch"})))
+
+
+def test_anthropic_web_fetch_declaration_is_allowed() -> None:
+    tools = anthropic_build(_inv("anthropic", frozenset({"complete_step", "web_fetch"})))
+    assert "web_fetch" not in tools  # reserved, not a registry tool

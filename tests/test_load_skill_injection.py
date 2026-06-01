@@ -24,9 +24,10 @@ class _AgentDef:
 
 
 class _Inv:
-    def __init__(self, tools: tuple[str, ...]) -> None:
+    def __init__(self, tools: tuple[str, ...], provider: str = "anthropic") -> None:
         self.agent_def = _AgentDef(tools)
         self.model_tiers: tuple[str, ...] = ()
+        self.provider_name = provider
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
