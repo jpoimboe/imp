@@ -420,6 +420,23 @@ def _parse_openai_message(raw: dict[str, Any]) -> Message:
     return Message(role="assistant", content=tuple(blocks))
 
 
+def _extract_responses_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+    """Responses-vocabulary diagnostics. Replaces _extract_openai_diagnostics
+    at the Task 17 flip."""
+    warnings: list[str] = []
+    for item in raw.get("output", []) or []:
+        itype = item.get("type")
+        if itype == "function_call":
+            try:
+                json.loads(item.get("arguments") or "{}")
+            except json.JSONDecodeError as e:
+                warnings.append(f"tool_call {item.get('call_id')!r} arguments not JSON: {e}")
+        elif itype == "refusal":
+            warnings.append(f"skipped refusal: {str(item.get('refusal'))[:80]!r}")
+        # message / function_call (ok) / web_search_call / reasoning: no warning
+    return Diagnostics(block_warnings=tuple(warnings), thinkings=())
+
+
 def _extract_openai_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     msg = raw["choices"][0]["message"]
     warnings: list[str] = []

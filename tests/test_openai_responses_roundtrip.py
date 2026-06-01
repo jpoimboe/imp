@@ -3,6 +3,7 @@ from __future__ import annotations
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.tools import Tool
 from imp.providers.openai import (
+    _extract_responses_diagnostics,
     _imp_to_responses_input,
     _parse_responses_message,
     _responses_tool_schema,
@@ -105,3 +106,16 @@ def test_parse_responses_ignores_web_search_call_item() -> None:
     msg = _parse_responses_message(raw)
     # web_search_call is a server-side op; never a dispatchable ToolUseBlock.
     assert not any(isinstance(b, ToolUseBlock) for b in msg.content)
+
+
+def test_responses_diagnostics_no_warn_on_web_search_call() -> None:
+    raw = resp_response(resp_web_search_call("ws1", query="q"),
+                        resp_message("ok")).model_dump(mode="json")
+    assert _extract_responses_diagnostics(raw).block_warnings == ()
+
+
+def test_responses_diagnostics_warn_on_bad_function_args() -> None:
+    raw = resp_response(
+        resp_function_call("c1", "bash", "{not json}")).model_dump(mode="json")
+    warns = _extract_responses_diagnostics(raw).block_warnings
+    assert any("not JSON" in w for w in warns)
