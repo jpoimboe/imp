@@ -609,18 +609,18 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
 
     # ── Single atomic coder commit ─────────────────────────────────────
     # Measured on the base branch after merge: exactly one non-merge commit
-    # touches the sentinel file. --no-merges excludes the --no-ff merge commit
-    # and sidesteps path-limited TREESAME history simplification around merges
-    # (which could otherwise report 1 or 2). Only the coder's single atomic
-    # commit touches src/imp/agents/tools/bash.py.
+    # MODIFIES the sentinel file. --no-merges excludes the --no-ff merge commit;
+    # --diff-filter=M excludes the seed commit (which ADDS bash.py via the
+    # copytree of imp's own source). What remains is the coder's single atomic
+    # commit, which modifies src/imp/agents/tools/bash.py.
     coder_commits = subprocess.run(
-        ["git", "log", "--no-merges", "--oneline", "--",
+        ["git", "log", "--no-merges", "--oneline", "--diff-filter=M", "--",
          "src/imp/agents/tools/bash.py"],
         cwd=tmp_path, capture_output=True, text=True, timeout=10, check=True,
     )
     n_coder = len([ln for ln in coder_commits.stdout.splitlines() if ln.strip()])
     assert n_coder == 1, (
-        f"expected exactly 1 non-merge commit touching bash.py (the coder's "
+        f"expected exactly 1 non-merge commit modifying bash.py (the coder's "
         f"single atomic commit), got {n_coder}:\n{coder_commits.stdout}"
     )
 
