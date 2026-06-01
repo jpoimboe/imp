@@ -257,7 +257,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     # Override config.yaml to pin the exact model string. run_init wrote
     # provider-default models; we want determinism across run_init updates.
     role_line = "{prefer: [{provider: " + provider + ", model: " + model + "}]}"
-    (tmp_path / ".imp" / "config.yaml").write_text(
+    (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n"
         f"  default:     {role_line}\n"
         f"  spec:        {role_line}\n"
@@ -267,6 +267,17 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"  fast:        {role_line}\n"
         f"  balanced:    {role_line}\n"
         f"  powerful:    {role_line}\n"
+    )
+    # imp/config.yaml is tracked (run_init wrote it, the seed commit captured
+    # it), so fold the model-pin override back into the seed commit — otherwise
+    # it leaves the working tree dirty and trips the clean-tree gate below.
+    subprocess.run(["git", "add", "imp/config.yaml"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git",
+         "-c", "user.email=test@imp",
+         "-c", "user.name=imp-dogfood",
+         "commit", "--amend", "--no-edit"],
+        cwd=tmp_path, check=True, capture_output=True,
     )
 
     # Title carries the feature intent. Unique sentinel per run prevents
