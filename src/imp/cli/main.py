@@ -531,14 +531,19 @@ _INFLIGHT = ("running", "paused", "merge_blocked")
 
 
 def _status_row(slug: str, state_json: bytes, change_json: bytes,
-                last_activity: str) -> tuple[str, str, str, str, str]:
+                last_activity: str) -> tuple[str, str, str, str, str] | None:
     """Pure (slug, status, step, last_activity, title) extractor, fed by either
     worktree file bytes or journal_show bytes. The journaled state.json and
     change.json are schema-identical to the in-flight ones (both written by
-    State.save / Change.create), so the two sections can't silently drift."""
-    st = json.loads(state_json)
-    meta = json.loads(change_json)
-    return (slug, st["status"], st.get("step") or "-", last_activity, meta["title"])
+    State.save / Change.create), so the two sections can't silently drift.
+    Returns None on malformed/incomplete JSON so a single corrupt entry can't
+    crash the whole `imp status` listing (callers skip None)."""
+    try:
+        st = json.loads(state_json)
+        meta = json.loads(change_json)
+        return (slug, st["status"], st.get("step") or "-", last_activity, meta["title"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
 
 
 def _status_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
@@ -549,7 +554,7 @@ def _status_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
         change_json = (cdir / "change.json").read_bytes()
         last = _last_event_timestamp(cdir / "events.jsonl")
         row = _status_row(slug, state_json, change_json, last)
-        if row[1] not in _INFLIGHT:
+        if row is None or row[1] not in _INFLIGHT:
             continue
         rows.append(row)
     return rows
@@ -569,7 +574,7 @@ def _completed_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
             continue
         last = _journal_last_activity(control, slug)
         row = _status_row(slug, state_json, change_json, last)
-        if row[1] in _INFLIGHT:
+        if row is None or row[1] in _INFLIGHT:
             continue  # belt-and-suspenders; journaled rows are completed
         rows.append(row)
     return rows

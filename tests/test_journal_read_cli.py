@@ -145,3 +145,36 @@ def test_status_inflight_takes_precedence_over_journal(
     assert rc == 0
     out = capsys.readouterr().out
     assert out.count("both") == 1  # only in the in-flight section
+
+
+def test_status_skips_malformed_journal_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A corrupt journaled state.json (valid otherwise-unreachable on-disk
+    corruption) must be skipped, not crash the whole `imp status` listing."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Good", slug="good", base_branch="main")
+    _complete_and_journal(tmp_path, "good")
+    # A second journaled slug whose state.json is not valid JSON.
+    bad = tmp_path / ".imp" / "bad-state.json"
+    bad.write_text("{ not json")
+    good_change = tmp_path / ".imp" / "bad-change.json"
+    good_change.write_text('{"slug":"broken","title":"Broken"}')
+    worktree.journal_commit(tmp_path, "broken", {
+        "state.json": bad,
+        "change.json": good_change,
+    })
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    completed = m._completed_rows(tmp_path)
+    assert [r[0] for r in completed] == ["good"]  # broken entry skipped
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "good" in out
+    assert "broken" not in out
