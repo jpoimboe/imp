@@ -7,7 +7,7 @@ Verifies §6.15 mechanics end-to-end:
   3. Send SIGINT to the imp subprocess.
   4. Confirm the imp subprocess exits cleanly with code 130.
   5. Confirm state.json is "paused" with the writer step still set.
-  6. Spawn `imp resume <id>`; confirm completion.
+  6. Spawn `imp resume <slug>`; confirm completion.
 
 Each test skips independently based on its own provider key/CLI availability.
 """
@@ -26,7 +26,8 @@ from pathlib import Path
 
 import pytest
 
-from tests._live import opted_in
+from tests._live import _await_worktree, opted_in
+from tests.conftest import _init_repo
 
 
 def _anthropic_key() -> str | None:
@@ -40,7 +41,17 @@ def _anthropic_key() -> str | None:
 
 
 def _seed_project(tmp_path: Path) -> None:
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    """Produce the committed imp/ layout the worktree model requires.
+
+    imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
+    and reads the workflow + config from the control root's WORKING TREE
+    (Change.create copies imp/workflows/default; load_config reads imp/config.yaml).
+    Committing them is the clean choice. _init_repo already commits a README +
+    .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
+    an extra gitignore commit.
+    """
+    _init_repo(tmp_path)
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(textwrap.dedent("""\
         ---
@@ -63,11 +74,17 @@ def _seed_project(tmp_path: Path) -> None:
             steps:
               - {name: w, file: agents/writer.md, model_role: default}
     """))
-    (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         roles:
           default:
             prefer: [{provider: anthropic, model: claude-sonnet-4-6}]
     """))
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-qm", "imp setup"],
+        cwd=tmp_path, check=True,
+    )
 
 
 def _wait_for_bash_tool_call(events_path: Path, timeout: float) -> bool:
@@ -133,22 +150,22 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
         start_new_session=True,
     )
     try:
-        # The change_id is 1 (fresh tmp project).
-        events = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
+        # Discover the worktree the engine created (its .name is the slug).
+        wt = _await_worktree(tmp_path, timeout=30.0)
+        slug = wt.name
+        events = wt / ".imp" / "change" / "events.jsonl"
+        state_path = wt / ".imp" / "change" / "state" / "state.json"
+
         if not _wait_for_bash_tool_call(events, timeout=60.0):
             stdout, stderr = proc.communicate(timeout=10)
             pytest.fail(
                 f"never saw bash tool_call event; stdout={stdout!r} stderr={stderr!r}"
             )
-        # Wait briefly so bash has settled into `sleep 30`, then SIGINT.
         time.sleep(1.0)
         os.killpg(proc.pid, signal.SIGINT)
         rc = proc.wait(timeout=15)
-        # exit 130 = ctrl-c convention used in main.py
         assert rc == 130, f"expected exit 130, got {rc}"
 
-        # Verify state is paused.
-        state_path = tmp_path / ".imp" / "changes" / "1" / "state" / "state.json"
         state = json.loads(state_path.read_text())
         assert state["status"] == "paused"
         assert state["step"] == "w"
@@ -157,9 +174,10 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
             proc.kill()
             proc.wait()
 
-    # Resume.
+    # Resume by slug; the minimal workflow has no merge gate, so the worktree
+    # persists and state.json reads "completed" from it (no journal needed).
     resume = subprocess.run(
-        [sys.executable, "-m", "imp", "resume", "1"],
+        [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
         capture_output=True, text=True, timeout=180,
     )
@@ -193,7 +211,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         "OPENAI_API_KEY env var or ~/.openai-key file found"
     )
     _seed_project(tmp_path)
-    (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         roles:
           default:
             prefer: [{provider: openai, model: gpt-4o-mini}]
@@ -211,7 +229,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         start_new_session=True,
     )
     try:
-        events = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
+        wt = _await_worktree(tmp_path, timeout=30.0)
+        slug = wt.name
+        events = wt / ".imp" / "change" / "events.jsonl"
+        state_path = wt / ".imp" / "change" / "state" / "state.json"
+
         if not _wait_for_bash_tool_call(events, timeout=60.0):
             stdout, stderr = proc.communicate(timeout=10)
             pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
@@ -224,12 +246,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
             proc.kill()
             proc.wait()
 
-    state_path = tmp_path / ".imp" / "changes" / "1" / "state" / "state.json"
     state = json.loads(state_path.read_text())
     assert state["status"] == "paused"
 
     resume = subprocess.run(
-        [sys.executable, "-m", "imp", "resume", "1"],
+        [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
         capture_output=True, text=True, timeout=180,
     )
@@ -250,7 +271,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         "not found on PATH"
     )
     _seed_project(tmp_path)
-    (tmp_path / ".imp" / "config.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
         roles:
           default:
             prefer: [{provider: claude_code, model: claude-sonnet-4-5}]
@@ -265,7 +286,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         start_new_session=True,
     )
     try:
-        events = tmp_path / ".imp" / "changes" / "1" / "events.jsonl"
+        wt = _await_worktree(tmp_path, timeout=30.0)
+        slug = wt.name
+        events = wt / ".imp" / "change" / "events.jsonl"
+        state_path = wt / ".imp" / "change" / "state" / "state.json"
+
         if not _wait_for_bash_tool_call(events, timeout=120.0):
             stdout, stderr = proc.communicate(timeout=10)
             pytest.fail(f"no bash; stdout={stdout!r} stderr={stderr!r}")
@@ -278,12 +303,11 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
             proc.kill()
             proc.wait()
 
-    state_path = tmp_path / ".imp" / "changes" / "1" / "state" / "state.json"
     state = json.loads(state_path.read_text())
     assert state["status"] == "paused"
 
     resume = subprocess.run(
-        [sys.executable, "-m", "imp", "resume", "1"],
+        [sys.executable, "-m", "imp", "resume", slug],
         cwd=tmp_path, env=env,
         capture_output=True, text=True, timeout=240,
     )
