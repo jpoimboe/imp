@@ -319,11 +319,13 @@ def apply_pending_rename(
     # Repoint in-memory paths onto the moved worktree.
     change.slug = new
     change.title = name
+    change.auto_titled = False   # renamed → the slug is now intentional (spec §12)
     change.project_root = new_path
     change.change_dir = new_path / ".imp" / "change"
     meta_path = change.change_dir / "change.json"
     meta = _json.loads(meta_path.read_text())          # preserves created_at
     meta["slug"], meta["title"] = new, name
+    meta["auto_titled"] = False
     meta_path.write_text(_json.dumps(meta, indent=2, sort_keys=True))
     state.slug = new
     state.pending_rename = None
