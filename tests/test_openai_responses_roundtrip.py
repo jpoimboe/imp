@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
 from imp.agents.tools import Tool
-from imp.providers.openai import _imp_to_responses_input, _responses_tool_schema
+from imp.providers.openai import (
+    _imp_to_responses_input,
+    _parse_responses_message,
+    _responses_tool_schema,
+    _serialize_responses_response,
+)
 from tests.openai_fakes import (
     FakeResponsesClient,
     resp_function_call,
@@ -72,3 +77,31 @@ def test_responses_input_conversion_items() -> None:
     assert fc["call_id"] == "c1" and fc["name"] == "bash"
     fco = next(it for it in items if it["type"] == "function_call_output")
     assert fco["call_id"] == "c1" and fco["output"] == "out"
+
+
+def test_serialize_responses_prefers_model_dump() -> None:
+    r = resp_response(resp_message("hello"))
+    raw = _serialize_responses_response(r)
+    assert raw["output"][0]["type"] == "message"
+
+
+def test_parse_responses_text_and_function_call() -> None:
+    raw = resp_response(
+        resp_message("answer"),
+        resp_function_call("c1", "bash", '{"cmd":"ls"}'),
+    ).model_dump(mode="json")
+    msg = _parse_responses_message(raw)
+    texts = [b.text for b in msg.content if isinstance(b, TextBlock)]
+    tus = [b for b in msg.content if isinstance(b, ToolUseBlock)]
+    assert texts == ["answer"]
+    assert tus[0].id == "c1" and tus[0].name == "bash" and tus[0].input == {"cmd": "ls"}
+
+
+def test_parse_responses_ignores_web_search_call_item() -> None:
+    raw = resp_response(
+        resp_web_search_call("ws1", query="q"),
+        resp_message("done"),
+    ).model_dump(mode="json")
+    msg = _parse_responses_message(raw)
+    # web_search_call is a server-side op; never a dispatchable ToolUseBlock.
+    assert not any(isinstance(b, ToolUseBlock) for b in msg.content)

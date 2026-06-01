@@ -345,6 +345,50 @@ def _serialize_openai_response(response: Any) -> dict[str, Any]:
     }
 
 
+def _serialize_responses_response(response: Any) -> dict[str, Any]:
+    """response → llm_response.raw dict. SDK .model_dump() preferred; the fake
+    path returns {output, usage} directly. Replaces _serialize_openai_response
+    at the Task 17 flip."""
+    dump = getattr(response, "model_dump", None)
+    if callable(dump):
+        try:
+            return cast(dict[str, Any], dump(mode="json"))
+        except TypeError:
+            return cast(dict[str, Any], dump())
+    # Minimal fallback for objects exposing `.output` / `.usage`.
+    return {
+        "output": getattr(response, "output", []) or [],
+        "usage": _usage_dict(getattr(response, "usage", None)),
+    }
+
+
+def _parse_responses_message(raw: dict[str, Any]) -> Message:
+    """Reconstruct the assistant Message from Responses `output[]`.
+
+    message → output_text parts become TextBlocks; function_call items become
+    ToolUseBlocks. web_search_call / reasoning items are NOT conversation
+    content (web events are emitted separately in Task 18)."""
+    blocks: list[Any] = []
+    for item in raw.get("output", []) or []:
+        itype = item.get("type")
+        if itype == "message":
+            text = "".join(
+                part.get("text", "")
+                for part in item.get("content", []) or []
+                if part.get("type") == "output_text")
+            if text:
+                blocks.append(TextBlock(text=text))
+        elif itype == "function_call":
+            try:
+                args = json.loads(item.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            blocks.append(ToolUseBlock(
+                id=item.get("call_id", ""),
+                name=cast(str, item.get("name")), input=args))
+    return Message(role="assistant", content=tuple(blocks))
+
+
 def _usage_dict(usage: Any) -> dict[str, Any]:
     if usage is None:
         return {}
