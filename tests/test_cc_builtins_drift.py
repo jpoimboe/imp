@@ -10,6 +10,15 @@ to fire when the CLI IS available and a new built-in has appeared.
 The spawned `claude -p` reports the same tools whether or not the parent
 process is itself a Claude Code session (verified empirically by scrubbing
 CLAUDECODE/CLAUDE_CODE_* env vars and comparing init output).
+
+WebSearch / WebFetch note (§5.2):
+  These two tools ARE included in ALL_CLAUDE_CODE_BUILTIN_TOOLS so that the
+  drift guard still catches them if the CLI removes or renames them. However,
+  they are *intentionally enabled* by _build_options when an agent declares
+  web_search/web_fetch — they are NOT part of the "imp-tools-only" deny
+  stance that blocks all other builtins. See
+  test_web_builtins_are_intentionally_enabled_when_declared below, which pins
+  that enablement so a future deny-all refactor fails loudly here.
 """
 
 from __future__ import annotations
@@ -17,10 +26,14 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
+from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
+from imp.providers.claude_code import ClaudeCodeAgentRunner
 
 
 def test_builtin_tools_match_cli() -> None:
@@ -92,3 +105,30 @@ def test_builtin_tools_match_cli() -> None:
             f"WARNING: ALL_CLAUDE_CODE_BUILTIN_TOOLS lists tools not in the "
             f"current CLI: {sorted(extra_in_constant)}. Safe to remove."
         )
+
+
+def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) -> None:
+    """WebSearch/WebFetch are deliberately exempted from the deny list and
+    allowlisted when an agent declares web_search/web_fetch (spec §5.2). This
+    pins that intent so a future deny-all refactor fails here."""
+    loc = SourceLoc(file=Path("a.md"), line=1)
+    agent = AgentDef(
+        name="t", description="",
+        tools=frozenset({"complete_step", "web_search", "web_fetch"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success",), required=True),),
+            source=loc),
+        prompt_template_source="hi", source_path=Path("a.md"), source=loc)
+    inv = AgentInvocation(
+        agent_def=agent, provider_name="claude_code", model_name="m",
+        system_prompt="s",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
+                                     workflow_dir=tmp_path),
+        interactive=False, transcript_dir=tmp_path, fs_permissions=(),
+        events_path=tmp_path / "events.jsonl")
+    opts = ClaudeCodeAgentRunner("m")._build_options(inv, object(), ["bash"])
+    assert {"WebSearch", "WebFetch"} <= set(opts.allowed_tools)
+    assert not ({"WebSearch", "WebFetch"} & set(opts.disallowed_tools))
