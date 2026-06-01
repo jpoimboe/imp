@@ -273,6 +273,62 @@ def _extract_responses_diagnostics(raw: dict[str, Any]) -> Diagnostics:
     return Diagnostics(block_warnings=tuple(warnings), thinkings=())
 
 
+def _collect_openai_url_citations(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """url_citation annotations across all message output_text parts →
+    [{url, title?}] (best-effort; only url guaranteed)."""
+    cites: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw.get("output", []) or []:
+        if item.get("type") != "message":
+            continue
+        for part in item.get("content", []) or []:
+            if part.get("type") != "output_text":
+                continue
+            for ann in part.get("annotations", []) or []:
+                if ann.get("type") != "url_citation":
+                    continue
+                url = ann.get("url")
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                c: dict[str, Any] = {"url": url}
+                if ann.get("title"):
+                    c["title"] = ann["title"]
+                cites.append(c)
+    return cites
+
+
+def _emit_openai_web_events(raw: dict[str, Any], elog: Any, aid: str) -> None:
+    """Normalized web events from Responses output. Each web_search_call →
+    a web_search tool_call.
+
+    Citation attribution caveat: url_citation annotations live on the assistant
+    output_text, not linked to a specific web_search_call id, so with >1 search
+    in a turn every search's tool_result carries the full citation list (no
+    per-search attribution is possible from this API shape). Single-search is
+    exact.
+    """
+    web_calls = [it for it in (raw.get("output") or [])
+                 if it.get("type") == "web_search_call"]
+    if not web_calls:
+        return
+    citations = _collect_openai_url_citations(raw)
+    for it in web_calls:
+        action = it.get("action") or {}
+        query = action.get("query", "")
+        call_id = it.get("id", "")
+        elog.append_tool_call(
+            agent_id=aid,
+            block=ToolUseBlock(id=call_id, name="web_search",
+                               input={"query": query}))
+        elog.append_tool_result(
+            agent_id=aid,
+            block=ToolResultBlock(call_id, "\n".join(
+                (f"{c['title']} — {c['url']}" if c.get("title") else c["url"])
+                for c in citations)),
+            citations=citations)
+
+
 def _openai_stop_reason(raw: dict[str, Any]) -> str | None:
     """Best-effort terminal marker for the llm_response event. Responses exposes
     `status` at the top level; the fake omits it → None, which is fine."""
@@ -486,6 +542,7 @@ class OpenAIAgentRunner:
                 agent_id=aid, provider=invocation.provider_name, model=self.model,
                 raw=raw, usage=raw.get("usage") or {},
                 stop_reason=_openai_stop_reason(raw))
+            _emit_openai_web_events(raw, elog, aid)
 
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
             if not tool_uses:
