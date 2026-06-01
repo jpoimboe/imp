@@ -27,7 +27,7 @@ from imp.cli.palette import should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
-from imp.engine import worktree
+from imp.engine import journal, worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
@@ -425,30 +425,71 @@ def _list_change_worktrees(control: Path) -> list[str]:
                   and (p / ".imp" / "change" / "change.json").exists())
 
 
+def _parse_jsonl(raw: bytes) -> list[dict]:
+    """Parse journaled events.jsonl bytes into event dicts, mirroring
+    JsonlEventLog.read: malformed lines become {"_malformed": True, ...}."""
+    out: list[dict] = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            out.append({"_malformed": True, "raw": line})
+    return out
+
+
+def _load_events_for_slug(control: Path, slug: str) -> list[dict] | None:
+    """Worktree first, journal second. Returns None if the slug is in neither.
+
+    Worktree-first is necessary, not merely preferred: a slug lives in exactly
+    one place (journal_commit runs once, concurrent with worktree removal), so
+    the only overlap is a crash mid-sequence where worktree-first harmlessly
+    returns identical content."""
+    try:
+        change = Change.load(control, slug)
+    except LoadError:
+        change = None
+    if change is not None:
+        return list(change.event_log().read())
+    raw = journal.journal_show(control, slug, "events.jsonl")
+    if raw is None:
+        return None
+    return _parse_jsonl(raw)
+
+
+def _resolve_default_slug(control: Path) -> str | None:
+    """No-slug default: most-recent in-flight worktree, else most-recent
+    journaled slug (by last-event timestamp), else None. _journal_last_activity
+    was added in Step 4."""
+    wts = _list_change_worktrees(control)
+    if wts:
+        return max(wts, key=lambda s: (control / ".imp" / "worktrees" / s
+                                       / ".imp" / "change" / "events.jsonl").stat().st_mtime)
+    journaled = journal.journal_slugs(control)
+    if not journaled:
+        return None
+    return max(journaled, key=lambda s: _journal_last_activity(control, s))
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
 
     control = _control_root()
-    slug = args.slug
+    slug = args.slug if args.slug is not None else _resolve_default_slug(control)
     if slug is None:
-        wts = _list_change_worktrees(control)
-        if not wts:
-            print("No in-flight Changes. Completed Changes: git log refs/imp/journal",
-                  file=sys.stderr)
-            return 2
-        slug = max(wts, key=lambda s: (control / ".imp" / "worktrees" / s
-                                       / ".imp" / "change" / "events.jsonl").stat().st_mtime)
-    try:
-        change = Change.load(control, slug)
-    except LoadError as err:
-        print(f"imp: {err}", file=sys.stderr)
+        print("imp: no Changes found (no in-flight or completed Changes)",
+              file=sys.stderr)
         return 2
 
-    events = list(change.event_log().read())
-    tree = narrative.build_tree(events)
+    events = _load_events_for_slug(control, slug)
+    if events is None:
+        print(f"imp: no such Change {slug!r}", file=sys.stderr)
+        return 2
 
-    from imp.cli.palette import should_use_color
+    tree = narrative.build_tree(events)
     width = _term_width()
     color = should_use_color(sys.stdout)
     lines = render_tree(tree, full=args.full, color=color, width=width)
@@ -456,15 +497,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
     return 0
 
 
-def _last_event_timestamp(events_path: Path) -> str:
-    """Return the timestamp of the last event in events.jsonl as local-time
-    ``YYYY-MM-DD HH:MM:SS``, or ``'-'`` if the file is missing, empty, or
-    has a malformed trailing line.
-    """
-    try:
-        text = events_path.read_text()
-    except FileNotFoundError:
-        return "-"
+def _format_last_timestamp(text: str) -> str:
+    """Local-time YYYY-MM-DD HH:MM:SS of the last event line in `text`, or '-'
+    when the text is empty / has a malformed trailing line."""
     lines = [line for line in text.splitlines() if line.strip()]
     if not lines:
         return "-"
@@ -474,6 +509,21 @@ def _last_event_timestamp(events_path: Path) -> str:
         return ts.strftime("%Y-%m-%d %H:%M:%S")
     except (json.JSONDecodeError, KeyError, ValueError):
         return "-"
+
+
+def _last_event_timestamp(events_path: Path) -> str:
+    try:
+        text = events_path.read_text()
+    except FileNotFoundError:
+        return "-"
+    return _format_last_timestamp(text)
+
+
+def _journal_last_activity(control: Path, slug: str) -> str:
+    raw = journal.journal_show(control, slug, "events.jsonl")
+    if raw is None:
+        return "-"
+    return _format_last_timestamp(raw.decode("utf-8", errors="replace"))
 
 
 # Spec §10: status shows only in-flight Changes; completed ones live in the
