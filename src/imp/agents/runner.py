@@ -70,6 +70,7 @@ class ChangeContext:
     slug: str
     title: str
     project_root: Path
+    workflow_dir: Path
 
 
 @dataclass(frozen=True, slots=True)

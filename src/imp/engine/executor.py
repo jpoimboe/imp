@@ -694,6 +694,7 @@ async def _run_agent_invocation(
         initial_messages=initial_messages,
         change_context=ChangeContext(
             slug=change.slug, title=change.title, project_root=change.project_root,
+            workflow_dir=change.workflow_dir,
         ),
         interactive=interactive,
         transcript_dir=transcript_dir,

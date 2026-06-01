@@ -138,7 +138,8 @@ def _inv(
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path),
+            slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         interactive=interactive, transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                mode="allow",

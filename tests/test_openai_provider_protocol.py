@@ -32,7 +32,8 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         provider_name="openai", model_name="gpt-4o-mini",
         system_prompt="hi",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
-        change_context=ChangeContext(slug="test", title="Test", project_root=tmp_path),
+        change_context=ChangeContext(slug="test", title="Test", project_root=tmp_path,
+                                     workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         interactive=False, transcript_dir=tmp_path / "s",
         fs_permissions=(), events_path=tmp_path / "events.jsonl",
     )

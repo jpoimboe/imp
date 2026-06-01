@@ -63,7 +63,8 @@ def _inv(provider, model, tmp_path):
     return AgentInvocation(
         agent_def=_agent("rev"), provider_name=provider, model_name=model,
         system_prompt="", initial_messages=(),
-        change_context=ChangeContext(1, tmp_path, tmp_path),
+        change_context=ChangeContext(
+            1, tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
         interactive=False, transcript_dir=tmp_path, fs_permissions=(),
         events_path=tmp_path / "e.jsonl")
 

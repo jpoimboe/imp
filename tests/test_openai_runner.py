@@ -53,6 +53,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
             slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         interactive=interactive, transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(
@@ -514,6 +515,7 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
         inv,
         change_context=ChangeContext(
             slug="test-2", title="Test 2", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )
     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",

@@ -80,6 +80,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     ctx.spawn_subagent = fake_spawn
     ctx.change_context = ChangeContext(
         slug="change-42", title="Change 42", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
 
     out = await dispatch_task(ctx, "reviewer", "please review")
@@ -138,6 +139,7 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
         parent_transcript_dir=tmp_path / "parent",
         change_context=ChangeContext(
             slug="change-7", title="Change 7", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )
 
@@ -223,7 +225,8 @@ async def test_dispatch_task_uses_subagent_model_role(tmp_path: Path) -> None:
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
+                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.resolved_roles = {"code_review": ProviderModel("openai", "gpt-5.2")}
 
     await dispatch_task(ctx, "reviewer", "review please")
@@ -252,7 +255,8 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
+                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     await dispatch_task(ctx, "reviewer", "go")
     inv = captured["inv"]
@@ -321,7 +325,8 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
+                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("powerful",)
     ctx.resolved_roles = {
         "code_review": ProviderModel("openai", "gpt-5.2"),     # frontmatter target
@@ -363,7 +368,8 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
+                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("powerful",)
     ctx.resolved_roles = {
         "code_review": ProviderModel("openai", "gpt-5.2"),
@@ -405,7 +411,8 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
+                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("powerful",)
     ctx.resolved_roles = {
         "code_review": ProviderModel("openai", "gpt-5.2"),
@@ -430,7 +437,8 @@ async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = lambda _inv: None  # type: ignore[assignment]
-    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
+                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("fast", "powerful")
     ctx.resolved_roles = {"powerful": ProviderModel("anthropic", "opus")}
 
@@ -461,7 +469,8 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     ctx.model_name = "claude-sonnet-4-6"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
     ctx.spawn_subagent = fake_spawn
-    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path)
+    ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
+                                       workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("fast", "balanced", "powerful")
     ctx.resolved_roles = {
         "fast": ProviderModel("anthropic", "claude-haiku-4-5-20251001"),

@@ -35,6 +35,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     )
     ctx.change_context = ChangeContext(
         slug="test-change", title="Test Change", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
     return ctx
 
@@ -128,6 +129,7 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
     ctx.parent_transcript_dir = tmp_path / "parent"
     ctx.change_context = ChangeContext(
         slug="test-change", title="Test Change", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
 
     async def fake_spawn(_inv: object) -> object:

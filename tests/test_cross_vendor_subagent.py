@@ -125,7 +125,8 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path),
+            slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
         interactive=False, transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                mode="allow", source=_SRC),),

@@ -92,6 +92,10 @@ async def dispatch_task(
     # Read change_context from ctx instead of fabricating it.
     cc = ctx.change_context or ChangeContext(
         slug="", title="", project_root=ctx.project_root,
+        # Degenerate path (no inherited change_context): mirror Change.workflow_dir
+        # (= project_root/.imp/change/workflow) so a fabricated context still
+        # points at the snapshot root.
+        workflow_dir=ctx.project_root / ".imp" / "change" / "workflow",
     )
 
     # Carryover important #1: render the subagent's Jinja template, same way

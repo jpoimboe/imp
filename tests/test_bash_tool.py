@@ -20,6 +20,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     )
     ctx.change_context = ChangeContext(
         slug="test-change", title="Test Change", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
     return ctx
 
