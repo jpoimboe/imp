@@ -2,10 +2,10 @@
 
 This is the integration test that proves the shipped default workflow runs
 end-to-end against a real LLM on a real (non-trivial) project — imp's own
-source tree. The coder agent makes a small, deterministic edit (a sentinel
-print at the top of the bash tool's function); we verify the workflow ran
-to completion, all events fired correctly, and the sentinel landed in the
-expected file.
+source tree. The implementer agent (dispatched by the implement phase's
+task-lead) makes a small, deterministic edit (a sentinel print at the top
+of the bash tool's function); we verify the workflow ran to completion, all
+events fired correctly, and the sentinel landed in the expected file.
 
 What this proves:
   1. The shipped workflow tree (`workflow.yaml`, `scripts/`, agents) runs
@@ -252,7 +252,12 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
 
     wf_yaml = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
     expected_gates = _walk_yaml_human_gates(wf_yaml)
-    assert expected_gates, "no human gates in workflow.yaml — test would never act"
+    # The superpowers workflow has NO ask/options human gates — the only gate
+    # (final-review) is an interactive AGENT, and it is disabled here via
+    # vars.final_review=false. So expected_gates is empty by design.
+    assert expected_gates == [], (
+        f"superpowers workflow should declare no ask/options gates; got {expected_gates}"
+    )
 
     # Override config.yaml to pin the exact model string. run_init wrote
     # provider-default models; we want determinism across run_init updates.
@@ -262,11 +267,19 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"  default:     {role_line}\n"
         f"  spec:        {role_line}\n"
         f"  spec_review: {role_line}\n"
+        f"  plan:        {role_line}\n"
+        f"  plan_review: {role_line}\n"
+        f"  task_lead:   {role_line}\n"
         f"  code:        {role_line}\n"
         f"  code_review: {role_line}\n"
         f"  fast:        {role_line}\n"
         f"  balanced:    {role_line}\n"
         f"  powerful:    {role_line}\n"
+        # Plan 1 config vars override: skip the interactive final gate so the
+        # change auto-merges deterministically (the spec phase still drives one
+        # interactive round). Exercises the final-review-gate branch -> merge.
+        "vars:\n"
+        "  final_review: false\n"
     )
     # imp/config.yaml is tracked (run_init wrote it, the seed commit captured
     # it), so fold the model-pin override back into the seed commit — otherwise
@@ -558,9 +571,9 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"expected status=completed, got {state['status']!r}"
     )
 
-    assert gates_answered == len(expected_gates), (
-        f"expected {len(expected_gates)} yaml-declared human gates to fire, "
-        f"saw {gates_answered}"
+    assert gates_answered == 0, (
+        f"superpowers workflow has no ask/options gates; saw {gates_answered} "
+        f"human_prompt_pending events"
     )
     assert asks_answered >= 1, (
         "interactive spec phase should produce at least one end-of-turn "
@@ -576,40 +589,49 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     )
     bash_src = bash_py.read_text()
     assert sentinel in bash_src, (
-        f"sentinel {sentinel!r} not found in {bash_py}; coder either skipped "
-        f"the edit, placed the sentinel elsewhere, or the documenter "
-        f"clobbered it.\nLast 500 chars of bash.py:\n{bash_src[-500:]}"
+        f"sentinel {sentinel!r} not found in {bash_py}; the implementer either "
+        f"skipped the edit or placed the sentinel elsewhere.\n"
+        f"Last 500 chars of bash.py:\n{bash_src[-500:]}"
     )
 
-    # ── No rework (authoritative) ──────────────────────────────────────
-    # The direct signal that something unexpected happened is a REWORK
-    # navigation EDGE — NOT a raw count of `step_started` (which re-emits on
-    # every agent invocation, including self-healed backoff retries). The robust
-    # signal is the rework EDGE: a step_completed whose action targets the
-    # implement phase / coder step via goto/resume. A clean single-task run
-    # produces NONE (run-tests passes → continue, reviewer approves → continue).
-    #
-    # Rework edges per workflow.yaml (verified against source):
-    #   - run-tests: {else: resume: coder}
-    #       → step_completed payload action = {"verb":"goto","target":"coder","resume":True}
-    #   - code-reviewer: {if verdict rework, goto: implement}
-    #       → step_completed payload action = {"verb":"goto","target":"implement","resume":False}
-    #   - merge-gate: {label: Back to implement, goto: implement}
-    #       → step_completed payload action = {"verb":"goto","target":"implement","resume":False}
-    # Both edge types use verb="goto"; `resume:` edges encode as goto+resume=True
-    # (verified against _action_payload in src/imp/engine/executor.py).
-    all_events = all_events_accum
-    rework_edges = [
-        e for e in all_events
-        if e.get("type") == "step_completed"
-        and (e.get("payload") or {}).get("action", {}).get("verb") == "goto"
-        and (e.get("payload") or {}).get("action", {}).get("target")
-            in {"implement", "coder"}
+    # ── No rework / no backstop (authoritative) ─────────────────────────
+    # A clean run produces NO rework edges. Rework/backstop edges (step_completed
+    # whose action is a back-edge), by issuing step → target:
+    #   run-tests (fail)        → resume task-lead       (failing suite)
+    #   code-reviewer task_gap  → goto   implement
+    #   code-reviewer plan_gap  → goto   plan-writer
+    #   task-lead  deviation    → resume plan-writer
+    #   spec/plan reviewer block→ resume spec-writer / plan-writer
+    #   *-commit-verify fail    → resume spec-writer / plan-writer
+    #   final-review rework     → goto   implement   (disabled via final_review=false)
+    # NOT rework: task-lead's own `goto task-lead` self-loop (one per task) — it
+    # targets task-lead but is ISSUED BY task-lead, so exclude that exact pair.
+    # NB: BOTH goto and resume serialize as verb "goto" (resume adds resume=True;
+    # executor.py:540-541 _action_payload), so matching verb=="goto" catches the
+    # resume-based backstops (run-tests/commit-check/reviewer/deviation) too.
+    def _is_rework(e: dict[str, Any]) -> bool:
+        if e.get("type") != "step_completed":
+            return False
+        p = e.get("payload") or {}
+        act = p.get("action") or {}
+        if act.get("verb") != "goto":
+            return False
+        step, target = p.get("step"), act.get("target")
+        if step == "task-lead" and target == "task-lead":
+            return False  # normal per-task progress, not rework
+        return target in {"implement", "task-lead", "plan-writer", "spec-writer"}
+
+    rework_edges = [e for e in all_events_accum if _is_rework(e)]
+    rework_pairs = [
+        (
+            (e.get("payload") or {}).get("step"),
+            (e.get("payload") or {}).get("action", {}).get("target"),
+        )
+        for e in rework_edges
     ]
     assert not rework_edges, (
-        f"REWORK/retry edge(s) detected (goto implement / resume coder) — "
-        f"a clean single-task run has none: "
-        f"{[(e.get('payload') or {}).get('step') for e in rework_edges]}"
+        f"rework/backstop edge(s) detected — a clean single-task run has none: "
+        f"{rework_pairs}"
     )
 
     # ── Clean working tree ─────────────────────────────────────────────
@@ -654,9 +676,11 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
 
     # Artifacts present: the default workflow writes spec/plan INTO the worktree
     # and commits them; merge-in-place lands them on the base branch at tmp_path.
-    for rel in (f"imp/docs/specs/{slug}.md", f"imp/docs/plans/{slug}.md"):
-        path = tmp_path / rel
-        assert path.exists(), f"expected artifact {path} after dogfood run"
+    # New layout (spec §12): docs/ layer dropped; plans are numbered.
+    spec_path = tmp_path / "imp" / "specs" / f"{slug}.md"
+    assert spec_path.exists(), f"expected spec artifact {spec_path} after run"
+    plans = sorted((tmp_path / "imp" / "plans").glob(f"{slug}-plan-*.md"))
+    assert plans, f"expected at least one imp/plans/{slug}-plan-N.md after run"
 
     # ── imp log smoke (journal-read path: worktree is gone) ────────────
     log_out = subprocess.run(
