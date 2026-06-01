@@ -161,7 +161,9 @@ class EventLog(Protocol):
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any) -> dict[str, Any]: ...
     def append_tool_result(self, *, agent_id: str | None,
-                           block: Any) -> dict[str, Any]: ...
+                           block: Any,
+                           citations: list[dict[str, Any]] | None = None,
+                           ) -> dict[str, Any]: ...
     def append(self, *, agent_id: str | None, type: str,
                payload: dict[str, Any]) -> dict[str, Any]: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
@@ -274,11 +276,18 @@ class _BaseEventLog:
             payload={"id": block.id, "name": block.name, "input": block.input})
 
     def append_tool_result(self, *, agent_id: str | None,
-                           block: Any) -> dict[str, Any]:
-        return self._emit(
-            agent_id=agent_id, type="tool_result",
-            payload={"id": block.tool_use_id, "content": block.content,
-                     "error": block.is_error})
+                           block: Any,
+                           citations: list[dict[str, Any]] | None = None,
+                           ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": block.tool_use_id, "content": block.content,
+            "error": block.is_error}
+        # Optional, web-only enrichment. Absent on every non-web result so the
+        # `tool_result` shape and _REQUIRED_KEYS stay unchanged. Empty list is
+        # treated as "no citations" — never write an empty array.
+        if citations:
+            payload["citations"] = citations
+        return self._emit(agent_id=agent_id, type="tool_result", payload=payload)
 
     def append(self, *, agent_id: str | None, type: str,
                payload: Any) -> dict[str, Any]:
