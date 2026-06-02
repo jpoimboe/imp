@@ -23,6 +23,7 @@ design
           You are a reviewer.
         tools:
       The spec looks good. Auth flows are clearly defined.
+      → status=Success · summary=Spec approved
     > Please add a section on token expiry.
     ✓ spec · status=Success · summary=Spec drafted
   approve

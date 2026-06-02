@@ -6,9 +6,10 @@ design
   spec
     ▸ context · anthropic/claude-sonnet-4-6 · 2 tools
     Drafting the spec.
-    ▸ thinking · 114 chars
-    ▸ 2 tools · 1 bash · 1 read_file
-    ▸ task → reviewer · 2 events · → {"status": "Success", "summary": "Spec a
+    task → reviewer
+      ▸ context · anthropic/claude-sonnet-4-6 · 0 tools
+      The spec looks good. Auth flows are clearly defined.
+      → status=Success · summary=Spec approved
     > Please add a section on token expiry.
     ✓ spec · status=Success · summary=Spec drafted
   approve
