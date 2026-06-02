@@ -129,6 +129,16 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
+def test_review_phase_stamps_trailers_after_autosquash() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    review = next(p for p in wf.phases if p.name == "review")
+    names = [s.name for s in review.steps]
+    assert "stamp-trailers" in names, names
+    assert names.index("stamp-trailers") == names.index("autosquash") + 1, names
+    assert names.index("stamp-trailers") < names.index("code-reviewer"), names
+
+
 def test_fast_path_gates_skip_depth_keep_safety() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())

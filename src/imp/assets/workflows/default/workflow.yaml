@@ -135,6 +135,12 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}   # rebase conflict → human resolves
 
+      - name: stamp-trailers
+        command: ./scripts/stamp-trailers.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, pause: true}   # self-verify failed → human resolves
+
       - name: code-reviewer
         file: agents/code-reviewer.md
         model_role: code_review
