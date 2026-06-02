@@ -50,7 +50,7 @@ import pytest
 import yaml
 
 from imp.engine import journal
-from tests._live import _await_worktree, first_opted_in
+from tests._live import _await_worktree, build_isolated_venv, first_opted_in
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -169,31 +169,27 @@ def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
         f"{tracked_imp.stdout}"
     )
 
-    # Isolated venv: --system-site-packages reuses host deps (fast); editable
-    # install of the COPY (--no-deps) puts the copy's src/ ahead of the host
-    # editable path-entry on THIS venv's sys.path, so only `imp` is overridden.
-    venv_dir = tmp_path / ".venv"
-    subprocess.run(
-        [sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)],
-        check=True,
-    )
-    venv_python = venv_dir / "bin" / "python"
-    subprocess.run(
-        [str(venv_python), "-m", "pip", "install", "-e", str(tmp_path),
-         "--no-deps", "-q"],
-        check=True,
-    )
+    # FULLY isolated venv: NO --system-site-packages, so the host's editable
+    # `imp` cannot shadow the copy. uv installs the copy + its deps fast; the
+    # one-time dep install at seed is negligible against the ~25-min live run.
+    venv_python = build_isolated_venv(tmp_path)
 
-    # Pre-flight: prove the venv's `imp` is the copy, not the real repo. Fail
-    # loudly BEFORE running the (expensive, live) workflow.
+    # Pre-flight: prove the venv's `imp` is the COPY (the edit root), not the
+    # host repo — and probe via the SAME interpreter and cwd the agent's
+    # run-tests uses, so the guard checks the invocation that actually bites.
+    # IMP_PROJECT_ROOT == tmp_path for the dogfood, so "under the edit root"
+    # means under tmp_path/src/imp.
     probe = subprocess.run(
         [str(venv_python), "-c", "import imp, sys; sys.stdout.write(imp.__file__)"],
+        cwd=tmp_path,
         capture_output=True, text=True, check=True,
     )
     resolved = Path(probe.stdout.strip()).resolve()
-    assert str(resolved).startswith(str(tmp_path.resolve())), (
-        f"venv imp resolves to {resolved}, not under the temp copy {tmp_path}; "
-        f"import isolation failed — the host editable repo is shadowing it."
+    edit_root_pkg = (tmp_path / "src" / "imp").resolve()
+    assert resolved.is_relative_to(edit_root_pkg), (
+        f"venv imp resolves to {resolved}, not under the edit root "
+        f"{edit_root_pkg}; import isolation failed — the host editable repo "
+        f"is shadowing it."
     )
     return venv_python
 
