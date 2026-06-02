@@ -184,6 +184,9 @@ async def dispatch_task(
         resolved_roles=ctx.resolved_roles,
         coordinator=ctx.coordinator,
         subagent_depth=child_depth,
+        # Same object as event_log= above, but a distinct role: log= is the
+        # nudge-event sink passed to build_continuation_fn; event_log= is the
+        # invocation's stored audit log. For subagents both are ctx.event_log.
         log=ctx.event_log,
     )
 
