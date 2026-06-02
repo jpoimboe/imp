@@ -1,7 +1,7 @@
 ---
 name: task-lead
 description: Implement-phase controller — pick the next task, dispatch implementer + two reviewers, adjudicate, commit one clean unit, record progress.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task, commit]
 subagents: [implementer, spec-task-reviewer, quality-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -50,12 +50,35 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
      The `autosquash` step folds it into the original task commit before review, so
      the final branch stays one-commit-per-task (Resolution 6). Do **not** make a
      second new commit for a re-opened task.
-3. Dispatch both reviewers on the result (independent eyes) at the **`balanced`
-   tier**: `task(subagent_name="spec-task-reviewer", model_tier="balanced", …)`
-   and `task(subagent_name="quality-reviewer", model_tier="balanced", …)`, giving
-   each the task text + spec. (Implementer → the `fast` tier; reviewers and your own judgment → the
-   `balanced` tier, per spec §11. Name tiers, never specific model names — the
-   configured provider may not be Anthropic.)
+3. **Framing consistency check (before dispatching reviewers).** Confirm your task
+   framing is internally consistent with the spec. If your own decomposition
+   contradicts the spec — e.g. you're about to tell the reviewer "part 1 of N" for
+   a change the spec calls a single atomic commit — that is a **deviation**, not a
+   puzzle for the reviewer. Record why in `progress.md`, set `deviation: true`, and
+   return so the engine resumes the plan-writer to fix the plan. If the implementer
+   already committed this task, record its `imp-task-<N>-end` tag in `progress.md`
+   too, so the revised plan accounts for the existing commit rather than orphaning
+   it. Never hand a reviewer contradictory framing.
+
+   **State what you already verified.** In each reviewer's dispatch message, state
+   the verification you actually ran: always the test state (e.g. "`make test`
+   green at `<sha>`"), and **only when `$IMP_LINT_COMMAND` is configured**, "lint
+   clean." State only what you ran — do not claim lint-clean when no lint command
+   is configured.
+
+   {% if vars.fast_path %}
+   **Fast-path: one reviewer.** Dispatch ONLY `spec-task-reviewer` (spec-conformance
+   is the load-bearing check on trivial work). Do **not** dispatch `quality-reviewer`
+   at all for this change. Run the one reviewer at the **`balanced` tier**:
+   `task(subagent_name="spec-task-reviewer", model_tier="balanced", …)`.
+   {% else %}
+   Dispatch **both** reviewers (independent eyes), each at the **`balanced` tier**:
+   `task(subagent_name="spec-task-reviewer", model_tier="balanced", …)` and
+   `task(subagent_name="quality-reviewer", model_tier="balanced", …)`.
+   {% endif %}
+   Give each dispatched reviewer the task text + spec. (Implementer → the `fast` tier;
+   reviewers and your own judgment → the `balanced` tier, per spec §11. Name tiers, never
+   specific model names — the configured provider may not be Anthropic.)
 4. **Adjudicate.** Load the receiving-code-review discipline
    (`load_skill(name="receiving-code-review")`) and decide which findings are
    valid (Critical/Major must be addressed; Minor/Nit may be deferred as
@@ -63,13 +86,31 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
    AMEND** its task commit (`commit(..., amend=true)`): the task commit is HEAD
    throughout this loop, so amend keeps it one clean logical commit, no rebase.
    Re-review until no blocking findings remain.
+
+   **Trailer survives every amend.** When you re-dispatch the implementer to amend,
+   remind it that amend replaces the whole message, so the `Task: imp-task-<N>-end`
+   line MUST be re-included.
+
+   **Message/trailer-only fixes you do yourself.** If the only fix is to the commit
+   **message or trailer** (no file changes) — e.g. HEAD lost its `Task:` trailer —
+   do NOT spawn an implementer. Amend `HEAD` yourself:
+
+     commit(paths=[], message="<full message>\n\nTask: imp-task-<N>-end", amend=true)
+
+   **Precondition:** only do this when `git status` shows a **clean index**. An
+   empty-paths amend folds any already-staged change into the commit; if the index
+   is dirty, route the fix to the implementer instead. File-touching fixes always
+   go to the implementer.
 5. Append to `/project/.imp/change/progress.md` (create it if missing): the task
    completed, **its tag `imp-task-<N>-end`** (the ledger entry from step 2) and the
    incremented next-free tag number, any carried followups (deferred Minor/Nit),
-   and any deviation note. **If a dispatch returned no clean structured result —
-   a subagent errored, or you had to redo its work yourself — record that under
-   an `open_items` note here**, so the summarizer surfaces the degradation in
-   `imp log` and the final summary. A degraded run must be self-reporting.
+   and any deviation note. **Record an `open_items` note whenever a round was NOT
+   clean on first pass** — any of: a reviewer raised a blocking finding; a gate
+   (`commit-check` / `run-tests`) failed and resumed you; a commit had to be amended
+   for **correctness** (not review polish); or any re-dispatch-for-fix occurred. A
+   degraded run must be self-reporting. The line between polish and correctness:
+   renaming a variable for clarity = polish (no note); fixing a wrong return value
+   or a lint error = correctness (record it).
 6. **Deviation escape hatch.** If implementing this task reveals the plan is
    wrong (a task can't be done as written, an assumption is false), set
    `deviation: true` and return — the engine resumes plan-writer to revise this
@@ -77,8 +118,9 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
 7. Return: `done: true` only when the plan is fully implemented; otherwise
    `done: false` (the engine re-enters you fresh for the next task).
 
-Discipline: never dispatch two implementers in parallel; never skip a reviewer;
-never move on with blocking findings open. When a subagent returns
+Discipline: never dispatch two implementers in parallel; never skip a reviewer
+(the one exception is `quality-reviewer` on a `vars.fast_path` change — see step 3;
+`spec-task-reviewer` is never skipped); never move on with blocking findings open. When a subagent returns
 `result: NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the missing context
 and **re-dispatch**. Because the re-dispatch is a fresh subagent with an empty
 context window, you must **re-pack the full context into the new
