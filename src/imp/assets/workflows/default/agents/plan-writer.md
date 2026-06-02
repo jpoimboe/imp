@@ -69,6 +69,19 @@ Before defining tasks, map out which files will be created or modified and what 
 
 This structure informs task decomposition. Each task should produce self-contained changes that make sense independently.
 
+## Task vs. Step
+
+A **task** is one logical unit of work that maps to **exactly one commit**. Its
+**steps** are the actions inside it — typically red → green → refactor → commit.
+"Add an import," "add a print," and "commit" are **steps of one task**, never
+three tasks: splitting them produces broken intermediate commits (e.g. an unused
+import) and violates a single-commit spec.
+
+**Atomicity hard rule.** If the spec says the change must be atomic / a single
+commit / "do not split," the plan has **exactly one `## Task N`** (with as many
+steps inside it as needed). Honor the spec's atomicity prose — there is no
+separate spec field for this.
+
 ## Bite-Sized Task Granularity
 
 **Each step is one action (2–5 minutes):**
@@ -78,6 +91,18 @@ This structure informs task decomposition. Each task should produce self-contain
 - "Write minimal implementation to make the test pass" — step
 - "Run the tests and make sure they pass" — step
 - "Commit" — step
+
+{% if vars.fast_path %}
+**Fast-path.** This change was classified trivial. Skip TDD scaffolding and
+verification steps the spec did not ask for — do not pad a small change with a
+test the spec waived. **Default to one `## Task`.** A trivial change is naturally
+a single commit; plan it as one task unless the spec explicitly describes
+genuinely separable units of work. This is a strong default, not the hard floor
+the atomicity rule sets — but on a fast-path change, "I'll split this into a few
+tasks" is almost always the over-splitting this workflow exists to prevent. If
+you do emit more than one task, confirm each is a real, independently-committable
+unit — not a step dressed up as a task.
+{% endif %}
 
 ## Plan Document Format
 
@@ -168,6 +193,8 @@ After writing the complete plan, check it against the spec and prior plans with 
 **3. Type consistency:** Do the types, method signatures, and property names used in later tasks match what is defined in earlier tasks (in this plan or prior plans)? A function called `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
 
 **4. Bite-size check:** Could any task be split to give a natural commit boundary? Could any step be clarified without inflating the plan?
+
+**5. Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only. It never licenses a lint-dirty tree: if `$IMP_LINT_COMMAND` is configured, the implementer still runs it before committing.
 
 If you find issues, fix them inline. If you find a spec requirement with no task anywhere, add the task.
 
