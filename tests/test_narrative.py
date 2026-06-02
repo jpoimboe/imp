@@ -716,6 +716,19 @@ def test_agent_output_stashes_args_and_emits_prose_for_long_fields() -> None:
     assert lits[0].text.startswith("A long summary.")
 
 
+def test_agent_output_skips_whitespace_only_prose_field() -> None:
+    # A whitespace-only multi-line field passes _is_prose_field (it contains a
+    # newline) but must NOT emit a blank LiteralTextNode — the `v.strip()` guard.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("0", "change_created", change_id=1, title="x"))
+    b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
+    b.add(_ev("2", "agent_output", agent_id="step:build/coder",
+              notes="   \n   ", status="Success"))
+    step = b._step_stack[-1]
+    lits = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
+    assert lits == []
+
+
 def test_structural_repr_covers_new_node_types() -> None:
     lit = nv.LiteralTextNode(text="hi")
     bc = nv.BreadcrumbLine(step_name="s", elapsed_s=1.0,
@@ -795,3 +808,28 @@ def test_same_phase_call_leaves_current_phase_open() -> None:
     phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
     assert len(phases) == 1
     assert phases[0].closed is False
+
+
+def test_empty_prose_llm_response_yields_no_agent_text_node() -> None:
+    # A thinking-only turn (no text block) renders to empty prose. It must NOT
+    # produce an AgentTextNode — that would render as an indent-only blank line.
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("2", "thinking", agent_id="a", content="hmm"),
+        _ev("3", "llm_response", agent_id="a",
+            raw={"content": [{"type": "thinking", "thinking": "hmm"}]}, usage={}),
+        _ev("4", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "real prose"}]}, usage={}),
+    ])
+    # Collect AgentTextNodes anywhere under the tree (they live under the StepNode).
+    def _agent_texts(node):
+        found = []
+        if isinstance(node, nv.AgentTextNode):
+            found.append(node)
+        for c in getattr(node, "children", []):
+            found.extend(_agent_texts(c))
+        return found
+
+    nodes = _agent_texts(tree.root)
+    assert len(nodes) == 1                       # only the real-prose turn
+    assert nodes[0].text == "real prose"

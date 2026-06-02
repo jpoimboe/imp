@@ -575,7 +575,13 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Token accumulation already happened in add(); here we only build the node.
     self._flush_burst()
-    self._append(AgentTextNode(payload=p))
+    node = AgentTextNode(payload=p)
+    # Skip thinking-only / tool-only turns (no prose) — an empty AgentTextNode
+    # renders as one indent-only blank line. node.text computes and caches once;
+    # on a real turn the same cached parse is reused at render time. (This moves
+    # the parse lazy->eager for llm_response — negligible, but a real shift.)
+    if node.text.strip():
+        self._append(node)
 
 
 def _h_thinking(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -600,7 +606,9 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     step = self._step_stack[-1]
     step.agent_output = p
     for k, v in p.items():
-        if _is_prose_field(k, v):
+        # `_is_prose_field` already screens most empties; the `.strip()` is
+        # belt-and-suspenders for a whitespace-only multi-line field.
+        if _is_prose_field(k, v) and v.strip():
             self._append(LiteralTextNode(text=v))
 
 
