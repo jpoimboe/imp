@@ -139,6 +139,21 @@ def test_review_phase_stamps_trailers_after_autosquash() -> None:
     assert names.index("stamp-trailers") < names.index("code-reviewer"), names
 
 
+def test_no_agent_declares_the_commit_tool() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    for agent in wf.agents.values():
+        assert "commit" not in agent.tools, f"{agent.name} still declares commit"
+
+
+def test_committing_agents_declare_bash() -> None:
+    # implementer/task-lead/spec-writer/plan-writer commit with raw git via bash.
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    for name in ("implementer", "task-lead", "spec-writer", "plan-writer"):
+        assert "bash" in wf.agents[name].tools, f"{name} missing bash"
+
+
 def test_fast_path_gates_skip_depth_keep_safety() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
