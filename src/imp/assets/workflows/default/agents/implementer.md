@@ -1,7 +1,7 @@
 ---
 name: implementer
-description: Implement one task with TDD; apply the task-lead's directed fixes; commit (or amend) the task.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, commit]
+description: Implement one task; apply the task-lead's directed fixes; commit the task with git.
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   result: {type: enum, values: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]}
@@ -58,7 +58,7 @@ Once you're clear on requirements:
 1. Implement exactly what the task specifies
 2. If the task calls for tests, write them test-first per TDD (write the failing test first, then make it pass); if the plan waives tests, do **not** add them
 3. Verify implementation works
-4. Commit your work (see Commit Modes below) — but FIRST run the lint-clean gate if `$IMP_LINT_COMMAND` is set (see Self-Review); lint must pass *before* the commit, not after
+4. Commit your work with `git` (see Committing below) — but FIRST run the lint-clean gate if `$IMP_LINT_COMMAND` is set (see Self-Review); lint must pass *before* the commit, not after
 5. Self-review (see below)
 6. Report your results **by calling `complete_step`** (see Report Format) — a turn that ends in prose instead of a tool call is a failure, not a report.
 
@@ -68,7 +68,7 @@ or "BLOCKED", report=…)`. You will not be penalized for escalating.
 
 ## Apply, Do Not Adjudicate
 
-The task-lead decides which reviewer findings are valid. When the task-lead tells you to make specific fixes, make exactly those fixes — do not add, remove, or modify other things. After applying fixes, commit using the mode the task-lead specified (amend for within-loop fixes).
+The task-lead decides which reviewer findings are valid. When the task-lead tells you to make specific fixes, make exactly those fixes — do not add, remove, or modify other things. After applying fixes, commit using the mode the task-lead specified (a `git commit --fixup=…` for within-loop fixes — see Committing).
 
 ## Code Organization
 
@@ -98,36 +98,44 @@ your transcript. So a `NEEDS_CONTEXT`/`BLOCKED` report MUST carry the bridge
 explicitly: **what you learned so far + what you specifically need to proceed**.
 Anything not in a commit, a file, or this `report` is lost.
 
-## Commit Modes
+## Committing
 
-The task-lead's dispatch message tells you exactly which mode to use and gives you the task's tag (e.g. `imp-task-3-end`). The `-end` suffix is a mandatory delimiter — use the tag verbatim, including `-end`.
+Commit with **raw `git`** in `bash` (working dir is the project root; use
+relative paths or `$IMP_PROJECT_ROOT`). Do **not** add any `Task:` trailer and
+do **not** add a `Change:` trailer — the workflow stamps `Change:` once at the
+top of the review phase, after history is final. The task-lead's dispatch
+message tells you which mode to use.
 
-**INITIAL task work** — a new commit. Include the line `Task: imp-task-<N>-end` in the commit message body:
-
-```
-commit(paths=[…changed files…], message="<type>: <task summary>\n\nTask: imp-task-<N>-end")
-```
-
-The `commit` tool also stamps the `Change:` trailer automatically.
-
-**WITHIN-LOOP review fix** (same task, its commit is still HEAD) — amend:
+**INITIAL task work** — a new commit:
 
 ```
-commit(paths=[…], message="<updated message>\n\nTask: imp-task-<N>-end", amend=true)
+git add <changed files>
+git commit -m "<type>: <task summary>"
 ```
 
-> ⚠️ **Amend replaces the ENTIRE commit message.** You MUST re-include the
-> `Task: imp-task-<N>-end` line every time you amend — if you drop it, the task
-> trailer is gone and a downstream gate will reject the commit. Re-state the tag
-> verbatim, including `-end`.
-
-**RE-OPENING a buried task** (its commit is no longer HEAD) — fixup, targeting the task by its tag:
+**WITHIN-LOOP review fix** (same task, you are fixing what you just did): edit
+the tree to the desired **final** state, then record a fixup of the current
+commit — never `--amend`, never history surgery:
 
 ```
-commit(paths=[…], message="", fixup=":/imp-task-<N>-end")
+git add <changed files>
+git commit --fixup=HEAD
 ```
 
-The `:/…` revspec re-resolves by message after any rebase, and it matches only the original task commit (fixup! commits copy only the subject, never the `Task:` body line). The fixup carries no trailer; `autosquash` folds it into the trailered target before review.
+A "remove the test file" fix is just this: delete the file (`git rm <file>`),
+then `git commit --fixup=HEAD`. The reverting delta rides in one fixup.
+
+**RE-OPENING a buried task** (its commit is no longer HEAD): the task-lead hands
+you the target commit's **SHA**. Fix the tree, then:
+
+```
+git add <changed files>
+git commit --fixup=<SHA>
+```
+
+Every `fixup!` commit is transient — `autosquash` folds it into its target
+before review, so the final branch is one clean commit per task. You never
+rebase, reset, or amend yourself.
 
 ## Before Reporting Back: Self-Review
 
