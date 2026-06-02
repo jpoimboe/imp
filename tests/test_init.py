@@ -171,3 +171,14 @@ def test_init_seeds_tier_roles(tmp_path: Path) -> None:
     assert models["fast"] == "claude-haiku-4-5-20251001"
     assert models["balanced"] == "claude-sonnet-4-6"
     assert models["powerful"] == "claude-opus-4-7"
+
+
+def test_init_scaffolds_commented_lint_command(tmp_path: Path) -> None:
+    run_init(
+        tmp_path,
+        input_fn=lambda _p: "",
+        output_fn=lambda _m: None,
+        picker_fn=lambda _avail: ["anthropic"],
+    )
+    text = (tmp_path / "imp" / "config.yaml").read_text()
+    assert "# lint_command:" in text

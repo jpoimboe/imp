@@ -215,9 +215,13 @@ def run_init(
     shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
 
     cfg = _build_role_map(providers, env_vars)
-    (imp_dir / "config.yaml").write_text(
-        yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False)
+    body = yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False)
+    lint_hint = (
+        "\n# Optional lint-clean gate: a command the implementer runs before each\n"
+        "# commit (separate from the test suite). Absent => no lint gate.\n"
+        '# lint_command: "make lint"\n'
     )
+    (imp_dir / "config.yaml").write_text(body + lint_hint)
 
     # Internal state lives under .imp/ (gitignored wholesale). No per-.imp
     # .gitignore — the project .gitignore ignores .imp/ entirely (spec §8).
