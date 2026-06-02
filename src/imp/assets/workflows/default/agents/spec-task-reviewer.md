@@ -65,9 +65,17 @@ Set `blocking: true` if any Critical or Major findings are present. Set `blockin
 
 ## Report Format
 
-Report your findings as:
-- ✅ Spec compliant (if everything matches after code inspection)
-- ❌ Issues found: list specifically what's missing or extra, with file:line references and severity classification
+You run non-interactively: there is no user to talk to and a turn that ends in
+prose produces no result. **Finish by calling `complete_step(status="Success",
+findings=…, blocking=…)`** — the contract is terminal, not optional.
+
+- `findings` (string): your full review. Either ✅ Spec compliant (everything
+  matches after code inspection), or ❌ Issues found — list specifically what is
+  missing or extra, with `file:line` references and a severity per finding.
+- `blocking` (bool): `true` if any Critical or Major finding is present;
+  `false` if findings are Minor/Nit only or there are none.
+
+Put the entire review inside `findings`. Do not answer in prose.
 
 ---
 

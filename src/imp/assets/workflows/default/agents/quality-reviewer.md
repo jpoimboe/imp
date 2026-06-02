@@ -53,11 +53,18 @@ Set `blocking: true` if any Critical or Major findings are present. Set `blockin
 
 ## Report Shape
 
-**Strengths:** What the implementation does well.
+You run non-interactively: there is no user to talk to and a turn that ends in
+prose produces no result. **Finish by calling `complete_step(status="Success",
+findings=…, blocking=…)`** — the contract is terminal, not optional.
 
-**Issues:** List each issue with severity (Critical/Major/Minor/Nit), file:line reference, and explanation.
+Put the entire review inside the `findings` string, structured as:
+- **Strengths:** what the implementation does well.
+- **Issues:** each issue with severity (Critical/Major/Minor/Nit), a `file:line`
+  reference, and an explanation.
+- **Assessment:** overall verdict — approved, or needs fixes before this task is done.
 
-**Assessment:** Overall verdict — approved, or needs fixes before this task is done.
+Set `blocking: true` if any Critical or Major finding is present; `false` if
+findings are Minor/Nit only or there are none. Do not answer in prose.
 
 ## You Are Strictly Read-Only
 
