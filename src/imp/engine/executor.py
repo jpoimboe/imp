@@ -21,15 +21,16 @@ import anyio
 
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import (
-    AgentInvocation,
     ChangeContext,
     Message,
     TextBlock,
 )
-from imp.engine import error_policy
-from imp.engine.agent_run import AgentRunResult, ErrorInfo
+from imp.engine.agent_run import (
+    AgentRunResult,
+    build_agent_invocation,
+    drive_invocation,
+)
 from imp.engine.change import Change
-from imp.engine.completion import completion_instruction
 from imp.engine.env import engine_env
 from imp.engine.feedback import (
     format_agent_feedback,
@@ -43,7 +44,6 @@ from imp.engine.gates import (
 )
 from imp.engine.loader import load_workflow
 from imp.engine.model_tiers import effective_model_tiers
-from imp.engine.schema import validate_agent_output
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
@@ -523,57 +523,6 @@ def _action_payload(action: Action) -> dict[str, Any]:
     return {"verb": "unknown"}
 
 
-_NUDGE_LIMIT = 2
-
-
-def _build_continuation_fn(
-    *,
-    interactive: bool,
-    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
-    instruction: str,
-    log: EventLog,
-    agent_id: str | None,
-) -> Callable[[str], str | None | Awaitable[str | None]] | None:
-    """Build the end-of-turn continuation hook the provider calls when an
-    agent ends a turn without complete_step.
-
-    interactive: wrap the user chat input — the human keeps the conversation
-    going, so it always returns a string (an interactive agent ends only by
-    calling complete_step). Preserves today's interactive-resume behavior.
-
-    non-interactive: a fresh nudge counter per invocation. The first
-    _NUDGE_LIMIT calls return the corrective instruction; after that, None —
-    which makes the provider emit agent_incomplete (→ Pause).
-    """
-    if interactive:
-        if user_chat_input_fn is None:
-            return None
-
-        def _interactive(last_text: str) -> str | Awaitable[str]:
-            # The agent ended its turn without complete_step → it is asking the
-            # user. Announce the block (mirrors human_prompt_pending) BEFORE we
-            # read input, so out-of-process drivers know input is awaited.
-            # Provider-native stop_reason can't carry this — claude_code streams
-            # per-block AssistantMessages and logs stop_reason=None on each.
-            _emit(log, "awaiting_user_input", {"prompt": last_text},
-                  agent_id=agent_id)
-            return user_chat_input_fn("")
-
-        return _interactive
-
-    nudge = f"You ended your turn without calling `complete_step`. {instruction}"
-    count = 0
-
-    def _nudge(_last_text: str) -> str | None:
-        nonlocal count
-        if count >= _NUDGE_LIMIT:
-            return None
-        count += 1
-        return nudge
-
-    return _nudge
-
-
 async def _run_agent_invocation(
     *,
     agent_id: str,
@@ -594,66 +543,32 @@ async def _run_agent_invocation(
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
 ) -> AgentRunResult:
-    """Run an agent step to completion.
+    """Run one top-level agent step to a terminal AgentRunResult.
 
-    Returns an ``AgentRunResult`` whose fields are:
-    - ``output`` is the validated output dict, or ``None`` if errored/paused.
-    - ``errored`` is ``True`` when the run produced an error that warrants a retry.
-    - ``paused`` is ``True`` when the coordinator requested a pause mid-run.
-    - ``fatal`` is ``True`` when error_policy.decide returned Pause for the
-      error's category; the caller turns this into ``Pause`` directly so the
-      user sees the failure immediately and we don't burn LLM calls on retries
-      that can't possibly succeed.
-    - ``delay`` is a non-None float when error_policy.decide returned
-      RetryWithBackoff for the error's category. The caller is expected to
-      ``await anyio.sleep(delay)`` and re-invoke this function with
-      an incremented ``prior_backoff_attempts``. None means "no backoff
-      requested" (success, pause, or RetryNow).
-    - ``error`` carries the classified category/kind on the fatal/backoff/retry
-      paths so the caller can stamp it on Pause and on the agent_retry event.
-
-    The caller is responsible for:
-    - setting/clearing ``state.current_step``
-    - deciding what ``Action`` to return based on the output/errored/paused flags
-    - cleaning up ``transcript_dir`` on success
+    Computes the executor's caller-specific inputs (model resolution from the
+    persisted role map, prompt rendering against the shared write-log,
+    subagent_defs + max_tool_calls resolution), emits step_started, then defers
+    construction and the drain loop to the shared builder + driver. The backoff
+    sleep loop lives in _route_agent (it owns agent_retry events + transcript
+    re-entry). See drive_invocation for the field semantics of the result.
     """
-    # Resolution happened once up-front (run_change); look the role up in the
-    # persisted map and rebuild a live Provider from the stored strings. An
-    # unconfigured role would already have aborted the run in resolve_roles.
     assert state.resolved_roles is not None  # set by run_change before dispatch
     provider = provider_from_model(state.resolved_roles[model_role])
 
     rendered = render_prompt(
         agent_def.prompt_template_source, build_context(
             change_slug=change.slug, change_title=change.title,
-            change_auto_titled=change.auto_titled,
-            event_log=log,
+            change_auto_titled=change.auto_titled, event_log=log,
         ),
     )
 
-    # Change 5: tell every agent — from its own output schema — to call
-    # complete_step. Single source of truth shared with the nudge closure.
-    instruction = completion_instruction(agent_def.output_schema)
-    rendered = f"{rendered}\n\n{instruction}"
-
-    continuation_fn = _build_continuation_fn(
-        interactive=interactive,
-        user_chat_input_fn=user_chat_input_fn,
-        instruction=instruction,
-        log=log,
-        agent_id=agent_id,
-    )
-
-    # Resolve subagents into their AgentDefs
     subagent_defs = {
         name: workflow.agents[name]
         for name in agent_def.subagents
         if name in workflow.agents
     }
 
-    # Spec ceiling resolution: agent.max_tool_calls -> workflow default -> None
-    # (NO default-50). The tool-call cap is opt-in only; when unset the
-    # loop_guard + complete_step + max_loops are the bounds.
+    # Spec ceiling resolution: agent.max_tool_calls -> workflow default -> None.
     if agent_def.max_tool_calls is not None:
         resolved_max_tool_calls = agent_def.max_tool_calls
     elif workflow.defaults.max_tool_calls is not None:
@@ -661,9 +576,8 @@ async def _run_agent_invocation(
     else:
         resolved_max_tool_calls = None
 
-    # step_started is an executor lifecycle event (not from the runner), so
-    # agent_id=None — it does not anchor into the per-agent chain. Its id
-    # seeds the agent's first event (step_context) via first_event_parent_id.
+    # step_started is an executor lifecycle event (agent_id=None); its id seeds
+    # the agent's first event (step_context) via first_event_parent_id.
     started = _emit(log, "step_started", {
         "model": provider.model,
         "provider": provider.name,
@@ -672,93 +586,43 @@ async def _run_agent_invocation(
         **step_started_payload_extras,
     }, agent_id=None)
 
-    invocation = AgentInvocation(
+    invocation = build_agent_invocation(
         agent_def=agent_def,
         provider_name=provider.name,
         model_name=provider.model,
-        system_prompt=rendered,
+        rendered_system_prompt=rendered,
         initial_messages=initial_messages,
         change_context=ChangeContext(
-            slug=change.slug, title=change.title, project_root=change.project_root,
-            workflow_dir=change.workflow_dir,
+            slug=change.slug, title=change.title,
+            project_root=change.project_root, workflow_dir=change.workflow_dir,
         ),
         interactive=interactive,
+        user_chat_input_fn=user_chat_input_fn,
         transcript_dir=transcript_dir,
         fs_permissions=fs_permissions,
         events_path=change.events_path,
         subagent_defs=subagent_defs,
+        model_tiers=state.model_tiers or (),
         max_tool_calls=resolved_max_tool_calls,
-        user_input_fn=user_chat_input_fn if interactive else None,
-        continuation_fn=continuation_fn,
         agent_id=agent_id,
         event_log=log,
         change_state=state,
-        first_event_parent_id=started["id"],  # chains step_context.parent_id to step_started
+        first_event_parent_id=started["id"],
+        resolved_roles=state.resolved_roles,
+        coordinator=coordinator,
+        subagent_depth=0,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
-        resolved_roles=state.resolved_roles,
-        model_tiers=state.model_tiers or (),
+        log=log,
     )
 
     runner = provider.create_runner(invocation)
-    agent_output: dict[str, Any] | None = None
-
-    coordinator.attach_runner(runner.interrupt)
-    try:
-        async for event in runner.run(invocation):
-            _emit_event(log, event, agent_id=invocation.agent_id)
-            if event["type"] == "agent_output":
-                agent_output = event["payload"]
-            if event["type"] == "error":
-                payload = event.get("payload") or {}
-                category = payload.get("category", "unknown")
-                kind = payload.get("kind")
-                retry_after = (payload.get("detail") or {}).get("retry_after_seconds")
-                decision = error_policy.decide(
-                    category,
-                    prior_backoff_attempts=prior_backoff_attempts,
-                    hint_delay_seconds=retry_after,
-                )
-                if isinstance(decision, error_policy.Pause):
-                    return AgentRunResult(None, True, False, True, None,
-                                          ErrorInfo(category, kind))
-                if isinstance(decision, error_policy.RetryWithBackoff):
-                    return AgentRunResult(None, True, False, False,
-                                          decision.delay_seconds,
-                                          ErrorInfo(category, kind))
-                # RetryNow (agent_output_missing today)
-                return AgentRunResult(None, True, False, False, None,
-                                      ErrorInfo(category, kind))
-            if coordinator.should_pause:
-                # Coordinator triggered mid-step. Runner's interrupt() has fired.
-                return AgentRunResult(None, False, True, False, None)
-    finally:
-        coordinator.detach_runner()
-
-    if agent_output is None:
-        return AgentRunResult(None, True, False, False, None)
-
-    try:
-        validate_agent_output(agent_output, agent_def.output_schema)
-    except Exception as e:
-        # Executor-synthesized error (not runner-yielded): agent_id=None.
-        _emit(log, "error", {
-            "category": "agent_output_missing",
-            "kind": "output_validation",
-            "message": f"output validation: {e}",
-        }, agent_id=None)
-        return AgentRunResult(None, True, False, False, None,
-                              ErrorInfo("agent_output_missing", "output_validation"))
-
-    return AgentRunResult(agent_output, False, False, False, None)
+    return await drive_invocation(
+        invocation, runner, coordinator=coordinator, log=log,
+        emit_events=True, prior_backoff_attempts=prior_backoff_attempts,
+    )
 
 
 def _emit(log: EventLog, type_: str, payload: dict[str, Any], *,
           agent_id: str | None = None) -> dict[str, Any]:
     return log.append(agent_id=agent_id, type=type_, payload=payload)
-
-
-def _emit_event(log: EventLog, event: dict[str, Any], *,
-                agent_id: str | None = None) -> dict[str, Any]:
-    return log.append(agent_id=agent_id, type=event["type"],
-                      payload=event.get("payload", {}))
