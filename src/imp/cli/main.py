@@ -7,14 +7,9 @@ no spinner. Plan 3 adds the polished UX layer.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
-import os
-import shlex
 import shutil
-import subprocess
 import sys
-from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -341,87 +336,6 @@ def _term_width() -> int:
     return shutil.get_terminal_size((80, 24)).columns
 
 
-def _page_or_print(lines: Iterable[str], *, no_pager: bool) -> None:
-    """Write rendered ``lines`` to stdout, paging through ``$PAGER`` (default
-    ``less -FRX``) when ``sys.stdout.isatty()`` is true, ``no_pager`` is
-    False, and ``$PAGER`` is not set to an empty/whitespace string.
-
-    Falls back to ``print()`` per line when paging doesn't apply or the
-    pager binary cannot be started. Each input line should NOT have a
-    trailing newline; the helper adds one itself.
-    """
-    if no_pager or not sys.stdout.isatty():
-        for line in lines:
-            print(line)
-        return
-
-    pager_env = os.environ.get("PAGER")
-    if pager_env is not None:
-        stripped = pager_env.strip()
-        if not stripped:
-            # PAGER="" or whitespace: explicit disable, like git.
-            for line in lines:
-                print(line)
-            return
-        try:
-            cmd = shlex.split(stripped)
-        except ValueError:
-            # Malformed quoting in $PAGER (e.g. `less "unclosed`). Don't
-            # crash `imp log` — degrade to inline output, same as a
-            # missing pager binary.
-            for line in lines:
-                print(line)
-            return
-        if not cmd:
-            # Defensive: post-strip non-empty value can't normally split
-            # to empty, but if it does, fall through to inline output.
-            for line in lines:
-                print(line)
-            return
-    else:
-        cmd = ["less", "-F", "-R", "-X"]
-
-    # When the resolved pager is `less`, always pass an explicit `LESS`
-    # value to the child env: use the user's existing value if set,
-    # otherwise default to `FRX` so that `PAGER=less` behaves the same
-    # as the unset-PAGER default (`less -FRX`).
-    env: dict[str, str] | None = None
-    if os.path.basename(cmd[0]) == "less":
-        less_val = os.environ.get("LESS", "FRX")
-        env = {**os.environ, "LESS": less_val}
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            text=True,
-            env=env,
-        )
-    except (FileNotFoundError, OSError):
-        # Pager binary missing or unexecutable → silent fallback.
-        for line in lines:
-            print(line)
-        return
-
-    assert proc.stdin is not None  # stdin=PIPE guarantees this for type-checkers
-    try:
-        with contextlib.suppress(BrokenPipeError):
-            for line in lines:
-                proc.stdin.write(line + "\n")
-    finally:
-        with contextlib.suppress(BrokenPipeError):
-            proc.stdin.close()
-        # Ctrl-C in the pager raises KeyboardInterrupt out of proc.wait().
-        # Re-wait until the child actually exits so the user sees the pager
-        # behave normally instead of a Python traceback.
-        while True:
-            try:
-                proc.wait()
-                break
-            except KeyboardInterrupt:
-                pass
-
-
 def _list_change_worktrees(control: Path) -> list[str]:
     """Slugs of in-flight Change worktrees under .imp/worktrees/ (excludes the
     transient .merge-* scratch dirs)."""
@@ -500,7 +414,9 @@ def _cmd_log(args: argparse.Namespace) -> int:
     width = _term_width()
     color = should_use_color(sys.stdout)
     lines = render_tree(tree, full=args.full, color=color, width=width)
-    _page_or_print(lines, no_pager=args.no_pager)
+    # Lines carry no trailing newline; print() adds one. No pager — straight to stdout.
+    for line in lines:
+        print(line)
     return 0
 
 
@@ -648,10 +564,6 @@ def main(argv: list[str] | None = None) -> int:
     p_log.add_argument(
         "--full", action="store_true",
         help="Render every event (no tool-burst collapse).",
-    )
-    p_log.add_argument(
-        "--no-pager", action="store_true",
-        help="Disable the pager even when stdout is a TTY.",
     )
     p_log.set_defaults(func=_cmd_log)
 

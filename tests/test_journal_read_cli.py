@@ -51,7 +51,7 @@ def test_log_falls_back_to_journal_after_merge(
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        rc = main(["log", "--no-pager", "done-thing"])
+        rc = main(["log", "done-thing"])
     assert rc == 0
     assert "Done Thing" in buf.getvalue()
 
@@ -66,7 +66,7 @@ def test_log_unknown_slug_returns_rc_2(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
-    rc = main(["log", "--no-pager", "ghost"])
+    rc = main(["log", "ghost"])
     assert rc == 2
     assert "ghost" in capsys.readouterr().err
 
@@ -86,7 +86,7 @@ def test_log_no_slug_falls_through_to_journal(
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        rc = main(["log", "--no-pager"])  # no slug, no in-flight worktrees
+        rc = main(["log"])  # no slug, no in-flight worktrees
     assert rc == 0
     assert "Only One" in buf.getvalue()
 
