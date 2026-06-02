@@ -1,5 +1,5 @@
-"""The commit-verify gate scripts (spec §12): HEAD must touch the expected
-artifact AND carry a `Change: <slug>` trailer. Exercised against a real repo."""
+"""The commit-verify gate scripts: HEAD must touch the expected artifact.
+Trailer checks were moved to the review phase (stamp-trailers.sh)."""
 
 from __future__ import annotations
 
@@ -32,22 +32,13 @@ def _run(script: str, root: Path, slug: str) -> int:
     ).returncode
 
 
-def test_spec_verify_passes_on_trailered_commit(tmp_path: Path) -> None:
+def test_spec_verify_passes_on_commit_touching_spec(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / "imp" / "specs").mkdir(parents=True)
     (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
     _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: spec\n\nChange: 2026-06-01-x")
+    _git(root, "commit", "-m", "docs: spec")        # no Change: trailer
     assert _run("spec-commit-verify.sh", root, "2026-06-01-x") == 0
-
-
-def test_spec_verify_fails_without_trailer(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "imp" / "specs").mkdir(parents=True)
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: spec (no trailer)")
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
 
 
 def test_spec_verify_fails_when_file_untouched(tmp_path: Path) -> None:
@@ -69,14 +60,6 @@ def test_plan_verify_passes_on_newest_plan(tmp_path: Path) -> None:
     _git(root, "commit", "-m", "docs: plan 2\n\nChange: 2026-06-01-x")
     assert _run("plan-commit-verify.sh", root, "2026-06-01-x") == 0
 
-
-def test_plan_verify_fails_without_trailer(tmp_path: Path) -> None:
-    root = _repo(tmp_path)
-    (root / "imp" / "plans").mkdir(parents=True)
-    (root / "imp" / "plans" / "2026-06-01-x-plan-1.md").write_text("# plan 1\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: plan 1 (no trailer)")
-    assert _run("plan-commit-verify.sh", root, "2026-06-01-x") != 0
 
 
 def test_plan_verify_fails_when_plan_not_committed(tmp_path: Path) -> None:
@@ -140,9 +123,10 @@ def _src_commit(root: Path, name: str, msg: str) -> None:
     _git(root, "commit", "-m", msg)
 
 
-def test_implement_verify_passes_clean_trailered_one_per_task(tmp_path: Path) -> None:
+def test_implement_verify_passes_on_clean_tree(tmp_path: Path) -> None:
     root = _impl_repo(tmp_path, n_tasks=1)
-    _src_commit(root, "f.py", "feat: task 1\n\nChange: 2026-06-01-x")
+    _src_commit(root, "f.py", "feat: task 1")        # no trailer
+    _src_commit(root, "g.py", "feat: task 1 more")   # 2 commits, no count cap now
     assert _run("implement-commit-verify.sh", root, "2026-06-01-x") == 0
 
 
@@ -151,38 +135,6 @@ def test_implement_verify_fails_on_dirty_tree(tmp_path: Path) -> None:
     _src_commit(root, "f.py", "feat: task 1\n\nChange: 2026-06-01-x")
     (root / "f.py").write_text("uncommitted edit\n")     # implementer left work
     assert _run("implement-commit-verify.sh", root, "2026-06-01-x") != 0
-
-
-def test_implement_verify_fails_on_untrailered_commit(tmp_path: Path) -> None:
-    root = _impl_repo(tmp_path, n_tasks=1)
-    _src_commit(root, "f.py", "feat: task 1 (bash-committed, no trailer)")
-    assert _run("implement-commit-verify.sh", root, "2026-06-01-x") != 0
-
-
-def test_implement_verify_fails_when_nothing_committed(tmp_path: Path) -> None:
-    root = _impl_repo(tmp_path, n_tasks=1)               # no source commit
-    assert _run("implement-commit-verify.sh", root, "2026-06-01-x") != 0
-
-
-def test_implement_verify_fails_on_commit_sprawl(tmp_path: Path) -> None:
-    # 1 planned task but 2 source commits → one-commit-per-task violated.
-    root = _impl_repo(tmp_path, n_tasks=1)
-    _src_commit(root, "a.py", "feat: task 1 part a\n\nChange: 2026-06-01-x")
-    _src_commit(root, "b.py", "feat: task 1 part b\n\nChange: 2026-06-01-x")
-    assert _run("implement-commit-verify.sh", root, "2026-06-01-x") != 0
-
-
-def test_implement_verify_ignores_fixup_commits(tmp_path: Path) -> None:
-    # A fixup! commit is transient (folded by autosquash) — it must NOT count as a
-    # second source commit, nor trip the missing-trailer check.
-    root = _impl_repo(tmp_path, n_tasks=1)
-    _src_commit(root, "f.py", "feat: task 1\n\nChange: 2026-06-01-x")
-    target = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
-                            capture_output=True, text=True, check=True).stdout.strip()
-    (root / "f.py").write_text("fixed\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", f"--fixup={target}")            # no trailer, fixup! subject
-    assert _run("implement-commit-verify.sh", root, "2026-06-01-x") == 0
 
 
 def test_autosquash_folds_fixups_into_target(tmp_path: Path) -> None:
