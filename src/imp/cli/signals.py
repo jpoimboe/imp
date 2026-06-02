@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+from collections.abc import Iterator
 from typing import Any
 
 from imp.engine.change import Change
@@ -76,6 +77,20 @@ class InterruptCoordinator:
 
     def detach_runner(self) -> None:
         self._runner_interrupt = None
+
+    @contextlib.contextmanager
+    def runner_attached(self, interrupt_fn: Any) -> Iterator[None]:
+        """Attach `interrupt_fn` for the duration of a single drive, then
+        RESTORE the previous attachment (not clear it). Nesting-safe: a nested
+        subagent drive saves the parent's interrupt and reinstates it on exit,
+        so ESC stays clean for the parent after a subagent returns, and ESC
+        mid-subagent cancels the subagent runner."""
+        prev = self._runner_interrupt
+        self._runner_interrupt = interrupt_fn
+        try:
+            yield
+        finally:
+            self._runner_interrupt = prev
 
     @property
     def should_pause(self) -> bool:
