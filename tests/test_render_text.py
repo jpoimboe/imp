@@ -324,3 +324,46 @@ def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
     assert "✓ code-reviewer" in out2 and "41s" in out2
     assert "status=Success" in out2
     assert "→ goto(implement)" in out2
+
+
+def _sub(outcome=None, *, is_error=False, name="reviewer"):
+    """A SubagentFold with an empty nested builder and the given outcome string."""
+    return nv.SubagentFold(subagent_name=name, event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder(), outcome=outcome,
+                           is_error=is_error)
+
+
+def test_header_line_renders_subagent_boundary() -> None:
+    sub = _sub(name="reviewer")
+    # Subagent color, no fold glyph, no (running)/(error) suffix.
+    assert rt.header_line(sub, depth=2, color=False) == "    task → reviewer"
+
+
+def test_subagent_outcome_empty_yields_nothing() -> None:
+    assert list(rt.subagent_outcome_lines(_sub(outcome=None), depth=1,
+                                          color=False, width=80)) == []
+    assert list(rt.subagent_outcome_lines(_sub(outcome=""), depth=1,
+                                          color=False, width=80)) == []
+
+
+def test_subagent_outcome_scalars_inline_and_block_with_real_newlines() -> None:
+    outcome = json.dumps({"status": "Success", "blocking": False,
+                          "report": "line one\nline two"})
+    lines = list(rt.subagent_outcome_lines(_sub(outcome=outcome), depth=1,
+                                           color=False, width=80))
+    # Short scalars on one inline → line, at the passed depth (2-space indent).
+    assert lines[0] == "  → status=Success · blocking=False"
+    # The multi-line string field becomes a labeled block at the same depth,
+    # body indented one level deeper.
+    assert "  report:" in lines
+    assert any("line one" in ln for ln in lines)
+    assert any("line two" in ln for ln in lines)
+    # The escaped \n from json.dumps must NOT leak through as a literal.
+    assert not any("\\n" in ln for ln in lines)
+
+
+def test_subagent_outcome_non_json_renders_as_prose() -> None:
+    lines = list(rt.subagent_outcome_lines(_sub(outcome="dispatch failed: boom",
+                                                is_error=True),
+                                           depth=1, color=False, width=80))
+    assert lines == ["  dispatch failed: boom"]

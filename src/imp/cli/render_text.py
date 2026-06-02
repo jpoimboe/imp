@@ -8,6 +8,7 @@ expand-all.
 """
 from __future__ import annotations
 
+import json
 import textwrap
 from collections.abc import Iterator
 from typing import Any
@@ -49,15 +50,61 @@ def _line(text: str, depth: int, color: bool, *codes: str) -> str:
 
 
 def header_line(node: Any, *, depth: int, color: bool) -> str:
-    """The single header line for a container node (PhaseNode / StepNode), with
-    no children. Shared by `_render` and the live driver so indentation/label/
-    color stay identical in both paths."""
+    """The single header line for a container node (PhaseNode / StepNode /
+    SubagentFold), with no children. Shared by `_render` and the live driver so
+    indentation/label/color stay identical in both paths. For a SubagentFold this
+    is the `task → {name}` boundary: subagent color, no fold glyph, and no
+    (running)/(error) suffix — the live driver prints it while the subagent is
+    still running, so any status suffix would be permanently wrong once it
+    completes (completion is signaled by the outcome line instead)."""
     if isinstance(node, nv.PhaseNode):
         return _line(node.name, depth, color, *pal.NODE_COLORS["phase"])
+    if isinstance(node, nv.SubagentFold):
+        return _line(f"task → {node.subagent_name}", depth, color,
+                     *pal.NODE_COLORS["subagent"])
     label = node.name
     if node.interactive:
         label += " (interactive)"
     return _line(label, depth, color, *pal.NODE_COLORS["step"])
+
+
+def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
+                           width: int) -> Iterator[str]:
+    """The subagent's structured return value, rendered readably at the passed
+    `depth` (no internal +1 — the caller passes the prose depth). Empty when the
+    subagent has no outcome yet (still running / force-popped).
+
+    The outcome is `json.dumps(...)` of the structured output the parent consumed,
+    so its prose newlines are escaped to literal `\\n`. We parse it back: a dict
+    renders short scalar fields inline on one `→ key=value · …` line and each
+    multi-line string field as a labeled block with REAL newlines (wrapped like
+    agent prose). A non-dict (the error case — a failed dispatch returns a plain
+    string) renders as prose. Error-styled when `sub.is_error`."""
+    raw = sub.outcome or ""
+    if not raw:
+        return
+    codes = pal.NODE_COLORS["error"] if sub.is_error else pal.NODE_COLORS["subagent"]
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        data = None
+    if not isinstance(data, dict):
+        for line in _wrap(raw, width, depth):
+            yield pal.ansi(line, *codes, enabled=color)
+        return
+    scalars: list[str] = []
+    blocks: list[tuple[str, str]] = []
+    for k, v in data.items():
+        if isinstance(v, str) and "\n" in v:
+            blocks.append((k, v))
+        else:
+            scalars.append(f"{k}={v}")
+    if scalars:
+        yield _line("→ " + " · ".join(scalars), depth, color, *codes)
+    for k, v in blocks:
+        yield _line(f"{k}:", depth, color, *codes)
+        for line in _wrap(v, width, depth + 1):
+            yield pal.ansi(line, *codes, enabled=color)
 
 
 def _render(node: Any, *, depth: int, full: bool, color: bool,
