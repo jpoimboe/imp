@@ -67,7 +67,10 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
    is configured.
 
    {% if vars.fast_path %}
-   **Fast-path: one reviewer.** Dispatch ONLY `spec-task-reviewer` (spec-conformance
+   **Fast-path: the spec waived tests.** When you dispatch the implementer for a
+   fast-path task, state plainly in the dispatch message: "the spec waived tests —
+   do **not** add or run tests; make exactly the task's edits and commit."
+   **One reviewer.** Dispatch ONLY `spec-task-reviewer` (spec-conformance
    is the load-bearing check on trivial work). Do **not** dispatch `quality-reviewer`
    at all for this change. Run the one reviewer at the **`balanced` tier**:
    `task(subagent_name="spec-task-reviewer", model_tier="balanced", …)`.
