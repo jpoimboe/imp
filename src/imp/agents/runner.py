@@ -144,6 +144,9 @@ class AgentInvocation:
     # can drive a subagent with pause detection + interrupt attachment. Any to
     # avoid importing cli.signals here. None for legacy/test construction.
     coordinator: Any = None
+    # config.lint_command, threaded onto the child ToolContext by each provider
+    # so the agent bash tool can inject IMP_LINT_COMMAND. None => no lint gate.
+    lint_command: str | None = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}

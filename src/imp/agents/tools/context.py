@@ -59,6 +59,9 @@ class ToolContext:
     # provider. dispatch_task passes it to drive_invocation so a subagent gets
     # pause detection + interrupt attachment. None for legacy/test contexts.
     coordinator: Any = None
+    # Optional lint-clean gate command (config.lint_command). Threaded onto the
+    # subprocess env (IMP_LINT_COMMAND) by the bash tool. None => no lint gate.
+    lint_command: str | None = None
     # invocation_id counter for disambiguating same-named subagent invocations
     _subagent_counter: int = 0
 

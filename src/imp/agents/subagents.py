@@ -188,6 +188,7 @@ async def dispatch_task(
         # nudge-event sink passed to build_continuation_fn; event_log= is the
         # invocation's stored audit log. For subagents both are ctx.event_log.
         log=ctx.event_log,
+        lint_command=ctx.lint_command,
     )
 
     # Drive via the shared loop, with backoff (omission #4). Each backoff

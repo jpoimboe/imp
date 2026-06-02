@@ -73,6 +73,19 @@ def test_bash_registers_and_clears_running_processes(tmp_path: Path) -> None:
     assert ctx.running_processes == []
 
 
+def test_bash_exposes_imp_lint_command(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    ctx.lint_command = "make lint"
+    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_LINT_COMMAND"}))
+    assert out["returncode"] == 0
+    assert "make lint" in out["stdout"]
+
+
+def test_bash_no_lint_command_means_empty(tmp_path: Path) -> None:
+    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "echo [$IMP_LINT_COMMAND]"}))
+    assert "[]" in out["stdout"]
+
+
 def test_bash_terminates_on_runner_interrupt(tmp_path: Path) -> None:
     """terminate_running_processes mid-bash drains the registry and returns
     the killed processes; bash's returncode reflects the signal."""
