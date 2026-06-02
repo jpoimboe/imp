@@ -234,3 +234,60 @@ def test_autosquash_aborts_cleanly_on_conflict(tmp_path: Path) -> None:
                            capture_output=True, text=True, check=True).stdout.strip()
     assert before == after                                # aborted, branch intact
     assert not (root / ".git" / "rebase-merge").exists()  # no rebase left in progress
+
+
+def _change_subject(root: Path, ref: str) -> str:
+    return subprocess.run(
+        ["git", "log", "-1", "--format=%(trailers:key=Change,valueonly)", ref],
+        cwd=root, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def test_stamp_trailers_stamps_every_commit(tmp_path: Path) -> None:
+    root = _impl_repo(tmp_path, n_tasks=1)            # base, change.json, plan
+    _src_commit(root, "f.py", "feat: task 1")        # no trailer
+    _src_commit(root, "g.py", "feat: task 1 more")   # no trailer
+    assert _run("stamp-trailers.sh", root, "2026-06-01-x") == 0
+    # Every commit since the fork now carries the trailer.
+    revs = subprocess.run(
+        ["git", "rev-list", "main..HEAD"], cwd=root,
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    for h in revs:
+        assert _change_subject(root, h) == "2026-06-01-x", f"{h} not stamped"
+
+
+def test_stamp_trailers_is_idempotent(tmp_path: Path) -> None:
+    root = _impl_repo(tmp_path, n_tasks=1)
+    _src_commit(root, "f.py", "feat: task 1")
+    assert _run("stamp-trailers.sh", root, "2026-06-01-x") == 0
+    assert _run("stamp-trailers.sh", root, "2026-06-01-x") == 0
+    body = subprocess.run(
+        ["git", "log", "-1", "--format=%B", "HEAD"], cwd=root,
+        capture_output=True, text=True, check=True,
+    ).stdout
+    assert body.count("Change: 2026-06-01-x") == 1   # not duplicated
+
+
+def test_stamp_trailers_fails_on_empty_slug(tmp_path: Path) -> None:
+    root = _impl_repo(tmp_path, n_tasks=1)
+    _src_commit(root, "f.py", "feat: task 1")
+    assert _run("stamp-trailers.sh", root, "") != 0   # ${IMP_CHANGE_SLUG:?}
+
+
+def test_stamp_trailers_fails_on_empty_range(tmp_path: Path) -> None:
+    # change.json says base=main, but HEAD == fork (no commits since) → the
+    # empty-range guard fires: base detection is wrong, not "nothing to stamp".
+    root = _repo(tmp_path)
+    (root / "README.md").write_text("seed\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "seed")
+    cdir = root / ".imp" / "change"
+    cdir.mkdir(parents=True)
+    (cdir / "change.json").write_text('{"base_branch": "main", "slug": "2026-06-01-x"}')
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "chore: change metadata")
+    # No change branch / no divergence from main beyond what main already has:
+    # merge-base(main, HEAD) == HEAD, so the range main..HEAD is empty.
+    # (HEAD is already on main, so no force-update needed.)
+    assert _run("stamp-trailers.sh", root, "2026-06-01-x") != 0
