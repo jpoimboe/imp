@@ -22,7 +22,7 @@ import anyio
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
-from imp.engine.env import engine_env
+from imp.engine.env import engine_env, overlay_engine_env
 
 # Rewrite a LEADING `cd /project` (optionally `/subpath`, optionally single- or
 # double-quoted) to the real project root. `/project` is a virtual FS-tool
@@ -52,13 +52,13 @@ def _rewrite_leading_cd_project(command: str, project_root: str) -> str:
 async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
     command = _rewrite_leading_cd_project(command, str(ctx.project_root))
     cwd_path = cwd or str(ctx.project_root)
-    env = {
-        **os.environ,
-        **engine_env(project_root=ctx.project_root,
-                     change_slug=ctx.change_context.slug if ctx.change_context else "",
-                     change_title=ctx.change_context.title if ctx.change_context else "",
-                     lint_command=ctx.lint_command),
-    }
+    env = overlay_engine_env(
+        os.environ,
+        engine_env(project_root=ctx.project_root,
+                   change_slug=ctx.change_context.slug if ctx.change_context else "",
+                   change_title=ctx.change_context.title if ctx.change_context else "",
+                   lint_command=ctx.lint_command),
+    )
     # POSIX: start_new_session=True makes the child a new session leader so
     # SIGTERM to the PG affects the whole tree. Windows: this kwarg is ignored
     # and signal handling differs — out of V1 scope (we ship POSIX-first).

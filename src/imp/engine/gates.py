@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from imp.engine.env import overlay_engine_env
 from imp.engine.expr import EvalEnv, evaluate
 from imp.engine.types import Action, Continue, HumanOption, Rule, Step
 
@@ -56,15 +57,15 @@ def run_script(
     and `command:` strings are explicit shell expressions. The Change author
     and the workflow author are the same trust principal in V0.
 
-    `env_extra` is merged on top of the current process environment so that
-    engine-level variables (e.g. IMP_CHANGE_SLUG) are visible to scripts.
+    `env_extra` (an `engine_env` result) is overlaid authoritatively on the current
+    process environment so engine-level variables (e.g. IMP_CHANGE_SLUG) are visible
+    to scripts, while a stale inherited engine var (e.g. IMP_LINT_COMMAND from an
+    outer imp process) cannot leak past engine_env's "absent => no gate" contract.
     """
     # The loader only constructs script steps with a non-None command; this
     # assert is purely for mypy (command: str | None in Step's type).
     assert step.command is not None, "script step must have a command"
-    env = os.environ.copy()
-    if env_extra:
-        env.update(env_extra)
+    env = overlay_engine_env(os.environ, env_extra or {})
     proc = subprocess.run(
         step.command, shell=True, cwd=step.cwd or str(cwd),
         capture_output=True, text=True, timeout=step.timeout_seconds,

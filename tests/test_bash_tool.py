@@ -83,7 +83,15 @@ def test_bash_exposes_imp_lint_command(tmp_path: Path) -> None:
     assert "make lint" in out["stdout"]
 
 
-def test_bash_no_lint_command_means_empty(tmp_path: Path) -> None:
+def test_bash_no_lint_command_means_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression (found by imp-on-imp dogfooding): a stale IMP_LINT_COMMAND in the
+    # ambient environment must NOT leak into the subprocess when the ctx has no
+    # lint_command. engine_env is authoritative; overlay_engine_env strips the
+    # inherited copy. Without that, `{**os.environ, ...}` would pass "make stale"
+    # straight through and falsely enable the lint gate.
+    monkeypatch.setenv("IMP_LINT_COMMAND", "make stale-lint")
     out = json.loads(_run_bash(_ctx(tmp_path), {"command": "echo [$IMP_LINT_COMMAND]"}))
     assert "[]" in out["stdout"]
 

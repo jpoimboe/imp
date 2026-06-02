@@ -11,7 +11,36 @@ All paths are host paths. There is no sandbox: the `/project/` prefix used in
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
+
+# Every env var this module manages. `engine_env` is the AUTHORITY for these: a
+# subprocess must see exactly what `engine_env` produces, never an inherited copy.
+# `IMP_LINT_COMMAND` is conditionally present (absent => no lint gate), so without
+# explicit stripping a stale ambient value (e.g. from a parent imp process during
+# imp-on-imp dogfooding) would leak through a `{**os.environ, ...}` merge and
+# falsely enable the gate. Use `overlay_engine_env` to merge, not a raw dict spread.
+ENGINE_ENV_VARS = frozenset({
+    "IMP_PROJECT_ROOT",
+    "IMP_CHANGE_SLUG",
+    "IMP_CHANGE_TITLE",
+    "IMP_LINT_COMMAND",
+})
+
+
+def overlay_engine_env(
+    parent: Mapping[str, str], overlay: Mapping[str, str],
+) -> dict[str, str]:
+    """Merge `overlay` (an `engine_env` result) onto `parent`, authoritatively.
+
+    Any engine-managed var inherited from `parent` is dropped first, so only the
+    vars `overlay` actually provides reach the subprocess. This prevents a stale
+    ambient engine var — notably `IMP_LINT_COMMAND` from an outer imp process —
+    from leaking past `engine_env`'s "absent => no lint gate" contract.
+    """
+    env = {k: v for k, v in parent.items() if k not in ENGINE_ENV_VARS}
+    env.update(overlay)
+    return env
 
 
 def engine_env(
