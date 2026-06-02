@@ -14,7 +14,6 @@ from __future__ import annotations
 import os
 import shutil
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -28,6 +27,7 @@ from imp.agents.runner import (
     TextBlock,
 )
 from imp.engine import error_policy
+from imp.engine.agent_run import AgentRunResult, ErrorInfo
 from imp.engine.change import Change
 from imp.engine.completion import completion_instruction
 from imp.engine.env import engine_env
@@ -60,27 +60,6 @@ from imp.providers.resolve import provider_from_model, resolve_roles
 EventCallback = Callable[[dict[str, Any]], None]
 HumanInputFn = Callable[[], str | Awaitable[str]]
 HumanOutputFn = Callable[[str], None]
-
-
-@dataclass(frozen=True)
-class ErrorInfo:
-    """The classified error that drove a fatal/backoff/retry decision, plumbed
-    out of _run_agent_invocation so the caller can record it on Pause and on
-    the agent_retry event. None on the success path."""
-    category: str
-    kind: str | None
-
-
-@dataclass(frozen=True)
-class AgentRunResult:
-    """Replaces the old bool-only 5-tuple from _run_agent_invocation. Carrying
-    a dataclass avoids arity bugs across its seven return statements."""
-    output: dict[str, Any] | None
-    errored: bool
-    paused: bool
-    fatal: bool
-    delay: float | None
-    error: ErrorInfo | None = None
 
 
 class RunResult(Enum):
