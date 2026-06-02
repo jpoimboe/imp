@@ -122,7 +122,8 @@ async def run_change(
                 step, workflow, change, state, log, is_resume=is_resume,
                 human_input_fn=human_input_fn, human_output_fn=human_output_fn,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
-                lint_command=config.lint_command)
+                lint_command=config.lint_command,
+                test_command=config.test_command)
 
             if coordinator.should_pause or isinstance(action, Pause):
                 state.status = "paused"
@@ -321,6 +322,7 @@ async def _dispatch_step(
     human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, lint_command: str | None = None,
+    test_command: str | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Returns (action, feedback_text, var_mutations)."""
     wrapper_text: str | None = None
@@ -333,13 +335,15 @@ async def _dispatch_step(
     if step.kind == "branch":
         return _route_branch(step, state, log)
     if step.kind == "script":
-        return _route_script(step, change, state, log, lint_command=lint_command)
+        return _route_script(step, change, state, log, lint_command=lint_command,
+                             test_command=test_command)
     if step.kind == "human":
         return await _route_human(step, state, log, human_input_fn, human_output_fn)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
-        wrapper_text=wrapper_text, is_resume=is_resume, lint_command=lint_command)
+        wrapper_text=wrapper_text, is_resume=is_resume, lint_command=lint_command,
+        test_command=test_command)
 
 
 def _emit_started(log: EventLog, step: Step, **extra: Any) -> dict[str, Any]:
@@ -371,13 +375,15 @@ def _route_branch(
 def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
     *, lint_command: str | None = None,
+    test_command: str | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step)
     out = run_script(step, cwd=change.workflow_dir,
                      env_extra=engine_env(project_root=change.project_root,
                                           change_slug=change.slug,
                                           change_title=change.title,
-                                          lint_command=lint_command))
+                                          lint_command=lint_command,
+                                          test_command=test_command))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, match)
@@ -412,6 +418,7 @@ async def _route_agent(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
     lint_command: str | None = None,
+    test_command: str | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
@@ -455,7 +462,8 @@ async def _route_agent(
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
-            initial_messages=initial, lint_command=lint_command)
+            initial_messages=initial, lint_command=lint_command,
+            test_command=test_command)
         if result.delay is None:
             break
         backoff += 1
@@ -502,7 +510,8 @@ async def _route_agent(
         return await _route_agent(step, workflow, change, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, wrapper_text=wrapper_text,
-                                  is_resume=is_resume, lint_command=lint_command)
+                                  is_resume=is_resume, lint_command=lint_command,
+                                  test_command=test_command)
 
     state.step_attempt = 0
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
@@ -547,6 +556,7 @@ async def _run_agent_invocation(
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
     lint_command: str | None = None,
+    test_command: str | None = None,
 ) -> AgentRunResult:
     """Run one top-level agent step to a terminal AgentRunResult.
 
@@ -621,6 +631,7 @@ async def _run_agent_invocation(
         balance_on_resume=balance_on_resume,
         log=log,
         lint_command=lint_command,
+        test_command=test_command,
     )
 
     runner = provider.create_runner(invocation)

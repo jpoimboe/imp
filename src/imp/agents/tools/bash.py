@@ -57,7 +57,8 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
         engine_env(project_root=ctx.project_root,
                    change_slug=ctx.change_context.slug if ctx.change_context else "",
                    change_title=ctx.change_context.title if ctx.change_context else "",
-                   lint_command=ctx.lint_command),
+                   lint_command=ctx.lint_command,
+                   test_command=ctx.test_command),
     )
     # POSIX: start_new_session=True makes the child a new session leader so
     # SIGTERM to the PG affects the whole tree. Windows: this kwarg is ignored

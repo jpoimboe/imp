@@ -139,3 +139,33 @@ def test_load_config_lint_command_not_string_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(LoadError, match="lint_command"):
         load_config(tmp_path)
+
+
+def test_load_config_parses_test_command(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "test_command: \"make test\"\n"
+        "roles:\n"
+        "  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.test_command == "make test"
+
+
+def test_load_config_test_command_absent_is_none(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.test_command is None
+
+
+def test_load_config_test_command_not_string_raises(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "test_command: [make, test]\n"
+        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    with pytest.raises(LoadError, match="test_command"):
+        load_config(tmp_path)

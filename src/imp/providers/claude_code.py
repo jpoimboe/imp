@@ -746,6 +746,7 @@ class ClaudeCodeAgentRunner:
         ctx.coordinator = invocation.coordinator
         ctx.model_tiers = invocation.model_tiers
         ctx.lint_command = invocation.lint_command
+        ctx.test_command = invocation.test_command
         ctx.event_log = elog
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn

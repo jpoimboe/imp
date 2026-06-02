@@ -62,6 +62,9 @@ class ToolContext:
     # Optional lint-clean gate command (config.lint_command). Threaded onto the
     # subprocess env (IMP_LINT_COMMAND) by the bash tool. None => no lint gate.
     lint_command: str | None = None
+    # Optional test-run gate command (config.test_command). Threaded onto the
+    # subprocess env (IMP_TEST_COMMAND) by the bash tool. None => no test gate.
+    test_command: str | None = None
     # invocation_id counter for disambiguating same-named subagent invocations
     _subagent_counter: int = 0
 

@@ -147,6 +147,9 @@ class AgentInvocation:
     # config.lint_command, threaded onto the child ToolContext by each provider
     # so the agent bash tool can inject IMP_LINT_COMMAND. None => no lint gate.
     lint_command: str | None = None
+    # config.test_command, threaded onto the child ToolContext by each provider
+    # so the agent bash tool can inject IMP_TEST_COMMAND. None => no test gate.
+    test_command: str | None = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}
