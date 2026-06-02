@@ -10,8 +10,8 @@ import pytest
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.runner import ChangeContext
 from imp.agents.tools import get_registry
-from imp.agents.tools.context import ToolContext
 from imp.agents.tools.bash import _rewrite_leading_cd_project
+from imp.agents.tools.context import ToolContext
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
