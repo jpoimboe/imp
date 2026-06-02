@@ -14,6 +14,14 @@ The task-lead's dispatch message contains the task text and spec. Use `git_diff`
 
 ## Your Job
 
+**Trust the stated verification.** The task-lead's dispatch states what it
+already verified (test state, and lint-clean when a lint command is configured).
+Do not re-run the full test suite unless you have a specific reason to doubt the
+stated state. If the dispatch contains **no** verification statement at all, do
+not assume green — verify independently before trusting an absent claim. Review
+the diff by reading code; spend your effort on judgment, not on re-running
+already-green checks.
+
 Review the task's diff for code quality. Evaluate:
 
 **Naming and clarity:**

@@ -29,6 +29,16 @@ The implementer's report may be incomplete, inaccurate, or optimistic. You MUST 
 
 ## Your Job
 
+**Trust the task-lead's stated verification** (this is the *task-lead*, not the
+implementer — the distrust above is about the implementer's *report*, not the
+task-lead's own test run). The task-lead's dispatch states what it already
+verified (test state, and lint-clean when a lint command is configured). Do not
+re-run the full test suite unless you have a specific reason to doubt the stated
+state. If the dispatch contains **no** verification statement at all, do not
+assume green — verify independently before trusting an absent claim. Review the
+diff by reading code; spend your effort on judgment, not on re-running
+already-green checks.
+
 Use `git_diff` to review the just-committed task's diff. Verify against the task text and spec provided in the dispatch message:
 
 **Missing requirements:**
