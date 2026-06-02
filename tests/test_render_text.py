@@ -50,7 +50,7 @@ def test_agent_text_rendered_in_full_not_truncated() -> None:
     assert out.count("\n") >= 5
 
 
-def test_collapsed_folds_show_one_line_summaries() -> None:
+def test_collapsed_folds_drop_thinking_and_tool_summaries() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -62,10 +62,9 @@ def test_collapsed_folds_show_one_line_summaries() -> None:
         _ev("8", "tool_call", agent_id="step:p/s", id="b3", name="ls", input={}),
         _ev("9", "tool_result", agent_id="step:p/s", id="b3", content="ok", error=False),
     ]))
-    assert "▸ thinking · 120 chars" in out
-    # burst summary sorted by count desc
-    assert "▸ 3 tools · 2 bash · 1 ls" in out
-    # no expanded tool lines in collapsed mode
+    # Default mode drops both the thinking line and the tool-burst summary line.
+    assert "thinking" not in out
+    assert "tools" not in out
     assert "⏺" not in out
 
 
@@ -198,10 +197,9 @@ def test_empty_thinking_is_suppressed_both_modes() -> None:
         assert list(rt._render(node, depth=1, full=True, color=False, width=80)) == []
 
 
-def test_nonempty_thinking_keeps_summary() -> None:
+def test_nonempty_thinking_dropped_in_default_mode() -> None:
     node = nv.ThinkingFold(content="abcde")
-    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
-    assert out == ["  ▸ thinking · 5 chars"]
+    assert list(rt._render(node, depth=1, full=False, color=False, width=80)) == []
 
 
 def test_render_gate_recap_false_is_header_only() -> None:

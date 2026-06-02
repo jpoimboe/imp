@@ -144,9 +144,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                         *pal.NODE_COLORS["thinking"])
             for line in _wrap(node.content, width, depth + 1):
                 yield pal.ansi(line, *pal.NODE_COLORS["thinking"], enabled=color)
-        else:
-            summary = f"{pal.fold_glyph(expanded=False)} thinking · {len(node.content)} chars"
-            yield _line(summary, depth, color, *pal.NODE_COLORS["thinking"])
+        # full=False: thinking is noise in the default view — render nothing.
+        # (A transient `· thinking` status cue lives in narrative.current_activity.)
         return
 
     if isinstance(node, nv.ToolBurstFold):
@@ -212,22 +211,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
 
-def _burst_counts(burst: nv.ToolBurstFold) -> str:
-    counts: dict[str, int] = {}
-    for c in burst.calls:
-        counts[c.name] = counts.get(c.name, 0) + 1
-    by_count = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
-    return " · ".join(f"{n} {name}" for name, n in by_count)
-
-
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
                   color: bool, width: int) -> Iterator[str]:
-    total = len(burst.calls)
     if not full:
-        glyph = pal.fold_glyph(expanded=False)
-        yield _line(f"{glyph} {total} tools · {_burst_counts(burst)}", depth, color,
-                    *pal.NODE_COLORS["tools"])
-        return
+        return  # tool bursts are noise in the default view — render nothing.
     yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
                 *pal.NODE_COLORS["tools"])
     for c in burst.calls:
