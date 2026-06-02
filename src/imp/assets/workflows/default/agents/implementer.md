@@ -25,13 +25,20 @@ variable `$IMP_PROJECT_ROOT` (the physical project root path). Never `cd /projec
 
 ## Before You Begin
 
+{% if vars.fast_path %}
+This change was classified **trivial** and the spec waived tests. Do **not**
+create, modify, or run tests — implement exactly the task's edits and commit.
+{% else %}
 Load the TDD discipline first:
 
 ```
 load_skill(name="test-driven-development")
 ```
 
-Follow RED-GREEN-REFACTOR. If you encounter a test failure or unexpected behavior during implementation, load:
+Follow RED-GREEN-REFACTOR.
+{% endif %}
+
+If you encounter a test failure or unexpected behavior during implementation, load:
 
 ```
 load_skill(name="systematic-debugging")
@@ -49,7 +56,7 @@ sinking effort into a guess.
 
 Once you're clear on requirements:
 1. Implement exactly what the task specifies
-2. Write tests (TDD: write the failing test first, then make it pass)
+2. If the task calls for tests, write them test-first per TDD (write the failing test first, then make it pass); if the plan waives tests, do **not** add them
 3. Verify implementation works
 4. Commit your work (see Commit Modes below) — but FIRST run the lint-clean gate if `$IMP_LINT_COMMAND` is set (see Self-Review); lint must pass *before* the commit, not after
 5. Self-review (see below)
@@ -143,7 +150,7 @@ Review your work with fresh eyes. Ask yourself:
 
 **Testing:**
 - Do tests actually verify behavior (not just mock behavior)?
-- Did I follow TDD if required?
+- If the task called for tests, did I follow TDD — and did I avoid adding tests the plan waived?
 - Are tests comprehensive?
 
 **Lint-clean gate (before committing):**

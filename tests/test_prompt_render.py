@@ -85,3 +85,32 @@ def test_vars_default_empty_when_omitted(tmp_path: Path) -> None:
     # An unknown var still raises (strict-within over an empty map).
     with pytest.raises(PromptRenderError):
         render_prompt("{{ vars.anything }}", ctx)
+
+
+def test_implementer_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
+    """The shipped implementer template must render two branches: fast_path
+    waives tests; else loads TDD. StrictUndefined means both renders pass
+    fast_path explicitly (there is no undefined->else fallback)."""
+    from imp.assets import default_workflow_dir
+    from imp.engine.loader import load_workflow
+
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["implementer"].prompt_template_source
+    log = _log(tmp_path / "events.jsonl", [])
+
+    fast = render_prompt(
+        body,
+        build_context(change_slug="t", change_title="t", event_log=log,
+                      vars={"fast_path": True}),
+    )
+    slow = render_prompt(
+        body,
+        build_context(change_slug="t", change_title="t", event_log=log,
+                      vars={"fast_path": False}),
+    )
+    # fast-path: tests waived, TDD skill NOT loaded.
+    assert "waived tests" in fast
+    assert "test-driven-development" not in fast
+    # standard path: TDD skill loaded, no "waived" language.
+    assert "test-driven-development" in slow
+    assert "waived tests" not in slow
