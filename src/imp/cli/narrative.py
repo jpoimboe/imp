@@ -287,6 +287,16 @@ class NarrativeBuilder:
             arg = _sanitize_activity_arg(next(iter((last.input or {}).values()), ""))
             head = f"{step} · " if step else ""
             return f"{head}{last.name} {arg} · {len(burst.calls)} tools".rstrip()
+        # Transient reasoning cue: the persistent thinking line is gone in default
+        # mode, so surface it on the status line while a NON-EMPTY thinking fold is
+        # the step's most recent child (flushed away by the next prose/tool event).
+        # The `.content.strip()` guard mirrors render_text dropping blank thinking
+        # as noise — a whitespace-only thinking event must not flash `· thinking`.
+        if self._step_stack:
+            last_step = self._step_stack[-1]
+            last_child = last_step.children[-1] if last_step.children else None
+            if isinstance(last_child, ThinkingFold) and last_child.content.strip():
+                return f"{last_step.name} · thinking"
         if step is not None:
             return f"{step} · working"
         return None

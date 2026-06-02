@@ -557,6 +557,47 @@ def test_current_activity_none_when_no_step() -> None:
     assert b.current_activity() is None
 
 
+def test_current_activity_thinking_cue_when_latest_child_is_thinking() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
+    ]:
+        b.add(e)
+    assert b.current_activity() == "spec · thinking"
+
+
+def test_current_activity_falls_back_to_working_after_thinking() -> None:
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
+        ev("5", "llm_response", agent_id="step:design/spec",
+           raw={"content": [{"type": "text", "text": "prose"}]}, usage={}),
+    ]:
+        b.add(e)
+    # After prose appends, the latest child is no longer a ThinkingFold.
+    assert b.current_activity() == "spec · working"
+
+
+def test_current_activity_blank_thinking_does_not_cue() -> None:
+    # A whitespace-only thinking event is dropped as noise by render_text; the
+    # status cue must stay consistent and NOT flash `· thinking`.
+    b = nv.NarrativeBuilder()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "thinking", agent_id="step:design/spec", content="   "),
+    ]:
+        b.add(e)
+    assert b.current_activity() == "spec · working"
+
+
 def test_subagent_current_activity_includes_nested_detail() -> None:
     b = nv.NarrativeBuilder()
     for e in [
