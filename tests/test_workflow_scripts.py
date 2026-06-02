@@ -11,8 +11,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from imp.assets import default_workflow_dir
 
 
@@ -31,81 +29,84 @@ def _run(script: str, *args: str, env_extra: dict[str, str] | None = None,
     )
 
 
-# ── run-tests.sh robustness (Bug Q) ──────────────────────────────────────────
+# ── run-tests.sh: IMP_TEST_COMMAND contract ───────────────────────────────────
 # Note: check-artifact.sh was removed in the superpowers workflow port.
 # Artifact validation is now handled by spec-commit-verify.sh and
 # plan-commit-verify.sh; see test_commit_verify_scripts.py for their tests.
 # The test_check_artifact_script.py file verifies those replacements exist.
 
 
-def test_run_tests_uses_python_m_pytest_not_bare_pytest(tmp_path: Path) -> None:
-    """Bug Q: bare `pytest` may not be on subprocess PATH; `python3 -m pytest`
-    is more reliable. Verify the script invokes the python module form."""
-    script_text = (_scripts_dir() / "run-tests.sh").read_text()
-    assert "python3 -m pytest" in script_text or "$PY -m pytest" in script_text
-    # The script should NOT have a bare `pytest -q` invocation outside of
-    # a python -m context (which would be the original Bug Q pattern).
-    for line in script_text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#") or not stripped:
-            continue
-        # `pytest` may appear inside `python -m pytest` or `"$PY" -m pytest`
-        # but not bare. Detect bare exec/run of pytest as the first word.
-        if stripped.startswith(("pytest ", "exec pytest", "timeout 300 pytest ")):
-            pytest.fail(
-                f"run-tests.sh has a bare `pytest` invocation: {line!r} "
-                "— this re-introduces Bug Q (pytest may not be on PATH "
-                "in subprocess envs)"
-            )
-
-
-def test_run_tests_fails_loud_when_tests_dir_but_no_pytest(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Bug Q corollary: tests/ exists but pytest unimportable → exit 2,
-    not silent pass. Forced by pointing IMP_PYTHON at a python that
-    doesn't have pytest installed."""
+def test_run_tests_command_succeeds(tmp_path: Path) -> None:
+    """IMP_TEST_COMMAND set to a command that succeeds → script exits 0."""
     project = tmp_path / "proj"
     project.mkdir()
-    (project / "tests").mkdir()
-    (project / "tests" / "test_x.py").write_text("def test_x(): assert True\n")
-
-    # Pick a python interpreter that definitely won't have pytest:
-    # write a tiny shim that always returns ImportError on `import pytest`.
-    fake_python = tmp_path / "fake-python.sh"
-    fake_python.write_text(
-        "#!/usr/bin/env bash\n"
-        '# Reject any `import pytest` attempt.\n'
-        'if [[ "$*" == *"import pytest"* ]]; then exit 1; fi\n'
-        'exec /usr/bin/env python3 "$@"\n'
-    )
-    fake_python.chmod(0o755)
-
     proc = _run(
         "run-tests.sh",
         env_extra={
             "IMP_PROJECT_ROOT": str(project),
-            "IMP_PYTHON": str(fake_python),
+            "IMP_TEST_COMMAND": "true",
         },
     )
-    assert proc.returncode == 2, (
-        f"expected exit 2 (fail-loud); got {proc.returncode}. "
+    assert proc.returncode == 0, (
+        f"expected exit 0 for succeeding IMP_TEST_COMMAND; got {proc.returncode}. "
         f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     )
-    assert "not importable" in proc.stderr
 
 
-def test_run_tests_passes_when_no_tests_dir_or_makefile(tmp_path: Path) -> None:
-    """New project without tests/ or Makefile: silently pass (don't block
-    a brand-new project's first Change)."""
-    project = tmp_path / "empty-proj"
+def test_run_tests_command_fails(tmp_path: Path) -> None:
+    """IMP_TEST_COMMAND set to a command that fails → script exits non-zero."""
+    project = tmp_path / "proj"
     project.mkdir()
     proc = _run(
         "run-tests.sh",
-        env_extra={"IMP_PROJECT_ROOT": str(project)},
+        env_extra={
+            "IMP_PROJECT_ROOT": str(project),
+            "IMP_TEST_COMMAND": "false",
+        },
+    )
+    assert proc.returncode != 0, (
+        f"expected non-zero exit for failing IMP_TEST_COMMAND; got {proc.returncode}. "
+        f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    )
+
+
+def test_run_tests_no_command_passes(tmp_path: Path) -> None:
+    """IMP_TEST_COMMAND unset → script exits 0 (no-op) with informational message."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    # Ensure IMP_TEST_COMMAND is not inherited from the outer environment.
+    env_extra: dict[str, str] = {"IMP_PROJECT_ROOT": str(project)}
+    env = os.environ.copy()
+    env.pop("IMP_TEST_COMMAND", None)
+    env.update(env_extra)
+    proc = subprocess.run(
+        [str(_scripts_dir() / "run-tests.sh")],
+        env=env, capture_output=True, text=True, check=False,
     )
     assert proc.returncode == 0, (
-        f"expected exit 0 for empty project; got {proc.returncode}. "
+        f"expected exit 0 when IMP_TEST_COMMAND unset; got {proc.returncode}. "
         f"stderr={proc.stderr!r}"
     )
-    assert "no tests found" in proc.stdout
+    assert "no test_command configured" in proc.stdout, (
+        f"expected 'no test_command configured' in stdout; got {proc.stdout!r}"
+    )
+
+
+def test_run_tests_empty_command_passes(tmp_path: Path) -> None:
+    """IMP_TEST_COMMAND set to empty string → script exits 0 (no-op)."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    proc = _run(
+        "run-tests.sh",
+        env_extra={
+            "IMP_PROJECT_ROOT": str(project),
+            "IMP_TEST_COMMAND": "",
+        },
+    )
+    assert proc.returncode == 0, (
+        f"expected exit 0 when IMP_TEST_COMMAND is empty; got {proc.returncode}. "
+        f"stderr={proc.stderr!r}"
+    )
+    assert "no test_command configured" in proc.stdout, (
+        f"expected 'no test_command configured' in stdout; got {proc.stdout!r}"
+    )
