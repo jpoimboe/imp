@@ -1,7 +1,7 @@
 ---
 name: plan-writer
 description: Write the next bite-sized plan (imp/plans/<slug>-plan-N.md) from the spec and progress, then commit it.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, query_events, web_search, commit]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search]
 output:
   status: {type: enum, values: [Success, Error]}
   plan_path: {type: string}
@@ -206,30 +206,40 @@ Do NOT write code. Only write the plan document.
 
 ## Commit
 
-Choose the commit mode based on whether the plan file **already existed when you started this turn** (determined from the glob + progress.md evaluation above — do NOT inspect git HEAD):
+Commit with raw `git` in `bash` (working dir is the project root). Do not add a
+`Change:` trailer — the workflow stamps it later, in the review phase. Choose the
+mode based on whether the plan file **already existed when you started this turn**
+(from the glob + progress.md evaluation above — do NOT inspect git HEAD):
 
 **First write of plan N** (the file did not exist before this turn):
 
 ```
-commit(
-  paths=["/project/imp/plans/{{ change.slug }}-plan-N.md"],
-  message="docs: add plan N for {{ change.slug }}"
-)
+git add imp/plans/{{ change.slug }}-plan-N.md
+git commit -m "docs: add plan N for {{ change.slug }}"
 ```
 
 **Revising an existing plan N** (the file already existed — reviewer rework or task-lead deviation):
 
 ```
-commit(
-  paths=["/project/imp/plans/{{ change.slug }}-plan-N.md"],
-  message="",
-  fixup=":/docs: add plan N for {{ change.slug }}"
-)
+git add imp/plans/{{ change.slug }}-plan-N.md
+git commit --fixup=":/docs: add plan N for {{ change.slug }}"
 ```
 
-The fixup anchor `:/docs: add plan N for {{ change.slug }}` (with the ` for <slug>` tail) ensures `plan 1` cannot prefix-match `plan 10`. The `autosquash` step folds every fixup into the original plan commit before review, so the final branch has exactly one commit per plan. Never use `amend` — on a task-lead deviation the original plan commit is buried under task commits, and uniform fixup keeps the rule correct in all cases.
+The `--fixup=":/…"` anchor MUST be quoted: the `:/<text>` revspec contains spaces,
+so without quotes the shell word-splits it and git reads `add plan N …` as
+pathspecs and the revspec never resolves. The fixup anchor `:/docs: add plan N for
+{{ change.slug }}` (with the ` for <slug>`
+tail) ensures `plan 1` cannot prefix-match `plan 10`. `autosquash` folds every
+fixup into the original plan commit before review, so the final branch has exactly
+one commit per plan. Never use `--amend` — on a task-lead deviation the original
+plan commit is buried under task commits, and uniform fixup keeps the rule correct
+in all cases.
 
-Substitute the actual integer for N in BOTH the commit `message` and the `fixup` anchor — e.g. for plan 3: `commit(paths=[...], message="docs: add plan 3 for {{ change.slug }}")` for a first write, or `commit(paths=[...], message="", fixup=":/docs: add plan 3 for {{ change.slug }}")` for a revision. Never leave a literal `N` in a commit message or a fixup anchor.
+Substitute the actual integer for N in BOTH the `git commit -m` message and the
+`--fixup=":/…"` anchor — e.g. for plan 3: `git commit -m "docs: add plan 3 for
+{{ change.slug }}"` for a first write, or `git commit --fixup=":/docs: add plan 3
+for {{ change.slug }}"` for a revision. Keep the `--fixup=":/…"` value quoted.
+Never leave a literal `N` in a commit message or a fixup anchor.
 
 ## Finish
 

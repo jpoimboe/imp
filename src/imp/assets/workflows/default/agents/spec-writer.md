@@ -1,7 +1,7 @@
 ---
 name: spec-writer
 description: Interactively brainstorm with the user, settle the slug, then write and commit the spec.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, query_events, web_search, commit, rename_change]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search, rename_change]
 output:
   status: {type: enum, values: [Success, Error]}
   phase: {type: enum, values: [drafting, written]}
@@ -72,10 +72,12 @@ Be concrete. Reference existing code paths when relevant. Do not modify any proj
 
 Fix issues inline; do not re-solicit the user.
 
-**Commit** with the `commit` tool (which stamps the `Change:` trailer automatically):
+**Commit** with raw `git` in `bash` (the working dir is the project root). Do
+not add a `Change:` trailer — the workflow stamps it later, in the review phase:
 
 ```
-commit(paths=["/project/imp/specs/{{ change.slug }}.md"], message="docs: add spec for {{ change.slug }}")
+git add imp/specs/{{ change.slug }}.md
+git commit -m "docs: add spec for {{ change.slug }}"
 ```
 
 **Finish** with:
@@ -86,16 +88,20 @@ complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")
 
 ## Rework Resumption
 
-**Recognizing a rework turn:** if your turn opens with injected feedback containing the spec-reviewer's findings — a message beginning "Your previous attempt completed but was not accepted. The spec-reviewer reviewed your work and did not accept it." followed by `findings:` and `blocking:` lines — you are in rework mode. Do NOT ask the user anything and do NOT end the turn with bare prose; go straight to editing the spec and end the turn tool-terminal (`commit(amend=true)` then `complete_step(phase="written", …)`).
+**Recognizing a rework turn:** if your turn opens with injected feedback containing the spec-reviewer's findings — a message beginning "Your previous attempt completed but was not accepted. The spec-reviewer reviewed your work and did not accept it." followed by `findings:` and `blocking:` lines — you are in rework mode. Do NOT ask the user anything and do NOT end the turn with bare prose; go straight to editing the spec and end the turn tool-terminal (`git commit --amend --no-edit` then `complete_step(phase="written", …)`).
 
-Address each finding, rewrite the spec, and amend the commit:
+Address each finding, rewrite the spec, and amend the spec commit (it is still
+HEAD on a spec rework, so `--amend` keeps it one clean commit):
 
 ```
-commit(paths=["/project/imp/specs/{{ change.slug }}.md"], message="docs: add spec for {{ change.slug }}", amend=true)
+git add imp/specs/{{ change.slug }}.md
+git commit --amend --no-edit
 complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")
 ```
 
-The rework turn must be tool-terminal: end with the `commit(amend=true)` then `complete_step(phase="written", …)` calls. Do NOT end a rework turn with a bare question or trailing prose. Never re-solicit the user on rework.
+The rework turn must be tool-terminal: end with the `git commit --amend` then the
+`complete_step(phase="written", …)` call. Do NOT end a rework turn with a bare
+question or trailing prose. Never re-solicit the user on rework.
 
 ## Classifying complexity (required on every completion)
 
