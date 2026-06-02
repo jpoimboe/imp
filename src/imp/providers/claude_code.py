@@ -44,7 +44,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import dispatch_task, make_task_tool
+from imp.agents.subagents import dispatch_task, make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
@@ -341,6 +341,14 @@ def _wrap_one(
             state.fatal_tool_error = (name, str(fte))
             return _tool_response(str(fte), is_error=True)
         except Exception as exc:
+            # Decision #6: re-raise a subagent-origin pause for honesty, but a
+            # clean synchronous unwind through the claude_agent_sdk loop is NOT
+            # reachable — the SDK owns the conversation and a tool callback
+            # raising does not propagate to _run_loop as a Python exception. In
+            # practice a subagent-origin pause under claude_code degrades to an
+            # is_error tool_result. Acceptable: resume = restart the subtree, and
+            # subagents are restart-safe by design.
+            raise_if_suspended(exc)
             text = f"{type(exc).__name__}: {exc}"
             state.runtime_errors.append(text)
             return _tool_response(text, is_error=True)
@@ -709,6 +717,7 @@ class ClaudeCodeAgentRunner:
             yield perr.make_error_event(exc)
             return
         except Exception as exc:
+            raise_if_suspended(exc)
             yield perr.make_unknown_error_event(exc)
             return
 
@@ -733,6 +742,8 @@ class ClaudeCodeAgentRunner:
         ctx.change_state = invocation.change_state
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_roles = invocation.resolved_roles
+        ctx.subagent_depth = invocation.subagent_depth
+        ctx.coordinator = invocation.coordinator
         ctx.model_tiers = invocation.model_tiers
         ctx.event_log = elog
         if self._user_input_fn is not None:

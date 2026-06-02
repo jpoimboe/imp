@@ -33,7 +33,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import dispatch_task, make_task_tool
+from imp.agents.subagents import dispatch_task, make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
 from imp.agents.tools.context import ToolContext
@@ -387,6 +387,7 @@ class OpenAIAgentRunner:
                 yield perr.make_error_event(exc)
                 return
             except Exception as exc:
+                raise_if_suspended(exc)
                 try:
                     classified = _classify_openai_exception(exc)
                 except Exception:
@@ -421,6 +422,8 @@ class OpenAIAgentRunner:
         ctx.change_state = invocation.change_state
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_roles = invocation.resolved_roles
+        ctx.subagent_depth = invocation.subagent_depth
+        ctx.coordinator = invocation.coordinator
         ctx.model_tiers = invocation.model_tiers
         ctx.event_log = elog                       # shared write instance
         if self._user_input_fn is not None:
@@ -618,6 +621,7 @@ class OpenAIAgentRunner:
                             model_tier=tu.input.get("model_tier"),
                         )
                     except Exception as e:
+                        raise_if_suspended(e)
                         err_text = f"{type(e).__name__}: {e}"
                         block = ToolResultBlock(tu.id, err_text, is_error=True)
                         tool_results.append(block)
