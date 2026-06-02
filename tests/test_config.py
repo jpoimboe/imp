@@ -109,3 +109,33 @@ def test_config_model_tiers_duplicate_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(LoadError, match="duplicate"):
         load_config(tmp_path)
+
+
+def test_load_config_parses_lint_command(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "lint_command: \"make lint\"\n"
+        "roles:\n"
+        "  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.lint_command == "make lint"
+
+
+def test_load_config_lint_command_absent_is_none(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.lint_command is None
+
+
+def test_load_config_lint_command_not_string_raises(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "lint_command: [make, lint]\n"
+        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
+    )
+    with pytest.raises(LoadError, match="lint_command"):
+        load_config(tmp_path)

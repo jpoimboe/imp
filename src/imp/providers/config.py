@@ -39,6 +39,7 @@ class Config:
     model_rules: dict[str, RoleConstraint] = field(hash=False, default_factory=dict)
     model_tiers: tuple[str, ...] | None = field(hash=False, default=None)
     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
+    lint_command: str | None = field(hash=False, default=None)
 
     def role_names(self) -> frozenset[str]:
         return frozenset(self.roles)
@@ -107,9 +108,14 @@ def load_config(project_root: Path) -> Config:
         parse_model_tiers(raw["model_tiers"], src) if "model_tiers" in raw else None
     )
     var_overrides = _parse_var_overrides(raw.get("vars"), src)
+    lint_command = raw.get("lint_command")
+    if lint_command is not None and not isinstance(lint_command, str):
+        raise LoadError(
+            "'lint_command' must be a string (e.g. \"make lint\")", src
+        )
     return Config(roles=roles, source=src,
                   model_rules=model_rules, model_tiers=model_tiers,
-                  var_overrides=var_overrides)
+                  var_overrides=var_overrides, lint_command=lint_command)
 
 
 def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:
