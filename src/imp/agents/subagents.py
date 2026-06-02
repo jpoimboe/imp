@@ -12,12 +12,16 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import anyio
+
 from imp.agents.prompts import build_context, render_prompt
-from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+from imp.agents.runner import ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
-from imp.engine.agent_run import SubagentSuspended
+from imp.engine.agent_run import SubagentSuspended, build_agent_invocation, drive_invocation
 from imp.engine.state import JsonlEventLog
+
+MAX_SUBAGENT_DEPTH = 3
 
 TASK_TOOL_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -97,54 +101,43 @@ async def dispatch_task(
     if ctx.parent_transcript_dir is None:
         raise RuntimeError("ToolContext.parent_transcript_dir not set")
 
+    # Nesting bound (threaded, not just a field): the child is one level deeper.
+    child_depth = ctx.subagent_depth + 1
+    if child_depth > MAX_SUBAGENT_DEPTH:
+        raise ValueError(
+            f"subagent nesting depth {child_depth} exceeds "
+            f"MAX_SUBAGENT_DEPTH={MAX_SUBAGENT_DEPTH}"
+        )
+
     subagent_def = ctx.subagent_defs[subagent_name]
     invocation_id = ctx.next_subagent_invocation_id()
 
-    # Read change_context from ctx instead of fabricating it.
     cc = ctx.change_context or ChangeContext(
         slug="", title="", project_root=ctx.project_root,
-        # Degenerate path (no inherited change_context): mirror Change.workflow_dir
-        # (= project_root/.imp/change/workflow) so a fabricated context still
-        # points at the snapshot root.
         workflow_dir=ctx.project_root / ".imp" / "change" / "workflow",
     )
 
-    # Carryover important #1: render the subagent's Jinja template, same way
-    # executor._route_agent renders the parent's. The PromptContext reads the
-    # live events.jsonl for this Change so {{ events.<step>.<field> }} works.
-    # Prompt rendering uses a SEPARATE read-only JsonlEventLog, NOT
-    # ctx.event_log. ctx.event_log is the shared WRITE instance that fans
-    # subagent audit events out to the parent's on_event chain; passing it
-    # here would conflate the write-fan-out log with a read-only snapshot
-    # cursor. Keep them distinct.
+    # Render the subagent's Jinja template (subagents don't see the parent
+    # title). A SEPARATE read-only JsonlEventLog for {{ events.* }} — NOT
+    # ctx.event_log, which is the shared WRITE instance.
     prompt_ctx = build_context(
         change_slug=cc.slug,
-        change_title=f"Change {cc.slug}",  # subagents don't see parent title
+        change_title=f"Change {cc.slug}",
         event_log=JsonlEventLog(ctx.events_path),
     )
     rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
 
-    # Choose the subagent's provider/model. Precedence (design §5):
-    #   1. runtime model_tier — only when truthy AND in the resolved map.
-    #      The "inherit" signal is None: Anthropic omits the optional arg
-    #      (.get -> None); OpenAI strict forces model_tier into `required` but
-    #      nullable, so the model sends JSON null -> None to decline. ("" can't
-    #      come from a strict enum; `model_tier or None` coalesces it defensively.)
-    #   2. the subagent's static model_role: frontmatter (today's behavior).
+    # Resolve (provider, model). Precedence (design §5):
+    #   1. runtime model_tier (truthy AND in the resolved map) — OVERRIDES static.
+    #   2. the subagent's static model_role frontmatter.
     #   3. inherit the parent's provider + model.
-    # Runtime tier OVERRIDES static frontmatter (§5): otherwise the parent's
-    # choice would be dead whenever a subagent declares a role. NOTE this means a
-    # tier deliberately bypasses any model_rules (differ_provider_from) constraint
-    # on the subagent's frontmatter role.
-    # AgentInvocation is frozen, so this is decided BEFORE construction.
     resolved = ctx.resolved_roles or {}
-    tier = model_tier or None           # None (or defensively "") -> inherit
+    tier = model_tier or None
     if tier is not None and tier not in resolved:
         valid = ", ".join(ctx.model_tiers) or "(no tiers configured)"
         raise ValueError(
             f"model_tier {tier!r} is not a configured tier; valid tiers: {valid}"
         )
-
     mr = subagent_def.model_role
     if tier is not None:
         pm = resolved[tier]
@@ -155,34 +148,69 @@ async def dispatch_task(
     else:
         sub_provider, sub_model = ctx.provider_name, ctx.model_name
 
-    sub_inv = AgentInvocation(
+    # Nesting enabled: the child may dispatch the subagents IT declares (resolved
+    # against the pool the parent saw). Empty for today's leaf subagents, so this
+    # preserves no-nesting for the shipped workflow while enabling+guarding it.
+    child_subagent_defs = {
+        n: ctx.subagent_defs[n]
+        for n in subagent_def.subagents
+        if n in ctx.subagent_defs
+    }
+
+    sub_inv = build_agent_invocation(
         agent_def=subagent_def,
         provider_name=sub_provider,
         model_name=sub_model,
-        system_prompt=rendered_prompt,
+        rendered_system_prompt=rendered_prompt,
         initial_messages=(Message(
-            role="user", content=(TextBlock(text=task_description),),
-        ),),
+            role="user", content=(TextBlock(text=task_description),)),),
         change_context=cc,
         interactive=False,
-        transcript_dir=ctx.parent_transcript_dir / "subagents" / f"{subagent_name}-{invocation_id}",
+        user_chat_input_fn=None,
+        transcript_dir=ctx.parent_transcript_dir / "subagents"
+        / f"{subagent_name}-{invocation_id}",
         fs_permissions=ctx.fs_permissions,
         events_path=ctx.events_path,
-        subagent_defs={},
-        # Stable subagent identity + shared write log + cross-agent parent link
+        subagent_defs=child_subagent_defs,
+        model_tiers=ctx.model_tiers,
+        # Decision #4: agent-level ceiling (workflow-default fallback not
+        # reachable here; deferred YAGNI). Closes "uncapped" for any subagent
+        # that declares a ceiling.
+        max_tool_calls=subagent_def.max_tool_calls,
         agent_id=f"sub:{tool_call_event_id}",
         event_log=ctx.event_log,
-        first_event_parent_id=tool_call_event_id if tool_call_event_id else None,
+        change_state=None,
+        first_event_parent_id=tool_call_event_id or None,
         resolved_roles=ctx.resolved_roles,
+        coordinator=ctx.coordinator,
+        subagent_depth=child_depth,
+        log=ctx.event_log,
     )
 
-    gen = await ctx.spawn_subagent(sub_inv)
-    final: Any = None
-    async for event in gen:
-        if event["type"] == "agent_output":
-            final = event["payload"]
-        elif event["type"] == "error":
-            raise RuntimeError(event["payload"].get("message", "subagent error"))
-    if final is None:
-        raise RuntimeError("subagent finished without agent_output")
-    return json.dumps(final)
+    # Drive via the shared loop, with backoff (omission #4). Each backoff
+    # iteration spawns a FRESH runner (runners are single-use). emit_events=False
+    # keeps subagent terminal events out of the parent's stream (today's
+    # behavior); the runner still writes its own audit events to the shared log.
+    backoff = 0
+    while True:
+        runner = await ctx.spawn_subagent(sub_inv)
+        result = await drive_invocation(
+            sub_inv, runner, coordinator=ctx.coordinator,
+            log=ctx.event_log, emit_events=False, prior_backoff_attempts=backoff)
+        if result.delay is None:
+            break
+        backoff += 1
+        await anyio.sleep(result.delay)
+        if ctx.coordinator is not None and ctx.coordinator.should_pause:
+            raise SubagentSuspended("paused during subagent backoff")
+
+    if result.paused:
+        # Unwind to the executor; resume restarts the subagent subtree fresh.
+        raise SubagentSuspended("subagent paused")
+    if result.fatal or result.errored or result.output is None:
+        # The parent adjudicates a flaky subagent (is_error tool_result) — it
+        # must not kill the task-lead. error_policy backoff has already been
+        # applied above, so transient errors retried before reaching here.
+        cat = result.error.category if result.error else "unknown"
+        raise RuntimeError(f"subagent {subagent_name!r} failed ({cat})")
+    return json.dumps(result.output)

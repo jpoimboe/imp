@@ -76,19 +76,19 @@ def provider_from_model(pm: ProviderModel) -> Provider:
 
 
 async def spawn_subagent_via_registry(sub_invocation: Any) -> Any:
-    """Provider-agnostic subagent spawn: build the child runner from
-    sub_invocation.provider_name via the registry, then run it. Replaces the
-    three per-provider, parent-bound _make_spawn_subagent closures so a subagent
-    can run on a DIFFERENT vendor than its parent. Returns the runner's event
-    async-iterator (dispatch_task awaits this call, then iterates the result)."""
+    """Provider-agnostic subagent spawn: build the child RUNNER from
+    sub_invocation.provider_name via the registry, so a subagent can run on a
+    DIFFERENT vendor than its parent. Returns the runner (NOT runner.run()), so
+    dispatch_task can pass it to drive_invocation — which attaches the
+    subagent runner's interrupt to the coordinator (clean ESC mid-subagent) and
+    drives it with the shared error_policy/nudge/pause loop."""
     provider = provider_from_model(
         ProviderModel(
             provider=sub_invocation.provider_name,
             model=sub_invocation.model_name,
         )
     )
-    runner = provider.create_runner(sub_invocation)
-    return runner.run(sub_invocation)
+    return provider.create_runner(sub_invocation)
 
 
 def _differ_tier(entry: ProviderModel, tgt_provider: str, tgt_model: str) -> int:

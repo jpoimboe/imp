@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import (
-    AgentInvocation,
     ChangeContext,
 )
 from imp.agents.subagents import (
@@ -17,6 +16,7 @@ from imp.agents.subagents import (
     make_task_tool,
 )
 from imp.agents.tools.context import ToolContext
+from imp.cli.signals import InterruptCoordinator
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
 
 
@@ -33,6 +33,44 @@ def _agent(name: str) -> AgentDef:
         source_path=Path("a.md"),
         source=SourceLoc(file=Path("a.md"), line=1),
     )
+
+
+def _agent2(name: str, *, max_tool_calls=None, subagents=(),
+            fields=None) -> AgentDef:
+    if fields is None:
+        fields = (OutputField(name="status", type="enum",
+                              values=("Success", "Error"), required=True),)
+    return AgentDef(
+        name=name, description="", tools=frozenset({"complete_step"}),
+        subagents=tuple(subagents),
+        output_schema=OutputSchema(fields=fields,
+                                   source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="hi {{ change.slug }}",
+        source_path=Path("a.md"), source=SourceLoc(file=Path("a.md"), line=1),
+        max_tool_calls=max_tool_calls)
+
+
+class _FakeRunner:
+    """Yields a fixed event list; optionally runs a side effect first and/or
+    captures the invocation it was driven with."""
+    def __init__(self, events, *, on_run=None, capture=None):
+        self._events = events
+        self._on_run = on_run
+        self._capture = capture
+    async def run(self, inv):
+        if self._capture is not None:
+            self._capture["inv"] = inv
+        if self._on_run is not None:
+            self._on_run()
+        for e in self._events:
+            yield e
+    async def interrupt(self) -> None: ...
+
+
+def _spawn_yielding(events, *, on_run=None, capture=None):
+    async def _spawn(_inv):
+        return _FakeRunner(events, on_run=on_run, capture=capture)
+    return _spawn
 
 
 @pytest.fixture
@@ -59,34 +97,24 @@ def test_task_tool_schema_has_required_args() -> None:
 
 @pytest.mark.anyio
 async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
-    captured: dict = {}
-
-    async def fake_spawn(sub_invocation: AgentInvocation):
-        captured["invocation"] = sub_invocation
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success", "note": "done"}}
-
-        return _gen()
-
-    ctx = ToolContext(
-        project_root=tmp_path, fs_permissions=(),
-        events_path=tmp_path / "events.jsonl",
-    )
+    capture: dict = {}
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
     ctx.subagent_defs = {"reviewer": _agent("reviewer")}
     ctx.provider_name = "anthropic"
     ctx.model_name = "claude-sonnet-4-6"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
-    ctx.spawn_subagent = fake_spawn
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success", "note": "done"}}],
+        capture=capture)
     ctx.change_context = ChangeContext(
         slug="change-42", title="Change 42", project_root=tmp_path,
-        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
-    )
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     out = await dispatch_task(ctx, "reviewer", "please review")
-    parsed = json.loads(out)
-    assert parsed == {"status": "Success", "note": "done"}
-    inv = captured["invocation"]
+    assert json.loads(out) == {"status": "Success", "note": "done"}
+    inv = capture["inv"]
     assert inv.agent_def.name == "reviewer"
     assert inv.interactive is False
     assert inv.provider_name == "anthropic"
@@ -142,21 +170,17 @@ def test_dispatch_task_renders_subagent_prompt(tmp_path):
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )
+    ctx.coordinator = InterruptCoordinator()
 
-    captured: dict = {}
-
-    async def fake_spawn(inv: AgentInvocation):
-        captured["system_prompt"] = inv.system_prompt
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-
-        return _gen()
-
-    ctx.spawn_subagent = fake_spawn
+    capture: dict = {}
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
 
     result = anyio.run(dispatch_task, ctx, "sub", "do the thing")
-    assert captured["system_prompt"] == "hello change-7"
+    # build_agent_invocation appends the completion instruction after the rendered
+    # prompt — check the rendered portion is correct.
+    assert capture["inv"].system_prompt.startswith("hello change-7")
     # Sanity: dispatch_task still returns JSON-stringified agent_output.
     assert "Success" in result
 
@@ -167,16 +191,7 @@ async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> 
     from imp.engine.state import InMemoryEventLog
 
     shared = InMemoryEventLog()
-    captured: dict = {}
-
-    async def fake_spawn(sub_inv):
-        captured["agent_id"] = sub_inv.agent_id
-        captured["event_log"] = sub_inv.event_log
-        captured["first_event_parent_id"] = sub_inv.first_event_parent_id
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        return _gen()
+    capture: dict = {}
 
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
@@ -185,13 +200,17 @@ async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> 
         parent_transcript_dir=tmp_path / "steps" / "p" / "s",
     )
     ctx.event_log = shared
-    ctx.spawn_subagent = fake_spawn
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
 
     out = await dispatch_task(ctx, "helper", "do it", tool_call_event_id="tc-99")
     assert json.loads(out) == {"status": "Success"}
-    assert captured["agent_id"] == "sub:tc-99"
-    assert captured["event_log"] is shared
-    assert captured["first_event_parent_id"] == "tc-99"
+    inv = capture["inv"]
+    assert inv.agent_id == "sub:tc-99"
+    assert inv.event_log is shared
+    assert inv.first_event_parent_id == "tc-99"
 
 
 @pytest.mark.anyio
@@ -200,14 +219,7 @@ async def test_dispatch_task_uses_subagent_model_role(tmp_path: Path) -> None:
     provider/model from ctx.resolved_roles, NOT the parent's."""
     from imp.providers.config import ProviderModel
 
-    captured: dict = {}
-
-    async def fake_spawn(sub_invocation: AgentInvocation):
-        captured["inv"] = sub_invocation
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        return _gen()
+    capture: dict = {}
 
     sub = _agent("reviewer")
     sub = AgentDef(  # rebuild with model_role set (AgentDef is frozen)
@@ -224,13 +236,16 @@ async def test_dispatch_task_uses_subagent_model_role(tmp_path: Path) -> None:
     ctx.provider_name = "anthropic"      # parent vendor
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
-    ctx.spawn_subagent = fake_spawn
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.resolved_roles = {"code_review": ProviderModel("openai", "gpt-5.2")}
 
     await dispatch_task(ctx, "reviewer", "review please")
-    inv = captured["inv"]
+    inv = capture["inv"]
     assert inv.provider_name == "openai"     # jumped vendor, not parent's anthropic
     assert inv.model_name == "gpt-5.2"
     assert inv.resolved_roles == ctx.resolved_roles
@@ -238,14 +253,7 @@ async def test_dispatch_task_uses_subagent_model_role(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -> None:
-    captured: dict = {}
-
-    async def fake_spawn(sub_invocation: AgentInvocation):
-        captured["inv"] = sub_invocation
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        return _gen()
+    capture: dict = {}
 
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
@@ -254,12 +262,15 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
-    ctx.spawn_subagent = fake_spawn
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
 
     await dispatch_task(ctx, "reviewer", "go")
-    inv = captured["inv"]
+    inv = capture["inv"]
     assert inv.provider_name == "anthropic"  # inherited
     assert inv.model_name == "haiku"
 
@@ -301,14 +312,7 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     """A runtime model_tier wins over the subagent's static model_role."""
     from imp.providers.config import ProviderModel
 
-    captured: dict = {}
-
-    async def fake_spawn(sub_invocation: AgentInvocation):
-        captured["inv"] = sub_invocation
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        return _gen()
+    capture: dict = {}
 
     sub = _agent("reviewer")
     sub = AgentDef(  # rebuild with a static model_role
@@ -324,7 +328,10 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
-    ctx.spawn_subagent = fake_spawn
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("powerful",)
@@ -334,7 +341,7 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
     }
 
     await dispatch_task(ctx, "reviewer", "go", model_tier="powerful")
-    inv = captured["inv"]
+    inv = capture["inv"]
     assert inv.provider_name == "anthropic"   # powerful, not code_review's openai
     assert inv.model_name == "opus"
 
@@ -344,14 +351,7 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     """The model declines to pick a tier (None) -> static model_role still applies."""
     from imp.providers.config import ProviderModel
 
-    captured: dict = {}
-
-    async def fake_spawn(sub_invocation: AgentInvocation):
-        captured["inv"] = sub_invocation
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        return _gen()
+    capture: dict = {}
 
     sub = _agent("reviewer")
     sub = AgentDef(
@@ -367,7 +367,10 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
-    ctx.spawn_subagent = fake_spawn
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("powerful",)
@@ -377,7 +380,7 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
     }
 
     await dispatch_task(ctx, "reviewer", "go", model_tier=None)
-    inv = captured["inv"]
+    inv = capture["inv"]
     assert inv.provider_name == "openai"      # fell through to frontmatter role
     assert inv.model_name == "gpt-5.2"
 
@@ -387,14 +390,7 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     """Defensive: an empty string is treated as 'inherit' via `model_tier or None`."""
     from imp.providers.config import ProviderModel
 
-    captured: dict = {}
-
-    async def fake_spawn(sub_invocation: AgentInvocation):
-        captured["inv"] = sub_invocation
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        return _gen()
+    capture: dict = {}
 
     sub = _agent("reviewer")
     sub = AgentDef(
@@ -410,7 +406,10 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
-    ctx.spawn_subagent = fake_spawn
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("powerful",)
@@ -420,7 +419,7 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
     }
 
     await dispatch_task(ctx, "reviewer", "go", model_tier="")
-    inv = captured["inv"]
+    inv = capture["inv"]
     assert inv.provider_name == "openai"      # fell through to frontmatter role
     assert inv.model_name == "gpt-5.2"
 
@@ -452,14 +451,7 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     the subagent jumps vendor to the tier's resolved model."""
     from imp.providers.config import ProviderModel
 
-    captured: dict = {}
-
-    async def fake_spawn(sub_invocation: AgentInvocation):
-        captured["inv"] = sub_invocation
-
-        async def _gen():
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        return _gen()
+    capture: dict = {}
 
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
@@ -468,7 +460,10 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     ctx.provider_name = "anthropic"                         # parent vendor
     ctx.model_name = "claude-sonnet-4-6"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
-    ctx.spawn_subagent = fake_spawn
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
     ctx.model_tiers = ("fast", "balanced", "powerful")
@@ -480,6 +475,120 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
 
     out = await dispatch_task(ctx, "reviewer", "hard problem", model_tier="powerful")
     assert json.loads(out) == {"status": "Success"}
-    inv = captured["inv"]
+    inv = capture["inv"]
     assert inv.provider_name == "openai"
     assert inv.model_name == "gpt-5.2"
+
+
+@pytest.mark.anyio
+async def test_subagent_construction_parity(tmp_path: Path) -> None:
+    """Omissions #1/#2/#3 closed: a subagent invocation built by dispatch_task
+    carries the completion instruction, a nudge continuation, and a resolved
+    max_tool_calls — parity with a step invocation."""
+    capture: dict = {}
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer", max_tool_calls=9)}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
+    ctx.change_context = ChangeContext(
+        slug="c", title="C c", project_root=tmp_path,
+        workflow_dir=tmp_path / "wf")
+
+    await dispatch_task(ctx, "reviewer", "review it")
+    inv = capture["inv"]
+    assert "complete_step" in inv.system_prompt
+    assert inv.continuation_fn is not None
+    assert inv.max_tool_calls == 9
+
+
+@pytest.mark.anyio
+async def test_subagent_error_fails_loudly_to_parent(tmp_path: Path) -> None:
+    """Omission #2 backstop: a prose-only subagent that the provider turns into
+    agent_incomplete (a Pause category) fails LOUDLY to the parent (RuntimeError
+    -> is_error tool_result), not a silent swallow."""
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding([{"type": "error", "payload": {
+        "category": "agent_incomplete",
+        "kind": "no_complete_step_after_nudges", "message": "no complete_step"}}])
+    ctx.change_context = ChangeContext(slug="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+    with pytest.raises(RuntimeError):
+        await dispatch_task(ctx, "reviewer", "review it")
+
+
+@pytest.mark.anyio
+async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> None:
+    """Omission #4 closed: a retryable error backs off (sleeps + re-spawns a
+    fresh runner) instead of failing immediately."""
+    import imp.agents.subagents as subagents_mod
+
+    sleeps: list[float] = []
+
+    async def _fake_sleep(d):
+        sleeps.append(d)
+
+    monkeypatch.setattr(subagents_mod.anyio, "sleep", _fake_sleep)
+
+    calls = {"n": 0}
+
+    async def _spawn(_inv):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _FakeRunner([{"type": "error", "payload": {
+                "category": "rate_limit", "kind": "429", "message": "slow"}}])
+        return _FakeRunner([{"type": "agent_output",
+                             "payload": {"status": "Success"}}])
+
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn
+    ctx.change_context = ChangeContext(slug="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+
+    out = await dispatch_task(ctx, "reviewer", "review it")
+    assert json.loads(out) == {"status": "Success"}
+    assert len(sleeps) == 1 and sleeps[0] > 0  # one backoff before success
+    assert calls["n"] == 2  # fresh runner on retry
+
+
+@pytest.mark.anyio
+async def test_subagent_pause_raises_suspended(tmp_path: Path) -> None:
+    """A coordinator pause during a subagent drive raises SubagentSuspended
+    (the unwind signal), not a RuntimeError."""
+    from imp.agents.subagents import SubagentSuspended
+
+    coord = InterruptCoordinator()
+
+    def _trip():
+        coord._should_pause = True
+
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = coord
+    ctx.spawn_subagent = _spawn_yielding([{"type": "thinking", "payload": {}}],
+                                         on_run=_trip)
+    ctx.change_context = ChangeContext(slug="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+    with pytest.raises(SubagentSuspended):
+        await dispatch_task(ctx, "reviewer", "review it")

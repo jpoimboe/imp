@@ -73,7 +73,50 @@ def _inv(provider, model, tmp_path):
 async def test_spawn_builds_runner_of_resolved_provider(tmp_path):
     """A subagent whose invocation names openai runs on openai's runner, even
     though the parent might be anthropic."""
-    gen = await resolve.spawn_subagent_via_registry(_inv("openai", "gpt-5.2", tmp_path))
-    outs = [e async for e in gen]
+    runner = await resolve.spawn_subagent_via_registry(_inv("openai", "gpt-5.2", tmp_path))
+    outs = [e async for e in runner.run(_inv("openai", "gpt-5.2", tmp_path))]
     assert outs[-1]["payload"]["ran_on"] == "openai"
     assert outs[-1]["payload"]["model"] == "gpt-5.2"
+
+
+@pytest.mark.anyio
+async def test_spawn_subagent_via_registry_returns_runner(tmp_path) -> None:
+    from imp.providers.resolve import spawn_subagent_via_registry
+
+    resolve.reset_providers_for_tests()
+
+    class _Runner:
+        async def run(self, inv):
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self) -> None: ...
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _inv):
+            return _Runner()
+
+    resolve.register_provider("fake", env_check=lambda: True,
+                              factory=lambda _m: _Provider())
+
+    agent = AgentDef(
+        name="a", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="hi", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    inv = AgentInvocation(
+        agent_def=agent, provider_name="fake", model_name="m",
+        system_prompt="s", initial_messages=(),
+        change_context=ChangeContext(slug="x", title="t",
+                                     project_root=tmp_path,
+                                     workflow_dir=tmp_path / "wf"),
+        interactive=False, transcript_dir=tmp_path / "td",
+        fs_permissions=(), events_path=tmp_path / "e.jsonl")
+
+    runner = await spawn_subagent_via_registry(inv)
+    # A runner, not a generator: it exposes run() + interrupt().
+    assert hasattr(runner, "run") and hasattr(runner, "interrupt")

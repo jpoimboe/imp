@@ -132,11 +132,15 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
         workflow_dir=tmp_path / ".imp" / "change" / "workflow",
     )
 
-    async def fake_spawn(_inv: object) -> object:
-        async def _gen() -> object:
+    class _FakeRunner:
+        async def run(self, inv):
             yield {"type": "agent_output", "payload": {"status": "Success"}}
-        return _gen()
+        async def interrupt(self) -> None: ...
 
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None  # no coordinator needed for this test
     ctx.spawn_subagent = fake_spawn
 
     state = _RunState()
