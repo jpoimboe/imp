@@ -75,12 +75,13 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
     `depth` (no internal +1 — the caller passes the prose depth). Empty when the
     subagent has no outcome yet (still running / force-popped).
 
-    The outcome is `json.dumps(...)` of the structured output the parent consumed,
-    so its prose newlines are escaped to literal `\\n`. We parse it back: a dict
-    renders short scalar fields inline on one `→ key=value · …` line and each
+    On the success path the outcome is `json.dumps(...)` of the structured output
+    the parent consumed, so its prose newlines are escaped to literal `\\n`; on the
+    error path (a failed dispatch) it is a plain, non-JSON string. We parse it back:
+    a dict renders short scalar fields inline on one `→ key=value · …` line and each
     multi-line string field as a labeled block with REAL newlines (wrapped like
-    agent prose). A non-dict (the error case — a failed dispatch returns a plain
-    string) renders as prose. Error-styled when `sub.is_error`."""
+    agent prose). A non-dict — including the plain-string error case — renders as
+    prose. Error-styled when `sub.is_error`."""
     raw = sub.outcome or ""
     if not raw:
         return

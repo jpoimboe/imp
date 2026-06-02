@@ -342,3 +342,29 @@ def test_nested_open_burst_emits_nothing_and_does_not_reorder() -> None:
     assert any("after burst" in ln for ln in body)     # prose still streams, in order
     # No duplicate prose line (guards against double-emit).
     assert sum("after burst" in ln for ln in body) == 1
+
+
+def test_subagent_closing_with_open_nested_burst_still_emits_outcome() -> None:
+    # A subagent can close (parent task tool_result) while a nested burst is still
+    # the nested builder's current_burst (no trailing prose flushed it). The
+    # builder-aware _is_final must NOT block the cursor on that burst once the
+    # subagent has closed — the outcome must still emit on the normal (non-force)
+    # walk. Regression guard for the _is_final builder-awareness fix.
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "tool_call", agent_id="sub:4", id="n1", name="bash", input={}),
+        ev("6", "tool_result", agent_id="sub:4", id="n1", content="ok"),
+        # Subagent closes with the nested burst still open (no flushing prose).
+        ev("7", "tool_result", agent_id="a", id="t1",
+           content='{"status":"Success"}'),
+    ]:
+        drv.on_event(e)
+    body = _body(out)
+    assert any(ln.strip() == "task → reviewer" for ln in body)
+    assert not any("tools" in ln for ln in body)        # nested burst dropped (A2)
+    assert any("→ status=Success" in ln for ln in body)  # outcome emitted on close, non-force

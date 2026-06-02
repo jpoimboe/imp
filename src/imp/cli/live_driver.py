@@ -14,7 +14,8 @@ Depth is read from the cursor stack, NOT the builder's mutable _step_stack /
 _current_phase (a scope-closer event pops those BEFORE this post-add() walk runs).
 
 Not-final children (the only things that block a cursor):
-  - an open ToolBurstFold (still builder.current_burst),
+  - an open ToolBurstFold (still its owning builder's current_burst; for a
+    nested burst the owner is the subagent's nested builder, not the main one),
   - an unresolved human GateNode (action is None) — deferred until the human
     step's step_completed stamps the resolved route onto it.
 Everything else is final on append. A SubagentFold is NOT a blocking leaf: it is
@@ -131,7 +132,7 @@ class LiveDriver:
                     continue
                 return                          # open container, no new children yet
             child = children[cur.index]
-            if not force and not self._is_final(child):
+            if not force and not self._is_final(child, container=cur.container):
                 return                          # block on a not-final child
             cur.index += 1
             if _is_container(child):
@@ -144,17 +145,21 @@ class LiveDriver:
             else:
                 self._emit_leaf(child, cur.depth)
 
-    def _is_final(self, node: Any) -> bool:
+    def _is_final(self, node: Any, *, container: Any) -> bool:
         if isinstance(node, nv.ToolBurstFold):
-            # Compares against the MAIN builder's current_burst. A *nested*
-            # subagent's open burst belongs to that subagent's nested builder, so
-            # it is never == self._builder.current_burst → treated as final and
-            # walked past. That is safe ONLY because render_text drops bursts
-            # entirely in full=False (Component A2): a "final" nested burst renders
-            # nothing, so there is no reorder/double-emit. If A2 ever changes, this
-            # becomes a live reordering/double-emit bug. TECH DEBT (post-release):
-            # make _is_final builder-aware (compare a burst against its OWNING
-            # builder's current_burst) and retire this comment-only coupling.
+            # A burst is "open" (not yet final) only against the current_burst of
+            # the builder that OWNS it: a top-level burst belongs to the main
+            # builder; a *nested* subagent's burst belongs to that subagent's
+            # nested builder. Comparing against the owning builder keeps this
+            # correct regardless of whether render_text renders bursts in
+            # full=False — no reliance on the A2 drop.
+            if isinstance(container, nv.SubagentFold):
+                # Once the subagent has closed, no more nested events arrive, so a
+                # still-"open" nested burst is final — otherwise the cursor would
+                # block here forever and the subagent's outcome would never emit on
+                # the normal (non-force) walk.
+                return (not container.running
+                        or node is not container.nested.current_burst)
             return node is not self._builder.current_burst
         if isinstance(node, nv.GateNode) and node.kind == "human":
             return node.action is not None     # deferred until step_completed
