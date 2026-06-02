@@ -293,6 +293,13 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         cwd=tmp_path, check=True, capture_output=True,
     )
 
+    # The dogfood task is fully specified (exact file, exact line, exact commit
+    # discipline). A correct spec-writer finds NOTHING to clarify, so it asks no
+    # questions. We gate the asks_answered assertion on this rather than dropping
+    # it — a non-zero-ambiguity task that produced 0 asks is still a real
+    # regression we want to catch.
+    TASK_IS_ZERO_AMBIGUITY = True
+
     # Title carries the feature intent. Unique sentinel per run prevents
     # stale state from faking a pass.
     sentinel = f"IMP_DOGFOOD_{uuid.uuid4().hex[:12]}"
@@ -575,10 +582,18 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"superpowers workflow has no ask/options gates; saw {gates_answered} "
         f"human_prompt_pending events"
     )
-    assert asks_answered >= 1, (
-        "interactive spec phase should produce at least one end-of-turn "
-        "question (an awaiting_user_input event); saw 0"
-    )
+    if TASK_IS_ZERO_AMBIGUITY:
+        # Fully-specified task: the spec-writer correctly clarifies nothing.
+        # (We do NOT force a confirmation turn — the spec-writer is unchanged.)
+        assert asks_answered == 0, (
+            f"zero-ambiguity dogfood task should produce no clarifying "
+            f"questions; saw {asks_answered}"
+        )
+    else:
+        assert asks_answered >= 1, (
+            "interactive spec phase should produce at least one end-of-turn "
+            "question (an awaiting_user_input event); saw 0"
+        )
 
     # ── Dogfood-specific verification ──────────────────────────────────
 
