@@ -135,6 +135,15 @@ class AgentInvocation:
     # cheapest->strongest). Copied onto ToolContext by the provider; surfaced to
     # the model as the `task` tool's optional `model_tier` enum. () = feature off.
     model_tiers: tuple[str, ...] = ()
+    # Nesting bound's threading path: dispatch_task sets the child's depth to
+    # parent + 1 and refuses past MAX_SUBAGENT_DEPTH. A field WITHOUT this
+    # threading would read 0 forever and never trip. Each provider copies it
+    # onto the child ToolContext (alongside resolved_roles).
+    subagent_depth: int = 0
+    # The run's InterruptCoordinator. Copied onto ToolContext so dispatch_task
+    # can drive a subagent with pause detection + interrupt attachment. Any to
+    # avoid importing cli.signals here. None for legacy/test construction.
+    coordinator: Any = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}

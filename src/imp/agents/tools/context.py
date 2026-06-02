@@ -51,6 +51,14 @@ class ToolContext:
     # The run's effective model-tier menu; copied from invocation.model_tiers by
     # the provider. dispatch_task reads it only to name valid tiers on error.
     model_tiers: tuple[str, ...] = ()
+    # Depth of THIS invocation in the subagent tree (0 = top-level step).
+    # Each provider copies it from invocation.subagent_depth; dispatch_task
+    # reads it to compute the child's depth and enforce MAX_SUBAGENT_DEPTH.
+    subagent_depth: int = 0
+    # The run's InterruptCoordinator, copied from invocation.coordinator by the
+    # provider. dispatch_task passes it to drive_invocation so a subagent gets
+    # pause detection + interrupt attachment. None for legacy/test contexts.
+    coordinator: Any = None
     # invocation_id counter for disambiguating same-named subagent invocations
     _subagent_counter: int = 0
 
