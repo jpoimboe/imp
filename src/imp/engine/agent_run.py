@@ -20,6 +20,7 @@ import it.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -132,3 +133,91 @@ def build_agent_invocation(
         subagent_depth=subagent_depth,
         coordinator=coordinator,
     )
+
+
+async def drive_invocation(
+    invocation: AgentInvocation,
+    runner: Any,
+    *,
+    coordinator: Any,
+    log: Any,
+    emit_events: bool,
+    prior_backoff_attempts: int = 0,
+) -> AgentRunResult:
+    """Drive one invocation to a single terminal outcome.
+
+    Consumes runner.run(), routes each error event through error_policy.decide
+    (Pause -> fatal; RetryWithBackoff -> delay; RetryNow -> errored), captures
+    agent_output, and detects a coordinator-requested pause. A SubagentSuspended
+    raised by a nested subagent propagates up through runner.run() and is
+    caught here as a pause (so the executor persists status="paused").
+
+    The caller owns the backoff loop: on a non-None `delay`, sleep and re-drive
+    with `prior_backoff_attempts + 1` (a FRESH runner — runners are single-use).
+
+    emit_events: when True (the executor), each drained event is appended to
+    `log` with agent_id=invocation.agent_id and synthesized validation errors
+    with agent_id=None — exactly today's behavior. False (subagents) keeps the
+    subagent's terminal events out of the parent's stream, preserving today's
+    dispatch behavior; the runner still writes its own audit events to its log.
+
+    coordinator may be None (legacy/test): interrupt attachment is skipped and
+    no pause is detected.
+    """
+    # LAZY imports (see module docstring): importing error_policy at module top
+    # would pull in providers/__init__ -> anthropic -> agents.subagents and crash
+    # a cold `import imp.agents.subagents`. drive_invocation is never called at
+    # import time.
+    from imp.engine import error_policy
+    from imp.engine.schema import validate_agent_output
+
+    agent_output: dict[str, Any] | None = None
+    attach = (coordinator.runner_attached(runner.interrupt)
+              if coordinator is not None else contextlib.nullcontext())
+    try:
+        with attach:
+            async for event in runner.run(invocation):
+                if emit_events and log is not None:
+                    log.append(agent_id=invocation.agent_id,
+                               type=event["type"], payload=event.get("payload", {}))
+                if event["type"] == "agent_output":
+                    agent_output = event["payload"]
+                if event["type"] == "error":
+                    payload = event.get("payload") or {}
+                    category = payload.get("category", "unknown")
+                    kind = payload.get("kind")
+                    retry_after = (payload.get("detail") or {}).get("retry_after_seconds")
+                    decision = error_policy.decide(
+                        category, prior_backoff_attempts=prior_backoff_attempts,
+                        hint_delay_seconds=retry_after)
+                    if isinstance(decision, error_policy.Pause):
+                        return AgentRunResult(None, True, False, True, None,
+                                              ErrorInfo(category, kind))
+                    if isinstance(decision, error_policy.RetryWithBackoff):
+                        return AgentRunResult(None, True, False, False,
+                                              decision.delay_seconds,
+                                              ErrorInfo(category, kind))
+                    # RetryNow (agent_output_missing today)
+                    return AgentRunResult(None, True, False, False, None,
+                                          ErrorInfo(category, kind))
+                if coordinator is not None and coordinator.should_pause:
+                    return AgentRunResult(None, False, True, False, None)
+    except SubagentSuspended:
+        # A nested subagent paused; unwind this drive as paused too.
+        return AgentRunResult(None, False, True, False, None)
+
+    if agent_output is None:
+        return AgentRunResult(None, True, False, False, None)
+
+    try:
+        validate_agent_output(agent_output, invocation.agent_def.output_schema)
+    except Exception as e:
+        if emit_events and log is not None:
+            log.append(agent_id=None, type="error", payload={
+                "category": "agent_output_missing",
+                "kind": "output_validation",
+                "message": f"output validation: {e}"})
+        return AgentRunResult(None, True, False, False, None,
+                              ErrorInfo("agent_output_missing", "output_validation"))
+
+    return AgentRunResult(agent_output, False, False, False, None)

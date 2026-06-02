@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from imp.agents.runner import ChangeContext
+from imp.cli.signals import InterruptCoordinator
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
 
 
 def _agent(name: str = "rev", max_tool_calls=None, subagents=()) -> AgentDef:
@@ -95,3 +103,100 @@ def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) -> 
     assert inv.interactive is True
     assert inv.continuation_fn is not None
     assert inv.user_input_fn is not None  # interactive -> PROMPT_USER resume wired
+
+
+def _inv(tmp_path: Path):
+    from imp.engine.agent_run import build_agent_invocation
+    return build_agent_invocation(
+        agent_def=_agent(), provider_name="p", model_name="m",
+        rendered_system_prompt="B", initial_messages=(),
+        change_context=_cc(tmp_path), interactive=False,
+        user_chat_input_fn=None, transcript_dir=tmp_path / "td",
+        fs_permissions=(), events_path=tmp_path / "e.jsonl",
+        subagent_defs={}, model_tiers=(), max_tool_calls=None,
+        agent_id="step:p/s", event_log=None, change_state=None,
+        first_event_parent_id=None, resolved_roles=None, coordinator=None)
+
+
+class _Runner:
+    def __init__(self, events, on_run=None):
+        self._events = events
+        self._on_run = on_run
+    async def run(self, invocation):
+        if self._on_run is not None:
+            self._on_run()
+        for e in self._events:
+            yield e
+    async def interrupt(self) -> None: ...
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_success(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "agent_output", "payload": {"status": "Success"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.output == {"status": "Success"}
+    assert res.errored is False and res.paused is False and res.fatal is False
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_fatal_error(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "auth", "kind": "AuthError", "message": "401"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.fatal is True
+    assert res.error is not None and res.error.category == "auth"
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_backoff_on_rate_limit(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "rate_limit", "kind": "429", "message": "slow down"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False,
+                                 prior_backoff_attempts=0)
+    assert res.delay is not None and res.delay > 0
+    assert res.error is not None and res.error.category == "rate_limit"
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_coordinator_pause(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+
+    def _trip():
+        coord._should_pause = True
+
+    # A benign event lets the loop body run once; should_pause is checked there.
+    runner = _Runner([{"type": "thinking", "payload": {}}], on_run=_trip)
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.paused is True
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_catches_subagent_suspended(tmp_path: Path) -> None:
+    from imp.engine.agent_run import SubagentSuspended, drive_invocation
+
+    coord = InterruptCoordinator()
+
+    class _SuspendingRunner:
+        async def run(self, invocation):
+            raise SubagentSuspended("nested pause")
+            yield  # pragma: no cover (makes this an async generator)
+        async def interrupt(self) -> None: ...
+
+    res = await drive_invocation(_inv(tmp_path), _SuspendingRunner(),
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.paused is True
