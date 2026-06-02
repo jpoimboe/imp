@@ -70,9 +70,11 @@ class InterruptCoordinator:
         """interrupt_fn is an `async def () -> None` callable. All three V1
         runners (AnthropicAgentRunner / OpenAIAgentRunner /
         ClaudeCodeAgentRunner) declare `async def interrupt(self) -> None`
-        per the AgentRunner protocol (`src/imp/agents/runner.py:85`), so the
-        existing `coordinator.attach_runner(runner.interrupt)` call site in
-        executor.py works unchanged — no sync→async migration required."""
+        per the AgentRunner protocol (`src/imp/agents/runner.py:85`).
+
+        The run-level attach/detach API; the per-drive wrapper is
+        `runner_attached` (used by `drive_invocation`), which the executor and
+        dispatch_task now go through instead of calling this directly."""
         self._runner_interrupt = interrupt_fn
 
     def detach_runner(self) -> None:
