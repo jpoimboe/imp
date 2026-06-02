@@ -200,3 +200,64 @@ async def test_drive_invocation_catches_subagent_suspended(tmp_path: Path) -> No
     res = await drive_invocation(_inv(tmp_path), _SuspendingRunner(),
                                  coordinator=coord, log=None, emit_events=False)
     assert res.paused is True
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_emit_events_appends_to_log(tmp_path: Path) -> None:
+    from imp.engine.agent_run import drive_invocation
+
+    class _Log:
+        def __init__(self):
+            self.calls: list[dict] = []
+        def append(self, *, agent_id, type, payload):
+            self.calls.append({"agent_id": agent_id, "type": type, "payload": payload})
+
+    coord = InterruptCoordinator()
+    log = _Log()
+    runner = _Runner([
+        {"type": "thinking", "payload": {"x": 1}},
+        {"type": "agent_output", "payload": {"status": "Success"}},
+    ])
+    inv = _inv(tmp_path)
+    res = await drive_invocation(inv, runner, coordinator=coord, log=log, emit_events=True)
+
+    assert res.output == {"status": "Success"}
+    assert res.errored is False
+    # Both drained events must have been appended with the invocation's agent_id.
+    assert any(
+        c["agent_id"] == "step:p/s" and c["type"] == "thinking"
+        for c in log.calls
+    ), f"thinking event not found in log.calls: {log.calls}"
+    assert any(
+        c["agent_id"] == "step:p/s" and c["type"] == "agent_output"
+        for c in log.calls
+    ), f"agent_output event not found in log.calls: {log.calls}"
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_output_validation_failure(tmp_path: Path) -> None:
+    # {"status": "Nope"} fails because "Nope" is not in the enum values
+    # ("Success", "Error"), so validate_agent_output raises LoadError.
+    from imp.engine.agent_run import drive_invocation
+
+    class _Log:
+        def __init__(self):
+            self.calls: list[dict] = []
+        def append(self, *, agent_id, type, payload):
+            self.calls.append({"agent_id": agent_id, "type": type, "payload": payload})
+
+    coord = InterruptCoordinator()
+    log = _Log()
+    runner = _Runner([{"type": "agent_output", "payload": {"status": "Nope"}}])
+    inv = _inv(tmp_path)
+    res = await drive_invocation(inv, runner, coordinator=coord, log=log, emit_events=True)
+
+    assert res.errored is True
+    assert res.output is None
+    assert res.error is not None
+    assert res.error.category == "agent_output_missing"
+    assert res.error.kind == "output_validation"
+    # A synthesized error event must have been appended with agent_id=None.
+    error_events = [c for c in log.calls if c["type"] == "error" and c["agent_id"] is None]
+    assert error_events, f"no synthesized error event found in log.calls: {log.calls}"
+    assert error_events[0]["payload"]["category"] == "agent_output_missing"
