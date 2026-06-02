@@ -6,6 +6,7 @@ output:
   status: {type: enum, values: [Success, Error]}
   phase: {type: enum, values: [drafting, written]}
   spec_path: {type: string, required: false}
+  complexity: {type: enum, values: [trivial, standard]}
 ---
 
 You are writing the specification for a change the user described.
@@ -54,7 +55,7 @@ The title is user-authoritative — do NOT rename. Proceed straight to writing o
 
 ## Writing the Spec (the `phase: written` turn)
 
-When the brainstorm is settled and the slug is final, write `/project/imp/specs/{{ change.slug }}.md` covering:
+When the brainstorm is settled and the slug is final, write `/project/imp/specs/{{ change.slug }}.md` covering (the full four-part structure for a `standard` change; on a `trivial` change the "Thin spec on `trivial`" note below overrides this and you write Goal + Acceptance criteria only):
 
 - **Goal:** one sentence — what outcome this change delivers
 - **Scope:** what is in and what is explicitly out
@@ -95,6 +96,40 @@ complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")
 ```
 
 The rework turn must be tool-terminal: end with the `commit(amend=true)` then `complete_step(phase="written", …)` calls. Do NOT end a rework turn with a bare question or trailing prose. Never re-solicit the user on rework.
+
+## Classifying complexity (required on every completion)
+
+Emit `complexity` on **every** `complete_step` call — both `drafting` and
+`written` turns. It is a required output field: a `complete_step` that omits it
+is rejected by output-validation, so you must include it even on a drafting
+hand-back. On drafting turns it is only a best estimate (the engine does not act
+on it); only the final `written` value is consumed downstream. "Not consumed on
+drafting" does **not** mean "may be omitted on drafting" — always emit it.
+
+Classify `trivial` **only** when ALL THREE hold:
+1. You asked the user **zero clarifying questions** this change — count over the
+   whole change (all turns since the spec phase began), not just this step. A
+   retrospective self-judgment: ground it with `query_events` (count your own
+   ask/turn history) rather than relying on memory. Any turn where you ended with
+   a question or a design proposal and the user replied counts here (and a design
+   proposal also trips criterion 2 below).
+2. There are **no design decisions** — nothing in the brainstorm required
+   choosing between real alternatives.
+3. The change is **small and localized**: a handful of files, no architectural
+   surface, no new subsystem.
+
+Otherwise emit `standard`. A large-but-precisely-specified change (e.g. a
+mechanical 200-line rename) is `standard`, not `trivial` — low ambiguity is not
+low complexity.
+
+**Thin spec on `trivial`.** When `complexity: trivial`, write a thin spec —
+**Goal + Acceptance criteria only**. This **supersedes** the four-part structure
+in "Writing the Spec" above: deliberately omit Scope and Decisions summary on a
+trivial change (there are no real scope boundaries or non-obvious decisions to
+record). Do NOT invent constraints the prompt did not state (e.g. import
+ordering), and do NOT drop a real constraint the prompt did state. On
+`standard`, write the full four-part spec (Goal, Scope, Decisions summary,
+Acceptance criteria) as described above.
 
 ## Output
 

@@ -69,3 +69,16 @@ def test_default_workflow_declares_tier_menu() -> None:
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
     assert wf.model_tiers == ("fast", "balanced", "powerful")
+
+
+def test_spec_writer_declares_complexity_output() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    spec_writer = wf.agents["spec-writer"]
+    assert "complexity" in spec_writer.output_schema.field_names()
+    # Pin the enum shape too: the downstream fast_path set: gates on the exact
+    # values, so a renamed/added value would silently break that wiring.
+    field = next(f for f in spec_writer.output_schema.fields if f.name == "complexity")
+    assert field.type == "enum"
+    assert field.values == ("trivial", "standard")
+    assert field.required is True

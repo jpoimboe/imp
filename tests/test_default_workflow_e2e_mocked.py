@@ -171,6 +171,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             # spec-writer phase
             "phase": "written",
             "spec_path": "stub-spec.md",
+            "complexity": "standard",
             # plan-writer
             "plan_path": "stub-plan.md",
             "plan_number": 1,
@@ -257,6 +258,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
             "verdict": "approve", "findings": "none",
             "decision": "merge", "comments": "",
             "phase": "written", "spec_path": "stub-spec.md",
+            "complexity": "standard",
             "plan_path": "stub-plan.md", "plan_number": 1,
             "done": True, "deviation": False, "summary": "ok",
             "more_plans": False, "rationale": "ok",
@@ -323,6 +325,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "verdict": "approve", "findings": "none",
                     "decision": "merge", "comments": "",
                     "phase": "written", "spec_path": "stub-spec.md",
+                    "complexity": "standard",
                     "plan_path": "stub-plan.md", "plan_number": 1,
                     "done": True, "deviation": False, "summary": "ok",
                     "more_plans": False, "rationale": "ok",
