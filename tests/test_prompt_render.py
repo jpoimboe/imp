@@ -1,4 +1,4 @@
-"""Prompt template rendering: 2 namespaces (events/change)."""
+"""Prompt template rendering: 3 namespaces (change/events/vars)."""
 
 from __future__ import annotations
 
@@ -61,3 +61,27 @@ def test_undefined_top_level_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(PromptRenderError):
         render_prompt("{{ bogus.thing }}", ctx)
+
+
+def test_renders_vars_namespace(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_slug="t", change_title="t", event_log=log,
+                        vars={"fast_path": True})
+    assert render_prompt("{{ vars.fast_path }}", ctx) == "True"
+    assert render_prompt("{% if vars.fast_path %}fast{% endif %}", ctx) == "fast"
+
+
+def test_vars_typo_raises_strict_within(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_slug="t", change_title="t", event_log=log,
+                        vars={"fast_path": False})
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ vars.fastpath }}", ctx)
+
+
+def test_vars_default_empty_when_omitted(tmp_path: Path) -> None:
+    log = _log(tmp_path / "events.jsonl", [])
+    ctx = build_context(change_slug="t", change_title="t", event_log=log)
+    # An unknown var still raises (strict-within over an empty map).
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ vars.anything }}", ctx)

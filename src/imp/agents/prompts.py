@@ -1,10 +1,12 @@
 """Prompt template rendering for agent .md bodies.
 
-Two namespaces (spec §7.5):
-  events.<step-name>.<field> — validated agent_output of prior step
+Three namespaces (spec §7.5):
   change.slug / change.title — change identity
+  events.<step-name>.<field> — validated agent_output of prior step;
+      missing steps render as empty (lenient-within)
+  vars.<name> — workflow vars from state.vars; a typo'd key raises at render
+      because the dict is passed directly under StrictUndefined (strict-within)
 
-Missing steps render as empty (lenient).
 Unknown top-level namespaces raise PromptRenderError (strict; catches typos).
 """
 
@@ -75,18 +77,21 @@ class _ChangeNamespace:
 class PromptContext:
     change: _ChangeNamespace
     events: _EventsNamespace
+    vars: dict[str, Any]
 
 
 def build_context(
     change_slug: str, change_title: str,
     event_log: EventLog,
     *, change_auto_titled: bool = False,
+    vars: dict[str, Any] | None = None,
 ) -> PromptContext:
     return PromptContext(
         change=_ChangeNamespace(
             slug=change_slug, title=change_title, auto_titled=change_auto_titled,
         ),
         events=_EventsNamespace(event_log),
+        vars=dict(vars or {}),
     )
 
 
@@ -101,7 +106,7 @@ def render_prompt(template_source: str, ctx: PromptContext) -> str:
     """Render the template. Strict on top-level names; lenient inside namespaces."""
     try:
         return _env.from_string(template_source).render(
-            change=ctx.change, events=ctx.events,
+            change=ctx.change, events=ctx.events, vars=ctx.vars,
         )
     except jinja2.exceptions.UndefinedError as e:
         raise PromptRenderError(str(e)) from e

@@ -564,6 +564,7 @@ async def _run_agent_invocation(
         agent_def.prompt_template_source, build_context(
             change_slug=change.slug, change_title=change.title,
             change_auto_titled=change.auto_titled, event_log=log,
+            vars=state.vars,
         ),
     )
 

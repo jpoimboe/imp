@@ -124,6 +124,7 @@ async def dispatch_task(
         change_slug=cc.slug,
         change_title=f"Change {cc.slug}",
         event_log=JsonlEventLog(ctx.events_path),
+        vars=ctx.change_state.vars if ctx.change_state is not None else {},
     )
     rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
 
