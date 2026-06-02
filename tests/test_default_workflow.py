@@ -30,7 +30,7 @@ def test_default_workflow_loads_with_default_roles(tmp_path: Path) -> None:
         "fast", "balanced", "powerful",
     }
     workflow = load_workflow(staged, configured_roles=configured)
-    assert workflow.name == "superpowers"
+    assert workflow.name == "feature"
     assert [p.name for p in workflow.phases] == [
         "spec", "plan", "implement", "review", "merge",
     ]

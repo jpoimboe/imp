@@ -32,14 +32,14 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     wf = load_workflow(wf_dir)
     by = {s.name: s for s in wf.flat_steps()}
     # producer back-edges resume their target's conversation
-    assert isinstance(by["spec-commit-verify"].rules[-1].action, Goto)
-    assert by["spec-commit-verify"].rules[-1].action.resume is True   # -> spec-writer
-    assert by["plan-commit-verify"].rules[-1].action.resume is True   # -> plan-writer
+    assert isinstance(by["spec-verify-commit"].rules[-1].action, Goto)
+    assert by["spec-verify-commit"].rules[-1].action.resume is True   # -> spec-writer
+    assert by["plan-verify-commit"].rules[-1].action.resume is True   # -> plan-writer
     assert by["run-tests"].rules[-1].action.resume is True            # -> task-lead
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
     # phase jumps clear (plain goto)
     assert by["code-reviewer"].rules[1].action.resume is False    # rework -> plan-writer
-    assert by["spec-commit-verify"].kind == "script"
+    assert by["spec-verify-commit"].kind == "script"
     assert wf.phases[-1].name == "merge" and wf.phases[-1].steps == ()
 
 
@@ -48,13 +48,13 @@ def test_default_workflow_has_code_review_constraint():
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
     # code_review must differ from fast (the implementer subagent tier) for
-    # cross-provider review; in the superpowers workflow the coder runs at the
+    # cross-provider review; in the feature workflow the coder runs at the
     # `fast` tier, so the reviewer is constrained against `fast` not `code`.
     assert wf.model_rules["code_review"].differ_provider_from == "fast"
 
 
 def test_default_code_reviewer_step_declares_model_role():
-    # In the superpowers workflow model_role is assigned at the step level in
+    # In the feature workflow model_role is assigned at the step level in
     # workflow.yaml, not in the agent frontmatter.  Verify the step-level
     # declaration is present and correct so code_review diversity wiring works.
     from imp.assets import default_workflow_dir

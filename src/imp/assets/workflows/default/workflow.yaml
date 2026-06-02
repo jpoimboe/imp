@@ -1,15 +1,8 @@
-name: superpowers
+name: feature
 description: |
-  Superpowers-ported workflow: spec -> (plan -> implement)* -> review -> merge.
-  The engine drives sequence; fresh per-step agents pull discipline skills on
-  demand. Ported from superpowers (MIT, Jesse Vincent).
+  spec -> (plan -> implement*)* -> review -> merge
 
 model_rules:
-  # Provider diversity is BEST-EFFORT, not enforced: with a single configured
-  # provider these are soft preferences (resolve to the same provider, no error);
-  # they only deliver real cross-provider review when >=2 providers are configured.
-  spec_review:  {differ_provider_from: spec}
-  plan_review:  {differ_provider_from: plan}
   # The whole-change author is the `implementer` subagent, dispatched at the
   # `fast` tier (not a `model_role: code` step). So the final code-reviewer must
   # differ from `fast` to see the change through a different provider (spec §11).
@@ -33,74 +26,65 @@ vars:
 
 defaults:
   max_retries: 3
-  max_loops: 6
+  max_loops: 1000
+  max_tool_calls: 10000
 
 phases:
-  # ── spec ──────────────────────────────────────────────────────────────
   - name: spec
     steps:
       - name: spec-writer
         file: agents/spec-writer.md
         model_role: spec
         interactive: true
-        max_tool_calls: 30           # per step-entry (executor.py:673-709 resolves it per
-                                     # dispatch into a fresh runner); resets each drafting hand-back
-        max_loops: 8                 # bounds drafting/rename self-loops only
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/imp/specs/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
         rules:
-          - {if: {phase: drafting}, resume: spec-writer}
+          - {if: {phase: drafting}, resume: spec-writer}    # used for rename at step boundary
           - {else: true, continue: true}
 
-      - name: spec-reviewer
-        file: agents/spec-reviewer.md
-        model_role: spec_review
-        max_loops: 6                 # bounds spec rework rounds
-        rules:
-          - {if: {blocking: true}, resume: spec-writer}
-          - {else: true, continue: true}
-
-      - name: spec-commit-verify
+      - name: spec-verify-commit
         command: ./scripts/spec-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 
-  # ── plan (supercycle head) ───────────────────────────────────────────
+      - name: spec-reviewer
+        file: agents/spec-reviewer.md
+        model_role: spec_review
+        rules:
+          - {if: {blocking: true}, resume: spec-writer}
+          - {else: true, continue: true}
+
   - name: plan
     steps:
       - name: plan-writer
         file: agents/plan-writer.md
         model_role: plan
-        max_tool_calls: 40           # reads spec + existing plans + codebase before writing
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/imp/plans/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
 
-      - name: plan-reviewer
-        file: agents/plan-reviewer.md
-        model_role: plan_review
-        max_loops: 6                 # bounds plan rework rounds
-        rules:
-          - {if: {blocking: true}, resume: plan-writer}
-          - {else: true, continue: true}
-
-      - name: plan-commit-verify
+      - name: plan-verify-commit
         command: ./scripts/plan-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
-  # ── implement (C1 loop + supercycle tail) ────────────────────────────
+      - name: plan-review
+        file: agents/plan-reviewer.md
+        model_role: plan_review
+        rules:
+          - {if: {blocking: true}, resume: plan-writer}
+          - {else: true, continue: true}
+
   - name: implement
     steps:
       - name: task-lead
         file: agents/task-lead.md
         model_role: task_lead
-        max_loops: 60                # tasks + deviations per plan (shared counter)
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           # implementer subagent inherits these. /project/** covers both code and
@@ -108,7 +92,7 @@ phases:
           - {operations: [write], paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}   # no writes outside /project
         rules:
-          - {if: {deviation: true}, resume: plan-writer}   # plan was wrong
+          - {if: {deviation: true}, resume: plan-writer}    # plan was wrong
           - {if: {done: false},     goto: task-lead}        # next task, fresh
           - {else: true, continue: true}                    # plan implemented
 
@@ -132,7 +116,6 @@ phases:
           - {if: {more_plans: true}, goto: plan-writer}     # supercycle
           - {else: true, continue: true}
 
-  # ── review ────────────────────────────────────────────────────────────
   - name: review
     steps:
       - name: autosquash

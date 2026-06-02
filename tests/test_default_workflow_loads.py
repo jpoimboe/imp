@@ -1,4 +1,4 @@
-"""Structural gate for the shipped superpowers workflow (spec §4, §11): it loads
+"""Structural gate for the shipped feature workflow (spec §4, §11): it loads
 and validates against the roles `imp init` scaffolds, with all phases, the
 supercycle back-edges, and the discipline skills present. No live providers."""
 
@@ -21,7 +21,7 @@ def _wf():
 
 def test_workflow_loads_with_scaffolded_roles() -> None:
     wf = _wf()
-    assert wf.name == "superpowers"
+    assert wf.name == "feature"
     assert [p.name for p in wf.phases] == ["spec", "plan", "implement",
                                            "review", "merge"]
 
