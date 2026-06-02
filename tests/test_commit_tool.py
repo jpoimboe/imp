@@ -129,3 +129,37 @@ def test_commit_fixup_requires_paths(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, "2026-06-01-demo")
     with pytest.raises(ValueError, match="fixup requires at least one path"):
         commit(ctx, paths=[], message="", fixup="HEAD")
+
+
+def test_commit_message_only_amend_clean_index(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    (tmp_path / "f.txt").write_text("orig\n")
+    ctx = _ctx(tmp_path, "2026-06-02-demo")
+    commit(ctx, paths=["/project/f.txt"], message="feat: x")
+    before = _count_commits(tmp_path)
+    # Clean index: amend only the message (re-adding a Task: trailer line).
+    commit(ctx, paths=[], message="feat: x\n\nTask: imp-task-1-end", amend=True)
+    body = _body(tmp_path)
+    assert "Task: imp-task-1-end" in body
+    assert body.count("Change: 2026-06-02-demo") == 1
+    assert _count_commits(tmp_path) == before          # amended, not new
+    assert (tmp_path / "f.txt").read_text() == "orig\n"  # content untouched
+
+
+def test_commit_message_only_amend_dirty_index_folds_in(tmp_path: Path) -> None:
+    """Documents the warned foot-gun: an empty-paths amend on a DIRTY index
+    folds the already-staged change into HEAD. The task-lead prompt must gate
+    the message-only amend on a clean index."""
+    _init_repo(tmp_path)
+    (tmp_path / "f.txt").write_text("orig\n")
+    ctx = _ctx(tmp_path, "2026-06-02-demo")
+    commit(ctx, paths=["/project/f.txt"], message="feat: x")
+    # Stage an unrelated change behind the tool's back.
+    (tmp_path / "f.txt").write_text("changed\n")
+    subprocess.run(["git", "add", "f.txt"], cwd=tmp_path, check=True)
+    commit(ctx, paths=[], message="feat: x (msg only)", amend=True)
+    # The staged change WAS folded into HEAD — the foot-gun the precondition guards.
+    head_blob = subprocess.run(
+        ["git", "show", "HEAD:f.txt"], cwd=tmp_path,
+        capture_output=True, text=True, check=True).stdout
+    assert head_blob == "changed\n"
