@@ -122,10 +122,11 @@ def test_spec_writer_drafting_turn_never_evaluates_set() -> None:
     assert m.var_mutations == {}
 
 
-def test_task_lead_has_commit_tool() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    assert "commit" in wf.agents["task-lead"].tools
+def test_commit_tool_is_removed_from_registry() -> None:
+    # Fix #3: the commit tool is gone; all agents commit with raw git.
+    import imp.agents.tools  # noqa: F401 — triggers _register_builtins
+    from imp.agents.tools import get_registry
+    assert "commit" not in get_registry()
 
 
 def test_fast_path_gates_skip_depth_keep_safety() -> None:
