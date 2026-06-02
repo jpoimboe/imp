@@ -51,7 +51,7 @@ Once you're clear on requirements:
 1. Implement exactly what the task specifies
 2. Write tests (TDD: write the failing test first, then make it pass)
 3. Verify implementation works
-4. Commit your work (see Commit Modes below)
+4. Commit your work (see Commit Modes below) — but FIRST run the lint-clean gate if `$IMP_LINT_COMMAND` is set (see Self-Review); lint must pass *before* the commit, not after
 5. Self-review (see below)
 6. Report your results **by calling `complete_step`** (see Report Format) — a turn that ends in prose instead of a tool call is a failure, not a report.
 
@@ -109,6 +109,11 @@ The `commit` tool also stamps the `Change:` trailer automatically.
 commit(paths=[…], message="<updated message>\n\nTask: imp-task-<N>-end", amend=true)
 ```
 
+> ⚠️ **Amend replaces the ENTIRE commit message.** You MUST re-include the
+> `Task: imp-task-<N>-end` line every time you amend — if you drop it, the task
+> trailer is gone and a downstream gate will reject the commit. Re-state the tag
+> verbatim, including `-end`.
+
 **RE-OPENING a buried task** (its commit is no longer HEAD) — fixup, targeting the task by its tag:
 
 ```
@@ -140,6 +145,13 @@ Review your work with fresh eyes. Ask yourself:
 - Do tests actually verify behavior (not just mock behavior)?
 - Did I follow TDD if required?
 - Are tests comprehensive?
+
+**Lint-clean gate (before committing):**
+If `$IMP_LINT_COMMAND` is set, run it and ensure it passes on your changes
+**before** you commit. This gate is **separate from the test suite** — run it
+even when the task description says to skip verification or tests. "Skip verification"
+scopes out the slow test suite; it never licenses a lint-dirty tree (e.g. an
+unused import / F401).
 
 If you find issues during self-review, fix them now before reporting.
 
