@@ -26,8 +26,11 @@ variable `$IMP_PROJECT_ROOT` (the physical project root path). Never `cd /projec
 ## Before You Begin
 
 {% if vars.fast_path %}
-This change was classified **trivial** and the spec waived tests. Do **not**
-create, modify, or run tests — implement exactly the task's edits and commit.
+This change was classified **trivial**: do **not** create or modify tests, and do
+**not** load the TDD skill. Make exactly the task's edits. Before you commit, run
+the test gate if `$IMP_TEST_COMMAND` is set (and the lint gate if `$IMP_LINT_COMMAND`
+is set) and confirm both pass — catching a slip yourself here avoids a wasted
+run-tests rebound. Then commit.
 {% else %}
 Load the TDD discipline first:
 

@@ -108,9 +108,10 @@ def test_implementer_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
         build_context(change_slug="t", change_title="t", event_log=log,
                       vars={"fast_path": False}),
     )
-    # fast-path: tests waived, TDD skill NOT loaded.
-    assert "waived tests" in fast
+    # fast-path: no new tests, TDD skill NOT loaded, but test gate IS run.
+    assert "do **not** create or modify tests" in fast
+    assert "IMP_TEST_COMMAND" in fast
     assert "test-driven-development" not in fast
-    # standard path: TDD skill loaded, no "waived" language.
+    # standard path: TDD skill loaded; fast-path constraints absent.
     assert "test-driven-development" in slow
-    assert "waived tests" not in slow
+    assert "do **not** create or modify tests" not in slow
