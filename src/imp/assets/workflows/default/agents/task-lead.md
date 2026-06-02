@@ -53,8 +53,9 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
 3. Dispatch both reviewers on the result (independent eyes) at the **`balanced`
    tier**: `task(subagent_name="spec-task-reviewer", model_tier="balanced", …)`
    and `task(subagent_name="quality-reviewer", model_tier="balanced", …)`, giving
-   each the task text + spec. (Implementer → `fast`/Haiku; reviewers and your own
-   judgment → `balanced`/Sonnet, per spec §11.)
+   each the task text + spec. (Implementer → the `fast` tier; reviewers and your own judgment → the
+   `balanced` tier, per spec §11. Name tiers, never specific model names — the
+   configured provider may not be Anthropic.)
 4. **Adjudicate.** Load the receiving-code-review discipline
    (`load_skill(name="receiving-code-review")`) and decide which findings are
    valid (Critical/Major must be addressed; Minor/Nit may be deferred as
@@ -65,7 +66,10 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
 5. Append to `/project/.imp/change/progress.md` (create it if missing): the task
    completed, **its tag `imp-task-<N>-end`** (the ledger entry from step 2) and the
    incremented next-free tag number, any carried followups (deferred Minor/Nit),
-   and any deviation note.
+   and any deviation note. **If a dispatch returned no clean structured result —
+   a subagent errored, or you had to redo its work yourself — record that under
+   an `open_items` note here**, so the summarizer surfaces the degradation in
+   `imp log` and the final summary. A degraded run must be self-reporting.
 6. **Deviation escape hatch.** If implementing this task reveals the plan is
    wrong (a task can't be done as written, an assumption is false), set
    `deviation: true` and return — the engine resumes plan-writer to revise this
@@ -74,8 +78,14 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
    `done: false` (the engine re-enters you fresh for the next task).
 
 Discipline: never dispatch two implementers in parallel; never skip a reviewer;
-never move on with blocking findings open; answer subagent questions before
-letting them proceed. Before returning `done: true`, load
+never move on with blocking findings open. When a subagent returns
+`result: NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the missing context
+and **re-dispatch**. Because the re-dispatch is a fresh subagent with an empty
+context window, you must **re-pack the full context into the new
+`task_description`** — the original task + your answer + what the subagent's
+`report` surfaced (and, if the report is thin, a `query_events` peek at the
+subagent's events, logged under `agent_id=sub:<…>`). The next subagent inherits
+*only* what you write. Before returning `done: true`, load
 verification-before-completion and confirm the plan's tasks are actually done.
 
 ---
