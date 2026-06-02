@@ -15,10 +15,11 @@ _current_phase (a scope-closer event pops those BEFORE this post-add() walk runs
 
 Not-final children (the only things that block a cursor):
   - an open ToolBurstFold (still builder.current_burst),
-  - a SubagentFold with running == True,
   - an unresolved human GateNode (action is None) — deferred until the human
     step's step_completed stamps the resolved route onto it.
-Everything else is final on append.
+Everything else is final on append. A SubagentFold is NOT a blocking leaf: it is
+a descended container (like a PhaseNode/StepNode), so its children stream live as
+their events route in, and its structured return value is emitted on close.
 """
 from __future__ import annotations
 
@@ -35,13 +36,29 @@ _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 @dataclass
 class _Cursor:
-    container: Any   # WorkflowNode | PhaseNode | StepNode
+    container: Any   # WorkflowNode | PhaseNode | StepNode | SubagentFold
     depth: int       # depth at which this container's CHILDREN render
     index: int = 0   # next unemitted child
 
 
 def _is_container(node: Any) -> bool:
-    return isinstance(node, (nv.PhaseNode, nv.StepNode))
+    return isinstance(node, (nv.PhaseNode, nv.StepNode, nv.SubagentFold))
+
+
+def _container_children(container: Any) -> list[Any]:
+    # A SubagentFold's children live on its nested tree, not a `.children` attr.
+    if isinstance(container, nv.SubagentFold):
+        children: list[Any] = container.tree.root.children
+    else:
+        children = container.children
+    return children
+
+
+def _container_closed(container: Any) -> bool:
+    # A SubagentFold has no `closed` attr; "closed" means it stopped running.
+    if isinstance(container, nv.SubagentFold):
+        return not container.running
+    return getattr(container, "closed", False)
 
 
 class LiveDriver:
@@ -97,11 +114,19 @@ class LiveDriver:
     def _walk(self, *, force: bool = False) -> None:
         while self._frontier:
             cur = self._frontier[-1]
-            children = cur.container.children
+            children = _container_children(cur.container)
             if cur.index >= len(children):
                 if len(self._frontier) == 1:
                     return                      # root: never pop; await more children
-                if force or getattr(cur.container, "closed", False):
+                if force or _container_closed(cur.container):
+                    # A drained+closed subagent emits its return value before pop,
+                    # at the prose depth (cur.depth) so it matches imp log. A still-
+                    # running subagent force-popped at finish() has an empty outcome
+                    # and emits nothing.
+                    if isinstance(cur.container, nv.SubagentFold):
+                        self._print_lines(list(rt.subagent_outcome_lines(
+                            cur.container, depth=cur.depth, color=self._color,
+                            width=self._width)))
                     self._frontier.pop()        # container drained + closed
                     continue
                 return                          # open container, no new children yet
@@ -110,6 +135,9 @@ class LiveDriver:
                 return                          # block on a not-final child
             cur.index += 1
             if _is_container(child):
+                # Subagent header is the shared `task → {name}` boundary; the live
+                # driver prints it the instant the subagent starts (while running),
+                # then streams the subagent's children as their events route in.
                 self._stream_or_hold(rt.header_line(
                     child, depth=cur.depth, color=self._color))
                 self._frontier.append(_Cursor(container=child, depth=cur.depth + 1))
@@ -118,11 +146,20 @@ class LiveDriver:
 
     def _is_final(self, node: Any) -> bool:
         if isinstance(node, nv.ToolBurstFold):
+            # Compares against the MAIN builder's current_burst. A *nested*
+            # subagent's open burst belongs to that subagent's nested builder, so
+            # it is never == self._builder.current_burst → treated as final and
+            # walked past. That is safe ONLY because render_text drops bursts
+            # entirely in full=False (Component A2): a "final" nested burst renders
+            # nothing, so there is no reorder/double-emit. If A2 ever changes, this
+            # becomes a live reordering/double-emit bug. TECH DEBT (post-release):
+            # make _is_final builder-aware (compare a burst against its OWNING
+            # builder's current_burst) and retire this comment-only coupling.
             return node is not self._builder.current_burst
-        if isinstance(node, nv.SubagentFold):
-            return not node.running
         if isinstance(node, nv.GateNode) and node.kind == "human":
             return node.action is not None     # deferred until step_completed
+        # SubagentFold is no longer a blocking leaf — it is a descended container
+        # (see _is_container / _walk), streamed child-by-child as events arrive.
         return True
 
     def _emit_leaf(self, node: Any, depth: int) -> None:

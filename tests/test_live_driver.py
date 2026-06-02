@@ -37,7 +37,7 @@ def _render_body(events) -> list[str]:
     return list(render_tree(tree, full=False, color=False, width=80))
 
 
-def test_burst_coalesces_once_on_flush() -> None:
+def test_burst_renders_nothing_in_live_path() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -50,17 +50,16 @@ def test_burst_coalesces_once_on_flush() -> None:
     ]
     for e in events:
         drv.on_event(e)
-    # Burst is still open (no non-tool event after it) — not emitted yet.
-    assert not any("tools ·" in ln for ln in _body(out))
+    assert not any("tools" in ln for ln in _body(out))
     drv.on_event(ev("8", "llm_response", agent_id="a",
                     raw={"content": [{"type": "text", "text": "done"}]},
                     usage={}))
     body = _body(out)
-    burst_lines = [ln for ln in body if "tools ·" in ln]
-    assert len(burst_lines) == 1 and "2 tools" in burst_lines[0]
+    assert not any("tools" in ln for ln in body)   # burst dropped (A2)
+    assert any("done" in ln for ln in body)        # prose still streams
 
 
-def test_tree_order_burst_then_prose() -> None:
+def test_burst_dropped_prose_kept_in_order() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -73,12 +72,11 @@ def test_tree_order_burst_then_prose() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    burst_i = next(i for i, ln in enumerate(body) if "tools ·" in ln)
-    prose_i = next(i for i, ln in enumerate(body) if "the answer" in ln)
-    assert burst_i < prose_i
+    assert not any("tools" in ln for ln in body)
+    assert any("the answer" in ln for ln in body)
 
 
-def test_subagent_fold_does_not_leak_nested_children() -> None:
+def test_subagent_descends_but_nested_burst_does_not_leak() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -92,9 +90,12 @@ def test_subagent_fold_does_not_leak_nested_children() -> None:
         ev("7", "tool_result", agent_id="a", id="t1", content="done"),
     ]:
         drv.on_event(e)
-    body = "\n".join(_body(out))
-    assert "task → coder" in body
-    assert "secret.py" not in body  # nested burst must NOT leak into the stream
+    body = _body(out)
+    # New boundary-header shape: no glyph, no `· N events` suffix.
+    assert any(ln.strip() == "task → coder" for ln in body)
+    assert not any("▸ task" in ln for ln in body)
+    # The nested tool burst must still NOT leak into the stream (A2 filters it).
+    assert not any("secret.py" in ln for ln in body)
 
 
 def test_depth_when_step_completed_flushes_trailing_burst() -> None:
@@ -206,7 +207,7 @@ def test_human_gate_blocks_following_nodes_until_resolved() -> None:
     assert gate_i < outcome_i                      # tree order preserved
 
 
-def test_finish_flushes_open_burst_at_pause() -> None:
+def test_open_burst_flushes_to_nothing_at_pause() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -216,6 +217,128 @@ def test_finish_flushes_open_burst_at_pause() -> None:
         ev("5", "tool_result", agent_id="a", id="b1", content="ok"),
     ]:
         drv.on_event(e)
-    assert not any("tools ·" in ln for ln in _body(out))   # still open
+    assert not any("tools" in ln for ln in _body(out))
     drv.finish()
-    assert any("1 tools" in ln for ln in _body(out))       # flushed on finish
+    assert not any("tools" in ln for ln in _body(out))   # nothing to emit (A2)
+
+
+def test_subagent_prose_streams_before_close() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "interim finding"}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    # Prose appears WHILE the subagent is still running (before the close event).
+    body_before = _body(out)
+    assert any("interim finding" in ln for ln in body_before)
+    assert not any("→ status" in ln for ln in body_before)   # no outcome yet
+    # Close the subagent; the outcome lands now.
+    drv.on_event(ev("6", "tool_result", agent_id="a", id="t1",
+                    content='{"status":"Success"}'))
+    body_after = _body(out)
+    assert any("→ status=Success" in ln for ln in body_after)
+
+
+def test_subagent_outcome_column_matches_prose_column() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "finding"}]}, usage={}),
+        ev("6", "tool_result", agent_id="a", id="t1",
+           content='{"status":"Success"}'),
+    ]:
+        drv.on_event(e)
+    body = _body(out)
+    prose_line = next(ln for ln in body if "finding" in ln)
+    outcome_line = next(ln for ln in body if "→ status=Success" in ln)
+
+    def indent(s: str) -> int:
+        return len(s) - len(s.lstrip())
+
+    assert indent(prose_line) == indent(outcome_line)
+
+
+def test_finish_force_pops_running_subagent_without_outcome() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "partial work"}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    # Subagent never closes; finish() must force-pop it without crashing.
+    drv.finish()
+    body = _body(out)
+    assert any(ln.strip() == "task → reviewer" for ln in body)
+    assert any("partial work" in ln for ln in body)
+    assert not any("→ status" in ln for ln in body)   # empty outcome → nothing
+
+
+def test_subagent_body_parity_with_render_tree() -> None:
+    # The stated invariant: snapshot (imp log) and live stay BYTE-IDENTICAL via the
+    # shared header/outcome helpers. The subagent path is where the two renderers
+    # diverge most (descended-container + outcome-on-pop vs. a single
+    # _render_subagent call), so assert full-line parity for a subagent with prose
+    # AND a structured outcome.
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
+        ev("6", "tool_result", agent_id="a", id="t1",
+           content='{"status":"Success","summary":"ok"}'),
+        ev("7", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert _body(out) == _render_body(events)
+
+
+# NOTE: there is intentionally NO doubly-nested (sub-subagent) live test. Routing
+# is single-level (narrative.py:763-770) and spawned subagents get
+# `subagent_defs={}`, so a sub-subagent's events misroute and the inner fold stays
+# empty — the scenario is unreachable until the engine enables nesting. See the
+# matching note in tests/test_render_text.py.
+
+
+def test_nested_open_burst_emits_nothing_and_does_not_reorder() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        # Nested burst left OPEN (no flushing event inside the subagent).
+        ev("5", "tool_call", agent_id="sub:4", id="n1", name="bash", input={}),
+        ev("6", "tool_result", agent_id="sub:4", id="n1", content="ok"),
+        ev("7", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "after burst"}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    body = _body(out)
+    assert not any("tools" in ln for ln in body)       # nested open burst emits nothing
+    assert any("after burst" in ln for ln in body)     # prose still streams, in order
+    # No duplicate prose line (guards against double-emit).
+    assert sum("after burst" in ln for ln in body) == 1
