@@ -37,13 +37,13 @@ Follow RED-GREEN-REFACTOR. If you encounter a test failure or unexpected behavio
 load_skill(name="systematic-debugging")
 ```
 
-If you have questions about:
-- The requirements or acceptance criteria
-- The approach or implementation strategy
-- Dependencies or assumptions
-- Anything unclear in the task description
-
-**Ask them now.** Raise any concerns before starting work. End your turn with the question as plain text and no tool call.
+If anything is unclear — the requirements or acceptance criteria, the approach,
+dependencies or assumptions, anything in the task description — you have **no
+user to ask**: you run non-interactively. Do not end your turn with a bare
+question; that is not a channel. Instead **escalate through `complete_step`**:
+call `complete_step(status="Success", result="NEEDS_CONTEXT", report=…)` and the
+task-lead will re-dispatch you with answers. Raise concerns this way before
+sinking effort into a guess.
 
 ## Your Job
 
@@ -53,9 +53,11 @@ Once you're clear on requirements:
 3. Verify implementation works
 4. Commit your work (see Commit Modes below)
 5. Self-review (see below)
-6. Report back
+6. Report your results **by calling `complete_step`** (see Report Format) — a turn that ends in prose instead of a tool call is a failure, not a report.
 
-**While you work:** If you encounter something unexpected or unclear, ask questions. It's always OK to pause and clarify. Don't guess or make assumptions.
+**While you work:** If you hit something unexpected or unclear, do not guess and
+do not silently end your turn — escalate via `complete_step(result="NEEDS_CONTEXT"
+or "BLOCKED", report=…)`. You will not be penalized for escalating.
 
 ## Apply, Do Not Adjudicate
 
@@ -81,7 +83,13 @@ It is always OK to stop and say "this is too hard for me." Bad work is worse tha
 - The task involves restructuring existing code in ways the plan didn't anticipate
 - You've been reading file after file trying to understand the system without progress
 
-**How to escalate:** Report back with `result` BLOCKED or NEEDS_CONTEXT. Describe specifically what you're stuck on, what you've tried, and what kind of help you need. The task-lead can provide more context, re-dispatch with a more capable model, or break the task into smaller pieces.
+**How to escalate:** finish via `complete_step(result="BLOCKED" or "NEEDS_CONTEXT", report=…)`. Describe specifically what you're stuck on, what you've tried, and what kind of help you need. The task-lead can provide more context, re-dispatch with a more capable model, or break the task into smaller pieces.
+
+**Your `report` is the ONLY thing the next subagent inherits.** A re-dispatch
+builds a brand-new implementer with an empty context window — it does not see
+your transcript. So a `NEEDS_CONTEXT`/`BLOCKED` report MUST carry the bridge
+explicitly: **what you learned so far + what you specifically need to proceed**.
+Anything not in a commit, a file, or this `report` is lost.
 
 ## Commit Modes
 
@@ -140,6 +148,10 @@ If you find issues during self-review, fix them now before reporting.
 When done, call `complete_step(status="Success", result="<one of the four>", report="…")` where:
 - `status` is the engine completion signal: set `"Success"` on normal completion (even when reporting DONE_WITH_CONCERNS, BLOCKED, or NEEDS_CONTEXT in `result`); set `"Error"` only if you genuinely could not produce a usable result.
 - `result` carries your four-state self-report: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+- Your entire report (what you implemented, tested, files changed, self-review
+  findings, concerns) goes **inside** the `report` field of `complete_step`.
+  Do not write it as a turn-ending prose message — that produces no structured
+  result and fails the step.
 
 Your report should include:
 - **Result:** DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
