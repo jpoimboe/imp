@@ -275,6 +275,11 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"  fast:        {role_line}\n"
         f"  balanced:    {role_line}\n"
         f"  powerful:    {role_line}\n"
+        # Opt this run into the lint gate (off by default): exercises the
+        # IMP_LINT_COMMAND pre-commit gate so the exemplar's deliberate F401
+        # unused import is caught (Acceptance #3/#6). Top-level key, parsed into
+        # Config.lint_command — NOT a workflow var.
+        "lint_command: make lint\n"
         # Plan 1 config vars override: skip the interactive final gate so the
         # change auto-merges deterministically (the spec phase still drives one
         # interactive round). Exercises the final-review-gate branch -> merge.
