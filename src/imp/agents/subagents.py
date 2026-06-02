@@ -16,6 +16,7 @@ from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
+from imp.engine.agent_run import SubagentSuspended
 from imp.engine.state import JsonlEventLog
 
 TASK_TOOL_SCHEMA: dict[str, Any] = {
@@ -30,6 +31,16 @@ TASK_TOOL_SCHEMA: dict[str, Any] = {
 
 class TaskMustBeAwaited(Exception):
     """Sentinel raised if the runner forgets the special-case dispatch."""
+
+
+def raise_if_suspended(exc: BaseException) -> None:
+    """The thinnest shared per-provider surface: each provider's `task`
+    wrapper calls this as the first line of its generic `except`, so a
+    SubagentSuspended unwinds (re-raised) instead of being swallowed into an
+    is_error tool_result. dispatch_task raises SubagentSuspended on a
+    subagent-origin pause; this keeps the three triplicated wrappers honest."""
+    if isinstance(exc, SubagentSuspended):
+        raise exc
 
 
 def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
