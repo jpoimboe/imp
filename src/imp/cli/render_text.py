@@ -2,7 +2,8 @@
 """Plain-text narrative view (imp log / non-TTY). Walks a NarrativeTree and
 yields wrapped ANSI lines. No rich — plain wrapped text only (design §3, §6).
 
-Default: folds render as one-line summaries; agent/user prose in full.
+Default: thinking and tool bursts are dropped; subagents expand (their prose +
+structured return value); context folds still collapse to a one-line summary.
 --full: every fold expanded inline (Task 13). Same content the TUI shows after
 expand-all.
 """
@@ -230,16 +231,23 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
 
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
                      color: bool, width: int) -> Iterator[str]:
-    if not full:
-        glyph = pal.fold_glyph(expanded=False)
-        tail = "running" if sub.running else f"→ {(sub.outcome or '').strip()[:40]}"
-        yield _line(f"{glyph} task → {sub.subagent_name} · {sub.event_count} events · {tail}",
+    # Header: lean uses the shared `task → {name}` boundary (no glyph, shared with
+    # the live driver); --full uses the expanded `▾ task → {name}` fold header.
+    if full:
+        yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
                     depth, color, *pal.NODE_COLORS["subagent"])
-        return
-    yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
-                depth, color, *pal.NODE_COLORS["subagent"])
+    else:
+        yield header_line(sub, depth=depth, color=color)
+    # The subagent's own narrative, recursed at the same `full` level (lean filters
+    # nested thinking/tools via A1/A2; --full expands them).
     for c in sub.tree.root.children:
         yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
+    # The structured return value the parent consumed — emitted in BOTH modes so
+    # --full stays a superset of default (DEVIATION from spec, which left --full
+    # untouched: the spec's "--full unchanged" produced the backwards result of
+    # --full showing LESS than default; per maintainer decision, --full is now a
+    # superset again). Always emit when non-empty (decision ii).
+    yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width)
 
 
 def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
