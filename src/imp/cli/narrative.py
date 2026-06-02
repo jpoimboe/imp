@@ -392,6 +392,8 @@ def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     if (self._current_phase is not None and not self._current_phase.closed
             and self._current_phase.name == name):
         return
+    if self._current_phase is not None:
+        self._current_phase.closed = True   # let the live cursor pop the drained phase
     phase = PhaseNode(name=name)
     self._root.children.append(phase)
     self._current_phase = phase

@@ -767,3 +767,31 @@ def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
     assert bc.elapsed_s == 42.0
     assert "status=Success" in bc.extras
     assert "plan_path=docs/plan.md" in bc.extras
+
+
+def test_phase_change_closes_the_outgoing_phase() -> None:
+    # A phase-name change must close the prior phase so the live cursor can pop
+    # it; the new (current) phase stays open during the run.
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("2", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("3", "step_started", step="build", kind="agent", phase="implement"),
+    ])
+    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert [p.name for p in phases] == ["design", "implement"]
+    assert phases[0].closed is True     # outgoing phase closed on the name change
+    assert phases[1].closed is False    # current phase still open during the run
+
+
+def test_same_phase_call_leaves_current_phase_open() -> None:
+    # Consecutive steps in the SAME phase must not close it.
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("2", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("3", "step_started", step="lint", kind="script", phase="design"),
+    ])
+    phases = [c for c in tree.root.children if isinstance(c, nv.PhaseNode)]
+    assert len(phases) == 1
+    assert phases[0].closed is False

@@ -368,3 +368,28 @@ def test_subagent_closing_with_open_nested_burst_still_emits_outcome() -> None:
     assert any(ln.strip() == "task → reviewer" for ln in body)
     assert not any("tools" in ln for ln in body)        # nested burst dropped (A2)
     assert any("→ status=Success" in ln for ln in body)  # outcome emitted on close, non-force
+
+
+def test_phase_b_streams_live_without_finish() -> None:
+    """Real mid-run state: phase A completes, phase B starts and emits prose,
+    and NO finish() is called. Phase B's header + prose must stream live. Before
+    the _ensure_phase close-fix the cursor froze in phase A and phase B never
+    appeared until finish()."""
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("4", "step_started", step="build", kind="agent", phase="implement",
+           model="m", provider="anthropic"),
+        ev("5", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "building now"}]}, usage={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    # Deliberately NO drv.finish() — assert content streamed during the run.
+    body = _body(out)
+    assert any("implement" in ln for ln in body)    # phase B header streamed
+    assert any("building now" in ln for ln in body)  # phase B prose streamed
