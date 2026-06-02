@@ -8,6 +8,8 @@ asserted (not skipped) — opt-in implies the user has set up credentials.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -24,6 +26,43 @@ def opted_in(provider: str) -> bool:
 def first_opted_in() -> str | None:
     items = _parse()
     return items[0] if items else None
+
+
+def build_isolated_venv(project_root: Path, *, python: str | None = None) -> Path:
+    """Build an ISOLATED venv (NO --system-site-packages) under
+    project_root/.venv and install project_root editable + its deps into it.
+
+    Prefers `uv` for speed; falls back to stdlib venv + pip. No
+    --system-site-packages means the host's editable `imp` cannot shadow the
+    copy: the venv sees only what is installed here.
+
+    Returns the venv's python interpreter path.
+    """
+    import shutil
+
+    venv_dir = project_root / ".venv"
+    base_python = python or sys.executable
+
+    if shutil.which("uv"):
+        subprocess.run(
+            ["uv", "venv", "--python", base_python, str(venv_dir)],
+            check=True,
+        )
+        venv_python = venv_dir / "bin" / "python"
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(venv_python),
+             "-e", str(project_root)],
+            check=True,
+        )
+    else:
+        subprocess.run([base_python, "-m", "venv", str(venv_dir)], check=True)
+        venv_python = venv_dir / "bin" / "python"
+        subprocess.run(
+            [str(venv_python), "-m", "pip", "install",
+             "-e", str(project_root), "-q"],
+            check=True,
+        )
+    return venv_python
 
 
 def _await_worktree(control_root: Path, timeout: float) -> Path:
