@@ -23,6 +23,7 @@ model_tiers: [fast, balanced, powerful]
 vars:
   ready_to_merge: {type: bool, default: false}
   final_review:   {type: bool, default: true}
+  fast_path:      {type: bool, default: false}
 
 defaults:
   max_retries: 3
@@ -42,7 +43,7 @@ phases:
           - {operations: [write], paths: ["/**"], mode: deny}
         rules:
           - {if: {phase: drafting}, resume: spec-writer}    # used for rename at step boundary
-          - {else: true, continue: true}
+          - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
       - name: spec-verify-commit
         command: ./scripts/spec-commit-verify.sh
@@ -72,6 +73,11 @@ phases:
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
+
+      - name: fast-path-plan-gate
+        rules:
+          - {if: {fast_path: true}, goto: task-lead}   # skip plan-review on fast-path
+          - {else: true, continue: true}
 
       - name: plan-review
         file: agents/plan-reviewer.md
@@ -107,6 +113,11 @@ phases:
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: task-lead}   # carries test stderr as feedback
+
+      - name: fast-path-cycle-gate
+        rules:
+          - {if: {fast_path: true}, goto: review}       # straight to autosquash/code-review
+          - {else: true, continue: true}
 
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md

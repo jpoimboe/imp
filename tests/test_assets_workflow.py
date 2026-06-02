@@ -3,7 +3,17 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
+from imp.engine.types import Goto
+
+
+def _steps(wf):
+    return {s.name: s for s in wf.flat_steps()}
+
+
+# All declared workflow vars at their defaults — a realistic evaluate_rules fixture.
+_BASE_VARS = {"fast_path": False, "ready_to_merge": False, "final_review": True}
 
 
 def test_shipped_default_workflow_loads(tmp_path: Path) -> None:
@@ -82,3 +92,43 @@ def test_spec_writer_declares_complexity_output() -> None:
     assert field.type == "enum"
     assert field.values == ("trivial", "standard")
     assert field.required is True
+
+
+def test_fast_path_var_declared_default_false() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    assert wf.vars.defaults()["fast_path"] is False
+
+
+def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-writer"].rules
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={"phase": "written", "complexity": "trivial", "status": "Success"})
+    assert m.var_mutations["fast_path"] is True
+
+    m2 = evaluate_rules(rules, vars=_BASE_VARS,
+                        output={"phase": "written", "complexity": "standard", "status": "Success"})
+    assert m2.var_mutations["fast_path"] is False
+
+
+def test_spec_writer_drafting_turn_never_evaluates_set() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-writer"].rules
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={"phase": "drafting", "complexity": "trivial", "status": "Success"})
+    assert m.var_mutations == {}
+
+
+def test_fast_path_gates_skip_depth_keep_safety() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    steps = _steps(wf)
+    plan_gate = steps["fast-path-plan-gate"].rules[0]
+    assert isinstance(plan_gate.action, Goto) and plan_gate.action.target == "task-lead"
+    cycle_gate = steps["fast-path-cycle-gate"].rules[0]
+    assert isinstance(cycle_gate.action, Goto) and cycle_gate.action.target == "review"
+    assert "code-reviewer" in steps
+    assert wf.phases[-1].name == "merge"
