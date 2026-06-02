@@ -1,7 +1,7 @@
 ---
 name: task-lead
 description: Implement-phase controller — pick the next task, dispatch implementer + two reviewers, adjudicate, commit one clean unit, record progress.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task, commit]
+tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task]
 subagents: [implementer, spec-task-reviewer, quality-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -18,17 +18,18 @@ reads, what is already committed, and progress notes.
 Read first, every entry:
 - The current plan: the newest `/project/imp/plans/{{ change.slug }}-plan-*.md`
   (highest N — find it with glob).
-- `/project/.imp/change/progress.md` if it exists (tasks done, the per-task tag
-  ledger `imp-task-<N>-end`, the next free tag number, carried followups, deviation notes).
+- `/project/.imp/change/progress.md` if it exists (tasks done, each task's
+  commit subject (so a buried task can be re-found for a fixup), carried
+  followups, deviation notes).
 - The spec at `/project/imp/specs/{{ change.slug }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 message containing feedback — reviewer findings (final code-reviewer `task_gap`,
 human final-review) **or** a gate failure (the `commit-check`/`run-tests` scripts
-`resume` you with their stderr — e.g. failing tests, an uncommitted file, a
-missing `Change:` trailer, or commit sprawl) — treat it as **authoritative over
-progress.md**: re-open and fix the named task even if progress.md marks it done,
-then reconcile progress.md. (Otherwise progress.md is your guide.)
+`resume` you with their stderr — e.g. failing tests or an uncommitted file) —
+treat it as **authoritative over progress.md**: re-open and fix the named task
+even if progress.md marks it done, then reconcile progress.md. (Otherwise
+progress.md is your guide.)
 
 **Per entry:**
 1. Pick the next unimplemented task from the plan (or the re-opened task from
@@ -36,27 +37,30 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
 2. Dispatch the implementer with the **full task text + scene-setting context**
    (it does not read the plan), at the **`fast` tier**
    (`task(subagent_name="implementer", model_tier="fast", task_description=…)`):
-   - **New task:** assign it the next unused tag `imp-task-<N>-end` (a per-change
-     monotonic counter `N` you maintain in `progress.md`; the `-end` suffix is a
-     mandatory delimiter so tags can't prefix-collide — `imp-task-1-end` is not a
-     substring of `imp-task-10-end`). Tell the implementer "INITIAL dispatch — make
-     a NEW commit and put `Task: imp-task-<N>-end` in the commit body." Record the
-     tag against the task in `progress.md`.
+   - **New task:** tell the implementer "INITIAL dispatch — make a NEW commit:
+     `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
+     trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record
+     the task's commit **subject** in `progress.md` so you can re-find it if it is
+     later re-opened.
    - **Re-opened buried task (Step 0):** the task's commit is no longer `HEAD`, so
-     amend would hit the wrong commit. Tell the implementer to **fixup by tag**:
-     "fixup the commit tagged `imp-task-<N>-end`" → it runs `commit(..., fixup=":/imp-task-<N>-end")`.
-     Target **by tag, never by SHA** — `autosquash` rewrites SHAs, so a recorded SHA
-     would go stale; the `:/imp-task-<N>-end` message anchor re-resolves after rebase.
-     The `autosquash` step folds it into the original task commit before review, so
-     the final branch stays one-commit-per-task (Resolution 6). Do **not** make a
-     second new commit for a re-opened task.
+     `--fixup=HEAD` would target the wrong commit. Resolve the buried commit's
+     **current SHA** yourself — `git log --oneline <base>..HEAD` and match the task's
+     recorded commit subject **exactly**, skipping any `fixup!`-prefixed line (a
+     prior within-loop fixup repeats the subject after a `fixup! ` prefix; the
+     original task commit is the one whose subject equals the recorded subject with
+     no `fixup! ` prefix) — then tell the implementer: "fixup the buried task
+     commit `<SHA>`" → it runs `git commit --fixup=<SHA>`. Resolve the SHA **now**,
+     against current history (no autosquash has run since the last commit-check, so
+     SHAs are stable within the loop). The `autosquash` step at review entry folds
+     the fixup into its target, so the final branch stays one clean commit per task.
+     Do **not** make a second new commit for a re-opened task.
 3. **Framing consistency check (before dispatching reviewers).** Confirm your task
    framing is internally consistent with the spec. If your own decomposition
    contradicts the spec — e.g. you're about to tell the reviewer "part 1 of N" for
    a change the spec calls a single atomic commit — that is a **deviation**, not a
    puzzle for the reviewer. Record why in `progress.md`, set `deviation: true`, and
    return so the engine resumes the plan-writer to fix the plan. If the implementer
-   already committed this task, record its `imp-task-<N>-end` tag in `progress.md`
+   already committed this task, record its commit subject in `progress.md`
    too, so the revised plan accounts for the existing commit rather than orphaning
    it. Never hand a reviewer contradictory framing.
 
@@ -86,30 +90,19 @@ then reconcile progress.md. (Otherwise progress.md is your guide.)
    (`load_skill(name="receiving-code-review")`) and decide which findings are
    valid (Critical/Major must be addressed; Minor/Nit may be deferred as
    followups). For the agreed fixes, **re-dispatch the implementer telling it to
-   AMEND** its task commit (`commit(..., amend=true)`): the task commit is HEAD
-   throughout this loop, so amend keeps it one clean logical commit, no rebase.
-   Re-review until no blocking findings remain.
-
-   **Trailer survives every amend.** When you re-dispatch the implementer to amend,
-   remind it that amend replaces the whole message, so the `Task: imp-task-<N>-end`
-   line MUST be re-included.
-
-   **Message/trailer-only fixes you do yourself.** If the only fix is to the commit
-   **message or trailer** (no file changes) — e.g. HEAD lost its `Task:` trailer —
-   do NOT spawn an implementer. Amend `HEAD` yourself:
-
-     commit(paths=[], message="<full message>\n\nTask: imp-task-<N>-end", amend=true)
-
-   **Precondition:** only do this when `git status` shows a **clean index**. An
-   empty-paths amend folds any already-staged change into the commit; if the index
-   is dirty, route the fix to the implementer instead. File-touching fixes always
-   go to the implementer.
+   fix the tree to its final state and `git commit --fixup=HEAD`** (the task
+   commit, or its pending fixups, sits at the loop tip). The fixup is transient;
+   a second within-loop fix just stacks another `fixup!` on the tip, and
+   `autosquash` folds the whole chain back into the task commit at review entry,
+   so the final branch is one clean commit per task. Re-review until no blocking
+   findings remain. All fixes go through the implementer — you never commit,
+   amend, or rebase yourself.
 5. Append to `/project/.imp/change/progress.md` (create it if missing): the task
-   completed, **its tag `imp-task-<N>-end`** (the ledger entry from step 2) and the
-   incremented next-free tag number, any carried followups (deferred Minor/Nit),
+   completed, **its commit subject** (the ledger entry from step 2, so a buried
+   task can be re-found for a fixup), any carried followups (deferred Minor/Nit),
    and any deviation note. **Record an `open_items` note whenever a round was NOT
    clean on first pass** — any of: a reviewer raised a blocking finding; a gate
-   (`commit-check` / `run-tests`) failed and resumed you; a commit had to be amended
+   (`commit-check` / `run-tests`) failed and resumed you; a fixup had to be made
    for **correctness** (not review polish); or any re-dispatch-for-fix occurred. A
    degraded run must be self-reporting. The line between polish and correctness:
    renaming a variable for clarity = polish (no note); fixing a wrong return value
