@@ -39,6 +39,7 @@ packages = ["src/imp"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100
