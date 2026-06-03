@@ -515,3 +515,24 @@ def test_gutter_indent_substitutes_magenta_bar_at_gutter_columns() -> None:
     bar = "\x1b[35m│ \x1b[0m"
     assert rt._gutter_indent(1, (0,), color=True) == bar
     assert rt._gutter_indent(2, (0, 1), color=True) == bar + bar
+
+
+def test_wrap_returns_colored_gutter_composed_lines() -> None:
+    # No gutters, color off: identical to the old indent+text shape.
+    assert rt._wrap("a b", 80, 1, False) == ["  a b"]
+    # No gutters, color on: content wrapped in codes, indent outside the span.
+    assert rt._wrap("hi", 80, 1, True, "green") == ["  \x1b[32mhi\x1b[0m"]
+    # With a gutter: magenta bar prefix, content colored independently.
+    assert rt._wrap("hi", 80, 1, True, "green", gutters=(0,)) == \
+        ["\x1b[35m│ \x1b[0m" if False else "\x1b[35m│ \x1b[0m\x1b[32mhi\x1b[0m"]
+    # Blank paragraph line keeps the (gutter-bearing) indent only.
+    assert rt._wrap("", 80, 1, False, gutters=(0,)) == ["│ "]
+
+
+def test_wrap_width_is_invariant_under_gutter() -> None:
+    # The │ substitutes within the indent, so wrap points don't move: the gutter
+    # and the plain run wrap into the same number of lines.
+    text = "word " * 40
+    plain = rt._wrap(text, 40, 2, False)
+    gutter = rt._wrap(text, 40, 2, False, gutters=(1,))
+    assert len(plain) == len(gutter)

@@ -51,16 +51,17 @@ def _gutter_indent(depth: int, gutters: tuple[int, ...], color: bool) -> str:
     return "".join(cols)
 
 
-def _wrap(text: str, width: int, depth: int) -> list[str]:
-    indent = _INDENT * depth
-    avail = max(8, width - len(indent))
+def _wrap(text: str, width: int, depth: int, color: bool, *codes: str,
+          gutters: tuple[int, ...] = ()) -> list[str]:
+    indent = _gutter_indent(depth, gutters, color)
+    avail = max(8, width - _INDENT_W * depth)   # logical width; gutter is invariant
     out: list[str] = []
     for para in text.split("\n"):
         if not para:
-            out.append(indent)
+            out.append(indent)                  # blank line still carries the gutter
             continue
         for line in textwrap.wrap(para, width=avail) or [""]:
-            out.append(f"{indent}{line}")
+            out.append(indent + pal.ansi(line, *codes, enabled=color))
     return out
 
 
@@ -140,8 +141,7 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
     except (ValueError, TypeError):
         data = None
     if not isinstance(data, dict):
-        for line in _wrap(raw, width, depth):
-            yield pal.ansi(line, *codes, enabled=color)
+        yield from _wrap(raw, width, depth, color, *codes, gutters=())
         return
     scalars: list[str] = []
     blocks: list[tuple[str, str]] = []
@@ -154,8 +154,7 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
         yield _line("→ " + " · ".join(scalars), depth, color, *codes)
     for k, v in blocks:
         yield _line(f"{k}:", depth, color, *codes)
-        for line in _wrap(v, width, depth + 1):
-            yield pal.ansi(line, *codes, enabled=color)
+        yield from _wrap(v, width, depth + 1, color, *codes, gutters=())
 
 
 def _render(node: Any, *, depth: int, full: bool, color: bool,
@@ -173,18 +172,16 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.AgentTextNode):
-        for line in _wrap(node.text, width, depth):
-            yield pal.ansi(line, *pal.NODE_COLORS["agent"], enabled=color)
+        yield from _wrap(node.text, width, depth, color, *pal.NODE_COLORS["agent"], gutters=())
         return
 
     if isinstance(node, nv.LiteralTextNode):
-        for line in _wrap(node.text, width, depth):
-            yield pal.ansi(line, *pal.NODE_COLORS["agent"], enabled=color)
+        yield from _wrap(node.text, width, depth, color, *pal.NODE_COLORS["agent"], gutters=())
         return
 
     if isinstance(node, nv.UserMessageNode):
-        for line in _wrap(f"> {node.text}", width, depth):
-            yield pal.ansi(line, *pal.NODE_COLORS["user"], enabled=color)
+        yield from _wrap(f"> {node.text}", width, depth, color,
+                         *pal.NODE_COLORS["user"], gutters=())
         return
 
     if isinstance(node, nv.ThinkingFold):
@@ -193,8 +190,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         if full:
             yield _line(f"{pal.fold_glyph(expanded=True)} thinking", depth, color,
                         *pal.NODE_COLORS["thinking"])
-            for line in _wrap(node.content, width, depth + 1):
-                yield pal.ansi(line, *pal.NODE_COLORS["thinking"], enabled=color)
+            yield from _wrap(node.content, width, depth + 1, color,
+                             *pal.NODE_COLORS["thinking"], gutters=())
         # full=False: thinking is noise in the default view — render nothing.
         # (A transient `· thinking` status cue lives in narrative.current_activity.)
         return
@@ -275,8 +272,7 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
         if len(result) > 60:
             result = result[:60] + "…"
         line = f"⏺ {c.name}  {args}  → {result}{killed}".rstrip()
-        for wl in _wrap(line, width, depth + 1):
-            yield pal.ansi(wl, *pal.NODE_COLORS["tools"], enabled=color)
+        yield from _wrap(line, width, depth + 1, color, *pal.NODE_COLORS["tools"], gutters=())
 
 
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
@@ -314,8 +310,8 @@ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
                 f"max_tool_calls={p.get('max_tool_calls', '?')}", depth, color,
                 *pal.NODE_COLORS["metadata"])
     yield _line("system_prompt:", depth + 1, color, *pal.NODE_COLORS["metadata"])
-    for line in _wrap(str(p.get("system_prompt", "")), width, depth + 2):
-        yield pal.ansi(line, *pal.NODE_COLORS["metadata"], enabled=color)
+    yield from _wrap(str(p.get("system_prompt", "")), width, depth + 2, color,
+                     *pal.NODE_COLORS["metadata"], gutters=())
     yield _line("tools:", depth + 1, color, *pal.NODE_COLORS["metadata"])
     for t in tools:
         name = t.get("name", t) if isinstance(t, dict) else t
@@ -334,8 +330,7 @@ def _render_gate(gate: nv.GateNode, *, depth: int, color: bool, width: int,
     header = f"{gate.kind} gate → {action}"
     yield _line(header, depth, color, *codes)
     if recap and gate.prompt:
-        for line in _wrap(gate.prompt, width, depth + 1):
-            yield pal.ansi(line, *pal.NODE_COLORS["gate"], enabled=color)
+        yield from _wrap(gate.prompt, width, depth + 1, color, *pal.NODE_COLORS["gate"], gutters=())
         for opt in gate.options:
             yield _line(f"- {opt.get('label', opt)}", depth + 1, color,
                         *pal.NODE_COLORS["gate"])
