@@ -153,6 +153,16 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                     pause_and_exit(change, reason="ctrl-d")
                     print(f"\nChange {change.slug}: paused (ctrl-d)")
                     rc = 130
+                except KeyboardInterrupt:
+                    # prompt_toolkit's prompt_async (handle_sigint=True) installs
+                    # its own SIGINT handler and raises KeyboardInterrupt while the
+                    # interactive prompt is active, bypassing InterruptCoordinator.
+                    # Catch it here, mirroring EOFError, so Ctrl-C at the prompt
+                    # pauses instead of escaping the task group as a crash.
+                    driver.finish()
+                    pause_and_exit(change, reason="ctrl-c")
+                    print(f"\nChange {change.slug}: paused (ctrl-c)")
+                    rc = 130
                 else:
                     driver.finish()
                     if coord.should_pause:
@@ -270,6 +280,16 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     driver.finish()
                     pause_and_exit(change, reason="ctrl-d")
                     print(f"\nChange {change.slug}: paused (ctrl-d)")
+                    rc = 130
+                except KeyboardInterrupt:
+                    # prompt_toolkit's prompt_async (handle_sigint=True) installs
+                    # its own SIGINT handler and raises KeyboardInterrupt while the
+                    # interactive prompt is active, bypassing InterruptCoordinator.
+                    # Catch it here, mirroring EOFError, so Ctrl-C at the prompt
+                    # pauses instead of escaping the task group as a crash.
+                    driver.finish()
+                    pause_and_exit(change, reason="ctrl-c")
+                    print(f"\nChange {change.slug}: paused (ctrl-c)")
                     rc = 130
                 else:
                     driver.finish()
