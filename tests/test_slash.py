@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import anyio
+import pytest
 
 from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
 
@@ -158,3 +159,13 @@ def test_skill_args_event_still_records_name_only(tmp_path: Path) -> None:
     events = [json.loads(line) for line in change._events.read_text().splitlines()]
     loads = [e for e in events if e["type"] == "skill_load"]
     assert loads[0]["payload"] == {"name": "refactor", "source": "human"}
+
+
+def test_blank_lines_bracket_the_prompt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from imp.cli.slash import ask_line_with_slash
+    prompt = _FakePrompt(["hello"])
+    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeChange(tmp_path))
+    assert line == "hello"
+    out = capsys.readouterr().out
+    # exactly one blank line before the prompt and one after: print() + print()
+    assert out == "\n\n"

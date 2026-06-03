@@ -96,11 +96,14 @@ async def ask_line_with_slash(prompt: Any, status: Any, change: Any) -> str:
         # display must stay suspended while they do, or it interleaves/clobbers
         # them before the loop re-prompts.
         with status.suspend():
+            print()                       # §3: separate the prompt from prior output
             line: str = await prompt.ask_async("> ")
             if not is_slash_command(line):
+                print()                   # §3: separate submitted input from next output
                 return line
             result = handle_slash_line(line, change=change, output_fn=print)
             if result is REPROMPT:
                 continue
             assert isinstance(result, str)  # handle_slash_line returns str for skill body
+            print()                       # §3: skill-body submission separated too
             return result
