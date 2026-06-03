@@ -19,11 +19,11 @@ and a `commit-check` step runs. The subagent's own prose streams (it is a
 descended container), but the parent step's completion breadcrumb and the
 entire following step are swallowed live.
 
-This test FAILS today (live is missing the post-spawn parent content) and should
-PASS once a never-closing subagent fold can no longer wedge the live cursor. It is
-marked `xfail(strict=True)` so the suite stays green now and the marker must be
-removed when the §11 fix lands (the fix turns the xfail into an xpass → strict
-failure).
+This is a regression guard: it confirms the post-spawn parent content (the
+parent step's completion breadcrumb and the following step) is emitted live now
+that a never-closing subagent fold can no longer wedge the cursor (the §11 fix
+closes an unmatched fold on an id mismatch). It would fail again if that fix
+regressed.
 """
 from __future__ import annotations
 
