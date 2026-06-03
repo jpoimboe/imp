@@ -42,16 +42,9 @@ def format_script_feedback(
     return _WRAPPER.format(detail=detail)
 
 
-def format_agent_feedback(reviewer: str, output: dict[str, Any]) -> str:
-    """Schema-agnostic: render every field of the reviewer's structured
-    output as `key: value` lines. The decide-matched verdict field (whatever
-    it is named) is surfaced among them — we make no assumption about a
-    specific field name."""
-    lines = [f"The {reviewer} reviewed your work and did not accept it."]
-    for key, value in output.items():
-        lines.append(f"{key}: {_coerce(value)}")
-    return _WRAPPER.format(detail="\n".join(lines))
-
-
-def format_human_feedback(label: str) -> str:
-    return _WRAPPER.format(detail=f"A reviewer sent this back: {label!r}.")
+def render_output_fields(output: dict[str, Any]) -> str:
+    """Render every field of a step's structured output as `key: value` lines.
+    No editorial, no wrapper — the engine composes `{preamble}\n{fields}` on the
+    edge (§6). Schema-agnostic: the decide-matched verdict field is surfaced
+    among the rest; we assume no specific field name."""
+    return "\n".join(f"{key}: {_coerce(value)}" for key, value in output.items())

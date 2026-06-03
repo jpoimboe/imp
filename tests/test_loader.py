@@ -212,7 +212,6 @@ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
                   - if: {verdict: approve}
                     goto: spec-writer
                     set: {review_done: true}
-                    feedback: false
                   - {else: true, pause: true}
           - name: implement
             steps:
@@ -235,7 +234,7 @@ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
     assert by["spec-reviewer"].max_loops == 6
     approve = by["spec-reviewer"].rules[1]
     assert isinstance(approve.action, Goto)
-    assert approve.action.feedback is False
+    assert approve.action.feedback is None
     assert wf_obj.vars.defaults() == {"review_done": False}
 
 
@@ -518,7 +517,8 @@ def test_resume_verb_parses_to_goto_with_resume_true(tmp_path: Path) -> None:
     assert act.resume is True
 
 
-def test_resume_honors_feedback_false(tmp_path: Path) -> None:
+def test_resume_bare_has_feedback_none(tmp_path: Path) -> None:
+    """A bare resume: (no feedback: key) has feedback=None (§6: forwards nothing)."""
     wf = _write(tmp_path, """\
         name: t
         description: t
@@ -532,14 +532,38 @@ def test_resume_honors_feedback_false(tmp_path: Path) -> None:
                 rules:
                   - if: {verdict: rework}
                     resume: w
-                    feedback: false
                   - {else: true, continue: true}
         """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
     wf_obj = load_workflow(wf)
     act = {s.name: s for s in wf_obj.flat_steps()}["gate"].rules[0].action
     assert isinstance(act, Goto)
     assert act.resume is True
-    assert act.feedback is False
+    assert act.feedback is None
+
+
+def test_resume_honors_feedback_string(tmp_path: Path) -> None:
+    """A resume: with a feedback: string carries the preamble (§6)."""
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - if: {verdict: rework}
+                    resume: w
+                    feedback: "Here's review feedback to address:"
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    wf_obj = load_workflow(wf)
+    act = {s.name: s for s in wf_obj.flat_steps()}["gate"].rules[0].action
+    assert isinstance(act, Goto)
+    assert act.resume is True
+    assert act.feedback == "Here's review feedback to address:"
 
 
 def test_resume_and_goto_are_mutually_exclusive(tmp_path: Path) -> None:
@@ -660,3 +684,61 @@ def test_load_workflow_model_tiers_duplicate_raises(tmp_path: Path) -> None:
     )
     with pytest.raises((LoadError, LoadErrors), match="duplicate"):
         load_workflow(wf_dir)
+
+
+def test_feedback_string_parsed_and_bool_rejected(tmp_path: Path) -> None:
+    """§6: feedback: string is parsed; bare → None; bool form raises LoadError."""
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: {verdict: rework}, goto: w, feedback: "Findings:"}
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    wf_obj = load_workflow(wf)
+    act = {s.name: s for s in wf_obj.flat_steps()}["gate"].rules[0].action
+    assert isinstance(act, Goto) and act.feedback == "Findings:"
+
+    # bare edge → None
+    wf2 = _write(tmp_path / "bare", """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: {verdict: rework}, goto: w}
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    wf2_obj = load_workflow(wf2)
+    bare_act = {s.name: s for s in wf2_obj.flat_steps()}["gate"].rules[0].action
+    assert isinstance(bare_act, Goto) and bare_act.feedback is None
+
+    # bool form raises LoadError
+    wf3 = _write(tmp_path / "bool", """\
+        name: t
+        description: t
+        phases:
+          - name: a
+            steps:
+              - name: w
+                file: agents/spec-writer.md
+              - name: gate
+                file: agents/spec-reviewer.md
+                rules:
+                  - {if: {verdict: rework}, goto: w, feedback: true}
+                  - {else: true, continue: true}
+        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
+    with pytest.raises((LoadError, LoadErrors)):
+        load_workflow(wf3)

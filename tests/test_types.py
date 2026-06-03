@@ -30,9 +30,9 @@ def _agent(name: str, phase: str, **kw) -> Step:
                 file=Path(f"agents/{name}.md"), **kw)
 
 
-def test_goto_default_feedback_true() -> None:
-    assert Goto(target="x").feedback is True
-    assert Goto(target="x", feedback=False).feedback is False
+def test_goto_default_feedback_none() -> None:
+    assert Goto(target="x").feedback is None
+    assert Goto(target="x", feedback="Findings:").feedback == "Findings:"
 
 
 def test_goto_resume_defaults_false_and_affects_equality() -> None:

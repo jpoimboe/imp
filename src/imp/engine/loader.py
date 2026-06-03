@@ -279,9 +279,12 @@ def _parse_verb(raw: dict[str, Any], source: SourceLoc) -> Action:
     target = raw[verb]
     if not isinstance(target, str):
         raise LoadError(f"{verb}: must name a phase or step", source)
-    feedback = raw.get("feedback", True)
-    if not isinstance(feedback, bool):
-        raise LoadError("feedback: must be true or false", source)
+    feedback = raw.get("feedback")
+    if feedback is not None and not isinstance(feedback, str):
+        raise LoadError(
+            "feedback: must be a string preamble (the bool form was removed in §6)",
+            source,
+        )
     return Goto(target=target, feedback=feedback, resume=(verb == "resume"))
 
 

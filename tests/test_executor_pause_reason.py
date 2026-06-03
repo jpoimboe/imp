@@ -182,7 +182,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
         "        model_role: default\n"
         "        max_loops: 2\n"
         "        rules:\n"
-        "          - {if: {verdict: rework}, goto: reviewer, feedback: false}\n"
+        "          - {if: {verdict: rework}, goto: reviewer}\n"
         "          - {else: true, continue: true}\n"
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)

@@ -67,8 +67,8 @@ phases:
         file: agents/spec-reviewer.md
         model_role: spec_review
         rules:
-          - {if: {blocking: true}, resume: spec-writer}                            # rework loop
-          - {else: true, set: {spec_final_review_done: true}, resume: spec-writer} # clean -> one final polish pass
+          - {if: {blocking: true}, resume: spec-writer, feedback: "Here's review feedback to address:"}                            # rework loop
+          - {else: true, set: {spec_final_review_done: true}, resume: spec-writer, feedback: "The spec was approved. Notes for a final polish pass:"} # clean -> one final polish pass
 
   - name: plan
     steps:
@@ -100,8 +100,8 @@ phases:
         file: agents/plan-reviewer.md
         model_role: plan_review
         rules:
-          - {if: {blocking: true}, resume: plan-writer}                            # rework loop
-          - {else: true, set: {plan_final_review_done: true}, resume: plan-writer} # clean -> one final polish pass
+          - {if: {blocking: true}, resume: plan-writer, feedback: "Here's review feedback to address:"}                            # rework loop
+          - {else: true, set: {plan_final_review_done: true}, resume: plan-writer, feedback: "The plan was approved. Notes for a final polish pass:"} # clean -> one final polish pass
 
   - name: implement
     steps:
@@ -115,7 +115,7 @@ phases:
           - {operations: [write], paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}   # no writes outside /project
         rules:
-          - {if: {deviation: true}, resume: plan-writer}    # plan was wrong
+          - {if: {deviation: true}, resume: plan-writer, feedback: "The plan didn't match the codebase. Here's what the implementer found:"}    # plan was wrong
           - {if: {done: false},     goto: task-lead}        # next task, fresh
           - {else: true, continue: true}                    # plan implemented
 
@@ -141,7 +141,7 @@ phases:
         model_role: task_lead        # balanced/Sonnet coverage judgment
         max_loops: 10                # plans-per-spec bound
         rules:
-          - {if: {more_plans: true}, goto: plan-writer}     # supercycle
+          - {if: {more_plans: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}     # supercycle
           - {else: true, continue: true}
 
   - name: review
@@ -163,8 +163,8 @@ phases:
         model_role: code_review
         max_loops: 5                 # combined task_gap + plan_gap budget
         rules:
-          - {if: {verdict: task_gap}, goto: implement}      # carries findings
-          - {if: {verdict: plan_gap}, goto: plan-writer}    # carries findings
+          - {if: {verdict: task_gap}, goto: implement, feedback: "The code reviewer found gaps to fix. Findings:"}      # carries findings
+          - {if: {verdict: plan_gap}, goto: plan-writer, feedback: "The code reviewer found the plan needs revision. Findings:"}    # carries findings
           - {else: true, continue: true}                    # approve
 
       - name: summarizer
@@ -183,7 +183,7 @@ phases:
         max_loops: 20                # interactive back-to-implement edge
         rules:
           - {if: {decision: merge},  set: {ready_to_merge: true}, continue: true}
-          - {if: {decision: rework}, goto: implement}        # carries comments
+          - {if: {decision: rework}, goto: implement, feedback: "Here's the feedback to address:"}        # carries comments
           - {else: true, pause: true}
 
   # ── merge ───────────────────────────────────────────────────────────

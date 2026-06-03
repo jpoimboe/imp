@@ -48,8 +48,10 @@ class Pause(Action):
 @dataclass(frozen=True, slots=True)
 class Goto(Action):
     target: str
-    feedback: bool = True       # feedback: false suppresses the wrapper on this edge
-    resume: bool = False        # set by the `resume:` verb; continues the target's transcript
+    feedback: str | None = None  # preamble string; the engine prepends it and
+                                 # appends the prior step's structured output. None
+                                 # => forwards nothing on this edge (§6).
+    resume: bool = False         # set by the `resume:` verb; continues the transcript
 
 
 # ── Mutations & rules ─────────────────────────────────────────────────────────

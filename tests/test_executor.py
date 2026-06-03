@@ -289,7 +289,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "        model_role: default\n"
         "        max_loops: 2\n"
         "        rules:\n"
-        "          - {if: {verdict: rework}, goto: writer, feedback: false}\n"
+        "          - {if: {verdict: rework}, goto: writer}\n"
         "          - {else: true, continue: true}\n"
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
@@ -834,9 +834,9 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
 
 @pytest.mark.anyio
 async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None:
-    """A reviewer agent that gotos backward (feedback: true) to a resume:-targeted
-    coder makes the coder's NEXT invocation carry the reviewer's feedback
-    string. The reviewer flips to approve on its 2nd pass so the run completes."""
+    """A reviewer agent that resumes backward with a feedback: preamble string
+    makes the coder's NEXT invocation carry the composed feedback text.
+    The reviewer flips to approve on its 2nd pass so the run completes."""
     wf = tmp_path / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
@@ -859,7 +859,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
         "        file: agents/reviewer.md\n"
         "        model_role: default\n"
         "        rules:\n"
-        "          - {if: {verdict: Reject}, resume: coder}\n"
+        "          - {if: {verdict: Reject}, resume: coder, feedback: \"reviewer findings:\"}\n"
         "          - {else: true, continue: true}\n"
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
@@ -907,7 +907,8 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     coder_runs = [fb for (aid, fb) in runs if aid.endswith("/coder")]
     assert len(coder_runs) == 2
     assert coder_runs[0] is None
-    assert coder_runs[1] is not None and "reviewer" in coder_runs[1]
+    assert coder_runs[1] is not None and "reviewer findings:" in coder_runs[1]
+    assert "verdict: " in coder_runs[1]   # render_output_fields half is present
 
     # Feedback consumed: cleared on the engine's state.
     assert State.load(change.state_dir).retry_feedback is None
@@ -969,9 +970,12 @@ def anyio_backend():
     return "asyncio"
 
 
-def _seed_back_edge_workflow(root: Path, verb: str) -> Change:
+def _seed_back_edge_workflow(
+    root: Path, verb: str, feedback: str | None = None
+) -> Change:
     """coder(agent) -> reviewer(agent). reviewer rules: on rework, <verb>: coder;
-    else continue. `verb` is 'goto' or 'resume'."""
+    else continue. `verb` is 'goto' or 'resume'. `feedback` is an optional
+    preamble string for the back edge (§6); None means bare (forwards nothing)."""
     wf = root / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
@@ -981,6 +985,7 @@ def _seed_back_edge_workflow(root: Path, verb: str) -> Change:
         "---\nname: reviewer\ntools: [complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "  verdict: {type: enum, values: [approve, rework]}\n---\ngo\n")
+    feedback_fragment = f', feedback: "{feedback}"' if feedback is not None else ""
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 1, max_loops: 6}\n"
@@ -992,7 +997,7 @@ def _seed_back_edge_workflow(root: Path, verb: str) -> Change:
         "        file: agents/reviewer.md\n"
         "        model_role: default\n"
         "        rules:\n"
-        f"          - {{if: {{verdict: rework}}, {verb}: coder}}\n"
+        f"          - {{if: {{verdict: rework}}, {verb}: coder{feedback_fragment}}}\n"
         "          - {else: true, continue: true}\n")
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text(
@@ -1086,9 +1091,10 @@ async def test_resume_marker_is_one_shot(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_resume_forwards_feedback_to_target(tmp_path: Path) -> None:
-    """F2: a resume: edge with feedback (default true) delivers the wrapper text
-    to the resumed agent's next invocation."""
-    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    """F2: a resume: edge with a feedback: preamble string delivers the composed
+    feedback text to the resumed agent's next invocation (§6)."""
+    change = _seed_back_edge_workflow(
+        tmp_path, verb="resume", feedback="reviewer findings:")
     runs: list = []
     _register_capturing(lambda _n: ("output", {"status": "Success"}),
                         ["rework", "approve"], runs)
@@ -1097,7 +1103,7 @@ async def test_resume_forwards_feedback_to_target(tmp_path: Path) -> None:
     coder_feedback = [fb for (aid, _bal, fb) in runs if aid.endswith("/coder")]
     assert coder_feedback[0] is None                  # first entry: no feedback
     assert coder_feedback[1] is not None              # resumed entry carries it
-    assert "reviewer" in coder_feedback[1]
+    assert "reviewer findings:" in coder_feedback[1]
 
 
 @pytest.mark.anyio

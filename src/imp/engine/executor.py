@@ -33,8 +33,8 @@ from imp.engine.agent_run import (
 from imp.engine.change import Change
 from imp.engine.env import engine_env
 from imp.engine.feedback import (
-    format_agent_feedback,
     format_script_feedback,
+    render_output_fields,
 )
 from imp.engine.gates import (
     apply_human_option,
@@ -388,8 +388,10 @@ def _route_script(
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, match)
     feedback = None
-    if isinstance(action, Goto) and action.feedback:
+    if isinstance(action, Goto):
         assert step.command is not None, "script step must have a command"
+        # §6: script feedback is always format_script_feedback; a script Goto's
+        # `feedback` preamble (an agent-path concept) is intentionally not honored here.
         feedback = format_script_feedback(
             step.command, out["exit"], out["stdout"], out["stderr"])
     return action, feedback, muts
@@ -519,10 +521,9 @@ async def _route_agent(
     state.current_step = None
     state.save(change.state_dir)
     action, _, muts = _finish(log, step, match)
-    feedback = (
-        format_agent_feedback(step.name, result.output)
-        if isinstance(action, Goto) and action.feedback else None
-    )
+    feedback = None
+    if isinstance(action, Goto) and action.feedback is not None:
+        feedback = f"{action.feedback}\n{render_output_fields(result.output)}"
     return action, feedback, muts
 
 

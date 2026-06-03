@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from imp.engine.feedback import (
-    format_agent_feedback,
-    format_human_feedback,
-    format_script_feedback,
-)
+from imp.engine.feedback import format_script_feedback, render_output_fields
 
 _WRAPPER_HEAD = "Your previous attempt completed but was not accepted."
 _WRAPPER_TAIL = "Address this, then call `complete_step` again."
@@ -33,16 +29,9 @@ def test_script_feedback_coerces_bytes() -> None:
     assert "raw" in out             # undecodable bytes replaced, not crashed
 
 
-def test_agent_feedback_names_reviewer_and_renders_fields() -> None:
-    out = format_agent_feedback(
-        "spec-reviewer", {"status": "Reject", "reason": "missing tests"})
-    assert "spec-reviewer" in out
+def test_render_output_fields_is_plain_no_editorial() -> None:
+    out = render_output_fields({"status": "Reject", "reason": "missing tests"})
     assert "status: Reject" in out
     assert "reason: missing tests" in out
-    assert out.startswith(_WRAPPER_HEAD)
-
-
-def test_human_feedback_quotes_label() -> None:
-    out = format_human_feedback("Send back for rework")
-    assert "'Send back for rework'" in out
-    assert out.startswith(_WRAPPER_HEAD)
+    assert "not accepted" not in out          # no editorial
+    assert "Your previous attempt" not in out  # no _WRAPPER
