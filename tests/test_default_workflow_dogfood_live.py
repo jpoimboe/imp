@@ -100,11 +100,18 @@ def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, str]]:
 
 
 def _ignore_for_copy(_dir: str, names: list[str]) -> set[str]:
-    return {n for n in names
-            if n in {".venv", ".git", ".imp", ".pytest_cache",
-                     ".mypy_cache", ".ruff_cache", ".coverage",
-                     "htmlcov", ".tox", "__pycache__", "dist", "build"}
-            or n.endswith(".egg-info")}
+    ignored = {n for n in names
+               if n in {".venv", ".git", ".imp", ".pytest_cache",
+                        ".mypy_cache", ".ruff_cache", ".coverage",
+                        "htmlcov", ".tox", "__pycache__", "dist", "build"}
+               or n.endswith(".egg-info")}
+    # The repo carries its own top-level imp/ dogfood control dir (config.yaml,
+    # specs/, plans/, workflows/). Copying it into the seed collides with
+    # run_init's fresh scaffold ("imp/ already exists; refusing to re-init").
+    # Exclude it ONLY at the project root — never src/imp (matched by basename).
+    if Path(_dir).resolve() == PROJECT_ROOT:
+        ignored.add("imp")
+    return ignored
 
 
 def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
