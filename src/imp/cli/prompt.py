@@ -1,9 +1,9 @@
 """Prompt abstraction backed by prompt_toolkit.
 
-One Prompt per CLI invocation. ESC returns the ESC_SENTINEL string so
-callers can distinguish chat-interrupt (Task 12) from normal text input.
-Ctrl+C raises KeyboardInterrupt, Ctrl+D raises EOFError — the CLI's signal
-handler (Task 11) catches both and triggers save-and-exit.
+One Prompt per CLI invocation. Ctrl+C raises KeyboardInterrupt, Ctrl+D raises
+EOFError — the CLI's signal handler catches both and triggers save-and-exit.
+ESC is left to prompt_toolkit's built-in handling (meta-prefix in emacs mode;
+leaves insert mode in vi mode — see editing_mode plumbing).
 
 History is per-session in-memory; persisted history is a post-V0 feature.
 """
@@ -14,8 +14,6 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
-ESC_SENTINEL = "__IMP_ESC__"
-
 
 def _build_session(skills_dir: Any | None = None) -> Any:
     from prompt_toolkit import PromptSession
@@ -24,10 +22,6 @@ def _build_session(skills_dir: Any | None = None) -> Any:
 
     history = InMemoryHistory()
     kb = KeyBindings()
-
-    @kb.add("escape", eager=True)
-    def _esc(event: Any) -> None:
-        event.app.exit(result=ESC_SENTINEL)
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
     return PromptSession(history=history, key_bindings=kb, completer=completer)  # type: ignore[arg-type]
@@ -81,7 +75,7 @@ class Prompt:
         self._session = self._session_factory()
 
     def ask(self, prompt_text: str = "> ") -> str:
-        """Read a single line. Returns user text, or ESC_SENTINEL.
+        """Read a single line. Returns the user's text.
         Raises KeyboardInterrupt (Ctrl+C) or EOFError (Ctrl+D) up to caller."""
         result = self._session.prompt(prompt_text)
         return str(result) if result is not None else ""

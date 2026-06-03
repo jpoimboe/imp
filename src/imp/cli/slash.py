@@ -79,7 +79,6 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
-    out("  ESC                Re-prompt without sending (interactive steps)")
     out("  Ctrl+C / Ctrl+D    Pause and exit; resume with `imp resume <id>`")
     out("  Up-arrow           Recall previous input")
     out("  Tab                Complete a /command or skill name")
@@ -88,7 +87,7 @@ def _help(out: Callable[[str], None]) -> None:
 async def ask_line_with_slash(prompt: Any, status: Any, change: Any) -> str:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> returns the
-    resolved skill body; anything else (incl. the ESC sentinel) returns as-is.
+    resolved skill body; anything else returns as-is.
 
     Shared by the run and resume paths so the slash/skills logic exists once."""
     while True:

@@ -58,8 +58,8 @@ class InterruptCoordinator:
         receiver calls it during signal_pause.
 
     Why no ESC: ESC is per-keystroke from prompt_toolkit (raw mode); it never
-    travels through OS signals. The interactive prompt path in
-    cli/prompt.py handles ESC directly via the ESC_SENTINEL.
+    travels through OS signals. ESC is handled entirely inside prompt_toolkit
+    (built-in behaviour) and never reaches this coordinator.
     """
 
     def __init__(self) -> None:

@@ -4,17 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from imp.cli.prompt import ESC_SENTINEL, Prompt
+from imp.cli.prompt import Prompt
 
 
 def test_prompt_returns_user_text() -> None:
     p = Prompt(_session_factory=lambda: _FakeSession(["hello"]))
     assert p.ask("> ") == "hello"
-
-
-def test_esc_returns_sentinel() -> None:
-    p = Prompt(_session_factory=lambda: _FakeSession([ESC_SENTINEL]))
-    assert p.ask("> ") == ESC_SENTINEL
 
 
 def test_ctrl_c_raises_keyboardinterrupt() -> None:

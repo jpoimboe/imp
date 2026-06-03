@@ -6,7 +6,6 @@ from pathlib import Path
 
 import anyio
 
-from imp.cli.prompt import ESC_SENTINEL
 from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
 
 
@@ -32,7 +31,6 @@ def test_is_slash_command() -> None:
     assert is_slash_command("  /help")  # leading whitespace tolerated
     assert not is_slash_command("hello")
     assert not is_slash_command("")
-    assert not is_slash_command(ESC_SENTINEL)  # ESC sentinel ("__IMP_ESC__") passes through
 
 
 def test_name_loads_body_and_emits_event(tmp_path: Path) -> None:
@@ -123,15 +121,6 @@ def test_ask_line_with_slash_returns_skill_body(tmp_path: Path) -> None:
     prompt = _FakePrompt(["/refactor"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
     assert line == "# Refactor\nstep one\n"
-
-
-def test_ask_line_with_slash_passes_through_esc(tmp_path: Path) -> None:
-    from imp.cli.prompt import ESC_SENTINEL
-    from imp.cli.slash import ask_line_with_slash
-    change = _FakeChange(tmp_path)
-    prompt = _FakePrompt([ESC_SENTINEL])
-    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
-    assert line == ESC_SENTINEL
 
 
 def test_skill_args_appended_after_body(tmp_path: Path) -> None:
