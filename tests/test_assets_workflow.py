@@ -13,7 +13,10 @@ def _steps(wf):
 
 
 # All declared workflow vars at their defaults — a realistic evaluate_rules fixture.
-_BASE_VARS = {"fast_path": False, "ready_to_merge": False, "final_review": True}
+_BASE_VARS = {
+    "fast_path": False, "ready_to_merge": False, "final_review": True,
+    "spec_final_review_done": False, "plan_final_review_done": False,
+}
 
 
 def test_shipped_default_workflow_loads(tmp_path: Path) -> None:
@@ -98,6 +101,14 @@ def test_fast_path_var_declared_default_false() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     assert wf.vars.defaults()["fast_path"] is False
+
+
+def test_final_review_done_vars_declared_default_false() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    defaults = wf.vars.defaults()
+    assert defaults["spec_final_review_done"] is False
+    assert defaults["plan_final_review_done"] is False
 
 
 def test_spec_writer_sets_fast_path_on_trivial_written() -> None:

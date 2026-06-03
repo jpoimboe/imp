@@ -21,9 +21,11 @@ model_rules:
 model_tiers: [fast, balanced, powerful]
 
 vars:
-  ready_to_merge: {type: bool, default: false}
-  final_review:   {type: bool, default: true}
-  fast_path:      {type: bool, default: false}
+  ready_to_merge:         {type: bool, default: false}
+  final_review:           {type: bool, default: true}
+  fast_path:              {type: bool, default: false}
+  spec_final_review_done: {type: bool, default: false}
+  plan_final_review_done: {type: bool, default: false}
 
 defaults:
   max_retries: 3
