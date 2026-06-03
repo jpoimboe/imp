@@ -639,14 +639,18 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         input=p.get("input") or {}))
 
 
+def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any]) -> None:
+    fold.running = False
+    fold.is_error = bool(p.get("error", False))
+    fold.outcome = _summarize_result(p.get("content"))
+
+
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
     # Closing a subagent? (parent `task` tool_result carries the block id.)
     fold = self._open_sub_by_block.pop(rid, None)
     if fold is not None:
-        fold.running = False
-        fold.is_error = bool(p.get("error", False))
-        fold.outcome = _summarize_result(p.get("content"))
+        _close_subagent_fold(fold, p)
         return
     # Normal burst result: pair with the matching open call.
     footer = _format_citations_footer(p.get("citations"))
@@ -657,6 +661,19 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
                 call.result = _summarize_result(p.get("content")) + footer
                 call.is_error = bool(p.get("error", False))
                 return
+    # §11: an unmatched result with an open subagent fold is the `task` close whose
+    # block id never matched the (empty / mismatched) open key. Only treat it as a
+    # fold-close when no open burst call could have been the real target — otherwise
+    # a stale/duplicate non-task result could mis-close a live fold. Single-level
+    # routing means at most one fold is open, so close the most-recently opened one.
+    burst_has_open_call = (
+        self._current_burst is not None
+        and any(c.result is None for c in self._current_burst.calls)
+    )
+    if self._open_sub_by_block and not burst_has_open_call:
+        _, fold = self._open_sub_by_block.popitem()   # LIFO; dicts preserve order
+        _close_subagent_fold(fold, p)
+        return
     # Orphan result (malformed log): start/extend a burst with a "tool" entry.
     burst = _ensure_burst(self)
     burst.calls.append(ToolCall(
@@ -785,12 +802,13 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
 
     NOTE: routing is SINGLE-LEVEL. A grandchild's `sub:<id2>` events are not
     delegated into this fold's nested builder (the top builder only knows its
-    own registered child ids). This is currently safe because spawned subagents
-    receive `subagent_defs={}` (subagents.py:104) and `dispatch_task` rejects
-    undeclared names (subagents.py:57-61), so subagents cannot spawn subagents.
-    Spec §5.2 ("an expanded subagent is itself a narrative with its own … sub
-    folds") implies nesting; if the engine ever enables it, routing must become
-    recursive/prefix-aware and a nested-subagent fixture added."""
+    own registered child ids). This is currently safe because only `task-lead`
+    declares `task` in its tools; its subagents (implementer, reviewers) declare
+    no subagents of their own, so `child_subagent_defs` in `dispatch_task` is
+    empty for them, and the dispatch guard rejects any undeclared name. The
+    depth ceiling (`MAX_SUBAGENT_DEPTH`) provides a hard backstop. If the engine
+    ever enables nesting, routing must become recursive/prefix-aware and a
+    nested-subagent fixture added."""
     self._flush_burst()
     event_id = str(event.get("id", ""))
     block_id = str(p.get("id", ""))

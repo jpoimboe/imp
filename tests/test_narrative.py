@@ -866,3 +866,28 @@ def test_real_prose_flushes_the_burst() -> None:
     b.add({"type": "llm_response", "agent_id": None,
            "payload": {"raw": {"content": [{"type": "text", "text": "done."}]}}, "id": "e3"})
     assert b.current_burst is None
+
+
+def test_task_result_closes_fold_despite_id_mismatch() -> None:
+    # §11: a task tool_call with an EMPTY block id (the real claude_code bug) opens
+    # a SubagentFold keyed under ""; the closing task tool_result carries the REAL
+    # toolu_... id which never matches the empty key. The fold must still close.
+    b = nv.NarrativeBuilder()
+    b.add({"type": "step_started", "agent_id": None,
+           "payload": {"step": "task-lead", "kind": "agent", "phase": "implement"},
+           "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"})
+    # task tool_call with an EMPTY block id (the real claude_code bug)
+    b.add({"type": "tool_call", "agent_id": None,
+           "payload": {"name": "task", "id": "",
+                       "input": {"subagent_name": "implementer", "task_description": "go"}},
+           "id": "e2"})
+    # Navigate: root -> PhaseNode -> StepNode -> children (SubagentFold lives here)
+    step_children = b.tree.root.children[0].children[0].children
+    folds = [c for c in step_children if isinstance(c, nv.SubagentFold)]
+    assert folds and folds[0].running is True
+    # closing task tool_result carries the REAL id — must still close the fold
+    b.add({"type": "tool_result", "agent_id": None,
+           "payload": {"id": "toolu_real", "content": "ok"}, "id": "e3"})
+    assert folds[0].running is False
+    assert folds[0].outcome == "ok"   # _summarize_result("ok") returns "ok" verbatim
+    assert folds[0].is_error is False

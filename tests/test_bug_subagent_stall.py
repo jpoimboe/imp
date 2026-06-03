@@ -30,8 +30,6 @@ from __future__ import annotations
 import io
 import json
 
-import pytest
-
 from imp.cli import narrative as nv
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
@@ -63,9 +61,6 @@ def _log_body(events) -> str:
     return "\n".join(render_tree(tree, full=False, color=False, width=80))
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="spec §11: live cursor wedged by never-closing subagent (unfixed)")
 def test_live_emits_content_after_a_subagent_spawn() -> None:
     events = _events()
     live = _live_body(events)
