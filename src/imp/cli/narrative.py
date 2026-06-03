@@ -574,18 +574,21 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Token accumulation already happened in add(); here we only build the node.
-    self._flush_burst()
+    # §8: an empty-text llm_response is a tool-use-turn carrier (a lone tool_use
+    # block). It must NOT flush an open burst — otherwise consecutive tool calls
+    # each start a fresh burst and the status counter sticks at 1. Compute text
+    # FIRST, then flush+append only on a genuine prose turn (this reorders the
+    # original flush-before-compute).
     node = AgentTextNode(payload=p)
-    # Skip thinking-only / tool-only turns (no prose) — an empty AgentTextNode
-    # renders as one indent-only blank line. node.text computes and caches once;
-    # on a real turn the same cached parse is reused at render time. (This moves
-    # the parse lazy->eager for llm_response — negligible, but a real shift.)
     if node.text.strip():
+        self._flush_burst()
         self._append(node)
 
 
 def _h_thinking(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    self._flush_burst()
+    # §8: a thinking block that is part of a tool-use turn must not flush an open
+    # burst (consecutive tools accumulate). A standalone thinking turn is harmless
+    # to leave un-flushed: the next real prose / step boundary flushes the burst.
     self._append(ThinkingFold(content=str(p.get("content", ""))))
 
 

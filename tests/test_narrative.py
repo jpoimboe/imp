@@ -833,3 +833,36 @@ def test_empty_prose_llm_response_yields_no_agent_text_node() -> None:
     nodes = _agent_texts(tree.root)
     assert len(nodes) == 1                       # only the real-prose turn
     assert nodes[0].text == "real prose"
+
+
+def test_empty_llm_response_between_tools_keeps_burst_open() -> None:
+    # §8: an empty-text llm_response (lone tool_use block, no prose) is a
+    # tool-use-turn carrier and must NOT flush an open burst — otherwise
+    # consecutive tool_calls each start a fresh burst with count 1.
+    b = nv.NarrativeBuilder()
+    b.add({"type": "step_started", "agent_id": None,
+           "payload": {"step": "s", "kind": "agent", "phase": "p"}, "id": "e1",
+           "timestamp": "2026-06-03T00:00:00+00:00"})
+    b.add({"type": "tool_call", "agent_id": None,
+           "payload": {"name": "bash", "id": "t1", "input": {"command": "ls"}}, "id": "e2"})
+    # tool-use-turn carrier: an llm_response whose only block is a tool_use (no text)
+    b.add({"type": "llm_response", "agent_id": None,
+           "payload": {"raw": {"content": [{"type": "tool_use", "id": "t2",
+                                            "name": "grep", "input": {}}]}}, "id": "e3"})
+    b.add({"type": "tool_call", "agent_id": None,
+           "payload": {"name": "grep", "id": "t2", "input": {"pattern": "x"}}, "id": "e4"})
+    burst = b.current_burst
+    assert burst is not None and len(burst.calls) == 2
+
+
+def test_real_prose_flushes_the_burst() -> None:
+    # §8: a real prose llm_response (with non-empty text) MUST flush the burst.
+    b = nv.NarrativeBuilder()
+    b.add({"type": "step_started", "agent_id": None,
+           "payload": {"step": "s", "kind": "agent", "phase": "p"}, "id": "e1",
+           "timestamp": "2026-06-03T00:00:00+00:00"})
+    b.add({"type": "tool_call", "agent_id": None,
+           "payload": {"name": "bash", "id": "t1", "input": {}}, "id": "e2"})
+    b.add({"type": "llm_response", "agent_id": None,
+           "payload": {"raw": {"content": [{"type": "text", "text": "done."}]}}, "id": "e3"})
+    assert b.current_burst is None
