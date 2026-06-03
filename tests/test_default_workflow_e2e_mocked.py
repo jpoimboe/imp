@@ -32,6 +32,27 @@ from imp.providers.anthropic import AnthropicProvider
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
 
 
+def _canned_anthropic(**overrides):
+    """A single complete_step response carrying every field any agent needs.
+    Override individual fields (e.g. complexity='trivial') per test."""
+    fields = {
+        "status": "Success",
+        "verdict": "approve", "findings": "none",
+        "decision": "merge", "comments": "",
+        "phase": "written", "spec_path": "stub-spec.md",
+        "complexity": "standard",
+        "plan_path": "stub-plan.md", "plan_number": 1,
+        "done": True, "deviation": False, "summary": "ok",
+        "more_plans": False, "rationale": "ok",
+        "blocking": False,
+        "built": "stub", "test_status": "ok",
+        "open_items": "", "next_steps": "",
+        "result": "DONE", "report": "ok",
+    }
+    fields.update(overrides)
+    return response(tool_use("c0", "complete_step", fields), stop_reason="tool_use")
+
+
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
@@ -356,3 +377,90 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
         human_output_fn=lambda _msg: None,
     )
     assert result is RunResult.COMPLETED
+
+
+@pytest.mark.anyio
+async def test_clean_review_loops_back_to_writer_then_skips_reviewer(
+    tmp_path: Path,
+) -> None:
+    change = _seed_default_workflow(tmp_path)
+    # standard change, blocking:false -> each reviewer passes clean on the first
+    # try, triggering exactly one writer polish pass, then the gate skips the
+    # second review.
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+
+    started: list[str] = []
+    completed: list[tuple[str, dict]] = []
+
+    def on_event(rec: dict) -> None:
+        if rec["type"] == "step_started":
+            started.append(rec["payload"]["step"])
+        elif rec["type"] == "step_completed":
+            completed.append((rec["payload"]["step"], rec["payload"]["action"]))
+
+    result = await run_change(
+        change, on_event=on_event,
+        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
+    )
+    assert result is RunResult.COMPLETED
+
+    # Exactly one review per loop (clean -> polish -> gate skips the second).
+    assert started.count("spec-reviewer") == 1, started
+    assert started.count("plan-review") == 1, started
+    # The writer ran twice per loop: the initial write + the one polish pass.
+    assert started.count("spec-writer") == 2, started
+    assert started.count("plan-writer") == 2, started
+
+    # The guarantee "no second reviewer runs" is the GATE's goto, not just the
+    # count: the final-review gate consumed the flag and jumped past the reviewer.
+    assert any(
+        s == "spec-final-review-gate"
+        and a.get("verb") == "goto" and a.get("target") == "plan-writer"
+        for s, a in completed
+    ), completed
+    assert any(
+        s == "plan-final-review-gate"
+        and a.get("verb") == "goto" and a.get("target") == "task-lead"
+        for s, a in completed
+    ), completed
+
+
+@pytest.mark.anyio
+async def test_fast_path_skips_both_reviewers_but_not_code_reviewer(
+    tmp_path: Path,
+) -> None:
+    change = _seed_default_workflow(tmp_path)
+    # complexity:trivial -> spec-writer sets fast_path=true; both the spec and
+    # plan reviewers are skipped, but the final code-reviewer still runs.
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+
+    started: list[str] = []
+
+    def on_event(rec: dict) -> None:
+        if rec["type"] == "step_started":
+            started.append(rec["payload"]["step"])
+
+    result = await run_change(
+        change, on_event=on_event,
+        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
+    )
+    assert result is RunResult.COMPLETED
+    assert "spec-reviewer" not in started, started
+    assert "plan-review" not in started, started
+    assert "code-reviewer" in started, started
