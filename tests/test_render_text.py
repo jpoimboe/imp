@@ -282,13 +282,12 @@ def test_header_line_matches_render_for_phase_and_step() -> None:
     assert rt.header_line(human, depth=2, color=False) == "    approve"
 
 
-def test_agent_text_is_bold_when_color_enabled() -> None:
+def test_agent_text_is_plain_when_color_enabled() -> None:
     node = nv.AgentTextNode(payload={})
     node._cache = _FakeRendered(["hello world"])
     out = list(rt._render(node, depth=0, full=False, color=True, width=80))
-    assert out and out[0].startswith("\x1b[1m")   # bold prefix from NODE_COLORS["agent"]
-    assert "\x1b[36m" not in out[0]               # NOT the removed bold-cyan ask_user block
-    assert "hello world" in out[0]
+    # agent = () → calm baseline: prose carries NO ANSI at all.
+    assert out == ["hello world"]
 
 
 def test_empty_thinking_is_suppressed_both_modes() -> None:
@@ -350,7 +349,7 @@ def test_snapshot_covers_every_node_type() -> None:
     assert required <= seen, f"fixture missing node types: {required - seen}"
 
 
-def test_literal_text_node_renders_as_bold_agent_prose() -> None:
+def test_literal_text_node_renders_as_agent_prose() -> None:
     from imp.cli import narrative as nv
     from imp.cli import render_text as rt
     node = nv.LiteralTextNode(text="line one\nline two")

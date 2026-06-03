@@ -2,8 +2,8 @@
 """Shared color palette + accent map + fold glyphs for both renderers.
 
 Ported from the deleted render.py (§9 keeps today's palette unchanged). No
-third-party imports — consumed by render_text.py (raw ANSI) and tui.py (which
-maps these color names onto its own rich/prompt_toolkit styles)."""
+third-party imports — consumed by render_text.py (imp log) and live_driver.py
+(the live stream), both of which emit raw ANSI via ansi()."""
 from __future__ import annotations
 
 import os
@@ -66,19 +66,21 @@ def action_text(action: Any) -> str:
 
 
 # §9 node-category → color names. Both views read these so colors stay in sync.
+# Ink spent backwards from frequency: the most frequent content (agent prose) is
+# calmest; weight + color are reserved for speaker identity and structure.
 NODE_COLORS: dict[str, tuple[str, ...]] = {
-    "workflow": ("bold", "magenta"),
-    "phase": ("bold", "blue"),
-    "step": ("cyan",),
-    "gate": ("yellow",),
-    "tools": ("gray",),
-    "subagent": ("magenta",),
-    "thinking": ("dim",),
-    "metadata": ("dim",),
-    "error": ("bold", "red"),
-    "warning": ("yellow",),
-    "user": ("blue",),
-    "agent": ("bold",),            # LLM prose emphasis (was colorless)
+    "workflow": ("bold", "magenta"),   # appears once at top — the lone bold anchor
+    "phase": ("cyan",),                # recedes: muted, no bold
+    "step": ("gray",),                 # navigational chrome, not speech
+    "gate": ("yellow",),               # semantic
+    "tools": ("gray",),                # --full only
+    "subagent": ("magenta",),          # header + gutter + outcome; never bold
+    "thinking": ("dim",),              # --full only
+    "metadata": ("dim",),              # --full only
+    "error": ("bold", "red"),          # semantic
+    "warning": ("yellow",),            # semantic
+    "user": ("green",),                # readable, clearly "the human"; no bold
+    "agent": (),                       # calm baseline — plain default fg; eye rests
 }
 
 _FOLD_UNICODE = {"collapsed": "▸", "expanded": "▾"}

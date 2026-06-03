@@ -80,5 +80,20 @@ def test_fold_glyphs_default_unicode() -> None:
     assert pal.fold_glyph(expanded=True) == "▾"
 
 
-def test_agent_color_present() -> None:
-    assert pal.NODE_COLORS["agent"] == ("bold",)
+def test_node_colors_calm_scheme() -> None:
+    # The most frequent content is calmest; weight/color go to identity + structure.
+    assert pal.NODE_COLORS["agent"] == ()                  # plain default fg (was bold)
+    assert pal.NODE_COLORS["user"] == ("green",)           # readable human (was blue)
+    assert pal.NODE_COLORS["phase"] == ("cyan",)           # recedes (was bold blue)
+    assert pal.NODE_COLORS["step"] == ("gray",)            # navigational chrome (was cyan)
+    assert pal.NODE_COLORS["subagent"] == ("magenta",)     # unchanged
+    assert pal.NODE_COLORS["workflow"] == ("bold", "magenta")  # lone bold anchor, unchanged
+    # Semantic colors untouched.
+    assert pal.NODE_COLORS["gate"] == ("yellow",)
+    assert pal.NODE_COLORS["error"] == ("bold", "red")
+    assert pal.NODE_COLORS["warning"] == ("yellow",)
+
+
+def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
+    # agent = () means pal.ansi returns prose unwrapped even when color is on.
+    assert pal.ansi("prose", *pal.NODE_COLORS["agent"], enabled=True) == "prose"
