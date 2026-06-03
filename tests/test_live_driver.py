@@ -137,6 +137,34 @@ def test_body_parity_with_render_tree() -> None:
     assert _body(out) == _render_body(events)
 
 
+def test_consecutive_prose_blank_separated_and_parity() -> None:
+    # Two prose turns with a thinking-only turn between them must be blank-separated
+    # live, exactly as in `imp log` — the live path streams prose one node at a time,
+    # so this guards that its blank-line spacing matches the batch walk byte-for-byte.
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "First turn."}]}, usage={}),
+        ev("5", "thinking", agent_id="a", content="hmm"),
+        ev("6", "llm_response", agent_id="a",   # thinking-only → emits nothing
+           raw={"content": [{"type": "thinking", "thinking": "hmm"}]}, usage={}),
+        ev("7", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "Second turn."}]}, usage={}),
+        ev("8", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    second = next(i for i, ln in enumerate(body) if "Second turn." in ln)
+    assert body[second - 1].strip() == ""        # blank separator between prose turns
+    assert body == _render_body(events)          # live == imp log, byte-for-byte
+
+
 def test_empty_thinking_dropped_in_live_path() -> None:
     events = [
         ev("1", "change_created", change_id=1, title="x"),

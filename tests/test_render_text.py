@@ -359,6 +359,38 @@ def test_literal_text_node_renders_as_bold_agent_prose() -> None:
     assert any("line two" in ln for ln in out)
 
 
+def test_consecutive_prose_turns_separated_by_blank_line() -> None:
+    # Two real prose turns with a thinking-only turn between them (which emits no
+    # AgentTextNode and renders nothing in lean mode). They must NOT bunch — one
+    # blank line separates them, restoring the spacing the empty-node used to give.
+    out = _lines([
+        _ev("1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("2", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "First prose turn."}]}, usage={}),
+        _ev("3", "thinking", agent_id="a", content="hmm"),
+        _ev("4", "llm_response", agent_id="a",   # thinking-only → no AgentTextNode
+            raw={"content": [{"type": "thinking", "thinking": "hmm"}]}, usage={}),
+        _ev("5", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Second prose turn."}]}, usage={}),
+    ])
+    body = [ln for ln in out if ln.strip()]   # sanity: both prose lines present
+    assert any("First prose turn." in ln for ln in body)
+    assert any("Second prose turn." in ln for ln in body)
+    second = next(i for i, ln in enumerate(out) if "Second prose turn." in ln)
+    assert out[second - 1].strip() == "", "consecutive prose turns must be blank-separated"
+
+
+def test_single_prose_turn_has_no_leading_blank() -> None:
+    # The FIRST prose block under a step must not get a spurious leading blank.
+    out = _lines([
+        _ev("1", "step_started", step="spec", kind="agent", phase="design"),
+        _ev("2", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Only prose."}]}, usage={}),
+    ])
+    idx = next(i for i, ln in enumerate(out) if "Only prose." in ln)
+    assert out[idx - 1].strip() != "", "step header should sit directly above first prose"
+
+
 def test_roles_resolved_attaches_at_root() -> None:
     # Fired before any step_started (agent_id=None) → lands at the workflow root.
     b = nv.NarrativeBuilder()

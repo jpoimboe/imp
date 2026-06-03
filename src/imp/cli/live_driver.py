@@ -69,6 +69,11 @@ class LiveDriver:
         self._color = color
         self._width = width
         self._status = status
+        # True after the last emitted block was agent prose, so the next prose
+        # block gets one blank-line separator — matching render_text's lean spacing
+        # so the live view and `imp log` look identical (design §5.4). Any non-prose
+        # output resets it; an empty emission leaves it untouched.
+        self._prev_prose = False
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
             _Cursor(container=self._builder.tree.root, depth=0)]
@@ -173,21 +178,30 @@ class LiveDriver:
             # the prompt/options as chrome (design "Human gates").
             lines = rt._render_gate(node, depth=depth, color=self._color,
                                     width=self._width, recap=False)
+            prose = False
         else:
             lines = rt._render(node, depth=depth, full=False, color=self._color,
                                width=self._width)
-        self._print_lines(list(lines))
+            prose = rt.is_prose_leaf(node)
+        self._print_lines(list(lines), prose=prose)
 
     def _stream_or_hold(self, line: str) -> None:
         self._print_lines([line])
 
-    def _print_lines(self, lines: list[str]) -> None:
+    def _print_lines(self, lines: list[str], *, prose: bool = False) -> None:
+        # The ONE output chokepoint, so prose spacing stays consistent: a blank
+        # line precedes a prose block that follows another prose block. An empty
+        # emission returns early and leaves _prev_prose untouched (so a lean-mode
+        # thinking/tool turn between two prose blocks doesn't break their pairing).
         if not lines:
             return
         self._status.hide()
+        if prose and self._prev_prose:
+            self._stream.write("\n")
         for ln in lines:
             self._stream.write(ln + "\n")
         self._stream.flush()
+        self._prev_prose = prose
 
     def _refresh_status(self) -> None:
         if self._builder.current_activity() is not None:

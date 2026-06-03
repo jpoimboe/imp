@@ -29,8 +29,7 @@ def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
     if root.status != "running":
         head = f"{head}  ({root.status})"
     yield pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
-    for child in root.children:
-        yield from _render(child, depth=0, full=full, color=color, width=width)
+    yield from _render_children(root.children, depth=0, full=full, color=color, width=width)
 
 
 def _wrap(text: str, width: int, depth: int) -> list[str]:
@@ -48,6 +47,34 @@ def _wrap(text: str, width: int, depth: int) -> list[str]:
 
 def _line(text: str, depth: int, color: bool, *codes: str) -> str:
     return pal.ansi(f"{_INDENT * depth}{text}", *codes, enabled=color)
+
+
+def is_prose_leaf(node: Any) -> bool:
+    """True for the agent-speech blocks (rendered LLM prose / surfaced free-text
+    output fields). Consecutive prose blocks get one blank line between them so
+    separate assistant turns don't bunch when the intervening thinking/tool turns
+    render nothing in lean mode. Shared by the batch walk and the live driver so
+    both paths space prose identically (design §5.4)."""
+    return isinstance(node, (nv.AgentTextNode, nv.LiteralTextNode))
+
+
+def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
+                     width: int) -> Iterator[str]:
+    """Render a container's children in order, inserting ONE blank line between
+    two consecutive prose blocks. A child that renders nothing (lean-mode thinking
+    / empty tool burst) leaves the prose-adjacency state untouched, so
+    prose→thinking→prose still separates; any non-prose output (header, breadcrumb,
+    subagent block) resets it, so prose never gets a spurious leading blank."""
+    prev_prose = False
+    for child in children:
+        lines = list(_render(child, depth=depth, full=full, color=color, width=width))
+        if not lines:
+            continue
+        cur_prose = is_prose_leaf(child)
+        if cur_prose and prev_prose:
+            yield ""
+        yield from lines
+        prev_prose = cur_prose
 
 
 def header_line(node: Any, *, depth: int, color: bool) -> str:
@@ -113,14 +140,14 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             width: int) -> Iterator[str]:
     if isinstance(node, nv.PhaseNode):
         yield header_line(node, depth=depth, color=color)
-        for c in node.children:
-            yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
+        yield from _render_children(node.children, depth=depth + 1, full=full,
+                                    color=color, width=width)
         return
 
     if isinstance(node, nv.StepNode):
         yield header_line(node, depth=depth, color=color)
-        for c in node.children:
-            yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
+        yield from _render_children(node.children, depth=depth + 1, full=full,
+                                    color=color, width=width)
         return
 
     if isinstance(node, nv.AgentTextNode):
@@ -241,8 +268,8 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
         yield header_line(sub, depth=depth, color=color)
     # The subagent's own narrative, recursed at the same `full` level (lean filters
     # nested thinking/tools via A1/A2; --full expands them).
-    for c in sub.tree.root.children:
-        yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
+    yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
+                                color=color, width=width)
     # The structured return value the parent consumed — emitted in BOTH modes so
     # --full stays a superset of default (DEVIATION from spec, which left --full
     # untouched: the spec's "--full unchanged" produced the backwards result of
