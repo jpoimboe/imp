@@ -16,16 +16,30 @@ def test_ansi_enabled_wraps_and_resets_once() -> None:
     assert pal.ansi("hi", "bold", "magenta", enabled=True) == "\x1b[1m\x1b[35mhi\x1b[0m"
 
 
-def test_should_use_color_requires_tty_and_no_NO_COLOR(monkeypatch) -> None:
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    assert pal.should_use_color(io.StringIO()) is False     # not a tty
+class _TTY:
+    def isatty(self) -> bool:
+        return True
 
-    class TTY:
-        def isatty(self) -> bool:
-            return True
-    assert pal.should_use_color(TTY()) is True
+
+def test_should_use_color_requires_tty_and_no_NO_COLOR(monkeypatch) -> None:
+    for var in ("NO_COLOR", "CLICOLOR_FORCE", "FORCE_COLOR"):
+        monkeypatch.delenv(var, raising=False)
+    assert pal.should_use_color(io.StringIO()) is False     # not a tty
+    assert pal.should_use_color(_TTY()) is True
     monkeypatch.setenv("NO_COLOR", "1")
-    assert pal.should_use_color(TTY()) is False
+    assert pal.should_use_color(_TTY()) is False
+
+
+@pytest.mark.parametrize("force_var", ["CLICOLOR_FORCE", "FORCE_COLOR"])
+def test_should_use_color_force_var_overrides_pipe(monkeypatch, force_var) -> None:
+    # Force vars color even a non-tty (e.g. `imp log | less -R`)...
+    for var in ("NO_COLOR", "CLICOLOR_FORCE", "FORCE_COLOR"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv(force_var, "1")
+    assert pal.should_use_color(io.StringIO()) is True
+    # ...but NO_COLOR still wins.
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert pal.should_use_color(io.StringIO()) is False
 
 
 @pytest.mark.parametrize("action,expected", [

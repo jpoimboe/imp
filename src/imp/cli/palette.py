@@ -25,7 +25,14 @@ def ansi(text: str, *codes: str, enabled: bool) -> str:
 
 
 def should_use_color(stream: Any) -> bool:
-    return bool(getattr(stream, "isatty", lambda: False)()) and "NO_COLOR" not in os.environ
+    # Precedence: NO_COLOR (disable) > force vars > isatty. NO_COLOR always
+    # wins. CLICOLOR_FORCE (ripgrep/fd/bat) and FORCE_COLOR (npm/pytest) let
+    # callers force color through a pipe, e.g. `imp log | less -R` or CI logs.
+    if "NO_COLOR" in os.environ:
+        return False
+    if os.environ.get("CLICOLOR_FORCE") or os.environ.get("FORCE_COLOR"):
+        return True
+    return bool(getattr(stream, "isatty", lambda: False)())
 
 
 # §9 accent: the ONLY action verbs the stream emits are continue/pause/
