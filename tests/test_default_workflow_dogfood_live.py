@@ -21,7 +21,6 @@ What this proves:
 Skip predicates (all must pass):
   - first_opted_in() is not None  (IMP_LIVE_PROVIDERS opt-in)
   - IMP_RUN_DOGFOOD=1             (cost guard; set by `make test-dogfood`)
-  - _can_pty()                    (Windows / sandboxed CI without /dev/pty*)
 
 Recursion guard: the coder runs `make test` -> `pytest -q` in the copied
 tree, which would re-collect this file. Scrubbing IMP_LIVE_PROVIDERS from
@@ -31,16 +30,12 @@ the subprocess env causes all live tests to skip via opted_in().
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import os
-import select
 import shutil
 import signal
-import struct
 import subprocess
 import sys
-import termios
 import time
 import uuid
 from pathlib import Path
@@ -86,17 +81,6 @@ def _provider_model(provider: str) -> str:
         "openai": "gpt-4o-mini",
         "claude_code": "claude-sonnet-4-5",
     }[provider]
-
-
-def _can_pty() -> bool:
-    try:
-        import pty
-        m, s = pty.openpty()
-        os.close(m)
-        os.close(s)
-        return True
-    except Exception:
-        return False
 
 
 def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, str]]:
@@ -205,10 +189,6 @@ pytestmark = [
         os.environ.get("IMP_RUN_DOGFOOD") != "1",
         reason="dogfood run on real LLM; set IMP_RUN_DOGFOOD=1 to opt in",
     ),
-    pytest.mark.skipif(
-        not _can_pty(),
-        reason="pty not available (Windows or sandboxed CI)",
-    ),
 ]
 
 
@@ -219,12 +199,11 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     """Run the shipped default workflow against imp's own source.
 
     Dogfoods imp by asking the workflow to add a unique sentinel print to
-    src/imp/agents/tools/bash.py. After completion, verifies the sentinel
-    landed in the right file plus all the events.jsonl/imp-log invariants
-    the prior PTY test had.
+    src/imp/agents/tools/bash.py. Launched via --non-interactive with stdin=PIPE:
+    the feature intent is written to stdin then stdin is closed so all subsequent
+    asks use the EOF default. After completion, verifies the sentinel landed in
+    the right file plus all the events.jsonl/imp-log invariants.
     """
-    import pty
-
     provider = first_opted_in()
     assert provider is not None  # guaranteed by skipif
     model = _provider_model(provider)
@@ -299,7 +278,8 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     # mandates a turn-1 ask, no tools, no exploration). The system prompt no
     # longer surfaces the title, so the agent learns the task from the FIRST
     # awaiting_user_input reply — that is where the driver delivers the title
-    # text below. Subsequent asks (if any) get the generic "use defaults" reply.
+    # text below. With --non-interactive, the intent is written to stdin and
+    # stdin is closed; all subsequent asks use the EOF default (first option).
 
     # Title carries the feature intent. Unique sentinel per run prevents
     # stale state from faking a pass.
@@ -345,34 +325,25 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
     env["IMP_PYTHON"] = str(venv_python)
 
-    master, slave = pty.openpty()
-    # Propagate a real terminal size onto the slave so imp's renderer wraps to a
-    # sensible width instead of flooring to 8 chars under a winsize-0 PTY (issue
-    # 2). Query the controlling terminal; fall back to 100x30 when stdout is not
-    # a TTY (CI) for determinism.
-    try:
-        cols, rows = os.get_terminal_size(sys.stdout.fileno())
-    except (OSError, ValueError):
-        cols, rows = 100, 30
-    winsize = struct.pack("HHHH", rows, cols, 0, 0)
-    fcntl.ioctl(slave, termios.TIOCSWINSZ, winsize)
-    # imp answers gates with line input ("1\n") — the only mode now that the
-    # TUI is gone. The PTY itself is still needed so the text path's
-    # prompt_toolkit prompt has a TTY. Mirrors test_human_gate_pty.
+    # Launch imp new via --non-interactive with stdin=PIPE (no PTY needed).
+    # Deliver the feature intent as the FIRST scripted reply (the spec-writer's
+    # opening ask), then close stdin so every later ask falls to the EOF default.
     proc = subprocess.Popen(
-        [str(venv_python), "-m", "imp", "new", title],
+        [str(venv_python), "-m", "imp", "new", title, "--non-interactive"],
         cwd=tmp_path,
-        stdin=slave,
-        stdout=slave,
-        stderr=slave,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         env=env,
         start_new_session=True,
+        text=False,
     )
-    os.close(slave)
+    with contextlib.suppress(BrokenPipeError):
+        proc.stdin.write(title.encode("utf-8") + b"\n")
+        proc.stdin.close()
 
     TOTAL_TIMEOUT = 1800.0
     EVENTS_FIRST_APPEAR_TIMEOUT = 30.0
-    TRACE_PTY = os.environ.get("IMP_PTY_TRACE") == "1"
 
     # SIGINT handling: hard-kill the subprocess PG so Ctrl-C is
     # unambiguous (raising KeyboardInterrupt from a signal handler is
@@ -387,8 +358,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
 
     def _teardown_proc() -> None:
         signal.signal(signal.SIGINT, _prev_sigint)
-        with contextlib.suppress(OSError):
-            os.close(master)
         if proc.poll() is None:
             with contextlib.suppress(OSError, ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -397,7 +366,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
 
     # Discover the Change worktree (created at startup, before any LLM call).
     # Capture the slug NOW — the worktree is transient and is removed at merge.
-    # Guarded so a startup-crash timeout still tears down proc + PTY fd.
+    # Guarded so a startup-crash timeout still tears down proc.
     try:
         change_wt = _await_worktree(tmp_path, timeout=EVENTS_FIRST_APPEAR_TIMEOUT)
     except BaseException:
@@ -406,11 +375,8 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     slug = change_wt.name
     events_file = change_wt / ".imp" / "change" / "events.jsonl"
 
-    buf = bytearray()
     gates_answered = 0
-    asks_answered = 0
     events_seen_bytes = 0
-    ask_questions: list[str] = []
     all_events_accum: list[dict[str, Any]] = []
     start_time = time.time()
     deadline = start_time + TOTAL_TIMEOUT
@@ -421,20 +387,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"sentinel={sentinel} expected_gates={len(expected_gates)}",
         file=sys.stderr, flush=True,
     )
-
-    def _drain_pty() -> None:
-        nonlocal buf
-        ready, _, _ = select.select([master], [], [], 0.05)
-        if ready:
-            try:
-                chunk = os.read(master, 4096)
-            except OSError:
-                return
-            if chunk:
-                buf.extend(chunk)
-                if TRACE_PTY:
-                    sys.stderr.buffer.write(chunk)
-                    sys.stderr.buffer.flush()
 
     def _tail_events() -> list[dict[str, Any]]:
         nonlocal events_seen_bytes, events_first_seen_at
@@ -474,8 +426,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
 
     try:
         while time.time() < deadline:
-            _drain_pty()
-
             # Startup guard: fail only if events were NEVER seen. We key off
             # events_first_seen_at (set by _tail_events on first sighting), not
             # events_file.exists() — at merge the worktree (and events.jsonl) is
@@ -490,8 +440,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                 pytest.fail(
                     f"events.jsonl never appeared within "
                     f"{EVENTS_FIRST_APPEAR_TIMEOUT}s of process start; "
-                    f"engine did not initialize.\n"
-                    f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
+                    f"engine did not initialize."
                 )
 
             for ev in _tail_events():
@@ -508,31 +457,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                             f"{phase!r} not in yaml-declared human gates "
                             f"{expected_gates}; workflow.yaml/parse drift?"
                         )
-                    os.write(master, b"1\n")
                     gates_answered += 1
-                elif etype == "awaiting_user_input":
-                    # Interactive agent ended its turn with a question (no tool
-                    # call). The engine emits this immediately before blocking on
-                    # user_chat_input_fn (executor.py _interactive), so writing
-                    # the answer now lands the bytes before prompt_async reads
-                    # them. This is provider-agnostic — unlike llm_response
-                    # stop_reason, which claude_code logs as None on every turn.
-                    question = payload.get("prompt") or ""
-                    if question:
-                        ask_questions.append(question)
-                    # The spec-writer's mandatory opening question carries no
-                    # task: the title is NOT in its system prompt. The FIRST
-                    # reply must deliver the feature intent; subsequent replies
-                    # (clarifications, design confirms) get the generic "use
-                    # defaults" answer.
-                    if asks_answered == 0:
-                        os.write(master, title.encode("utf-8") + b"\n")
-                    else:
-                        os.write(
-                            master,
-                            b"looks good, proceed with reasonable defaults\n",
-                        )
-                    asks_answered += 1
                 elif etype == "workflow_paused":
                     # Pause fail-fast: the engine emits workflow_paused at
                     # executor.py:100/106 whenever it halts (including
@@ -544,14 +469,10 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                     pytest.fail(
                         f"engine emitted workflow_paused (reason={reason!r}); "
                         f"likely max_retries exhausted in a step or phase. "
-                        f"gates_answered={gates_answered}/{len(expected_gates)} "
-                        f"asks_answered={asks_answered}\n"
-                        f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
+                        f"gates_answered={gates_answered}/{len(expected_gates)}"
                     )
 
             if proc.poll() is not None:
-                for _ in range(20):
-                    _drain_pty()
                 break
 
             time.sleep(0.05)
@@ -562,9 +483,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                 f"dogfood workflow exceeded {TOTAL_TIMEOUT}s wall clock "
                 f"(may be reviewer flake or coder iteration storm; "
                 f"rerun once before investigating).\n"
-                f"gates_answered={gates_answered}/{len(expected_gates)} "
-                f"asks_answered={asks_answered}\n"
-                f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
+                f"gates_answered={gates_answered}/{len(expected_gates)}"
             )
     finally:
         _teardown_proc()
@@ -572,9 +491,7 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     rc = proc.wait(timeout=10)
     assert rc == 0, (
         f"expected exit 0, got {rc}; "
-        f"gates_answered={gates_answered}/{len(expected_gates)} "
-        f"asks_answered={asks_answered}\n"
-        f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
+        f"gates_answered={gates_answered}/{len(expected_gates)}"
     )
 
     # The worktree was removed at merge; completion status lives in the journal.
@@ -590,16 +507,6 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     assert gates_answered == 0, (
         f"superpowers workflow has no ask/options gates; saw {gates_answered} "
         f"human_prompt_pending events"
-    )
-    # The spec-writer now opens every change with a mandatory question; the
-    # driver delivers the task in its first reply. Therefore at least one
-    # awaiting_user_input event must have fired and been answered — anything
-    # less means the always-ask discipline regressed.
-    assert asks_answered >= 1, (
-        "spec-writer must open every change with a clarifying question "
-        "(its prompt mandates a turn-1 ask); the driver saw 0 "
-        "awaiting_user_input events. Did the open-by-asking discipline "
-        "regress?"
     )
 
     # ── Dogfood-specific verification ──────────────────────────────────

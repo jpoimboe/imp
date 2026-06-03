@@ -56,7 +56,6 @@ test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
 test-live-verbose: ## test-live but with live progress + raw PTY output streamed to your terminal.
 	@$(_REQUIRE_PROVIDERS) && \
 	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
-	  IMP_PTY_TRACE=1 \
 	    timeout --foreground 1800 $(PYTEST) -s -v $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
@@ -69,12 +68,12 @@ test-live-quick: ## One-step live test for the first opted-in provider only.
 	      tests/test_default_workflow_e2e_live_claude_code.py
 
 .PHONY: test-dogfood
-test-dogfood: ## Dogfood imp on imp via PTY against the first opted-in provider (costs real tokens).
+test-dogfood: ## Dogfood imp on imp via --non-interactive against the first opted-in provider (costs real tokens).
 	IMP_RUN_DOGFOOD=1 $(PYTEST) -q tests/test_default_workflow_dogfood_live.py
 
 .PHONY: test-dogfood-verbose
-test-dogfood-verbose: ## test-dogfood with -v + raw PTY trace.
-	IMP_RUN_DOGFOOD=1 IMP_PTY_TRACE=1 $(PYTEST) -v -s tests/test_default_workflow_dogfood_live.py
+test-dogfood-verbose: ## test-dogfood with -v and verbose output.
+	IMP_RUN_DOGFOOD=1 $(PYTEST) -v -s tests/test_default_workflow_dogfood_live.py
 
 .PHONY: test-all
 test-all: test test-live ## Full suite including live tests.
@@ -149,7 +148,7 @@ define _REQUIRE_PROVIDERS
     echo "  IMP_LIVE_PROVIDERS=anthropic,openai,claude_code  (combine as desired)" >&2; \
     echo "" >&2; \
     echo "Note: per-provider one-step tests run for every provider listed." >&2; \
-    echo "      The full PTY workflow test uses only the FIRST provider in the list." >&2; \
+    echo "      The full dogfood test uses only the FIRST provider in the list." >&2; \
     exit 1; \
   fi; \
   IFS=',' read -r -a _provs <<< "$${IMP_LIVE_PROVIDERS}"; \
