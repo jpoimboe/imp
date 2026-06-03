@@ -53,12 +53,22 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 
+      - name: spec-final-review-gate   # self-consuming flag; ordered FIRST
+        rules:
+          - {if: {spec_final_review_done: true}, set: {spec_final_review_done: false}, goto: plan-writer}
+          - {else: true, continue: true}
+
+      - name: fast-path-spec-gate      # trivial change -> skip spec review entirely
+        rules:
+          - {if: {fast_path: true}, goto: plan-writer}
+          - {else: true, continue: true}
+
       - name: spec-reviewer
         file: agents/spec-reviewer.md
         model_role: spec_review
         rules:
-          - {if: {blocking: true}, resume: spec-writer}
-          - {else: true, continue: true}
+          - {if: {blocking: true}, resume: spec-writer}                            # rework loop
+          - {else: true, set: {spec_final_review_done: true}, resume: spec-writer} # clean -> one final polish pass
 
   - name: plan
     steps:

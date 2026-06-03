@@ -5,7 +5,7 @@ from pathlib import Path
 
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
-from imp.engine.types import Goto
+from imp.engine.types import Continue, Goto
 
 
 def _steps(wf):
@@ -109,6 +109,55 @@ def test_final_review_done_vars_declared_default_false() -> None:
     defaults = wf.vars.defaults()
     assert defaults["spec_final_review_done"] is False
     assert defaults["plan_final_review_done"] is False
+
+
+def test_spec_gates_precede_reviewer_in_order() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    spec = next(p for p in wf.phases if p.name == "spec")
+    names = [s.name for s in spec.steps]
+    # final-review gate first, then fast-path gate, then the reviewer
+    assert names.index("spec-final-review-gate") < names.index("fast-path-spec-gate")
+    assert names.index("fast-path-spec-gate") < names.index("spec-reviewer")
+
+
+def test_fast_path_spec_gate_skips_to_plan_writer() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    gate = _steps(wf)["fast-path-spec-gate"].rules[0]
+    assert isinstance(gate.action, Goto) and gate.action.target == "plan-writer"
+
+
+def test_spec_final_review_gate_consumes_and_resets_flag() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-final-review-gate"].rules
+    # flag set -> reset to false and goto plan-writer (skipping the reviewer)
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "spec_final_review_done": True}, output=None)
+    assert m.var_mutations["spec_final_review_done"] is False
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer"
+    assert m.action.resume is False
+    # flag clear -> continue, no mutation
+    m2 = evaluate_rules(rules, vars=_BASE_VARS, output=None)
+    assert isinstance(m2.action, Continue)
+    assert m2.var_mutations == {}
+
+
+def test_spec_reviewer_clean_sets_flag_and_resumes_writer() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-reviewer"].rules
+    # rework branch unchanged: blocking true -> resume spec-writer, no mutation
+    rework = evaluate_rules(rules, vars=_BASE_VARS, output={"blocking": True})
+    assert isinstance(rework.action, Goto) and rework.action.resume is True
+    assert rework.var_mutations == {}
+    # clean branch (the change): blocking false -> set flag + resume spec-writer
+    clean = evaluate_rules(rules, vars=_BASE_VARS, output={"blocking": False})
+    assert clean.var_mutations["spec_final_review_done"] is True
+    assert isinstance(clean.action, Goto)
+    assert clean.action.target == "spec-writer"
+    assert clean.action.resume is True
 
 
 def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
