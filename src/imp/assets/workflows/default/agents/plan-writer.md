@@ -285,6 +285,10 @@ complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)
 
 (Substitute the actual integer for N.)
 
+(On a **final advisory polish pass** — `blocking: false` — the `complete_step` call
+is already specified in the *Final advisory polish pass* section above; follow that
+section and do not also run the steps here.)
+
 ---
 
 > Ported from superpowers (MIT, Jesse Vincent): writing-plans.
