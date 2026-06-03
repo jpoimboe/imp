@@ -1,6 +1,7 @@
 # tests/test_prompt_completer.py
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from prompt_toolkit.document import Document
@@ -41,3 +42,16 @@ def test_no_completion_for_non_slash(tmp_path: Path) -> None:
 def test_missing_skills_dir_only_builtins(tmp_path: Path) -> None:
     c = SlashCompleter(tmp_path / "nope")
     assert set(_texts(c, "/")) >= {"help", "skills"}
+
+
+def test_async_path_delegates_to_get_completions(tmp_path: Path) -> None:
+    """prompt_toolkit's async REPL (prompt_async) drives completions through
+    get_completions_async, not get_completions. The duck-typed completer must
+    provide it or the async event loop crashes with AttributeError."""
+    c = SlashCompleter(_skills(tmp_path))
+    doc = Document(text="/re", cursor_position=3)
+
+    async def _collect() -> list[str]:
+        return [item.text async for item in c.get_completions_async(doc, None)]
+
+    assert set(asyncio.run(_collect())) == {"refactor", "review"}

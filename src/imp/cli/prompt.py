@@ -10,7 +10,7 @@ History is per-session in-memory; persisted history is a post-V0 feature.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +58,16 @@ class SlashCompleter:
         for name in names:
             if name.startswith(prefix):
                 yield Completion(name, start_position=-len(prefix))
+
+    async def get_completions_async(
+        self, document: Any, complete_event: Any
+    ) -> AsyncIterator[Any]:
+        """prompt_toolkit's async REPL (PromptSession.prompt_async) drives
+        completions through this, not get_completions. The real Completer base
+        class supplies it for free, but we duck-type to avoid an import-time
+        prompt_toolkit dependency — so we mirror the base class by delegating."""
+        for item in self.get_completions(document, complete_event):
+            yield item
 
 
 class Prompt:
