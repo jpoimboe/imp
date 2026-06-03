@@ -65,6 +65,10 @@ class ToolContext:
     # Optional test-run gate command (config.test_command). Threaded onto the
     # subprocess env (IMP_TEST_COMMAND) by the bash tool. None => no test gate.
     test_command: str | None = None
+    # §10/§12: when True, the run is headless (no human at the keyboard). The
+    # subagent backoff loop applies a wall-clock ceiling instead of retrying
+    # forever. Copied from invocation.non_interactive by each provider.
+    non_interactive: bool = False
     # invocation_id counter for disambiguating same-named subagent invocations
     _subagent_counter: int = 0
 

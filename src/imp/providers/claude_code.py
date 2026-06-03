@@ -78,8 +78,10 @@ _QUOTA_PATTERNS = (
 )
 
 # Matches "API Error: <code>" surfaced by the claude CLI as assistant text when
-# the underlying Anthropic API returns a 4xx. Conservative: only 4xx (not 5xx)
-# are classified — 5xx is transient and falls back to existing retry/nudge.
+# the underlying Anthropic API returns a non-2xx. 4xx codes → ApiError/
+# RateLimitError; 5xx codes → NetworkError (network category → RetryWithBackoff,
+# same routing as SDK InternalServerError; previously fell through to None and
+# were treated as agent text → wrong nudge loop).
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
 
@@ -93,9 +95,9 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
     confusion into fatal pause.
 
     Auth/quota patterns are checked first so they win when both substrings
-    appear. The API-error regex matches "API Error: <code>" for 4xx codes:
+    appear. The API-error regex matches "API Error: <code>":
     429 → RateLimitError; other 4xx → ApiError with kind="http_<code>";
-    5xx → None (transient, leave to retry).
+    5xx → NetworkError (network category → RetryWithBackoff; §10).
     """
     for pat in _AUTH_PATTERNS:
         if pat in text:
@@ -114,6 +116,12 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
             # the event records kind="http_400" rather than the class name.
             exc.kind = f"http_{code}"  # type: ignore[attr-defined]
             return exc
+        if 500 <= code < 600:
+            # §10: 5xx (529 Overloaded et al.) is transient — route to the
+            # `network` category, which maps to RetryWithBackoff (same routing the
+            # SDK providers use for an InternalServerError). Previously fell through
+            # to `return None` → treated as agent text → wrong nudge loop.
+            return perr.NetworkError(f"claude CLI: {text[:200]}")
     return None
 
 
@@ -747,6 +755,7 @@ class ClaudeCodeAgentRunner:
         ctx.model_tiers = invocation.model_tiers
         ctx.lint_command = invocation.lint_command
         ctx.test_command = invocation.test_command
+        ctx.non_interactive = invocation.non_interactive
         ctx.event_log = elog
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn

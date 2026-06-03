@@ -12,13 +12,17 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import anyio
-
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.agent_run import SubagentSuspended, build_agent_invocation, drive_invocation
+from imp.engine.backoff import (
+    HEADLESS_RETRY_CEILING_SECONDS as _HEADLESS_RETRY_CEILING_SECONDS,
+)
+from imp.engine.backoff import (
+    interruptible_sleep as _interruptible_sleep,
+)
 from imp.engine.state import JsonlEventLog
 
 MAX_SUBAGENT_DEPTH = 3
@@ -191,13 +195,24 @@ async def dispatch_task(
         log=ctx.event_log,
         lint_command=ctx.lint_command,
         test_command=ctx.test_command,
+        non_interactive=ctx.non_interactive,
     )
 
     # Drive via the shared loop, with backoff (omission #4). Each backoff
     # iteration spawns a FRESH runner (runners are single-use). emit_events=False
     # keeps subagent terminal events out of the parent's stream (today's
     # behavior); the runner still writes its own audit events to the shared log.
+    #
+    # §10/§12 safety: the original `anyio.sleep(result.delay)` was a raw,
+    # non-interruptible sleep. Two escape hatches are applied here, matching
+    # _route_agent in executor.py:
+    #   1. Interruptible sleep — each tick checks should_pause so Ctrl-C returns
+    #      within one tick (100 ms default) instead of blocking for the full delay.
+    #   2. Headless ceiling — when ctx.non_interactive is True and cumulative
+    #      backoff would exceed _HEADLESS_RETRY_CEILING_SECONDS, stop retrying
+    #      and raise SubagentSuspended (unwinds as a clean pause).
     backoff = 0
+    cumulative_backoff = 0.0
     while True:
         runner = await ctx.spawn_subagent(sub_inv)
         result = await drive_invocation(
@@ -205,8 +220,13 @@ async def dispatch_task(
             log=ctx.event_log, emit_events=False, prior_backoff_attempts=backoff)
         if result.delay is None:
             break
+        # §10/§12 headless ceiling (checked BEFORE sleeping, matching executor).
+        if (ctx.non_interactive
+                and cumulative_backoff + result.delay > _HEADLESS_RETRY_CEILING_SECONDS):
+            raise SubagentSuspended("retry ceiling reached during subagent backoff")
         backoff += 1
-        await anyio.sleep(result.delay)
+        await _interruptible_sleep(result.delay, ctx.coordinator)
+        cumulative_backoff += result.delay
         if ctx.coordinator is not None and ctx.coordinator.should_pause:
             raise SubagentSuspended("paused during subagent backoff")
 

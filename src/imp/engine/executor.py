@@ -17,8 +17,6 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any
 
-import anyio
-
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import (
     ChangeContext,
@@ -29,6 +27,12 @@ from imp.engine.agent_run import (
     AgentRunResult,
     build_agent_invocation,
     drive_invocation,
+)
+from imp.engine.backoff import (
+    HEADLESS_RETRY_CEILING_SECONDS as _HEADLESS_RETRY_CEILING_SECONDS,
+)
+from imp.engine.backoff import (
+    interruptible_sleep as _interruptible_sleep,
 )
 from imp.engine.change import Change
 from imp.engine.env import engine_env
@@ -452,6 +456,7 @@ async def _route_agent(
     initial = (Message(role="user", content=(TextBlock(text=opening),)),)
 
     backoff = 0
+    cumulative_backoff = 0.0
     while True:
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
@@ -469,9 +474,20 @@ async def _route_agent(
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
             initial_messages=initial, lint_command=lint_command,
-            test_command=test_command)
+            test_command=test_command, non_interactive=non_interactive)
         if result.delay is None:
             break
+        # §10/§12 headless backstop: an unattended run has no human to Ctrl-C, so
+        # cap cumulative transient-error backoff by wall clock and pause instead of
+        # hanging. Checked BEFORE the agent_retry emit so the journal shows a clean
+        # ceiling pause, not a retry-then-pause. Interactive runs stay unbounded.
+        if non_interactive and cumulative_backoff + result.delay > _HEADLESS_RETRY_CEILING_SECONDS:
+            pause = Pause(reason="retry_ceiling",
+                          kind=result.error.kind if result.error else None)
+            _emit(log, "step_completed",
+                  {"step": step.name, "kind": "agent",
+                   "action": _action_payload(pause), "var_mutations": {}})
+            return pause, None, {}
         backoff += 1
         # Self-healed-retry visibility (agent_retry): surface the backoff so a
         # transient network/rate_limit error that recovers doesn't look like a
@@ -481,7 +497,8 @@ async def _route_agent(
             "attempt": backoff,
             "backoff_seconds": result.delay,
         }, agent_id=None)
-        await anyio.sleep(result.delay)
+        await _interruptible_sleep(result.delay, coordinator)
+        cumulative_backoff += result.delay
         if coordinator.should_pause:
             return Pause(), None, {}
 
@@ -563,6 +580,7 @@ async def _run_agent_invocation(
     balance_on_resume: bool = False,
     lint_command: str | None = None,
     test_command: str | None = None,
+    non_interactive: bool = False,
 ) -> AgentRunResult:
     """Run one top-level agent step to a terminal AgentRunResult.
 
@@ -638,6 +656,7 @@ async def _run_agent_invocation(
         log=log,
         lint_command=lint_command,
         test_command=test_command,
+        non_interactive=non_interactive,
     )
 
     runner = provider.create_runner(invocation)

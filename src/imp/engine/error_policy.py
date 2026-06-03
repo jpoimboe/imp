@@ -51,34 +51,27 @@ _POLICY: dict[Category, type[Pause] | type[RetryNow] | type[RetryWithBackoff]] =
     "unknown":              Pause,
 }
 
-_MAX_BACKOFF_ATTEMPTS = 4
-_BACKOFF_SCHEDULE = [1.0, 2.0, 4.0, 8.0]
-assert len(_BACKOFF_SCHEDULE) == _MAX_BACKOFF_ATTEMPTS
-
-
 def decide(
     category: Category,
     *,
     prior_backoff_attempts: int,
     hint_delay_seconds: float | None = None,
 ) -> ErrorDecision:
-    """Map a category + prior-attempts count to a concrete decision.
+    """Map a category + prior-attempts count to a decision.
 
-    ``hint_delay_seconds`` carries an optional server-provided delay
-    (e.g. Retry-After header from a 429). When set on a
-    RetryWithBackoff category, we use ``max(hint, schedule_entry)`` so
-    we respect the server's wish without falling below our own
-    minimum backoff. Capped at 60s to prevent unbounded sleeps from a
-    misbehaving upstream.
+    RetryWithBackoff categories retry FOREVER (§10): delay = 1·2^n, unbounded.
+    There is no attempt ceiling here — interactive runs rely on an interruptible
+    sleep + Ctrl-C, and headless runs rely on a wall-clock ceiling in the executor.
+    `hint_delay_seconds` (a server Retry-After) is honored as max(hint, our delay)
+    but capped at 60s so a misbehaving upstream header can't strand us; that 60s
+    cap is on the *hint only*, not on our own doubling.
     """
     cls = _POLICY.get(category, Pause)
     if cls is Pause:
         return Pause()
     if cls is RetryNow:
         return RetryNow()
-    if prior_backoff_attempts >= _MAX_BACKOFF_ATTEMPTS:
-        return Pause()
-    delay = _BACKOFF_SCHEDULE[prior_backoff_attempts]
+    delay = 1.0 * (2 ** prior_backoff_attempts)
     if hint_delay_seconds is not None:
         delay = min(60.0, max(delay, hint_delay_seconds))
     return RetryWithBackoff(delay)

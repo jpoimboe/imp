@@ -554,8 +554,11 @@ class _RateLimitThenSuccessRunner:
 async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    from imp.engine import error_policy
-    monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
+    from imp.engine import executor
+    # §10: no _BACKOFF_SCHEDULE; patch the interruptible sleep to be instant.
+    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+        pass
+    monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
     change, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
@@ -583,9 +586,17 @@ async def test_rate_limit_sleeps_then_retries_without_consuming_step_attempt(
 
 
 @pytest.mark.anyio
-async def test_rate_limit_exhaustion_pauses(tmp_path: Path, monkeypatch) -> None:
-    from imp.engine import error_policy
-    monkeypatch.setattr(error_policy, "_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0, 0.0])
+async def test_headless_retry_ceiling_pauses_non_interactive(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """§10/§12: non_interactive run hits the wall-clock ceiling and pauses cleanly."""
+    from imp.engine import executor
+    # Patch ceiling to a tiny value so the first retry delay (1.0s) exceeds it.
+    monkeypatch.setattr(executor, "_HEADLESS_RETRY_CEILING_SECONDS", 0.5)
+    # Patch sleep to be instant so the test is fast.
+    async def _instant_sleep(delay, coordinator, *, tick=0.1):  # type: ignore[misc]
+        pass
+    monkeypatch.setattr(executor, "_interruptible_sleep", _instant_sleep)
 
     change, _, _ = _seed_minimal_workflow(tmp_path)
     from imp.providers import resolve
@@ -606,9 +617,14 @@ async def test_rate_limit_exhaustion_pauses(tmp_path: Path, monkeypatch) -> None
         "fake", env_check=lambda: True, factory=lambda _m: _RLProvider(),
     )
 
-    result = await run_change(change, on_event=lambda _e: None)
+    events: list[dict] = []
+    result = await run_change(change, on_event=events.append, non_interactive=True)
     assert result is RunResult.PAUSED
-    assert runner.run_count == 5
+    # Should pause after the first attempt (ceiling exceeded before retry)
+    assert runner.run_count == 1
+    # The pause reason should be retry_ceiling
+    paused_events = [e for e in events if e["type"] == "workflow_paused"]
+    assert paused_events and paused_events[0]["payload"]["reason"] == "retry_ceiling"
 
 
 @pytest.mark.anyio

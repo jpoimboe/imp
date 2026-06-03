@@ -26,25 +26,29 @@ def test_retry_now_for_agent_output_missing() -> None:
     )
 
 
-def test_rate_limit_uses_schedule() -> None:
-    expected = [1.0, 2.0, 4.0, 8.0]
+def test_rate_limit_doubles_unbounded() -> None:
+    # §10: no cap — doubles forever: 1, 2, 4, 8, 16, ...
+    expected = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
     for i, want in enumerate(expected):
         d = ep.decide("rate_limit", prior_backoff_attempts=i)
         assert isinstance(d, ep.RetryWithBackoff)
         assert d.delay_seconds == want
 
 
-def test_network_uses_schedule() -> None:
+def test_network_doubles() -> None:
     d = ep.decide("network", prior_backoff_attempts=2)
     assert isinstance(d, ep.RetryWithBackoff)
     assert d.delay_seconds == 4.0
 
 
-def test_schedule_exhausted_returns_pause() -> None:
+def test_no_attempt_ceiling_for_backoff_categories() -> None:
+    # §10: no attempt cap — attempt 4 (previously caused Pause) now retries.
     d = ep.decide("rate_limit", prior_backoff_attempts=4)
-    assert isinstance(d, ep.Pause)
+    assert isinstance(d, ep.RetryWithBackoff)
+    assert d.delay_seconds == 16.0
     d = ep.decide("network", prior_backoff_attempts=4)
-    assert isinstance(d, ep.Pause)
+    assert isinstance(d, ep.RetryWithBackoff)
+    assert d.delay_seconds == 16.0
 
 
 def test_hint_overrides_when_larger() -> None:
@@ -88,3 +92,16 @@ def test_pause_for_agent_incomplete() -> None:
 
 def test_policy_covers_every_category() -> None:
     assert set(ep._POLICY.keys()) == set(get_args(Category))
+
+
+def test_backoff_doubles_unbounded_no_cap() -> None:
+    from imp.engine.error_policy import RetryWithBackoff, decide
+    delays = [decide("network", prior_backoff_attempts=n) for n in range(8)]
+    assert all(isinstance(d, RetryWithBackoff) for d in delays)   # never Pause
+    assert [d.delay_seconds for d in delays] == [1, 2, 4, 8, 16, 32, 64, 128]
+
+
+def test_retry_after_hint_still_capped_at_60() -> None:
+    from imp.engine.error_policy import RetryWithBackoff, decide
+    d = decide("network", prior_backoff_attempts=0, hint_delay_seconds=300)
+    assert isinstance(d, RetryWithBackoff) and d.delay_seconds == 60.0

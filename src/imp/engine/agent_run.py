@@ -109,6 +109,7 @@ def build_agent_invocation(
     log: Any = None,
     lint_command: str | None = None,
     test_command: str | None = None,
+    non_interactive: bool = False,
 ) -> AgentInvocation:
     """Construct one AgentInvocation, owning the completion-contract invariant
     that drifted between the two creation paths: append
@@ -158,6 +159,7 @@ def build_agent_invocation(
         coordinator=coordinator,
         lint_command=lint_command,
         test_command=test_command,
+        non_interactive=non_interactive,
     )
 
 

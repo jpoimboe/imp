@@ -427,6 +427,7 @@ class OpenAIAgentRunner:
         ctx.model_tiers = invocation.model_tiers
         ctx.lint_command = invocation.lint_command
         ctx.test_command = invocation.test_command
+        ctx.non_interactive = invocation.non_interactive
         ctx.event_log = elog                       # shared write instance
         if self._user_input_fn is not None:
             ctx.user_input_fn = self._user_input_fn

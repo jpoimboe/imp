@@ -150,6 +150,11 @@ class AgentInvocation:
     # config.test_command, threaded onto the child ToolContext by each provider
     # so the agent bash tool can inject IMP_TEST_COMMAND. None => no test gate.
     test_command: str | None = None
+    # §10/§12: when True, the run is headless (no human at the keyboard) and the
+    # subagent backoff loop applies a wall-clock ceiling instead of waiting forever.
+    # Threaded from run_change → _route_agent → _run_agent_invocation →
+    # build_agent_invocation → provider → ToolContext → dispatch_task.
+    non_interactive: bool = False
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}

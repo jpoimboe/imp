@@ -25,9 +25,17 @@ def test_429_classified_as_rate_limit_not_api() -> None:
     assert not isinstance(exc, perr.ApiError)
 
 
-def test_5xx_not_classified() -> None:
-    # 5xx is transient; leave it to existing retry/nudge behavior.
-    assert _classify_agent_text("API Error: 500 server error") is None
+def test_5xx_classified_as_network() -> None:
+    # §10: 5xx → NetworkError (network category → RetryWithBackoff). Previously
+    # returned None (treated as agent text → wrong nudge loop).
+    from imp.providers import errors as perr
+    from imp.providers.claude_code import _classify_agent_text
+    err = _classify_agent_text("API Error: 529 Overloaded")
+    assert isinstance(err, perr.NetworkError)
+
+
+def test_500_classified_as_network() -> None:
+    assert isinstance(_classify_agent_text("API Error: 500 server error"), perr.NetworkError)
 
 
 def test_auth_pattern_still_wins() -> None:

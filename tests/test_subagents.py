@@ -532,14 +532,15 @@ async def test_subagent_error_fails_loudly_to_parent(tmp_path: Path) -> None:
 async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> None:
     """Omission #4 closed: a retryable error backs off (sleeps + re-spawns a
     fresh runner) instead of failing immediately."""
-    import imp.agents.subagents as subagents_mod
+    import imp.engine.backoff as backoff_mod
 
     sleeps: list[float] = []
 
     async def _fake_sleep(d):
         sleeps.append(d)
 
-    monkeypatch.setattr(subagents_mod.anyio, "sleep", _fake_sleep)
+    # Patch anyio.sleep inside the backoff module (where interruptible_sleep lives).
+    monkeypatch.setattr(backoff_mod.anyio, "sleep", _fake_sleep)
 
     calls = {"n": 0}
 
@@ -564,7 +565,10 @@ async def test_subagent_backs_off_on_rate_limit(tmp_path: Path, monkeypatch) -> 
 
     out = await dispatch_task(ctx, "reviewer", "review it")
     assert json.loads(out) == {"status": "Success"}
-    assert len(sleeps) == 1 and sleeps[0] > 0  # one backoff before success
+    # interruptible_sleep drives multiple tick-sized anyio.sleep calls per backoff
+    # round, so sleeps will have more than one entry. Verify at least one sleep
+    # happened (non-empty) and we retried with a fresh runner.
+    assert len(sleeps) >= 1 and all(s > 0 for s in sleeps)
     assert calls["n"] == 2  # fresh runner on retry
 
 
@@ -592,3 +596,152 @@ async def test_subagent_pause_raises_suspended(tmp_path: Path) -> None:
                                        workflow_dir=tmp_path / "wf")
     with pytest.raises(SubagentSuspended):
         await dispatch_task(ctx, "reviewer", "review it")
+
+
+# ── §10 safety regression tests: interruptible backoff + headless ceiling ──
+
+
+@pytest.mark.anyio
+async def test_subagent_backoff_sleep_is_interruptible(tmp_path: Path) -> None:
+    """§10 fix: a should_pause mid-backoff returns promptly (within one tick)
+    instead of blocking the full delay. Mirrors test_executor_backoff.py."""
+    import anyio
+
+    from imp.agents.subagents import SubagentSuspended
+
+    # Verify the backoff loop uses interruptible_sleep, not anyio.sleep directly.
+    # We do this by confirming that a coordinator pause during a long backoff
+    # raises SubagentSuspended well before the delay would expire.
+    coord = InterruptCoordinator()
+
+    calls = {"n": 0}
+
+    async def _spawn(_inv):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # First call: rate_limit with a very long delay.
+            return _FakeRunner([{"type": "error", "payload": {
+                "category": "rate_limit", "kind": "429", "message": "slow",
+                "detail": {"retry_after_seconds": None}}}])
+        # Second call would succeed, but coordinator should interrupt before we get here.
+        return _FakeRunner([{"type": "agent_output",
+                             "payload": {"status": "Success"}}])
+
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = coord
+    ctx.spawn_subagent = _spawn
+    ctx.change_context = ChangeContext(slug="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+
+    async def main() -> None:
+        async with anyio.create_task_group() as tg:
+            async def _flip() -> None:
+                await anyio.sleep(0.05)
+                coord._should_pause = True
+
+            tg.start_soon(_flip)
+            # A 10 s backoff must abandon well before 10 s once should_pause flips.
+            with anyio.fail_after(2.0):
+                with pytest.raises(SubagentSuspended):
+                    await dispatch_task(ctx, "reviewer", "review it")
+
+    await main()
+
+
+@pytest.mark.anyio
+async def test_subagent_headless_backoff_hits_ceiling(tmp_path: Path,
+                                                      monkeypatch) -> None:
+    """§12 fix: headless (non_interactive=True) subagent backoff stops at the
+    ceiling and raises SubagentSuspended rather than looping forever."""
+    import imp.agents.subagents as subagents_mod
+    from imp.agents.subagents import SubagentSuspended
+
+    # Monkeypatch the ceiling to a tiny value so the test is fast and deterministic.
+    monkeypatch.setattr(subagents_mod, "_HEADLESS_RETRY_CEILING_SECONDS", 10.0)
+
+    # Also patch _interruptible_sleep so we don't actually sleep.
+    async def _no_sleep(delay, coordinator, *, tick=0.1):
+        pass
+
+    monkeypatch.setattr(subagents_mod, "_interruptible_sleep", _no_sleep)
+
+    calls = {"n": 0}
+
+    async def _spawn(_inv):
+        calls["n"] += 1
+        # Always return a rate_limit with delay=15 > ceiling=10.
+        return _FakeRunner([{"type": "error", "payload": {
+            "category": "rate_limit", "kind": "429", "message": "slow",
+            "detail": {"retry_after_seconds": 15.0}}}])
+
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent2("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn
+    ctx.non_interactive = True  # headless
+    ctx.change_context = ChangeContext(slug="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+
+    with pytest.raises(SubagentSuspended, match="retry ceiling"):
+        await dispatch_task(ctx, "reviewer", "review it")
+
+    # The ceiling check fires BEFORE the sleep on the first retry, so only 1 spawn.
+    assert calls["n"] == 1
+
+
+# ── §10 Fix: non_interactive forwarded to child invocation ──
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_forwards_non_interactive_true(tmp_path: Path) -> None:
+    """Fix: dispatch_task must thread ctx.non_interactive into the child
+    AgentInvocation so sub-subagent backoff ceilings fire correctly at
+    nesting depth >1. This test fails if the forwarding is absent."""
+    capture: dict = {}
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                     events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"helper": _agent("helper")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
+    ctx.change_context = ChangeContext(slug="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+    ctx.non_interactive = True  # headless parent
+
+    await dispatch_task(ctx, "helper", "do it")
+    assert capture["inv"].non_interactive is True
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_forwards_non_interactive_false(tmp_path: Path) -> None:
+    """Symmetry: False propagates False (interactive parent -> interactive child)."""
+    capture: dict = {}
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                     events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"helper": _agent("helper")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
+    ctx.change_context = ChangeContext(slug="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+    ctx.non_interactive = False  # interactive parent
+
+    await dispatch_task(ctx, "helper", "do it")
+    assert capture["inv"].non_interactive is False
