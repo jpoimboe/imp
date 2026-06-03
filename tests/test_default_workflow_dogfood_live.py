@@ -295,12 +295,11 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         cwd=tmp_path, check=True, capture_output=True,
     )
 
-    # The dogfood task is fully specified (exact file, exact line, exact commit
-    # discipline). A correct spec-writer finds NOTHING to clarify, so it asks no
-    # questions. We gate the asks_answered assertion on this rather than dropping
-    # it — a non-zero-ambiguity task that produced 0 asks is still a real
-    # regression we want to catch.
-    TASK_IS_ZERO_AMBIGUITY = True
+    # The spec-writer now ALWAYS opens with a clarifying question (its prompt
+    # mandates a turn-1 ask, no tools, no exploration). The system prompt no
+    # longer surfaces the title, so the agent learns the task from the FIRST
+    # awaiting_user_input reply — that is where the driver delivers the title
+    # text below. Subsequent asks (if any) get the generic "use defaults" reply.
 
     # Title carries the feature intent. Unique sentinel per run prevents
     # stale state from faking a pass.
@@ -521,10 +520,18 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
                     question = payload.get("prompt") or ""
                     if question:
                         ask_questions.append(question)
-                    os.write(
-                        master,
-                        b"looks good, proceed with reasonable defaults\n",
-                    )
+                    # The spec-writer's mandatory opening question carries no
+                    # task: the title is NOT in its system prompt. The FIRST
+                    # reply must deliver the feature intent; subsequent replies
+                    # (clarifications, design confirms) get the generic "use
+                    # defaults" answer.
+                    if asks_answered == 0:
+                        os.write(master, title.encode("utf-8") + b"\n")
+                    else:
+                        os.write(
+                            master,
+                            b"looks good, proceed with reasonable defaults\n",
+                        )
                     asks_answered += 1
                 elif etype == "workflow_paused":
                     # Pause fail-fast: the engine emits workflow_paused at
@@ -584,18 +591,16 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"superpowers workflow has no ask/options gates; saw {gates_answered} "
         f"human_prompt_pending events"
     )
-    if TASK_IS_ZERO_AMBIGUITY:
-        # Fully-specified task: the spec-writer correctly clarifies nothing.
-        # (We do NOT force a confirmation turn — the spec-writer is unchanged.)
-        assert asks_answered == 0, (
-            f"zero-ambiguity dogfood task should produce no clarifying "
-            f"questions; saw {asks_answered}"
-        )
-    else:
-        assert asks_answered >= 1, (
-            "interactive spec phase should produce at least one end-of-turn "
-            "question (an awaiting_user_input event); saw 0"
-        )
+    # The spec-writer now opens every change with a mandatory question; the
+    # driver delivers the task in its first reply. Therefore at least one
+    # awaiting_user_input event must have fired and been answered — anything
+    # less means the always-ask discipline regressed.
+    assert asks_answered >= 1, (
+        "spec-writer must open every change with a clarifying question "
+        "(its prompt mandates a turn-1 ask); the driver saw 0 "
+        "awaiting_user_input events. Did the open-by-asking discipline "
+        "regress?"
+    )
 
     # ── Dogfood-specific verification ──────────────────────────────────
 
