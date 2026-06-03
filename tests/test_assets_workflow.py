@@ -224,3 +224,45 @@ def test_fast_path_gates_skip_depth_keep_safety() -> None:
     assert isinstance(cycle_gate.action, Goto) and cycle_gate.action.target == "review"
     assert "code-reviewer" in steps
     assert wf.phases[-1].name == "merge"
+
+
+def test_plan_gates_precede_reviewer_in_order() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    plan = next(p for p in wf.phases if p.name == "plan")
+    names = [s.name for s in plan.steps]
+    # final-review gate first, then fast-path gate, then the reviewer
+    assert names.index("plan-final-review-gate") < names.index("fast-path-plan-gate")
+    assert names.index("fast-path-plan-gate") < names.index("plan-review")
+
+
+def test_plan_final_review_gate_consumes_and_resets_flag() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["plan-final-review-gate"].rules
+    # flag set -> reset to false and goto task-lead (skipping the reviewer)
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "plan_final_review_done": True}, output=None)
+    assert m.var_mutations["plan_final_review_done"] is False
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "task-lead"
+    assert m.action.resume is False
+    # flag clear -> continue, no mutation
+    m2 = evaluate_rules(rules, vars=_BASE_VARS, output=None)
+    assert isinstance(m2.action, Continue)
+    assert m2.var_mutations == {}
+
+
+def test_plan_reviewer_clean_sets_flag_and_resumes_writer() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["plan-review"].rules
+    # rework branch unchanged: blocking true -> resume plan-writer, no mutation
+    rework = evaluate_rules(rules, vars=_BASE_VARS, output={"blocking": True})
+    assert isinstance(rework.action, Goto) and rework.action.resume is True
+    assert rework.var_mutations == {}
+    # clean branch (the change): blocking false -> set flag + resume plan-writer
+    clean = evaluate_rules(rules, vars=_BASE_VARS, output={"blocking": False})
+    assert clean.var_mutations["plan_final_review_done"] is True
+    assert isinstance(clean.action, Goto)
+    assert clean.action.target == "plan-writer"
+    assert clean.action.resume is True

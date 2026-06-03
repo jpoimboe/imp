@@ -86,7 +86,12 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
-      - name: fast-path-plan-gate
+      - name: plan-final-review-gate   # self-consuming flag; ordered FIRST (mirrors spec phase)
+        rules:
+          - {if: {plan_final_review_done: true}, set: {plan_final_review_done: false}, goto: task-lead}
+          - {else: true, continue: true}
+
+      - name: fast-path-plan-gate      # moved after the final-review gate
         rules:
           - {if: {fast_path: true}, goto: task-lead}   # skip plan-review on fast-path
           - {else: true, continue: true}
@@ -95,8 +100,8 @@ phases:
         file: agents/plan-reviewer.md
         model_role: plan_review
         rules:
-          - {if: {blocking: true}, resume: plan-writer}
-          - {else: true, continue: true}
+          - {if: {blocking: true}, resume: plan-writer}                            # rework loop
+          - {else: true, set: {plan_final_review_done: true}, resume: plan-writer} # clean -> one final polish pass
 
   - name: implement
     steps:
