@@ -92,9 +92,11 @@ complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")
 
 **First, read the `blocking:` line.** This section applies **only** when the injected
 feedback reads `blocking: true`. If it reads `blocking: false`, this is **not** rework
-— stop here and follow "Final advisory polish pass (clean review)" below instead.
+— stop here and follow "Final advisory polish pass (clean review)" below instead. (The
+engine renders the bool capitalized — you will see `blocking: True` or `blocking: False`;
+match it case-insensitively.)
 
-**Recognizing a rework turn:** if your turn opens with injected feedback containing the spec-reviewer's findings — a message beginning "Your previous attempt completed but was not accepted. The spec-reviewer reviewed your work and did not accept it." followed by `findings:` and `blocking:` lines — you are in rework mode. Do NOT ask the user anything and do NOT end the turn with bare prose; go straight to editing the spec and end the turn tool-terminal (`git commit --amend --no-edit` then `complete_step(phase="written", …)`).
+**Recognizing a rework turn:** if your turn opens with injected feedback containing the spec-reviewer's findings — a message beginning "Your previous attempt completed but was not accepted. The spec-reviewer reviewed your work and did not accept it." followed by `findings:` and a `blocking: true` line — you are in rework mode. Do NOT ask the user anything and do NOT end the turn with bare prose; go straight to editing the spec and end the turn tool-terminal (`git commit --amend --no-edit` then `complete_step(phase="written", …)`).
 
 Address each finding, rewrite the spec, and amend the spec commit (it is still
 HEAD on a spec rework, so `--amend` keeps it one clean commit):
