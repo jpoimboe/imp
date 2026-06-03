@@ -36,7 +36,7 @@ If `/project/.imp/change/progress.md` exists, read it.
 | Newest plan exists AND `progress.md` marks it COMPLETE | Author `…-plan-(N+1).md` (fresh write) |
 | Newest plan exists AND `progress.md` does NOT mark it complete (or file absent) | Revise `…-plan-N.md` in place |
 
-**Disambiguation note:** You may be resumed after a reviewer's "did not accept" message. That framing is identical whether you are doing a reviewer rework (revise N) or starting the next plan after a `plan-cycle-check` `more_plans` signal. **`progress.md` completion state — not the wrapper text — is authoritative.** If the newest plan is marked COMPLETE in `progress.md`, you are writing N+1. If it is not, you are revising N.
+**Disambiguation note:** **First, read the `blocking:` line.** If it reads `blocking: false` (rendered capitalized as `blocking: False` — match case-insensitively), this is **not** a rework — follow "Final advisory polish pass (clean review)" below, which may complete **without committing** (do NOT run an empty `git commit --fixup`). Otherwise: You may be resumed after a reviewer's "did not accept" message. That framing is identical whether you are doing a reviewer rework (revise N) or starting the next plan after a `plan-cycle-check` `more_plans` signal. **`progress.md` completion state — not the wrapper text — is authoritative.** If the newest plan is marked COMPLETE in `progress.md`, you are writing N+1. If it is not, you are revising N.
 
 Keep the integer N in mind throughout — you will substitute the actual value wherever `N` appears below.
 
@@ -240,6 +240,42 @@ Substitute the actual integer for N in BOTH the `git commit -m` message and the
 {{ change.slug }}"` for a first write, or `git commit --fixup=":/docs: add plan 3
 for {{ change.slug }}"` for a revision. Keep the `--fixup=":/…"` value quoted.
 Never leave a literal `N` in a commit message or a fixup anchor.
+
+## Final advisory polish pass (clean review)
+
+A resumed turn whose injected feedback carries `blocking: false` is **not** a
+rework — it is your one **final advisory polish pass**, and you get the last word
+(no reviewer runs after it). The engine's feedback wrapper still opens with "Your
+previous attempt completed but was not accepted" even on this clean resume —
+**ignore that framing and trust the `blocking:` line.** (The engine renders the bool
+capitalized — you will see `blocking: True` or `blocking: False`; match it
+case-insensitively.) `blocking: false` means the plan already passed review; the
+reviewer's Minor/Nit `findings:` are advisory, not a rejection.
+
+You are revising the existing plan N (the same disambiguation as a rework: the
+newest plan exists and `progress.md` does not mark it complete, so you revise N in
+place). On this pass:
+
+1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
+   `findings:` to plan N, then fold the edit into the plan commit with a fixup
+   (the same revision mode the rework path uses) and finish tool-terminal:
+
+   ```
+   git add imp/plans/{{ change.slug }}-plan-N.md
+   git commit --fixup=":/docs: add plan N for {{ change.slug }}"
+   complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)
+   ```
+
+2. **If there is nothing worth integrating** (no advisory findings worth acting
+   on), **complete WITHOUT committing** — just call
+   `complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)`.
+   Do NOT run an empty `git commit --fixup`: with no staged change it errors on a
+   clean index and fails the turn.
+
+End the turn tool-terminal with the `complete_step` call. Do not re-solicit the
+user and do not reopen planning — this pass exists only to incorporate the
+reviewer's advice. (Substitute the actual integer for N, and keep the
+`--fixup=":/…"` value quoted, exactly as in the Commit section above.)
 
 ## Finish
 

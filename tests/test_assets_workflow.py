@@ -276,3 +276,12 @@ def test_spec_writer_prompt_has_polish_pass_branch() -> None:
     assert "blocking: false" in body
     assert "polish" in body.lower()
     assert "without committing" in body.lower()
+
+
+def test_plan_writer_prompt_has_polish_pass_branch() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["plan-writer"].prompt_template_source
+    assert "blocking: false" in body
+    assert "polish" in body.lower()
+    assert "without committing" in body.lower()
