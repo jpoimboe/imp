@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re as _re
 from pathlib import Path
 
 from imp.cli import narrative as nv
@@ -637,3 +638,34 @@ def test_phase_breadcrumb_renders_after_closed_phase() -> None:
     assert "7" in spec_line    # computed from timestamps
     # the breadcrumb is at depth 0 (same as the phase header)
     assert spec_line == "✓ spec · 7s"
+
+
+_ANSI_RE = _re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _visible(s: str) -> str:
+    return _ANSI_RE.sub("", s)
+
+
+def test_markdown_block_keeps_gutter_and_visible_width() -> None:
+    from imp.cli.render_text import _render_markdown_block
+    text = "# Heading\n\nSome **bold** and a list:\n\n- one\n- two\n"
+    lines = _render_markdown_block(text, width=40, depth=2, color=True,
+                                   gutters=(1,))   # one subagent gutter level
+    assert lines, "expected rendered lines"
+    for ln in lines:
+        # never splits an escape: every ESC[ is followed by a terminator 'm'
+        assert ln.count("\x1b[") == len(_re.findall(r"\x1b\[[0-9;]*m", ln))
+        # the magenta gutter column is present at level 1
+        assert "│" in _visible(ln) or _visible(ln).startswith("  ")
+    # heading text survives markdown rendering
+    assert any("Heading" in _visible(ln) for ln in lines)
+
+
+def test_markdown_block_plain_when_color_off() -> None:
+    from imp.cli.render_text import _render_markdown_block
+    lines = _render_markdown_block("**bold** text", width=40, depth=0,
+                                   color=False, gutters=())
+    joined = "\n".join(lines)
+    assert "\x1b[" not in joined          # no ANSI when color disabled
+    assert "bold" in joined

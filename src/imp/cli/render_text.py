@@ -1,6 +1,8 @@
 # src/imp/cli/render_text.py
 """Plain-text narrative view (imp log / non-TTY). Walks a NarrativeTree and
-yields wrapped ANSI lines. No rich — plain wrapped text only (design §3, §6).
+yields wrapped ANSI lines. Finalized prose blocks are rendered through
+rich.markdown.Markdown to inner width, then the magenta gutter/indent is
+prefixed (§9); structural chrome (headers, breadcrumbs) stays plain.
 
 Default: thinking and tool bursts are dropped; subagents expand (their prose +
 structured return value); context folds still collapse to a one-line summary.
@@ -71,6 +73,36 @@ def _line(text: str, depth: int, color: bool, *codes: str,
     # Indent (with any gutters) is composed separately from the content so the
     # magenta gutter and the content's own color coexist on one line (seam 1).
     return _gutter_indent(depth, gutters, color) + pal.ansi(text, *codes, enabled=color)
+
+
+def _visible_len(s: str) -> int:
+    """Width of `s` ignoring SGR escapes (they are zero-width)."""
+    import re
+    return len(re.sub(r"\x1b\[[0-9;]*m", "", s))
+
+
+def _render_markdown_block(text: str, width: int, depth: int, color: bool,
+                           gutters: tuple[int, ...] = ()) -> list[str]:
+    """Render one finalized prose block as markdown→ANSI at inner width, then
+    prefix the depth gutter/indent. rich owns bold/heading/list/fence formatting;
+    we own the magenta gutter. We never slice rich's output, so no escape is ever
+    cut; content rich won't reflow (code fences, tables) is allowed to overflow."""
+    import io
+
+    from rich.console import Console
+    from rich.markdown import Markdown
+
+    inner = max(8, width - _INDENT_W * depth)
+    buf = io.StringIO()
+    console = Console(file=buf, width=inner, no_color=not color,
+                      color_system="standard" if color else None,
+                      force_terminal=color, soft_wrap=False, highlight=False)
+    console.print(Markdown(text))
+    indent = _gutter_indent(depth, gutters, color)
+    out: list[str] = []
+    for raw in buf.getvalue().splitlines():
+        out.append(indent + raw.rstrip())
+    return out or [indent]
 
 
 def is_prose_leaf(node: Any) -> bool:
@@ -192,13 +224,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.AgentTextNode):
-        yield from _wrap(node.text, width, depth, color, *pal.NODE_COLORS["agent"],
-                         gutters=gutters)
+        yield from _render_markdown_block(node.text, width, depth, color, gutters)
         return
 
     if isinstance(node, nv.LiteralTextNode):
-        yield from _wrap(node.text, width, depth, color, *pal.NODE_COLORS["agent"],
-                         gutters=gutters)
+        yield from _render_markdown_block(node.text, width, depth, color, gutters)
         return
 
     if isinstance(node, nv.UserMessageNode):
