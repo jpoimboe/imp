@@ -132,7 +132,8 @@ class LiveDriver:
                     if isinstance(cur.container, nv.SubagentFold):
                         self._print_lines(list(rt.subagent_outcome_lines(
                             cur.container, depth=cur.depth, color=self._color,
-                            width=self._width)))
+                            width=self._width, gutters=()
+                        )))
                     self._frontier.pop()        # container drained + closed
                     continue
                 return                          # open container, no new children yet
@@ -145,10 +146,10 @@ class LiveDriver:
                 # driver prints it the instant the subagent starts (while running),
                 # then streams the subagent's children as their events route in.
                 self._stream_or_hold(rt.header_line(
-                    child, depth=cur.depth, color=self._color))
+                    child, depth=cur.depth, color=self._color, gutters=()))
                 self._frontier.append(_Cursor(container=child, depth=cur.depth + 1))
             else:
-                self._emit_leaf(child, cur.depth)
+                self._emit_leaf(child, cur.depth, gutters=())
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
         if isinstance(node, nv.ToolBurstFold):
@@ -172,16 +173,17 @@ class LiveDriver:
         # (see _is_container / _walk), streamed child-by-child as events arrive.
         return True
 
-    def _emit_leaf(self, node: Any, depth: int) -> None:
+    def _emit_leaf(self, node: Any, depth: int,
+                   gutters: tuple[int, ...] = ()) -> None:
         if isinstance(node, nv.GateNode) and node.kind == "human":
             # Live renders the resolved header only; run_human_gate already showed
             # the prompt/options as chrome (design "Human gates").
             lines = rt._render_gate(node, depth=depth, color=self._color,
-                                    width=self._width, recap=False)
+                                    width=self._width, recap=False, gutters=gutters)
             prose = False
         else:
             lines = rt._render(node, depth=depth, full=False, color=self._color,
-                               width=self._width)
+                               width=self._width, gutters=gutters)
             prose = rt.is_prose_leaf(node)
         self._print_lines(list(lines), prose=prose)
 

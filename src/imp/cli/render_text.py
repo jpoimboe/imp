@@ -31,7 +31,8 @@ def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
     if root.status != "running":
         head = f"{head}  ({root.status})"
     yield pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
-    yield from _render_children(root.children, depth=0, full=full, color=color, width=width)
+    yield from _render_children(root.children, depth=0, full=full, color=color, width=width,
+                                gutters=())
 
 
 def _gutter_indent(depth: int, gutters: tuple[int, ...], color: bool) -> str:
@@ -82,7 +83,7 @@ def is_prose_leaf(node: Any) -> bool:
 
 
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
-                     width: int) -> Iterator[str]:
+                     width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     """Render a container's children in order, inserting ONE blank line between
     two consecutive prose blocks. A child that renders nothing (lean-mode thinking
     / empty tool burst) leaves the prose-adjacency state untouched, so
@@ -90,7 +91,8 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
     subagent block) resets it, so prose never gets a spurious leading blank."""
     prev_prose = False
     for child in children:
-        lines = list(_render(child, depth=depth, full=full, color=color, width=width))
+        lines = list(_render(child, depth=depth, full=full, color=color, width=width,
+                             gutters=gutters))
         if not lines:
             continue
         cur_prose = is_prose_leaf(child)
@@ -100,7 +102,8 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
         prev_prose = cur_prose
 
 
-def header_line(node: Any, *, depth: int, color: bool) -> str:
+def header_line(node: Any, *, depth: int, color: bool,
+                gutters: tuple[int, ...] = ()) -> str:
     """The single header line for a container node (PhaseNode / StepNode /
     SubagentFold), with no children. Shared by `_render` and the live driver so
     indentation/label/color stay identical in both paths. For a SubagentFold this
@@ -109,18 +112,18 @@ def header_line(node: Any, *, depth: int, color: bool) -> str:
     still running, so any status suffix would be permanently wrong once it
     completes (completion is signaled by the outcome line instead)."""
     if isinstance(node, nv.PhaseNode):
-        return _line(node.name, depth, color, *pal.NODE_COLORS["phase"])
+        return _line(node.name, depth, color, *pal.NODE_COLORS["phase"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):
         return _line(f"task → {node.subagent_name}", depth, color,
-                     *pal.NODE_COLORS["subagent"])
+                     *pal.NODE_COLORS["subagent"], gutters=gutters)
     label = node.name
     if node.interactive:
         label += " (interactive)"
-    return _line(label, depth, color, *pal.NODE_COLORS["step"])
+    return _line(label, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
 
 
 def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
-                           width: int) -> Iterator[str]:
+                           width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     """The subagent's structured return value, rendered readably at the passed
     `depth` (no internal +1 — the caller passes the prose depth). Empty when the
     subagent has no outcome yet (still running / force-popped).
@@ -141,7 +144,7 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
     except (ValueError, TypeError):
         data = None
     if not isinstance(data, dict):
-        yield from _wrap(raw, width, depth, color, *codes, gutters=())
+        yield from _wrap(raw, width, depth, color, *codes, gutters=gutters)
         return
     scalars: list[str] = []
     blocks: list[tuple[str, str]] = []
@@ -151,37 +154,39 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
         else:
             scalars.append(f"{k}={v}")
     if scalars:
-        yield _line("→ " + " · ".join(scalars), depth, color, *codes)
+        yield _line("→ " + " · ".join(scalars), depth, color, *codes, gutters=gutters)
     for k, v in blocks:
-        yield _line(f"{k}:", depth, color, *codes)
-        yield from _wrap(v, width, depth + 1, color, *codes, gutters=())
+        yield _line(f"{k}:", depth, color, *codes, gutters=gutters)
+        yield from _wrap(v, width, depth + 1, color, *codes, gutters=gutters)
 
 
 def _render(node: Any, *, depth: int, full: bool, color: bool,
-            width: int) -> Iterator[str]:
+            width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     if isinstance(node, nv.PhaseNode):
-        yield header_line(node, depth=depth, color=color)
+        yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth + 1, full=full,
-                                    color=color, width=width)
+                                    color=color, width=width, gutters=gutters)
         return
 
     if isinstance(node, nv.StepNode):
-        yield header_line(node, depth=depth, color=color)
+        yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth + 1, full=full,
-                                    color=color, width=width)
+                                    color=color, width=width, gutters=gutters)
         return
 
     if isinstance(node, nv.AgentTextNode):
-        yield from _wrap(node.text, width, depth, color, *pal.NODE_COLORS["agent"], gutters=())
+        yield from _wrap(node.text, width, depth, color, *pal.NODE_COLORS["agent"],
+                         gutters=gutters)
         return
 
     if isinstance(node, nv.LiteralTextNode):
-        yield from _wrap(node.text, width, depth, color, *pal.NODE_COLORS["agent"], gutters=())
+        yield from _wrap(node.text, width, depth, color, *pal.NODE_COLORS["agent"],
+                         gutters=gutters)
         return
 
     if isinstance(node, nv.UserMessageNode):
         yield from _wrap(f"> {node.text}", width, depth, color,
-                         *pal.NODE_COLORS["user"], gutters=())
+                         *pal.NODE_COLORS["user"], gutters=gutters)
         return
 
     if isinstance(node, nv.ThinkingFold):
@@ -189,34 +194,37 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             return  # blank/whitespace thinking is pure noise — drop in both modes
         if full:
             yield _line(f"{pal.fold_glyph(expanded=True)} thinking", depth, color,
-                        *pal.NODE_COLORS["thinking"])
+                        *pal.NODE_COLORS["thinking"], gutters=gutters)
             yield from _wrap(node.content, width, depth + 1, color,
-                             *pal.NODE_COLORS["thinking"], gutters=())
+                             *pal.NODE_COLORS["thinking"], gutters=gutters)
         # full=False: thinking is noise in the default view — render nothing.
         # (A transient `· thinking` status cue lives in narrative.current_activity.)
         return
 
     if isinstance(node, nv.ToolBurstFold):
-        yield from _render_burst(node, depth=depth, full=full, color=color, width=width)
+        yield from _render_burst(node, depth=depth, full=full, color=color, width=width,
+                                 gutters=gutters)
         return
 
     if isinstance(node, nv.SubagentFold):
-        yield from _render_subagent(node, depth=depth, full=full, color=color, width=width)
+        yield from _render_subagent(node, depth=depth, full=full, color=color, width=width,
+                                    gutters=gutters)
         return
 
     if isinstance(node, nv.StepContextNode):
-        yield from _render_step_context(node, depth=depth, full=full, color=color, width=width)
+        yield from _render_step_context(node, depth=depth, full=full, color=color, width=width,
+                                        gutters=gutters)
         return
 
     if isinstance(node, nv.GateNode):
-        yield from _render_gate(node, depth=depth, color=color, width=width)
+        yield from _render_gate(node, depth=depth, color=color, width=width, gutters=gutters)
         return
 
     if isinstance(node, nv.OutcomeLine):
         text = pal.action_text(node.action)
         ac = pal.accent_color(node.action)
         codes = (ac,) if ac else ()
-        yield _line(f"→ {text}", depth, color, *codes)
+        yield _line(f"→ {text}", depth, color, *codes, gutters=gutters)
         return
 
     if isinstance(node, nv.BreadcrumbLine):
@@ -229,19 +237,21 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             parts.append(f"→ {verb_text}")
         ac = pal.accent_color(node.action)
         codes = (ac,) if ac else ()
-        yield _line(" · ".join(parts), depth, color, *codes)
+        yield _line(" · ".join(parts), depth, color, *codes, gutters=gutters)
         return
 
     if isinstance(node, nv.ErrorNode):
         if node.is_warning:
-            yield _line(f"warning: {node.message}", depth, color, *pal.NODE_COLORS["warning"])
+            yield _line(f"warning: {node.message}", depth, color,
+                        *pal.NODE_COLORS["warning"], gutters=gutters)
         else:
             tag = f"[{node.category}] " if node.category else ""
-            yield _line(f"error: {tag}{node.message}", depth, color, *pal.NODE_COLORS["error"])
+            yield _line(f"error: {tag}{node.message}", depth, color,
+                        *pal.NODE_COLORS["error"], gutters=gutters)
         return
 
     if isinstance(node, nv.RolesResolvedNode):
-        yield _line("roles resolved:", depth, color)
+        yield _line("roles resolved:", depth, color, gutters=gutters)
         col_w = max((len(r["role"]) for r in node.rows), default=0)  # role-name column
         for r in node.rows:
             # two-space sub-indent under the "roles resolved:" header
@@ -250,21 +260,23 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                 label = _DIFFER_LABELS.get(r["differ_tier"], "?")
                 line += (f"   (differ from {r['differ_from']}: "
                          f"tier {r['differ_tier']}, {label})")
-            yield _line(line, depth, color)
+            yield _line(line, depth, color, gutters=gutters)
         return
 
     if isinstance(node, nv.FallbackLine):
         kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
-        yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color, "dim")
+        yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color, "dim",
+                    gutters=gutters)
         return
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
-                  color: bool, width: int) -> Iterator[str]:
+                  color: bool, width: int,
+                  gutters: tuple[int, ...] = ()) -> Iterator[str]:
     if not full:
         return  # tool bursts are noise in the default view — render nothing.
     yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
-                *pal.NODE_COLORS["tools"])
+                *pal.NODE_COLORS["tools"], gutters=gutters)
     for c in burst.calls:
         args = " ".join(f"{k}={v}" for k, v in (c.input or {}).items())
         killed = " [killed]" if c.killed else ""
@@ -272,54 +284,61 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
         if len(result) > 60:
             result = result[:60] + "…"
         line = f"⏺ {c.name}  {args}  → {result}{killed}".rstrip()
-        yield from _wrap(line, width, depth + 1, color, *pal.NODE_COLORS["tools"], gutters=())
+        yield from _wrap(line, width, depth + 1, color, *pal.NODE_COLORS["tools"],
+                         gutters=gutters)
 
 
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
-                     color: bool, width: int) -> Iterator[str]:
+                     color: bool, width: int,
+                     gutters: tuple[int, ...] = ()) -> Iterator[str]:
     # Header: lean uses the shared `task → {name}` boundary (no glyph, shared with
     # the live driver); --full uses the expanded `▾ task → {name}` fold header.
     if full:
         yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
-                    depth, color, *pal.NODE_COLORS["subagent"])
+                    depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
     else:
-        yield header_line(sub, depth=depth, color=color)
+        yield header_line(sub, depth=depth, color=color, gutters=gutters)
     # The subagent's own narrative, recursed at the same `full` level (lean filters
     # nested thinking/tools via A1/A2; --full expands them).
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
-                                color=color, width=width)
+                                color=color, width=width, gutters=gutters)
     # The structured return value the parent consumed — emitted in BOTH modes so
     # --full stays a superset of default (DEVIATION from spec, which left --full
     # untouched: the spec's "--full unchanged" produced the backwards result of
     # --full showing LESS than default; per maintainer decision, --full is now a
     # superset again). Always emit when non-empty (decision ii).
-    yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width)
+    yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width,
+                                      gutters=gutters)
 
 
 def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
-                         color: bool, width: int) -> Iterator[str]:
+                         color: bool, width: int,
+                         gutters: tuple[int, ...] = ()) -> Iterator[str]:
     p = ctx.payload
     provider = p.get("provider", "?")
     model = p.get("model", "?")
     tools = p.get("tools_schema") or []
     if not full:
         yield _line(f"{pal.fold_glyph(expanded=False)} context · {provider}/{model} · "
-                    f"{len(tools)} tools", depth, color, *pal.NODE_COLORS["metadata"])
+                    f"{len(tools)} tools", depth, color, *pal.NODE_COLORS["metadata"],
+                    gutters=gutters)
         return
     yield _line(f"{pal.fold_glyph(expanded=True)} context · {provider}/{model} · "
                 f"max_tool_calls={p.get('max_tool_calls', '?')}", depth, color,
-                *pal.NODE_COLORS["metadata"])
-    yield _line("system_prompt:", depth + 1, color, *pal.NODE_COLORS["metadata"])
+                *pal.NODE_COLORS["metadata"], gutters=gutters)
+    yield _line("system_prompt:", depth + 1, color, *pal.NODE_COLORS["metadata"],
+                gutters=gutters)
     yield from _wrap(str(p.get("system_prompt", "")), width, depth + 2, color,
-                     *pal.NODE_COLORS["metadata"], gutters=())
-    yield _line("tools:", depth + 1, color, *pal.NODE_COLORS["metadata"])
+                     *pal.NODE_COLORS["metadata"], gutters=gutters)
+    yield _line("tools:", depth + 1, color, *pal.NODE_COLORS["metadata"], gutters=gutters)
     for t in tools:
         name = t.get("name", t) if isinstance(t, dict) else t
-        yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"])
+        yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"],
+                    gutters=gutters)
 
 
 def _render_gate(gate: nv.GateNode, *, depth: int, color: bool, width: int,
-                 recap: bool = True) -> Iterator[str]:
+                 recap: bool = True, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     """Render a gate node. `recap=True` (imp log) emits header + prompt + every
     option — the permanent record. `recap=False` (live driver) emits the header
     line only, because run_human_gate already showed the prompt/options as live
@@ -328,11 +347,12 @@ def _render_gate(gate: nv.GateNode, *, depth: int, color: bool, width: int,
     accent = pal.accent_color(gate.action) if gate.action is not None else None
     codes = (accent,) if accent else pal.NODE_COLORS["gate"]
     header = f"{gate.kind} gate → {action}"
-    yield _line(header, depth, color, *codes)
+    yield _line(header, depth, color, *codes, gutters=gutters)
     if recap and gate.prompt:
-        yield from _wrap(gate.prompt, width, depth + 1, color, *pal.NODE_COLORS["gate"], gutters=())
+        yield from _wrap(gate.prompt, width, depth + 1, color, *pal.NODE_COLORS["gate"],
+                         gutters=gutters)
         for opt in gate.options:
             yield _line(f"- {opt.get('label', opt)}", depth + 1, color,
-                        *pal.NODE_COLORS["gate"])
+                        *pal.NODE_COLORS["gate"], gutters=gutters)
 
 
