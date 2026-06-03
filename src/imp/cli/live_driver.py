@@ -191,6 +191,13 @@ class LiveDriver:
 
     def _emit_leaf(self, node: Any, depth: int,
                    gutters: tuple[int, ...] = ()) -> None:
+        if isinstance(node, nv.UserMessageNode):
+            # §4: live already showed the user's input via prompt_toolkit's raw
+            # echo; re-emitting the guttered node would duplicate it. imp log,
+            # which has no terminal echo, still renders the node normally.
+            # _prev_prose is intentionally left untouched — the node isn't a
+            # prose leaf, so the early return won't disturb prose blank-line spacing.
+            return
         if isinstance(node, nv.GateNode) and node.kind == "human":
             # Live renders the resolved header only; run_human_gate already showed
             # the prompt/options as chrome (design "Human gates").

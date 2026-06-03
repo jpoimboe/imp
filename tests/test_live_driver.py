@@ -458,3 +458,24 @@ def test_print_chrome_renders_plain_and_carries_no_gutter() -> None:
     body = out.getvalue()
     assert "hello from the agent" in body
     assert "\x1b[" not in body   # agent = () → no codes; main-agent sink → no gutter
+
+
+def test_user_message_suppressed_in_live_present_in_log() -> None:
+    # §4: prompt_toolkit already echoed the user's input in live mode; re-rendering
+    # the UserMessageNode would duplicate it. imp log has no terminal echo so it
+    # must still render the node as the sole record.
+    events = [
+        ev("1", "change_created", change_id=1, title="t"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "user_message", content=[{"type": "text", "text": "do the thing"}]),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    live = out.getvalue()
+    log = "\n".join(_render_body(events))
+
+    assert "> do the thing" not in live   # suppressed in live (prompt_toolkit echoed)
+    assert "> do the thing" in log        # the only record in imp log
