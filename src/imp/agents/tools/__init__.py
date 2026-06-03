@@ -106,7 +106,6 @@ def _register_builtins() -> None:
     from imp.agents.tools import (  # noqa: F401
         bash,
         fs,
-        git_diff,
         nav,
         query_events,
         rename_change,

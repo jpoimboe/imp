@@ -30,6 +30,25 @@ from imp.agents.runner import AgentInvocation, ChangeContext, Message
 from imp.engine.completion import build_continuation_fn, completion_instruction
 from imp.engine.types import AgentDef
 
+# Injected into the system prompt of every agent that has the `bash` tool (see
+# build_agent_invocation). This is a PROPERTY OF HOLDING `bash`, not something
+# each prompt author must remember to paste — code-reviewer and summarizer once
+# lacked it and burned tool calls feeding `/project/...` paths to `ls`/`find`/
+# `head`/`sed`, which hit the real filesystem and fail.
+_BASH_VIRTUAL_PATHS_NOTE = """\
+## Paths: `/project` is virtual
+
+`/project/...` paths resolve **only** through your file tools (`read_file`,
+`write_file`, `edit_file`, `grep`, `glob`, `ls`). The `bash` tool is different:
+its working directory already **is** the project root, and it runs your command
+literally against the real filesystem — there is no `/project` directory on disk.
+Passing `/project/...` to a shell command (`find`, `cat`, `head`, `sed`) fails
+with "No such file or directory".
+
+In `bash`, use **relative paths** from the project root, or `$IMP_PROJECT_ROOT`
+(the real root path). A leading `cd /project` is auto-rewritten to the real root,
+so it works — but prefer relative paths."""
+
 
 @dataclass(frozen=True)
 class ErrorInfo:
@@ -101,7 +120,10 @@ def build_agent_invocation(
     is a value, not a policy, here.
     """
     instruction = completion_instruction(agent_def.output_schema)
-    system_prompt = f"{rendered_system_prompt}\n\n{instruction}"
+    body = rendered_system_prompt
+    if "bash" in agent_def.tools:
+        body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
+    system_prompt = f"{body}\n\n{instruction}"
     continuation_fn = build_continuation_fn(
         interactive=interactive,
         user_chat_input_fn=user_chat_input_fn,

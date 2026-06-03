@@ -1,7 +1,7 @@
 ---
 name: quality-reviewer
 description: Per-task code-quality review (read-only); reports severity-classified findings to the task-lead.
-tools: [complete_step, read_file, glob, grep, git_diff, bash, query_events]
+tools: [complete_step, read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
@@ -10,7 +10,7 @@ output:
 
 You are reviewing the code quality of a just-committed task.
 
-The task-lead's dispatch message contains the task text and spec. Use `git_diff` to see what changed.
+The task-lead's dispatch message contains the task text and spec. In `bash`, run `git show HEAD` to see what changed.
 
 ## Your Job
 

@@ -1,7 +1,7 @@
 ---
 name: spec-task-reviewer
 description: Per-task spec-compliance review (read-only); reports severity-classified findings to the task-lead.
-tools: [complete_step, read_file, glob, grep, git_diff, bash, query_events]
+tools: [complete_step, read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
@@ -22,7 +22,7 @@ The implementer's report may be incomplete, inaccurate, or optimistic. You MUST 
 - Accept their interpretation of requirements
 
 **DO:**
-- Read the actual code they wrote (use `git_diff` to see what changed)
+- Read the actual code they wrote (in `bash`, `git show HEAD` to see what changed)
 - Compare actual implementation to requirements line by line
 - Check for missing pieces they claimed to implement
 - Look for extra features they didn't mention
@@ -39,7 +39,7 @@ assume green — verify independently before trusting an absent claim. Review th
 diff by reading code; spend your effort on judgment, not on re-running
 already-green checks.
 
-Use `git_diff` to review the just-committed task's diff. Verify against the task text and spec provided in the dispatch message:
+In `bash`, run `git show HEAD` to review the just-committed task's diff (a bare `git diff` is empty — the task is already committed). Verify against the task text and spec provided in the dispatch message:
 
 **Missing requirements:**
 - Did they implement everything that was requested?

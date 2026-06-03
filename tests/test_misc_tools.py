@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 from imp.agents.tools import get_registry
@@ -25,11 +24,3 @@ def test_query_events_returns_recent(tmp_path: Path) -> None:
     events = json.loads(out)
     assert len(events) == 1
     assert events[0]["type"] == "step_started"
-
-
-def test_git_diff_in_clean_repo(tmp_path: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
-    out = get_registry()["git_diff"].invoke(_ctx(tmp_path), {"staged": False})
-    assert out == "" or "no changes" in out.lower() or out.strip() == ""

@@ -14,9 +14,10 @@ def anyio_backend():
     return "asyncio"
 
 
-def _agent(name: str = "rev", max_tool_calls=None, subagents=()) -> AgentDef:
+def _agent(name: str = "rev", max_tool_calls=None, subagents=(),
+           tools=frozenset({"complete_step"})) -> AgentDef:
     return AgentDef(
-        name=name, description="", tools=frozenset({"complete_step"}),
+        name=name, description="", tools=frozenset(tools),
         subagents=tuple(subagents),
         output_schema=OutputSchema(
             fields=(OutputField(name="status", type="enum",
@@ -84,6 +85,55 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
     assert inv.agent_id == "sub:abc"
     assert inv.first_event_parent_id == "tc-1"
     assert inv.user_input_fn is None  # non-interactive
+
+
+def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
+    tmp_path: Path,
+) -> None:
+    # An agent holding `bash` gets the `/project`-is-virtual note appended to its
+    # body (between the rendered body and the completion contract), so every
+    # bash-capable agent learns the rule without each prompt re-pasting it.
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(tools={"complete_step", "bash"}),
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=(), change_context=_cc(tmp_path),
+        interactive=False, user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td", fs_permissions=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_roles=None, coordinator=None)
+
+    assert inv.system_prompt.startswith("RENDERED BODY")
+    assert "IMP_PROJECT_ROOT" in inv.system_prompt
+    assert "`/project` is virtual" in inv.system_prompt
+    # The note precedes the completion contract.
+    assert inv.system_prompt.index("IMP_PROJECT_ROOT") < inv.system_prompt.index(
+        "complete_step")
+
+
+def test_build_agent_invocation_omits_bash_paths_note_without_bash(
+    tmp_path: Path,
+) -> None:
+    # No `bash` tool -> no note (the rule is irrelevant to file-tool-only agents).
+    from imp.engine.agent_run import build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(),  # tools = {complete_step}
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=(), change_context=_cc(tmp_path),
+        interactive=False, user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td", fs_permissions=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_roles=None, coordinator=None)
+
+    assert "IMP_PROJECT_ROOT" not in inv.system_prompt
 
 
 def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) -> None:

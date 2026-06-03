@@ -10,7 +10,7 @@ def test_all_builtins_registered() -> None:
         "glob", "grep", "ls",
         "bash",
         "write_todos",
-        "query_events", "git_diff",
+        "query_events",
     }
     missing = expected - reg.keys()
     assert not missing, f"missing built-in tools: {sorted(missing)}"

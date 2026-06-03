@@ -1,7 +1,7 @@
 ---
 name: summarizer
 description: Emit a structured summary of the change — what was built, test status, open items, next steps — queryable via imp log.
-tools: [complete_step, read_file, glob, grep, bash, query_events, git_diff]
+tools: [complete_step, read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   built: {type: string}
@@ -11,7 +11,7 @@ output:
 ---
 
 Produce the change's final summary. Read the spec, plans, and
-`/project/.imp/change/progress.md`; inspect the change (`git_diff` vs base) and the
+`/project/.imp/change/progress.md`; inspect the change (in `bash`, `git show HEAD` or `git diff <base>..HEAD`) and the
 test state (`bash`, e.g. the project's `make test` if cheap — do NOT make code
 changes).
 

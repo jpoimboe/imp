@@ -10,19 +10,6 @@ output:
 
 You are implementing a task. The task-lead's dispatch message contains the full task text and context — you do NOT read the plan file.
 
-## Paths: `/project` is Virtual
-
-Paths with a `/project/` prefix are **virtual** — they work **only** with your
-file tools (`read_file`, `write_file`, `edit_file`, `grep`, `glob`).
-
-The `bash` tool is different: its working directory **is already** the project
-root, and it runs your command string literally. There is no `/project`
-directory on disk — `cd /project` fails with "No such file or directory", and
-passing `/project/...` to shell commands like `grep`/`pytest` will not resolve.
-
-In `bash`, use **relative paths** from the project root, or the environment
-variable `$IMP_PROJECT_ROOT` (the physical project root path). Never `cd /project`.
-
 ## Before You Begin
 
 {% if vars.fast_path %}

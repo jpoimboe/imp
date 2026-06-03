@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Final whole-change review vs the spec — correctness AND completeness; routes approve / task_gap / plan_gap.
-tools: [complete_step, read_file, glob, grep, bash, query_events, git_diff, web_search]
+tools: [complete_step, read_file, glob, grep, bash, query_events, web_search]
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, task_gap, plan_gap]}
@@ -20,7 +20,9 @@ plans, then route to one of three outcomes.
   and intended for each phase.
 - **Progress:** `/project/.imp/change/progress.md` — what tasks were completed,
   any deferred followups, and deviation notes.
-- **Diff:** use `git_diff` against the base to see everything that was implemented.
+- **Diff:** in `bash`, run `git diff <base>..HEAD` (or `git show HEAD`) to see
+  everything that was implemented — the work is already committed, so a bare
+  `git diff` shows nothing.
 
 Read all of these before forming a verdict.
 
