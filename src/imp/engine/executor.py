@@ -76,6 +76,7 @@ async def run_change(
     human_output_fn: HumanOutputFn = print,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
+    non_interactive: bool = False,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
     if coordinator is None:
@@ -123,7 +124,8 @@ async def run_change(
                 human_input_fn=human_input_fn, human_output_fn=human_output_fn,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 lint_command=config.lint_command,
-                test_command=config.test_command)
+                test_command=config.test_command,
+                non_interactive=non_interactive)
 
             if coordinator.should_pause or isinstance(action, Pause):
                 state.status = "paused"
@@ -323,6 +325,7 @@ async def _dispatch_step(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, lint_command: str | None = None,
     test_command: str | None = None,
+    non_interactive: bool = False,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Returns (action, feedback_text, var_mutations)."""
     wrapper_text: str | None = None
@@ -343,7 +346,7 @@ async def _dispatch_step(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
         wrapper_text=wrapper_text, is_resume=is_resume, lint_command=lint_command,
-        test_command=test_command)
+        test_command=test_command, non_interactive=non_interactive)
 
 
 def _emit_started(log: EventLog, step: Step, **extra: Any) -> dict[str, Any]:
@@ -421,6 +424,7 @@ async def _route_agent(
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
     lint_command: str | None = None,
     test_command: str | None = None,
+    non_interactive: bool = False,  # Task 12: §10/§12 wall-clock retry ceiling (not yet active)
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
@@ -513,7 +517,8 @@ async def _route_agent(
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, wrapper_text=wrapper_text,
                                   is_resume=is_resume, lint_command=lint_command,
-                                  test_command=test_command)
+                                  test_command=test_command,
+                                  non_interactive=non_interactive)
 
     state.step_attempt = 0
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)

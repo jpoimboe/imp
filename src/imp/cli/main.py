@@ -10,6 +10,7 @@ import argparse
 import json
 import shutil
 import sys
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,24 @@ from imp.engine.naming import random_title
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import InvalidSlug, dated_slug
 from imp.engine.state import LockHeld, ProjectLock, State
+
+_DEFAULT_NONINTERACTIVE_REPLY = "Proceed using your best judgment."
+
+
+def make_stdin_reply_fn(default_reply: str) -> Callable[[], Awaitable[str]]:
+    """A scripted reply channel for --non-interactive runs (§12): each call reads
+    the next stdin line; on EOF it returns `default_reply`. Used for BOTH the
+    human-gate input and the interactive-agent ask. No TTY, no prompt_toolkit."""
+    async def _reply() -> str:
+        # Blocking read: the default (non-cancellable) thread means a stalled read
+        # blocks task-group cancellation; callers must close stdin (pipe/redirect
+        # EOF) to unblock. The §10/§12 wall-clock retry ceiling (Task 12) is the
+        # headless backstop.
+        line: str = await anyio.to_thread.run_sync(sys.stdin.readline)
+        if line == "":                 # EOF
+            return default_reply
+        return line.rstrip("\r\n")    # strip both CR and LF for Windows-style endings
+    return _reply
 
 
 def _project_root() -> Path:
@@ -121,21 +140,26 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(f"Created Change {change.slug}: {change.title!r}")
-            prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                            editing_mode=_editing_mode(change.control_root))
+            non_interactive = bool(getattr(args, "non_interactive", False))
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
                                 width=_term_width(), status=status)
             coord = InterruptCoordinator()
             rc = 0
+            if non_interactive:
+                _ask_line = make_stdin_reply_fn(args.default_reply)
+            else:
+                prompt = Prompt(skills_dir=change.workflow_dir / "skills",
+                                editing_mode=_editing_mode(change.control_root))
 
-            async def _ask_line() -> str:
-                return await ask_line_with_slash(prompt, status, change)
+                async def _ask_line() -> str:
+                    return await ask_line_with_slash(prompt, status, change)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
-                tg.start_soon(status.tick)
+                if not non_interactive:
+                    tg.start_soon(status.tick)
                 try:
                     result = await run_change(
                         change,
@@ -144,6 +168,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                         human_output_fn=driver.print_chrome,
                         user_chat_input_fn=lambda _q: _ask_line(),
                         coordinator=coord,
+                        non_interactive=non_interactive,
                     )
                 except (LoadError, LoadErrors) as e:
                     driver.finish()
@@ -242,8 +267,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(f"Resuming Change {change.slug}: {change.title!r}")
-            prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                            editing_mode=_editing_mode(change.control_root))
+            non_interactive = bool(getattr(args, "non_interactive", False))
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -259,12 +283,19 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             state.status = "running"
             state.save(change.state_dir)
 
-            async def _ask_line() -> str:
-                return await ask_line_with_slash(prompt, status, change)
+            if non_interactive:
+                _ask_line = make_stdin_reply_fn(args.default_reply)
+            else:
+                prompt = Prompt(skills_dir=change.workflow_dir / "skills",
+                                editing_mode=_editing_mode(change.control_root))
+
+                async def _ask_line() -> str:
+                    return await ask_line_with_slash(prompt, status, change)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
-                tg.start_soon(status.tick)
+                if not non_interactive:
+                    tg.start_soon(status.tick)
                 try:
                     result = await run_change(
                         change,
@@ -273,6 +304,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                         human_output_fn=driver.print_chrome,
                         user_chat_input_fn=lambda _q: _ask_line(),
                         coordinator=coord,
+                        non_interactive=non_interactive,
                     )
                 except (LoadError, LoadErrors) as e:
                     driver.finish()
@@ -578,10 +610,18 @@ def main(argv: list[str] | None = None) -> int:
 
     p_new = sub.add_parser("new")
     p_new.add_argument("title", nargs="?")
+    p_new.add_argument("--non-interactive", action="store_true",
+                       help="Headless: read replies from stdin, default on EOF, no live chrome.")
+    p_new.add_argument("--default-reply", default=_DEFAULT_NONINTERACTIVE_REPLY,
+                       help="Reply used when stdin reaches EOF (non-interactive).")
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
     p_resume.add_argument("slug")
+    p_resume.add_argument("--non-interactive", action="store_true",
+                          help="Headless: read replies from stdin, default on EOF, no live chrome.")
+    p_resume.add_argument("--default-reply", default=_DEFAULT_NONINTERACTIVE_REPLY,
+                          help="Reply used when stdin reaches EOF (non-interactive).")
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(
