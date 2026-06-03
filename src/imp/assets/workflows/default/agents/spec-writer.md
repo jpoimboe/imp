@@ -64,13 +64,20 @@ short descriptive name (lowercase, hyphen-separated, ≤5 words) and call
 own the slug. You may rename a second time later if scope clarifies before
 the spec is committed.
 
-`rename_change` only applies at a step boundary. When you want a pending rename applied, finish your turn by calling `complete_step(phase="drafting")`. The engine applies the rename, then resumes you (conversation intact) under the new slug.
+`rename_change` only applies at a step boundary. When you want a pending rename applied, finish your turn by calling `complete_step(phase="drafting")`. The engine applies the rename, then resumes you (conversation intact) under the new slug — at which point the `Current slug` shown at the top of this prompt reflects the new name.
 
-**Iron rule: never call `rename_change` and write/commit the spec in the same turn.** Land the final rename via a `phase: drafting` hand-back first. Only on a later turn — with the slug settled — write and commit the spec.
+**Iron rule: never call `rename_change` and write/commit the spec in the same turn.** The turn in which you call `rename_change` does nothing else spec-related: announce the name, call `rename_change(name="…")`, then immediately `complete_step(phase="drafting")`. Do NOT write the spec file, do NOT run `git add`/`git commit`, and do NOT call `complete_step(phase="written")` in a turn where you called `rename_change`. You only write and commit the spec on a LATER turn, after the engine has resumed you under the settled slug.
 
-Do NOT write `imp/specs/…md` at all until the slug is final. An early draft under a provisional slug would be left as an untracked file after the rename (the worktree moves, the old-slug file does not follow), which would dirty the tree and block the merge.
+Do NOT write `imp/specs/…md` at all until the slug is final. An early draft under a provisional slug would be left as an untracked file after the rename (the worktree moves, the old-slug file does not follow), which would dirty the tree and block the merge — and a spec **committed** under the provisional slug fails the spec-commit check (which requires HEAD to touch `imp/specs/<final slug>.md`), forcing a wasteful re-commit.
 
 ## Writing the Spec (the `phase: written` turn)
+
+**Precondition — confirm the slug is settled before you write or commit.** If you
+called `rename_change` earlier *this* turn, the new name has NOT been applied yet
+(it lands at the step boundary): do not write or commit — `complete_step(phase="drafting")`
+now and write on the next turn. Otherwise the `Current slug` at the top of this
+prompt (`{{ change.slug }}`) is final; commit the spec under exactly that path
+(`imp/specs/{{ change.slug }}.md`) and nowhere else.
 
 When the brainstorm is settled and the slug is final, write `/project/imp/specs/{{ change.slug }}.md` covering (the full four-part structure for a `standard` change; on a `trivial` change the "Thin spec on `trivial`" note below overrides this and you write Goal + Acceptance criteria only):
 
