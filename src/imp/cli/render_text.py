@@ -75,12 +75,6 @@ def _line(text: str, depth: int, color: bool, *codes: str,
     return _gutter_indent(depth, gutters, color) + pal.ansi(text, *codes, enabled=color)
 
 
-def _visible_len(s: str) -> int:
-    """Width of `s` ignoring SGR escapes (they are zero-width)."""
-    import re
-    return len(re.sub(r"\x1b\[[0-9;]*m", "", s))
-
-
 def _render_markdown_block(text: str, width: int, depth: int, color: bool,
                            gutters: tuple[int, ...] = ()) -> list[str]:
     """Render one finalized prose block as markdown→ANSI at inner width, then

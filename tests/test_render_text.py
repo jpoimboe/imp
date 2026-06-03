@@ -656,8 +656,9 @@ def test_markdown_block_keeps_gutter_and_visible_width() -> None:
     for ln in lines:
         # never splits an escape: every ESC[ is followed by a terminator 'm'
         assert ln.count("\x1b[") == len(_re.findall(r"\x1b\[[0-9;]*m", ln))
-        # the magenta gutter column is present at level 1
-        assert "│" in _visible(ln) or _visible(ln).startswith("  ")
+        # depth=2 / gutters=(1,): level-0 is plain ("  "), level-1 is the gutter bar.
+        # The visible prefix must be exactly "  │ " — two spaces then the bar.
+        assert _visible(ln).startswith("  │ ")
     # heading text survives markdown rendering
     assert any("Heading" in _visible(ln) for ln in lines)
 
