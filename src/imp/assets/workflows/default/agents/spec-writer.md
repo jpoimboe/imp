@@ -25,6 +25,8 @@ Help the user turn their idea into a fully formed spec through focused collabora
 
 **One question at a time.** Do not stack multiple questions in a single message. If a topic needs more exploration, break it into multiple turns.
 
+**Skip reflexive questions on fully-specified requests.** If the user's request already states the exact change — concrete edits given, no alternatives to choose between, no unanswered design decisions — do NOT open with a ceremonial "what outcome do you want?" or similar. Proceed directly to reading the codebase and writing the (thin, if trivial) spec. Asking a reflexive question when the outcome is already fully stated needlessly trips criterion 1 of the complexity rubric and forfeits the `trivial` / fast-path classification. This applies only to genuinely complete specifications; if there is real ambiguity, a missing decision, or alternatives to weigh, ask as normal.
+
 **Propose 2–3 approaches.** Before locking in a design direction, offer 2–3 concrete options with trade-offs and your recommendation. Let the user confirm.
 
 **Design-then-approve.** Once you believe you understand what needs to be built, present the design (scaled to complexity — a few sentences for simple things, more detail if nuanced) and get the user's confirmation before writing the spec.
@@ -118,7 +120,9 @@ Classify `trivial` **only** when ALL THREE hold:
    retrospective self-judgment: ground it with `query_events` (count your own
    ask/turn history) rather than relying on memory. Any turn where you ended with
    a question or a design proposal and the user replied counts here (and a design
-   proposal also trips criterion 2 below).
+   proposal also trips criterion 2 below). Note: the "Skip reflexive questions"
+   discipline above is specifically designed to preserve this criterion for
+   fully-specified requests.
 2. There are **no design decisions** — nothing in the brainstorm required
    choosing between real alternatives.
 3. The change is **small and localized**: a handful of files, no architectural
