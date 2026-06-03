@@ -41,6 +41,7 @@ class Config:
     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
     lint_command: str | None = field(hash=False, default=None)
     test_command: str | None = field(hash=False, default=None)
+    editing_mode: str = field(hash=False, default="emacs")
 
     def role_names(self) -> frozenset[str]:
         return frozenset(self.roles)
@@ -119,10 +120,15 @@ def load_config(project_root: Path) -> Config:
         raise LoadError(
             "'test_command' must be a string (e.g. \"make test\")", src
         )
+    editing_mode = raw.get("editing_mode", "emacs")
+    if editing_mode not in ("vi", "emacs"):
+        raise LoadError(
+            "'editing_mode' must be 'vi' or 'emacs'", src
+        )
     return Config(roles=roles, source=src,
                   model_rules=model_rules, model_tiers=model_tiers,
                   var_overrides=var_overrides, lint_command=lint_command,
-                  test_command=test_command)
+                  test_command=test_command, editing_mode=editing_mode)
 
 
 def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:

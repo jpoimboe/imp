@@ -169,3 +169,29 @@ def test_load_config_test_command_not_string_raises(tmp_path: Path) -> None:
     )
     with pytest.raises(LoadError, match="test_command"):
         load_config(tmp_path)
+
+
+def test_editing_mode_defaults_to_emacs(tmp_path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "roles:\n  default:\n    prefer:\n    - {provider: claude_code, model: opus}\n")
+    cfg = load_config(tmp_path)
+    assert cfg.editing_mode == "emacs"
+
+
+def test_editing_mode_vi_accepted(tmp_path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "editing_mode: vi\n"
+        "roles:\n  default:\n    prefer:\n    - {provider: claude_code, model: opus}\n")
+    cfg = load_config(tmp_path)
+    assert cfg.editing_mode == "vi"
+
+
+def test_editing_mode_rejects_unknown(tmp_path) -> None:
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "config.yaml").write_text(
+        "editing_mode: nano\n"
+        "roles:\n  default:\n    prefer:\n    - {provider: claude_code, model: opus}\n")
+    with pytest.raises(LoadError):
+        load_config(tmp_path)

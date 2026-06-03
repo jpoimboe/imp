@@ -121,7 +121,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(f"Created Change {change.slug}: {change.title!r}")
-            prompt = Prompt(skills_dir=change.workflow_dir / "skills")
+            prompt = Prompt(skills_dir=change.workflow_dir / "skills",
+                            editing_mode=_editing_mode(change.control_root))
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -241,7 +242,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(f"Resuming Change {change.slug}: {change.title!r}")
-            prompt = Prompt(skills_dir=change.workflow_dir / "skills")
+            prompt = Prompt(skills_dir=change.workflow_dir / "skills",
+                            editing_mode=_editing_mode(change.control_root))
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -346,6 +348,17 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_resume, args)
+
+
+def _editing_mode(control_root: Path) -> str:
+    """Read editing_mode from config; default to emacs if config is absent or
+    invalid (run_change reports a bad config with full context — don't double-fail
+    here just to pick a prompt mode)."""
+    from imp.providers.config import load_config
+    try:
+        return load_config(control_root).editing_mode
+    except (LoadError, LoadErrors):
+        return "emacs"
 
 
 def _term_width() -> int:

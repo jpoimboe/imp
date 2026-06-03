@@ -33,6 +33,14 @@ def test_history_persists_across_asks() -> None:
     assert "first" in p.history_strings()
 
 
+def test_build_session_vi_mode() -> None:
+    from prompt_toolkit.enums import EditingMode
+
+    from imp.cli.prompt import _build_session
+    session = _build_session(None, editing_mode="vi")
+    assert session.editing_mode == EditingMode.VI
+
+
 class _FakeSession:
     def __init__(self, answers: list[str] | None = None, raises=None) -> None:
         self.answers = list(answers or [])
