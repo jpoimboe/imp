@@ -891,3 +891,16 @@ def test_task_result_closes_fold_despite_id_mismatch() -> None:
     assert folds[0].running is False
     assert folds[0].outcome == "ok"   # _summarize_result("ok") returns "ok" verbatim
     assert folds[0].is_error is False
+
+
+def test_phase_elapsed_from_first_start_to_last_end() -> None:
+    b = nv.NarrativeBuilder()
+    b.add({"type": "step_started", "agent_id": None,
+           "payload": {"step": "s1", "kind": "branch", "phase": "spec"},
+           "id": "a", "timestamp": "2026-06-03T00:00:00+00:00"})
+    b.add({"type": "step_completed", "agent_id": None,
+           "payload": {"step": "s1", "kind": "branch", "action": {"verb": "continue"}},
+           "id": "b", "timestamp": "2026-06-03T00:00:10+00:00"})
+    phase = b.tree.root.children[0]
+    assert isinstance(phase, nv.PhaseNode)
+    assert nv.phase_elapsed(phase) == 10.0

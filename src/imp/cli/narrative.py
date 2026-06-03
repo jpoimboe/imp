@@ -73,6 +73,7 @@ class StepNode:
     children: list[Any] = field(default_factory=list)
     outcome: OutcomeLine | None = None
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
+    end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
     closed: bool = False
     collapsible = False
@@ -451,6 +452,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         # Preserve StepNode.outcome (existing tests assert on the field); the
         # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
         node.outcome = OutcomeLine(action=action)
+        node.end_ts = event.get("timestamp")
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
         node.children.append(BreadcrumbLine(
             step_name=node.name, elapsed_s=elapsed, action=action,
@@ -553,6 +555,16 @@ def _breadcrumb_extras(args: Any) -> list[str]:
         if isinstance(v, (str, int, float, bool)):
             out.append(f"{k}={v}")
     return out
+
+
+def phase_elapsed(phase: PhaseNode) -> float | None:
+    """Phase duration derived from its steps: first step start_ts → last step
+    end_ts. No phase_started/phase_completed events exist (§7) — phase timing is
+    derived. None when the phase has no timestamped steps."""
+    steps = [c for c in phase.children if isinstance(c, StepNode)]
+    if not steps:
+        return None
+    return _elapsed_seconds(steps[0].start_ts, steps[-1].end_ts)
 
 
 def _elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
@@ -837,6 +849,7 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, StepNode):
         return {"t": t, "name": node.name, "kind": node.kind,
                 "interactive": node.interactive, "closed": node.closed,
+                "end_ts": node.end_ts,
                 "outcome": structural_repr(node.outcome) if node.outcome else None,
                 "children": [structural_repr(c) for c in node.children]}
     if isinstance(node, AgentTextNode):

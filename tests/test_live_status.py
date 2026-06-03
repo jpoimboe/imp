@@ -97,3 +97,16 @@ def test_suspend_suppresses_concurrent_tick_draw() -> None:
         assert s.getvalue() == ""           # nothing drawn over the prompt
     # On exit, drawing resumes and the line is re-shown.
     assert s.getvalue().endswith("busy")
+
+
+def test_restart_span_resets_elapsed() -> None:
+    clock = {"t": 100.0}
+    s = _TTY()
+    ls = LiveStatus(s, now=lambda: clock["t"])
+    seen: list[float] = []
+    ls.update(lambda frame, elapsed: seen.append(elapsed) or "x")
+    clock["t"] = 130.0
+    ls.restart_span()           # new t0 = 130.0
+    clock["t"] = 135.0          # advance 5s past the restart point
+    ls.update(lambda frame, elapsed: seen.append(elapsed) or "x")
+    assert seen[-1] == 5.0      # elapsed is from the new t0 (not 35.0 from the original)

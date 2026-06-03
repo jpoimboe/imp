@@ -83,6 +83,8 @@ class LiveDriver:
         self._builder.add(event)
         if isinstance(event, dict) and event.get("type") == "change_created":
             self._emit_header()
+        if isinstance(event, dict) and event.get("type") == "step_started":
+            self._status.restart_span()      # §7: time the current step's span
         self._walk()
         self._refresh_status()
 
@@ -134,6 +136,12 @@ class LiveDriver:
                             cur.container, depth=cur.depth, color=self._color,
                             width=self._width, gutters=self._gutters()
                         )))
+                    elif (isinstance(cur.container, nv.PhaseNode)
+                          and _container_closed(cur.container)
+                          and nv.phase_elapsed(cur.container) is not None):
+                        self._print_lines([rt.phase_breadcrumb_line(
+                            cur.container, depth=cur.depth - 1, color=self._color,
+                            gutters=self._gutters())])
                     self._frontier.pop()        # container drained + closed
                     continue
                 return                          # open container, no new children yet

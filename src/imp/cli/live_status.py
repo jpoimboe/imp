@@ -56,6 +56,13 @@ class LiveStatus:
         self._compose = None
         self._session_start = None
 
+    def restart_span(self) -> None:
+        """Reset the elapsed timer to zero for a new activity span (§7). Unlike
+        reset(), this keeps the compose fn — the line keeps drawing, just from a
+        fresh t0."""
+        self._session_start = self._now()
+        self._draw()
+
     async def tick(self, interval: float = 0.1) -> None:
         """Background spinner: advance the frame and redraw on an interval so the
         line animates during long LLM/tool waits with no events."""

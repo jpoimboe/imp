@@ -479,3 +479,63 @@ def test_user_message_suppressed_in_live_present_in_log() -> None:
 
     assert "> do the thing" not in live   # suppressed in live (prompt_toolkit echoed)
     assert "> do the thing" in log        # the only record in imp log
+
+
+def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:
+    """The final (never-closed) phase must NOT emit a ✓ <phase> breadcrumb in
+    either the live path (finish()/force-pop) or the log (render_tree gated on
+    node.closed). Uses distinct names for phase ("finalize") and step ("deploy")
+    so a phase-level assert cannot accidentally match a step-level breadcrumb."""
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"slug": "s", "title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "deploy", "kind": "branch", "phase": "finalize"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "deploy", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e2", "timestamp": "2026-06-03T00:00:10+00:00"},
+        # No second step_started: the "finalize" phase is never closed.
+    ]
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    live_lines = out.getvalue().splitlines()
+    log_lines = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
+
+    # The phase-level breadcrumb must be absent in BOTH renderers.
+    assert not any("✓ finalize ·" in ln for ln in live_lines), (
+        f"phase breadcrumb leaked into live: {live_lines}")
+    assert not any("✓ finalize ·" in ln for ln in log_lines), (
+        f"phase breadcrumb leaked into log: {log_lines}")
+    # The step-level breadcrumb (✓ deploy) may still appear — we don't assert on it.
+
+
+def test_phase_breadcrumb_identical_in_live_and_log() -> None:
+    events = [
+        {"type": "change_created", "agent_id": None, "payload": {"slug": "s", "title": "t"},
+         "id": "e0", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "s1", "kind": "branch", "phase": "spec"},
+         "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "s1", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e2", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_started", "agent_id": None,
+         "payload": {"step": "s2", "kind": "branch", "phase": "plan"},
+         "id": "e3", "timestamp": "2026-06-03T00:00:05+00:00"},
+        {"type": "step_completed", "agent_id": None,
+         "payload": {"step": "s2", "kind": "branch", "action": {"verb": "continue"}},
+         "id": "e4", "timestamp": "2026-06-03T00:00:09+00:00"},
+    ]
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    live_line = next(ln for ln in out.getvalue().splitlines() if "✓ spec" in ln)
+    log_lines = render_tree(nv.build_tree(events), full=False, color=False, width=80)
+    log_line = next(ln for ln in log_lines if "✓ spec" in ln)
+    assert live_line == log_line   # byte-identical indent + content across both paths

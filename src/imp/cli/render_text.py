@@ -102,6 +102,20 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
         prev_prose = cur_prose
 
 
+def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
+                          gutters: tuple[int, ...] = ()) -> str:
+    """The `✓ <phase> · <N>s` completion line, shared by both renderers (§7).
+    `depth` is the phase HEADER's depth — pass `depth` from render_text and
+    `cur.depth - 1` from the live driver; both equal the header level.
+    This depth equivalence holds only because phases appear solely as direct
+    children of the root (single-level invariant) and would break if phases
+    ever nested inside SubagentFolds."""
+    elapsed = nv.phase_elapsed(node)
+    secs = "" if elapsed is None else f" · {int(elapsed)}s"
+    return _line(f"✓ {node.name}{secs}", depth, color, *pal.NODE_COLORS["phase"],
+                 gutters=gutters)
+
+
 def header_line(node: Any, *, depth: int, color: bool,
                 gutters: tuple[int, ...] = ()) -> str:
     """The single header line for a container node (PhaseNode / StepNode /
@@ -167,6 +181,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth + 1, full=full,
                                     color=color, width=width, gutters=gutters)
+        if node.closed and nv.phase_elapsed(node) is not None:
+            yield phase_breadcrumb_line(node, depth=depth, color=color, gutters=gutters)
         return
 
     if isinstance(node, nv.StepNode):

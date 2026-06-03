@@ -609,3 +609,31 @@ def test_full_subagent_nested_thinking_keeps_dim_text_and_gains_gutter() -> None
     line = next(ln for ln in out if "nested musings" in ln)
     assert "\x1b[35m│ \x1b[0m" in line   # magenta gutter
     assert "\x1b[2m" in line             # dim thinking text preserved
+
+
+def test_phase_breadcrumb_renders_after_closed_phase() -> None:
+    # Two phases: the first (spec) is closed when the second (plan) opens.
+    # The breadcrumb requires both step timestamps to compute duration.
+    events = [
+        {"id": "e0", "agent_id": None, "type": "change_created",
+         "payload": {"slug": "s", "title": "t"}},
+        {"id": "e1", "agent_id": None, "type": "step_started",
+         "payload": {"step": "step1", "kind": "branch", "phase": "spec"},
+         "timestamp": "2026-06-03T00:00:00+00:00"},
+        {"id": "e2", "agent_id": None, "type": "step_completed",
+         "payload": {"step": "step1", "kind": "branch", "action": {"verb": "continue"}},
+         "timestamp": "2026-06-03T00:00:07+00:00"},
+        # Starting plan phase forces spec phase to close
+        {"id": "e3", "agent_id": None, "type": "step_started",
+         "payload": {"step": "step2", "kind": "branch", "phase": "plan"},
+         "timestamp": "2026-06-03T00:00:07+00:00"},
+    ]
+    out = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
+    joined = "\n".join(out)
+    # closed spec phase gets a breadcrumb with seconds suffix
+    assert "✓ spec" in joined
+    spec_line = next(ln for ln in out if "✓ spec" in ln)
+    assert "s" in spec_line    # e.g. "7s"
+    assert "7" in spec_line    # computed from timestamps
+    # the breadcrumb is at depth 0 (same as the phase header)
+    assert spec_line == "✓ spec · 7s"
