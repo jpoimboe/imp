@@ -90,6 +90,10 @@ complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")
 
 ## Rework Resumption
 
+**First, read the `blocking:` line.** This section applies **only** when the injected
+feedback reads `blocking: true`. If it reads `blocking: false`, this is **not** rework
+— stop here and follow "Final advisory polish pass (clean review)" below instead.
+
 **Recognizing a rework turn:** if your turn opens with injected feedback containing the spec-reviewer's findings — a message beginning "Your previous attempt completed but was not accepted. The spec-reviewer reviewed your work and did not accept it." followed by `findings:` and `blocking:` lines — you are in rework mode. Do NOT ask the user anything and do NOT end the turn with bare prose; go straight to editing the spec and end the turn tool-terminal (`git commit --amend --no-edit` then `complete_step(phase="written", …)`).
 
 Address each finding, rewrite the spec, and amend the spec commit (it is still
@@ -104,6 +108,44 @@ complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")
 The rework turn must be tool-terminal: end with the `git commit --amend` then the
 `complete_step(phase="written", …)` call. Do NOT end a rework turn with a bare
 question or trailing prose. Never re-solicit the user on rework.
+
+## Final advisory polish pass (clean review)
+
+A resumed turn whose injected feedback carries `blocking: false` is **not** a
+rework — it is your one **final advisory polish pass**, and you get the last word
+(no reviewer runs after it). The engine's feedback wrapper still opens with "Your
+previous attempt completed but was not accepted" even on this clean resume —
+**ignore that framing and trust the `blocking:` line.** `blocking: false` means the
+spec already passed review; the reviewer's Minor/Nit `findings:` are advisory, not
+a rejection.
+
+On this pass:
+
+1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
+   `findings:`, then amend the spec commit (it is still HEAD on this resume) and
+   finish tool-terminal:
+
+   ```
+   git add imp/specs/{{ change.slug }}.md
+   git commit --amend --no-edit
+   complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")
+   ```
+
+2. **If there is nothing worth integrating** (no advisory findings, or none worth
+   acting on), **complete WITHOUT committing** — just call
+   `complete_step(phase="written", spec_path="imp/specs/{{ change.slug }}.md")`.
+   Do not make an empty commit.
+
+**Pin `complexity` to its first-pass value.** Re-emit the SAME `complexity` you
+sent on the `written` turn that triggered this review — do NOT reclassify to
+`trivial` here. The classification was settled before review; the polish pass must
+not flip it.
+
+**Non-negotiable on this pass:** emit `phase: written` (NOT `drafting` — a
+`drafting` return self-loops you instead of advancing to the next phase), do
+**not** ask the user anything, and end the turn tool-terminal with the
+`complete_step` call. This pass exists to incorporate the reviewer's advice, not to
+reopen the brainstorm.
 
 ## Classifying complexity (required on every completion)
 

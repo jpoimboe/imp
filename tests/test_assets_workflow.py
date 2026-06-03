@@ -266,3 +266,13 @@ def test_plan_reviewer_clean_sets_flag_and_resumes_writer() -> None:
     assert isinstance(clean.action, Goto)
     assert clean.action.target == "plan-writer"
     assert clean.action.resume is True
+
+
+def test_spec_writer_prompt_has_polish_pass_branch() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["spec-writer"].prompt_template_source
+    # The polish branch keys on the injected `blocking:` line and pins phase/complexity.
+    assert "blocking: false" in body
+    assert "polish" in body.lower()
+    assert "without committing" in body.lower()
