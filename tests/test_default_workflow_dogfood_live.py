@@ -172,7 +172,7 @@ def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
     # FULLY isolated venv: NO --system-site-packages, so the host's editable
     # `imp` cannot shadow the copy. uv installs the copy + its deps fast; the
     # one-time dep install at seed is negligible against the ~25-min live run.
-    venv_python = build_isolated_venv(tmp_path)
+    venv_python = build_isolated_venv(tmp_path, extras=("dev",))
 
     # Pre-flight: prove the venv's `imp` is the COPY (the edit root), not the
     # host repo — and probe via the SAME interpreter and cwd the agent's
@@ -623,12 +623,13 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     #   final-review rework     → goto   implement   (disabled via final_review=false)
     # NOT rework: task-lead's own `goto task-lead` self-loop (one per task) — it
     # targets task-lead but is ISSUED BY task-lead, so exclude that exact pair.
-    # NOT rework: the fast-path gates (Task 9) — `fast-path-plan-gate → task-lead`
-    # skips plan-review and `fast-path-cycle-gate → review` skips plan-cycle-check.
-    # Both are intended FORWARD skips on a trivial change, not backstop/rework
-    # loops; a clean fast-path run issues exactly these, so exclude them by their
-    # issuing step. (Only fast-path-plan-gate would otherwise match — its target
-    # task-lead is in the set below; cycle-gate's target `review` is not.)
+    # NOT rework: the three fast-path gates (Task 9), all FORWARD skips on a
+    # trivial change — `fast-path-spec-gate → plan-writer` skips spec-review,
+    # `fast-path-plan-gate → task-lead` skips plan-review, and
+    # `fast-path-cycle-gate → review` skips plan-cycle-check. A clean fast-path
+    # run issues exactly these, so exclude them by their issuing step. (spec-gate
+    # and plan-gate would otherwise match — their targets plan-writer/task-lead
+    # are in the set below; cycle-gate's target `review` is not.)
     # NB: BOTH goto and resume serialize as verb "goto" (resume adds resume=True;
     # executor.py:540-541 _action_payload), so matching verb=="goto" catches the
     # resume-based backstops (run-tests/commit-check/reviewer/deviation) too.
@@ -642,7 +643,8 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         step, target = p.get("step"), act.get("target")
         if step == "task-lead" and target == "task-lead":
             return False  # normal per-task progress, not rework
-        if step in {"fast-path-plan-gate", "fast-path-cycle-gate"}:
+        if step in {"fast-path-spec-gate", "fast-path-plan-gate",
+                    "fast-path-cycle-gate"}:
             return False  # fast-path forward skips (Task 9), not rework
         return target in {"implement", "task-lead", "plan-writer", "spec-writer"}
 

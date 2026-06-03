@@ -28,7 +28,12 @@ def first_opted_in() -> str | None:
     return items[0] if items else None
 
 
-def build_isolated_venv(project_root: Path, *, python: str | None = None) -> Path:
+def build_isolated_venv(
+    project_root: Path,
+    *,
+    python: str | None = None,
+    extras: tuple[str, ...] = (),
+) -> Path:
     """Build an ISOLATED venv (NO --system-site-packages) under
     project_root/.venv and install project_root editable + its deps into it.
 
@@ -36,12 +41,20 @@ def build_isolated_venv(project_root: Path, *, python: str | None = None) -> Pat
     --system-site-packages means the host's editable `imp` cannot shadow the
     copy: the venv sees only what is installed here.
 
+    `extras` names optional-dependency groups (e.g. ("dev",)) to install with
+    the editable target — the isolated venv has no host site-packages to borrow
+    from, so test tools like pytest must be installed here explicitly. Empty by
+    default so the stub-isolation test keeps a deliberately bare venv.
+
     Returns the venv's python interpreter path.
     """
     import shutil
 
     venv_dir = project_root / ".venv"
     base_python = python or sys.executable
+    target = (
+        f"{project_root}[{','.join(extras)}]" if extras else str(project_root)
+    )
 
     if shutil.which("uv"):
         subprocess.run(
@@ -51,7 +64,7 @@ def build_isolated_venv(project_root: Path, *, python: str | None = None) -> Pat
         venv_python = venv_dir / "bin" / "python"
         subprocess.run(
             ["uv", "pip", "install", "--python", str(venv_python),
-             "-e", str(project_root)],
+             "-e", target],
             check=True,
         )
     else:
@@ -59,7 +72,7 @@ def build_isolated_venv(project_root: Path, *, python: str | None = None) -> Pat
         venv_python = venv_dir / "bin" / "python"
         subprocess.run(
             [str(venv_python), "-m", "pip", "install",
-             "-e", str(project_root), "-q"],
+             "-e", target, "-q"],
             check=True,
         )
     return venv_python
