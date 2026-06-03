@@ -171,7 +171,7 @@ def test_load_config_test_command_not_string_raises(tmp_path: Path) -> None:
         load_config(tmp_path)
 
 
-def test_editing_mode_defaults_to_emacs(tmp_path) -> None:
+def test_editing_mode_defaults_to_emacs(tmp_path: Path) -> None:
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "config.yaml").write_text(
         "roles:\n  default:\n    prefer:\n    - {provider: claude_code, model: opus}\n")
@@ -179,7 +179,7 @@ def test_editing_mode_defaults_to_emacs(tmp_path) -> None:
     assert cfg.editing_mode == "emacs"
 
 
-def test_editing_mode_vi_accepted(tmp_path) -> None:
+def test_editing_mode_vi_accepted(tmp_path: Path) -> None:
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "config.yaml").write_text(
         "editing_mode: vi\n"
@@ -188,10 +188,10 @@ def test_editing_mode_vi_accepted(tmp_path) -> None:
     assert cfg.editing_mode == "vi"
 
 
-def test_editing_mode_rejects_unknown(tmp_path) -> None:
+def test_editing_mode_rejects_unknown(tmp_path: Path) -> None:
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "config.yaml").write_text(
         "editing_mode: nano\n"
         "roles:\n  default:\n    prefer:\n    - {provider: claude_code, model: opus}\n")
-    with pytest.raises(LoadError):
+    with pytest.raises(LoadError, match="editing_mode"):
         load_config(tmp_path)
