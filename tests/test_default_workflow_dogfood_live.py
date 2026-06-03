@@ -501,6 +501,18 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"gates_answered={gates_answered}/{len(expected_gates)}"
     )
 
+    # Resolve the FINAL slug from the journal. The spec-writer may RENAME the
+    # change (a spec-phase self-resume edge), so `change_wt.name` captured at
+    # startup is the PRE-rename slug and the live worktree (with events.jsonl)
+    # was renamed/removed mid-run — the journal is keyed under the final slug.
+    # Exactly one change ran here.
+    journaled_slugs = journal.journal_slugs(tmp_path)
+    assert len(journaled_slugs) == 1, (
+        f"expected exactly one journaled change, got {journaled_slugs} "
+        f"(startup slug was {slug!r})"
+    )
+    slug = journaled_slugs[0]
+
     # The worktree was removed at merge; completion status lives in the journal.
     state_raw = journal.journal_show(tmp_path, slug, "state.json")
     assert state_raw is not None, (
@@ -565,9 +577,28 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         if step in {"fast-path-spec-gate", "fast-path-plan-gate",
                     "fast-path-cycle-gate"}:
             return False  # fast-path forward skips (Task 9), not rework
+        # Deterministic spec-phase RENAME flow (fires on every clean run where the
+        # spec-writer renames the change, which the spec-writer prompt mandates):
+        #   spec-writer -> spec-writer        the rename self-resume (rename_change)
+        #   spec-verify-commit -> spec-writer the spec was committed under the OLD
+        #     slug, then renamed; spec-commit-verify.sh checks HEAD touches
+        #     imp/specs/<NEW slug>.md, fails once, and resumes spec-writer to
+        #     re-commit under the new name. Benign, not change-quality rework.
+        if (step, target) in {("spec-writer", "spec-writer"),
+                              ("spec-verify-commit", "spec-writer")}:
+            return False
         return target in {"implement", "task-lead", "plan-writer", "spec-writer"}
 
-    rework_edges = [e for e in all_events_accum if _is_rework(e)]
+    # Use the COMPLETE journaled event stream (authoritative): the live
+    # all_events_accum stops at the worktree rename, so it can miss late edges.
+    events_raw = journal.journal_show(tmp_path, slug, "events.jsonl")
+    assert events_raw is not None, f"no journaled events.jsonl for {slug!r}"
+    full_events = [
+        json.loads(ln)
+        for ln in events_raw.decode("utf-8").splitlines()
+        if ln.strip()
+    ]
+    rework_edges = [e for e in full_events if _is_rework(e)]
     rework_pairs = [
         (
             (e.get("payload") or {}).get("step"),
