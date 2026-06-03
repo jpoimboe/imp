@@ -497,3 +497,21 @@ def test_subagent_outcome_non_json_renders_as_prose() -> None:
                                                 is_error=True),
                                            depth=1, color=False, width=80))
     assert lines == ["  dispatch failed: boom"]
+
+
+def test_gutter_indent_plain_when_no_gutters() -> None:
+    assert rt._gutter_indent(0, (), color=False) == ""
+    assert rt._gutter_indent(3, (), color=False) == "      "   # 3 * "  "
+    # color on, no gutters → still plain spaces (no ANSI).
+    assert rt._gutter_indent(2, (), color=True) == "    "
+
+
+def test_gutter_indent_substitutes_magenta_bar_at_gutter_columns() -> None:
+    # color=False: the │ glyph is plain text (NO_COLOR attribution).
+    assert rt._gutter_indent(1, (0,), color=False) == "│ "
+    assert rt._gutter_indent(3, (2,), color=False) == "    │ "      # cols 0,1 plain, col 2 bar
+    assert rt._gutter_indent(2, (0, 1), color=False) == "│ │ "      # two nested levels
+    # color=True: each bar column is an independently magenta-wrapped "│ ".
+    bar = "\x1b[35m│ \x1b[0m"
+    assert rt._gutter_indent(1, (0,), color=True) == bar
+    assert rt._gutter_indent(2, (0, 1), color=True) == bar + bar

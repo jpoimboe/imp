@@ -18,6 +18,8 @@ from imp.cli import narrative as nv
 from imp.cli import palette as pal
 
 _INDENT = "  "          # two spaces per tree level
+_INDENT_W = len(_INDENT)  # logical indent width per level; the gutter SUBSTITUTES
+                          # within it (same 2 cols), so wrap width is invariant
 
 _DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
 
@@ -30,6 +32,23 @@ def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
         head = f"{head}  ({root.status})"
     yield pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
     yield from _render_children(root.children, depth=0, full=full, color=color, width=width)
+
+
+def _gutter_indent(depth: int, gutters: tuple[int, ...], color: bool) -> str:
+    """Build the `depth`-level indent column-by-column. Each 2-col slot is plain
+    `_INDENT` unless its level is in `gutters`, where it becomes a magenta-wrapped
+    `│ ` — substituting WITHIN the indent (same 2 cols), never prepended ahead of
+    it, so wrap width stays invariant. The gutter is colored INDEPENDENTLY of the
+    content beside it (seam 1): a magenta gutter can sit on a default-fg / red /
+    dim content line. The bar is always magenta (subagent identity), regardless of
+    the content's own color or outcome status."""
+    cols: list[str] = []
+    for level in range(depth):
+        if level in gutters:
+            cols.append(pal.ansi("│ ", "magenta", enabled=color))
+        else:
+            cols.append(_INDENT)
+    return "".join(cols)
 
 
 def _wrap(text: str, width: int, depth: int) -> list[str]:
@@ -45,8 +64,11 @@ def _wrap(text: str, width: int, depth: int) -> list[str]:
     return out
 
 
-def _line(text: str, depth: int, color: bool, *codes: str) -> str:
-    return pal.ansi(f"{_INDENT * depth}{text}", *codes, enabled=color)
+def _line(text: str, depth: int, color: bool, *codes: str,
+          gutters: tuple[int, ...] = ()) -> str:
+    # Indent (with any gutters) is composed separately from the content so the
+    # magenta gutter and the content's own color coexist on one line (seam 1).
+    return _gutter_indent(depth, gutters, color) + pal.ansi(text, *codes, enabled=color)
 
 
 def is_prose_leaf(node: Any) -> bool:
