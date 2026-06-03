@@ -87,9 +87,9 @@ def test_collapsed_subagent_expands_with_outcome() -> None:
     # Step-context still collapses to its one-line summary (untouched).
     assert "▸ context · anthropic/claude · 2 tools" in joined
     # Subagent: boundary header (no glyph, no `· N events`), recursed prose, outcome.
-    assert any(ln.strip() == "task → reviewer" for ln in out)
+    assert any(ln.strip() == "↳ task → reviewer" for ln in out)
     assert "looks good" in joined
-    assert any(ln.strip() == "→ status=Success · summary=ok" for ln in out)
+    assert any(ln.strip() == "│ → status=Success · summary=ok" for ln in out)
     # The old one-liner shape is gone.
     assert "▸ task → reviewer" not in joined
     assert "events" not in joined
@@ -466,7 +466,7 @@ def _sub(outcome=None, *, is_error=False, name="reviewer"):
 def test_header_line_renders_subagent_boundary() -> None:
     sub = _sub(name="reviewer")
     # Subagent color, no fold glyph, no (running)/(error) suffix.
-    assert rt.header_line(sub, depth=2, color=False) == "    task → reviewer"
+    assert rt.header_line(sub, depth=2, color=False) == "    ↳ task → reviewer"
 
 
 def test_subagent_outcome_empty_yields_nothing() -> None:
@@ -536,3 +536,76 @@ def test_wrap_width_is_invariant_under_gutter() -> None:
     plain = rt._wrap(text, 40, 2, False)
     gutter = rt._wrap(text, 40, 2, False, gutters=(1,))
     assert len(plain) == len(gutter)
+
+
+def test_subagent_content_carries_magenta_gutter() -> None:
+    # color=False: the subagent's prose + outcome carry a plain `│ ` at the
+    # subagent's column; the header (one level out) does NOT.
+    out = _lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "looks good"}]}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+    ])
+    # header at depth 2 (under phase→step): 4 spaces, no gutter.
+    assert any(ln == "    ↳ task → reviewer" for ln in out)
+    # prose + outcome at depth 3: cols 0,1 plain + col 2 gutter.
+    assert any(ln == "    │ looks good" for ln in out)
+    assert any(ln == "    │ → status=Success" for ln in out)
+
+
+def test_subagent_header_excludes_own_gutter() -> None:
+    sub = _sub(name="reviewer")
+    assert rt.header_line(sub, depth=0, color=False) == "↳ task → reviewer"
+    # ancestor gutters show; the header's own column does not.
+    assert rt.header_line(sub, depth=1, color=False, gutters=(0,)) == "│ ↳ task → reviewer"
+
+
+def test_nested_subagent_emits_two_gutter_levels() -> None:
+    # Sub-subagents can't be built through the event pipeline (single-level
+    # routing), so construct the nested SubagentFold directly and render it.
+    inner = nv.SubagentFold(subagent_name="inner", event_id="e2", block_id="b2",
+                            nested=nv.NarrativeBuilder())
+    inner.nested.tree.root.children.append(nv.LiteralTextNode(text="deep finding"))
+    outer = nv.SubagentFold(subagent_name="outer", event_id="e1", block_id="b1",
+                            nested=nv.NarrativeBuilder())
+    outer.nested.tree.root.children.append(inner)
+    out = list(rt._render(outer, depth=0, full=False, color=False, width=80))
+    assert out[0] == "↳ task → outer"                       # depth 0, no gutter
+    assert any(ln == "│ ↳ task → inner" for ln in out)      # depth 1, one gutter
+    assert any(ln == "│ │ deep finding" for ln in out)      # depth 2, two gutters
+
+
+def test_errored_subagent_gutter_stays_magenta_with_red_outcome() -> None:
+    # seam 1 / error path: magenta gutter + red outcome TEXT on the same line.
+    out = list(render_tree(nv.build_tree([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content="dispatch failed: boom", error=True),
+    ]), full=False, color=True, width=80))
+    line = next(ln for ln in out if "dispatch failed: boom" in ln)
+    assert "\x1b[35m│ \x1b[0m" in line   # magenta gutter span (identity)
+    assert "\x1b[31m" in line             # red outcome text span (status)
+
+
+def test_full_subagent_nested_thinking_keeps_dim_text_and_gains_gutter() -> None:
+    out = list(render_tree(nv.build_tree([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("t1", "thinking", agent_id="sub:tk1", content="nested musings"),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+    ]), full=True, color=True, width=80))
+    line = next(ln for ln in out if "nested musings" in ln)
+    assert "\x1b[35m│ \x1b[0m" in line   # magenta gutter
+    assert "\x1b[2m" in line             # dim thinking text preserved

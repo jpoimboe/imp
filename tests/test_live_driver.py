@@ -91,8 +91,8 @@ def test_subagent_descends_but_nested_burst_does_not_leak() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    # New boundary-header shape: no glyph, no `· N events` suffix.
-    assert any(ln.strip() == "task → coder" for ln in body)
+    # New boundary-header shape: ↳ glyph, no `· N events` suffix.
+    assert any(ln.strip() == "↳ task → coder" for ln in body)
     assert not any("▸ task" in ln for ln in body)
     # The nested tool burst must still NOT leak into the stream (A2 filters it).
     assert not any("secret.py" in ln for ln in body)
@@ -312,7 +312,7 @@ def test_finish_force_pops_running_subagent_without_outcome() -> None:
     # Subagent never closes; finish() must force-pop it without crashing.
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "task → reviewer" for ln in body)
+    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
     assert any("partial work" in ln for ln in body)
     assert not any("→ status" in ln for ln in body)   # empty outcome → nothing
 
@@ -393,7 +393,7 @@ def test_subagent_closing_with_open_nested_burst_still_emits_outcome() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    assert any(ln.strip() == "task → reviewer" for ln in body)
+    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
     assert not any("tools" in ln for ln in body)        # nested burst dropped (A2)
     assert any("→ status=Success" in ln for ln in body)  # outcome emitted on close, non-force
 
@@ -421,3 +421,40 @@ def test_phase_b_streams_live_without_finish() -> None:
     body = _body(out)
     assert any("implement" in ln for ln in body)    # phase B header streamed
     assert any("building now" in ln for ln in body)  # phase B prose streamed
+
+
+def _driver_color():
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=True, width=80, status=LiveStatus(out))
+    return drv, out
+
+
+def test_live_subagent_prose_carries_gutter_byte_identical_to_log() -> None:
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
+        ev("6", "tool_result", agent_id="a", id="t1", content='{"status":"Success"}'),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    # The streamed `↳` header and the `│ ` gutter on prose + outcome…
+    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
+    assert any(ln.endswith("│ the finding") for ln in body)
+    # …and the whole body is byte-identical to the imp log replay (shared layer).
+    assert body == _render_body(events)
+
+
+def test_print_chrome_renders_plain_and_carries_no_gutter() -> None:
+    drv, out = _driver_color()
+    drv.print_chrome("hello from the agent")
+    body = out.getvalue()
+    assert "hello from the agent" in body
+    assert "\x1b[" not in body   # agent = () → no codes; main-agent sink → no gutter

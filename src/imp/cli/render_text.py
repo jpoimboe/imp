@@ -107,14 +107,15 @@ def header_line(node: Any, *, depth: int, color: bool,
     """The single header line for a container node (PhaseNode / StepNode /
     SubagentFold), with no children. Shared by `_render` and the live driver so
     indentation/label/color stay identical in both paths. For a SubagentFold this
-    is the `task → {name}` boundary: subagent color, no fold glyph, and no
-    (running)/(error) suffix — the live driver prints it while the subagent is
-    still running, so any status suffix would be permanently wrong once it
-    completes (completion is signaled by the outcome line instead)."""
+    is the `↳ task → {name}` boundary: subagent color, ↳ descent marker (not a
+    fold/expand glyph), and no (running)/(error) suffix — the live driver prints
+    it while the subagent is still running, so any status suffix would be
+    permanently wrong once it completes (completion is signaled by the outcome
+    line instead)."""
     if isinstance(node, nv.PhaseNode):
         return _line(node.name, depth, color, *pal.NODE_COLORS["phase"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):
-        return _line(f"task → {node.subagent_name}", depth, color,
+        return _line(f"↳ task → {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
     label = node.name
     if node.interactive:
@@ -291,8 +292,8 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
                      color: bool, width: int,
                      gutters: tuple[int, ...] = ()) -> Iterator[str]:
-    # Header: lean uses the shared `task → {name}` boundary (no glyph, shared with
-    # the live driver); --full uses the expanded `▾ task → {name}` fold header.
+    # Header: lean uses the shared `↳ task → {name}` boundary (↳ descent glyph, shared
+    # with the live driver); --full uses the expanded `▾ task → {name}` fold header.
     if full:
         yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
                     depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
@@ -301,14 +302,14 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
     # The subagent's own narrative, recursed at the same `full` level (lean filters
     # nested thinking/tools via A1/A2; --full expands them).
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
-                                color=color, width=width, gutters=gutters)
+                                color=color, width=width, gutters=(*gutters, depth))
     # The structured return value the parent consumed — emitted in BOTH modes so
     # --full stays a superset of default (DEVIATION from spec, which left --full
     # untouched: the spec's "--full unchanged" produced the backwards result of
     # --full showing LESS than default; per maintainer decision, --full is now a
     # superset again). Always emit when non-empty (decision ii).
     yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width,
-                                      gutters=gutters)
+                                      gutters=(*gutters, depth))
 
 
 def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,

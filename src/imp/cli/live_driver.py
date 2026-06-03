@@ -132,7 +132,7 @@ class LiveDriver:
                     if isinstance(cur.container, nv.SubagentFold):
                         self._print_lines(list(rt.subagent_outcome_lines(
                             cur.container, depth=cur.depth, color=self._color,
-                            width=self._width, gutters=()
+                            width=self._width, gutters=self._gutters()
                         )))
                     self._frontier.pop()        # container drained + closed
                     continue
@@ -142,14 +142,14 @@ class LiveDriver:
                 return                          # block on a not-final child
             cur.index += 1
             if _is_container(child):
-                # Subagent header is the shared `task → {name}` boundary; the live
+                # Subagent header is the shared `↳ task → {name}` boundary; the live
                 # driver prints it the instant the subagent starts (while running),
                 # then streams the subagent's children as their events route in.
                 self._stream_or_hold(rt.header_line(
-                    child, depth=cur.depth, color=self._color, gutters=()))
+                    child, depth=cur.depth, color=self._color, gutters=self._gutters()))
                 self._frontier.append(_Cursor(container=child, depth=cur.depth + 1))
             else:
-                self._emit_leaf(child, cur.depth, gutters=())
+                self._emit_leaf(child, cur.depth, gutters=self._gutters())
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
         if isinstance(node, nv.ToolBurstFold):
@@ -172,6 +172,22 @@ class LiveDriver:
         # SubagentFold is no longer a blocking leaf — it is a descended container
         # (see _is_container / _walk), streamed child-by-child as events arrive.
         return True
+
+    def _gutters(self) -> tuple[int, ...]:
+        """Set of indent columns that are subagent boundaries, read from the
+        cursor stack. A SubagentFold cursor's `.depth` is its CHILDREN depth, so
+        the subagent's own header column is `.depth - 1`. The self-inclusion rule
+        falls out of WHEN this is called: the header is emitted BEFORE self's
+        cursor is pushed (so self is excluded), and the outcome is emitted BEFORE
+        self's cursor is popped (so self is included) — matching imp log.
+
+        Single-level routing (spawned subagents get subagent_defs={}) means a live
+        nested subagent can't occur, so this returns a 0- or 1-tuple in practice;
+        the multi-entry/ordering behavior is covered by the imp log nested test
+        (test_nested_subagent_emits_two_gutter_levels), which builds the nested
+        fold directly — there is no live nested test."""
+        return tuple(c.depth - 1 for c in self._frontier
+                     if isinstance(c.container, nv.SubagentFold))
 
     def _emit_leaf(self, node: Any, depth: int,
                    gutters: tuple[int, ...] = ()) -> None:

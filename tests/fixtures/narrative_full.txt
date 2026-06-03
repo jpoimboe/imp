@@ -18,12 +18,12 @@ design
       ⏺ read_file  path=README.md  → # Project Auth module needed. [killed]
       ⏺ bash  command=ls src/  → auth.py main.py
     ▾ task → reviewer
-      ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
-        system_prompt:
-          You are a reviewer.
-        tools:
-      The spec looks good. Auth flows are clearly defined.
-      → status=Success · summary=Spec approved
+    │ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
+    │   system_prompt:
+    │     You are a reviewer.
+    │   tools:
+    │ The spec looks good. Auth flows are clearly defined.
+    │ → status=Success · summary=Spec approved
     > Please add a section on token expiry.
     ✓ spec · status=Success · summary=Spec drafted
   approve
