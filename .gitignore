@@ -20,3 +20,6 @@ spikes/
 *.swp
 *.swo
 *~
+
+# superpowers brainstorm mockups (throwaway)
+.superpowers/
