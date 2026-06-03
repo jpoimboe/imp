@@ -133,8 +133,8 @@ def test_init_code_and_code_review_prefer_heads(tmp_path: Path) -> None:
     cfg = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     code = cfg["roles"]["code"]["prefer"]
     review = cfg["roles"]["code_review"]["prefer"]
-    assert code[0] == {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"}
-    assert review[0] == {"provider": "anthropic", "model": "claude-sonnet-4-6"}
+    assert code[0] == {"provider": "anthropic", "model": "haiku"}
+    assert review[0] == {"provider": "anthropic", "model": "sonnet"}
     assert {"provider": "openai", "model": "gpt-5.2"} in review
 
 
@@ -145,8 +145,8 @@ def test_init_code_review_handles_claude_code_via_default_tier(tmp_path: Path) -
              picker_fn=lambda _a: ["claude_code", "openai"])
     cfg = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
     review = {e["provider"]: e["model"] for e in cfg["roles"]["code_review"]["prefer"]}
-    assert review["claude_code"] == "claude-sonnet-4-6"  # default tier = coding
-    assert review["openai"] == "gpt-5.2"                  # openai tier = thinking
+    assert review["claude_code"] == "sonnet"  # default tier = coding
+    assert review["openai"] == "gpt-5.2"     # openai tier = thinking
 
 
 def test_init_scaffolds_plan_and_task_lead_roles(tmp_path: Path) -> None:
@@ -168,9 +168,18 @@ def test_init_seeds_tier_roles(tmp_path: Path) -> None:
         assert tier in data["roles"], f"{tier} role not seeded"
     models = {t: data["roles"][t]["prefer"][0]["model"] for t in
               ("fast", "balanced", "powerful")}
-    assert models["fast"] == "claude-haiku-4-5-20251001"
-    assert models["balanced"] == "claude-sonnet-4-6"
-    assert models["powerful"] == "claude-opus-4-7"
+    assert models["fast"] == "haiku"
+    assert models["balanced"] == "sonnet"
+    assert models["powerful"] == "opus"
+
+
+def test_scaffolds_bare_model_aliases(tmp_path: Path) -> None:
+    run_init(tmp_path, input_fn=lambda _p: "", output_fn=lambda _s: None,
+             picker_fn=lambda _avail: ["claude_code"])
+    cfg = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    models = {pm["model"] for role in cfg["roles"].values() for pm in role["prefer"]}
+    assert models <= {"opus", "sonnet", "haiku"}, models
+    assert "opus" in models and "haiku" in models
 
 
 def test_init_scaffolds_commented_lint_command(tmp_path: Path) -> None:

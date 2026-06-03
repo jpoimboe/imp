@@ -22,17 +22,22 @@ import yaml
 from imp.assets import default_workflow_dir
 
 # Per spec §8.2 role taxonomy. Order: thinking-heavy → coding → quick.
-# Models per provider chosen for current best-in-class as of V0.
+# Bare aliases (opus/sonnet/haiku) track "latest" automatically so the
+# scaffold never goes stale. Verified accepted by the claude_code provider.
+# The anthropic block uses the same aliases by analogy; they were NOT verified
+# against the Anthropic HTTP API at scaffold time (no key available). If a
+# future HTTP call rejects them, swap to that provider's documented
+# dated/"-latest" alias form here.
 _PROVIDER_MODELS: dict[str, dict[str, str]] = {
     "claude_code": {
-        "thinking":  "claude-opus-4-7",
-        "coding":    "claude-sonnet-4-6",
-        "quick":     "claude-haiku-4-5-20251001",
+        "thinking":  "opus",
+        "coding":    "sonnet",
+        "quick":     "haiku",
     },
     "anthropic": {
-        "thinking":  "claude-opus-4-7",
-        "coding":    "claude-sonnet-4-6",
-        "quick":     "claude-haiku-4-5-20251001",
+        "thinking":  "opus",
+        "coding":    "sonnet",
+        "quick":     "haiku",
     },
     "openai": {
         "thinking": "gpt-5.2",
