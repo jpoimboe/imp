@@ -285,3 +285,81 @@ def test_plan_writer_prompt_has_polish_pass_branch() -> None:
     assert "blocking: false" in body
     assert "polish" in body.lower()
     assert "without committing" in body.lower()
+
+
+def test_spec_writer_prompt_drops_title_and_auto_titled() -> None:
+    # Acceptance #1: the spec-writer system prompt no longer surfaces the
+    # change title or auto_titled flag anywhere in its body. The agent learns
+    # the user's intent from the first user reply, not from the prompt.
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["spec-writer"].prompt_template_source
+    assert "{{ change.title }}" not in body
+    assert "{{ change.auto_titled }}" not in body
+
+
+def test_spec_writer_prompt_drops_auto_titled_conditional() -> None:
+    # Acceptance #2: the {% if change.auto_titled %} / {% else %} / {% endif %}
+    # split is gone; slug-settling guidance is a single unconditional section.
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["spec-writer"].prompt_template_source
+    assert "change.auto_titled" not in body
+    assert "{% if change.auto_titled" not in body
+    assert "{% else %}" not in body
+
+
+def test_spec_writer_prompt_mandates_opening_question() -> None:
+    # Acceptance #3: the prompt explicitly instructs the agent to open the
+    # change with a single plain-prose question, with no tool calls and no
+    # codebase exploration before the user answers.
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["spec-writer"].prompt_template_source
+    lowered = body.lower()
+    assert "open by asking" in lowered
+    assert "first turn" in lowered
+    # The discipline forbids any tool use or codebase exploration on turn 1.
+    assert "no tool calls" in lowered
+    assert "no codebase exploration" in lowered
+
+
+def test_spec_writer_prompt_mandates_proactive_rename() -> None:
+    # Acceptance #4: the agent renames proactively via rename_change as soon
+    # as intent is clear, ANNOUNCING the name in prose WITHOUT asking the
+    # user. The iron-rule sentence is preserved verbatim.
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["spec-writer"].prompt_template_source
+    lowered = body.lower()
+    assert "without asking the user" in lowered
+    assert "announce" in lowered  # "Announce the new name in prose"
+    # Iron-rule sentence preserved verbatim (acceptance #4):
+    assert (
+        "**Iron rule: never call `rename_change` and write/commit the spec "
+        "in the same turn.**"
+    ) in body
+
+
+def test_spec_writer_prompt_drops_skip_reflexive_paragraph() -> None:
+    # Acceptance #5 (part 1): the "Skip reflexive questions on fully-specified
+    # requests" paragraph is incompatible with always-ask and must be removed.
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["spec-writer"].prompt_template_source
+    assert "Skip reflexive questions" not in body
+    assert "fully-specified requests" not in body
+
+
+def test_spec_writer_prompt_has_trivial_carveout() -> None:
+    # Acceptance #5 (part 2): criterion 1 of the complexity rubric gains a
+    # carve-out clarifying that the mandatory opening question does not count
+    # against `trivial`.
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    body = wf.agents["spec-writer"].prompt_template_source
+    lowered = body.lower()
+    # "opening question" appears as both the discipline name and the carve-out.
+    assert "opening question" in lowered
+    # The carve-out must explicitly say the opening question does not count.
+    assert "does not count" in lowered or "does NOT count" in body
