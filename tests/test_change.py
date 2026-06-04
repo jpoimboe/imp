@@ -63,3 +63,25 @@ def test_create_without_workflow_raises_and_leaves_no_orphan(tmp_path: Path) -> 
     # The branch+worktree created before validation must be torn down.
     assert not (tmp_path / ".imp" / "worktrees" / "nowf").exists()
     assert "imp/nowf" not in _git(tmp_path, "branch", "--list", "imp/nowf").stdout
+
+
+def test_leaf_edit_pinned_in_graph_live_on_reload(tmp_path: Path) -> None:
+    """A loaded Workflow is pinned (graph + leaves read once); a fresh load
+    reflects an edited agent leaf. This is the self-test loop's guarantee: the
+    running cursor is frozen, resume's re-load picks up the edit."""
+    from imp.engine.loader import load_workflow
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", slug="live", base_branch="main")
+
+    wf_first = load_workflow(ch.workflow_dir)
+    assert "prompt body" in wf_first.agents["stub"].prompt_template_source
+
+    agent_md = ch.workflow_dir / "agents" / "stub.md"
+    agent_md.write_text(agent_md.read_text().replace("prompt body", "EDITED BODY"))
+
+    # The already-loaded graph is frozen — the edit is inert for this run.
+    assert "EDITED BODY" not in wf_first.agents["stub"].prompt_template_source
+    # A fresh load (what resume does) sees the edited bytes.
+    wf_second = load_workflow(ch.workflow_dir)
+    assert "EDITED BODY" in wf_second.agents["stub"].prompt_template_source
