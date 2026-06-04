@@ -544,3 +544,74 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
         pass
 
     assert fake.responses.calls[0]["prompt_cache_key"] == "test-2:step:p/s"
+
+
+def test_prompt_cache_key_passthrough_at_boundary() -> None:
+    """A key whose full "slug:aid" is exactly 64 chars passes through verbatim."""
+    from imp.providers.openai import _prompt_cache_key
+
+    aid = "step:p/s"               # 8 chars
+    slug = "a" * 55                 # 55 + 1 (":") + 8 = 64
+    key = _prompt_cache_key(slug, aid)
+    assert key == f"{slug}:{aid}"
+    assert len(key) == 64
+
+
+def test_prompt_cache_key_hashed_just_over_boundary() -> None:
+    """One char over the limit triggers hashing; output is exactly 64 chars."""
+    from imp.providers.openai import _prompt_cache_key
+
+    aid = "step:p/s"               # 8 chars
+    slug = "a" * 56                 # 56 + 1 + 8 = 65 > 64
+    key = _prompt_cache_key(slug, aid)
+    assert key != f"{slug}:{aid}"
+    assert len(key) == 64
+
+
+def test_prompt_cache_key_far_over_limit_is_bounded() -> None:
+    """A wildly over-limit slug still yields a <= 64-char key."""
+    from imp.providers.openai import _prompt_cache_key
+
+    key = _prompt_cache_key("a" * 200, "step:p/s")
+    assert len(key) <= 64
+
+
+def test_prompt_cache_key_deterministic() -> None:
+    """Same (slug, aid) always yields the same key (stable turn-over-turn)."""
+    from imp.providers.openai import _prompt_cache_key
+
+    slug, aid = "s" * 60, "step:p/s"
+    assert _prompt_cache_key(slug, aid) == _prompt_cache_key(slug, aid)
+
+
+def test_prompt_cache_key_keeps_full_aid_for_long_slug() -> None:
+    """For a long slug with a short aid, the whole aid stays visible in the key."""
+    from imp.providers.openai import _prompt_cache_key
+
+    aid = "step:code-reviewer/context"   # 26 chars, well under the 54-char budget
+    key = _prompt_cache_key("s" * 80, aid)
+    assert len(key) == 64
+    assert aid in key
+
+
+def test_prompt_cache_key_distinct_per_aid_when_slug_head_collides() -> None:
+    """Two agents in one long-slug change get distinct keys even when the
+    slug head (the readable prefix) is identical — the exact case plain
+    truncation collapses."""
+    from imp.providers.openai import _prompt_cache_key
+
+    slug = "s" * 60                 # slug alone exceeds the 55-char budget
+    k1 = _prompt_cache_key(slug, "step:foo/a")
+    k2 = _prompt_cache_key(slug, "step:bar/b")
+    assert k1 != k2
+
+
+def test_prompt_cache_key_distinct_per_change_when_slug_head_collides() -> None:
+    """Two changes whose long slugs share a 46-char head still get distinct
+    keys (distinctness comes from the digest of the full slug:aid)."""
+    from imp.providers.openai import _prompt_cache_key
+
+    aid = "step:p/s"
+    slug1 = "s" * 55 + "aaaa"       # identical first 46+ chars...
+    slug2 = "s" * 55 + "bbbb"       # ...differ only in the truncated tail
+    assert _prompt_cache_key(slug1, aid) != _prompt_cache_key(slug2, aid)
