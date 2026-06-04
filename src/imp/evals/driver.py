@@ -6,7 +6,8 @@ model_name), bypassing tier/role inheritance (spec Variant §)."""
 
 from __future__ import annotations
 
-import uuid
+import shutil
+import tempfile
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -74,16 +75,20 @@ async def drive_agent(
     events.jsonl this run wrote, filtered to `agent_id`."""
     safe_id = agent_id.replace(":", "_").replace("/", "_")  # loci contain '/' (M7)
     # Each eval-agent run is a stateless one-shot, but the provider reconstructs
-    # its message transcript from the event log and `classify_resume`s on it
-    # (providers/anthropic.py): a NON-EMPTY events file makes it RESUME a prior
-    # transcript instead of judging the new input fresh. Judge runs all share
-    # project_root=repo-root and collide on agent_id (same {symbol}:{locus} across
-    # items + persisted across runs), so a stable path silently replays a foreign
-    # review -> every verdict degrades to `none`. Isolate each call in its own
-    # fresh path so the log is guaranteed empty at start (no spurious resume).
-    run_token = uuid.uuid4().hex[:12]
-    events_path = project_root / ".imp" / "eval" / f"{safe_id}.{run_token}.events.jsonl"
-    events_path.parent.mkdir(parents=True, exist_ok=True)
+    # its message transcript from the event log and `classify_resume`s on a
+    # non-empty log (providers/anthropic.py). Two hazards if the log is neither
+    # fresh nor isolated from project_root:
+    #   1. Reuse/collision: judge calls all share project_root=repo-root and
+    #      collide on agent_id (same {symbol}:{locus} across items + persisted
+    #      across runs) -> the 2nd+ call RESUMES a foreign transcript instead of
+    #      judging its own input -> every verdict silently degrades to `none`.
+    #   2. Volatility: a reviewer's project_root is a DISPOSABLE worktree that the
+    #      paired-run path tears down (and the reviewer's own bash can mutate); an
+    #      events file under it can vanish mid-run -> FileNotFoundError on append.
+    # Both are solved by giving every call its own throwaway events dir OUTSIDE
+    # project_root, torn down once telemetry has been read back.
+    events_dir = Path(tempfile.mkdtemp(prefix="imp-eval-"))
+    events_path = events_dir / f"{safe_id}.events.jsonl"
     event_log = JsonlEventLog(events_path)
 
     rendered = render_prompt(
@@ -110,7 +115,7 @@ async def drive_agent(
         ),
         interactive=False,
         user_chat_input_fn=None,
-        transcript_dir=project_root / ".imp" / "eval" / "transcripts" / f"{safe_id}.{run_token}",
+        transcript_dir=events_dir / "transcripts",
         fs_permissions=(),  # reviewers/judges are read-only; file tools via /project map
         events_path=events_path,
         subagent_defs={},  # reviewers/judges/normalizers have no subagents
@@ -124,12 +129,15 @@ async def drive_agent(
         coordinator=None,
         non_interactive=True,
     )
-    runner = provider.create_runner(invocation)
-    result = await drive_invocation(
-        invocation, runner, coordinator=None, log=event_log, emit_events=True
-    )
-    telem = read_telemetry(events_path, agent_id)
-    return result.output, telem
+    try:
+        runner = provider.create_runner(invocation)
+        result = await drive_invocation(
+            invocation, runner, coordinator=None, log=event_log, emit_events=True
+        )
+        telem = read_telemetry(events_path, agent_id)
+        return result.output, telem
+    finally:
+        shutil.rmtree(events_dir, ignore_errors=True)
 
 
 def drive_agent_sync(**kwargs: Any) -> tuple[dict[str, Any] | None, Telemetry]:
