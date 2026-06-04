@@ -147,7 +147,7 @@ def _seed_single_step(root: Path) -> Change:
         configured = load_config(root).role_names()
     workflow = load_workflow(dest_wf, configured_roles=configured)
     flat = workflow.flat_steps()
-    State(slug="s", step=flat[0].name, step_attempt=0, status="running",
+    State(id="s", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")
     change = Change(slug="s", title="t", base_branch="main", control_root=root,
                     project_root=root, change_dir=change_dir)

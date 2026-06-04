@@ -47,7 +47,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
-        slug=slug,
+        id=slug,
         step=flat[0].name if flat else None,
         step_attempt=0,
         status="running",

@@ -12,7 +12,7 @@ def _ctx(tmp_path, state):
 
 
 def test_rename_change_records_pending(tmp_path) -> None:
-    state = State(slug="old", step="s", step_attempt=0, status="running")
+    state = State(id="old", step="s", step_attempt=0, status="running")
     tool = get_registry()["rename_change"]
     msg = tool.invoke(_ctx(tmp_path, state), {"name": "Add OAuth"})
     assert state.pending_rename == "Add OAuth"
@@ -20,7 +20,7 @@ def test_rename_change_records_pending(tmp_path) -> None:
 
 
 def test_rename_change_rejects_empty(tmp_path) -> None:
-    state = State(slug="old", step="s", step_attempt=0, status="running")
+    state = State(id="old", step="s", step_attempt=0, status="running")
     tool = get_registry()["rename_change"]
     with pytest.raises(ValueError):
         tool.invoke(_ctx(tmp_path, state), {"name": "!!!"})

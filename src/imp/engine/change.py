@@ -73,7 +73,7 @@ class Change:
         )
         flat = workflow.flat_steps()
         State(
-            slug=slug, step=flat[0].name if flat else None, step_attempt=0,
+            id=slug, step=flat[0].name if flat else None, step_attempt=0,
             status="running",
             vars=apply_var_overrides(workflow.vars, config.var_overrides),
             loop_counts={},

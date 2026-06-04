@@ -38,7 +38,7 @@ def _make_change_worktree(control: Path, slug: str, title: str,
         json.dumps({"slug": slug, "title": title, "base_branch": "main"})
     )
     (change_dir / "events.jsonl").write_text("")
-    state = State(slug=slug, status=status, step="spec", step_attempt=0)
+    state = State(id=slug, status=status, step="spec", step_attempt=0)
     state.save(change_dir / "state")
     return wt
 

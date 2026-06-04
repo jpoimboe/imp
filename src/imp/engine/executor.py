@@ -314,7 +314,6 @@ def apply_pending_rename(
     meta["slug"], meta["title"] = new, name
     meta["auto_titled"] = False
     meta_path.write_text(_json.dumps(meta, indent=2, sort_keys=True))
-    state.slug = new
     state.pending_rename = None
     state.save(change.state_dir)
     new_log = JsonlEventLog(change.events_path, on_event=on_event)

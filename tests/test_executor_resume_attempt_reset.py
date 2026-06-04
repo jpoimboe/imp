@@ -41,7 +41,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     workflow = load_workflow(dest_wf, configured_roles=configured_roles)
     flat = workflow.flat_steps()
     State(
-        slug=slug, step=flat[0].name if flat else None, step_attempt=0,
+        id=slug, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(change_dir / "state")
 

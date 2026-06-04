@@ -43,7 +43,7 @@ class CurrentStep:
 
 @dataclass
 class State:
-    slug: str
+    id: str
     step: str | None
     step_attempt: int
     status: Status
@@ -83,7 +83,7 @@ class State:
         state_dir.mkdir(parents=True, exist_ok=True)
         target = state_dir / "state.json"
         payload = {
-            "slug": self.slug,
+            "id": self.id,
             "step": self.step,
             "step_attempt": self.step_attempt,
             "status": self.status,
