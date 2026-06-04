@@ -15,7 +15,6 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import json
-import shutil
 from pathlib import Path
 
 import pytest
@@ -43,13 +42,9 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    src_wf = root / ".imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
-    dest_wf = change_dir / "workflow"
-    if dest_wf.exists():
-        shutil.rmtree(dest_wf)
-    shutil.copytree(src_wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
         "slug": slug, "title": title, "base_branch": "main",
@@ -59,7 +54,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     with contextlib.suppress(Exception):
         configured_roles = load_config(root).role_names()
 
-    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    workflow = load_workflow(src_wf, configured_roles=configured_roles)
     flat = workflow.flat_steps()
     State(
         slug=slug, step=flat[0].name if flat else None, step_attempt=0,
@@ -348,7 +343,7 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     from imp.engine.executor import RunResult, run_change
     from imp.providers import resolve
 
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "worker.md").write_text(
         "---\nname: worker\ntools: [complete_step]\n"

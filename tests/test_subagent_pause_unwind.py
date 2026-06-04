@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import importlib
 import json
-import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -119,7 +118,7 @@ def _seed_single_step(root: Path) -> Change:
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    wf = root / ".imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -135,17 +134,13 @@ def _seed_single_step(root: Path) -> Change:
 
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
-    dest_wf = change_dir / "workflow"
-    if dest_wf.exists():
-        shutil.rmtree(dest_wf)
-    shutil.copytree(wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps(
         {"slug": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
         configured = load_config(root).role_names()
-    workflow = load_workflow(dest_wf, configured_roles=configured)
+    workflow = load_workflow(wf, configured_roles=configured)
     flat = workflow.flat_steps()
     State(slug="s", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")
