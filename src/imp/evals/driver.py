@@ -37,9 +37,18 @@ def _assets_root() -> Path:
     return Path(str(files("imp"))) / "assets" / "workflows" / "default"
 
 
+def _evals_agents_root() -> Path:
+    return Path(str(files("imp"))) / "evals" / "data" / "agents"
+
+
 def baseline_agent_path(name: str) -> Path:
-    """Path to a baseline reviewer agent's .md in the asset tree."""
-    return _assets_root() / "agents" / f"{name}.md"
+    """Resolve an agent .md by name: the baseline reviewers live in the asset
+    workflow; the eval-only agents (completeness-slice, grader-judge,
+    label-normalizer) live under evals/data/agents."""
+    asset = _assets_root() / "agents" / f"{name}.md"
+    if asset.exists():
+        return asset
+    return _evals_agents_root() / f"{name}.md"
 
 
 def _provider_for(provider: str, model: str) -> Any:
