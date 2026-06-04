@@ -40,10 +40,6 @@ class SweepPlan:
     estimated_dollars: float
 
 
-def _members(variant: Variant) -> int:
-    return max(1, len(variant.role_to_model_map))
-
-
 def plan_sweep(
     variants: list[Variant],
     fixtures: list[Fixture],
