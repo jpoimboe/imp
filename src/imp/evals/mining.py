@@ -9,9 +9,11 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+
+from imp.evals.models import ExpectedFinding, Fixture, FixtureMeta
 
 # A dispatch description like "Spec review ...", "Quality review ...",
 # "Code review ..." (spec mining step 1). subagent_type is the stronger signal
@@ -283,3 +285,86 @@ def reconstruct_diff(control_root: Path, base_sha: str, head_sha: str) -> str:
         errors="replace",
     )
     return proc.stdout if proc.returncode == 0 else ""
+
+
+# Strip the SAME label forms `extract_shas` accepts (BASE/HEAD with an optional
+# `_SHA` suffix + `:`/`=`), so a bare `BASE:`/`HEAD:` SHA the extractor uses can't
+# leak into task_context, plus any `git diff`/`git show` instruction line.
+_SHA_OR_GITDIFF_LINE = re.compile(
+    r"^.*(\b(?:BASE|HEAD)(?:[_ ]?SHA)?\s*[:=]|git (?:diff|show)).*$", re.I | re.M
+)
+
+
+def _clean_task_context(dispatch_prompt: str) -> str:
+    """Strip SHA labels and `git diff`/`git show` instruction lines from a mined
+    dispatch prompt so mined `task_context` doesn't LEAK the answer (SHAs, "look
+    here" hints) or carry a richer/leakier context than curated fixtures' neutral
+    one-paragraph task_context (asymmetry would bias a mined-vs-curated recall
+    comparison). Keeps the substantive task description."""
+    cleaned = _SHA_OR_GITDIFF_LINE.sub("", dispatch_prompt)
+    return "\n".join(ln for ln in cleaned.splitlines() if ln.strip()).strip()
+
+
+@dataclass(frozen=True)
+class MiningDrop:
+    tool_use_id: str
+    session_file: str
+    reason: str  # "no_shas" | "tree_unreconstructable"
+
+
+@dataclass(frozen=True)
+class MiningOutcome:
+    fixtures: list[Fixture]
+    drops: list[MiningDrop]
+
+
+def assemble_fixtures(
+    episodes: list[RawEpisode],
+    *,
+    control_root: Path,
+    normalize: Callable[[str], tuple[ExpectedFinding, ...]],
+) -> MiningOutcome:
+    """Build mined Fixtures from episodes by reconstructing each diff via
+    `git diff BASE..HEAD` against `control_root` (the verified mechanism — the
+    diff is not in the log). `normalize` turns prose into ExpectedFindings (inject
+    normalize.normalize_findings in production; a fake in tests). Episodes missing
+    SHAs (no_shas) or whose SHAs no longer resolve (tree_unreconstructable) are
+    dropped and logged — never silently skipped (spec Risks §)."""
+    fixtures: list[Fixture] = []
+    drops: list[MiningDrop] = []
+    for ep in episodes:
+        base, head = extract_shas(ep.dispatch_prompt)
+        if not base or not head:
+            drops.append(MiningDrop(ep.tool_use_id, ep.session_file, "no_shas"))
+            continue
+        diff = reconstruct_diff(control_root, base, head)
+        if not diff:
+            drops.append(MiningDrop(ep.tool_use_id, ep.session_file, "tree_unreconstructable"))
+            continue
+        findings = normalize(ep.review_prose)
+        # blocking→fixed promotes findings to must_catch (high-confidence real bug);
+        # otherwise keep the normalizer's per-finding blocking call.
+        if ep.was_fixed:
+            findings = tuple(
+                ExpectedFinding(f.locus, f.symbol, f.description, f.severity, True)
+                for f in findings
+            )
+        fixtures.append(
+            Fixture(
+                id=f"mined-{ep.reviewer_type}-{head[:8]}",
+                source="mined",
+                base_sha=base,
+                head_sha=head,
+                diff=diff,
+                task_context=_clean_task_context(ep.dispatch_prompt),
+                expected_findings=findings,
+                clean_loci=(),  # mined merged-clean is directional only (grader handles it)
+                meta=FixtureMeta(
+                    reviewer_type=ep.reviewer_type,
+                    original_model=None,
+                    blocking=ep.blocking,
+                    was_fixed=ep.was_fixed,
+                ),
+            )
+        )
+    return MiningOutcome(fixtures=fixtures, drops=drops)
