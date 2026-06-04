@@ -1,0 +1,23 @@
+{
+  "id": "hint-cap-inversion",
+  "source": "curated",
+  "base_sha": "41e667f579c799a1cd91e862955ed0969e7b6a83",
+  "head_sha": "00f3fc9b1d5c179588ce1e99721b9f5005e8b3bd",
+  "task_context": "Implement per-category retry backoff in error_policy.decide(): RetryWithBackoff categories use delay = 1*2^n and honor a server Retry-After hint.",
+  "expected_findings": [
+    {
+      "locus": "src/imp/engine/error_policy.py:79",
+      "symbol": "decide",
+      "description": "hint-cap inversion: min(60, max(delay, hint)) caps our own exponential backoff, contradicting the docstring (the 60s cap is meant for the hint only). Fires only when hint_delay_seconds is not None.",
+      "severity": "Major",
+      "must_catch": true
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "code-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false
+  }
+}
