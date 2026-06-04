@@ -546,7 +546,7 @@ class OpenAIAgentRunner:
         # change) so the prefix stays cache-resident turn-over-turn. slug
         # is required: agent_id alone is change-agnostic, so concurrent changes
         # running the same step would collide on one routing slot.
-        prompt_cache_key = f"{invocation.change_context.slug}:{aid}"
+        prompt_cache_key = _prompt_cache_key(invocation.change_context.slug, aid)
         guard = LoopGuard()
 
         while not self._cancel:
