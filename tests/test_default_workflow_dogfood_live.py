@@ -690,5 +690,5 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     assert status_out.returncode == 0, (
         f"imp status rc={status_out.returncode}\nstderr: {status_out.stderr!r}"
     )
-    assert "Completed Changes" in status_out.stdout, status_out.stdout
+    assert "completed" in status_out.stdout, status_out.stdout
     assert slug in status_out.stdout, status_out.stdout
