@@ -76,7 +76,7 @@ async def test_live_minimal_change_completes_one_step(
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
     change = Change.create(
-        tmp_path, title="live-smoke", slug="live-smoke", base_branch="main")
+        tmp_path, title="live-smoke", change_id="live-smoke", base_branch="main")
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED

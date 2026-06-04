@@ -340,23 +340,23 @@ _CACHE_KEY_MAX = 64        # OpenAI's hard limit on prompt_cache_key
 _CACHE_KEY_HASH_LEN = 8    # hex chars of disambiguating digest
 
 
-def _prompt_cache_key(slug: str, aid: str) -> str:
+def _prompt_cache_key(change_id: str, aid: str) -> str:
     """OpenAI routing/affinity hint, bounded to the 64-char API limit.
 
     Stable per (change, agent) invocation; distinct per change and per
     agent. Keys that fit are passed through verbatim. Over-long keys keep
     the whole aid (the within-change discriminator one greps for) and the
-    slug head (the cross-change discriminator), then append a hash of the
-    *full* slug:aid so distinctness on both survives truncation.
+    change_id head (the cross-change discriminator), then append a hash of the
+    *full* change_id:aid so distinctness on both survives truncation.
     """
-    full = f"{slug}:{aid}"
+    full = f"{change_id}:{aid}"
     if len(full) <= _CACHE_KEY_MAX:
         return full
     digest = hashlib.sha256(full.encode()).hexdigest()[:_CACHE_KEY_HASH_LEN]
     budget = _CACHE_KEY_MAX - _CACHE_KEY_HASH_LEN - 1   # 55: readable, before "-{digest}"
-    aid_keep = min(len(aid), budget - 1)                # keep >=1 char for slug + ":"
-    slug_keep = budget - aid_keep - 1                   # -1 for the ":" separator
-    return f"{slug[:slug_keep]}:{aid[-aid_keep:]}-{digest}"
+    aid_keep = min(len(aid), budget - 1)                # keep >=1 char for id + ":"
+    id_keep = budget - aid_keep - 1                     # -1 for the ":" separator
+    return f"{change_id[:id_keep]}:{aid[-aid_keep:]}-{digest}"
 
 
 class OpenAIAgentRunner:
@@ -543,10 +543,13 @@ class OpenAIAgentRunner:
         openai_tools.extend(openai_web_tool_specs(invocation.agent_def))
         # Stable routing/affinity hint for OpenAI's automatic prompt cache.
         # Keyed to one growing conversation (one agent invocation within one
-        # change) so the prefix stays cache-resident turn-over-turn. slug
+        # change) so the prefix stays cache-resident turn-over-turn. id
         # is required: agent_id alone is change-agnostic, so concurrent changes
         # running the same step would collide on one routing slot.
-        prompt_cache_key = _prompt_cache_key(invocation.change_context.slug, aid)
+        # Keyed to the IMMUTABLE id, not the slug: a slug rotates at the
+        # spec->plan title rename and would bust the cache mid-conversation
+        # (spec §9). [AC 10]
+        prompt_cache_key = _prompt_cache_key(invocation.change_context.id, aid)
         guard = LoopGuard()
 
         while not self._cancel:

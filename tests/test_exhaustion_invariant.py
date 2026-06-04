@@ -38,7 +38,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     shutil.copytree(src_wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
-        "slug": slug, "title": title, "base_branch": "main",
+        "id": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_roles: list[str] = []
@@ -53,12 +53,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     ).save(change_dir / "state")
 
     change = Change(
-        slug=slug, title=title, base_branch="main",
+        id=slug, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"slug": slug, "title": title},
+        payload={"id": slug, "slug": change.slug, "title": title},
     )
     return change
 

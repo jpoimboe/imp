@@ -117,16 +117,16 @@ async def dispatch_task(
     invocation_id = ctx.next_subagent_invocation_id()
 
     cc = ctx.change_context or ChangeContext(
-        slug="", title="", project_root=ctx.project_root,
+        id="", slug="", title="", project_root=ctx.project_root,
         workflow_dir=ctx.project_root / ".imp" / "change" / "workflow",
     )
 
-    # Render the subagent's Jinja template (subagents don't see the parent
-    # title). A SEPARATE read-only JsonlEventLog for {{ events.* }} — NOT
-    # ctx.event_log, which is the shared WRITE instance.
+    # Render the subagent's Jinja template. A SEPARATE read-only JsonlEventLog
+    # for {{ events.* }} — NOT ctx.event_log, which is the shared WRITE instance.
     prompt_ctx = build_context(
+        change_id=cc.id,
         change_slug=cc.slug,
-        change_title=f"Change {cc.slug}",
+        change_title=cc.title,   # dispatch label is the title now [item 11]
         event_log=JsonlEventLog(ctx.events_path),
         vars=ctx.change_state.vars if ctx.change_state is not None else {},
     )

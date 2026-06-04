@@ -141,7 +141,7 @@ def _seed_single_step(root: Path) -> Change:
     shutil.copytree(wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps(
-        {"slug": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
+        {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
         configured = load_config(root).role_names()
@@ -149,10 +149,10 @@ def _seed_single_step(root: Path) -> Change:
     flat = workflow.flat_steps()
     State(id="s", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")
-    change = Change(slug="s", title="t", base_branch="main", control_root=root,
+    change = Change(id="s", title="t", base_branch="main", control_root=root,
                     project_root=root, change_dir=change_dir)
     change.event_log().append(agent_id=None, type="change_created",
-                              payload={"slug": "s", "title": "t"})
+                              payload={"id": "s", "slug": change.slug, "title": "t"})
     return change
 
 

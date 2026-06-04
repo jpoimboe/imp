@@ -32,11 +32,6 @@ def slugify(text: str) -> str:
     return s
 
 
-# `YYYY-MM-DD-<name>` slug identity (spec §12). The date gives every Change a
-# chronological, collision-resistant identity; doc filenames derive from the slug.
-DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.*)$")
-
-
 def dated_slug(name: str, *, date: str) -> str:
     """`<date>-<slugified name>`. `date` is a fixed-width `YYYY-MM-DD` string.
     The name keeps the MAX_SLUG_LEN cap (slugify), so the full slug is at most
@@ -57,12 +52,3 @@ def new_change_id(*, date: str) -> str:
     string (the caller passes today's date)."""
     suffix = "".join(secrets.choice(_ID_ALPHABET) for _ in range(6))
     return f"{date}-{suffix}"
-
-
-def split_date_prefix(slug: str) -> tuple[str | None, str]:
-    """Split `YYYY-MM-DD-<rest>` into (date, rest); (None, slug) when there is
-    no date prefix (e.g. a legacy or test slug created before this convention)."""
-    m = DATE_PREFIX_RE.match(slug)
-    if m is None:
-        return None, slug
-    return m.group(1), m.group(2)

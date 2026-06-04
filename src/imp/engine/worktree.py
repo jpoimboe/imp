@@ -23,7 +23,7 @@ class PreconditionError(Exception):
 
 
 class BranchExists(Exception):
-    """The slug's branch imp/<slug> already exists (collision)."""
+    """The branch imp/<id> already exists (collision)."""
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -73,65 +73,35 @@ def current_branch(root: Path) -> str:
 
 
 def branch_exists(control_root: Path, branch: str) -> bool:
-    """Public so the CLI can pre-check slug availability (spec §3.1 — git
-    branch-uniqueness IS the collision check)."""
+    """True if refs/heads/<branch> exists. The imp new collision-error guard
+    keys on this."""
     return _git(
         control_root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
     ).returncode == 0
 
 
-def create_worktree(control_root: Path, slug: str, base: str) -> Path:
-    """`git worktree add -b imp/<slug> .imp/worktrees/<slug> <base>` (spec §4).
-    Branch collision surfaces as BranchExists so the caller can retry (random
-    slug) or report a clean error (title-derived slug)."""
-    rel = Path(".imp") / "worktrees" / slug
-    branch = f"imp/{slug}"
+def create_worktree(control_root: Path, change_id: str, base: str) -> Path:
+    """`git worktree add -b imp/<id> .imp/worktrees/<id> <base>` (spec §4).
+    Branch collision surfaces as BranchExists — the caller reports a clean error
+    (there is no retry; the random id is the uniqueness guarantee)."""
+    rel = Path(".imp") / "worktrees" / change_id
+    branch = f"imp/{change_id}"
     with RepoGitLock(control_root).acquire():
         if branch_exists(control_root, branch):
             raise BranchExists(branch)
         proc = _git(control_root, "worktree", "add", "-b", branch, str(rel), base)
         if proc.returncode != 0:
-            # already-exists races collapse to BranchExists; anything else bubbles
             if "already exists" in proc.stderr:
                 raise BranchExists(branch)
             raise RuntimeError(f"git worktree add failed: {proc.stderr.strip()}")
     return (control_root / rel).resolve()
 
 
-def remove_worktree(control_root: Path, slug: str) -> None:
-    """`git worktree remove .imp/worktrees/<slug>`. Branch is KEPT (spec §4)."""
-    rel = Path(".imp") / "worktrees" / slug
+def remove_worktree(control_root: Path, change_id: str) -> None:
+    """`git worktree remove .imp/worktrees/<id>`. Branch is KEPT (spec §4)."""
+    rel = Path(".imp") / "worktrees" / change_id
     with RepoGitLock(control_root).acquire():
         _git_ok(control_root, "worktree", "remove", str(rel))
-
-
-def rename(control_root: Path, old: str, new: str) -> Path | None:
-    """Rename branch + worktree dir (spec §4). Returns the new path, or None on
-    collision (imp/<new> already exists) having changed nothing — the caller
-    keeps running on the old slug."""
-    new_rel = Path(".imp") / "worktrees" / new
-    with RepoGitLock(control_root).acquire():
-        if branch_exists(control_root, f"imp/{new}"):
-            return None
-        bm = _git(control_root, "branch", "-m", f"imp/{old}", f"imp/{new}")
-        if bm.returncode != 0:
-            return None
-        mv = _git(
-            control_root, "worktree", "move",
-            str(Path(".imp") / "worktrees" / old), str(new_rel),
-        )
-        if mv.returncode != 0:
-            # Roll the branch rename back so identity stays consistent.
-            rb = _git(control_root, "branch", "-m", f"imp/{new}", f"imp/{old}")
-            if rb.returncode != 0:
-                # Extremely unlikely under the lock; surface it rather than leave
-                # branch/worktree identity inconsistent and silent.
-                raise RuntimeError(
-                    f"rename rollback failed: branch is imp/{new} but worktree is "
-                    f"still imp/{old}; reconcile manually ({rb.stderr.strip()})"
-                )
-            return None
-    return (control_root / new_rel).resolve()
 
 
 class RepoGitLock:
@@ -186,27 +156,25 @@ def is_dirty(worktree: Path) -> bool:
     return bool(_git_ok(worktree, "status", "--porcelain").strip())
 
 
-def merge_to_base(control_root: Path, slug: str, base: str) -> MergeResult:
-    """Integrate imp/<slug> into <base> without ever desyncing a live checkout
-    (spec §4). Strategy branches on where <base> is checked out."""
-    branch = f"imp/{slug}"
+def merge_to_base(control_root: Path, change_id: str, base: str, *, title: str) -> MergeResult:
+    """Integrate imp/<id> into <base> without ever desyncing a live checkout
+    (spec §4). The merge subject uses the human title; the id appears in the body
+    for branch traceability."""
+    branch = f"imp/{change_id}"
     with RepoGitLock(control_root).acquire():
         live = _worktree_on_branch(control_root, base)
         if live is not None:
             if is_dirty(live):
                 return MergeResult("BASE_DIRTY")
-            return _merge_in_place(live, branch)
-        return _merge_detached(control_root, slug, branch, base)
+            return _merge_in_place(live, branch, title, change_id)
+        return _merge_detached(control_root, change_id, branch, base, title)
 
 
-def _merge_in_place(worktree: Path, branch: str) -> MergeResult:
+def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> MergeResult:
     """Branch 1: advance ref + index + working tree atomically in the live
-    checkout. The up-front is_dirty(live) -> BASE_DIRTY check (in merge_to_base,
-    under the lock) is THE dirty-safety guard; `git merge` itself only partially
-    backstops the TOCTOU window (it refuses solely for files the merge would
-    touch, not for unrelated dirty files), so don't rely on the merge command
-    alone for dirty-safety."""
-    proc = _git(worktree, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
+    checkout. (See the dirty-safety note in merge_to_base.)"""
+    subject = f"Merge {title}\n\n(imp/{change_id})"
+    proc = _git(worktree, "merge", "--no-ff", "-m", subject, branch)
     if proc.returncode != 0:
         _git(worktree, "merge", "--abort")
         return MergeResult("CONFLICT")
@@ -214,19 +182,18 @@ def _merge_in_place(worktree: Path, branch: str) -> MergeResult:
     return MergeResult("MERGED", commit)
 
 
-def _merge_detached(control_root: Path, slug: str, branch: str, base: str) -> MergeResult:
-    """Branch 3: <base> is checked out nowhere. Merge in a detached scratch
-    worktree at base's tip, then update-ref (safe — no live checkout to
-    desync), then remove the scratch."""
-    scratch_rel = Path(".imp") / "worktrees" / f".merge-{slug}"
+def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
+                    title: str) -> MergeResult:
+    """Branch 3: <base> checked out nowhere. Merge in a detached scratch worktree,
+    update-ref, remove the scratch."""
+    scratch_rel = Path(".imp") / "worktrees" / f".merge-{change_id}"
     scratch = control_root / scratch_rel
-    # A prior crash can leave a stale scratch that would make `worktree add`
-    # fail permanently; clear it first (best-effort) so retries can proceed.
     _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
     shutil.rmtree(scratch, ignore_errors=True)
     _git_ok(control_root, "worktree", "add", "--detach", str(scratch_rel), base)
+    subject = f"Merge {title}\n\n(imp/{change_id})"
     try:
-        proc = _git(scratch, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
+        proc = _git(scratch, "merge", "--no-ff", "-m", subject, branch)
         if proc.returncode != 0:
             _git(scratch, "merge", "--abort")
             return MergeResult("CONFLICT")
@@ -237,9 +204,9 @@ def _merge_detached(control_root: Path, slug: str, branch: str, base: str) -> Me
         _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
 
 
-def journal_commit(control_root: Path, slug: str, files: Mapping[str, Path]) -> None:
+def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]) -> None:
     """Append one commit to refs/imp/journal (spec §4, §6) via plumbing — never
-    checks out the ref. Files land under <slug>/ in the journal tree. On the
+    checks out the ref. Files land under <id>/ in the journal tree. On the
     very first journaled Change the ref doesn't exist, so commit-tree runs with
     no -p (a root commit, starting the orphan history)."""
     with RepoGitLock(control_root).acquire():
@@ -258,7 +225,7 @@ def journal_commit(control_root: Path, slug: str, files: Mapping[str, Path]) -> 
             parent = _git(control_root, "rev-parse", "--verify", "--quiet",
                           "refs/imp/journal")
             have_parent = parent.returncode == 0
-            # Seed the temp index with the existing journal tree so prior slugs
+            # Seed the temp index with the existing journal tree so prior ids
             # survive (read-tree is a no-op miss when the ref is absent).
             if have_parent:
                 subprocess.run(["git", "read-tree", "refs/imp/journal"],
@@ -271,12 +238,12 @@ def journal_commit(control_root: Path, slug: str, files: Mapping[str, Path]) -> 
                 ).stdout.decode().strip()
                 subprocess.run(
                     ["git", "update-index", "--add", "--cacheinfo",
-                     f"100644,{blob},{slug}/{name}"],
+                     f"100644,{blob},{change_id}/{name}"],
                     cwd=control_root, env=env, check=True, capture_output=True, text=True,
                 )
             tree = subprocess.run(["git", "write-tree"], cwd=control_root, env=env,
                                   check=True, capture_output=True, text=True).stdout.strip()
-            args = ["git", "commit-tree", tree, "-m", f"journal: {slug}"]
+            args = ["git", "commit-tree", tree, "-m", f"journal: {change_id}"]
             if have_parent:
                 args += ["-p", "refs/imp/journal"]
             commit = subprocess.run(args, cwd=control_root, env=env, check=True,

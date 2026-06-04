@@ -93,6 +93,6 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "vars")
 
-    ch = Change.create(tmp_path, title="X", slug="x", base_branch="main")
+    ch = Change.create(tmp_path, title="X", change_id="x", base_branch="main")
     st = State.load(ch.state_dir)
     assert st.vars["final_review"] is False

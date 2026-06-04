@@ -204,7 +204,7 @@ async def run_change(
 
 def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     """Terminal handler: marks the Change completed and, when ready_to_merge is
-    set in state.vars, performs the full merge phase: merge imp/<slug> into
+    set in state.vars, performs the full merge phase: merge imp/<id> into
     base, journal the final artifacts, then remove the worktree (branch kept).
 
     Contract change from the original stub:
@@ -247,7 +247,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
               {"reason": "worktree_dirty", "base": change.base_branch})
         return RunResult.PAUSED
 
-    result = worktree.merge_to_base(change.control_root, change.slug, change.base_branch)
+    result = worktree.merge_to_base(
+        change.control_root, change.id, change.base_branch, title=change.title)
     if result.status in ("CONFLICT", "BASE_DIRTY"):
         state.status = "merge_blocked"
         state.save(change.state_dir)
@@ -262,63 +263,63 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.save(change.state_dir)
     _emit(log, "change_merged",
           {"base": change.base_branch, "commit": result.merge_commit})
-    worktree.journal_commit(change.control_root, change.slug, {
+    worktree.journal_commit(change.control_root, change.id, {
         "events.jsonl": change.events_path,
         "change.json": change.change_dir / "change.json",
         "state.json": change.state_dir / "state.json",
     })
-    worktree.remove_worktree(change.control_root, change.slug)  # steps/ goes with it
+    worktree.remove_worktree(change.control_root, change.id)  # steps/ goes with it
     return RunResult.COMPLETED
 
 
 def apply_pending_rename(
     change: Change, state: State, log: EventLog, *, on_event: EventCallback | None,
 ) -> EventLog:
-    """Apply state.pending_rename at a step boundary (spec §5.3). The worktree
-    move is safe here: steps are sequential (no live tool subprocess), and the
-    engine's cwd is the control root (set in run_change). Returns the event log
-    to use going forward (re-opened at the possibly-new path)."""
+    """Apply state.pending_rename at a step boundary (spec §5.3). CONTENT-ONLY:
+    the id is immutable, so this never touches a git ref or worktree path. It (a)
+    rewrites `title` in change.json, (b) git-mv's the spec file old-slug -> new-slug
+    if it already exists, (c) emits change_renamed. The slug is derived, so there
+    is nothing to reassign on the Change beyond `title`."""
     import json as _json
-
-    from imp.engine import worktree
-    from imp.engine.slug import dated_slug, slugify, split_date_prefix
 
     name = state.pending_rename
     assert name is not None
-    old = change.slug
-    # Preserve the YYYY-MM-DD- creation-date prefix: it is part of the Change's
-    # identity and must not be dropped when the slug is re-derived from the new
-    # name (spec §12). A date-less slug (legacy/test) falls back to plain slugify.
-    date, _ = split_date_prefix(old)
-    new = dated_slug(name, date=date) if date else slugify(name)
-    if new == old:
+    old_title = change.title
+    old_slug = change.slug
+    change.title = name          # slug property now derives from the new title
+    new_slug = change.slug
+    if name == old_title:
         state.pending_rename = None
         state.save(change.state_dir)
         return log
 
-    new_path = worktree.rename(change.control_root, old, new)
-    if new_path is None:
-        state.pending_rename = None
-        state.save(change.state_dir)
-        _emit(log, "rename_blocked", {"requested": new})
-        return log
-
-    # Repoint in-memory paths onto the moved worktree.
-    change.slug = new
-    change.title = name
-    change.auto_titled = False   # renamed → the slug is now intentional (spec §12)
-    change.project_root = new_path
-    change.change_dir = new_path / ".imp" / "change"
+    # Persist the new title (created_at + id preserved).
     meta_path = change.change_dir / "change.json"
-    meta = _json.loads(meta_path.read_text())          # preserves created_at
-    meta["slug"], meta["title"] = new, name
-    meta["auto_titled"] = False
+    meta = _json.loads(meta_path.read_text())
+    meta["title"] = name
     meta_path.write_text(_json.dumps(meta, indent=2, sort_keys=True))
+
+    # If an early spec file exists under the old slug, move it so the filename
+    # tracks the settled name. `git mv` for a tracked/staged file; fall back to a
+    # filesystem rename for an UNTRACKED early draft (git mv fails "not under
+    # version control" on those). The fallback is essential: a lingering untracked
+    # imp/specs/<old-slug>.md is seen by is_dirty() and would later block the merge
+    # (the exact failure the deleted spec-writer warning guarded against).
+    old_spec = change.project_root / "imp" / "specs" / f"{old_slug}.md"
+    if old_spec.exists() and old_slug != new_slug:
+        from imp.engine import worktree
+        new_spec = change.project_root / "imp" / "specs" / f"{new_slug}.md"
+        proc = worktree._git(
+            change.project_root, "mv", f"imp/specs/{old_slug}.md",
+            f"imp/specs/{new_slug}.md")
+        if proc.returncode != 0:                 # untracked draft: plain rename
+            old_spec.rename(new_spec)
+
     state.pending_rename = None
     state.save(change.state_dir)
-    new_log = JsonlEventLog(change.events_path, on_event=on_event)
-    _emit(new_log, "change_renamed", {"old_slug": old, "new_slug": new, "title": name})
-    return new_log
+    _emit(log, "change_renamed",
+          {"id": change.id, "old_title": old_title, "new_title": name})
+    return log
 
 
 async def _dispatch_step(
@@ -386,6 +387,7 @@ def _route_script(
     _emit_started(log, step)
     out = run_script(step, cwd=change.workflow_dir,
                      env_extra=engine_env(project_root=change.project_root,
+                                          change_id=change.id,
                                           change_slug=change.slug,
                                           change_title=change.title,
                                           lint_command=lint_command,
@@ -595,9 +597,8 @@ async def _run_agent_invocation(
 
     rendered = render_prompt(
         agent_def.prompt_template_source, build_context(
-            change_slug=change.slug, change_title=change.title,
-            change_auto_titled=change.auto_titled, event_log=log,
-            vars=state.vars,
+            change_id=change.id, change_slug=change.slug, change_title=change.title,
+            event_log=log, vars=state.vars,
         ),
     )
 
@@ -632,7 +633,7 @@ async def _run_agent_invocation(
         rendered_system_prompt=rendered,
         initial_messages=initial_messages,
         change_context=ChangeContext(
-            slug=change.slug, title=change.title,
+            id=change.id, slug=change.slug, title=change.title,
             project_root=change.project_root, workflow_dir=change.workflow_dir,
         ),
         interactive=interactive,

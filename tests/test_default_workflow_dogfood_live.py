@@ -501,17 +501,15 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         f"gates_answered={gates_answered}/{len(expected_gates)}"
     )
 
-    # Resolve the FINAL slug from the journal. The spec-writer may RENAME the
-    # change (a spec-phase self-resume edge), so `change_wt.name` captured at
-    # startup is the PRE-rename slug and the live worktree (with events.jsonl)
-    # was renamed/removed mid-run — the journal is keyed under the final slug.
-    # Exactly one change ran here.
-    journaled_slugs = journal.journal_slugs(tmp_path)
-    assert len(journaled_slugs) == 1, (
-        f"expected exactly one journaled change, got {journaled_slugs} "
-        f"(startup slug was {slug!r})"
+    # Resolve the change id from the journal. The id is immutable, so it equals
+    # the startup worktree name, but read it back from the journal anyway to
+    # assert exactly one change ran here. The journal is keyed under the id.
+    journaled_ids = journal.journal_ids(tmp_path)
+    assert len(journaled_ids) == 1, (
+        f"expected exactly one journaled change, got {journaled_ids} "
+        f"(startup id was {slug!r})"
     )
-    slug = journaled_slugs[0]
+    slug = journaled_ids[0]
 
     # The worktree was removed at merge; completion status lives in the journal.
     state_raw = journal.journal_show(tmp_path, slug, "state.json")

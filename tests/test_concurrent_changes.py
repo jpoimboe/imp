@@ -17,8 +17,8 @@ from tests.conftest import _git, _seed_control
 def test_two_changes_isolated(tmp_path: Path) -> None:
     """Two concurrent worktrees see only their own files."""
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="A", slug="alpha", base_branch="main")
-    b = Change.create(tmp_path, title="B", slug="beta", base_branch="main")
+    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
     (a.project_root / "a.txt").write_text("a")
     (b.project_root / "b.txt").write_text("b")
     assert not (a.project_root / "b.txt").exists()
@@ -28,8 +28,8 @@ def test_two_changes_isolated(tmp_path: Path) -> None:
 def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
     """Two changes merge in sequence; the second picks up what the first committed."""
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="A", slug="alpha", base_branch="main")
-    b = Change.create(tmp_path, title="B", slug="beta", base_branch="main")
+    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
     for ch, fn in ((a, "a.txt"), (b, "b.txt")):
         (ch.project_root / fn).write_text(fn)
         _git(ch.project_root, "add", "-A")
@@ -47,7 +47,7 @@ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
 def test_add_a_inside_worktree_ignores_imp_state(tmp_path: Path) -> None:
     """git add -A inside a worktree must NOT stage .imp/ files."""
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X", slug="iso", base_branch="main")
+    ch = Change.create(tmp_path, title="X", change_id="iso", base_branch="main")
     (ch.project_root / "src.txt").write_text("code")
     _git(ch.project_root, "add", "-A")
     staged = _git(ch.project_root, "diff", "--cached", "--name-only").stdout
@@ -59,8 +59,8 @@ def test_per_change_lock_is_exclusive_but_cross_change_is_not(tmp_path: Path) ->
     from imp.engine.state import LockHeld, ProjectLock
 
     _seed_control(tmp_path)
-    a = Change.create(tmp_path, title="A", slug="alpha", base_branch="main")
-    b = Change.create(tmp_path, title="B", slug="beta", base_branch="main")
+    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
     with ProjectLock(a.change_dir / "lock").acquire():
         # Same lock file: must raise LockHeld (timeout=0 → immediate)
         with pytest.raises(LockHeld), ProjectLock(a.change_dir / "lock").acquire(timeout=0.2):
@@ -77,7 +77,7 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
 
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))  # type: ignore[call-arg]
     _seed_two_step_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="spine", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="spine", base_branch="main")
     (ch.project_root / "out.txt").write_text("done")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "work")

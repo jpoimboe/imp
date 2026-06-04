@@ -55,6 +55,7 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
     env = overlay_engine_env(
         os.environ,
         engine_env(project_root=ctx.project_root,
+                   change_id=ctx.change_context.id if ctx.change_context else "",
                    change_slug=ctx.change_context.slug if ctx.change_context else "",
                    change_title=ctx.change_context.title if ctx.change_context else "",
                    lint_command=ctx.lint_command,

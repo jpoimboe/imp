@@ -69,7 +69,7 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
     change = Change.create(
-        tmp_path, title="live-cc", slug="live-cc", base_branch="main")
+        tmp_path, title="live-cc", change_id="live-cc", base_branch="main")
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED

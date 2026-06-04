@@ -1,5 +1,5 @@
-"""Change lifecycle (spec §3, §5): slug identity, worktree creation, state
-home inside the worktree at <worktree>/.imp/change/."""
+"""Change lifecycle (spec §3, §5): immutable id identity, derived slug, worktree
+creation, state home inside the worktree at <worktree>/.imp/change/."""
 
 from __future__ import annotations
 
@@ -17,13 +17,19 @@ from imp.engine.types import SourceLoc
 
 @dataclass
 class Change:
-    slug: str
-    title: str
+    id: str                      # immutable identity (spec §1), minted at imp new
+    title: str                   # mutable human name
     base_branch: str
     control_root: Path
     project_root: Path           # the worktree
     change_dir: Path             # <worktree>/.imp/change
-    auto_titled: bool = False    # provisional random slug (renamable in spec phase)
+
+    @property
+    def slug(self) -> str:
+        """Derived display name (spec filename + human output ONLY — never a path
+        or ref). `id[:10]` is the fixed-width YYYY-MM-DD prefix of the id."""
+        from imp.engine.slug import dated_slug
+        return dated_slug(self.title, date=self.id[:10])
 
     @property
     def workflow_dir(self) -> Path:
@@ -42,13 +48,12 @@ class Change:
 
     @classmethod
     def create(
-        cls, control_root: Path, *, title: str, slug: str, base_branch: str,
-        auto_titled: bool = False,
+        cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
     ) -> Change:
-        """Create branch+worktree (caller has already verified the slug is free
-        and the gitignore precondition holds), then seed internal state inside
-        the worktree. May raise worktree.BranchExists on a slug race."""
-        wt_path = worktree.create_worktree(control_root, slug, base_branch)
+        """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
+        internal state inside the worktree. Raises worktree.BranchExists on the
+        (effectively impossible) id collision — the caller reports a clean error."""
+        wt_path = worktree.create_worktree(control_root, change_id, base_branch)
         change_dir = wt_path / ".imp" / "change"
         change_dir.mkdir(parents=True)
 
@@ -59,8 +64,7 @@ class Change:
         (change_dir / "state").mkdir()
 
         (change_dir / "change.json").write_text(json.dumps({
-            "slug": slug, "title": title, "base_branch": base_branch,
-            "auto_titled": auto_titled,
+            "id": change_id, "title": title, "base_branch": base_branch,
             "created_at": datetime.now(UTC).isoformat(),
         }, indent=2, sort_keys=True))
 
@@ -73,35 +77,33 @@ class Change:
         )
         flat = workflow.flat_steps()
         State(
-            id=slug, step=flat[0].name if flat else None, step_attempt=0,
+            id=change_id, step=flat[0].name if flat else None, step_attempt=0,
             status="running",
             vars=apply_var_overrides(workflow.vars, config.var_overrides),
             loop_counts={},
         ).save(change_dir / "state")
 
         change = cls(
-            slug=slug, title=title, base_branch=base_branch,
+            id=change_id, title=title, base_branch=base_branch,
             control_root=control_root, project_root=wt_path, change_dir=change_dir,
-            auto_titled=auto_titled,
         )
         change.event_log().append(
             agent_id=None, type="change_created",
-            payload={"slug": slug, "title": title},
+            # Carries BOTH id (new canonical key) and the derived slug (the
+            # narrative renderers read payload["slug"] — keep emitting it). [item 12]
+            payload={"id": change_id, "slug": change.slug, "title": title},
         )
         return change
 
     @classmethod
-    def load(cls, control_root: Path, slug: str) -> Change:
-        # .resolve() to match Change.create (create_worktree returns a resolved
-        # path); otherwise a symlinked control_root yields differently-normalized
-        # project_root between create and load.
-        wt_path = (control_root / ".imp" / "worktrees" / slug).resolve()
+    def load(cls, control_root: Path, change_id: str) -> Change:
+        # .resolve() to match create (create_worktree returns a resolved path).
+        wt_path = (control_root / ".imp" / "worktrees" / change_id).resolve()
         change_dir = wt_path / ".imp" / "change"
         if not change_dir.is_dir():
-            raise LoadError(f"no such Change {slug!r}", SourceLoc(file=change_dir, line=1))
+            raise LoadError(f"no such Change {change_id!r}", SourceLoc(file=change_dir, line=1))
         meta = json.loads((change_dir / "change.json").read_text())
         return cls(
-            slug=meta["slug"], title=meta["title"], base_branch=meta["base_branch"],
+            id=meta["id"], title=meta["title"], base_branch=meta["base_branch"],
             control_root=control_root, project_root=wt_path, change_dir=change_dir,
-            auto_titled=meta.get("auto_titled", False),
         )

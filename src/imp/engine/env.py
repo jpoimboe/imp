@@ -24,6 +24,7 @@ from pathlib import Path
 # `overlay_engine_env` to merge, not a raw dict spread.
 ENGINE_ENV_VARS = frozenset({
     "IMP_PROJECT_ROOT",
+    "IMP_CHANGE_ID",
     "IMP_CHANGE_SLUG",
     "IMP_CHANGE_TITLE",
     "IMP_LINT_COMMAND",
@@ -61,7 +62,7 @@ def overlay_engine_env(
 
 
 def engine_env(
-    *, project_root: Path, change_slug: str, change_title: str,
+    *, project_root: Path, change_id: str, change_slug: str, change_title: str,
     lint_command: str | None = None,
     test_command: str | None = None,
 ) -> dict[str, str]:
@@ -69,7 +70,11 @@ def engine_env(
 
     Variables:
         IMP_PROJECT_ROOT  — absolute path of the project root on the host.
-        IMP_CHANGE_SLUG   — URL-safe identifier for the change (e.g. "add-oauth").
+        IMP_CHANGE_ID     — the stable, immutable Change identity; hook authors
+                            MUST key on this.
+        IMP_CHANGE_SLUG   — display-only derived name; MAY change mid-session on a
+                            title rename. Do not key automation on it; use
+                            IMP_CHANGE_ID.
         IMP_CHANGE_TITLE  — human-readable title for the change.
         IMP_LINT_COMMAND  — optional lint-clean gate command, injected only when
                             configured. A falsy command (None or empty string) is
@@ -87,6 +92,7 @@ def engine_env(
     """
     env = {
         "IMP_PROJECT_ROOT": str(project_root),
+        "IMP_CHANGE_ID": change_id,
         "IMP_CHANGE_SLUG": change_slug,
         "IMP_CHANGE_TITLE": change_title,
     }

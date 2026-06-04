@@ -40,7 +40,7 @@ def test_log_falls_back_to_journal_after_merge(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Done Thing", slug="done-thing", base_branch="main")
+    Change.create(tmp_path, title="Done Thing", change_id="done-thing", base_branch="main")
     _complete_and_journal(tmp_path, "done-thing")
     # Worktree is gone: Change.load now raises; log must use the journal.
     assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
@@ -77,7 +77,7 @@ def test_log_no_slug_falls_through_to_journal(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Only One", slug="only-one", base_branch="main")
+    Change.create(tmp_path, title="Only One", change_id="only-one", base_branch="main")
     _complete_and_journal(tmp_path, "only-one")
 
     monkeypatch.chdir(tmp_path)
@@ -99,8 +99,8 @@ def test_status_shows_completed_section_from_journal(
 
     _seed_control(tmp_path)
     # One in-flight, one merged-and-journaled.
-    Change.create(tmp_path, title="Live One", slug="live-one", base_branch="main")
-    Change.create(tmp_path, title="Gone One", slug="gone-one", base_branch="main")
+    Change.create(tmp_path, title="Live One", change_id="live-one", base_branch="main")
+    Change.create(tmp_path, title="Gone One", change_id="gone-one", base_branch="main")
     _complete_and_journal(tmp_path, "gone-one")
 
     monkeypatch.chdir(tmp_path)
@@ -128,7 +128,7 @@ def test_status_inflight_takes_precedence_over_journal(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Both", slug="both", base_branch="main")
+    ch = Change.create(tmp_path, title="Both", change_id="both", base_branch="main")
     # Journal it but DON'T remove the worktree (simulates the crash window).
     worktree.journal_commit(tmp_path, "both", {
         "events.jsonl": ch.events_path,
@@ -156,7 +156,7 @@ def test_status_skips_malformed_journal_entry(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Good", slug="good", base_branch="main")
+    Change.create(tmp_path, title="Good", change_id="good", base_branch="main")
     _complete_and_journal(tmp_path, "good")
     # A second journaled slug whose state.json is not valid JSON.
     bad = tmp_path / ".imp" / "bad-state.json"

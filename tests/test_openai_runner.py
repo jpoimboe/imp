@@ -57,7 +57,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            slug="test", title="Test", project_root=tmp_path,
+            id="test", slug="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         interactive=interactive, transcript_dir=tmp_path / "step",
@@ -519,7 +519,7 @@ async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
-    """A different change slug yields a different prompt_cache_key, so two
+    """A different change id yields a different prompt_cache_key, so two
     concurrent changes running the same step don't share a routing slot."""
     from dataclasses import replace
 
@@ -534,7 +534,7 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
     inv = replace(
         inv,
         change_context=ChangeContext(
-            slug="test-2", title="Test 2", project_root=tmp_path,
+            id="test-2", slug="test-2", title="Test 2", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )
