@@ -443,7 +443,7 @@ async def _route_agent(
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = False
-        opening = wrapper_text or "begin"                  # fresh-seed via initial_messages
+        opening = wrapper_text or "<imp:begin/>"           # fresh-seed via initial_messages
         retry_wrapper: str | None = None
     else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)

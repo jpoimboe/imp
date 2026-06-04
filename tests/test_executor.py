@@ -986,6 +986,50 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.mark.anyio
+async def test_fresh_start_seeds_initial_messages_with_imp_begin_tag(
+    tmp_path: Path,
+) -> None:
+    """On a fresh agent step (no resume marker, no wrapper_text), the executor
+    seeds the runner with exactly one user message whose sole TextBlock is the
+    literal `<imp:begin/>` engine tag (replacing the legacy `"begin"` opener)."""
+    from imp.providers import resolve
+
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    captured: dict[str, AgentInvocation] = {}
+
+    class _CapRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            captured["inv"] = invocation
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _CapProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _CapRunner:
+            return _CapRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _CapProvider(model))
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    inv = captured["inv"]
+    assert len(inv.initial_messages) == 1, inv.initial_messages
+    msg = inv.initial_messages[0]
+    assert msg.role == "user"
+    assert len(msg.content) == 1
+    assert msg.content[0].text == "<imp:begin/>"
+
+
 def _seed_back_edge_workflow(
     root: Path, verb: str, feedback: str | None = None
 ) -> Change:
