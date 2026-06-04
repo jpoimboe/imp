@@ -127,28 +127,28 @@ def test_optional_enum_gets_null_appended() -> None:
         "type": "object", "additionalProperties": False,
         "properties": {
             "subagent_name": {"type": "string"},
-            "model_tier": {"type": "string", "enum": ["fast", "powerful"]},
+            "tier": {"type": "string", "enum": ["low", "high"]},
         },
         "required": ["subagent_name"],   # model_tier optional
     }
     out = to_openai_strict(src)
-    tier = out["properties"]["model_tier"]
+    tier = out["properties"]["tier"]
     assert tier["type"] == ["string", "null"]
     assert None in tier["enum"]
-    assert tier["enum"] == ["fast", "powerful", None]
+    assert tier["enum"] == ["low", "high", None]
 
 
 def test_nullable_enum_append_idempotent() -> None:
     """Running the transform twice does not append null twice."""
     src = {
         "type": "object", "additionalProperties": False,
-        "properties": {"model_tier": {"type": "string", "enum": ["fast"]}},
+        "properties": {"tier": {"type": "string", "enum": ["low"]}},
         "required": [],
     }
     once = to_openai_strict(src)
     twice = to_openai_strict(once)
     assert twice == once
-    assert once["properties"]["model_tier"]["enum"] == ["fast", None]
+    assert once["properties"]["tier"]["enum"] == ["low", None]
 
 
 def _is_nullable(prop: dict) -> bool:

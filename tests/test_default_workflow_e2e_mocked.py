@@ -70,11 +70,11 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
         "slug": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
-    configured_roles: list[str] = []
+    configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_roles = load_config(root).role_names()
+        configured_tiers = load_config(root).tier_names()
 
-    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    workflow = load_workflow(dest_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     State(
         slug=slug, step=flat[0].name if flat else None, step_attempt=0,
@@ -118,21 +118,15 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         shell.write_text("#!/bin/sh\nexit 0\n")
         shell.chmod(0o755)
 
-    # config.yaml: a single role for every model_role used by the workflow.
+    # config.yaml: a single role for every tier used by the workflow.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     cfg = tmp_path / "imp" / "config.yaml"
     cfg_content = (
-        "roles:\n"
-        "  default:       {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  spec:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  spec_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  plan:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  plan_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  task_lead:     {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  code_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  fast:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  balanced:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
-        "  powerful:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "providers: [anthropic]\n"
+        "tiers:\n"
+        "  low:    {anthropic: claude-sonnet-4-6}\n"
+        "  medium: {anthropic: claude-sonnet-4-6}\n"
+        "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
     cfg.write_text(cfg_content)
 
@@ -268,10 +262,8 @@ async def test_full_default_workflow_completes_with_canned_openai(
     change = _seed_default_workflow(tmp_path)
     # Rewrite config to OpenAI provider for every role.
     cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(cfg.read_text().replace(
-        "{provider: anthropic, model: claude-sonnet-4-6}",
-        "{provider: openai, model: gpt-4o-mini}",
-    ))
+    cfg.write_text(cfg.read_text().replace("anthropic", "openai")
+        .replace("claude-sonnet-4-6", "gpt-4o-mini"))
 
     default_completion = resp_response(
         resp_function_call("c0", "complete_step", json.dumps({
@@ -330,10 +322,8 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
 
     change = _seed_default_workflow(tmp_path)
     cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(cfg.read_text().replace(
-        "{provider: anthropic, model: claude-sonnet-4-6}",
-        "{provider: claude_code, model: claude-sonnet-4-5}",
-    ))
+    cfg.write_text(cfg.read_text().replace("anthropic", "claude_code")
+        .replace("claude-sonnet-4-6", "claude-sonnet-4-5"))
 
     # The CC fake is per-step; each runner spawns a fresh client. Use a
     # factory that returns the same scripted reply for every new client.

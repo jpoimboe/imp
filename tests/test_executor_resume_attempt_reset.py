@@ -34,11 +34,11 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
         "slug": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
-    configured_roles: list[str] = []
+    configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_roles = load_config(root).role_names()
+        configured_tiers = load_config(root).tier_names()
 
-    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    workflow = load_workflow(dest_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     State(
         slug=slug, step=flat[0].name if flat else None, step_attempt=0,
@@ -132,7 +132,7 @@ def _seed_resume_loop_workflow(root: Path) -> Change:
         "    steps:\n"
         "      - name: writer\n"
         "        file: agents/writer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        rules:\n"
         "          - {if: 'go_on', goto: done}\n"
         "          - {else: true, continue: true}\n"
@@ -144,7 +144,7 @@ def _seed_resume_loop_workflow(root: Path) -> Change:
     )
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     return _make_change(root)
 
@@ -236,10 +236,10 @@ async def test_resumed_step_persistent_error_still_terminates(
         "    steps:\n"
         "      - name: writer\n"
         "        file: agents/writer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "      - name: checker\n"
         "        file: agents/checker.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "      - name: route\n"
         "        rules:\n"
         "          - {if: 'resumed', continue: true}\n"
@@ -247,7 +247,7 @@ async def test_resumed_step_persistent_error_still_terminates(
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
 

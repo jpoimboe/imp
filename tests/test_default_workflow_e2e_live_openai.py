@@ -75,10 +75,14 @@ async def test_one_step_walk_against_openai(
         "phases:\n"
         "  - name: a\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, model_role: default}\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: openai, model: gpt-4o-mini}]\n"
+        "providers: [openai]\n"
+        "tiers:\n"
+        "  low:    {openai: gpt-4o-mini}\n"
+        "  medium: {openai: gpt-4o-mini}\n"
+        "  high:   {openai: gpt-4o-mini}\n"
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")

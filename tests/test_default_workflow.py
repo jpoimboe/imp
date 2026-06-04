@@ -23,13 +23,9 @@ def test_default_workflow_loads_with_default_roles(tmp_path: Path) -> None:
     # Stage the workflow into a tmp dir to ensure no .imp/ ambient leakage
     staged = tmp_path / "wf"
     shutil.copytree(default_workflow_dir(), staged)
-    # Roles referenced by the default workflow
-    configured = {
-        "default", "spec", "spec_review", "plan", "plan_review", "task_lead",
-        "code", "code_review",
-        "fast", "balanced", "powerful",
-    }
-    workflow = load_workflow(staged, configured_roles=configured)
+    # Tiers referenced by the default workflow
+    configured = {"low", "medium", "high"}
+    workflow = load_workflow(staged, configured_tiers=configured)
     assert workflow.name == "feature"
     assert [p.name for p in workflow.phases] == [
         "spec", "plan", "implement", "review", "merge",
@@ -40,6 +36,6 @@ def test_default_workflow_fails_with_missing_role(tmp_path: Path) -> None:
     staged = tmp_path / "wf"
     shutil.copytree(default_workflow_dir(), staged)
     with pytest.raises(LoadErrors) as exc:
-        load_workflow(staged, configured_roles=frozenset({"default"}))
+        load_workflow(staged, configured_tiers=frozenset({"medium"}))
     msg = str(exc.value)
-    assert "spec" in msg or "code" in msg  # at least one undefined role surfaces
+    assert "low" in msg or "high" in msg  # at least one undefined tier surfaces

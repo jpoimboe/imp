@@ -2,7 +2,7 @@
 """Cross-vendor subagent seam (real runner).
 
 A real AnthropicAgentRunner parent dispatches a `task` to a `reviewer` subagent
-whose model_role (`code_review`) resolves to openai. The child must run on the
+whose tier (`medium`) resolves to openai. The child must run on the
 openai recording runner (vendor B != the anthropic parent), and its agent_output
 must flow back as the parent's task tool_result.
 
@@ -14,7 +14,7 @@ then complete_step) — adding a third (child) turn would leave it unconsumed an
 desync the parent.
 
 Fails if any single hop regresses: resolution not collecting the subagent role,
-dispatch_task not reading ctx.resolved_roles, or spawn_subagent_via_registry not
+dispatch_task not reading ctx.resolved_tiers, or spawn_subagent_via_registry not
 building the child from the registry by provider_name.
 """
 from __future__ import annotations
@@ -81,14 +81,14 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
 ) -> None:
     (tmp_path / "art").mkdir()
 
-    # Delta 3: reviewer subagent declares model_role code_review (-> openai).
+    # Delta 3: reviewer subagent declares tier medium (-> openai).
     reviewer_def = AgentDef(
         name="reviewer", description="",
         tools=frozenset({"complete_step"}), subagents=(),
         output_schema=_status_schema(),
         prompt_template_source="review",
         source_path=Path("r.md"), source=_SRC,
-        model_role="code_review",
+        tier="medium",
     )
     parent_def = AgentDef(
         name="coder", description="",
@@ -134,11 +134,11 @@ async def test_cross_vendor_subagent_runs_on_child_vendor(
         agent_id="step:p/s",
         event_log=log,
         subagent_defs={"reviewer": reviewer_def},
-        # Delta 2: parent sets resolved_roles so the subagent's code_review role
+        # Delta 2: parent sets resolved_tiers so the subagent's medium tier
         # places the child on openai.
-        resolved_roles={
-            "code": ProviderModel("anthropic", "claude-sonnet-4-6"),
-            "code_review": ProviderModel("openai", "gpt-5.2"),
+        resolved_tiers={
+            "low": ProviderModel("anthropic", "claude-sonnet-4-6"),
+            "medium": ProviderModel("openai", "gpt-5.2"),
         },
     )
 

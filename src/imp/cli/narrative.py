@@ -214,10 +214,10 @@ class FallbackLine:
 
 
 @dataclass
-class RolesResolvedNode:
-    """Run-level summary of once-per-run role resolution (the roles_resolved
-    event). Each row: {role, provider, model, differ_tier, differ_from}.
-    differ_tier/differ_from are None for unconstrained roles."""
+class TiersResolvedNode:
+    """Run-level summary of once-per-run tier resolution (the tiers_resolved
+    event). Each row: {tier, provider, model, differ_tier, differ_from}.
+    differ_tier/differ_from are None for unconstrained tiers."""
     rows: list[dict[str, Any]] = field(default_factory=list)
     collapsible = False
 
@@ -792,19 +792,27 @@ NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 
 
-def _h_roles_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Fires once at run start with agent_id=None, BEFORE any step_started, so the
     # step stack is empty and _append lands this at the workflow root.
-    roles = p.get("roles") or {}
+    # Payload: {"tiers": {tier: {provider, model, ...}}, "steps": {step: {...}}}
+    tiers = p.get("tiers") or {}
     rows = [
-        {"role": role, "provider": d.get("provider"), "model": d.get("model"),
+        {"tier": tier, "provider": d.get("provider"), "model": d.get("model"),
          "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from")}
-        for role, d in roles.items()
+        for tier, d in tiers.items()
     ]
-    self._append(RolesResolvedNode(rows=rows))
+    # Also add step overrides (steps with differ_from resolution)
+    steps = p.get("steps") or {}
+    for step_name, d in steps.items():
+        rows.append({
+            "tier": step_name, "provider": d.get("provider"), "model": d.get("model"),
+            "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from"),
+        })
+    self._append(TiersResolvedNode(rows=rows))
 
 
-NarrativeBuilder._HANDLERS["roles_resolved"] = _h_roles_resolved
+NarrativeBuilder._HANDLERS["tiers_resolved"] = _h_tiers_resolved
 
 
 def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

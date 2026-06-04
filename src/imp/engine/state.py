@@ -53,29 +53,32 @@ class State:
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
     pending_rename: str | None = None
-    resolved_roles: dict[str, ProviderModel] | None = None
-    model_tiers: tuple[str, ...] | None = None
+    resolved_tiers: dict[str, ProviderModel] | None = None
+    resolved_steps: dict[str, ProviderModel] | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
         from imp.providers.config import ProviderModel  # local: avoid import cycle
         data = json.loads((state_dir / "state.json").read_text())
         cur = data.pop("current_step", None)
-        raw_rr = data.pop("resolved_roles", None)
+        raw_rt = data.pop("resolved_tiers", None)
         # Preserve None (not yet resolved) vs a dict (resolved). A `... or {}`
         # would map null→{}, defeating the executor's `is None` compute-if-absent
         # check. None still avoids the `.items()`-on-None crash because we guard.
-        resolved_roles = (
-            {role: ProviderModel(**pm) for role, pm in raw_rr.items()}
-            if raw_rr is not None else None
+        resolved_tiers = (
+            {tier: ProviderModel(**pm) for tier, pm in raw_rt.items()}
+            if raw_rt is not None else None
         )
-        raw_mt = data.pop("model_tiers", None)
-        model_tiers = tuple(raw_mt) if raw_mt is not None else None
+        raw_rs = data.pop("resolved_steps", None)
+        resolved_steps = (
+            {step: ProviderModel(**pm) for step, pm in raw_rs.items()}
+            if raw_rs is not None else None
+        )
         return cls(
             **data,
             current_step=CurrentStep.from_dict(cur) if cur else None,
-            resolved_roles=resolved_roles,
-            model_tiers=model_tiers,
+            resolved_tiers=resolved_tiers,
+            resolved_steps=resolved_steps,
         )
 
     def save(self, state_dir: Path) -> None:
@@ -93,13 +96,15 @@ class State:
             "retry_feedback": self.retry_feedback,
             "resume_pending": self.resume_pending,
             "pending_rename": self.pending_rename,
-            "resolved_roles": (
-                {r: {"provider": pm.provider, "model": pm.model}
-                 for r, pm in self.resolved_roles.items()}
-                if self.resolved_roles is not None else None
+            "resolved_tiers": (
+                {t: {"provider": pm.provider, "model": pm.model}
+                 for t, pm in self.resolved_tiers.items()}
+                if self.resolved_tiers is not None else None
             ),
-            "model_tiers": (
-                list(self.model_tiers) if self.model_tiers is not None else None
+            "resolved_steps": (
+                {s: {"provider": pm.provider, "model": pm.model}
+                 for s, pm in self.resolved_steps.items()}
+                if self.resolved_steps is not None else None
             ),
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)

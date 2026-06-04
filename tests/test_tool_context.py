@@ -122,19 +122,19 @@ def test_tool_context_has_event_log_field(tmp_path) -> None:
     assert ctx.event_log is sentinel
 
 
-def test_tool_context_resolved_roles_defaults_none(tmp_path):
+def test_tool_context_resolved_tiers_defaults_none(tmp_path):
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "e.jsonl")
-    assert ctx.resolved_roles is None
+    assert ctx.resolved_tiers is None
 
 
-def test_tool_context_model_tiers_defaults_empty(tmp_path) -> None:
+def test_tool_context_tiers_defaults_empty(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
-    assert ctx.model_tiers == ()
-    ctx.model_tiers = ("fast", "powerful")
-    assert ctx.model_tiers == ("fast", "powerful")
+    assert ctx.tiers == ()
+    ctx.tiers = ("low", "high")
+    assert ctx.tiers == ("low", "high")

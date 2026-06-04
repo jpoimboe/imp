@@ -46,11 +46,11 @@ class ToolContext:
     event_log: Any = None
     # Subagent dispatch hook (filled by runner; signature defined in subagents tool).
     spawn_subagent: Any = None
-    # role → ProviderModel; copied from invocation.resolved_roles by the runner.
-    resolved_roles: dict[str, Any] | None = None
-    # The run's effective model-tier menu; copied from invocation.model_tiers by
+    # tier → ProviderModel; copied from invocation.resolved_tiers by the runner.
+    resolved_tiers: dict[str, Any] | None = None
+    # The run's effective tier menu; copied from invocation.tiers by
     # the provider. dispatch_task reads it only to name valid tiers on error.
-    model_tiers: tuple[str, ...] = ()
+    tiers: tuple[str, ...] = ()
     # Depth of THIS invocation in the subagent tree (0 = top-level step).
     # Each provider copies it from invocation.subagent_depth; dispatch_task
     # reads it to compute the child's depth and enforce MAX_SUBAGENT_DEPTH.

@@ -291,12 +291,12 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                         *pal.NODE_COLORS["error"], gutters=gutters)
         return
 
-    if isinstance(node, nv.RolesResolvedNode):
-        yield _line("roles resolved:", depth, color, gutters=gutters)
-        col_w = max((len(r["role"]) for r in node.rows), default=0)  # role-name column
+    if isinstance(node, nv.TiersResolvedNode):
+        yield _line("tiers resolved:", depth, color, gutters=gutters)
+        col_w = max((len(r["tier"]) for r in node.rows), default=0)  # tier-name column
         for r in node.rows:
-            # two-space sub-indent under the "roles resolved:" header
-            line = f"  {r['role']:<{col_w}} → {r['provider']}/{r['model']}"
+            # two-space sub-indent under the "tiers resolved:" header
+            line = f"  {r['tier']:<{col_w}} → {r['provider']}/{r['model']}"
             if r["differ_tier"] is not None:
                 label = _DIFFER_LABELS.get(r["differ_tier"], "?")
                 line += (f"   (differ from {r['differ_from']}: "

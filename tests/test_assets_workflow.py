@@ -60,28 +60,30 @@ def test_default_workflow_has_code_review_constraint():
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
-    # code_review must differ from fast (the implementer subagent tier) for
-    # cross-provider review; in the feature workflow the coder runs at the
-    # `fast` tier, so the reviewer is constrained against `fast` not `code`.
-    assert wf.model_rules["code_review"].differ_provider_from == "fast"
+    # code-reviewer must differ from task-lead (the implementer step tier) for
+    # cross-provider review; the reviewer is constrained to differ from task-lead.
+    by = {s.name: s for s in wf.flat_steps()}
+    assert by["code-reviewer"].differ_from == "task-lead"
 
 
-def test_default_code_reviewer_step_declares_model_role():
-    # In the feature workflow model_role is assigned at the step level in
+def test_default_code_reviewer_step_declares_tier():
+    # In the feature workflow tier is assigned at the step level in
     # workflow.yaml, not in the agent frontmatter.  Verify the step-level
     # declaration is present and correct so code_review diversity wiring works.
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["code-reviewer"].model_role == "code_review"
+    assert by["code-reviewer"].tier == "high"
 
 
-def test_default_workflow_declares_tier_menu() -> None:
+def test_default_workflow_loads() -> None:
+    # Verify the default workflow loads without errors.
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
-    assert wf.model_tiers == ("fast", "balanced", "powerful")
+    assert wf.name == "feature"
+    assert len(wf.flat_steps()) > 0
 
 
 def test_spec_writer_declares_complexity_output() -> None:

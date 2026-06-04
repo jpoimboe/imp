@@ -218,7 +218,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
     if "task" in invocation.agent_def.tools:
-        out["task"] = make_task_tool(invocation.model_tiers)
+        out["task"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     return out
@@ -311,8 +311,8 @@ def _wrap_one(
                         "subagent_name": args["subagent_name"],
                         "task_description": args["task_description"],
                     }
-                    if args.get("model_tier"):
-                        task_input["model_tier"] = args["model_tier"]
+                    if args.get("tier"):
+                        task_input["tier"] = args["tier"]
                     tc_ev = ctx.event_log.append_tool_call(
                         agent_id=state.agent_id,
                         block=ToolUseBlock(id=tu_id, name="task", input=task_input))
@@ -320,7 +320,7 @@ def _wrap_one(
                 result = await dispatch_task(
                     ctx, args["subagent_name"], args["task_description"],
                     tool_call_event_id=tc_event_id,
-                    model_tier=args.get("model_tier"),
+                    tier=args.get("tier"),
                 )
                 return _tool_response(result, is_error=False)
             if name == "complete_step":
@@ -749,10 +749,10 @@ class ClaudeCodeAgentRunner:
         ctx.change_context = invocation.change_context
         ctx.change_state = invocation.change_state
         ctx.spawn_subagent = spawn_subagent_via_registry
-        ctx.resolved_roles = invocation.resolved_roles
+        ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
         ctx.coordinator = invocation.coordinator
-        ctx.model_tiers = invocation.model_tiers
+        ctx.tiers = invocation.tiers
         ctx.lint_command = invocation.lint_command
         ctx.test_command = invocation.test_command
         ctx.non_interactive = invocation.non_interactive

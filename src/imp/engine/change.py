@@ -69,7 +69,7 @@ class Change:
 
         config = load_config(control_root)
         workflow = load_workflow(
-            change_dir / "workflow", configured_roles=config.role_names()
+            change_dir / "workflow", configured_tiers=config.tier_names()
         )
         flat = workflow.flat_steps()
         State(
