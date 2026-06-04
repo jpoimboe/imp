@@ -71,6 +71,8 @@ class ChangeContext:
     title: str
     project_root: Path
     workflow_dir: Path
+    id: str = ""   # stable Change identity (spec §1). Defaulted so test
+    # constructors stay green; production sites (executor, subagents) pass it.
 
 
 @dataclass(frozen=True, slots=True)
