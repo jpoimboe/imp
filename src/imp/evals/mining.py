@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,15 @@ from pathlib import Path
 # "Code review ..." (spec mining step 1). subagent_type is the stronger signal
 # when present.
 _REVIEW_DESC = re.compile(r"\b(spec|quality|code)\s+review\b", re.I)
+
+# add near the other regexes (BOTH cases, optional `_SHA`/` SHA` suffix, colon
+# or equals separator). The SHA suffix is OPTIONAL so a bare `base:`/`head:` label
+# also matches. Only HEAD/BASE — the "Commit SHA" alt was a foot-gun from the
+# de-scoped bash-result path and matches truncated 8-hex SHAs in review prose.
+# Leading \b anchors keep a bare `base:`/`head:` from matching inside `database:`
+# / `ahead:` followed by a hex value (the optional-SHA suffix widened that risk).
+_HEAD_SHA = re.compile(r"\bHEAD(?:[_ ]?SHA)?\s*[:=]\s*`?([0-9a-f]{7,40})", re.I)
+_BASE_SHA = re.compile(r"\bBASE(?:[_ ]?SHA)?\s*[:=]\s*`?([0-9a-f]{7,40})", re.I)
 
 
 @dataclass(frozen=True)
@@ -111,3 +121,41 @@ def discover_episodes(session_file: Path) -> list[RawEpisode]:
             )
         )
     return episodes
+
+
+def extract_shas(dispatch_prompt: str) -> tuple[str | None, str | None]:
+    """Return (base_sha, head_sha) from the prompt's BASE_SHA:/HEAD_SHA: labels.
+    Either may be None."""
+    base_m = _BASE_SHA.search(dispatch_prompt)
+    head_m = _HEAD_SHA.search(dispatch_prompt)
+    return (
+        base_m.group(1) if base_m else None,
+        head_m.group(1) if head_m else None,
+    )
+
+
+def reconstruct_diff(control_root: Path, base_sha: str, head_sha: str) -> str:
+    """`git diff base..head` against the live repo — the verified recovery
+    mechanism (the diff is NOT in the log). Returns '' if either SHA does not
+    resolve (rebased/orphaned history; caller drops + logs as 'tree_unrecon').
+
+    Two-dot `A..B` here is a TREE DELTA (identical to `git diff A B` — verified;
+    `..` only means a commit RANGE for `git log`, not `git diff`). So a
+    multi-commit task reconstructs the full cumulative base->head change and
+    applies cleanly onto a base worktree — no `head~1..head` needed.
+    `errors='replace'` keeps a binary-file diff from killing the whole mine run
+    with UnicodeDecodeError; such a diff may then fail `git apply` and be logged
+    as tree_unreconstructable, which is correct."""
+    for sha in (base_sha, head_sha):
+        if subprocess.run(
+            ["git", "cat-file", "-e", sha], cwd=control_root, capture_output=True
+        ).returncode != 0:
+            return ""
+    proc = subprocess.run(
+        ["git", "diff", f"{base_sha}..{head_sha}"],
+        cwd=control_root,
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    return proc.stdout if proc.returncode == 0 else ""
