@@ -27,6 +27,7 @@ FALSIFIABILITY_MARKERS = [
     (AGENTS_DIR / "plan-writer.md", "falsifiab"),                        # B: anti-transcription
     (SKILLS_DIR / "test-driven-development.md", "plan-echo"),            # A: anti-pattern 6
     (SKILLS_DIR / "test-driven-development.md", "authoritative oracle"), # D: oracle note
+    (SKILLS_DIR / "test-driven-development.md", "xfail"),                # E: xfail convention
 ]
 
 
