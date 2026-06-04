@@ -50,6 +50,23 @@ In `bash`, use **relative paths** from the project root, or `$IMP_PROJECT_ROOT`
 so it works — but prefer relative paths."""
 
 
+# Injected into the system prompt of EVERY agent (top-level or subagent),
+# unconditional on tool set. Documents the `<imp:begin/>` opener as an
+# engine-emitted signal — the executor seeds the first user-role message
+# with this literal tag (see executor._route_agent) rather than a fake
+# user "begin" prompt. Without this note the model sees an unfamiliar token
+# and has to infer intent; with it, the contract is documented where the
+# model reads.
+_ENGINE_SEED_NOTE = """\
+## Session start: `<imp:begin/>`
+
+Your first user-role message in this conversation is the literal token
+`<imp:begin/>`. It is emitted by the engine to open the turn — it is not
+a message a human user typed. Treat it as a signal to begin the work
+described in the rest of this system prompt; do not reply to it as if a
+user had addressed you, and do not quote it back."""
+
+
 @dataclass(frozen=True)
 class ErrorInfo:
     """The classified error that drove a fatal/backoff/retry decision, plumbed
@@ -124,6 +141,7 @@ def build_agent_invocation(
     body = rendered_system_prompt
     if "bash" in agent_def.tools:
         body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
+    body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
     system_prompt = f"{body}\n\n{instruction}"
     continuation_fn = build_continuation_fn(
         interactive=interactive,

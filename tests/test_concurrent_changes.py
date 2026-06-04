@@ -97,3 +97,41 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
         _git(tmp_path, "show", "refs/imp/journal:spine/change.json").returncode == 0
     )                                                            # journaled
     assert os.getcwd() == cwd_before                             # cwd restored
+
+
+def test_workflow_edits_isolated_between_changes(tmp_path: Path) -> None:
+    """Editing Change A's workflow agent leaves Change B's copy untouched —
+    each worktree resolves imp/workflows/default to its own checkout."""
+    _seed_control(tmp_path)
+    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
+    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+
+    a_agent = a.workflow_dir / "agents" / "stub.md"
+    b_agent = b.workflow_dir / "agents" / "stub.md"
+    before = b_agent.read_text()
+
+    a_agent.write_text(a_agent.read_text() + "\nEDITED IN A\n")
+
+    assert "EDITED IN A" in a_agent.read_text()
+    assert b_agent.read_text() == before
+
+
+def test_committed_workflow_edit_is_tracked_on_branch(tmp_path: Path) -> None:
+    """Editing + committing a Change's workflow agent produces a real tracked
+    diff on imp/<slug>. (In imp's own repo imp/workflows/default is a symlink, so
+    the tracked path is src/imp/assets/workflows/default/...; the test fixture
+    uses a real dir, so the path here is imp/workflows/default/...)."""
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X", change_id="ver", base_branch="main")
+
+    agent_md = ch.workflow_dir / "agents" / "stub.md"
+    agent_md.write_text(agent_md.read_text() + "\nVERSIONED EDIT\n")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "improve stub agent")
+
+    # The edit is a committed diff on the Change's branch...
+    show = _git(tmp_path, "show", "imp/ver:imp/workflows/default/agents/stub.md")
+    assert "VERSIONED EDIT" in show.stdout
+    # ...and is NOT on base.
+    base = _git(tmp_path, "show", "main:imp/workflows/default/agents/stub.md")
+    assert "VERSIONED EDIT" not in base.stdout

@@ -161,11 +161,16 @@ def test_skill_args_event_still_records_name_only(tmp_path: Path) -> None:
     assert loads[0]["payload"] == {"name": "refactor", "source": "human"}
 
 
-def test_blank_lines_bracket_the_prompt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_one_blank_line_before_prompt_zero_after(tmp_path: Path,
+                                                 capsys: pytest.CaptureFixture[str]) -> None:
+    """slash.ask_line_with_slash prints exactly one blank line BEFORE showing
+    the prompt and ZERO after the user submits. The post-submission newline is
+    supplied by prompt_toolkit terminating the `> …` line, and the unified
+    prose-adjacency rule (Tasks 4/7) inserts the separator before the next
+    agent block. Two stacked blanks around `> …` looked unbalanced."""
     from imp.cli.slash import ask_line_with_slash
     prompt = _FakePrompt(["hello"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeChange(tmp_path))
     assert line == "hello"
     out = capsys.readouterr().out
-    # exactly one blank line before the prompt and one after: print() + print()
-    assert out == "\n\n"
+    assert out == "\n"

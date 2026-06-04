@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import signal
 import sys
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -20,7 +22,7 @@ import anyio
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
-from imp.cli.palette import should_use_color
+from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
@@ -115,7 +117,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 _ask_line = make_stdin_reply_fn(args.default_reply)
             else:
                 prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                                editing_mode=_editing_mode(change.control_root))
+                                editing_mode=_editing_mode(change.control_root),
+                                color=should_use_color(sys.stdout))
 
                 async def _ask_line() -> str:
                     return await ask_line_with_slash(prompt, status, change)
@@ -255,7 +258,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 _ask_line = make_stdin_reply_fn(args.default_reply)
             else:
                 prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                                editing_mode=_editing_mode(change.control_root))
+                                editing_mode=_editing_mode(change.control_root),
+                                color=should_use_color(sys.stdout))
 
                 async def _ask_line() -> str:
                     return await ask_line_with_slash(prompt, status, change)
@@ -625,35 +629,75 @@ def _completed_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
     return rows
 
 
-_STATUS_HEADER = (
-    f"{'ID':<24} {'STATUS':<12} {'STEP':<18} {'LAST_ACTIVITY':<20} TITLE"
-)
+# STATUS cell colors mirror imp log's restraint — color only this cell,
+# leave the rest plain. Padding is computed against the un-colored status
+# text so the column edge holds when colors are on.
+_STATUS_COLORS: dict[str, tuple[str, ...]] = {
+    "running": ("green",),
+    "paused": ("cyan",),
+    "merge_blocked": ("yellow",),
+    "errored": ("bold", "red"),
+    "completed": ("gray",),
+}
 
 
-def _print_status_section(title: str, rows: list[tuple[str, str, str, str, str]],
-                          empty_msg: str) -> None:
-    print(title)
-    if rows:
-        print(_STATUS_HEADER)
-        for r in rows:
-            print(f"{r[0]:<24} {r[1]:<12} {r[2]:<18} {r[3]:<20} {r[4]}")
-    else:
-        print(empty_msg)
+def _render_status_table(
+    rows: list[tuple[str, str, str, str, str]],
+    *,
+    color_enabled: bool,
+) -> list[str]:
+    """Format pre-sorted rows into aligned table lines. Per-column widths are
+    `max(len(header), max(len(cell) for cell in column))` over the un-colored
+    cell text; only the STATUS value (not its trailing pad) is wrapped in
+    ANSI, so later columns hold their offset whether color is on or off."""
+    headers = ("ID", "STATUS", "STEP", "LAST_ACTIVITY", "TITLE")
+    # Compute widths for columns 0-3 only; TITLE is the terminal column and
+    # needs no padding.
+    widths = [
+        max(len(headers[i]), max((len(r[i]) for r in rows), default=0))
+        for i in range(4)
+    ]
+    lines: list[str] = [
+        f"{headers[0]:<{widths[0]}} "
+        f"{headers[1]:<{widths[1]}} "
+        f"{headers[2]:<{widths[2]}} "
+        f"{headers[3]:<{widths[3]}} "
+        f"{headers[4]}"
+    ]
+    for slug, status, step, last, title in rows:
+        status_cell = f"{status:<{widths[1]}}"
+        codes = _STATUS_COLORS.get(status, ())
+        if color_enabled and codes:
+            pad = " " * (widths[1] - len(status))
+            status_cell = ansi(status, *codes, enabled=True) + pad
+        lines.append(
+            f"{slug:<{widths[0]}} "
+            f"{status_cell} "
+            f"{step:<{widths[2]}} "
+            f"{last:<{widths[3]}} "
+            f"{title}"
+        )
+    return lines
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
     except worktree.PreconditionError:
-        _print_status_section("In-flight Changes", [], "No in-flight Changes.")
-        print()
-        _print_status_section("Completed Changes", [], "No completed Changes.")
+        print("No Changes.")
         return 0
-    _print_status_section("In-flight Changes", _status_rows(control),
-                          "No in-flight Changes.")
-    print()
-    _print_status_section("Completed Changes", _completed_rows(control),
-                          "No completed Changes.")
+    rows = _status_rows(control) + _completed_rows(control)
+    if not rows:
+        print("No Changes.")
+        return 0
+    # Sort rows by `last_activity` descending so the most-recently changed
+    # entry appears first. `last_activity` is YYYY-MM-DD HH:MM:SS or '-';
+    # lexicographic DESC puts real timestamps before '-' because '-' (0x2D)
+    # is less than '2' (0x32), so '-' entries fall to the bottom.
+    rows.sort(key=lambda r: r[3], reverse=True)
+    color_enabled = should_use_color(sys.stdout)
+    for line in _render_status_table(rows, color_enabled=color_enabled):
+        print(line)
     return 0
 
 
@@ -701,5 +745,18 @@ def main(argv: list[str] | None = None) -> int:
     p_status.set_defaults(func=_cmd_status)
 
     ns = parser.parse_args(args)
-    rc: int = ns.func(ns)
-    return rc
+    try:
+        rc: int = ns.func(ns)
+        # Flush here, inside the guard: output small enough to fit Python's
+        # stdout buffer is otherwise flushed at interpreter shutdown, where a
+        # broken pipe surfaces as an uncatchable "Exception ignored" traceback.
+        # Forcing the flush now moves that write where the handler can catch it.
+        sys.stdout.flush()
+        return rc
+    except BrokenPipeError:
+        # A reader (e.g. `imp log | less` quit before draining) closed the pipe.
+        # Redirect stdout to devnull so the interpreter's final flush can't
+        # re-raise during shutdown, then exit with the conventional SIGPIPE code.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 128 + signal.SIGPIPE

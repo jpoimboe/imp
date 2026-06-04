@@ -4,13 +4,12 @@ creation, state home inside the worktree at <worktree>/.imp/change/."""
 from __future__ import annotations
 
 import json
-import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from imp.engine import worktree
-from imp.engine.errors import LoadError
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
@@ -33,7 +32,9 @@ class Change:
 
     @property
     def workflow_dir(self) -> Path:
-        return self.change_dir / "workflow"
+        # The Change's own worktree carries the tracked workflow; the branch IS
+        # the per-Change workflow source. No gitignored snapshot copy.
+        return self.project_root / "imp" / "workflows" / "default"
 
     @property
     def state_dir(self) -> Path:
@@ -56,11 +57,6 @@ class Change:
         wt_path = worktree.create_worktree(control_root, change_id, base_branch)
         change_dir = wt_path / ".imp" / "change"
         change_dir.mkdir(parents=True)
-
-        src_wf = control_root / "imp" / "workflows" / "default"
-        if not src_wf.is_dir():
-            raise LoadError(f"no default workflow at {src_wf}", SourceLoc(file=src_wf, line=1))
-        shutil.copytree(src_wf, change_dir / "workflow")
         (change_dir / "state").mkdir()
 
         (change_dir / "change.json").write_text(json.dumps({
@@ -72,9 +68,22 @@ class Change:
         from imp.providers.config import apply_var_overrides, load_config
 
         config = load_config(control_root)
-        workflow = load_workflow(
-            change_dir / "workflow", configured_roles=config.role_names()
-        )
+        # The branch's own tracked workflow IS the source — read it directly from
+        # the worktree, no snapshot copy. This seed load doubles as the single
+        # validator: raises LoadError on an absent/malformed workflow, or
+        # LoadErrors when the workflow parses but fails validation (e.g. a step
+        # references a model_role not present in imp/config.yaml).
+        try:
+            workflow = load_workflow(
+                wt_path / "imp" / "workflows" / "default",
+                configured_roles=config.role_names(),
+            )
+        except (LoadError, LoadErrors):
+            # Validation now runs post-create_worktree, so a base branch lacking a
+            # readable imp/workflows/default would otherwise leak the just-created
+            # branch+worktree. Roll both back so a failed create leaves nothing.
+            worktree.destroy_worktree(control_root, change_id)
+            raise
         flat = workflow.flat_steps()
         State(
             id=change_id, step=flat[0].name if flat else None, step_attempt=0,

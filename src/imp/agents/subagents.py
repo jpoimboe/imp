@@ -118,7 +118,9 @@ async def dispatch_task(
 
     cc = ctx.change_context or ChangeContext(
         id="", slug="", title="", project_root=ctx.project_root,
-        workflow_dir=ctx.project_root / ".imp" / "change" / "workflow",
+        # The branch's own tracked workflow dir — mirrors Change.workflow_dir
+        # (no create-time snapshot copy exists anymore).
+        workflow_dir=ctx.project_root / "imp" / "workflows" / "default",
     )
 
     # Render the subagent's Jinja template. A SEPARATE read-only JsonlEventLog

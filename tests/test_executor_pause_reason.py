@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -22,13 +21,9 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    src_wf = root / ".imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
-    dest_wf = change_dir / "workflow"
-    if dest_wf.exists():
-        shutil.rmtree(dest_wf)
-    shutil.copytree(src_wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
         "id": slug, "title": title, "base_branch": "main",
@@ -38,7 +33,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     with contextlib.suppress(Exception):
         configured_roles = load_config(root).role_names()
 
-    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    workflow = load_workflow(src_wf, configured_roles=configured_roles)
     flat = workflow.flat_steps()
     State(
         id=slug, step=flat[0].name if flat else None, step_attempt=0,
@@ -92,7 +87,7 @@ def test_emit_branch_for_non_pause_action_is_interrupt() -> None:
 
 
 def _seed_single_agent(root: Path) -> Change:
-    wf = root / ".imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -164,7 +159,7 @@ async def test_fatal_error_records_reason_and_kind_on_workflow_paused(
 async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
     """The max_loops pause path is unchanged by Fix A: its workflow_paused still
     emits reason=max_loops (it never routes through the agent fatal branch)."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "reviewer.md").write_text(
         "---\nname: reviewer\ntools: [complete_step]\n"
