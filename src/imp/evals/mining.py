@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from imp.evals.fixtures import save_fixture
 from imp.evals.models import ExpectedFinding, Fixture, FixtureMeta
 
 # A dispatch description like "Spec review ...", "Quality review ...",
@@ -368,3 +369,55 @@ def assemble_fixtures(
             )
         )
     return MiningOutcome(fixtures=fixtures, drops=drops)
+
+
+THIN_YIELD_THRESHOLD = 12  # below this, mining is "thin" (spec: dozens+ is the goal)
+
+
+@dataclass(frozen=True)
+class MiningReport:
+    episodes_found: int       # dispatches WITH a returned review (resultless ones
+    #                           aren't episodes; malformed JSON lines are skipped)
+    n_after_dedup: int        # so episodes_found - n_after_dedup = collapsed, and
+    #                           n_after_dedup = fixtures_written + sum(drops) reconciles
+    fixtures_written: int
+    drops_by_reason: dict[str, int]
+    thin: bool
+
+
+def mine_corpus(
+    session_files: list[Path],
+    out_dir: Path,
+    *,
+    control_root: Path,
+    normalize: Callable[[str], tuple[ExpectedFinding, ...]],
+) -> MiningReport:
+    """Mine a LIST of session files (caller excludes .imp/worktrees/ copies).
+    Diffs are reconstructed via `git diff BASE..HEAD` against `control_root`.
+    Writes mined fixtures to out_dir. Thin yield is reported, never raised."""
+    all_eps: list[RawEpisode] = []
+    for f in session_files:
+        all_eps.extend(discover_episodes(f))
+    episodes_found = len(all_eps)
+    # ORDER MATTERS: mark rework on the FULL list (same-SHA pairing needs the
+    # earlier blocking pass), THEN dedup (which preserves the marked signal).
+    flagged = mark_rework(all_eps)
+    deduped = dedup_episodes(flagged)
+    outcome = assemble_fixtures(deduped, control_root=control_root, normalize=normalize)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for fx in outcome.fixtures:
+        save_fixture(fx, out_dir)
+
+    drops_by_reason: dict[str, int] = {}
+    for d in outcome.drops:
+        drops_by_reason[d.reason] = drops_by_reason.get(d.reason, 0) + 1
+
+    written = len(outcome.fixtures)
+    return MiningReport(
+        episodes_found=episodes_found,
+        n_after_dedup=len(deduped),
+        fixtures_written=written,
+        drops_by_reason=drops_by_reason,
+        thin=written < THIN_YIELD_THRESHOLD,
+    )
