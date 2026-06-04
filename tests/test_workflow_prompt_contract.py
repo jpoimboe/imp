@@ -12,6 +12,30 @@ SUBAGENT_FILES = ["implementer.md", "spec-task-reviewer.md", "quality-reviewer.m
 # question is correct for them. Exempt from the no-bare-question rule.
 INTERACTIVE_STEP_FILES = ["spec-writer.md", "final-review.md"]
 
+SKILLS_DIR = Path("src/imp/assets/workflows/default/skills")
+
+# Falsifiability-hardening guards: each component's edit leaves a marker in a
+# specific file. These are per-(path, marker) pairs spanning skills/ and direct
+# agents/ reads (including quality-reviewer, already in SUBAGENT_FILES for the
+# complete_step guards — reused here for a *different* marker, not re-listed for
+# the same purpose). NOT a uniform sweep over SUBAGENT_FILES. A presence guard
+# proves the marker exists somewhere in the file; section placement is left to
+# author self-review and the reviewer pass.
+FALSIFIABILITY_MARKERS = [
+    (AGENTS_DIR / "code-reviewer.md", "falsifiab"),  # C: whole-change backstop
+]
+
+
+@pytest.mark.parametrize(
+    "path,marker",
+    FALSIFIABILITY_MARKERS,
+    ids=[f"{p.name}:{m}" for p, m in FALSIFIABILITY_MARKERS],
+)
+def test_falsifiability_marker_present(path: Path, marker: str) -> None:
+    assert marker.lower() in path.read_text().lower(), (
+        f"{path.name}: missing falsifiability marker {marker!r} — the "
+        f"test-falsifiability hardening edit for this file is absent")
+
 
 def _read(name: str) -> str:
     return (AGENTS_DIR / name).read_text()
