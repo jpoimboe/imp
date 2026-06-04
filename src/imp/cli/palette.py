@@ -13,7 +13,7 @@ _ANSI: dict[str, str] = {
     "dim": "\x1b[2m", "bold": "\x1b[1m",
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
     "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
-    "gray": "\x1b[90m", "reset": "\x1b[0m",
+    "gray": "\x1b[90m", "bg_bright_blue": "\x1b[104m", "reset": "\x1b[0m",
 }
 
 
@@ -79,7 +79,7 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "metadata": ("dim",),              # --full only
     "error": ("bold", "red"),          # semantic
     "warning": ("yellow",),            # semantic
-    "user": ("green",),                # readable, clearly "the human"; no bold
+    "user": ("bg_bright_blue",),       # bright-blue bg paints the input region
     "agent": (),                       # calm baseline — plain default fg; eye rests
 }
 
