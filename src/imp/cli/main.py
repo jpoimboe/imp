@@ -690,6 +690,11 @@ def main(argv: list[str] | None = None) -> int:
     ns = parser.parse_args(args)
     try:
         rc: int = ns.func(ns)
+        # Flush here, inside the guard: output small enough to fit Python's
+        # stdout buffer is otherwise flushed at interpreter shutdown, where a
+        # broken pipe surfaces as an uncatchable "Exception ignored" traceback.
+        # Forcing the flush now moves that write where the handler can catch it.
+        sys.stdout.flush()
         return rc
     except BrokenPipeError:
         # A reader (e.g. `imp log | less` quit before draining) closed the pipe.
