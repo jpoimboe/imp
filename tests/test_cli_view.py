@@ -24,21 +24,21 @@ def test_replay_current_step_removed() -> None:
     )
 
 
-def _make_change_worktree(control: Path, slug: str, title: str,
+def _make_change_worktree(control: Path, change_id: str, title: str,
                            status: str = "paused") -> Path:
     """Create a minimal on-disk worktree for a Change (no real git worktree
     needed — Change.load only reads the .imp/change/ directory)."""
     from imp.engine.state import State
 
-    wt = control / ".imp" / "worktrees" / slug
+    wt = control / ".imp" / "worktrees" / change_id
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "state").mkdir()
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": title, "base_branch": "main"})
+        json.dumps({"id": change_id, "title": title, "base_branch": "main"})
     )
     (change_dir / "events.jsonl").write_text("")
-    state = State(id=slug, status=status, step="spec", step_attempt=0)
+    state = State(id=change_id, status=status, step="spec", step_attempt=0)
     state.save(change_dir / "state")
     return wt
 
@@ -69,7 +69,7 @@ def test_resume_renders_through_live_driver_without_replay(tmp_path, monkeypatch
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
     buf = io.StringIO()
-    args = argparse.Namespace(slug="resume-test")
+    args = argparse.Namespace(token="resume-test")
     with redirect_stdout(buf):
         rc = anyio.run(m._async_cmd_resume, args)
     out = buf.getvalue()
@@ -128,7 +128,7 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
     buf = io.StringIO()
-    args = argparse.Namespace(slug="mb-test")
+    args = argparse.Namespace(token="mb-test")
     with redirect_stdout(buf):
         rc = anyio.run(m._async_cmd_resume, args)
 
@@ -160,7 +160,7 @@ def test_cli_log_pipes_through_narrative(
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": "smoke", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -204,7 +204,7 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": "smoke", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -253,7 +253,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": "sub", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "sub", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -298,7 +298,7 @@ def test_cmd_log_auto_picks_latest_by_mtime(
         change_dir = wt / ".imp" / "change"
         change_dir.mkdir(parents=True)
         (change_dir / "change.json").write_text(
-            json.dumps({"slug": slug, "title": title, "base_branch": "main"}),
+            json.dumps({"id": slug, "title": title, "base_branch": "main"}),
         )
         events_path = change_dir / "events.jsonl"
         events_path.write_text(
