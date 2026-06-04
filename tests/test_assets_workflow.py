@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -363,3 +364,20 @@ def test_spec_writer_prompt_has_trivial_carveout() -> None:
     assert "opening question" in lowered
     # The carve-out must explicitly say the opening question does not count.
     assert "does not count" in lowered or "does NOT count" in body
+
+
+def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
+    # Acceptance #1/#2/#6: in this repo, imp/workflows/default must be a
+    # symlink whose resolved target equals src/imp/assets/workflows/default.
+    # This pins the dogfood install against silent drift from the bundled
+    # assets — if someone re-materializes the directory, this test fails.
+    repo_root = Path(__file__).resolve().parents[1]
+    link = repo_root / "imp" / "workflows" / "default"
+    target = repo_root / "src" / "imp" / "assets" / "workflows" / "default"
+    assert link.is_symlink(), f"{link} is not a symlink"
+    assert os.readlink(link) == "../../src/imp/assets/workflows/default", (
+        f"unexpected symlink literal target: {os.readlink(link)!r}"
+    )
+    assert link.resolve() == target.resolve(), (
+        f"{link} resolves to {link.resolve()}, expected {target.resolve()}"
+    )
