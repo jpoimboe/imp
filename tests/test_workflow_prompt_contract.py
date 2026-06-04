@@ -22,7 +22,8 @@ SKILLS_DIR = Path("src/imp/assets/workflows/default/skills")
 # proves the marker exists somewhere in the file; section placement is left to
 # author self-review and the reviewer pass.
 FALSIFIABILITY_MARKERS = [
-    (AGENTS_DIR / "code-reviewer.md", "falsifiab"),  # C: whole-change backstop
+    (AGENTS_DIR / "code-reviewer.md", "falsifiab"),     # C: whole-change backstop
+    (AGENTS_DIR / "quality-reviewer.md", "falsifiab"),  # C: per-task tripwire
 ]
 
 
