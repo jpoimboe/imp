@@ -163,6 +163,13 @@ Next failing test for next feature.
 | **Clear** | Name describes behavior | `test_1` |
 | **Shows intent** | Demonstrates desired API | Obscures what code should do |
 
+## Acceptance Test Oracles
+
+Acceptance tests have **one authoritative oracle**, asserted strictly (the assertion
+that proves the feature works). Corroborating signals that depend on non-determinism —
+commit counts, agent counts in multi-task runs — use bounds (`>= N`), never exact
+equality. Keep the oracle strict; relax only the corroborating counts.
+
 ## Why Order Matters
 
 **"I'll write tests after to verify it works"**
