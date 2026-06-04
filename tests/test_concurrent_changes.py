@@ -97,3 +97,20 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
         _git(tmp_path, "show", "refs/imp/journal:spine/change.json").returncode == 0
     )                                                            # journaled
     assert os.getcwd() == cwd_before                             # cwd restored
+
+
+def test_workflow_edits_isolated_between_changes(tmp_path: Path) -> None:
+    """Editing Change A's workflow agent leaves Change B's copy untouched —
+    each worktree resolves imp/workflows/default to its own checkout."""
+    _seed_control(tmp_path)
+    a = Change.create(tmp_path, title="A", slug="alpha", base_branch="main")
+    b = Change.create(tmp_path, title="B", slug="beta", base_branch="main")
+
+    a_agent = a.workflow_dir / "agents" / "stub.md"
+    b_agent = b.workflow_dir / "agents" / "stub.md"
+    before = b_agent.read_text()
+
+    a_agent.write_text(a_agent.read_text() + "\nEDITED IN A\n")
+
+    assert "EDITED IN A" in a_agent.read_text()
+    assert b_agent.read_text() == before
