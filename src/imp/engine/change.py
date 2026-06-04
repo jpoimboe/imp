@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from imp.engine import worktree
-from imp.engine.errors import LoadError
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import SourceLoc
 
@@ -66,13 +66,15 @@ class Change:
         config = load_config(control_root)
         # The branch's own tracked workflow IS the source — read it directly from
         # the worktree, no snapshot copy. This seed load doubles as the single
-        # validator (raises LoadError on an absent or malformed workflow).
+        # validator: raises LoadError on an absent/malformed workflow, or
+        # LoadErrors when the workflow parses but fails validation (e.g. a step
+        # references a model_role not present in imp/config.yaml).
         try:
             workflow = load_workflow(
                 wt_path / "imp" / "workflows" / "default",
                 configured_roles=config.role_names(),
             )
-        except LoadError:
+        except (LoadError, LoadErrors):
             # Validation now runs post-create_worktree, so a base branch lacking a
             # readable imp/workflows/default would otherwise leak the just-created
             # branch+worktree. Roll both back so a failed create leaves nothing.

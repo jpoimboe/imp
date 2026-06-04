@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.change import Change
-from imp.engine.errors import LoadError
+from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.state import State
 from tests.conftest import _git, _init_repo, _seed_control
 
@@ -63,6 +63,33 @@ def test_create_without_workflow_raises_and_leaves_no_orphan(tmp_path: Path) -> 
     # The branch+worktree created before validation must be torn down.
     assert not (tmp_path / ".imp" / "worktrees" / "nowf").exists()
     assert "imp/nowf" not in _git(tmp_path, "branch", "--list", "imp/nowf").stdout
+
+
+def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
+    tmp_path: Path,
+) -> None:
+    """A workflow that PARSES but fails validators raises LoadErrors (not
+    LoadError). Change.create must still tear down the worktree+branch — a
+    validator failure is just as much a failed create as a missing workflow."""
+    # Seed a valid repo, then overwrite workflow.yaml so the step references
+    # a model_role that is not configured in imp/config.yaml. The YAML still
+    # parses (no LoadError), but _v_model_role_configured fires and LoadErrors
+    # is raised.
+    _seed_control(tmp_path)
+    workflow_yaml = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
+    workflow_yaml.write_text(
+        "name: t\ndescription: \"\"\n"
+        "phases:\n  - name: p\n    steps:\n"
+        "      - {name: s, file: agents/stub.md, model_role: nonexistent_role}\n"
+    )
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "break model_role")
+
+    with pytest.raises(LoadErrors):
+        Change.create(tmp_path, title="X", slug="badwf", base_branch="main")
+    # The branch+worktree created before validation must be torn down.
+    assert not (tmp_path / ".imp" / "worktrees" / "badwf").exists()
+    assert "imp/badwf" not in _git(tmp_path, "branch", "--list", "imp/badwf").stdout
 
 
 def test_leaf_edit_pinned_in_graph_live_on_reload(tmp_path: Path) -> None:
