@@ -1,9 +1,25 @@
 # tests/test_change.py
 from pathlib import Path
 
+import pytest
+
 from imp.engine.change import Change
+from imp.engine.errors import LoadError
 from imp.engine.state import State
-from tests.conftest import _seed_control
+from tests.conftest import _git, _init_repo, _seed_control
+
+
+def _seed_control_without_workflow(root: Path) -> None:
+    """A repo with committed imp/config.yaml but NO imp/workflows/default — so
+    Change.create gets past create_worktree and config load, then fails the seed
+    workflow load."""
+    _init_repo(root)
+    (root / "imp").mkdir()
+    (root / "imp" / "config.yaml").write_text(
+        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "config only")
 
 
 def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
@@ -38,3 +54,12 @@ def test_workflow_dir_is_the_branch_dir_not_a_copy(tmp_path: Path) -> None:
     assert "phases:" in (ch.workflow_dir / "workflow.yaml").read_text()
     # ...and there is no gitignored second copy.
     assert not (ch.change_dir / "workflow").exists()
+
+
+def test_create_without_workflow_raises_and_leaves_no_orphan(tmp_path: Path) -> None:
+    _seed_control_without_workflow(tmp_path)
+    with pytest.raises(LoadError):
+        Change.create(tmp_path, title="X", slug="nowf", base_branch="main")
+    # The branch+worktree created before validation must be torn down.
+    assert not (tmp_path / ".imp" / "worktrees" / "nowf").exists()
+    assert "imp/nowf" not in _git(tmp_path, "branch", "--list", "imp/nowf").stdout

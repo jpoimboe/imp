@@ -67,10 +67,17 @@ class Change:
         # The branch's own tracked workflow IS the source — read it directly from
         # the worktree, no snapshot copy. This seed load doubles as the single
         # validator (raises LoadError on an absent or malformed workflow).
-        workflow = load_workflow(
-            wt_path / "imp" / "workflows" / "default",
-            configured_roles=config.role_names(),
-        )
+        try:
+            workflow = load_workflow(
+                wt_path / "imp" / "workflows" / "default",
+                configured_roles=config.role_names(),
+            )
+        except LoadError:
+            # Validation now runs post-create_worktree, so a base branch lacking a
+            # readable imp/workflows/default would otherwise leak the just-created
+            # branch+worktree. Roll both back so a failed create leaves nothing.
+            worktree.destroy_worktree(control_root, slug)
+            raise
         flat = workflow.flat_steps()
         State(
             slug=slug, step=flat[0].name if flat else None, step_attempt=0,
