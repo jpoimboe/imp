@@ -1,0 +1,17 @@
+{
+  "id": "clean-executor-comment",
+  "source": "curated",
+  "base_sha": "b3dadb6e4abbddad4d58b0bddbfbaab4c17ebd5b",
+  "head_sha": "1c0671c08f15030b8d7542dff119665e9d6472b6",
+  "task_context": "A small, correct change.",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "code-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": "clean",
+    "independence": "independent-history"
+  }
+}
