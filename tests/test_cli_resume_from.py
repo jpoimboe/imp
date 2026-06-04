@@ -180,3 +180,49 @@ def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) 
     final = State.load(ch.state_dir)
     assert final.step is None
     assert final.vars["ready_to_merge"] is True
+
+
+def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> None:
+    """Guards the abandon/resume TOCTOU: the precondition read is unlocked, so a
+    concurrent `imp abandon` can flip status to 'abandoned' after it passes.
+    Resume re-reads status under the lock and refuses (rc 2) without running.
+    Modelled by flipping the on-disk status between the two State.load calls
+    (early check = call 1; under-lock recheck = call 2)."""
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+
+    _seed_control_default(tmp_path)
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "code-reviewer"
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    real_load = State.load.__func__
+    calls = {"n": 0}
+
+    def fake_load(cls, state_dir):
+        calls["n"] += 1
+        s = real_load(cls, state_dir)
+        if calls["n"] >= 2:          # the under-lock recheck sees abandon's write
+            s.status = "abandoned"
+        return s
+
+    ran = {"called": False}
+
+    async def fake_run_change(change, **kwargs):
+        ran["called"] = True
+        from imp.engine.executor import RunResult
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_change", fake_run_change)
+    monkeypatch.setattr(m.State, "load", classmethod(fake_load))
+
+    args = argparse.Namespace(slug="feat", from_target=None, force=False)
+    rc = anyio.run(m._async_cmd_resume, args)
+    assert rc == 2
+    assert ran["called"] is False    # never ran a Change abandon finalized

@@ -266,6 +266,19 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
         return 2
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
+            # Re-read status under the lock: the precondition above is an
+            # unlocked read, so a concurrent `imp abandon` (which sets
+            # status="abandoned", journals, then releases the lock before
+            # removing the worktree) could have landed in the gap. Re-checking
+            # here ensures resume never runs a Change abandon has finalized.
+            state = State.load(change.state_dir)
+            if state.status not in ("paused", "errored", "merge_blocked"):
+                print(
+                    f"imp: Change {change.slug} status is {state.status!r}; "
+                    "nothing to resume",
+                    file=sys.stderr,
+                )
+                return 2
             print(f"Resuming Change {change.slug}: {change.title!r}")
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
@@ -622,6 +635,53 @@ def _print_status_section(title: str, rows: list[tuple[str, str, str, str, str]]
         print(empty_msg)
 
 
+def _abandon(control: Path, slug: str) -> int:
+    """Tear down a Change (worktree, branch, state) as one logged operation.
+
+    Order is pinned by git (spec §2): journal BEFORE worktree removal (records
+    live inside the worktree); `git branch -D` AFTER (git refuses to delete a
+    branch checked out in a worktree). Idempotent / crash-tolerant: re-running
+    after any mid-sequence crash converges."""
+    try:
+        change = Change.load(control, slug)
+    except (LoadError, LoadErrors):
+        # Worktree fully gone (e.g. a crash between worktree removal and branch
+        # deletion). Idempotent teardown: reap a possibly-orphaned branch (the
+        # name needs only the slug) and exit 0 — NOT the rc=2 LoadError path.
+        worktree.delete_branch(control, slug)
+        print(f"Change {slug} already gone; ensured branch imp/{slug} is removed.")
+        return 0
+
+    try:
+        with ProjectLock(change.change_dir / "lock").acquire():  # timeout=0
+            state = State.load(change.state_dir)
+            state.status = "abandoned"
+            state.save(change.state_dir)                          # (a)
+            change.event_log().append(                            # (b)
+                agent_id=None, type="change_abandoned", payload={})
+            worktree.journal_commit(control, slug, {              # (c)
+                "events.jsonl": change.events_path,
+                "change.json": change.change_dir / "change.json",
+                "state.json": change.state_dir / "state.json",
+            })
+        # lock released here (after c, before d): nothing below needs it, and
+        # the persisted status="abandoned" blocks any concurrent resume —
+        # _async_cmd_resume re-reads status under the lock and refuses.
+    except LockHeld as e:
+        print(f"imp: Change {slug} is running (pid {e.held_by_pid or '?'}); "
+              f"stop it before abandoning", file=sys.stderr)
+        return 2
+
+    worktree.remove_worktree(control, slug, force=True)           # (d)
+    worktree.delete_branch(control, slug)                         # (e)
+    print(f"Abandoned {slug}.")
+    return 0
+
+
+def _cmd_abandon(args: argparse.Namespace) -> int:
+    return _abandon(_control_root(), args.slug)
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
@@ -688,6 +748,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p_status = sub.add_parser("status")
     p_status.set_defaults(func=_cmd_status)
+
+    p_abandon = sub.add_parser(
+        "abandon",
+        help="Tear down a Change's worktree, branch, and state (logged).",
+    )
+    p_abandon.add_argument("slug")
+    p_abandon.set_defaults(func=_cmd_abandon)
 
     ns = parser.parse_args(args)
     rc: int = ns.func(ns)
