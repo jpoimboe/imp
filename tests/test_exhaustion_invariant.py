@@ -44,6 +44,9 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
 
     workflow = load_workflow(wf_dir, configured_roles=configured_roles)
     flat = workflow.flat_steps()
+    # NOTE: production Change.create uses apply_var_overrides(...); this
+    # characterization fixture keeps the simpler defaults() form (unchanged from
+    # the prior fixture) — the exhaustion invariant doesn't depend on overrides.
     State(
         slug=slug, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
