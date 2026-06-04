@@ -445,15 +445,20 @@ async def _route_agent(
         balance = False
         opening = wrapper_text or "<imp:begin/>"           # fresh-seed via initial_messages
         retry_wrapper: str | None = None
+        initial: tuple[Message, ...] = (
+            Message(role="user", content=(TextBlock(text=opening),)),
+        )
     else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = True
-        opening = "begin"
+        # No opener on resume: providers replay the on-disk transcript and
+        # never iterate initial_messages. retry_wrapper rides on
+        # retry_feedback (balance_success_on_resume), a separate channel.
         retry_wrapper = wrapper_text
+        initial = ()
 
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
     state.save(change.state_dir)
-    initial = (Message(role="user", content=(TextBlock(text=opening),)),)
 
     backoff = 0
     cumulative_backoff = 0.0

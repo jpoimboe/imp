@@ -1271,3 +1271,60 @@ async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
     coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
     # entry1 fresh; entry2 (paused) resumed; entry3 (post-reload) resumed
     assert coder_balances == [False, True, True]
+
+
+@pytest.mark.anyio
+async def test_resume_keep_branch_passes_empty_initial_messages(
+    tmp_path: Path,
+) -> None:
+    """On the resume keep-branch the executor must not construct any opener
+    message: providers replay the on-disk transcript and never iterate
+    initial_messages here. The first (fresh) coder entry still carries the
+    `<imp:begin/>` seed; the second (resumed) entry carries `()`."""
+    from imp.providers import resolve
+
+    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    invs: list[AgentInvocation] = []
+    reviewer_calls = {"n": 0}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            invs.append(invocation)
+            if invocation.agent_def.name == "reviewer":
+                reviewer_calls["n"] += 1
+                verdict = "rework" if reviewer_calls["n"] == 1 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "verdict": verdict}}
+            else:
+                yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    # Defensive: assert overall shape (coder, reviewer, coder, reviewer) before
+    # slicing — protects against a future workflow change re-ordering the
+    # back-edge dispatch and silently masking the resume-branch assertion.
+    assert [i.agent_def.name for i in invs] == ["coder", "reviewer", "coder", "reviewer"]
+    coder_invs = [i for i in invs if i.agent_def.name == "coder"]
+    assert len(coder_invs) == 2, [i.agent_def.name for i in invs]
+
+    # Fresh entry: one <imp:begin/> seed.
+    assert len(coder_invs[0].initial_messages) == 1
+    assert coder_invs[0].initial_messages[0].content[0].text == "<imp:begin/>"
+
+    # Resume-kept entry: NO seed message at all.
+    assert coder_invs[1].initial_messages == ()
