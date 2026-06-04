@@ -24,7 +24,7 @@ from imp.cli.palette import should_use_color
 from imp.cli.prompt import Prompt
 from imp.cli.signals import install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
-from imp.engine import journal, worktree
+from imp.engine import journal, recovery, worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
@@ -267,6 +267,36 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(f"Resuming Change {change.slug}: {change.title!r}")
+
+            # spec 2026-06-04: --from rewind preflight, before any run. Resolve
+            # + gate-check FIRST (plan_rewind raises before mutating/emitting) so
+            # a refused --from leaves zero new events. The status precondition
+            # above still gates this — --from cannot bypass it.
+            from_target = getattr(args, "from_target", None)
+            rewind_plan = None
+            workflow = None
+            if from_target is not None:
+                from imp.engine.loader import load_workflow
+                from imp.providers.config import load_config
+                try:
+                    cfg = load_config(change.control_root)
+                    workflow = load_workflow(
+                        change.workflow_dir, configured_roles=cfg.role_names())
+                except (LoadError, LoadErrors) as e:
+                    print(f"imp: {e}", file=sys.stderr)
+                    return 2
+                try:
+                    rewind_plan = recovery.plan_rewind(
+                        workflow, state, from_target,
+                        force=bool(getattr(args, "force", False)))
+                except (recovery.RewindError, recovery.GateBypassRequired) as e:
+                    # str(e) bare (not the usual f"imp: {e}"): these messages
+                    # already embed the "imp:" prefix and are multi-line (they
+                    # list valid targets / skipped gates), so they are printed
+                    # verbatim rather than re-prefixed.
+                    print(str(e), file=sys.stderr)
+                    return 2
+
             non_interactive = bool(getattr(args, "non_interactive", False))
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
@@ -281,6 +311,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             change.event_log().append(
                 agent_id=None, type="workflow_resumed", payload={})
             state.status = "running"
+            # Apply the rewind AFTER the resume marker so step_rewound (+ any
+            # gates_bypassed) follow workflow_resumed in the append-only log.
+            if rewind_plan is not None:
+                # workflow is set whenever rewind_plan is (both assigned only
+                # inside `if from_target is not None`); assert narrows for mypy.
+                assert workflow is not None
+                recovery.apply_rewind(
+                    rewind_plan, workflow, state, change.event_log())
             state.save(change.state_dir)
 
             if non_interactive:
@@ -622,6 +660,14 @@ def main(argv: list[str] | None = None) -> int:
                           help="Headless: read replies from stdin, default on EOF, no live chrome.")
     p_resume.add_argument("--default-reply", default=_DEFAULT_NONINTERACTIVE_REPLY,
                           help="Reply used when stdin reaches EOF (non-interactive).")
+    p_resume.add_argument(
+        "--from", dest="from_target", metavar="TARGET",
+        help="Rewind/jump the step cursor to TARGET (a step or phase name) and "
+             "re-run forward, appending new events (never rewriting history).")
+    p_resume.add_argument(
+        "--force", action="store_true",
+        help="Permit a forward --from jump that skips gate steps "
+             "(land the Change as-is; sets ready_to_merge).")
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(

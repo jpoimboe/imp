@@ -1,0 +1,182 @@
+import shutil
+from pathlib import Path
+
+import pytest
+
+from imp.assets import default_workflow_dir
+from imp.cli.main import main
+from imp.engine.change import Change
+from imp.engine.state import State
+from tests.conftest import _git, _init_repo, _seed_control
+
+# Roles referenced by the real default workflow (mirrors tests/test_default_workflow.py).
+_DEFAULT_ROLES = (
+    "default", "spec", "spec_review", "plan", "plan_review", "task_lead",
+    "code", "code_review", "fast", "balanced", "powerful",
+)
+
+
+def _seed_control_default(root: Path) -> None:
+    """Like conftest._seed_control, but commits the REAL shipped default
+    workflow at imp/workflows/default plus a config.yaml defining every role it
+    uses — so Change.create copies the real workflow (with code-reviewer, gates,
+    a merge phase) into the worktree."""
+    _init_repo(root)
+    shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
+    roles = "".join(
+        f"  {r}: {{prefer: [{{provider: anthropic, model: m}}]}}\n"
+        for r in _DEFAULT_ROLES
+    )
+    (root / "imp" / "config.yaml").write_text("roles:\n" + roles)
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "imp setup (default workflow)")
+
+
+def test_resume_real_parser_accepts_from_and_force(tmp_path, monkeypatch) -> None:
+    # Drive the REAL main() parser. argparse errors raise SystemExit; our code
+    # paths return an int. A nonexistent slug on a paused-precondition path
+    # returns 2 (LoadError), proving the parser accepted --from/--force without
+    # an argparse SystemExit.
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    rc = main(["resume", "nope", "--from", "code-reviewer", "--force"])
+    assert rc == 2          # returned (not raised) => flags parsed fine
+
+
+def test_no_fork_or_rebase_subcommand() -> None:
+    with pytest.raises(SystemExit):
+        main(["fork", "feat"])
+    with pytest.raises(SystemExit):
+        main(["rebase", "feat"])
+
+
+def test_resume_from_rejects_nonresumable_status(tmp_path, monkeypatch) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "completed"
+    st.save(ch.state_dir)
+    monkeypatch.chdir(tmp_path)
+    rc = main(["resume", "feat", "--from", "s"])
+    assert rc == 2
+
+
+def test_resume_from_unknown_target_rc2(tmp_path, monkeypatch, capsys) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+    monkeypatch.chdir(tmp_path)
+    rc = main(["resume", "feat", "--from", "no-such-step"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "no-such-step" in err
+    assert "valid steps" in err
+
+
+def test_resume_from_noop_appends_event_without_rewriting_history(
+    tmp_path, monkeypatch,
+) -> None:
+    from imp.engine.loader import load_workflow
+    from imp.engine.recovery import apply_rewind, plan_rewind
+    from imp.providers.config import load_config
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    before = _git(tmp_path, "rev-parse", "imp/feat").stdout.strip()
+
+    st = State.load(ch.state_dir)            # stub workflow: cursor at step "s"
+    wf = load_workflow(ch.workflow_dir,
+                       configured_roles=load_config(tmp_path).role_names())
+    plan = plan_rewind(wf, st, st.step, force=False)   # no-op: --from current step
+    apply_rewind(plan, wf, st, ch.event_log())
+    st.save(ch.state_dir)
+
+    after = _git(tmp_path, "rev-parse", "imp/feat").stdout.strip()
+    assert before == after                   # no commit SHAs rewritten
+    assert any(e["type"] == "step_rewound" for e in ch.event_log().read())
+
+
+def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -> None:
+    """End-to-end through _async_cmd_resume (with run_change faked): proves the
+    argparse flags -> preflight -> apply_rewind wiring, incl. the workflow_resumed
+    BEFORE step_rewound ordering and the persisted cursor/loop-count reset."""
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.executor import RunResult
+
+    _seed_control_default(tmp_path)
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "code-reviewer"
+    st.status = "paused"
+    st.loop_counts = {"task-lead": 2, "code-reviewer": 6}
+    st.save(ch.state_dir)
+
+    async def fake_run_change(change, **kwargs):
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_change", fake_run_change)
+
+    args = argparse.Namespace(slug="feat", from_target="code-reviewer", force=False)
+    rc = anyio.run(m._async_cmd_resume, args)
+    assert rc == 0
+
+    # Event ordering: workflow_resumed precedes step_rewound (no gates_bypassed,
+    # this is a backward/self rewind).
+    types = [e["type"] for e in ch.event_log().read()]
+    assert "workflow_resumed" in types and "step_rewound" in types
+    assert types.index("workflow_resumed") < types.index("step_rewound")
+    assert "gates_bypassed" not in types
+
+    # Persisted cursor + downstream-only loop-count reset.
+    final = State.load(ch.state_dir)
+    assert final.step == "code-reviewer"
+    assert final.loop_counts == {"task-lead": 2}     # code-reviewer reset, upstream kept
+
+
+def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) -> None:
+    """The --force forward path through the real CLI seam: --from merge --force
+    from a paused code-reviewer emits gates_bypassed (after workflow_resumed),
+    sets ready_to_merge, and terminates the cursor (to_step None)."""
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.executor import RunResult
+
+    _seed_control_default(tmp_path)
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "code-reviewer"
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    async def fake_run_change(change, **kwargs):
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_change", fake_run_change)
+
+    args = argparse.Namespace(slug="feat", from_target="merge", force=True)
+    rc = anyio.run(m._async_cmd_resume, args)
+    assert rc == 0
+
+    # Ordering: workflow_resumed < gates_bypassed < step_rewound; gates named.
+    events = list(ch.event_log().read())
+    types = [e["type"] for e in events]
+    assert types.index("workflow_resumed") < types.index("gates_bypassed")
+    assert types.index("gates_bypassed") < types.index("step_rewound")
+    bypassed = next(e for e in events if e["type"] == "gates_bypassed")
+    assert bypassed["payload"]["gates"] == ["code-reviewer", "final-review"]
+
+    # Persisted: terminal cursor + ready_to_merge set (land as-is).
+    final = State.load(ch.state_dir)
+    assert final.step is None
+    assert final.vars["ready_to_merge"] is True
