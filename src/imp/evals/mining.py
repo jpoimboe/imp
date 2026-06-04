@@ -36,6 +36,8 @@ class RawEpisode:
     dispatch_prompt: str
     review_prose: str
     timestamp: str | None
+    blocking: bool = False
+    was_fixed: bool = False
 
 
 def _records(path: Path) -> Iterator[dict[str, object]]:
@@ -132,6 +134,128 @@ def extract_shas(dispatch_prompt: str) -> tuple[str | None, str | None]:
         base_m.group(1) if base_m else None,
         head_m.group(1) if head_m else None,
     )
+
+
+# Sampled from real review proses (heterogeneous — PASS/FAIL, "Must Fix",
+# ✅/❌, free "verdict" lines). Heuristic; the must_catch labels it feeds are
+# spot-checked in the normalization calibration (Task 16).
+# `(?<!no )blocking\b`: the bare word "blocking" is a blocking signal EXCEPT in the
+# approval phrase "no blocking issues" — the negative lookbehind drops that case.
+_BLOCKING_KEYWORDS = re.compile(
+    r"task_gap|plan_gap|request[\s_-]*changes?|changes?\s+requested|"
+    r"must[\s_-]*fix|\bblocker\b|(?<!no )blocking\b|:\s*fail\b|❌",
+    re.I,
+)
+_SEV_HEADER = re.compile(r"^#+\s*(critical|major)\b", re.I)
+# An inline `#### Critical: <real content>` on a single line (content after the
+# colon) — distinct from the bare boilerplate header `#### Critical (Must Fix)`.
+_INLINE_SEV = re.compile(r"#+\s*(critical|major)\s*:\s*\S", re.I)
+_EMPTY_SECTION = re.compile(r"^\s*[-*]?\s*(none|n/?a|nothing|no\b.*\bissues?)\b", re.I)
+_APPROVE_VOCAB = re.compile(
+    r"\bapprove[d]?\b|\bLGTM\b|:\s*pass\b|✅|no\s+blocking|"
+    r"no\s+(critical|major)\s+issues",
+    re.I,
+)
+
+
+def _sev_header_has_content(prose: str) -> bool:
+    """A Critical/Major section counts as blocking ONLY if it has real content —
+    reviewers emit `#### Critical (Must Fix)` headers unconditionally and write
+    'None' underneath when there's nothing (M9). Don't treat the bare header as
+    a blocking signal."""
+    lines = prose.splitlines()
+    for i, line in enumerate(lines):
+        if _SEV_HEADER.match(line.strip()):
+            for nxt in lines[i + 1 : i + 6]:
+                s = nxt.strip()
+                if not s:
+                    continue
+                if s.startswith("#"):
+                    break  # next header -> this section was empty
+                if _EMPTY_SECTION.match(s):
+                    break  # "None" / "N/A" -> empty
+                return True  # a real bullet under the header
+    return False
+
+
+def verdict_is_blocking(prose: str) -> bool:
+    """Heuristic: did the review request changes / raise a NON-EMPTY blocking
+    issue? Keyword signal (scanned on non-header lines, so a boilerplate
+    `#### Critical (Must Fix)` header doesn't self-trigger the 'must fix'
+    keyword — M9) OR a Critical/Major header with actual content OR an inline
+    `#### Critical: <content>`."""
+    non_header = "\n".join(
+        ln for ln in prose.splitlines() if not ln.lstrip().startswith("#")
+    )
+    if _BLOCKING_KEYWORDS.search(non_header):
+        return True
+    if _sev_header_has_content(prose):
+        return True
+    return bool(_INLINE_SEV.search(prose))
+
+
+def verdict_is_approve(prose: str) -> bool:
+    """An explicit approval with no blocking signal (used by the block→fixed
+    rework heuristic to spot a later clean re-review)."""
+    return _APPROVE_VOCAB.search(prose) is not None and not verdict_is_blocking(prose)
+
+
+def mark_rework(episodes: list[RawEpisode]) -> list[RawEpisode]:
+    """Set `blocking` on every episode, and `was_fixed` on a blocking episode only
+    when a LATER episode **on the SAME head_sha** approves. SAME-SHA scoping is
+    load-bearing: a corpus-global "any later approval" fires on nearly every
+    blocking episode in a 586-dispatch corpus (there's always *some* later
+    approval somewhere) and turns the ground truth into noise. Must run BEFORE
+    dedup (dedup would drop the earlier blocking pass).
+
+    LIMITATION (documented, conservative): descendant-SHA rework (block on H1, fix
+    in child H2, approve on H2) is NOT detected in v1 — same-SHA re-review after a
+    fix is rare, so `was_fixed` fires seldom. That's fine: must_catch then comes
+    from the normalizer's per-finding blocking signal (the parity lower bound);
+    `was_fixed` is only a high-confidence BONUS, and a rare-but-correct signal
+    beats a frequent-but-wrong one."""
+    ordered = sorted(episodes, key=lambda e: e.timestamp or "")
+    heads = [extract_shas(e.dispatch_prompt)[1] for e in ordered]
+    out: list[RawEpisode] = []
+    for i, ep in enumerate(ordered):
+        blocking = verdict_is_blocking(ep.review_prose)
+        head = heads[i]
+        later_same_sha_approve = head is not None and any(
+            heads[j] == head and verdict_is_approve(ordered[j].review_prose)
+            for j in range(i + 1, len(ordered))
+        )
+        out.append(
+            RawEpisode(
+                session_file=ep.session_file,
+                tool_use_id=ep.tool_use_id,
+                reviewer_type=ep.reviewer_type,
+                dispatch_prompt=ep.dispatch_prompt,
+                review_prose=ep.review_prose,
+                timestamp=ep.timestamp,
+                blocking=blocking,
+                was_fixed=blocking and later_same_sha_approve,
+            )
+        )
+    return out
+
+
+def dedup_episodes(episodes: list[RawEpisode]) -> list[RawEpisode]:
+    """Collapse rework passes per (head_sha, reviewer). Run AFTER mark_rework.
+    Keeps a BLOCKING representative when the group has one (it carries the bug
+    labels, not the later approval's empty findings) and OR-s `was_fixed` across
+    the group so the signal survives dedup."""
+    from dataclasses import replace
+
+    groups: dict[tuple[str | None, str], list[RawEpisode]] = {}
+    for ep in episodes:
+        _base, head = extract_shas(ep.dispatch_prompt)
+        groups.setdefault((head, ep.reviewer_type), []).append(ep)
+    out: list[RawEpisode] = []
+    for group in groups.values():
+        blocking_eps = [e for e in group if e.blocking]
+        rep = max(blocking_eps or group, key=lambda e: e.timestamp or "")
+        out.append(replace(rep, was_fixed=any(e.was_fixed for e in group)))
+    return out
 
 
 def reconstruct_diff(control_root: Path, base_sha: str, head_sha: str) -> str:
