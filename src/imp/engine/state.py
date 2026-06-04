@@ -26,7 +26,9 @@ if TYPE_CHECKING:
 
 import filelock
 
-Status = Literal["running", "paused", "completed", "errored", "merge_blocked"]
+Status = Literal[
+    "running", "paused", "completed", "errored", "merge_blocked", "abandoned"
+]
 
 
 @dataclass

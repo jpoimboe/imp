@@ -234,3 +234,12 @@ def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
     assert events[0]["type"] == "good_one"
     assert events[1] == {"_malformed": True, "raw": "this is not json"}
     assert events[2]["type"] == "good_two"
+
+
+def test_state_roundtrips_abandoned_status(tmp_path: Path) -> None:
+    from imp.engine.state import State
+
+    state_dir = tmp_path / "state"
+    State(slug="s", step=None, step_attempt=0, status="abandoned").save(state_dir)
+    loaded = State.load(state_dir)
+    assert loaded.status == "abandoned"
