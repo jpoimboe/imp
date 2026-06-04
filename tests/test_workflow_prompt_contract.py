@@ -24,6 +24,7 @@ SKILLS_DIR = Path("src/imp/assets/workflows/default/skills")
 FALSIFIABILITY_MARKERS = [
     (AGENTS_DIR / "code-reviewer.md", "falsifiab"),     # C: whole-change backstop
     (AGENTS_DIR / "quality-reviewer.md", "falsifiab"),  # C: per-task tripwire
+    (AGENTS_DIR / "plan-writer.md", "falsifiab"),       # B: anti-transcription
 ]
 
 
