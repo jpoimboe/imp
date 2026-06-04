@@ -83,8 +83,15 @@ class LiveDriver:
         self._builder.add(event)
         if isinstance(event, dict) and event.get("type") == "change_created":
             self._emit_header()
-        if isinstance(event, dict) and event.get("type") == "step_started":
-            self._status.restart_span()      # §7: time the current step's span
+        if isinstance(event, dict) and event.get("type") in (
+                "step_started", "user_message"):
+            # §7: time-the-agent-working-since-the-last-user-reply. Reset on
+            # step_started AND user_message so the elapsed counter measures
+            # the current burst between user inputs (across tools, thinks, and
+            # multiple llm_response blocks within one interactive turn). Non-
+            # interactive runs never fire user_message, so today's per-step
+            # reset behavior is preserved as a side effect.
+            self._status.restart_span()
         self._walk()
         self._refresh_status()
 
@@ -132,6 +139,7 @@ class LiveDriver:
                     # running subagent force-popped at finish() has an empty outcome
                     # and emits nothing.
                     if isinstance(cur.container, nv.SubagentFold):
+                        self._prev_prose = False  # structural emission: no blank-sep
                         self._print_lines(list(rt.subagent_outcome_lines(
                             cur.container, depth=cur.depth, color=self._color,
                             width=self._width, gutters=self._gutters()
@@ -139,6 +147,7 @@ class LiveDriver:
                     elif (isinstance(cur.container, nv.PhaseNode)
                           and _container_closed(cur.container)
                           and nv.phase_elapsed(cur.container) is not None):
+                        self._prev_prose = False  # structural emission: no blank-sep
                         self._print_lines([rt.phase_breadcrumb_line(
                             cur.container, depth=cur.depth - 1, color=self._color,
                             gutters=self._gutters())])
@@ -153,8 +162,11 @@ class LiveDriver:
                 # Subagent header is the shared `↳ task → {name}` boundary; the live
                 # driver prints it the instant the subagent starts (while running),
                 # then streams the subagent's children as their events route in.
-                self._stream_or_hold(rt.header_line(
-                    child, depth=cur.depth, color=self._color, gutters=self._gutters()))
+                gutters = self._gutters()
+                self._stream_or_hold(
+                    rt.header_line(child, depth=cur.depth, color=self._color,
+                                   gutters=gutters),
+                    depth=cur.depth, gutters=gutters)
                 self._frontier.append(_Cursor(container=child, depth=cur.depth + 1))
             else:
                 self._emit_leaf(child, cur.depth, gutters=self._gutters())
@@ -216,21 +228,31 @@ class LiveDriver:
             lines = rt._render(node, depth=depth, full=False, color=self._color,
                                width=self._width, gutters=gutters)
             prose = rt.is_prose_leaf(node)
-        self._print_lines(list(lines), prose=prose)
+        self._print_lines(
+            list(lines), prose=prose,
+            separator_indent=rt._gutter_indent(depth, gutters, self._color))
 
-    def _stream_or_hold(self, line: str) -> None:
-        self._print_lines([line])
+    def _stream_or_hold(self, line: str, *, depth: int,
+                        gutters: tuple[int, ...]) -> None:
+        self._print_lines(
+            [line],
+            separator_indent=rt._gutter_indent(depth, gutters, self._color))
 
-    def _print_lines(self, lines: list[str], *, prose: bool = False) -> None:
+    def _print_lines(self, lines: list[str], *, prose: bool = False,
+                     separator_indent: str = "") -> None:
         # The ONE output chokepoint, so prose spacing stays consistent: a blank
-        # line precedes a prose block that follows another prose block. An empty
-        # emission returns early and leaves _prev_prose untouched (so a lean-mode
-        # thinking/tool turn between two prose blocks doesn't break their pairing).
+        # line precedes ANY emission whose immediate predecessor was a prose
+        # leaf. `separator_indent` is the gutter-bearing indent at the next
+        # emission's depth, so the magenta │ stays continuous inside a
+        # SubagentFold (mirroring render_text._render_children). An empty
+        # emission returns early and leaves _prev_prose untouched (so a lean-
+        # mode thinking/tool turn between two prose blocks doesn't break their
+        # pairing).
         if not lines:
             return
         self._status.hide()
-        if prose and self._prev_prose:
-            self._stream.write("\n")
+        if self._prev_prose:
+            self._stream.write(separator_indent + "\n")
         for ln in lines:
             self._stream.write(ln + "\n")
         self._stream.flush()
@@ -238,6 +260,20 @@ class LiveDriver:
 
     def _refresh_status(self) -> None:
         if self._builder.current_activity() is not None:
+            # Honour the unified prose-adjacency rule for the LIVE status line,
+            # which bypasses `_print_lines`. Gated on the stream being a TTY
+            # (where the status actually draws) so a non-TTY capture doesn't
+            # collect a phantom blank in scroll-back. Inspect the stream
+            # directly — `LiveStatus`'s public API stays untouched, matching
+            # the spec's "Out" note.
+            stream_isatty = getattr(self._stream, "isatty", lambda: False)
+            if self._prev_prose and stream_isatty():
+                # Clearing `_prev_prose` here prevents the next
+                # `_status.hide()` (from a following _print_lines) from
+                # re-introducing a blank when the next permanent block emits.
+                self._stream.write("\n")
+                self._stream.flush()
+                self._prev_prose = False
             self._status.update(self.compose_status)
         else:
             self._status.reset()

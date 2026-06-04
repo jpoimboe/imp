@@ -441,20 +441,23 @@ def test_roles_resolved_renders_constrained_and_unconstrained() -> None:
 def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
     from imp.cli import narrative as nv
     from imp.cli import render_text as rt
-    # plain continue: no "→ continue" suffix
+    # plain continue: no "→ continue" suffix; elapsed is the only/last field.
     bc = nv.BreadcrumbLine(step_name="spec", elapsed_s=12.4,
                            action={"verb": "continue"}, extras=[])
-    out = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
-    assert "✓ spec" in out and "12s" in out
-    assert "→ continue" not in out
-    # non-continue action: suffix appended; extras folded in
+    line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert line == "  ✓ spec · 12s"
+    assert "→ continue" not in line
+    # non-continue action: extras and → suffix sit BEFORE elapsed (last field).
     bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
                             action={"verb": "goto", "target": "implement"},
                             extras=["status=Success"])
-    out2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert "✓ code-reviewer" in out2 and "41s" in out2
-    assert "status=Success" in out2
-    assert "→ goto(implement)" in out2
+    line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
+    assert line2 == "  ✓ code-reviewer · status=Success · → goto(implement) · 41s"
+    # No elapsed (elapsed_s is None) → no trailing seconds field at all.
+    bc3 = nv.BreadcrumbLine(step_name="quick", elapsed_s=None,
+                            action={"verb": "continue"}, extras=[])
+    line3 = "\n".join(rt._render(bc3, depth=1, full=False, color=False, width=80))
+    assert line3 == "  ✓ quick"
 
 
 def _sub(outcome=None, *, is_error=False, name="reviewer"):
@@ -670,3 +673,101 @@ def test_markdown_block_plain_when_color_off() -> None:
     joined = "\n".join(lines)
     assert "\x1b[" not in joined          # no ANSI when color disabled
     assert "bold" in joined
+
+
+def test_inline_code_is_cyan_not_bold_and_no_dark_bg() -> None:
+    # rich's default theme paints inline `code` with \x1b[1;36;40m (bold + cyan
+    # + black bg). The Theme({"markdown.code": "cyan"}) override drops bold and
+    # the dark bg cleanly; the span stays foreground-cyan.
+    from imp.cli.render_text import _render_markdown_block
+    lines = _render_markdown_block("Try `inline code` here.", width=40, depth=0,
+                                   color=True, gutters=())
+    joined = "\n".join(lines)
+    assert "inline code" in _visible(joined)
+    assert "\x1b[1m" not in joined          # no bold
+    assert "\x1b[40m" not in joined         # no dark default-bg
+    assert "\x1b[1;36;40m" not in joined    # no rich-default combined code
+    assert "\x1b[36m" in joined             # still cyan foreground
+
+
+def test_markdown_block_blank_line_inside_prose_carries_magenta_gutter() -> None:
+    """Two paragraphs (blank line between) rendered with a subagent gutter level
+    must emit the bare gutter-indent on the blank line — keeping the magenta │
+    continuous through the prose block. Inspected on the line list so any
+    regression where the blank renders as a raw "" is caught."""
+    from imp.cli.render_text import _render_markdown_block
+    lines = _render_markdown_block(
+        "paragraph one\n\nparagraph two", width=40, depth=1, color=True,
+        gutters=(0,))
+    bar = "\x1b[35m│ \x1b[0m"
+    # exactly one blank line carrying the bare gutter-indent (and nothing else)
+    assert bar in lines, f"gutter-only blank line missing from {lines!r}"
+    # the bare-gutter line is exactly the indent (no trailing whitespace)
+    blank_indices = [i for i, ln in enumerate(lines) if ln == bar]
+    assert len(blank_indices) == 1
+    # prose surrounds it
+    assert any("paragraph one" in ln for ln in lines[:blank_indices[0]])
+    assert any("paragraph two" in ln for ln in lines[blank_indices[0] + 1:])
+
+
+def test_prose_then_structural_leaf_separated_by_blank() -> None:
+    """After any prose block, the next emission in the same children-context
+    gets one blank-line separator — not only another prose block. Today the
+    step_completed breadcrumb sits directly under the last prose line; the
+    generalized rule inserts one gutter-bearing blank between them."""
+    out = _lines([
+        _ev("1", "change_created", slug="x", title="t"),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Drafting."}]}, usage={}),
+        _ev("4", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+    prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
+    bc_i = next(i for i, ln in enumerate(out) if "✓ spec" in ln)
+    assert bc_i > prose_i
+    assert out[bc_i - 1].strip() == "", (
+        "prose must be blank-separated from the following breadcrumb")
+
+
+def test_prose_then_subagent_header_separated_by_blank() -> None:
+    """Prose then a subagent header (a non-prose container child) also gets a
+    blank separator — the rule applies to ALL non-prose next children, not just
+    leaves."""
+    out = _lines([
+        _ev("1", "change_created", slug="x", title="t"),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Drafting."}]}, usage={}),
+        _ev("tk", "tool_call", agent_id="a", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("r", "tool_result", agent_id="a", id="b1",
+            content='{"status":"Success"}'),
+    ])
+    prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
+    hdr_i = next(i for i, ln in enumerate(out) if "↳ task → reviewer" in ln)
+    assert hdr_i > prose_i
+    assert out[hdr_i - 1].strip() == ""
+
+
+def test_user_message_paints_bright_blue_bg_on_every_line_color_on() -> None:
+    """Multi-line user input gets the bg on every wrapped line; the leading `> `
+    prefix is preserved on the first line (and not duplicated on continuations).
+    """
+    node = nv.UserMessageNode(text="line one\nline two")
+    out = list(rt._render(node, depth=1, full=False, color=True, width=80))
+    assert len(out) == 2
+    # First line: `> ` prefix + bg span; second line: bg span without `> `.
+    assert "\x1b[104m" in out[0] and "> line one" in out[0]
+    assert "\x1b[104m" in out[1] and "line two" in out[1]
+    assert "> line two" not in out[1]    # `> ` is a first-line speaker marker
+
+
+def test_user_message_no_bg_when_color_off_but_keeps_prefix() -> None:
+    node = nv.UserMessageNode(text="line one\nline two")
+    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+    joined = "\n".join(out)
+    assert "\x1b[104m" not in joined        # bg suppressed under NO_COLOR / non-TTY
+    assert "> line one" in joined           # `> ` still anchors the speaker

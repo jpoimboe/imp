@@ -539,3 +539,150 @@ def test_phase_breadcrumb_identical_in_live_and_log() -> None:
     log_lines = render_tree(nv.build_tree(events), full=False, color=False, width=80)
     log_line = next(ln for ln in log_lines if "✓ spec" in ln)
     assert live_line == log_line   # byte-identical indent + content across both paths
+
+
+def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
+    """Live path inserts a blank between prose and the step's BreadcrumbLine,
+    mirroring render_text. Parity with the imp-log replay is preserved."""
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "the prose"}]}, usage={}),
+        ev("5", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    bc_i = next(i for i, ln in enumerate(body) if "✓ spec" in ln)
+    assert body[bc_i - 1].strip() == ""
+    assert body == _render_body(events)
+
+
+def test_live_subagent_outcome_NOT_blank_separated_from_prose() -> None:
+    """The subagent outcome line emits on cursor pop (a structural emission
+    outside the children-flow), so it must NOT receive the prose-adjacency
+    blank — matching render_text where the outcome is yielded directly from
+    _render_subagent, bypassing _render_children's prev_prose tracking."""
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
+        ev("6", "tool_result", agent_id="a", id="t1",
+           content='{"status":"Success"}'),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    prose_i = next(i for i, ln in enumerate(body) if "the finding" in ln)
+    outcome_i = next(i for i, ln in enumerate(body) if "→ status=Success" in ln)
+    assert outcome_i == prose_i + 1, (
+        "outcome must immediately follow prose; no blank separator")
+    assert body == _render_body(events)
+
+
+def test_live_prose_then_subagent_header_blank_separated() -> None:
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "Pre-task prose."}]}, usage={}),
+        ev("tk", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("r", "tool_result", agent_id="a", id="t1",
+           content='{"status":"Success"}'),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    hdr_i = next(i for i, ln in enumerate(body) if "↳ task → reviewer" in ln)
+    assert body[hdr_i - 1].strip() == ""
+    assert body == _render_body(events)
+
+
+class _TTYPipe(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def test_refresh_status_writes_newline_after_prose_on_tty() -> None:
+    """When the driver is about to draw a status line and the last permanent
+    emission was prose, write a single \\n first so the status line sits
+    below a blank separator. Then clear `_prev_prose` so the subsequent
+    `status.hide()` from the next _print_lines doesn't re-add another blank."""
+    out = _TTYPipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    # Set up a builder activity so current_activity() returns non-None.
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="spec", kind="agent", phase="p",
+                    model="m", provider="anthropic"))
+    out.truncate(0)
+    out.seek(0)
+    drv._prev_prose = True
+    drv._refresh_status()
+    written = out.getvalue()
+    assert written.startswith("\n"), f"expected leading newline; got {written!r}"
+    assert drv._prev_prose is False
+
+
+def test_refresh_status_no_newline_on_non_tty_even_with_prev_prose() -> None:
+    """On a non-TTY pipe the status line never draws, so injecting a \\n
+    would create a phantom blank in scroll-back. The newline is gated on the
+    stream's TTY state, inspected directly by the driver."""
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="spec", kind="agent", phase="p",
+                    model="m", provider="anthropic"))
+    out.truncate(0)
+    out.seek(0)
+    drv._prev_prose = True
+    drv._refresh_status()
+    assert out.getvalue() == ""
+    assert drv._prev_prose is True   # untouched on non-TTY
+
+
+def test_user_message_resets_status_span() -> None:
+    """The status-line elapsed timer measures 'time the agent has been working
+    since the last user reply' — across tools, thinks, and multiple
+    llm_responses within one interactive turn. So `restart_span()` fires on
+    `step_started` AND on `user_message`."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+        ev("3", "tool_call", agent_id="a", id="b1", name="bash", input={}),
+        ev("4", "tool_result", agent_id="a", id="b1", content="ok"),
+        ev("5", "thinking", agent_id="a", content="hmm"),
+        ev("6", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),
+        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),
+        ev("8", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    # restart_span fired exactly at step_started (e2) and user_message (e7).
+    assert calls == ["restart", "restart"]

@@ -89,6 +89,11 @@ async def ask_line_with_slash(prompt: Any, status: Any, change: Any) -> str:
     unknown, and not-found commands print and re-prompt; /<name> returns the
     resolved skill body; anything else returns as-is.
 
+    Spacing: one blank line BEFORE the prompt (so the `> …` field is visually
+    separated from prior output). NONE after the user submits — prompt_toolkit
+    already terminates the `> …` line with a newline, and the unified prose-
+    adjacency rule produces the single separator before the next agent block.
+
     Shared by the run and resume paths so the slash/skills logic exists once."""
     while True:
         # Keep the whole turn inside status.suspend(): /help, /skills, and
@@ -99,11 +104,9 @@ async def ask_line_with_slash(prompt: Any, status: Any, change: Any) -> str:
             print()                       # §3: separate the prompt from prior output
             line: str = await prompt.ask_async("> ")
             if not is_slash_command(line):
-                print()                   # §3: separate submitted input from next output
                 return line
             result = handle_slash_line(line, change=change, output_fn=print)
             if result is REPROMPT:
                 continue
             assert isinstance(result, str)  # handle_slash_line returns str for skill body
-            print()                       # §3: skill-body submission separated too
             return result

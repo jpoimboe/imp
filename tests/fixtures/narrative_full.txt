@@ -11,6 +11,7 @@ design
         - bash
         - read_file
     Drafting the spec.
+    
     ▾ thinking
       I need to consider the auth requirements carefully before writing the
       spec. Let me think about OAuth2 vs API keys.

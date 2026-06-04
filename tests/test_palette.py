@@ -83,7 +83,7 @@ def test_fold_glyphs_default_unicode() -> None:
 def test_node_colors_calm_scheme() -> None:
     # The most frequent content is calmest; weight/color go to identity + structure.
     assert pal.NODE_COLORS["agent"] == ()                  # plain default fg (was bold)
-    assert pal.NODE_COLORS["user"] == ("green",)           # readable human (was blue)
+    assert pal.NODE_COLORS["user"] == ("bg_bright_blue",) # bright-blue bg on user input
     assert pal.NODE_COLORS["phase"] == ("cyan",)           # recedes (was bold blue)
     assert pal.NODE_COLORS["step"] == ("gray",)            # navigational chrome (was cyan)
     assert pal.NODE_COLORS["subagent"] == ("magenta",)     # unchanged
@@ -97,3 +97,17 @@ def test_node_colors_calm_scheme() -> None:
 def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
     # agent = () means pal.ansi returns prose unwrapped even when color is on.
     assert pal.ansi("prose", *pal.NODE_COLORS["agent"], enabled=True) == "prose"
+
+
+def test_bg_bright_blue_ansi_code() -> None:
+    # The bright-blue background ANSI 104 lives in the palette so both renderers
+    # (imp log via _wrap; prompt_toolkit via Style) reference the same constant.
+    assert pal._ANSI["bg_bright_blue"] == "\x1b[104m"
+    assert pal.ansi("hi", "bg_bright_blue", enabled=True) == "\x1b[104mhi\x1b[0m"
+
+
+def test_user_color_is_bright_blue_background() -> None:
+    # NODE_COLORS["user"] now paints the user-input region rather than coloring
+    # the foreground. _wrap applies these codes to every wrapped line, so multi-
+    # line user input gets the bg on every line.
+    assert pal.NODE_COLORS["user"] == ("bg_bright_blue",)
