@@ -98,11 +98,37 @@ def create_worktree(control_root: Path, slug: str, base: str) -> Path:
     return (control_root / rel).resolve()
 
 
-def remove_worktree(control_root: Path, slug: str) -> None:
-    """`git worktree remove .imp/worktrees/<slug>`. Branch is KEPT (spec §4)."""
+def remove_worktree(control_root: Path, slug: str, *, force: bool = False) -> None:
+    """`git worktree remove .imp/worktrees/<slug>`. Branch is KEPT (spec §4).
+
+    Default (force=False) is the merge-teardown behaviour: a plain remove that
+    errors on a dirty tree. With force=True (used by `imp abandon`) tolerate a
+    dirty tree / stale metadata / an already-absent worktree: retry with
+    --force, then prune git's bookkeeping and drop any leftover directory so a
+    re-run after a crash converges."""
     rel = Path(".imp") / "worktrees" / slug
     with RepoGitLock(control_root).acquire():
-        _git_ok(control_root, "worktree", "remove", str(rel))
+        if not force:
+            _git_ok(control_root, "worktree", "remove", str(rel))
+            return
+        proc = _git(control_root, "worktree", "remove", "--force", str(rel))
+        if proc.returncode != 0:
+            _git(control_root, "worktree", "prune")
+            shutil.rmtree(control_root / rel, ignore_errors=True)
+
+
+def delete_branch(control_root: Path, slug: str) -> None:
+    """`git branch -D imp/<slug>` (abandon-only; remove_worktree keeps the
+    branch). Tolerates an already-deleted branch so abandon is idempotent, and
+    needs only the slug — callable even when the worktree/change.json is gone
+    (the (remove → delete) crash-recovery path)."""
+    with RepoGitLock(control_root).acquire():
+        # rc ignored deliberately: tolerates "branch not found" (already
+        # deleted — the idempotency we want). The other non-zero case is
+        # "used by worktree", which only happens if a caller skips the
+        # required remove_worktree-before-delete_branch ordering; abandon's
+        # flow always removes first, so that path is unreachable here.
+        _git(control_root, "branch", "-D", f"imp/{slug}")
 
 
 def rename(control_root: Path, old: str, new: str) -> Path | None:
