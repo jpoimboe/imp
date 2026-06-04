@@ -224,6 +224,7 @@ class RunResult:
     raw_review: str  # the reviewer's full `findings` prose (union prose for panels)
     findings: tuple[ReviewFinding, ...]
     telemetry: Telemetry
+    dollars: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -233,6 +234,7 @@ class RunResult:
             "raw_review": self.raw_review,
             "findings": [asdict(f) for f in self.findings],
             "telemetry": self.telemetry.to_dict(),
+            "dollars": self.dollars,
         }
 
     @classmethod
@@ -253,6 +255,7 @@ class RunResult:
                 for f in d.get("findings", [])
             ),
             telemetry=Telemetry.from_dict(d["telemetry"]),
+            dollars=float(d.get("dollars", 0.0)),
         )
 
 

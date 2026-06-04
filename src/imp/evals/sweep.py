@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
-from imp.evals.cache import store_run
+from imp.evals.cache import load_run, store_run
 from imp.evals.grader import grade
 from imp.evals.models import Fixture, GradeResult, Telemetry, Variant
 from imp.evals.pricing import dollars_for
@@ -156,3 +156,23 @@ def run_sweep(
         for fut in futures:
             grades.extend(fut.result())
     return grades
+
+
+def collect_dollars(
+    cache_dir: Path, variants: list[Variant], fixtures: list[Fixture], provenance: str
+) -> dict[tuple[str, str], list[float]]:
+    """Build {(variant_id, fixture_id): [dollars per repeat]} from cached runs —
+    for the scorecard's Q3 axis. `provenance` is REQUIRED (no default) and MUST
+    match what run_sweep stored under, or every lookup misses and Q3 reads
+    $0.0000 (M4)."""
+    out: dict[tuple[str, str], list[float]] = {}
+    for v in variants:
+        for fx in fixtures:
+            vals: list[float] = []
+            for r in range(v.n_repeats):
+                rr = load_run(cache_dir, v.id, fx.id, r, provenance)
+                if rr is not None:
+                    vals.append(rr.dollars)
+            if vals:
+                out[(v.id, fx.id)] = vals
+    return out

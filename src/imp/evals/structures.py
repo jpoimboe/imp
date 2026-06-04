@@ -30,6 +30,7 @@ def run_variant(
     all_findings: list[ReviewFinding] = []
     prose_parts: list[str] = []
     telem = Telemetry.zero()
+    total_dollars = 0.0
     try:
         for agent_name, (provider, model) in variant.role_to_model_map.items():
             member = drive_review(
@@ -44,6 +45,7 @@ def run_variant(
             )
             all_findings.extend(member.findings)
             telem = telem + member.telemetry  # tokens/tool-calls/wall all SUM
+            total_dollars += member.dollars
             prose_parts.append(f"## {agent_name} ({provider}/{model})\n{member.raw_review}")
     finally:
         teardown_fixture_tree(control_root, fixture)
@@ -66,4 +68,5 @@ def run_variant(
         raw_review="\n\n".join(prose_parts),
         findings=findings,
         telemetry=telem,
+        dollars=total_dollars,
     )

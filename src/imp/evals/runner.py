@@ -12,7 +12,18 @@ from imp.engine.types import AgentDef
 from imp.evals.driver import baseline_agent_path, drive_agent_sync
 from imp.evals.findings_parse import parse_review_findings
 from imp.evals.models import Fixture, RunResult, Telemetry
+from imp.evals.pricing import dollars_for
 from imp.evals.tree import materialize_fixture_tree, teardown_fixture_tree
+
+
+def price_run(telemetry: Telemetry, provider_name: str, model_name: str) -> float:
+    """Dollar cost of one run; unknown model -> 0.0 (a sweep over a real model is
+    priced; tests with fake models price to zero rather than crash)."""
+    try:
+        return dollars_for(telemetry, provider_name, model_name)
+    except KeyError:
+        return 0.0
+
 
 _OPENING = """\
 You are reviewing a single committed change. The change is already committed at
@@ -71,13 +82,15 @@ def drive_review(
         agent_id=f"eval:{agent_name}",
     )
     prose = (output or {}).get("findings", "") if output else ""
+    effective_telem = telem or Telemetry.zero()
     return RunResult(
         variant_id=vid,
         fixture_id=fixture.id,
         repeat_index=repeat_index,
         raw_review=prose,
         findings=parse_review_findings(prose),
-        telemetry=telem or Telemetry.zero(),
+        telemetry=effective_telem,
+        dollars=price_run(effective_telem, provider_name, model_name),
     )
 
 
