@@ -77,7 +77,7 @@ test-dogfood-verbose: ## test-dogfood with -v and verbose output.
 
 .PHONY: test-eval
 test-eval: ## Run the eval harness live (costs real tokens; set IMP_RUN_EVALS=1).
-	IMP_RUN_EVALS=1 $(PYTEST) -q tests/evals/test_harness_live.py
+	IMP_RUN_EVALS=1 $(PYTEST) -q tests/evals/test_harness_live.py tests/evals/test_e2e_live.py
 
 .PHONY: test-all
 test-all: test test-live ## Full suite including live tests.
