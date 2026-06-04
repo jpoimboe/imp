@@ -406,6 +406,28 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
+    # Retry re-entry: the executor's transient-error retry loop re-emits
+    # step_started on every iteration WITHOUT a prior step_completed for that
+    # step, so the same StepNode is still on the stack. Reuse it in place —
+    # do NOT clear children (unlike resume re-entry below), because every
+    # attempt's error/warning lines must stay visible as direct children of
+    # the one step. Do not reset start_ts/model/provider/kind/interactive:
+    # elapsed time should reflect the operator's wait, and the other fields
+    # are identical by construction (same agent, same step). The `not
+    # self._resuming` guard makes this disjoint from resume re-entry below
+    # (spec: "the two paths are disjoint"): on a resume the step from before
+    # the pause is also on the stack with matching (name, phase), so without
+    # this guard the retry branch would fire first and swallow the resume —
+    # never clearing the stale partial transcript the resume logic exists to
+    # clear.
+    if (not self._resuming
+            and self._step_stack
+            and self._current_phase is not None
+            and not self._current_phase.closed
+            and self._current_phase.name == phase):
+        top = self._step_stack[-1]
+        if not top.closed and top.name == name:
+            return
     # Resume re-entry: the first step_started after a resume re-enters the
     # interrupted step in the still-open phase. The executor re-runs it from
     # scratch, so reuse the open StepNode and RESET its content (the fresh re-run
