@@ -293,6 +293,7 @@ Before calling `complete_step` with a success status:
 - [ ] Output pristine (no errors, warnings)
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
+- [ ] Each test would fail if the behavior were wrong — not just if the plan were not transcribed
 
 Can't check all boxes? You skipped TDD. Start over.
 
@@ -541,6 +542,47 @@ TDD cycle:
 4. THEN claim complete
 ```
 
+### Anti-Pattern 6: Tautological / Plan-Echo Tests
+
+**The violation:**
+```python
+# BAD: expected is just the literal the implementation returns
+def test_label_is_built():
+    result = build_label(item)
+    assert result == "ready"   # ...and the impl is literally `return "ready"`
+```
+
+**Why this is wrong:**
+- The test's `expected` value was copied from (or co-authored with) the code under
+  test, so it verifies *transcription*, not behavior.
+- It stays green even if the feature is broken — revert the implementation, return a
+  wrong value, or skip the step, and a plan-echo test still passes.
+- This is especially dangerous when a plan emits the test and the implementation in
+  the same pass, hand-crafted to agree: the RED step never genuinely fails.
+
+**The fix:**
+```python
+# GOOD: expected is derived from the requirement and encodes observable behavior
+def test_label_reflects_item_state():
+    item = make_item(status="done", retries=2)
+    result = build_label(item)
+    assert result == "done (2 retries)"   # a consequence a broken impl can't fake
+```
+
+**Gate Function:**
+```
+BEFORE committing a test:
+  Ask: "If I broke the feature — reverted the implementation, returned a wrong
+        value, skipped the step — would THIS test fail?"
+
+  IF no:
+    STOP - the test pins transcription, not behavior
+    Rewrite it to assert an observable consequence the broken version cannot produce
+
+  The `expected` value must be justified by the requirement,
+  NEVER copied from the code under test.
+```
+
 ### When Mocks Become Too Complex
 
 **Warning signs:**
@@ -561,6 +603,7 @@ TDD cycle:
 | Incomplete mocks | Mirror real API completely |
 | Tests as afterthought | TDD - tests first |
 | Over-complex mocks | Consider integration tests |
+| Tautological / plan-echo test | Derive `expected` from the spec, not the implementation |
 
 ### Anti-Patterns Red Flags
 
@@ -570,6 +613,7 @@ TDD cycle:
 - Test fails when you remove mock
 - Can't explain why mock is needed
 - Mocking "just to be safe"
+- Test's expected value lifted from the implementation it's testing → plan-echo / tautology
 
 **Mocks are tools to isolate, not things to test.**
 
