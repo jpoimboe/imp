@@ -6,6 +6,7 @@ model_name), bypassing tier/role inheritance (spec Variant §)."""
 
 from __future__ import annotations
 
+import uuid
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -72,7 +73,16 @@ async def drive_agent(
     output is None if the agent errored/paused. Telemetry is read back from the
     events.jsonl this run wrote, filtered to `agent_id`."""
     safe_id = agent_id.replace(":", "_").replace("/", "_")  # loci contain '/' (M7)
-    events_path = project_root / ".imp" / "eval" / f"{safe_id}.events.jsonl"
+    # Each eval-agent run is a stateless one-shot, but the provider reconstructs
+    # its message transcript from the event log and `classify_resume`s on it
+    # (providers/anthropic.py): a NON-EMPTY events file makes it RESUME a prior
+    # transcript instead of judging the new input fresh. Judge runs all share
+    # project_root=repo-root and collide on agent_id (same {symbol}:{locus} across
+    # items + persisted across runs), so a stable path silently replays a foreign
+    # review -> every verdict degrades to `none`. Isolate each call in its own
+    # fresh path so the log is guaranteed empty at start (no spurious resume).
+    run_token = uuid.uuid4().hex[:12]
+    events_path = project_root / ".imp" / "eval" / f"{safe_id}.{run_token}.events.jsonl"
     events_path.parent.mkdir(parents=True, exist_ok=True)
     event_log = JsonlEventLog(events_path)
 
@@ -100,7 +110,7 @@ async def drive_agent(
         ),
         interactive=False,
         user_chat_input_fn=None,
-        transcript_dir=project_root / ".imp" / "eval" / "transcripts" / safe_id,
+        transcript_dir=project_root / ".imp" / "eval" / "transcripts" / f"{safe_id}.{run_token}",
         fs_permissions=(),  # reviewers/judges are read-only; file tools via /project map
         events_path=events_path,
         subagent_defs={},  # reviewers/judges/normalizers have no subagents
