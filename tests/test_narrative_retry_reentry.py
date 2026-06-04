@@ -104,3 +104,34 @@ def test_retry_reentry_does_not_clear_existing_children() -> None:
         f"all four error/warning lines (2 errors + 2 retry warnings) must remain "
         f"as children after re-entry; got {len(errs)}"
     )
+
+
+def test_render_text_shows_coder_header_once_with_flat_error_indent() -> None:
+    """`render_tree` emits the `coder` step header exactly once, and every
+    error/warning line sits at the same depth (no progressively-growing indent
+    from nesting later attempts inside earlier ones)."""
+    from imp.cli.render_text import render_tree
+
+    tree = nv.build_tree(_retry_sequence())
+    lines = list(render_tree(tree, full=False, color=False, width=120))
+
+    coder_header_lines = [ln for ln in lines if ln.rstrip() == "  coder"]
+    assert len(coder_header_lines) == 1, (
+        f"`coder` step header must render exactly once, not once per attempt; "
+        f"got {len(coder_header_lines)}: {coder_header_lines!r}"
+    )
+
+    # All error/warning lines must share the same leading-indent width — i.e.
+    # they all sit at the StepNode's children depth, not nested deeper as
+    # children of a child StepNode. Indent is two spaces per level (see
+    # render_text._INDENT). With color=False there is no ANSI wrapping.
+    err_lines = [ln for ln in lines
+                 if ln.lstrip().startswith(("error:", "warning:"))]
+    assert len(err_lines) == 4, (
+        f"expected 4 error/warning lines, got {len(err_lines)}: {err_lines!r}"
+    )
+    indents = {len(ln) - len(ln.lstrip(" ")) for ln in err_lines}
+    assert len(indents) == 1, (
+        f"all error/warning lines must share one indent depth (flat under the "
+        f"step); got distinct indents {sorted(indents)} in lines {err_lines!r}"
+    )
