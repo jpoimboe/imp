@@ -750,3 +750,24 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     hdr_i = next(i for i, ln in enumerate(out) if "↳ task → reviewer" in ln)
     assert hdr_i > prose_i
     assert out[hdr_i - 1].strip() == ""
+
+
+def test_user_message_paints_bright_blue_bg_on_every_line_color_on() -> None:
+    """Multi-line user input gets the bg on every wrapped line; the leading `> `
+    prefix is preserved on the first line (and not duplicated on continuations).
+    """
+    node = nv.UserMessageNode(text="line one\nline two")
+    out = list(rt._render(node, depth=1, full=False, color=True, width=80))
+    assert len(out) == 2
+    # First line: `> ` prefix + bg span; second line: bg span without `> `.
+    assert "\x1b[104m" in out[0] and "> line one" in out[0]
+    assert "\x1b[104m" in out[1] and "line two" in out[1]
+    assert "> line two" not in out[1]    # `> ` is a first-line speaker marker
+
+
+def test_user_message_no_bg_when_color_off_but_keeps_prefix() -> None:
+    node = nv.UserMessageNode(text="line one\nline two")
+    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+    joined = "\n".join(out)
+    assert "\x1b[104m" not in joined        # bg suppressed under NO_COLOR / non-TTY
+    assert "> line one" in joined           # `> ` still anchors the speaker
