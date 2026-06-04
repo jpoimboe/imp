@@ -253,6 +253,20 @@ class LiveDriver:
 
     def _refresh_status(self) -> None:
         if self._builder.current_activity() is not None:
+            # Honour the unified prose-adjacency rule for the LIVE status line,
+            # which bypasses `_print_lines`. Gated on the stream being a TTY
+            # (where the status actually draws) so a non-TTY capture doesn't
+            # collect a phantom blank in scroll-back. Inspect the stream
+            # directly — `LiveStatus`'s public API stays untouched, matching
+            # the spec's "Out" note.
+            stream_isatty = getattr(self._stream, "isatty", lambda: False)
+            if self._prev_prose and stream_isatty():
+                # Clearing `_prev_prose` here prevents the next
+                # `_status.hide()` (from a following _print_lines) from
+                # re-introducing a blank when the next permanent block emits.
+                self._stream.write("\n")
+                self._stream.flush()
+                self._prev_prose = False
             self._status.update(self.compose_status)
         else:
             self._status.reset()

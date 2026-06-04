@@ -611,3 +611,45 @@ def test_live_prose_then_subagent_header_blank_separated() -> None:
     hdr_i = next(i for i, ln in enumerate(body) if "↳ task → reviewer" in ln)
     assert body[hdr_i - 1].strip() == ""
     assert body == _render_body(events)
+
+
+class _TTYPipe(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def test_refresh_status_writes_newline_after_prose_on_tty() -> None:
+    """When the driver is about to draw a status line and the last permanent
+    emission was prose, write a single \\n first so the status line sits
+    below a blank separator. Then clear `_prev_prose` so the subsequent
+    `status.hide()` from the next _print_lines doesn't re-add another blank."""
+    out = _TTYPipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    # Set up a builder activity so current_activity() returns non-None.
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="spec", kind="agent", phase="p",
+                    model="m", provider="anthropic"))
+    out.truncate(0)
+    out.seek(0)
+    drv._prev_prose = True
+    drv._refresh_status()
+    written = out.getvalue()
+    assert written.startswith("\n"), f"expected leading newline; got {written!r}"
+    assert drv._prev_prose is False
+
+
+def test_refresh_status_no_newline_on_non_tty_even_with_prev_prose() -> None:
+    """On a non-TTY pipe the status line never draws, so injecting a \\n
+    would create a phantom blank in scroll-back. The newline is gated on the
+    stream's TTY state, inspected directly by the driver."""
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("2", "step_started", step="spec", kind="agent", phase="p",
+                    model="m", provider="anthropic"))
+    out.truncate(0)
+    out.seek(0)
+    drv._prev_prose = True
+    drv._refresh_status()
+    assert out.getvalue() == ""
+    assert drv._prev_prose is True   # untouched on non-TTY
