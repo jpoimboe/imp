@@ -80,17 +80,24 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     """Render one finalized prose block as markdown→ANSI at inner width, then
     prefix the depth gutter/indent. rich owns bold/heading/list/fence formatting;
     we own the magenta gutter. We never slice rich's output, so no escape is ever
-    cut; content rich won't reflow (code fences, tables) is allowed to overflow."""
+    cut; content rich won't reflow (code fences, tables) is allowed to overflow.
+
+    Theme override: rich's default `markdown.code` is bold+cyan+black-bg. We
+    drop the bold and dark bg by setting it to plain `cyan` so inline `code`
+    sits calmly in the prose. Fenced blocks (`markdown.code_block`) keep
+    rich's default formatting."""
     import io
 
     from rich.console import Console
     from rich.markdown import Markdown
+    from rich.theme import Theme
 
     inner = max(8, width - _INDENT_W * depth)
     buf = io.StringIO()
     console = Console(file=buf, width=inner, no_color=not color,
                       color_system="standard" if color else None,
-                      force_terminal=color, soft_wrap=False, highlight=False)
+                      force_terminal=color, soft_wrap=False, highlight=False,
+                      theme=Theme({"markdown.code": "cyan"}))
     console.print(Markdown(text))
     indent = _gutter_indent(depth, gutters, color)
     out: list[str] = []

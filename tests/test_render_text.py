@@ -670,3 +670,18 @@ def test_markdown_block_plain_when_color_off() -> None:
     joined = "\n".join(lines)
     assert "\x1b[" not in joined          # no ANSI when color disabled
     assert "bold" in joined
+
+
+def test_inline_code_is_cyan_not_bold_and_no_dark_bg() -> None:
+    # rich's default theme paints inline `code` with \x1b[1;36;40m (bold + cyan
+    # + black bg). The Theme({"markdown.code": "cyan"}) override drops bold and
+    # the dark bg cleanly; the span stays foreground-cyan.
+    from imp.cli.render_text import _render_markdown_block
+    lines = _render_markdown_block("Try `inline code` here.", width=40, depth=0,
+                                   color=True, gutters=())
+    joined = "\n".join(lines)
+    assert "inline code" in _visible(joined)
+    assert "\x1b[1m" not in joined          # no bold
+    assert "\x1b[40m" not in joined         # no dark default-bg
+    assert "\x1b[1;36;40m" not in joined    # no rich-default combined code
+    assert "\x1b[36m" in joined             # still cyan foreground
