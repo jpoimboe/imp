@@ -1,7 +1,7 @@
 """Slash command dispatcher for interactive steps (spec §4).
 
 Flat namespace: built-ins (/help, /skills) take precedence; every other
-/<name> resolves a skill from the Change snapshot and is submitted AS the
+/<name> resolves a skill from the Change's tracked workflow dir and is submitted AS the
 user's input line (human-attributed). The skill name is untrusted and
 sanitized by agents.skills."""
 
