@@ -68,6 +68,8 @@ class FixtureMeta:
     original_model: str | None
     blocking: bool | None
     was_fixed: bool | None
+    stratum: str | None = None        # "in-diff" | "cross-cutting" | "deep-tail" | "clean"
+    independence: str | None = None   # "experiment-seed" | "independent-history" | "blind-authored"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -79,6 +81,8 @@ class FixtureMeta:
             original_model=d.get("original_model"),
             blocking=d.get("blocking"),
             was_fixed=d.get("was_fixed"),
+            stratum=d.get("stratum"),
+            independence=d.get("independence"),
         )
 
 

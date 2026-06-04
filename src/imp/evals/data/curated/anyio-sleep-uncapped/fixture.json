@@ -18,6 +18,8 @@
     "reviewer_type": "code-reviewer",
     "original_model": null,
     "blocking": true,
-    "was_fixed": true
+    "was_fixed": true,
+    "stratum": "cross-cutting",
+    "independence": "experiment-seed"
   }
 }

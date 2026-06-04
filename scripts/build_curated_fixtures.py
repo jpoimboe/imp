@@ -60,7 +60,10 @@ def build() -> None:
         # of co-located bugs. Precision anchors come from Task 26 clean fixtures, so
         # no clean_loci guess here (the earlier :69 guess was wrong for this tree).
         clean_loci=(),
-        meta=FixtureMeta("code-reviewer", None, True, False),
+        meta=FixtureMeta(
+            "code-reviewer", None, True, False,
+            stratum="in-diff", independence="experiment-seed",
+        ),
     )
 
     overflow = Fixture(
@@ -99,7 +102,10 @@ def build() -> None:
             ),
         ),
         clean_loci=(),
-        meta=FixtureMeta("code-reviewer", None, True, False),
+        meta=FixtureMeta(
+            "code-reviewer", None, True, False,
+            stratum="deep-tail", independence="experiment-seed",
+        ),
     )
 
     anyio = Fixture(
@@ -128,7 +134,10 @@ def build() -> None:
             ),
         ),
         clean_loci=(),
-        meta=FixtureMeta("code-reviewer", None, True, True),  # was_fixed=True
+        meta=FixtureMeta(
+            "code-reviewer", None, True, True,  # was_fixed=True
+            stratum="cross-cutting", independence="experiment-seed",
+        ),
     )
 
     for fx in (hint, overflow, anyio):

@@ -25,6 +25,8 @@
     "reviewer_type": "code-reviewer",
     "original_model": null,
     "blocking": true,
-    "was_fixed": false
+    "was_fixed": false,
+    "stratum": "deep-tail",
+    "independence": "experiment-seed"
   }
 }
