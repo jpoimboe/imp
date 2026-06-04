@@ -124,21 +124,22 @@ def is_prose_leaf(node: Any) -> bool:
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
                      width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     """Render a container's children in order, inserting ONE blank line between
-    two consecutive prose blocks. A child that renders nothing (lean-mode thinking
-    / empty tool burst) leaves the prose-adjacency state untouched, so
-    prose→thinking→prose still separates; any non-prose output (header, breadcrumb,
-    subagent block) resets it, so prose never gets a spurious leading blank."""
+    a prose block and ANY following emission. A child that renders nothing
+    (lean-mode thinking / empty tool burst) leaves the prose-adjacency state
+    untouched, so prose→thinking→prose still separates; any non-empty emission
+    resets it. The blank separator is the gutter-bearing indent at the child
+    depth (reusing `_wrap`'s blank-paragraph carrier) so the magenta │ stays
+    continuous inside a SubagentFold."""
     prev_prose = False
     for child in children:
         lines = list(_render(child, depth=depth, full=full, color=color, width=width,
                              gutters=gutters))
         if not lines:
             continue
-        cur_prose = is_prose_leaf(child)
-        if cur_prose and prev_prose:
-            yield ""
+        if prev_prose:
+            yield _gutter_indent(depth, gutters, color)
         yield from lines
-        prev_prose = cur_prose
+        prev_prose = is_prose_leaf(child)
 
 
 def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,

@@ -705,3 +705,45 @@ def test_markdown_block_blank_line_inside_prose_carries_magenta_gutter() -> None
     # prose surrounds it
     assert any("paragraph one" in ln for ln in lines[:blank_indices[0]])
     assert any("paragraph two" in ln for ln in lines[blank_indices[0] + 1:])
+
+
+def test_prose_then_structural_leaf_separated_by_blank() -> None:
+    """After any prose block, the next emission in the same children-context
+    gets one blank-line separator — not only another prose block. Today the
+    step_completed breadcrumb sits directly under the last prose line; the
+    generalized rule inserts one gutter-bearing blank between them."""
+    out = _lines([
+        _ev("1", "change_created", slug="x", title="t"),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Drafting."}]}, usage={}),
+        _ev("4", "step_completed", step="spec", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+    prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
+    bc_i = next(i for i, ln in enumerate(out) if "✓ spec" in ln)
+    assert bc_i > prose_i
+    assert out[bc_i - 1].strip() == "", (
+        "prose must be blank-separated from the following breadcrumb")
+
+
+def test_prose_then_subagent_header_separated_by_blank() -> None:
+    """Prose then a subagent header (a non-prose container child) also gets a
+    blank separator — the rule applies to ALL non-prose next children, not just
+    leaves."""
+    out = _lines([
+        _ev("1", "change_created", slug="x", title="t"),
+        _ev("2", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("3", "llm_response", agent_id="a",
+            raw={"content": [{"type": "text", "text": "Drafting."}]}, usage={}),
+        _ev("tk", "tool_call", agent_id="a", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("r", "tool_result", agent_id="a", id="b1",
+            content='{"status":"Success"}'),
+    ])
+    prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
+    hdr_i = next(i for i, ln in enumerate(out) if "↳ task → reviewer" in ln)
+    assert hdr_i > prose_i
+    assert out[hdr_i - 1].strip() == ""
