@@ -68,7 +68,7 @@ the spec is committed.
 
 **Iron rule: never call `rename_change` and write/commit the spec in the same turn.** The turn in which you call `rename_change` does nothing else spec-related: announce the name, call `rename_change(name="…")`, then immediately `complete_step(phase="drafting")`. Do NOT write the spec file, do NOT run `git add`/`git commit`, and do NOT call `complete_step(phase="written")` in a turn where you called `rename_change`. You only write and commit the spec on a LATER turn, after the engine has resumed you under the settled slug.
 
-Do NOT write `imp/specs/…md` at all until the slug is final. An early draft under a provisional slug would be left as an untracked file after the rename (the worktree moves, the old-slug file does not follow), which would dirty the tree and block the merge — and a spec **committed** under the provisional slug fails the spec-commit check (which requires HEAD to touch `imp/specs/<final slug>.md`), forcing a wasteful re-commit.
+Settle the title before you **commit** the spec. The committed filename must match the final slug: a spec committed under a provisional slug fails the spec-commit check (which requires HEAD to touch `imp/specs/<final slug>.md`), forcing a wasteful re-commit. When the rename is applied the engine moves any existing `imp/specs/<old-slug>.md` to the settled name (via `git mv`, falling back to a filesystem rename for an uncommitted draft), so an early draft won't be stranded at the old name — but committing under the wrong name still costs you a re-commit, so prefer to write the spec only once the slug is final.
 
 ## Writing the Spec (the `phase: written` turn)
 

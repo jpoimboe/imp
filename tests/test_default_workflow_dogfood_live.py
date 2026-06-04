@@ -588,7 +588,9 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         return target in {"implement", "task-lead", "plan-writer", "spec-writer"}
 
     # Use the COMPLETE journaled event stream (authoritative): the live
-    # all_events_accum stops at the worktree rename, so it can miss late edges.
+    # all_events_accum may miss late edges (the rename is content-only — title
+    # change + spec git mv — and the worktree path stays stable across it, but
+    # accumulation can still lag behind the journaled record).
     events_raw = journal.journal_show(tmp_path, slug, "events.jsonl")
     assert events_raw is not None, f"no journaled events.jsonl for {slug!r}"
     full_events = [
