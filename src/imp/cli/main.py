@@ -151,7 +151,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 _ask_line = make_stdin_reply_fn(args.default_reply)
             else:
                 prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                                editing_mode=_editing_mode(change.control_root))
+                                editing_mode=_editing_mode(change.control_root),
+                                color=should_use_color(sys.stdout))
 
                 async def _ask_line() -> str:
                     return await ask_line_with_slash(prompt, status, change)
@@ -287,7 +288,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 _ask_line = make_stdin_reply_fn(args.default_reply)
             else:
                 prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                                editing_mode=_editing_mode(change.control_root))
+                                editing_mode=_editing_mode(change.control_root),
+                                color=should_use_color(sys.stdout))
 
                 async def _ask_line() -> str:
                     return await ask_line_with_slash(prompt, status, change)

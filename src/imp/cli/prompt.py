@@ -15,19 +15,26 @@ from pathlib import Path
 from typing import Any
 
 
-def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs") -> Any:
+def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs",
+                   color: bool = False) -> Any:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.enums import EditingMode
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.styles import Style
 
     history = InMemoryHistory()
     kb = KeyBindings()
     mode = EditingMode.VI if editing_mode == "vi" else EditingMode.EMACS
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
+    # bright-blue background on the input region (the default style class),
+    # paralleling NODE_COLORS["user"] in palette.py so the live prompt and the
+    # `imp log` replay of UserMessageNode look the same. Omitted under NO_COLOR
+    # / non-TTY (`color=False`) so the default unstyled input is shown.
+    style = Style.from_dict({"": "bg:ansibrightblue"}) if color else None
     return PromptSession(history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
-                         editing_mode=mode)
+                         editing_mode=mode, style=style)
 
 
 class SlashCompleter:
@@ -73,10 +80,12 @@ class Prompt:
         *,
         skills_dir: Any | None = None,
         editing_mode: str = "emacs",
+        color: bool = False,
         _session_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._session_factory = _session_factory or (
-            lambda: _build_session(skills_dir, editing_mode=editing_mode))
+            lambda: _build_session(skills_dir, editing_mode=editing_mode,
+                                   color=color))
         self._session = self._session_factory()
 
     def ask(self, prompt_text: str = "> ") -> str:
