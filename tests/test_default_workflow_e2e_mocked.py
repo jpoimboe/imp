@@ -464,3 +464,69 @@ async def test_fast_path_skips_both_reviewers_but_not_code_reviewer(
     assert "spec-reviewer" not in started, started
     assert "plan-review" not in started, started
     assert "code-reviewer" in started, started
+
+
+@pytest.mark.anyio
+async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
+    from imp.engine import recovery
+    from imp.engine.loader import load_workflow
+    from imp.providers.config import load_config
+
+    change = _seed_default_workflow(tmp_path)
+
+    # Position the Change as if paused at a maxed-out code-reviewer: its loop
+    # budget (max_loops 5) is exhausted at 6. apply_rewind must clear that count
+    # so a re-entry that loops back (a reject verdict) gets a fresh budget rather
+    # than tripping the max_loops re-pause again. (On the approve path below the
+    # gate advances via Continue, which pops the count regardless — so the reset
+    # is guarded by the explicit assert on st.loop_counts, not by the COMPLETED
+    # outcome; the runtime reset semantics are unit-tested in test_recovery.py.)
+    st = State.load(change.state_dir)
+    st.step = "code-reviewer"
+    st.status = "paused"
+    st.loop_counts = {"code-reviewer": 6}
+    st.save(change.state_dir)
+
+    wf = load_workflow(change.workflow_dir,
+                       configured_roles=load_config(tmp_path).role_names())
+    plan = recovery.plan_rewind(wf, st, "code-reviewer", force=False)
+    recovery.apply_rewind(plan, wf, st, change.event_log())
+    st.status = "running"
+    st.save(change.state_dir)
+    assert "code-reviewer" not in st.loop_counts          # the load-bearing reset guard
+
+    default = response(
+        tool_use("c0", "complete_step", {
+            "status": "Success",
+            "verdict": "approve", "findings": "none",
+            "decision": "merge", "comments": "",
+            "phase": "written", "spec_path": "stub-spec.md",
+            "complexity": "standard",
+            "plan_path": "stub-plan.md", "plan_number": 1,
+            "done": True, "deviation": False, "summary": "ok",
+            "more_plans": False, "rationale": "ok",
+            "blocking": False,
+            "built": "stub", "test_status": "ok",
+            "open_items": "", "next_steps": "",
+            "result": "DONE", "report": "ok",
+        }),
+        stop_reason="tool_use",
+    )
+    fake = FakeAsyncAnthropic([], default_response=default)
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake),
+    )
+
+    result = await run_change(
+        change, on_event=lambda _e: None,
+        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
+    )
+
+    assert result is RunResult.COMPLETED
+    events = list(change.event_log().read())
+    assert any(e["type"] == "step_rewound" for e in events)
+    # Merged: worktree removed by the terminal merge gate.
+    assert not (tmp_path / ".imp" / "worktrees" / "test-change").exists()
