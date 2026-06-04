@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import signal
 import sys
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -686,5 +688,13 @@ def main(argv: list[str] | None = None) -> int:
     p_status.set_defaults(func=_cmd_status)
 
     ns = parser.parse_args(args)
-    rc: int = ns.func(ns)
-    return rc
+    try:
+        rc: int = ns.func(ns)
+        return rc
+    except BrokenPipeError:
+        # A reader (e.g. `imp log | less` quit before draining) closed the pipe.
+        # Redirect stdout to devnull so the interpreter's final flush can't
+        # re-raise during shutdown, then exit with the conventional SIGPIPE code.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 128 + signal.SIGPIPE

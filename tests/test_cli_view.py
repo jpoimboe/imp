@@ -285,6 +285,26 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     assert "\x1b[" not in result.stdout
 
 
+def test_main_swallows_broken_pipe(monkeypatch) -> None:
+    """A reader closing the pipe early (e.g. `imp log | less` quit) must not
+    surface a BrokenPipeError traceback: main() catches it and returns the
+    conventional 128+SIGPIPE status. os.dup2/os.open are stubbed so the real
+    handler's stdout-fd redirect can't clobber pytest's own stdout."""
+    import signal
+
+    import imp.cli.main as m
+
+    def boom(_ns: object) -> int:
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(m, "_cmd_status", boom)
+    monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
+    monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
+
+    rc = m.main(["status"])
+    assert rc == 128 + signal.SIGPIPE
+
+
 def test_cmd_log_auto_picks_latest_by_mtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
