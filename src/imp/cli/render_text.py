@@ -102,7 +102,13 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     indent = _gutter_indent(depth, gutters, color)
     out: list[str] = []
     for raw in buf.getvalue().splitlines():
-        out.append(indent + raw.rstrip())
+        stripped = raw.rstrip()
+        if not stripped:
+            # Blank line inside the prose block — emit the bare gutter-indent
+            # so the magenta │ stays continuous inside a SubagentFold.
+            out.append(indent)
+        else:
+            out.append(indent + stripped)
     return out or [indent]
 
 

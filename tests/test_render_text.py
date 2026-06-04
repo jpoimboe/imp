@@ -685,3 +685,23 @@ def test_inline_code_is_cyan_not_bold_and_no_dark_bg() -> None:
     assert "\x1b[40m" not in joined         # no dark default-bg
     assert "\x1b[1;36;40m" not in joined    # no rich-default combined code
     assert "\x1b[36m" in joined             # still cyan foreground
+
+
+def test_markdown_block_blank_line_inside_prose_carries_magenta_gutter() -> None:
+    """Two paragraphs (blank line between) rendered with a subagent gutter level
+    must emit the bare gutter-indent on the blank line — keeping the magenta │
+    continuous through the prose block. Inspected on the line list so any
+    regression where the blank renders as a raw "" is caught."""
+    from imp.cli.render_text import _render_markdown_block
+    lines = _render_markdown_block(
+        "paragraph one\n\nparagraph two", width=40, depth=1, color=True,
+        gutters=(0,))
+    bar = "\x1b[35m│ \x1b[0m"
+    # exactly one blank line carrying the bare gutter-indent (and nothing else)
+    assert bar in lines, f"gutter-only blank line missing from {lines!r}"
+    # the bare-gutter line is exactly the indent (no trailing whitespace)
+    blank_indices = [i for i, ln in enumerate(lines) if ln == bar]
+    assert len(blank_indices) == 1
+    # prose surrounds it
+    assert any("paragraph one" in ln for ln in lines[:blank_indices[0]])
+    assert any("paragraph two" in ln for ln in lines[blank_indices[0] + 1:])
