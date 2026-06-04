@@ -284,12 +284,12 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.BreadcrumbLine):
         parts = [f"✓ {node.step_name}"]
-        if node.elapsed_s is not None:
-            parts.append(f"{int(node.elapsed_s)}s")
         parts.extend(node.extras)
         verb_text = pal.action_text(node.action) if node.action is not None else None
         if verb_text and verb_text != "continue":
             parts.append(f"→ {verb_text}")
+        if node.elapsed_s is not None:
+            parts.append(f"{int(node.elapsed_s)}s")
         ac = pal.accent_color(node.action)
         codes = (ac,) if ac else ()
         yield _line(" · ".join(parts), depth, color, *codes, gutters=gutters)

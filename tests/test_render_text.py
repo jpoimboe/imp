@@ -441,20 +441,23 @@ def test_roles_resolved_renders_constrained_and_unconstrained() -> None:
 def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
     from imp.cli import narrative as nv
     from imp.cli import render_text as rt
-    # plain continue: no "→ continue" suffix
+    # plain continue: no "→ continue" suffix; elapsed is the only/last field.
     bc = nv.BreadcrumbLine(step_name="spec", elapsed_s=12.4,
                            action={"verb": "continue"}, extras=[])
-    out = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
-    assert "✓ spec" in out and "12s" in out
-    assert "→ continue" not in out
-    # non-continue action: suffix appended; extras folded in
+    line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert line == "  ✓ spec · 12s"
+    assert "→ continue" not in line
+    # non-continue action: extras and → suffix sit BEFORE elapsed (last field).
     bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
                             action={"verb": "goto", "target": "implement"},
                             extras=["status=Success"])
-    out2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert "✓ code-reviewer" in out2 and "41s" in out2
-    assert "status=Success" in out2
-    assert "→ goto(implement)" in out2
+    line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
+    assert line2 == "  ✓ code-reviewer · status=Success · → goto(implement) · 41s"
+    # No elapsed (elapsed_s is None) → no trailing seconds field at all.
+    bc3 = nv.BreadcrumbLine(step_name="quick", elapsed_s=None,
+                            action={"verb": "continue"}, extras=[])
+    line3 = "\n".join(rt._render(bc3, depth=1, full=False, color=False, width=80))
+    assert line3 == "  ✓ quick"
 
 
 def _sub(outcome=None, *, is_error=False, name="reviewer"):

@@ -146,7 +146,7 @@ spec
     
     I'll land the slug rename now and write the spec on the next turn.
     
-    ✓ spec-writer · 815s · status=Success · phase=drafting · complexity=standard · → goto(spec-writer) [resume]
+    ✓ spec-writer · status=Success · phase=drafting · complexity=standard · → goto(spec-writer) [resume] · 815s
   change_renamed  old_slug=2026-06-03-vine-salt-kelp new_slug=2026-06-03-imp-new-open-by-asking title=imp new open by asking
   spec-writer (interactive)
     > Your previous attempt completed but was not accepted. The spec-writer
@@ -158,7 +158,7 @@ spec
     
     I have everything I need. Writing the spec now.
     
-    ✓ spec-writer · 115s · status=Success · phase=written · spec_path=imp/specs/2026-06-03-imp-new-open-by-asking.md · complexity=standard
+    ✓ spec-writer · status=Success · phase=written · spec_path=imp/specs/2026-06-03-imp-new-open-by-asking.md · complexity=standard · 115s
   spec-verify-commit
     ✓ spec-verify-commit · 0s
   spec-final-review-gate
@@ -208,7 +208,7 @@ spec
     
     Spec is ready for planning.
     
-    ✓ spec-reviewer · 31s · status=Success · blocking=False · → goto(spec-writer) [resume]
+    ✓ spec-reviewer · status=Success · blocking=False · → goto(spec-writer) [resume] · 31s
   spec-writer (interactive)
     > Your previous attempt completed but was not accepted. The spec-reviewer
     reviewed your work and did not accept it.
@@ -250,17 +250,17 @@ spec
     
     Spec is ready for planning.
     blocking: False Address this, then call `complete_step` again.
-    ✓ spec-writer · 35s · status=Success · phase=written · spec_path=imp/specs/2026-06-03-imp-new-open-by-asking.md · complexity=standard
+    ✓ spec-writer · status=Success · phase=written · spec_path=imp/specs/2026-06-03-imp-new-open-by-asking.md · complexity=standard · 35s
   spec-verify-commit
     ✓ spec-verify-commit · 0s
   spec-final-review-gate
-    ✓ spec-final-review-gate · 0s · → goto(plan-writer)
+    ✓ spec-final-review-gate · → goto(plan-writer) · 0s
 ✓ spec · 997s
 plan
   plan-writer
     ▸ context · claude_code/claude-opus-4-7 · 9 tools
     > begin
-    ✓ plan-writer · 283s · status=Success · plan_path=imp/plans/2026-06-03-imp-new-open-by-asking-plan-1.md · plan_number=1
+    ✓ plan-writer · status=Success · plan_path=imp/plans/2026-06-03-imp-new-open-by-asking-plan-1.md · plan_number=1 · 283s
   plan-verify-commit
     ✓ plan-verify-commit · 0s
   plan-final-review-gate
@@ -288,7 +288,7 @@ plan
     try again in a moment. If it persists, check status.claude.com.
     
     error: [agent_incomplete] agent did not call complete_step after nudges
-    ✓ plan-review · 1002s · → pause
+    ✓ plan-review · → pause · 1002s
   error: [agent_incomplete] paused: agent_incomplete (no_complete_step_after_nudges)
   plan-review
     ▸ context · claude_code/claude-opus-4-7 · 6 tools
@@ -339,7 +339,7 @@ plan
        the canonical entry point per project_live_dogfood.md; the explicit
        env-var form shown still works. Cosmetic.
     
-    ✓ plan-review · 157s · status=Success · blocking=False · → goto(plan-writer) [resume]
+    ✓ plan-review · status=Success · blocking=False · → goto(plan-writer) [resume] · 157s
   plan-writer
     > Your previous attempt completed but was not accepted. The plan-review
     reviewed your work and did not accept it.
@@ -379,11 +379,11 @@ plan
     canonical entry point per `project_live_dogfood.md`; the explicit env-var
     form shown still works. Cosmetic.
     blocking: False Address this, then call `complete_step` again.
-    ✓ plan-writer · 26s · status=Success · plan_path=imp/plans/2026-06-03-imp-new-open-by-asking-plan-1.md · plan_number=1
+    ✓ plan-writer · status=Success · plan_path=imp/plans/2026-06-03-imp-new-open-by-asking-plan-1.md · plan_number=1 · 26s
   plan-verify-commit
     ✓ plan-verify-commit · 0s
   plan-final-review-gate
-    ✓ plan-final-review-gate · 0s · → goto(task-lead)
+    ✓ plan-final-review-gate · → goto(task-lead) · 0s
 ✓ plan · 29341s
 implement
   task-lead
@@ -1755,7 +1755,7 @@ implement
     broad (future unrelated Jinja2 {% else %} would cause spurious failure);
     recorded in progress.md.
     
-    ✓ task-lead · 1006s · status=Success · done=True · deviation=False
+    ✓ task-lead · status=Success · done=True · deviation=False · 1006s
   commit-check
     ✓ commit-check · 0s
   run-tests
@@ -1788,7 +1788,7 @@ implement
     has the correct first-ask branch and unconditional assertion. All 9
     acceptance criteria are satisfied. No remaining spec scope.
     
-    ✓ plan-cycle-check · 34s · status=Success · more_plans=False
+    ✓ plan-cycle-check · status=Success · more_plans=False · 34s
 ✓ implement · 1040s
 review
   autosquash
@@ -1901,7 +1901,7 @@ review
     broad {% else %} assertion) is a pre-existing open item recorded in the
     progress tracker and does not block merging.
     
-    ✓ code-reviewer · 266s · status=Success · verdict=approve
+    ✓ code-reviewer · status=Success · verdict=approve · 266s
   summarizer
     ▸ context · claude_code/claude-sonnet-4-6 · 7 tools
     > begin
@@ -1976,7 +1976,7 @@ review
        operator/contributor docs so future prompt authors know change.slug is
        not a reliable source of intent.
     
-    ✓ summarizer · 78s · status=Success
+    ✓ summarizer · status=Success · 78s
   final-review-gate
     ✓ final-review-gate · 0s
   final-review (interactive)
@@ -2057,6 +2057,6 @@ review
     lint and typecheck clean. One deferred nit (overly broad {% else %}
     assertion) to address in a follow-up.
     
-    ✓ final-review · 2983s · status=Success · decision=merge
+    ✓ final-review · status=Success · decision=merge · 2983s
   merge_blocked  reason=base_dirty base=master
   change_merged  base=master commit=3dfa5c5221a434472965e08d390f970ac76fc248
