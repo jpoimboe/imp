@@ -539,3 +539,75 @@ def test_phase_breadcrumb_identical_in_live_and_log() -> None:
     log_lines = render_tree(nv.build_tree(events), full=False, color=False, width=80)
     log_line = next(ln for ln in log_lines if "✓ spec" in ln)
     assert live_line == log_line   # byte-identical indent + content across both paths
+
+
+def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
+    """Live path inserts a blank between prose and the step's BreadcrumbLine,
+    mirroring render_text. Parity with the imp-log replay is preserved."""
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "the prose"}]}, usage={}),
+        ev("5", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    bc_i = next(i for i, ln in enumerate(body) if "✓ spec" in ln)
+    assert body[bc_i - 1].strip() == ""
+    assert body == _render_body(events)
+
+
+def test_live_subagent_outcome_NOT_blank_separated_from_prose() -> None:
+    """The subagent outcome line emits on cursor pop (a structural emission
+    outside the children-flow), so it must NOT receive the prose-adjacency
+    blank — matching render_text where the outcome is yielded directly from
+    _render_subagent, bypassing _render_children's prev_prose tracking."""
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
+        ev("6", "tool_result", agent_id="a", id="t1",
+           content='{"status":"Success"}'),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    prose_i = next(i for i, ln in enumerate(body) if "the finding" in ln)
+    outcome_i = next(i for i, ln in enumerate(body) if "→ status=Success" in ln)
+    assert outcome_i == prose_i + 1, (
+        "outcome must immediately follow prose; no blank separator")
+    assert body == _render_body(events)
+
+
+def test_live_prose_then_subagent_header_blank_separated() -> None:
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "Pre-task prose."}]}, usage={}),
+        ev("tk", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("r", "tool_result", agent_id="a", id="t1",
+           content='{"status":"Success"}'),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    hdr_i = next(i for i, ln in enumerate(body) if "↳ task → reviewer" in ln)
+    assert body[hdr_i - 1].strip() == ""
+    assert body == _render_body(events)
