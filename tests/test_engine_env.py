@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from imp.engine.env import engine_env, overlay_engine_env
@@ -74,3 +75,36 @@ def test_overlay_configured_test_command_overrides_inherited() -> None:
                          change_title="t", test_command="make test")
     env = overlay_engine_env(parent, overlay)
     assert env["IMP_TEST_COMMAND"] == "make test"   # overlay wins over inherited
+
+
+def test_engine_env_injects_worktree_src_on_pythonpath_when_present(
+    tmp_path: Path,
+) -> None:
+    # A src/ layout (imp's own) => PYTHONPATH prefix points at the worktree's src
+    # so an editable install can't resolve `import imp` to a sibling checkout.
+    (tmp_path / "src").mkdir()
+    env = engine_env(project_root=tmp_path, change_slug="s", change_title="t")
+    assert env["PYTHONPATH"] == str(tmp_path / "src")
+
+
+def test_engine_env_omits_pythonpath_without_src_layout(tmp_path: Path) -> None:
+    env = engine_env(project_root=tmp_path, change_slug="s", change_title="t")
+    assert "PYTHONPATH" not in env
+
+
+def test_overlay_prepends_worktree_src_to_inherited_pythonpath(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "src").mkdir()
+    parent = {"PYTHONPATH": "/tmp/ambient"}
+    overlay = engine_env(project_root=tmp_path, change_slug="s", change_title="t")
+    env = overlay_engine_env(parent, overlay)
+    # worktree src first (wins over the editable .pth), ambient preserved after.
+    assert env["PYTHONPATH"] == f"{tmp_path / 'src'}{os.pathsep}/tmp/ambient"
+
+
+def test_overlay_sets_pythonpath_alone_when_none_inherited(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    overlay = engine_env(project_root=tmp_path, change_slug="s", change_title="t")
+    env = overlay_engine_env({}, overlay)
+    assert env["PYTHONPATH"] == str(tmp_path / "src")

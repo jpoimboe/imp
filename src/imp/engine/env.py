@@ -11,6 +11,7 @@ All paths are host paths. There is no sandbox: the `/project/` prefix used in
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -40,9 +41,22 @@ def overlay_engine_env(
     ambient engine var — notably `IMP_LINT_COMMAND` or `IMP_TEST_COMMAND` from an
     outer imp process — from leaking past `engine_env`'s "absent => no lint/test
     gate" contract.
+
+    `PYTHONPATH` is special-cased: it is a *prefix*, not an authoritative value.
+    The worktree's `src/` (set by `engine_env`) is prepended to any inherited
+    `PYTHONPATH` so the worktree's own sources win over an editable install that
+    pins a sibling checkout — without discarding ambient entries the parent set.
     """
     env = {k: v for k, v in parent.items() if k not in ENGINE_ENV_VARS}
+    overlay = dict(overlay)
+    pythonpath_prefix = overlay.pop("PYTHONPATH", None)
     env.update(overlay)
+    if pythonpath_prefix:
+        inherited = parent.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            pythonpath_prefix if not inherited
+            else pythonpath_prefix + os.pathsep + inherited
+        )
     return env
 
 
@@ -63,6 +77,13 @@ def engine_env(
         IMP_TEST_COMMAND  — optional test-run gate command, injected only when
                             configured. A falsy command (None or empty string) is
                             treated as absent => no test gate, so the var is omitted.
+        PYTHONPATH        — prefix pointing at `<project_root>/src`, injected only
+                            when that directory exists. `overlay_engine_env`
+                            prepends it to any inherited PYTHONPATH so subprocesses
+                            import the worktree's own packages instead of resolving
+                            an editable install to a sibling checkout. Emitted as a
+                            bare prefix here; the prepend-vs-clobber merge happens
+                            in `overlay_engine_env` where the parent env is visible.
     """
     env = {
         "IMP_PROJECT_ROOT": str(project_root),
@@ -73,4 +94,12 @@ def engine_env(
         env["IMP_LINT_COMMAND"] = lint_command
     if test_command:
         env["IMP_TEST_COMMAND"] = test_command
+    # Editable installs (pip install -e) pin the package to whatever checkout was
+    # installed — for imp-on-imp that is the parent repo, so a worktree's `import
+    # imp` resolves to the parent's src, not the worktree's. Prepending the
+    # worktree's own `src/` to PYTHONPATH shadows that. Guarded on existence so it
+    # is a no-op for projects without a `src/` layout.
+    src_dir = project_root / "src"
+    if src_dir.is_dir():
+        env["PYTHONPATH"] = str(src_dir)
     return env
