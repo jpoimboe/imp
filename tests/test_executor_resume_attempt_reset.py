@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -22,13 +21,9 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    src_wf = root / ".imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
-    dest_wf = change_dir / "workflow"
-    if dest_wf.exists():
-        shutil.rmtree(dest_wf)
-    shutil.copytree(src_wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
         "slug": slug, "title": title, "base_branch": "main",
@@ -38,7 +33,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     with contextlib.suppress(Exception):
         configured_roles = load_config(root).role_names()
 
-    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    workflow = load_workflow(src_wf, configured_roles=configured_roles)
     flat = workflow.flat_steps()
     State(
         slug=slug, step=flat[0].name if flat else None, step_attempt=0,
@@ -117,7 +112,7 @@ def _seed_resume_loop_workflow(root: Path) -> Change:
     itself. That is the genuine stale-count scenario: a change paused with a
     nonzero step_attempt whose next move is a `resume:` edge re-entering a
     step."""
-    wf = root / ".imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -212,7 +207,7 @@ async def test_resumed_step_persistent_error_still_terminates(
     invocations and raises if exceeded, so a per-retry-reset regression fails
     loudly (bounded) instead of looping.
     """
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     # writer succeeds once (drives a resume edge into reviewer-style loop); the
     # SECOND step is resumed into and then persistently fails.

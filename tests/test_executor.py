@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -18,20 +17,17 @@ from imp.engine.state import State
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees.
 
-    The test sets up the workflow under root/.imp/workflows/default BEFORE
-    calling _make_change; this helper copies it into the change dir and seeds
-    the State so run_change can be invoked immediately.
+    The test sets up the workflow under root/imp/workflows/default BEFORE
+    calling _make_change; this helper seeds the State so run_change can be
+    invoked immediately (no snapshot copy needed — workflow_dir resolves to
+    root/imp/workflows/default directly).
     """
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    src_wf = root / ".imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
-    dest_wf = change_dir / "workflow"
-    if dest_wf.exists():
-        shutil.rmtree(dest_wf)
-    shutil.copytree(src_wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
 
     # Write change metadata
@@ -43,7 +39,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     with contextlib.suppress(Exception):
         configured_roles = load_config(root).role_names()
 
-    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    workflow = load_workflow(src_wf, configured_roles=configured_roles)
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
@@ -106,7 +102,7 @@ def _seed_minimal_workflow(
 ) -> tuple[Change, str, str]:
     """Create a minimal single-step workflow on disk and snapshot it into a
     Change. Returns ``(change, phase_name, step_name)``."""
-    wf_dir = root / ".imp" / "workflows" / "default"
+    wf_dir = root / "imp" / "workflows" / "default"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
         f"---\nname: {agent_stem}\ntools: [complete_step]\n"
@@ -165,7 +161,7 @@ async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
 async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
     """A rule with `set: {review_done: true}` updates state.vars; reload State
     and confirm the mutation persisted."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -205,7 +201,7 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
     """writer(agent); the branch loops back via resume: writer. writer sets
     review_done=true; a branch step continues while review_done is false, and
     gotos the trailing `done` phase once it's true."""
-    wf = root / ".imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -266,7 +262,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
     """A reviewer agent that always gotos backward to the writer, with
     max_loops: 2 → after exhausting, the run PAUSES and loop_counts reflects
     the cap."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -341,7 +337,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
 @pytest.mark.anyio
 async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
     """The last real step gotos a trailing empty phase → COMPLETED."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -712,7 +708,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
 ) -> None:
     from imp.providers import resolve
 
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -781,7 +777,7 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
 
     from imp.providers import resolve
 
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "asker.md").write_text(
         "---\nname: asker\ntools: [complete_step]\n"
@@ -853,7 +849,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     """A reviewer agent that resumes backward with a feedback: preamble string
     makes the coder's NEXT invocation carry the composed feedback text.
     The reviewer flips to approve on its 2nd pass so the run completes."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
         "---\nname: coder\ntools: [complete_step]\n"
@@ -1036,7 +1032,7 @@ def _seed_back_edge_workflow(
     """coder(agent) -> reviewer(agent). reviewer rules: on rework, <verb>: coder;
     else continue. `verb` is 'goto' or 'resume'. `feedback` is an optional
     preamble string for the back edge (§6); None means bare (forwards nothing)."""
-    wf = root / ".imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
         "---\nname: coder\ntools: [complete_step]\n"

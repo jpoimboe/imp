@@ -105,6 +105,25 @@ def remove_worktree(control_root: Path, slug: str) -> None:
         _git_ok(control_root, "worktree", "remove", str(rel))
 
 
+def destroy_worktree(control_root: Path, slug: str) -> None:
+    """Full teardown: remove the worktree AND delete its branch imp/<slug>,
+    leaving nothing behind. Used to roll back a failed Change.create — unlike
+    remove_worktree, which deliberately KEEPS the branch after a successful run.
+    Best-effort git calls (not _git_ok) so a teardown hiccup never masks the
+    LoadError that triggered the rollback — a teardown failure may therefore
+    leave an orphan rather than raise. Acceptable under V0's single principal."""
+    rel = Path(".imp") / "worktrees" / slug
+    branch = f"imp/{slug}"
+    with RepoGitLock(control_root).acquire():
+        _git(control_root, "worktree", "remove", "--force", str(rel))
+        shutil.rmtree(control_root / rel, ignore_errors=True)
+        # If `worktree remove` failed but rmtree deleted the dir, git still has a
+        # stale registration that makes `branch -D` fail with "checked out at …",
+        # leaking the branch. Prune the stale entry first so the delete succeeds.
+        _git(control_root, "worktree", "prune")
+        _git(control_root, "branch", "-D", branch)
+
+
 def rename(control_root: Path, old: str, new: str) -> Path | None:
     """Rename branch + worktree dir (spec §4). Returns the new path, or None on
     collision (imp/<new> already exists) having changed nothing — the caller
