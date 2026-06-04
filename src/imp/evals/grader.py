@@ -11,10 +11,12 @@ from pathlib import Path
 
 from imp.engine.loader import parse_agent_file
 from imp.evals.driver import drive_agent_sync
+from imp.evals.matching import dedup_findings, flags_known_locus
 from imp.evals.models import (
     ExpectedFinding,
     FindingMatch,
     Fixture,
+    GradeResult,
     ReviewFinding,
     RunResult,
 )
@@ -132,3 +134,51 @@ def _best_review_finding(
         if r < best_rank:
             best, best_rank = f, r
     return best if best_rank < 2 else None
+
+
+def grade(
+    fixture: Fixture,
+    run_result: RunResult,
+    *,
+    project_root: Path,
+    judge_provider: str,
+    judge_model: str,
+) -> GradeResult:
+    """Full grade: recall (judge) + precision classification. A review finding
+    that hits a labeled bug is a true positive. Out-of-locus flags are FALSE
+    POSITIVES on curated fixtures (hand-verified) but only directional
+    INSPECT-FLAGS on mined fixtures (merged-clean is not trustworthy)."""
+    matches = score_recall(
+        fixture,
+        run_result,
+        project_root=project_root,
+        judge_provider=judge_provider,
+        judge_model=judge_model,
+    )
+    # M1: recall is judged by the LLM; precision must AGREE with it. A review
+    # finding the judge confirmed as a catch is a true positive even if the
+    # deterministic locus match missed it — otherwise the same finding is credited
+    # for recall AND penalized as an FP (double penalty). So a judge-caught review
+    # finding suppresses its FP and counts as a TP flag.
+    judge_caught_rfs = {
+        m.review_finding for m in matches if m.caught and m.review_finding is not None
+    }
+    false_positives: list[ReviewFinding] = []
+    inspect_flags: list[ReviewFinding] = []
+    true_positive_flags: list[ReviewFinding] = []
+    for rf in dedup_findings(run_result.findings):
+        if flags_known_locus(rf, fixture.expected_findings) or rf in judge_caught_rfs:
+            true_positive_flags.append(rf)  # hit a labeled bug — precision numerator
+        elif fixture.source == "curated":
+            false_positives.append(rf)
+        else:  # mined merged-clean: directional inspect signal only
+            inspect_flags.append(rf)
+    return GradeResult(
+        variant_id=run_result.variant_id,
+        fixture_id=fixture.id,
+        repeat_index=run_result.repeat_index,
+        matches=matches,
+        false_positives=tuple(false_positives),
+        inspect_flags=tuple(inspect_flags),
+        true_positive_flags=tuple(true_positive_flags),
+    )
