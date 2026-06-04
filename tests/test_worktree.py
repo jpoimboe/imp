@@ -282,6 +282,16 @@ def test_ensure_imp_ignored_repairs_mis_set_committed_rule(tmp_path: Path) -> No
     assert _make_worktree_and_check(tmp_path)
 
 
+def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    path = wt.create_worktree(tmp_path, "gone", "main")
+    assert path.exists()
+    assert wt.branch_exists(tmp_path, "imp/gone")
+    wt.destroy_worktree(tmp_path, "gone")
+    assert not path.exists()
+    assert not wt.branch_exists(tmp_path, "imp/gone")
+
+
 def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
