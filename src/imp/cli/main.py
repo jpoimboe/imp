@@ -643,6 +643,10 @@ def main(argv: list[str] | None = None) -> int:
     p_status = sub.add_parser("status")
     p_status.set_defaults(func=_cmd_status)
 
+    from imp.evals.cli import add_eval_parser
+
+    add_eval_parser(sub)
+
     ns = parser.parse_args(args)
     rc: int = ns.func(ns)
     return rc
