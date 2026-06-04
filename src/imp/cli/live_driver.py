@@ -83,8 +83,15 @@ class LiveDriver:
         self._builder.add(event)
         if isinstance(event, dict) and event.get("type") == "change_created":
             self._emit_header()
-        if isinstance(event, dict) and event.get("type") == "step_started":
-            self._status.restart_span()      # §7: time the current step's span
+        if isinstance(event, dict) and event.get("type") in (
+                "step_started", "user_message"):
+            # §7: time-the-agent-working-since-the-last-user-reply. Reset on
+            # step_started AND user_message so the elapsed counter measures
+            # the current burst between user inputs (across tools, thinks, and
+            # multiple llm_response blocks within one interactive turn). Non-
+            # interactive runs never fire user_message, so today's per-step
+            # reset behavior is preserved as a side effect.
+            self._status.restart_span()
         self._walk()
         self._refresh_status()
 

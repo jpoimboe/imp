@@ -653,3 +653,36 @@ def test_refresh_status_no_newline_on_non_tty_even_with_prev_prose() -> None:
     drv._refresh_status()
     assert out.getvalue() == ""
     assert drv._prev_prose is True   # untouched on non-TTY
+
+
+def test_user_message_resets_status_span() -> None:
+    """The status-line elapsed timer measures 'time the agent has been working
+    since the last user reply' — across tools, thinks, and multiple
+    llm_responses within one interactive turn. So `restart_span()` fires on
+    `step_started` AND on `user_message`."""
+    calls: list[str] = []
+
+    class _CountingStatus(LiveStatus):
+        def restart_span(self) -> None:
+            calls.append("restart")
+            super().restart_span()
+
+    out = _Pipe()
+    status = _CountingStatus(out)
+    drv = LiveDriver(stream=out, color=False, width=80, status=status)
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+        ev("3", "tool_call", agent_id="a", id="b1", name="bash", input={}),
+        ev("4", "tool_result", agent_id="a", id="b1", content="ok"),
+        ev("5", "thinking", agent_id="a", content="hmm"),
+        ev("6", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),
+        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),
+        ev("8", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),
+    ]:
+        drv.on_event(e)
+    # restart_span fired exactly at step_started (e2) and user_message (e7).
+    assert calls == ["restart", "restart"]
