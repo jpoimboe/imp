@@ -123,35 +123,45 @@ def run_q1_q4(
 
     paired_by_fixture: dict[str, dict[str, RunResult]] = {}
     fast_c = fast_t = union_c = union_t = 0
+    q4_n_diffs = 0
     for fx in fixtures:
         res = run_paired(control_root, fx, model_map)
-        paired_by_fixture[fx.id] = res
-        cr = res.get("code-reviewer")
-        if cr is not None:
+        # Each pool has its own self-grading exclusion; a fixture excluded from one
+        # pool may still contribute to the other.
+        # Q1 pool: exclude a mined fixture authored by spec-task-reviewer (the role
+        # Q1 evaluates dropping) — don't score it against a copy of its own output.
+        if not is_self_graded(fx, "spec-task-reviewer"):
+            paired_by_fixture[fx.id] = res
+        # Q4 pool: exclude a mined fixture authored by code-reviewer (Q4's fast-path
+        # role). Curated code-reviewer fixtures are NOT excluded (is_self_graded
+        # gates on source == "mined").
+        if not is_self_graded(fx, "code-reviewer"):
+            q4_n_diffs += 1
+            cr = res.get("code-reviewer")
+            if cr is not None:
+                c, t = _blocking_counts(
+                    grade(fx, cr, project_root=control_root,
+                          judge_provider=judge_provider, judge_model=judge_model)
+                )
+                fast_c += c
+                fast_t += t
+            union = dedup_findings(
+                f
+                for name in ("spec-task-reviewer", "quality-reviewer")
+                if name in res
+                for f in res[name].findings
+            )
+            union_rr = RunResult("union", fx.id, 0, "", union, Telemetry.zero())
             c, t = _blocking_counts(
-                grade(fx, cr, project_root=control_root,
+                grade(fx, union_rr, project_root=control_root,
                       judge_provider=judge_provider, judge_model=judge_model)
             )
-            fast_c += c
-            fast_t += t
-        union = dedup_findings(
-            f
-            for name in ("spec-task-reviewer", "quality-reviewer")
-            if name in res
-            for f in res[name].findings
-        )
-        union_rr = RunResult("union", fx.id, 0, "", union, Telemetry.zero())
-        c, t = _blocking_counts(
-            grade(fx, union_rr, project_root=control_root,
-                  judge_provider=judge_provider, judge_model=judge_model)
-        )
-        union_c += c
-        union_t += t
+            union_c += c
+            union_t += t
 
     q1 = compute_q1(paired_by_fixture)
     q4 = compute_q4(
-        fastpath_recall=(fast_c / fast_t) if fast_t else 0.0,
-        union_recall=(union_c / union_t) if union_t else 0.0,
-        n_diffs=len(fixtures),
+        fast_c=fast_c, fast_t=fast_t, union_c=union_c, union_t=union_t,
+        n_diffs=q4_n_diffs,
     )
     return q1, q4
