@@ -16,6 +16,7 @@ dependencies = [
   "anthropic>=0.40,<1.0",
   "openai>=1.50,<3.0",
   "claude-agent-sdk>=0.2.87,<1.0",
+  "openai-codex-sdk==0.1.11",
   "httpx>=0.27",
   "prompt_toolkit>=3.0,<4.0",
   "rich>=13.0,<15.0",
@@ -58,3 +59,10 @@ known-first-party = ["imp"]
 python_version = "3.11"
 strict = true
 warn_unreachable = true
+
+# The codex provider SDK is an optional runtime dependency (guarded by
+# try/except ImportError); it is not installed in the dev/test env, so mypy
+# can't resolve it. Treat it as a missing import rather than a hard error.
+[[tool.mypy.overrides]]
+module = "openai_codex_sdk"
+ignore_missing_imports = true

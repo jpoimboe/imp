@@ -316,6 +316,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                 line += (f"   (differ from {r['differ_from']}: "
                          f"tier {r['differ_tier']}, {label})")
             yield _line(line, depth, color, gutters=gutters)
+            if r.get("warning"):
+                yield _line(f"    ⚠ {r['warning']}", depth, color, gutters=gutters)
         return
 
     if isinstance(node, nv.FallbackLine):

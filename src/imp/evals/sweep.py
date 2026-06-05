@@ -13,7 +13,7 @@ from pathlib import Path
 
 from imp.evals.cache import load_run, store_run
 from imp.evals.grader import grade
-from imp.evals.models import Fixture, GradeResult, Telemetry, Variant
+from imp.evals.models import PER_TASK_STRUCTURES, Fixture, GradeResult, Telemetry, Variant
 from imp.evals.pricing import dollars_for
 from imp.evals.provenance import imp_commit_sha
 from imp.evals.structures import run_variant
@@ -65,12 +65,17 @@ def plan_sweep(
             return 0.0  # unpriced model: estimate omits it (real run still records $)
 
     for v in variants:
+        per_task = v.structure in PER_TASK_STRUCTURES
         for fx in fixtures:
+            if per_task and not fx.tasks:
+                continue  # mirror the runtime skip (Task 7)
+            task_factor = len(fx.tasks) if per_task else 1
             for _r in range(v.n_repeats):
                 n_cells += 1
                 for _agent, (provider, model) in v.role_to_model_map.items():
-                    n_agent_runs += 1
-                    est += _add(rev_telem, provider, model)
+                    n_agent_runs += task_factor
+                    est += task_factor * _add(rev_telem, provider, model)
+                # Judge runs ONCE on the cross-task union per cell — NOT x task_factor.
                 n_judge_calls += len(fx.expected_findings)
                 est += len(fx.expected_findings) * _add(judge_telem, judge_provider, judge_model)
     return SweepPlan(
@@ -150,6 +155,11 @@ def _run_fixture_cells(
     """All cells for ONE fixture, run sequentially (shared worktree slug)."""
     grades: list[GradeResult] = []
     for v in variants:
+        # Per-task variants have nothing to review on a single-task fixture; skip
+        # BEFORE run_variant so we produce no cell — running it would degrade to the
+        # whole-change path and duplicate baseline-monolithic at full cost.
+        if v.structure in PER_TASK_STRUCTURES and fixture.tasks == ():
+            continue
         for repeat in range(v.n_repeats):
             rr = run_variant(control_root, v, fixture, repeat_index=repeat)
             store_run(cache_dir, rr, provenance, imp_commit_sha=sha)

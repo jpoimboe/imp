@@ -406,7 +406,7 @@ def test_tiers_resolved_attaches_at_root() -> None:
     assert len(nodes) == 1
     assert nodes[0].rows == [
         {"tier": "medium", "provider": "anthropic", "model": "haiku",
-         "differ_tier": None, "differ_from": None}]
+         "differ_tier": None, "differ_from": None, "warning": None}]
 
 
 def test_tiers_resolved_renders_constrained_and_unconstrained() -> None:
