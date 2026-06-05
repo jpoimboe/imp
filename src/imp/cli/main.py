@@ -638,14 +638,14 @@ def _read_last_line(events_path: Path) -> bytes | None:
         return _last_nonempty_line(buf)
 
 
-def _format_last_timestamp(text: str) -> str:
-    """Local-time YYYY-MM-DD HH:MM:SS of the last event line in `text`, or '-'
-    when the text is empty / has a malformed trailing line."""
-    lines = [line for line in text.splitlines() if line.strip()]
-    if not lines:
+def _format_last_timestamp(line: str) -> str:
+    """Local-time YYYY-MM-DD HH:MM:SS for a single already-extracted event line,
+    or '-' when the line is empty / malformed. Callers pass the last non-empty
+    line (see _read_last_line / _last_nonempty_line)."""
+    if not line.strip():
         return "-"
     try:
-        record = json.loads(lines[-1])
+        record = json.loads(line)
         ts = datetime.fromisoformat(record["timestamp"]).astimezone()
         return ts.strftime("%Y-%m-%d %H:%M:%S")
     except (json.JSONDecodeError, KeyError, ValueError):

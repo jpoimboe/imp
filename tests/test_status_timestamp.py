@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from imp.cli.main import _last_nonempty_line, _read_last_line
+from imp.cli.main import (
+    _format_last_timestamp,
+    _last_nonempty_line,
+    _read_last_line,
+)
 
 
 @pytest.mark.parametrize(
@@ -66,3 +70,25 @@ def test_read_last_line_matches_whole_file_extraction(tmp_path: Path) -> None:
 def test_read_last_line_missing_file_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         _read_last_line(tmp_path / "nope.jsonl")
+
+
+def test_format_last_timestamp_valid_line() -> None:
+    # Fixed UTC offset so the assertion is timezone-stable.
+    line = '{"timestamp":"2026-06-05T12:34:56+00:00"}'
+    out = _format_last_timestamp(line)
+    # Rendered in local time; just assert it parsed to the expected shape.
+    assert len(out) == 19 and out[4] == "-" and out[13] == ":"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "",                              # empty
+        "   ",                           # blank
+        "not json",                      # malformed JSON
+        '{"no":"timestamp"}',            # missing key
+        '{"timestamp":"not-a-date"}',    # bad date
+    ],
+)
+def test_format_last_timestamp_bad_input(line: str) -> None:
+    assert _format_last_timestamp(line) == "-"
