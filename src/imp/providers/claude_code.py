@@ -1043,11 +1043,20 @@ class ClaudeCodeAgentRunner:
                         # handling so a detected loop wins over a nudge.
                         flushed = _flush_pending()
                         if flushed is not None:
-                            loop_err = guard.observe(flushed)
-                            if loop_err is not None:
-                                yield perr.make_error_event(
-                                    loop_err, kind=getattr(loop_err, "kind", ""))
-                                return
+                            if invocation.interactive and not flushed.tools:
+                                # Human handoff: a pure-text turn awaiting fresh
+                                # human input is not an autonomous loop iteration,
+                                # so reset rather than observe — normal multi-turn
+                                # conversation must not trip no_progress. A
+                                # tool-bearing interactive turn still observes, so
+                                # an interactive re-read loop is still caught.
+                                guard.note_external_input()
+                            else:
+                                loop_err = guard.observe(flushed)
+                                if loop_err is not None:
+                                    yield perr.make_error_event(
+                                        loop_err, kind=getattr(loop_err, "kind", ""))
+                                    return
 
                         # End-of-turn:
                         #   a) complete_step captured → emit agent_output, return

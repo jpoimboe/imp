@@ -600,12 +600,20 @@ class OpenAIAgentRunner:
                     messages.append(user_msg)
                     transcript.append(user_msg)
                     elog.append_user_message(agent_id=aid, message=user_msg)
-                    loop_err = guard.observe(TurnRecord(
-                        assistant_text=last_text, tools=[], has_complete_step=False))
-                    if loop_err is not None:
-                        yield perr.make_error_event(
-                            loop_err, kind=getattr(loop_err, "kind", ""))
-                        return
+                    if invocation.interactive:
+                        # Human handoff: this text-only turn awaits fresh human
+                        # input, so it is not an autonomous loop iteration —
+                        # reset so normal multi-turn conversation never trips
+                        # no_progress. (The nudge path below still observes.)
+                        guard.note_external_input()
+                    else:
+                        loop_err = guard.observe(TurnRecord(
+                            assistant_text=last_text, tools=[],
+                            has_complete_step=False))
+                        if loop_err is not None:
+                            yield perr.make_error_event(
+                                loop_err, kind=getattr(loop_err, "kind", ""))
+                            return
                     continue
                 # Legacy/test fallback: no continuation_fn wired by the executor.
                 if invocation.interactive and ctx.user_input_fn is not None:
