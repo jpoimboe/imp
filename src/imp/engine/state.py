@@ -164,7 +164,8 @@ class EventLog(Protocol):
                             message: Message) -> dict[str, Any]: ...
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],
-                            stop_reason: Any) -> dict[str, Any]: ...
+                            stop_reason: Any,
+                            auth_mode: str | None = None) -> dict[str, Any]: ...
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any) -> dict[str, Any]: ...
     def append_tool_result(self, *, agent_id: str | None,
@@ -270,11 +271,16 @@ class _BaseEventLog:
 
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],
-                            stop_reason: Any) -> dict[str, Any]:
+                            stop_reason: Any,
+                            auth_mode: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "provider": provider, "model": model, "raw": raw,
+            "usage": usage, "stop_reason": stop_reason,
+        }
+        if auth_mode is not None:
+            payload["auth_mode"] = auth_mode
         return self._emit(
-            agent_id=agent_id, type="llm_response",
-            payload={"provider": provider, "model": model, "raw": raw,
-                     "usage": usage, "stop_reason": stop_reason})
+            agent_id=agent_id, type="llm_response", payload=payload)
 
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any) -> dict[str, Any]:

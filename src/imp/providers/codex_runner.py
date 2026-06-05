@@ -163,3 +163,53 @@ class CodexAgentRunner:
         if self._abort_controller is not None:
             with contextlib.suppress(Exception):
                 self._abort_controller.abort()
+
+
+# ── Event mapping ─────────────────────────────────────────────────────────────
+
+
+def process_event(
+    event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
+    provider: str, model: str,
+) -> None:
+    """Translate one codex ThreadEvent into imp EventLog records.
+
+    `state` is a shared dict carrying in-flight thread_id, pending usage,
+    captured complete_step args, etc. Filled in across subsequent tasks.
+
+    The default arm (unknown item type) logs a runner_warning and returns
+    (L3 invariant); only security-relevant types get special handling.
+    """
+    etype = getattr(event, "type", None)
+
+    # `thread.started` — capture thread_id for resume / re-query.
+    if etype == "thread.started":
+        state["thread_id"] = getattr(event, "thread_id", None)
+        return
+
+    # `item.completed` — dispatch on the item's own type.
+    # `item.started` is intentionally left to fall through (no final content).
+    if etype == "item.completed":
+        item = getattr(event, "item", None)
+        itype = getattr(item, "type", None)
+        if itype == "reasoning":
+            content = getattr(item, "text", "") or ""
+            elog.append(agent_id=agent_id, type="thinking",
+                        payload={"content": content})
+            return
+        if itype == "agent_message":
+            text = getattr(item, "text", "") or ""
+            elog.append_llm_response(
+                agent_id=agent_id, provider=provider, model=model,
+                raw={"content": [{"type": "text", "text": text}]},
+                usage={}, stop_reason=None,
+                auth_mode=state.get("auth_mode"),
+            )
+            return
+        # Other item types mapped in later tasks; fall through to default arm.
+        elog.append(agent_id=agent_id, type="runner_warning",
+                    payload={"message": f"unhandled codex item type: {itype!r}"})
+        return
+
+    # Default arm: turn.completed / turn.failed / error / unknown —
+    # handled by subsequent tasks. Falling through here is benign.
