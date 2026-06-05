@@ -65,6 +65,7 @@ def read_telemetry(events_path: Path, agent_id: str) -> Telemetry:
         return Telemetry.zero()
     log = JsonlEventLog(events_path)
     inp = out = cr = cc = tool_calls = 0
+    auth_mode: str | None = None
     timestamps: list[datetime] = []
     for ev in log.read():
         if ev.get("agent_id") != agent_id:
@@ -83,6 +84,12 @@ def read_telemetry(events_path: Path, agent_id: str) -> Telemetry:
             out += f_out
             cr += f_cr
             cc += f_cc
+            # Codex runs stamp `auth_mode` onto every llm_response payload.
+            # The last-seen value wins (a run never switches mode mid-flight,
+            # so any non-None value is canonical for the agent's whole run).
+            am = payload.get("auth_mode")
+            if isinstance(am, str):
+                auth_mode = am
         elif etype == "tool_call":
             tool_calls += 1
     wall = (max(timestamps) - min(timestamps)).total_seconds() if len(timestamps) >= 2 else 0.0
@@ -93,4 +100,5 @@ def read_telemetry(events_path: Path, agent_id: str) -> Telemetry:
         cache_creation_tokens=cc,
         tool_calls=tool_calls,
         wall_seconds=wall,
+        auth_mode=auth_mode,
     )
