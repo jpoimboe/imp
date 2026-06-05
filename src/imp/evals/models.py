@@ -225,6 +225,7 @@ class RunResult:
     findings: tuple[ReviewFinding, ...]
     telemetry: Telemetry
     dollars: float = 0.0
+    imp_commit_sha: str = ""  # the imp HEAD SHA the cell was produced at (P1)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -235,6 +236,7 @@ class RunResult:
             "findings": [asdict(f) for f in self.findings],
             "telemetry": self.telemetry.to_dict(),
             "dollars": self.dollars,
+            "imp_commit_sha": self.imp_commit_sha,
         }
 
     @classmethod
@@ -256,6 +258,7 @@ class RunResult:
             ),
             telemetry=Telemetry.from_dict(d["telemetry"]),
             dollars=float(d.get("dollars", 0.0)),
+            imp_commit_sha=d.get("imp_commit_sha", ""),
         )
 
 
