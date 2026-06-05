@@ -18,7 +18,28 @@ BLOCKING_SEVERITIES = ("Critical", "Major")  # spec "Decision rules": blocking r
 # role_to_model_map is keyed by agent_name, so same-agent x N is inexpressible.
 # Adding it = switch role_to_model_map to a `members: tuple[Member, ...]` list
 # (Member = agent_name+provider+model+override). Not needed for Q1-Q4.
-STRUCTURES = ("monolithic", "slice-panel")
+PER_TASK_STRUCTURES = ("per-task-monolithic", "per-task-slice-panel")
+STRUCTURES = ("monolithic", "slice-panel", *PER_TASK_STRUCTURES)
+
+
+@dataclass(frozen=True)
+class TaskSlice:
+    """One task's diff in a multi-task fixture sequence. `index` is the 0-based
+    position in `Fixture.tasks` (and equals `ExpectedFinding.manifest_task`), so the
+    `tasks[i]` / `base + tasks[0..i]` slice math is direct. `task_context` describes
+    ONLY this task (not the cumulative change) — feeding the cumulative context to a
+    per-task reviewer would leak the cross-task hint the cell exists to withhold."""
+
+    index: int
+    diff: str
+    task_context: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TaskSlice:
+        return cls(index=int(d["index"]), diff=d["diff"], task_context=d["task_context"])
 
 
 @dataclass(frozen=True)
@@ -32,6 +53,8 @@ class ExpectedFinding:
     description: str
     severity: str  # one of SEVERITIES
     must_catch: bool
+    cross_task: bool = False  # bug manifests only when a LATER task interacts with an earlier one
+    manifest_task: int | None = None  # 0-based index into tasks where the catch is scored; TEST/AUTHORING anchor only — no runtime keys on it
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -44,6 +67,8 @@ class ExpectedFinding:
             description=d["description"],
             severity=d["severity"],
             must_catch=bool(d["must_catch"]),
+            cross_task=bool(d.get("cross_task", False)),
+            manifest_task=d.get("manifest_task"),
         )
 
 
@@ -100,6 +125,7 @@ class Fixture:
     expected_findings: tuple[ExpectedFinding, ...]
     clean_loci: tuple[CleanLocus, ...]
     meta: FixtureMeta
+    tasks: tuple[TaskSlice, ...] = ()  # empty == today's single-diff fixture; top-level `diff` stays the CUMULATIVE base->head diff
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -112,6 +138,7 @@ class Fixture:
             "expected_findings": [f.to_dict() for f in self.expected_findings],
             "clean_loci": [c.to_dict() for c in self.clean_loci],
             "meta": self.meta.to_dict(),
+            "tasks": [t.to_dict() for t in self.tasks],
         }
 
     @classmethod
@@ -128,6 +155,7 @@ class Fixture:
             ),
             clean_loci=tuple(CleanLocus.from_dict(c) for c in d.get("clean_loci", [])),
             meta=FixtureMeta.from_dict(d.get("meta", {})),
+            tasks=tuple(TaskSlice.from_dict(t) for t in d.get("tasks", [])),
         )
 
 
