@@ -66,6 +66,25 @@ def core_digest(stamp_dict: dict[str, Any]) -> str:
     return provenance_digest(core)
 
 
+def fixture_label_hash(fixtures: Any) -> str:
+    """A content hash of every fixture's expected_findings (+ clean_loci) — the
+    GRADED labels. Folded into the stamp so editing a fixture's labels busts its
+    cells (S4). Without this the cache silently serves stale grades after a label
+    edit — the invisible sibling of the imp-SHA case P1 fixes."""
+    h = hashlib.sha256()
+    for fx in sorted(fixtures, key=lambda f: f.id):
+        h.update(fx.id.encode())
+        h.update(b"\0")
+        for ef in fx.expected_findings:
+            # all judge-visible label fields — a label edit (incl. description) must bust the cache (S4)
+            h.update(repr((ef.locus, ef.symbol, ef.description, ef.severity, ef.must_catch)).encode())
+            h.update(b"\0")
+        for loc in getattr(fx, "clean_loci", ()):
+            h.update(repr(loc).encode())
+            h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
 def provenance_digest(stamp_dict: dict[str, Any]) -> str:
     """A short, stable digest of a stamp — the cache-key provenance component
     (cache.py). Any change to imp SHA / prompts / models / pricing changes it, so

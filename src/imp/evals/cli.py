@@ -63,18 +63,22 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    from imp.evals.provenance import fixture_label_hash as _flh
     from imp.evals.provenance import provenance_digest, stamp
     from imp.evals.sweep import SweepError, run_sweep
 
     control_root = find_control_root(Path.cwd())
     variants = _default_variants()
+    fixtures_for_run = _curated_fixtures()
     prompt_dirs = {"baseline": Path("src/imp/assets/workflows/default/agents")}
     cell_models = {v.id: [f"{p}/{m}" for p, m in v.role_to_model_map.values()] for v in variants}
+    label_hash = _flh(fixtures_for_run)
     run_stamp = stamp(
         prompt_dirs=prompt_dirs,
         cell_models=cell_models,
         judge_model=f"{args.judge_provider}/{args.judge_model}",
         pricing_version=PRICING_VERSION,
+        fixture_label_hash=label_hash,
     )
     prov = provenance_digest(run_stamp)
     cache_dir = control_root / ".imp" / "eval-cache"
@@ -82,7 +86,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         grades = run_sweep(
             control_root,
             variants,
-            _curated_fixtures(),
+            fixtures_for_run,
             cache_dir=cache_dir,
             judge_provider=args.judge_provider,
             judge_model=args.judge_model,
@@ -94,7 +98,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     from imp.evals.analysis import run_q1_q4
 
-    fixture_list = _curated_fixtures()
+    fixture_list = fixtures_for_run
     # Per-model Q1/Q4 SHAPE is landed here; EXECUTION stays at one model this
     # sweep (S2): on the curated-only set both verdicts read insufficient-diffs
     # and paired runs are not persisted, so the trio buys no decision yet. Stage 2
@@ -155,14 +159,16 @@ def cmd_mine(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_provenance(args: argparse.Namespace, variants: list[Variant]) -> str:
-    from imp.evals.provenance import provenance_digest, stamp
+def _run_provenance(args: argparse.Namespace, variants: list[Variant],
+                    fixtures: list[Fixture]) -> str:
+    from imp.evals.provenance import core_digest, fixture_label_hash, stamp
 
-    return provenance_digest(stamp(
+    return core_digest(stamp(
         prompt_dirs={"baseline": Path("src/imp/assets/workflows/default/agents")},
         cell_models={v.id: [f"{p}/{m}" for p, m in v.role_to_model_map.values()] for v in variants},
         judge_model=f"{args.judge_provider}/{args.judge_model}",
         pricing_version=PRICING_VERSION,
+        fixture_label_hash=fixture_label_hash(fixtures),
     ))
 
 
@@ -179,7 +185,7 @@ def cmd_scorecard(args: argparse.Namespace) -> int:
     control_root = find_control_root(Path.cwd())
     variants = _default_variants()
     fixtures = _curated_fixtures()
-    prov = _run_provenance(args, variants)
+    prov = _run_provenance(args, variants, fixtures)
     cache_dir = control_root / ".imp" / "eval-cache"
     grades = []
     for v in variants:
