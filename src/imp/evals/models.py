@@ -53,8 +53,8 @@ class ExpectedFinding:
     description: str
     severity: str  # one of SEVERITIES
     must_catch: bool
-    cross_task: bool = False  # bug manifests only when a LATER task interacts with an earlier one
-    manifest_task: int | None = None  # 0-based index into tasks where the catch is scored; TEST/AUTHORING anchor only — no runtime keys on it
+    cross_task: bool = False  # bug manifests only when a later task interacts with this one
+    manifest_task: int | None = None  # 0-based task index where catch is scored; authoring only
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -125,7 +125,7 @@ class Fixture:
     expected_findings: tuple[ExpectedFinding, ...]
     clean_loci: tuple[CleanLocus, ...]
     meta: FixtureMeta
-    tasks: tuple[TaskSlice, ...] = ()  # empty == today's single-diff fixture; top-level `diff` stays the CUMULATIVE base->head diff
+    tasks: tuple[TaskSlice, ...] = ()  # empty == single-diff; `diff` field is cumulative base->head
 
     def to_dict(self) -> dict[str, Any]:
         return {
