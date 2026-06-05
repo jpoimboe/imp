@@ -66,18 +66,27 @@ def compute_q1(paired_by_fixture: Mapping[str, Mapping[str, RunResult]]) -> dict
     }
 
 
-def compute_q4(*, fastpath_recall: float, union_recall: float, n_diffs: int) -> dict[str, Any]:
+def compute_q4(
+    *, fast_c: int, fast_t: int, union_c: int, union_t: int, n_diffs: int
+) -> dict[str, Any]:
     # NOTE (M3): unlike Q1 (Wilson CI on the per-diff unique-blocking proportion),
     # Q4 compares POOLED POINT ESTIMATES within a fixed margin, guarded only by the
     # minimum-diff-count gate — NOT a CI-separation test. This is intentional and
-    # pre-registered, but it is a weaker guarantee than Q1's; a future version
-    # should bootstrap a CI on (fastpath - union) and gate on that.
+    # pre-registered. We surface the RAW caught/total counts (not just the ratio)
+    # so a human can read 4/5-vs-5/5 as the noise it is on thin data — the
+    # substitute for the CI Q4 deliberately does not compute (spec Component 3).
+    fastpath_recall = (fast_c / fast_t) if fast_t else 0.0
+    union_recall = (union_c / union_t) if union_t else 0.0
     return {
         "verdict": q4_verdict(
             fastpath_recall=fastpath_recall, union_recall=union_recall, n_diffs=n_diffs
         ),
         "fastpath_blocking_recall": fastpath_recall,
         "union_blocking_recall": union_recall,
+        "fast_caught": fast_c,
+        "fast_total": fast_t,
+        "union_caught": union_c,
+        "union_total": union_t,
         "n_diffs": n_diffs,
         "min_diffs_required": min_diff_count(),
     }
