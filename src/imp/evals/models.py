@@ -212,6 +212,11 @@ class Telemetry:
     cache_creation_tokens: int
     tool_calls: int
     wall_seconds: float
+    # Codex-only: "chatgpt" (subscription, notional dollars) or "apikey"
+    # (real spend). None for every other provider — consumers treat None as
+    # "not applicable / real spend." Set by `CodexAgentRunner` per `auth.json`
+    # `auth_mode` field; spec Acceptance #25.
+    auth_mode: str | None = None
 
     def __add__(self, other: Telemetry) -> Telemetry:
         return Telemetry(
@@ -221,6 +226,7 @@ class Telemetry:
             cache_creation_tokens=self.cache_creation_tokens + other.cache_creation_tokens,
             tool_calls=self.tool_calls + other.tool_calls,
             wall_seconds=self.wall_seconds + other.wall_seconds,
+            auth_mode=self.auth_mode if self.auth_mode is not None else other.auth_mode,
         )
 
     @classmethod
@@ -239,6 +245,7 @@ class Telemetry:
             cache_creation_tokens=int(d["cache_creation_tokens"]),
             tool_calls=int(d["tool_calls"]),
             wall_seconds=float(d["wall_seconds"]),
+            auth_mode=d.get("auth_mode"),
         )
 
 
