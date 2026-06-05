@@ -694,6 +694,19 @@ class ClaudeCodeAgentRunner:
         disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t not in exempt]
         return ClaudeAgentOptions(
             model=self.model,
+            # The claude_code provider drives the `claude` CLI, which
+            # authenticates via its OWN backend (OAuth/subscription, Vertex, or
+            # Bedrock). ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN are the
+            # *external-key* auth path used by the direct-SDK `anthropic`
+            # provider — never by claude_code. If either is present in the
+            # parent env, claude switches to it as an external key; a bogus or
+            # mismatched value then fails with "Invalid API key · Fix external
+            # API key" (exit 0, surfaced as assistant text → AuthError → empty
+            # review). The SDK merges options.env OVER the inherited env, and an
+            # empty string makes claude fall back to its backend auth (verified
+            # live), so blank both here to make the nested claude immune to
+            # whatever ANTHROPIC_* the parent process happens to export.
+            env={"ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": ""},
             # Pin the `claude` subprocess to the change's project_root. Without
             # this the SDK launches claude with cwd=None and leaves $PWD as
             # inherited, so claude keys off a stale $PWD and edits/commits the

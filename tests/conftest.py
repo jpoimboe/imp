@@ -19,16 +19,17 @@ def _stub_provider_api_keys(
     the real env through (their own skipif handles the "no auth" case);
     ordinary tests get the stub so module-level provider construction works.
 
-    The dogfood live test and the e2e live tests spawn subprocesses that
-    read ANTHROPIC_API_KEY from the real env. Stubbing it to "sk-test"
-    would give the subprocess a fake key and cause 401 errors. Skip
-    stubbing for test files whose name matches the live-API patterns.
+    Live-API tests spawn subprocesses (or the claude_code provider's nested
+    `claude`) that read ANTHROPIC_API_KEY from the real env. Stubbing it to
+    "sk-test" would give the subprocess a fake key and cause "Invalid API key"
+    / 401 errors. These tests follow a `_live` suffix convention
+    (`*_live.py`, `*_live_<provider>.py`) and gate themselves with their own
+    skipif, so exempt them from stubbing. The unrelated `test_live_*` UI
+    tests (live_status/live_driver) are NOT live-API tests and still get the
+    stub.
     """
-    if "test_default_workflow_e2e_live" in str(request.node.fspath):
-        return
-    if "test_default_workflow_dogfood_live" in str(request.node.fspath):
-        return
-    if "test_mid_step_resume_live" in str(request.node.fspath):
+    name = Path(request.node.fspath).name
+    if "_live" in name and not name.startswith("test_live_"):
         return
     if not os.environ.get("ANTHROPIC_API_KEY"):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
