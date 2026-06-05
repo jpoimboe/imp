@@ -10,6 +10,11 @@ from dataclasses import dataclass
 
 from imp.evals.models import Telemetry
 
+# Bump this when any price row changes — it is part of the CORE provenance digest,
+# so bumping it invalidates the entire existing cache (the numbers are no longer
+# comparable). Referenced once here; imported wherever a stamp is built.
+PRICING_VERSION = "2026-06-04"
+
 
 @dataclass(frozen=True)
 class Price:

@@ -11,6 +11,7 @@ from pathlib import Path
 from imp.engine.worktree import find_control_root
 from imp.evals.fixtures import load_fixtures
 from imp.evals.models import ExpectedFinding, Fixture, Variant
+from imp.evals.pricing import PRICING_VERSION
 
 _CURATED = Path("src/imp/evals/data/curated")
 
@@ -58,7 +59,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         prompt_dirs=prompt_dirs,
         cell_models=cell_models,
         judge_model=f"{args.judge_provider}/{args.judge_model}",
-        pricing_version="2026-06-03",
+        pricing_version=PRICING_VERSION,
     )
     prov = provenance_digest(run_stamp)
     cache_dir = control_root / ".imp" / "eval-cache"
@@ -140,7 +141,7 @@ def _run_provenance(args: argparse.Namespace, variants: list[Variant]) -> str:
         prompt_dirs={"baseline": Path("src/imp/assets/workflows/default/agents")},
         cell_models={v.id: [f"{p}/{m}" for p, m in v.role_to_model_map.values()] for v in variants},
         judge_model=f"{args.judge_provider}/{args.judge_model}",
-        pricing_version="2026-06-03",
+        pricing_version=PRICING_VERSION,
     ))
 
 
