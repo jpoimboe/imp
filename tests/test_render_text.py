@@ -69,7 +69,9 @@ def test_collapsed_folds_drop_thinking_and_tool_summaries() -> None:
     assert "⏺" not in out
 
 
-def test_collapsed_subagent_expands_with_outcome() -> None:
+def test_collapsed_subagent_renders_single_status_row() -> None:
+    # Part D: lean collapses a subagent to ONE status row — no recursed prose,
+    # no outcome, no SDK sentinel. (--full still expands; see test_full_mode_*.)
     out = _lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -87,16 +89,18 @@ def test_collapsed_subagent_expands_with_outcome() -> None:
     joined = "\n".join(out)
     # Step-context still collapses to its one-line summary (untouched).
     assert "▸ context · anthropic/claude · 2 tools" in joined
-    # Subagent: boundary header (no glyph, no `· N events`), recursed prose, outcome.
-    assert any(ln.strip() == "↳ task → reviewer" for ln in out)
-    assert "looks good" in joined
-    assert any(ln.strip() == "│ → status=Success · summary=ok" for ln in out)
-    # The old one-liner shape is gone.
+    # Subagent: single status row, ✓ done. No recursed prose, no outcome.
+    assert any(ln.strip() == "↳ task → reviewer  ⟨✓ done⟩" for ln in out)
+    assert "looks good" not in joined
+    assert "status=Success" not in joined
+    # The old one-liner / events shape is gone.
     assert "▸ task → reviewer" not in joined
     assert "events" not in joined
 
 
-def test_subagent_recurses_filters_nested_thinking_and_tools() -> None:
+def test_subagent_lean_suppresses_all_nested_io() -> None:
+    # Part D: lean renders NO subagent I/O at all — not prose, not nested
+    # thinking/tools, not the outcome. Just the one status row.
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -111,14 +115,15 @@ def test_subagent_recurses_filters_nested_thinking_and_tools() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
     ]))
-    assert "nested prose" in out           # subagent prose recurses
-    assert "nested musings" not in out     # nested thinking filtered (A1)
-    assert "tools" not in out              # nested burst filtered (A2)
-    assert "→ status=Success" in out       # outcome present
+    assert "↳ task → reviewer  ⟨✓ done⟩" in out   # the single status row
+    assert "nested prose" not in out       # subagent prose NOT recursed in lean
+    assert "nested musings" not in out     # nested thinking suppressed
+    assert "status=Success" not in out     # outcome NOT shown in lean
 
 
-def test_subagent_outcome_present_even_with_prose() -> None:
-    # Outcome is ALWAYS emitted when non-empty, alongside prose (decision ii).
+def test_subagent_outcome_suppressed_in_lean() -> None:
+    # Part D supersedes the old "decision ii" (outcome shown in lean): lean now
+    # shows neither the prose nor the outcome, only the status row.
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -130,8 +135,9 @@ def test_subagent_outcome_present_even_with_prose() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success","summary":"done"}', error=False),
     ]))
-    assert "the prose" in out
-    assert "→ status=Success · summary=done" in out
+    assert "↳ task → reviewer  ⟨✓ done⟩" in out
+    assert "the prose" not in out
+    assert "status=Success" not in out
 
 
 # NOTE: there is intentionally NO doubly-nested (sub-subagent) test here.
@@ -145,7 +151,9 @@ def test_subagent_outcome_present_even_with_prose() -> None:
 # recursive/prefix-aware — out of scope for this plan.
 
 
-def test_subagent_error_outcome_is_error_styled() -> None:
+def test_subagent_error_renders_failed_status_row() -> None:
+    # Part D: a failed subagent surfaces as ⟨✗ failed⟩ in lean — NOT the raw
+    # error outcome prose (which could leak the SDK sentinel).
     out = list(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -154,9 +162,9 @@ def test_subagent_error_outcome_is_error_styled() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ], width=80))
-    # Non-JSON error outcome renders as prose; verify it is present.
-    assert any("dispatch failed: boom" in ln for ln in out)
-    # And it is error-styled when color is on.
+    assert any("↳ task → reviewer  ⟨✗ failed⟩" in ln for ln in out)
+    assert not any("dispatch failed: boom" in ln for ln in out)   # outcome suppressed
+    # The status row carries the subagent (magenta) color when color is on.
     color_out = list(render_tree(nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -165,7 +173,7 @@ def test_subagent_error_outcome_is_error_styled() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ]), full=False, color=True, width=80))
-    assert any("dispatch failed: boom" in ln and "\x1b[31m" in ln for ln in color_out)
+    assert any("✗ failed" in ln and "\x1b[35m" in ln for ln in color_out)
 
 
 def test_full_mode_also_emits_subagent_outcome() -> None:
@@ -542,9 +550,10 @@ def test_wrap_width_is_invariant_under_gutter() -> None:
     assert len(plain) == len(gutter)
 
 
-def test_subagent_content_carries_magenta_gutter() -> None:
-    # color=False: the subagent's prose + outcome carry a plain `│ ` at the
-    # subagent's column; the header (one level out) does NOT.
+def test_full_subagent_content_carries_magenta_gutter() -> None:
+    # color=False, --full: the subagent's recursed prose + outcome carry a plain
+    # `│ ` at the subagent's column; the expanded fold header does NOT. (In lean
+    # there is no recursed content — see test_collapsed_subagent_renders_single_*.)
     out = _lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -555,9 +564,7 @@ def test_subagent_content_carries_magenta_gutter() -> None:
             raw={"content": [{"type": "text", "text": "looks good"}]}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
-    ])
-    # header at depth 2 (under phase→step): 4 spaces, no gutter.
-    assert any(ln == "    ↳ task → reviewer" for ln in out)
+    ], full=True)
     # prose + outcome at depth 3: cols 0,1 plain + col 2 gutter.
     assert any(ln == "    │ looks good" for ln in out)
     assert any(ln == "    │ → status=Success" for ln in out)
@@ -573,20 +580,22 @@ def test_subagent_header_excludes_own_gutter() -> None:
 def test_nested_subagent_emits_two_gutter_levels() -> None:
     # Sub-subagents can't be built through the event pipeline (single-level
     # routing), so construct the nested SubagentFold directly and render it.
+    # The recursive gutter behavior lives in --full; lean collapses to one row.
     inner = nv.SubagentFold(subagent_name="inner", event_id="e2", block_id="b2",
-                            nested=nv.NarrativeBuilder())
+                            nested=nv.NarrativeBuilder(), running=False)
     inner.nested.tree.root.children.append(nv.LiteralTextNode(text="deep finding"))
     outer = nv.SubagentFold(subagent_name="outer", event_id="e1", block_id="b1",
-                            nested=nv.NarrativeBuilder())
+                            nested=nv.NarrativeBuilder(), running=False)
     outer.nested.tree.root.children.append(inner)
-    out = list(rt._render(outer, depth=0, full=False, color=False, width=80))
-    assert out[0] == "↳ task → outer"                       # depth 0, no gutter
-    assert any(ln == "│ ↳ task → inner" for ln in out)      # depth 1, one gutter
+    out = list(rt._render(outer, depth=0, full=True, color=False, width=80))
+    assert out[0] == "▾ task → outer"                       # depth 0, no gutter
+    assert any(ln == "│ ▾ task → inner" for ln in out)      # depth 1, one gutter
     assert any(ln == "│ │ deep finding" for ln in out)      # depth 2, two gutters
 
 
 def test_errored_subagent_gutter_stays_magenta_with_red_outcome() -> None:
-    # seam 1 / error path: magenta gutter + red outcome TEXT on the same line.
+    # seam 1 / error path (--full): magenta gutter + red outcome TEXT on the same
+    # line. In lean the outcome is suppressed; this seam lives in --full now.
     out = list(render_tree(nv.build_tree([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -594,7 +603,7 @@ def test_errored_subagent_gutter_stays_magenta_with_red_outcome() -> None:
             input={"subagent_name": "reviewer", "task_description": "go"}),
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
-    ]), full=False, color=True, width=80))
+    ]), full=True, color=True, width=80))
     line = next(ln for ln in out if "dispatch failed: boom" in ln)
     assert "\x1b[35m│ \x1b[0m" in line   # magenta gutter span (identity)
     assert "\x1b[31m" in line             # red outcome text span (status)
@@ -771,3 +780,78 @@ def test_user_message_no_bg_when_color_off_but_keeps_prefix() -> None:
     joined = "\n".join(out)
     assert "\x1b[104m" not in joined        # bg suppressed under NO_COLOR / non-TTY
     assert "> line one" in joined           # `> ` still anchors the speaker
+
+
+def test_lean_subagent_is_single_status_row() -> None:
+    # Lean: a subagent renders as ONE status row — no children, no outcome prose,
+    # no SDK rejection sentinel.
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import _render
+
+    fold = nv.SubagentFold(subagent_name="reviewer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder())
+    fold.running = False
+    fold.outcome = ("The user doesn't want to proceed with this tool use. "
+                    "The tool use was rejected...")  # the sentinel
+    lines = list(_render(fold, depth=0, full=False, color=False, width=80))
+    text = "\n".join(lines)
+    assert "reviewer" in text
+    assert "done" in text                 # ✓ done status
+    assert "doesn't want to proceed" not in text   # sentinel never surfaces
+    assert len(lines) == 1                # exactly one status row
+
+
+def test_lean_subagent_status_glyphs() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import subagent_status_row
+
+    def row(**kw):
+        f = nv.SubagentFold(subagent_name="s", event_id="e", block_id="b",
+                            nested=nv.NarrativeBuilder())
+        for k, v in kw.items():
+            setattr(f, k, v)
+        return subagent_status_row(f, depth=0, color=False, gutters=())
+
+    assert "⏳ running" in row(running=True)
+    assert "✓ done" in row(running=False)
+    assert "✗ failed" in row(running=False, is_error=True)
+    assert "⊘ stalled" in row(running=False, is_error=True, terminal_state="stalled")
+    assert "⊘ interrupted" in row(running=False, is_error=True,
+                                  terminal_state="interrupted")
+
+
+def test_full_subagent_unchanged_shows_children() -> None:
+    # --full still recurses (regression guard).
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import _render
+    fold = nv.SubagentFold(subagent_name="reviewer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder())
+    fold.running = False
+    fold.outcome = '{"summary": "did the thing"}'
+    lines = list(_render(fold, depth=0, full=True, color=False, width=80))
+    assert any("did the thing" in ln for ln in lines)   # outcome still shown in --full
+
+
+def test_stalled_subagent_renders_stalled_glyph_through_builder() -> None:
+    # END-TO-END (no hand-built {"kind": ...}): feed the REAL task tool_result the
+    # provider builds from dispatch_task's stalled RuntimeError, through the
+    # NarrativeBuilder, then render lean — assert ⊘ stalled.
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import _render
+
+    exc = RuntimeError("subagent 'reviewer' failed (config) [stalled]")
+    content = f"{type(exc).__name__}: {exc}"   # provider formatting
+
+    b = nv.NarrativeBuilder()
+    b.add({"type": "tool_call", "payload": {
+        "name": "task", "id": "b1",
+        "input": {"subagent_name": "reviewer", "task_description": "x"}}})
+    b.add({"type": "tool_result", "payload": {
+        "id": "b1", "content": content, "error": True}})
+
+    folds = [n for n in b.tree.root.children if isinstance(n, nv.SubagentFold)]
+    assert folds, "expected a SubagentFold from the task tool_call/result pair"
+    fold = folds[0]
+    assert fold.terminal_state == "stalled"
+    lines = list(_render(fold, depth=0, full=False, color=False, width=80))
+    assert any("⊘ stalled" in ln for ln in lines)

@@ -177,6 +177,26 @@ def header_line(node: Any, *, depth: int, color: bool,
     return _line(label, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
 
 
+def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
+                        gutters: tuple[int, ...] = ()) -> str:
+    """The single lean/live status row for a subagent:
+    `↳ task → {name}  ⟨{status}⟩` — and NOTHING else (no prompt, no streamed
+    output, no outcome prose). This is what structurally eliminates the SDK
+    cancellation-sentinel leak from the default views."""
+    if sub.running:
+        status = "⏳ running"
+    elif sub.terminal_state == "stalled":
+        status = "⊘ stalled"
+    elif sub.terminal_state == "interrupted":
+        status = "⊘ interrupted"
+    elif sub.is_error:
+        status = "✗ failed"
+    else:
+        status = "✓ done"
+    return _line(f"↳ task → {sub.subagent_name}  ⟨{status}⟩", depth, color,
+                 *pal.NODE_COLORS["subagent"], gutters=gutters)
+
+
 def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
                            width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     """The subagent's structured return value, rendered readably at the passed
@@ -348,22 +368,19 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
                      color: bool, width: int,
                      gutters: tuple[int, ...] = ()) -> Iterator[str]:
-    # Header: lean uses the shared `↳ task → {name}` boundary (↳ descent glyph, shared
-    # with the live driver); --full uses the expanded `▾ task → {name}` fold header.
-    if full:
-        yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
-                    depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
-    else:
-        yield header_line(sub, depth=depth, color=color, gutters=gutters)
-    # The subagent's own narrative, recursed at the same `full` level (lean filters
-    # nested thinking/tools via A1/A2; --full expands them).
+    if not full:
+        # Lean: ONE status row, no children, no outcome (Part D). Structurally
+        # eliminates the SDK cancellation-sentinel leak — lean renders no subagent
+        # I/O at all, only `↳ task → {name}  ⟨{status}⟩`.
+        yield subagent_status_row(sub, depth=depth, color=color, gutters=gutters)
+        return
+    # --full: unchanged — expanded `▾ task → {name}` fold header, full recursion of
+    # the subagent's narrative (nested thinking/tools expanded), then the structured
+    # return value. --full stays a superset of the lean view.
+    yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
+                depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
                                 color=color, width=width, gutters=(*gutters, depth))
-    # The structured return value the parent consumed — emitted in BOTH modes so
-    # --full stays a superset of default (DEVIATION from spec, which left --full
-    # untouched: the spec's "--full unchanged" produced the backwards result of
-    # --full showing LESS than default; per maintainer decision, --full is now a
-    # superset again). Always emit when non-empty (decision ii).
     yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width,
                                       gutters=(*gutters, depth))
 
