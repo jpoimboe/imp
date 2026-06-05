@@ -67,6 +67,39 @@ def _default_variants() -> list[Variant]:
     ]
 
 
+def _structure_variants() -> list[Variant]:
+    """The Stage 3 granularity 2x2: {per-task, whole-change} x {monolithic, slice}.
+    `baseline-monolithic` is the whole-change-mono cell (also Q2's monolithic pop.);
+    `whole-change-completeness` is the whole-change-slice cell (Q2's slice pop.). The
+    per-task pair carries NEITHER Q2 substring, so it stays out of Q2. The slice cells
+    add the baseline `completeness-slice` agent as a second panel member (no
+    prompt_overrides needed). Per-task cells run extra repeats for power."""
+    reviewer = ("anthropic", "claude-sonnet-4-6")
+    slice_member = ("anthropic", "claude-sonnet-4-6")
+    return [
+        Variant(
+            id="baseline-monolithic",
+            role_to_model_map={"code-reviewer": reviewer},
+            structure="monolithic", n_repeats=3,
+        ),
+        Variant(
+            id="whole-change-completeness",
+            role_to_model_map={"code-reviewer": reviewer, "completeness-slice": slice_member},
+            structure="slice-panel", n_repeats=3,
+        ),
+        Variant(
+            id="per-task-mono",
+            role_to_model_map={"code-reviewer": reviewer},
+            structure="per-task-monolithic", n_repeats=5,
+        ),
+        Variant(
+            id="per-task-slice",
+            role_to_model_map={"code-reviewer": reviewer, "completeness-slice": slice_member},
+            structure="per-task-slice-panel", n_repeats=5,
+        ),
+    ]
+
+
 def _curated_fixtures() -> list[Fixture]:
     if _CURATED.exists():
         return load_fixtures(_CURATED)
@@ -77,7 +110,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     from imp.evals.sweep import plan_sweep
 
     plan = plan_sweep(
-        _default_variants(), _curated_fixtures(),
+        _default_variants() + _structure_variants(), _curated_fixtures(),
         judge_provider=getattr(args, "judge_provider", "anthropic"),
         judge_model=getattr(args, "judge_model", "claude-opus-4-8"),
     )
@@ -94,7 +127,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     from imp.evals.sweep import SweepError, run_sweep
 
     control_root = find_control_root(Path.cwd())
-    variants = _default_variants()
+    variants = _default_variants() + _structure_variants()
     fixtures_for_run = _curated_fixtures()
     prompt_dirs = {"baseline": Path("src/imp/assets/workflows/default/agents")}
     cell_models = {v.id: [f"{p}/{m}" for p, m in v.role_to_model_map.values()] for v in variants}
@@ -210,7 +243,7 @@ def cmd_scorecard(args: argparse.Namespace) -> int:
 
     require_optin()  # re-grading calls the judge (billable)
     control_root = find_control_root(Path.cwd())
-    variants = _default_variants()
+    variants = _default_variants() + _structure_variants()
     fixtures = _curated_fixtures()
     prov = _run_provenance(args, variants, fixtures)
     cache_dir = control_root / ".imp" / "eval-cache"
