@@ -315,10 +315,14 @@ class CodexAgentRunner:
         callable that takes `options=` and returns a FakeCodex."""
         if self._client_factory is not None:
             return self._client_factory(options=None)
-        from openai_codex_sdk import (
-            Codex,
-            CodexOptions,
-        )
+        from openai_codex_sdk import Codex
+
+        # `CodexOptions` is not re-exported at the package top level in the
+        # pinned SDK (0.1.11) — only `openai_codex_sdk.types` (and .codex/.thread)
+        # expose it. Import from the submodule so client construction works
+        # against the pinned wheel. `Codex(...)` also accepts a plain dict, but
+        # the typed object keeps the kwarg contract explicit.
+        from openai_codex_sdk.types import CodexOptions
 
         from imp.engine.env import overlay_engine_env
         env = overlay_engine_env(os.environ, {
@@ -575,12 +579,17 @@ class CodexAgentRunner:
             )
         except ImportError:
             return None
+        # Use the SDK's declared (alias) parameter names. ThreadOptions is a
+        # pydantic model with `populate_by_name=True`, so the snake_case field
+        # names work identically at runtime — but only these camelCase aliases
+        # match the typed `__init__` signature, so this is what mypy checks
+        # against. Verified: both forms model_dump() to the same payload.
         return ThreadOptions(
             model=self.model,
-            sandbox_mode="danger-full-access",
-            approval_policy="never",
-            web_search_enabled=False,
-            network_access_enabled=False,
+            sandboxMode="danger-full-access",
+            approvalPolicy="never",
+            webSearchEnabled=False,
+            networkAccessEnabled=False,
         )
 
     def _build_prompt(self, system_prompt: str) -> str:

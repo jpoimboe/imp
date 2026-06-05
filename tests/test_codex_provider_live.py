@@ -126,20 +126,45 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
 
 @pytest.mark.anyio
 async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> None:
-    """Force a cap trip with a tight max_tool_calls. The loop must terminate
-    within the bounded retry budget -- design "tolerate the bounded retry
-    amplification when sizing the high cap"."""
+    """Force a real cap trip end-to-end and assert the loop TERMINATES (does
+    not hang) within the bounded retry budget.
+
+    The dispatch cap is "max ALLOWED calls": `dispatch_count > cap` trips, so
+    `cap = max_tool_calls = 1` permits exactly one tool call. A single-call
+    agent (the round-trip echoer) can never trip it — its lone `complete_step`
+    is that one allowed call. (Note `cap = max_tool_calls or 1000` also makes
+    cap=0 unreachable.) So to exercise the ceiling we give the agent a second
+    read-only tool (`ls`) and instruct it to call that FIRST, then
+    `complete_step`: dispatch #1 (`ls`) is allowed, dispatch #2 (`complete_step`)
+    trips the cap. The runner then aborts the SDK and yields
+    `tool_call_ceiling_exceeded` on its next event iteration — independent of
+    what the model does next. The mechanism itself (RMW + abort flag) is
+    unit-covered in test_codex_mcp_dispatch.py; this is the live proof that a
+    real codex turn terminates under cap pressure rather than looping."""
     _git_init(tmp_path)
     (tmp_path / "tx").mkdir()
     runner = CodexAgentRunner(model_name="gpt-5.5")
     inv = _inv(tmp_path)
-    # Inject max_tool_calls=1 — even complete_step itself trips the cap.
-    inv = dataclasses.replace(inv, max_tool_calls=1)
+    # Give the agent a second (read-only) tool so it can make two calls, and
+    # order them so the SECOND call (complete_step) is the one that trips cap=1.
+    agent_def = dataclasses.replace(
+        inv.agent_def, tools=frozenset({"complete_step", "ls"})
+    )
+    inv = dataclasses.replace(
+        inv,
+        agent_def=agent_def,
+        max_tool_calls=1,
+        system_prompt=(
+            "First call the `ls` tool with path \".\". After it returns, call "
+            'complete_step with word="banana". Call `ls` before complete_step. '
+            "Do not call any other tools and do not write any files."
+        ),
+    )
     events = [ev async for ev in runner.run(inv)]
     # Terminated — and within the bounded budget (test runner has its own
     # session timeout; reaching here at all means we terminated).
     err = next((e for e in events if e.get("type") == "error"), None)
-    assert err is not None
+    assert err is not None, events
     assert err["payload"]["kind"] in (
         "tool_call_ceiling_exceeded", "agent_output_missing", "native_tool_violation",
-    )
+    ), err

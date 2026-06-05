@@ -159,7 +159,14 @@ async def start_server(
     sock, port = _reserve_socket(host)
     config = uvicorn.Config(
         asgi_app, host=host, port=port, log_level="warning",
-        access_log=False, lifespan="off",
+        # lifespan MUST be on: FastMCP's streamable-HTTP app attaches its
+        # `StreamableHTTPSessionManager.run()` as the ASGI lifespan (mcp's
+        # server.py: `lifespan=lambda app: self.session_manager.run()`). That
+        # is what initializes the manager's task group; with lifespan="off"
+        # every request raises "Task group is not initialized" and codex sees
+        # zero imp tools (no complete_step). The bearer middleware forwards the
+        # lifespan scope through to the wrapped app, so auth is unaffected.
+        access_log=False, lifespan="on",
     )
     server = uvicorn.Server(config)
     # MUST disable signal handler installation: signal handlers can only be
