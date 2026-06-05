@@ -38,6 +38,18 @@ If `/project/.imp/change/progress.md` exists, read it.
 
 **Disambiguation note (resumed turns only):** This note applies **only if your turn opened with injected reviewer feedback** — a "did not accept" wrapper carrying `findings:` and `blocking:` lines. **If there was no injected feedback, ignore this note and use the table above** (you are authoring fresh). When there IS injected feedback, **first read the `blocking:` line.** If it reads `blocking: false` (rendered capitalized as `blocking: False` — match case-insensitively), this is **not** a rework — follow "Final advisory polish pass (clean review)" below, which may complete **without committing** (do NOT run an empty `git commit --fixup`). If it reads `blocking: true`, the "did not accept" framing is identical whether you are doing a reviewer rework (revise N) or starting the next plan after a `plan-cycle-check` `more_plans` signal. **`progress.md` completion state — not the wrapper text — is authoritative.** If the newest plan is marked COMPLETE in `progress.md`, you are writing N+1. If it is not, you are revising N.
 
+**Verify each finding before acting on it (reviewer rework).** A reviewer finding
+can rest on a false premise — a misread of the spec or plan, or a claim about the
+code that isn't true. Before changing anything, confirm the problem is real:
+re-read the cited passage and use `read_file`/`grep` to check any claim the finding
+makes about existing code. If it holds, fix it. If it rests on a false premise, do
+**not** make the change it asks for — editing a correct plan step to satisfy a
+phantom finding introduces the very bug the reviewer imagined. Instead resolve the
+misread: fix the real concern if there is one, or add a brief clarifying note so
+the next reviewer doesn't re-flag it. Never apply a finding you haven't verified,
+and never edit the plan into something you know to be wrong just to make a finding
+disappear.
+
 Keep the integer N in mind throughout — you will substitute the actual value wherever `N` appears below.
 
 ## Your Role
