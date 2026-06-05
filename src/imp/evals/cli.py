@@ -13,10 +13,14 @@ from typing import Any
 
 from imp.engine.worktree import find_control_root
 from imp.evals.fixtures import load_fixtures
+from imp.evals.mining import AGGREGATE_BLOCKING_FLOOR as _AGG
+from imp.evals.mining import PER_QUESTION_BLOCKING_FLOOR as _PERQ
+from imp.evals.mining import FeasibilityCount
 from imp.evals.models import ExpectedFinding, Fixture, Variant
 from imp.evals.pricing import PRICING_VERSION
 
 _CURATED = Path("src/imp/evals/data/curated")
+_DEFAULT_CORPUS_GLOB = "/home/jpoimboe/.claude/projects/-home-jpoimboe-imp/*.jsonl"
 
 
 def _resolve_sha_mismatch(
@@ -185,6 +189,39 @@ def cmd_mine(args: argparse.Namespace) -> int:
     return 0
 
 
+def _render_feasibility(c: FeasibilityCount) -> str:
+    """Human-readable go/no-go. PROCEED/STOP is advisory — the human decides; this
+    is the cheap 'look before you invest' gate, read per question (spec F1/F3)."""
+    def _mark(ok: bool) -> str:
+        return "PROCEED" if ok else "STOP"
+
+    return (
+        "feasibility (distinct blocking-bearing diffs; free pre-count):\n"
+        f"  aggregate: {c.aggregate_blocking_diffs} "
+        f"(floor {_AGG}) -> {_mark(c.aggregate_ok)}\n"
+        f"  Q1 (drop spec-task-reviewer): {c.q1_blocking_diffs} "
+        f"(floor {_PERQ}) -> {_mark(c.q1_ok)}\n"
+        f"  Q4 (drop code-reviewer): {c.q4_blocking_diffs} "
+        f"(floor {_PERQ}) -> {_mark(c.q4_ok)}\n"
+        "note: proxy counts diffs (head_shas), is mined-only, and is a LOWER bound "
+        "on the grade's n (which also pools curated fixtures). Read each question "
+        "by its own count."
+    )
+
+
+def cmd_feasibility(args: argparse.Namespace) -> int:
+    """Component 0: free pre-count of distinct blocking-bearing diffs per question
+    before any billable mining/sweep. Never calls a provider; always exits 0."""
+    import glob
+
+    from imp.evals.mining import count_corpus_feasibility
+
+    files = [Path(p) for p in glob.glob(args.corpus_glob)]
+    c = count_corpus_feasibility(files)
+    print(_render_feasibility(c))
+    return 0
+
+
 def _run_provenance(args: argparse.Namespace, variants: list[Variant],
                     fixtures: list[Fixture]) -> str:
     from imp.evals.provenance import core_digest, fixture_label_hash, stamp
@@ -310,12 +347,18 @@ def add_eval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     pr.set_defaults(func=cmd_run)
 
     pm = actions.add_parser("mine", help="Mine .claude session logs into fixtures")
-    _default_glob = "/home/jpoimboe/.claude/projects/-home-jpoimboe-imp/*.jsonl"
-    pm.add_argument("--corpus-glob", default=_default_glob)
+    pm.add_argument("--corpus-glob", default=_DEFAULT_CORPUS_GLOB)
     pm.add_argument("--out", default="src/imp/evals/data/mined")
     pm.add_argument("--judge-provider", default="anthropic")
     pm.add_argument("--judge-model", default="claude-haiku-4-5-20251001")
     pm.set_defaults(func=cmd_mine)
+
+    pf = actions.add_parser(
+        "feasibility",
+        help="Free pre-count of blocking-bearing diffs per question (never bills)",
+    )
+    pf.add_argument("--corpus-glob", default=_DEFAULT_CORPUS_GLOB)
+    pf.set_defaults(func=cmd_feasibility)
 
     ps = actions.add_parser(
         "scorecard", help="Re-render the scorecard from cached runs (no reviewer sweep)"

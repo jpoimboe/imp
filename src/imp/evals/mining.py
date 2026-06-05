@@ -304,6 +304,17 @@ def count_blocking_diffs(episodes: list[RawEpisode]) -> FeasibilityCount:
     )
 
 
+def count_corpus_feasibility(session_files: list[Path]) -> FeasibilityCount:
+    """Free pre-count over a LIST of session files (spec Component 0): discover
+    episodes, mark the rework/blocking signal, count distinct blocking head_shas
+    per question. Deliberately stops BEFORE assemble_fixtures (the billable
+    normalizer step) so the pre-count costs nothing — no git, no LLM calls."""
+    all_eps: list[RawEpisode] = []
+    for f in session_files:
+        all_eps.extend(discover_episodes(f))
+    return count_blocking_diffs(mark_rework(all_eps))
+
+
 def dedup_episodes(episodes: list[RawEpisode]) -> list[RawEpisode]:
     """Collapse rework passes per (head_sha, reviewer). Run AFTER mark_rework.
     Keeps a BLOCKING representative when the group has one (it carries the bug
