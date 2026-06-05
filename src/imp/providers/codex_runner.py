@@ -241,6 +241,29 @@ def process_event(
                 state["complete_step_args"] = dict(args)
                 state["complete_step_called"] = True
             return
+        if itype == "web_search":
+            # `web_search_enabled=False` should remove the tool entirely.
+            # Seeing one is a soft tripwire (not fail-closed by itself; the
+            # SDK-form disable is verified live in the e2e test).
+            elog.append(agent_id=agent_id, type="runner_warning",
+                        payload={"message":
+                                 f"unexpected codex web_search item "
+                                 f"(query={getattr(item, 'query', '')!r})"})
+            return
+        if itype in ("file_change", "command_execution"):
+            # Fail-closed tripwire (design HIGH-3). The native edit ALREADY
+            # happened — recording it here triggers the runner's revert path
+            # at the next turn boundary. Autonomous: hard run failure.
+            # Interactive: user keep-or-revert prompt; default revert.
+            detail = (getattr(item, "path", None) or
+                      getattr(item, "command", None) or "?")
+            state["native_violation"] = {
+                "kind": itype, "detail": detail,
+            }
+            elog.append(agent_id=agent_id, type="runner_warning",
+                        payload={
+                            "message": f"native {itype} detected: {detail!r}"})
+            return
         # Other item types mapped in later tasks; fall through to default arm.
         elog.append(agent_id=agent_id, type="runner_warning",
                     payload={"message": f"unhandled codex item type: {itype!r}"})
