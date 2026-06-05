@@ -8,11 +8,14 @@ Virtual path conventions:
 from __future__ import annotations
 
 import contextlib
+import os
+import signal as _signal
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 from imp.agents.permissions import check_permission
+from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
 from imp.engine.types import AgentDef, FsRule
 
 
@@ -90,12 +93,42 @@ class ToolContext:
         check_permission(self.fs_permissions, op, virtual)
 
 
+def _supports_killpg() -> bool:
+    # start_new_session (os.setsid) gives the child pgid == pid, so os.killpg can
+    # target the whole tree without os.getpgid (which would add a second
+    # ProcessLookupError race on a reaped pid). Absent setsid/killpg (Windows /
+    # no-setsid), fall back to single-pid termination.
+    return hasattr(os, "killpg") and hasattr(os, "setsid")
+
+
+async def kill_process_group(proc: Any, sig: int) -> None:
+    """Send `sig` to the process GROUP of `proc`, falling back to single-pid on
+    platforms without setsid/killpg. Suppresses ESRCH (already-reaped). Does NOT
+    wait/reap — the caller reaps via `await proc.wait()`.
+
+    M1 INVARIANT: this is correct only because every registered proc is a setsid
+    session leader (pgid == pid; see the bash registration site), so os.killpg(pid)
+    targets exactly that group. If a future caller ever registers a NON-setsid
+    proc, os.killpg(pid, …) could no-op (ESRCH) or signal an unrelated group —
+    revisit this then.
+    """
+    pid = getattr(proc, "pid", None)
+    if pid is not None and _supports_killpg():
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(pid, sig)
+        return
+    fn = proc.terminate if sig == _signal.SIGTERM else proc.kill
+    with contextlib.suppress(ProcessLookupError, AttributeError):
+        fn()
+
+
 async def terminate_running_processes(
-    ctx: ToolContext, *, timeout: float = 2.0,
+    ctx: ToolContext, *, timeout: float = PROCESS_KILL_GRACE_S,
 ) -> list[Any]:
-    """Send SIGTERM to every registered process, wait `timeout`, then SIGKILL
-    survivors. Drain the registry. Returns the list of processes that were
-    signalled (caller emits tool_killed events from it)."""
+    """SIGTERM the process GROUP of every registered process, wait `timeout`
+    (named grace, default 4 s), then SIGKILL the group of any survivor. Drain the
+    registry. Returns the processes that were signalled (caller emits tool_killed
+    from it). Escalation is TIME-gated, not count-gated."""
     import anyio
 
     if not ctx.running_processes:
@@ -104,13 +137,8 @@ async def terminate_running_processes(
     ctx.running_processes.clear()
 
     for p in procs:
-        # `.terminate()` sends SIGTERM (or maps to it on POSIX). Ignore errors
-        # for already-exited processes.
-        with contextlib.suppress(ProcessLookupError, AttributeError):
-            p.terminate()
+        await kill_process_group(p, _signal.SIGTERM)
 
-    # Wait up to `timeout` seconds for all to exit; whatever's still alive
-    # gets SIGKILL.
     async def _wait_one(p: Any) -> None:
         with contextlib.suppress(Exception):
             await p.wait()
@@ -122,8 +150,7 @@ async def terminate_running_processes(
 
     for p in procs:
         if getattr(p, "returncode", None) is None:
-            with contextlib.suppress(ProcessLookupError, AttributeError):
-                p.kill()
+            await kill_process_group(p, _signal.SIGKILL)
             with contextlib.suppress(Exception):
                 await p.wait()
     return procs

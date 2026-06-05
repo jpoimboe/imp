@@ -764,7 +764,7 @@ class OpenAIAgentRunner:
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
         if self._ctx is not None:
-            await terminate_running_processes(self._ctx, timeout=2.0)
+            await terminate_running_processes(self._ctx)
 
 
 class OpenAIProvider:

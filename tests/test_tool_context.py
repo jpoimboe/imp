@@ -110,6 +110,52 @@ def test_terminate_running_processes_drains(tmp_path):
     anyio.run(_spawn_and_kill)
 
 
+def test_terminate_kills_process_group(tmp_path):
+    """A shell that spawns a child: killpg must reap the WHOLE group, not just
+    the shell pid. The child writes a marker file; after teardown it must stop.
+
+    M6: this is the most timing-sensitive test in the plan (real sleeps + a real
+    process group). Keep the sleeps as small as the assertion tolerates; if it
+    flakes under CI load, widen the post-teardown observation window, not the cap.
+    """
+    import anyio
+
+    from imp.agents.tools.context import ToolContext, terminate_running_processes
+
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "e.jsonl")
+    marker = tmp_path / "child_alive"
+
+    async def go():
+        # Parent shell backgrounds a child that touches `marker` every 0.1s.
+        proc = await anyio.open_process(
+            ["sh", "-c", f"(while true; do touch {marker}; sleep 0.1; done) & wait"],
+            start_new_session=True,
+        )
+        ctx.running_processes.append(proc)
+        await anyio.sleep(0.3)
+        await terminate_running_processes(ctx)
+        assert ctx.running_processes == []
+        # Give any orphaned child a chance to keep writing, then confirm it died.
+        if marker.exists():
+            marker.unlink()
+        await anyio.sleep(0.5)
+        assert not marker.exists(), "child survived killpg — group was not reaped"
+
+    anyio.run(go)
+
+
+def test_terminate_uses_named_grace_constant():
+    # The grace is a named constant, not a 2.0 literal (must be 4.0).
+    import inspect
+
+    from imp.agents.tools import context
+    from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
+    sig = inspect.signature(context.terminate_running_processes)
+    assert sig.parameters["timeout"].default == PROCESS_KILL_GRACE_S
+    assert PROCESS_KILL_GRACE_S == 4.0
+
+
 def test_tool_context_has_event_log_field(tmp_path) -> None:
     from imp.agents.tools.context import ToolContext
     ctx = ToolContext(

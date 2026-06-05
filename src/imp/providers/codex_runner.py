@@ -400,7 +400,7 @@ class CodexAgentRunner:
                     if self._abort_controller is not None:
                         with contextlib.suppress(Exception):
                             self._abort_controller.abort()
-                    await terminate_running_processes(ctx, timeout=2.0)
+                    await terminate_running_processes(ctx)
                     yield {"type": "error", "payload": {
                         "category": "config",
                         "kind": "tool_call_ceiling_exceeded",
@@ -595,12 +595,12 @@ class CodexAgentRunner:
     async def interrupt(self) -> None:
         """Cancel the run — three effects:
           1. set `self._cancel = True`.
-          2. `terminate_running_processes(ctx, timeout=2.0)`.
+          2. `terminate_running_processes(ctx)`.
           3. SDK `AbortController.abort()`.
         Idempotent."""
         self._cancel = True
         if self._ctx is not None:
-            await terminate_running_processes(self._ctx, timeout=2.0)
+            await terminate_running_processes(self._ctx)
         if self._abort_controller is not None:
             with contextlib.suppress(Exception):
                 self._abort_controller.abort()

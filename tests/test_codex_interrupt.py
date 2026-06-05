@@ -45,7 +45,10 @@ async def test_interrupt_sets_cancel_terminates_processes_and_aborts_sdk(tmp_pat
         term.assert_awaited_once()
         args, kwargs = term.call_args
         assert args[0] is runner._ctx
-        assert kwargs.get("timeout") == 2.0 or (len(args) > 1 and args[1] == 2.0)
+        # No timeout literal: interrupt() now relies on the 4 s named grace
+        # default (PROCESS_KILL_GRACE_S) inside terminate_running_processes.
+        assert "timeout" not in kwargs
+        assert len(args) == 1
         assert ab.calls == 1
 
 

@@ -45,8 +45,8 @@ def _rewrite_leading_cd_project(command: str, project_root: str) -> str:
     description=(
         "Run a shell command. Returns JSON {stdout, stderr, returncode}. "
         "No permission gate (shell access is total at OS-user level). "
-        "Interruptible: a runner interrupt sends SIGTERM to the process "
-        "group; 2 s grace; then SIGKILL."
+        "Output is capped at 50 KB. Interruptible: a runner interrupt sends "
+        "SIGTERM to the process group; 4 s grace; then SIGKILL."
     ),
 )
 async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
