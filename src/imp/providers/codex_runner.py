@@ -7,6 +7,7 @@ process_event() for basic event types. The full run() is added in later tasks.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import secrets
@@ -275,7 +276,7 @@ class CodexAgentRunner:
             async for ev in self._drive_turns(
                 client=client, invocation=invocation, elog=elog,
                 aid=aid, ctx=ctx, state=state, proc_state=proc_state,
-                entry_snapshot=entry_snapshot,
+                entry_snapshot=entry_snapshot, server_handle=server_handle,
             ):
                 yield ev
         finally:
@@ -316,7 +317,7 @@ class CodexAgentRunner:
     async def _drive_turns(
         self, *, client: Any, invocation: AgentInvocation, elog: Any,
         aid: str, ctx: ToolContext, state: RunState, proc_state: dict[str, Any],
-        entry_snapshot: EntrySnapshot,
+        entry_snapshot: EntrySnapshot, server_handle: Any,
     ) -> AsyncGenerator[Event, None]:
         """Start a thread, run streamed turns, consume events.
 
@@ -364,6 +365,17 @@ class CodexAgentRunner:
             streamed = await thread.run_streamed(next_prompt)
             need_nudge = False  # set when turn ends without complete_step
             async for event in streamed.events:
+                # Dead-server poll: if the MCP server task has ended, bail
+                # immediately rather than letting codex's retry-loop be
+                # misread as "missing complete_step".
+                if server_handle.task.done():
+                    exc = (server_handle.task.exception()
+                           if not server_handle.task.cancelled() else None)
+                    yield {"type": "error", "payload": {
+                        "category": "network", "kind": "mcp_server_died",
+                        "message": "MCP server task ended mid-turn",
+                        "detail": {"server_error": str(exc) if exc else ""}}}
+                    return
                 if self._cancel:
                     yield {"type": "error", "payload": {
                         "category": "config", "kind": "interrupted",
@@ -752,3 +764,39 @@ async def _ping_mcp_server(
     raise RuntimeError(
         f"MCP endpoint not reachable within {timeout_seconds}s "
         f"({last_exc!r})")
+
+
+# ── Dead-server race helper ───────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RaceOutcome:
+    kind: str  # "consume_done" | "server_died" | "timeout"
+    detail: str = ""
+
+
+async def race_consume_against_server(
+    consume_task: asyncio.Task[Any], serve_task: asyncio.Task[Any],
+    *, timeout: float,
+) -> RaceOutcome:
+    """Race two tasks; classify which finished first.
+
+    Per design "Distinguish a dead MCP server from a retried tool error":
+      - `serve_task` completes first ⇒ server died ⇒ classify api/network and
+        bail (don't let codex retry-loop look like "missing complete_step").
+      - `consume_task` completes first ⇒ stream finished normally.
+      - Neither completes within `timeout` ⇒ timeout (caller decides).
+    """
+    done, _pending = await asyncio.wait(
+        {consume_task, serve_task},
+        return_when=asyncio.FIRST_COMPLETED,
+        timeout=timeout,
+    )
+    if not done:
+        return RaceOutcome(kind="timeout")
+    if serve_task in done:
+        exc = serve_task.exception() if not serve_task.cancelled() else None
+        return RaceOutcome(
+            kind="server_died",
+            detail=str(exc) if exc is not None else "serve_task ended unexpectedly")
+    return RaceOutcome(kind="consume_done")
