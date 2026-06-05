@@ -107,7 +107,10 @@ def test_last_event_timestamp_reads_last_event(tmp_path: Path) -> None:
         b'{"timestamp":"2026-06-05T12:00:00+00:00"}\n'
     )
     out = _last_event_timestamp(p)
-    assert len(out) == 19 and out != "-"  # parsed the LAST line, not the first
+    first = _format_last_timestamp('{"timestamp":"2026-06-01T00:00:00+00:00"}')
+    last = _format_last_timestamp('{"timestamp":"2026-06-05T12:00:00+00:00"}')
+    assert out == last      # parsed the LAST line...
+    assert out != first     # ...not the first
 
 
 def test_last_event_timestamp_non_utf8_last_line(tmp_path: Path) -> None:
@@ -127,7 +130,10 @@ def test_journal_last_activity_uses_last_line(monkeypatch, tmp_path: Path) -> No
         cli_main.journal, "journal_show", lambda control, cid, name: blob
     )
     out = cli_main._journal_last_activity(tmp_path, "some-id")
-    assert len(out) == 19 and out != "-"
+    first = _format_last_timestamp('{"timestamp":"2026-06-01T00:00:00+00:00"}')
+    last = _format_last_timestamp('{"timestamp":"2026-06-05T12:00:00+00:00"}')
+    assert out == last
+    assert out != first
 
 
 def test_journal_last_activity_absent(monkeypatch, tmp_path: Path) -> None:
