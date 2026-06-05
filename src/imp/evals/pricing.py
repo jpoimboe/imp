@@ -33,6 +33,10 @@ _PRICES: dict[tuple[str, str], Price] = {
     ("openai", "gpt-5"): Price(1.25, 10.0, 0.125, 1.25),
     ("openai", "gpt-5.2"): Price(1.25, 10.0, 0.125, 1.25),
     ("openai", "gpt-5.5"): Price(5.0, 30.0, 0.50, 5.0),
+    # codex: notional alias of openai/gpt-5.5 under subscription auth.
+    # Real USD only under API-key auth; eval record carries `auth_mode` so a
+    # consumer can distinguish notional from real spend (see Telemetry).
+    ("codex", "gpt-5.5"): Price(5.0, 30.0, 0.50, 5.0),
     ("openai", "gpt-5.3-codex"): Price(1.75, 14.0, 0.175, 1.75),
     ("openai", "gpt-5.4-mini"): Price(0.75, 4.50, 0.075, 0.75),
     ("openai", "gpt-5-mini"): Price(0.25, 2.0, 0.025, 0.25),
