@@ -1,27 +1,69 @@
 """`imp eval` subcommand. dry-run never bills (matrix + dollar estimate); run is
 gated behind IMP_RUN_EVALS; scorecard re-renders from cache. The default Variant
-set is a single baseline code-reviewer; richer matrices are configured by editing
-the builder or passing a variants JSON (future)."""
+set is a five-model matrix (OpenAI gpt-5.5/gpt-5.3-codex/gpt-5.4-mini + claude_code
+opus-4-8/sonnet-4-6), one Variant per model binding the `code-reviewer` role, 3
+repeats each."""
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+from typing import Any
 
 from imp.engine.worktree import find_control_root
 from imp.evals.fixtures import load_fixtures
 from imp.evals.models import ExpectedFinding, Fixture, Variant
+from imp.evals.pricing import PRICING_VERSION
 
 _CURATED = Path("src/imp/evals/data/curated")
 
 
+def _resolve_sha_mismatch(
+    *, runs_shas: set[str], head: str, reuse_stale: bool, is_tty: bool
+) -> str:
+    """Decide continue/abort for cmd_scorecard when cached cells were produced at a
+    different imp SHA than HEAD. Binary (grades are never cached, so we always
+    re-grade on continue). Non-interactive or --yes defaults to abort;
+    --reuse-stale-sha pre-answers continue; no mismatch -> continue silently."""
+    stale = {s for s in runs_shas if s and s != head}
+    if not stale:
+        return "continue"
+    if reuse_stale:
+        return "continue"
+    if not is_tty:
+        return "abort"
+    print(
+        f"\n⚠ cached reviewer runs were produced at imp {sorted(stale)}, but HEAD is {head}.\n"
+        "  Prompts, models, judge, and pricing are unchanged — but code outside those\n"
+        "  (the eval harness, parsing, tool schema) may have changed; review if you\n"
+        "  touched the harness.\n"
+        "  [c]ontinue (grade the cached runs)   [a]bort"
+    )
+    answer = input("> ").strip().lower()
+    return "continue" if answer.startswith("c") else "abort"
+
+
 def _default_variants() -> list[Variant]:
+    """The reviewer model matrix: one Variant per model, each binding the single
+    `code-reviewer` role at the single-agent seam. The OpenAI trio is priced (real
+    Q3 $-axis); the claude_code pair runs on the subscription at $0 and is read on
+    the RECALL axis only (a $0 model looks infinitely cost-efficient on Q3).
+
+    Variant ids use a `mono-` prefix, NOT the literal `monolithic`/`completeness`
+    substrings Q2 selects on (scorecard.py:72-73) — so these model-matrix cells
+    stay out of the Q2 structure comparison by construction. Q2's structure
+    variants are Stage 3's job.
+    """
+    def _mono(vid: str, provider: str, model: str) -> Variant:
+        return Variant(id=vid, role_to_model_map={"code-reviewer": (provider, model)}, n_repeats=3)
+
     return [
-        Variant(
-            id="baseline-monolithic",
-            role_to_model_map={"code-reviewer": ("anthropic", "claude-sonnet-4-6")},
-            n_repeats=3,
-        )
+        _mono("mono-gpt-5.5", "openai", "gpt-5.5"),
+        _mono("mono-gpt-5.3-codex", "openai", "gpt-5.3-codex"),
+        _mono("mono-gpt-5.4-mini", "openai", "gpt-5.4-mini"),
+        _mono("mono-cc-opus-4-8", "claude_code", "claude-opus-4-8"),
+        _mono("mono-cc-sonnet-4-6", "claude_code", "claude-sonnet-4-6"),
     ]
 
 
@@ -37,7 +79,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     plan = plan_sweep(
         _default_variants(), _curated_fixtures(),
         judge_provider=getattr(args, "judge_provider", "anthropic"),
-        judge_model=getattr(args, "judge_model", "claude-opus-4-7"),
+        judge_model=getattr(args, "judge_model", "claude-opus-4-8"),
     )
     print(
         f"matrix: {plan.n_cells} cells, {plan.n_agent_runs} reviewer runs, "
@@ -47,26 +89,30 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    from imp.evals.provenance import provenance_digest, stamp
+    from imp.evals.provenance import core_digest, stamp
+    from imp.evals.provenance import fixture_label_hash as _flh
     from imp.evals.sweep import SweepError, run_sweep
 
     control_root = find_control_root(Path.cwd())
     variants = _default_variants()
+    fixtures_for_run = _curated_fixtures()
     prompt_dirs = {"baseline": Path("src/imp/assets/workflows/default/agents")}
     cell_models = {v.id: [f"{p}/{m}" for p, m in v.role_to_model_map.values()] for v in variants}
+    label_hash = _flh(fixtures_for_run)
     run_stamp = stamp(
         prompt_dirs=prompt_dirs,
         cell_models=cell_models,
         judge_model=f"{args.judge_provider}/{args.judge_model}",
-        pricing_version="2026-06-03",
+        pricing_version=PRICING_VERSION,
+        fixture_label_hash=label_hash,
     )
-    prov = provenance_digest(run_stamp)
+    prov = core_digest(run_stamp)
     cache_dir = control_root / ".imp" / "eval-cache"
     try:
         grades = run_sweep(
             control_root,
             variants,
-            _curated_fixtures(),
+            fixtures_for_run,
             cache_dir=cache_dir,
             judge_provider=args.judge_provider,
             judge_model=args.judge_model,
@@ -78,19 +124,25 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     from imp.evals.analysis import run_q1_q4
 
-    fixture_list = _curated_fixtures()
-    paired_model = ("anthropic", "claude-sonnet-4-6")
-    q1, q4 = run_q1_q4(
-        control_root,
-        fixture_list,
-        {
-            "spec-task-reviewer": paired_model,
-            "quality-reviewer": paired_model,
-            "code-reviewer": paired_model,
-        },
-        judge_provider=args.judge_provider,
-        judge_model=args.judge_model,
-    )
+    fixture_list = fixtures_for_run
+    # Per-model Q1/Q4 SHAPE is landed here; EXECUTION stays at one model this
+    # sweep (S2): on the curated-only set both verdicts read insufficient-diffs
+    # and paired runs are not persisted, so the trio buys no decision yet. Stage 2
+    # flips this list to the OpenAI trio when the mined set crosses min_diff_count.
+    paired_models = [("anthropic", "claude-sonnet-4-6")]
+    q1_by_model: dict[str, Any] = {}
+    q4_by_model: dict[str, Any] = {}
+    for provider, model in paired_models:
+        q1, q4 = run_q1_q4(
+            control_root,
+            fixture_list,
+            {role: (provider, model) for role in
+             ("spec-task-reviewer", "quality-reviewer", "code-reviewer")},
+            judge_provider=args.judge_provider,
+            judge_model=args.judge_model,
+        )
+        q1_by_model[f"{provider}/{model}"] = q1
+        q4_by_model[f"{provider}/{model}"] = q4
 
     from imp.evals.scorecard import build_scorecard, render_markdown
     from imp.evals.sweep import collect_dollars
@@ -102,8 +154,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         dollars_by_cell=collect_dollars(cache_dir, variants, fixture_list, prov),
         prompt_dirs=prompt_dirs,
         provenance=run_stamp,
-        paired_overlap=q1,
-        fastpath=q4,
+        paired_overlap=q1_by_model,
+        fastpath=q4_by_model,
     )
     out = control_root / ".imp" / "eval-scorecard.md"
     out.write_text(render_markdown(sc))
@@ -133,14 +185,16 @@ def cmd_mine(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_provenance(args: argparse.Namespace, variants: list[Variant]) -> str:
-    from imp.evals.provenance import provenance_digest, stamp
+def _run_provenance(args: argparse.Namespace, variants: list[Variant],
+                    fixtures: list[Fixture]) -> str:
+    from imp.evals.provenance import core_digest, fixture_label_hash, stamp
 
-    return provenance_digest(stamp(
+    return core_digest(stamp(
         prompt_dirs={"baseline": Path("src/imp/assets/workflows/default/agents")},
         cell_models={v.id: [f"{p}/{m}" for p, m in v.role_to_model_map.values()] for v in variants},
         judge_model=f"{args.judge_provider}/{args.judge_model}",
-        pricing_version="2026-06-03",
+        pricing_version=PRICING_VERSION,
+        fixture_label_hash=fixture_label_hash(fixtures),
     ))
 
 
@@ -150,6 +204,7 @@ def cmd_scorecard(args: argparse.Namespace) -> int:
     it is gated like a sweep. Grades are not cached in v1."""
     from imp.evals.cache import load_run
     from imp.evals.grader import grade
+    from imp.evals.provenance import imp_commit_sha, stamp
     from imp.evals.scorecard import build_scorecard, render_markdown
     from imp.evals.sweep import collect_dollars, require_optin
 
@@ -157,26 +212,60 @@ def cmd_scorecard(args: argparse.Namespace) -> int:
     control_root = find_control_root(Path.cwd())
     variants = _default_variants()
     fixtures = _curated_fixtures()
-    prov = _run_provenance(args, variants)
+    prov = _run_provenance(args, variants, fixtures)
     cache_dir = control_root / ".imp" / "eval-cache"
-    grades = []
+
+    # First pass: load cells, collect their stored SHAs (no grading yet).
+    loaded = []
+    runs_shas: set[str] = set()
     for v in variants:
         for fx in fixtures:
             for r in range(v.n_repeats):
                 rr = load_run(cache_dir, v.id, fx.id, r, prov)
                 if rr is None:
                     continue
-                grades.append(grade(
-                    fx, rr, project_root=control_root,
-                    judge_provider=args.judge_provider, judge_model=args.judge_model,
-                ))
-    if not grades:
+                loaded.append((fx, rr))
+                if rr.imp_commit_sha:
+                    runs_shas.add(rr.imp_commit_sha)
+    if not loaded:
         print("no cached runs for this provenance; run `imp eval run` first")
         return 1
+
+    head = imp_commit_sha()
+    decision = _resolve_sha_mismatch(
+        runs_shas=runs_shas, head=head,
+        reuse_stale=getattr(args, "reuse_stale_sha", False),
+        is_tty=sys.stdin.isatty() and not getattr(args, "yes", False),
+    )
+    if decision == "abort":
+        print("aborted: cached runs were produced at a different imp SHA than HEAD")
+        return 2
+
+    grades = [
+        grade(fx, rr, project_root=control_root,
+              judge_provider=args.judge_provider, judge_model=args.judge_model)
+        for fx, rr in loaded
+    ]
+
+    # Full stamp (with HEAD SHA) for the provenance block ONLY; runs_shas records
+    # where the cached cells actually came from. fixture_label_hash is omitted here
+    # deliberately — this stamp is for DISPLAY, and render_markdown never renders
+    # that field (only imp_commit_sha / prompt_hashes / runs_shas). The cache-key
+    # stamp that DOES need it is `_run_provenance` (above), unchanged.
+    prompt_dirs = {"baseline": Path("src/imp/assets/workflows/default/agents")}
+    run_stamp = stamp(
+        prompt_dirs=prompt_dirs,
+        cell_models={v.id: [f"{p}/{m}" for p, m in v.role_to_model_map.values()]
+                     for v in variants},
+        judge_model=f"{args.judge_provider}/{args.judge_model}",
+        pricing_version=PRICING_VERSION,
+    )
     sc = build_scorecard(
         grades=grades, fixtures={f.id: f for f in fixtures},
         dollars_by_cell=collect_dollars(cache_dir, variants, fixtures, prov),
-        prompt_dirs={"baseline": Path("src/imp/assets/workflows/default/agents")},
+        prompt_dirs=prompt_dirs,
+        provenance=run_stamp,
+        runs_shas=runs_shas,
     )
     out = control_root / ".imp" / "eval-scorecard.md"
     out.write_text(render_markdown(sc))
@@ -216,7 +305,7 @@ def add_eval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 
     pr = actions.add_parser("run", help="Run the gated sweep and write a scorecard")
     pr.add_argument("--judge-provider", default="anthropic")
-    pr.add_argument("--judge-model", default="claude-opus-4-7")
+    pr.add_argument("--judge-model", default="claude-opus-4-8")
     pr.add_argument("--concurrency", type=int, default=4)
     pr.set_defaults(func=cmd_run)
 
@@ -232,11 +321,15 @@ def add_eval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         "scorecard", help="Re-render the scorecard from cached runs (no reviewer sweep)"
     )
     ps.add_argument("--judge-provider", default="anthropic")
-    ps.add_argument("--judge-model", default="claude-opus-4-7")
+    ps.add_argument("--judge-model", default="claude-opus-4-8")
+    ps.add_argument("--reuse-stale-sha", action="store_true",
+                    help="grade cached cells even if produced at a different imp SHA")
+    ps.add_argument("--yes", action="store_true",
+                    help="non-interactive: do not prompt (defaults to abort on SHA mismatch)")
     ps.set_defaults(func=cmd_scorecard)
 
     pc = actions.add_parser("calibrate", help="Run the judge calibration hop on judge_items.json")
     pc.add_argument("--judge-items", default="src/imp/evals/data/calibration/judge_items.json")
-    pc.add_argument("--judge-provider", default="openai")  # cross-vendor from Anthropic reviewers
-    pc.add_argument("--judge-model", default="gpt-5.2")
+    pc.add_argument("--judge-provider", default="anthropic")
+    pc.add_argument("--judge-model", default="claude-opus-4-8")  # the calibrated judge (README)
     pc.set_defaults(func=cmd_calibrate)

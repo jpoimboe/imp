@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from imp.evals.models import RunResult
@@ -30,11 +31,14 @@ def _path(
     return cache_dir / f"{cache_key(variant_id, fixture_id, repeat_index, provenance)}.json"
 
 
-def store_run(cache_dir: Path, run_result: RunResult, provenance: str = "") -> None:
+def store_run(
+    cache_dir: Path, run_result: RunResult, provenance: str = "", imp_commit_sha: str = ""
+) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    p = _path(cache_dir, run_result.variant_id, run_result.fixture_id,
-              run_result.repeat_index, provenance)
-    p.write_text(json.dumps(run_result.to_dict(), indent=2))
+    # frozen dataclass: stamp the SHA via replace, never attribute assignment.
+    rr = replace(run_result, imp_commit_sha=imp_commit_sha)
+    p = _path(cache_dir, rr.variant_id, rr.fixture_id, rr.repeat_index, provenance)
+    p.write_text(json.dumps(rr.to_dict(), indent=2))
 
 
 def load_run(

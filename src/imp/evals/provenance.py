@@ -55,6 +55,38 @@ def stamp(
     }
 
 
+def core_digest(stamp_dict: dict[str, Any]) -> str:
+    """The HARD cache key: a digest of everything that genuinely moves a number —
+    prompt hashes, cell models, judge model, pricing version, fixture label hash —
+    but NOT `imp_commit_sha`. A docs-only or harness-only imp commit no longer busts
+    the cache; a real scoring-input change still does. The SHA rides on each cached
+    cell (RunResult.imp_commit_sha) and is surfaced as a warn-prompt at re-render
+    time instead (cmd_scorecard)."""
+    core = {k: v for k, v in stamp_dict.items() if k != "imp_commit_sha"}
+    return provenance_digest(core)
+
+
+def fixture_label_hash(fixtures: Any) -> str:
+    """A content hash of every fixture's expected_findings (+ clean_loci) — the
+    GRADED labels. Folded into the stamp so editing a fixture's labels busts its
+    cells (S4). Without this the cache silently serves stale grades after a label
+    edit — the invisible sibling of the imp-SHA case P1 fixes."""
+    h = hashlib.sha256()
+    for fx in sorted(fixtures, key=lambda f: f.id):
+        h.update(fx.id.encode())
+        h.update(b"\0")
+        for ef in fx.expected_findings:
+            # all judge-visible label fields — a label edit (incl. description) must bust the
+            # cache (S4)
+            fields = (ef.locus, ef.symbol, ef.description, ef.severity, ef.must_catch)
+            h.update(repr(fields).encode())
+            h.update(b"\0")
+        for loc in getattr(fx, "clean_loci", ()):
+            h.update(repr(loc).encode())
+            h.update(b"\0")
+    return h.hexdigest()[:16]
+
+
 def provenance_digest(stamp_dict: dict[str, Any]) -> str:
     """A short, stable digest of a stamp — the cache-key provenance component
     (cache.py). Any change to imp SHA / prompts / models / pricing changes it, so

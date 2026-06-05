@@ -10,6 +10,11 @@ from dataclasses import dataclass
 
 from imp.evals.models import Telemetry
 
+# Bump this when any price row changes — it is part of the CORE provenance digest,
+# so bumping it invalidates the entire existing cache (the numbers are no longer
+# comparable). Referenced once here; imported wherever a stamp is built.
+PRICING_VERSION = "2026-06-04"
+
 
 @dataclass(frozen=True)
 class Price:
@@ -27,8 +32,15 @@ _PRICES: dict[tuple[str, str], Price] = {
     ("anthropic", "claude-haiku-4-5-20251001"): Price(1.0, 5.0, 0.10, 1.25),
     ("openai", "gpt-5"): Price(1.25, 10.0, 0.125, 1.25),
     ("openai", "gpt-5.2"): Price(1.25, 10.0, 0.125, 1.25),
-    ("openai", "gpt-5.5"): Price(2.0, 16.0, 0.20, 2.0),
+    ("openai", "gpt-5.5"): Price(5.0, 30.0, 0.50, 5.0),
+    ("openai", "gpt-5.3-codex"): Price(1.75, 14.0, 0.175, 1.75),
+    ("openai", "gpt-5.4-mini"): Price(0.75, 4.50, 0.075, 0.75),
     ("openai", "gpt-5-mini"): Price(0.25, 2.0, 0.025, 0.25),
+    # Judge: priced only in the dry-run estimate (the run path never prices the
+    # judge). Placeholder = the opus-4-7 tuple; swap in real opus-4-8 list prices
+    # if you have them to hand. Cost is not a decision driver — this only sharpens
+    # the `dry-run` estimate.
+    ("anthropic", "claude-opus-4-8"): Price(15.0, 75.0, 1.50, 18.75),
 }
 
 
