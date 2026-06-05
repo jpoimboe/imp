@@ -165,6 +165,19 @@ def test_bash_caps_runaway_output(tmp_path: Path) -> None:
     assert ctx.running_processes == []
 
 
+def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
+    # S2: a stderr-dominant flood must mark stderr (the stream that crossed the
+    # cap), NOT leave a truncation marker on an empty stdout.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {
+        "command": "yes ABCDEFGHIJ | head -c 5000000 1>&2"}))
+    assert "[output truncated at 50 KB]" in out["stderr"]
+    assert "[output truncated" not in out["stdout"]
+    assert len(out["stderr"]) < 60_000          # bounded: 50 KB + slop + marker
+    assert out["returncode"] == 0               # cap is a NORMAL result, not a kill
+    assert ctx.running_processes == []
+
+
 def test_bash_normal_output_uncapped(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "echo hello"}))
