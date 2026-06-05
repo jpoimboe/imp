@@ -41,17 +41,25 @@ def _agent_def(agent_name: str, override_path: str | None) -> AgentDef:
     return parse_agent_file(path)
 
 
-def _inject_review_context(worktree: Path, fixture: Fixture) -> None:
+def _inject_review_context(
+    worktree: Path, fixture: Fixture, task_context: str | None = None
+) -> None:
     """Write the fixture's task_context where the reviewer prompt looks for it, so
     its 'read the spec/plan/progress' step (code-reviewer.md:15-27) doesn't
     silently no-op against a slug='eval' tree that has none of those files. This
     narrows — but does NOT close — the context gap vs production (one paragraph is
     not a full spec + plans + progress log). ABSOLUTE recall from this harness is
     therefore NOT expected to transfer to production; only RELATIVE comparisons
-    between variants AT EQUAL CONTEXT are valid (see grader §)."""
+    between variants AT EQUAL CONTEXT are valid (see grader §).
+
+    `task_context`, when given, OVERRIDES `fixture.task_context` for the on-disk
+    spec — the per-task review path passes a single task's slice so the cumulative
+    multi-task context (which describes later cross-task interactions) does not leak
+    into this on-disk channel."""
+    ctx = task_context if task_context is not None else fixture.task_context
     spec = worktree / "imp" / "specs" / "eval.md"
     spec.parent.mkdir(parents=True, exist_ok=True)
-    spec.write_text(f"# Change: eval\n\n{fixture.task_context}\n")
+    spec.write_text(f"# Change: eval\n\n{ctx}\n")
     progress = worktree / ".imp" / "change" / "progress.md"
     progress.parent.mkdir(parents=True, exist_ok=True)
     progress.write_text("# Progress\n\nReviewed change is committed at HEAD.\n")
@@ -67,18 +75,25 @@ def drive_review(
     repeat_index: int = 0,
     override_path: str | None = None,
     variant_id: str | None = None,
+    review_context: str | None = None,
 ) -> RunResult:
     """Drive one reviewer in an ALREADY-materialized worktree. Used by panels so
-    N members share one tree."""
+    N members share one tree.
+
+    `review_context`, when given, OVERRIDES `fixture.task_context` for BOTH context
+    channels (the on-disk spec the reviewer reads AND the opening message). The
+    per-task review path passes a single task's slice so the cumulative multi-task
+    context never leaks into either channel."""
     vid = variant_id or f"{agent_name}@{provider_name}/{model_name}"
+    ctx = review_context if review_context is not None else fixture.task_context
     agent_def = _agent_def(agent_name, override_path)
-    _inject_review_context(worktree, fixture)
+    _inject_review_context(worktree, fixture, task_context=ctx)
     output, telem = drive_agent_sync(
         agent_def=agent_def,
         provider_name=provider_name,
         model_name=model_name,
         project_root=worktree,
-        opening_message=_OPENING.format(task_context=fixture.task_context),
+        opening_message=_OPENING.format(task_context=ctx),
         agent_id=f"eval:{agent_name}",
     )
     prose = (output or {}).get("findings", "") if output else ""
