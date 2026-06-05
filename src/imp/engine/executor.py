@@ -47,7 +47,6 @@ from imp.engine.gates import (
     run_script,
 )
 from imp.engine.loader import load_workflow
-from imp.engine.model_tiers import effective_model_tiers
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
@@ -59,7 +58,7 @@ from imp.engine.types import (
     Workflow,
 )
 from imp.providers.config import load_config
-from imp.providers.resolve import provider_from_model, resolve_roles
+from imp.providers.resolve import provider_from_model, resolve_run
 
 EventCallback = Callable[[dict[str, Any]], None]
 HumanInputFn = Callable[[], str | Awaitable[str]]
@@ -100,15 +99,17 @@ async def run_change(
         log: EventLog = JsonlEventLog(change.events_path, on_event=on_event)
         state = State.load(change.state_dir)
 
-        # Resolve roles once per run and persist, so resume never re-snapshots the
+        # Resolve tiers once per run and persist, so resume never re-snapshots the
         # environment (design "When it runs"). run_change re-executes on every
         # resume, so guard on the persisted map.
-        if state.resolved_roles is None:
-            resolved, details = resolve_roles(workflow, config)
-            state.resolved_roles = resolved
-            state.model_tiers = effective_model_tiers(workflow, config)
+        if state.resolved_tiers is None:
+            resolved_tiers, resolved_steps, details = resolve_run(workflow, config)
+            state.resolved_tiers = resolved_tiers
+            state.resolved_steps = resolved_steps
             state.save(change.state_dir)
-            _emit(log, "roles_resolved", {"roles": details}, agent_id=None)
+            _emit(log, "tiers_resolved",
+                  {"tiers": details["tiers"], "steps": details["steps"]},
+                  agent_id=None)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
@@ -466,7 +467,7 @@ async def _route_agent(
     while True:
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
-            fs_permissions=step.fs_permissions, model_role=step.model_role,
+            fs_permissions=step.fs_permissions, tier=step.tier, step_name=step.name,
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
             # MUST include "step" — _run_agent_invocation builds step_started as
@@ -570,7 +571,8 @@ async def _run_agent_invocation(
     agent_id: str,
     agent_def: Any,
     fs_permissions: Any,
-    model_role: str,
+    tier: str,
+    step_name: str,
     workflow: Workflow,
     change: Change,
     state: State,
@@ -591,14 +593,20 @@ async def _run_agent_invocation(
     """Run one top-level agent step to a terminal AgentRunResult.
 
     Computes the executor's caller-specific inputs (model resolution from the
-    persisted role map, prompt rendering against the shared write-log,
+    persisted tier map, prompt rendering against the shared write-log,
     subagent_defs + max_tool_calls resolution), emits step_started, then defers
     construction and the drain loop to the shared builder + driver. The backoff
     sleep loop lives in _route_agent (it owns agent_retry events + transcript
     re-entry). See drive_invocation for the field semantics of the result.
     """
-    assert state.resolved_roles is not None  # set by run_change before dispatch
-    provider = provider_from_model(state.resolved_roles[model_role])
+    assert state.resolved_tiers is not None  # set by run_change before dispatch
+    # Per-step override if differ_from was used, else the tier default
+    resolved_steps = state.resolved_steps or {}
+    if step_name in resolved_steps:
+        provider_model = resolved_steps[step_name]
+    else:
+        provider_model = state.resolved_tiers[tier]
+    provider = provider_from_model(provider_model)
 
     rendered = render_prompt(
         agent_def.prompt_template_source, build_context(
@@ -647,13 +655,13 @@ async def _run_agent_invocation(
         fs_permissions=fs_permissions,
         events_path=change.events_path,
         subagent_defs=subagent_defs,
-        model_tiers=state.model_tiers or (),
+        tiers=tuple(state.resolved_tiers.keys()) if state.resolved_tiers else (),
         max_tool_calls=resolved_max_tool_calls,
         agent_id=agent_id,
         event_log=log,
         change_state=state,
         first_event_parent_id=started["id"],
-        resolved_roles=state.resolved_roles,
+        resolved_tiers=state.resolved_tiers,
         coordinator=coordinator,
         subagent_depth=0,
         retry_feedback=retry_feedback,

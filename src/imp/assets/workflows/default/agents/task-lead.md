@@ -35,8 +35,8 @@ progress.md is your guide.)
 1. Pick the next unimplemented task from the plan (or the re-opened task from
    injected feedback).
 2. Dispatch the implementer with the **full task text + scene-setting context**
-   (it does not read the plan), at the **`fast` tier**
-   (`task(subagent_name="implementer", model_tier="fast", task_description=…)`):
+   (it does not read the plan), at the **`low` tier**
+   (`task(subagent_name="implementer", tier="low", task_description=…)`):
    - **New task:** tell the implementer "INITIAL dispatch — make a NEW commit:
      `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
      trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record
@@ -77,15 +77,15 @@ progress.md is your guide.)
    `$IMP_TEST_COMMAND` if it is set to confirm nothing broke, then commit."
    **One reviewer.** Dispatch ONLY `spec-task-reviewer` (spec-conformance
    is the load-bearing check on trivial work). Do **not** dispatch `quality-reviewer`
-   at all for this change. Run the one reviewer at the **`balanced` tier**:
-   `task(subagent_name="spec-task-reviewer", model_tier="balanced", …)`.
+   at all for this change. Run the one reviewer at the **`medium` tier**:
+   `task(subagent_name="spec-task-reviewer", tier="medium", …)`.
    {% else %}
-   Dispatch **both** reviewers (independent eyes), each at the **`balanced` tier**:
-   `task(subagent_name="spec-task-reviewer", model_tier="balanced", …)` and
-   `task(subagent_name="quality-reviewer", model_tier="balanced", …)`.
+   Dispatch **both** reviewers (independent eyes), each at the **`medium` tier**:
+   `task(subagent_name="spec-task-reviewer", tier="medium", …)` and
+   `task(subagent_name="quality-reviewer", tier="medium", …)`.
    {% endif %}
-   Give each dispatched reviewer the task text + spec. (Implementer → the `fast` tier;
-   reviewers and your own judgment → the `balanced` tier, per spec §11. Name tiers, never
+   Give each dispatched reviewer the task text + spec. (Implementer → the `low` tier;
+   reviewers and your own judgment → the `medium` tier, per spec §11. Name tiers, never
    specific model names — the configured provider may not be Anthropic.)
 4. **Adjudicate.** Load the receiving-code-review discipline
    (`load_skill(name="receiving-code-review")`) and decide which findings are

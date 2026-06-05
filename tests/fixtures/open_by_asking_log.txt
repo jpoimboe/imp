@@ -1,14 +1,9 @@
 #2026-06-03-vine-salt-kelp  vine salt kelp
-roles resolved:
-  balanced    → claude_code/claude-sonnet-4-6
-  fast        → claude_code/claude-haiku-4-5-20251001
-  code_review → claude_code/claude-sonnet-4-6   (differ from fast: tier 2, same-vendor fallback)
-  plan        → claude_code/claude-opus-4-7
-  plan_review → claude_code/claude-opus-4-7
-  powerful    → claude_code/claude-opus-4-7
-  spec        → claude_code/claude-opus-4-7
-  spec_review → claude_code/claude-opus-4-7
-  task_lead   → claude_code/claude-sonnet-4-6
+tiers resolved:
+  low           → claude_code/claude-haiku-4-5-20251001
+  medium        → claude_code/claude-sonnet-4-6
+  high          → claude_code/claude-opus-4-7
+  code-reviewer → claude_code/claude-sonnet-4-6   (differ from task-lead: tier 2, same-vendor fallback)
 spec
   spec-writer (interactive)
     ▸ context · claude_code/claude-opus-4-7 · 10 tools

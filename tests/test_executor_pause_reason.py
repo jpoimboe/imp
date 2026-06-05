@@ -29,11 +29,11 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
         "id": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
-    configured_roles: list[str] = []
+    configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_roles = load_config(root).role_names()
+        configured_tiers = load_config(root).tier_names()
 
-    workflow = load_workflow(src_wf, configured_roles=configured_roles)
+    workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     State(
         id=slug, step=flat[0].name if flat else None, step_attempt=0,
@@ -99,11 +99,11 @@ def _seed_single_agent(root: Path) -> Change:
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, model_role: default}\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     return _make_change(root)
 
@@ -174,7 +174,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
         "    steps:\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        max_loops: 2\n"
         "        rules:\n"
         "          - {if: {verdict: rework}, goto: reviewer}\n"
@@ -182,7 +182,7 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
 

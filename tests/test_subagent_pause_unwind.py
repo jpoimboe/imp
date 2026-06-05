@@ -127,10 +127,10 @@ def _seed_single_step(root: Path) -> Change:
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 3, max_loops: 6, on_max_retries: {pause: true}}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, model_role: default}\n")
+        "      - {name: w, file: agents/writer.md, tier: medium}\n")
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n")
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
 
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
@@ -139,8 +139,8 @@ def _seed_single_step(root: Path) -> Change:
         {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
-        configured = load_config(root).role_names()
-    workflow = load_workflow(wf, configured_roles=configured)
+        configured = load_config(root).tier_names()
+    workflow = load_workflow(wf, configured_tiers=configured)
     flat = workflow.flat_steps()
     State(id="s", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")

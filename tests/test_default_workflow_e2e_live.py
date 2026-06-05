@@ -68,10 +68,14 @@ async def test_live_minimal_change_completes_one_step(
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, model_role: default}\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: anthropic, model: claude-sonnet-4-6}]\n"
+        "providers: [anthropic]\n"
+        "tiers:\n"
+        "  low:    {anthropic: claude-sonnet-4-6}\n"
+        "  medium: {anthropic: claude-sonnet-4-6}\n"
+        "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")

@@ -214,20 +214,20 @@ async def test_dispatch_task_threads_shared_event_log_and_agent_id(tmp_path) -> 
 
 
 @pytest.mark.anyio
-async def test_dispatch_task_uses_subagent_model_role(tmp_path: Path) -> None:
-    """A subagent whose AgentDef.model_role is set resolves to that role's
-    provider/model from ctx.resolved_roles, NOT the parent's."""
+async def test_dispatch_task_uses_subagent_tier(tmp_path: Path) -> None:
+    """A subagent whose AgentDef.tier is set resolves to that role's
+    provider/model from ctx.resolved_tiers, NOT the parent's."""
     from imp.providers.config import ProviderModel
 
     capture: dict = {}
 
     sub = _agent("reviewer")
-    sub = AgentDef(  # rebuild with model_role set (AgentDef is frozen)
+    sub = AgentDef(  # rebuild with tier set (AgentDef is frozen)
         name=sub.name, description=sub.description, tools=sub.tools,
         subagents=sub.subagents, output_schema=sub.output_schema,
         prompt_template_source=sub.prompt_template_source,
         source_path=sub.source_path, source=sub.source,
-        model_role="code_review")
+        tier="medium")
 
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
@@ -242,13 +242,13 @@ async def test_dispatch_task_uses_subagent_model_role(tmp_path: Path) -> None:
         capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
-    ctx.resolved_roles = {"code_review": ProviderModel("openai", "gpt-5.2")}
+    ctx.resolved_tiers = {"medium": ProviderModel("openai", "gpt-5.2")}
 
     await dispatch_task(ctx, "reviewer", "review please")
     inv = capture["inv"]
     assert inv.provider_name == "openai"     # jumped vendor, not parent's anthropic
     assert inv.model_name == "gpt-5.2"
-    assert inv.resolved_roles == ctx.resolved_roles
+    assert inv.resolved_tiers == ctx.resolved_tiers
 
 
 @pytest.mark.anyio
@@ -258,7 +258,7 @@ async def test_dispatch_task_roleless_subagent_inherits_parent(tmp_path: Path) -
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
-    ctx.subagent_defs = {"reviewer": _agent("reviewer")}  # model_role None
+    ctx.subagent_defs = {"reviewer": _agent("reviewer")}  # tier None
     ctx.provider_name = "anthropic"
     ctx.model_name = "haiku"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
@@ -279,47 +279,47 @@ def test_make_task_tool_no_tiers_is_unchanged() -> None:
     """Off-path: the schema is identical to the shared TASK_TOOL_SCHEMA."""
     tool = make_task_tool()
     assert tool.input_schema is TASK_TOOL_SCHEMA
-    assert "model_tier" not in tool.input_schema["properties"]
+    assert "tier" not in tool.input_schema["properties"]
 
 
 def test_make_task_tool_with_tiers_adds_optional_enum() -> None:
-    tool = make_task_tool(("fast", "balanced", "powerful"))
+    tool = make_task_tool(("low", "medium", "high"))
     props = tool.input_schema["properties"]
-    assert props["model_tier"]["type"] == "string"
-    assert props["model_tier"]["enum"] == ["fast", "balanced", "powerful"]
+    assert props["tier"]["type"] == "string"
+    assert props["tier"]["enum"] == ["low", "medium", "high"]
     # optional: NOT added to required
-    assert "model_tier" not in tool.input_schema["required"]
+    assert "tier" not in tool.input_schema["required"]
     # original required args preserved
     assert set(tool.input_schema["required"]) == {"subagent_name", "task_description"}
     # shared constant not mutated
-    assert "model_tier" not in TASK_TOOL_SCHEMA["properties"]
+    assert "tier" not in TASK_TOOL_SCHEMA["properties"]
 
 
 def test_make_task_tool_openai_strict_round_trip() -> None:
     """The generated tier schema survives the OpenAI strict transform: the
     optional enum becomes nullable AND null lands in the enum (Task 5)."""
     from imp.providers._openai_schema import to_openai_strict
-    tool = make_task_tool(("fast", "powerful"))
+    tool = make_task_tool(("low", "high"))
     strict = to_openai_strict(tool.input_schema)
-    tier = strict["properties"]["model_tier"]
+    tier = strict["properties"]["tier"]
     assert tier["type"] == ["string", "null"]
     assert None in tier["enum"]
-    assert set(strict["required"]) == {"subagent_name", "task_description", "model_tier"}
+    assert set(strict["required"]) == {"subagent_name", "task_description", "tier"}
 
 
 @pytest.mark.anyio
 async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) -> None:
-    """A runtime model_tier wins over the subagent's static model_role."""
+    """A runtime tier= wins over the subagent's static tier: frontmatter."""
     from imp.providers.config import ProviderModel
 
     capture: dict = {}
 
     sub = _agent("reviewer")
-    sub = AgentDef(  # rebuild with a static model_role
+    sub = AgentDef(  # rebuild with a static tier set
         name=sub.name, description=sub.description, tools=sub.tools,
         subagents=sub.subagents, output_schema=sub.output_schema,
         prompt_template_source=sub.prompt_template_source,
-        source_path=sub.source_path, source=sub.source, model_role="code_review")
+        source_path=sub.source_path, source=sub.source, tier="medium")
 
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
@@ -334,21 +334,21 @@ async def test_dispatch_task_runtime_tier_overrides_frontmatter(tmp_path: Path) 
         capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
-    ctx.model_tiers = ("powerful",)
-    ctx.resolved_roles = {
-        "code_review": ProviderModel("openai", "gpt-5.2"),     # frontmatter target
-        "powerful": ProviderModel("anthropic", "opus"),        # runtime tier target
+    ctx.tiers = ("high",)
+    ctx.resolved_tiers = {
+        "medium": ProviderModel("openai", "gpt-5.2"),     # frontmatter target
+        "high": ProviderModel("anthropic", "opus"),        # runtime tier target
     }
 
-    await dispatch_task(ctx, "reviewer", "go", model_tier="powerful")
+    await dispatch_task(ctx, "reviewer", "go", tier="high")
     inv = capture["inv"]
-    assert inv.provider_name == "anthropic"   # powerful, not code_review's openai
+    assert inv.provider_name == "anthropic"   # high, not medium's openai
     assert inv.model_name == "opus"
 
 
 @pytest.mark.anyio
 async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Path) -> None:
-    """The model declines to pick a tier (None) -> static model_role still applies."""
+    """The model declines to pick a tier (None) -> static tier still applies."""
     from imp.providers.config import ProviderModel
 
     capture: dict = {}
@@ -358,7 +358,7 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
         name=sub.name, description=sub.description, tools=sub.tools,
         subagents=sub.subagents, output_schema=sub.output_schema,
         prompt_template_source=sub.prompt_template_source,
-        source_path=sub.source_path, source=sub.source, model_role="code_review")
+        source_path=sub.source_path, source=sub.source, tier="medium")
 
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
@@ -373,21 +373,21 @@ async def test_dispatch_task_none_tier_falls_through_to_frontmatter(tmp_path: Pa
         capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
-    ctx.model_tiers = ("powerful",)
-    ctx.resolved_roles = {
-        "code_review": ProviderModel("openai", "gpt-5.2"),
-        "powerful": ProviderModel("anthropic", "opus"),
+    ctx.tiers = ("high",)
+    ctx.resolved_tiers = {
+        "medium": ProviderModel("openai", "gpt-5.2"),
+        "high": ProviderModel("anthropic", "opus"),
     }
 
-    await dispatch_task(ctx, "reviewer", "go", model_tier=None)
+    await dispatch_task(ctx, "reviewer", "go", tier=None)
     inv = capture["inv"]
-    assert inv.provider_name == "openai"      # fell through to frontmatter role
+    assert inv.provider_name == "openai"      # fell through to frontmatter tier
     assert inv.model_name == "gpt-5.2"
 
 
 @pytest.mark.anyio
 async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: Path) -> None:
-    """Defensive: an empty string is treated as 'inherit' via `model_tier or None`."""
+    """Defensive: an empty string is treated as 'inherit' via `tier or None`."""
     from imp.providers.config import ProviderModel
 
     capture: dict = {}
@@ -397,7 +397,7 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
         name=sub.name, description=sub.description, tools=sub.tools,
         subagents=sub.subagents, output_schema=sub.output_schema,
         prompt_template_source=sub.prompt_template_source,
-        source_path=sub.source_path, source=sub.source, model_role="code_review")
+        source_path=sub.source_path, source=sub.source, tier="medium")
 
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
@@ -412,13 +412,13 @@ async def test_dispatch_task_blank_tier_falls_through_to_frontmatter(tmp_path: P
         capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
-    ctx.model_tiers = ("powerful",)
-    ctx.resolved_roles = {
-        "code_review": ProviderModel("openai", "gpt-5.2"),
-        "powerful": ProviderModel("anthropic", "opus"),
+    ctx.tiers = ("high",)
+    ctx.resolved_tiers = {
+        "medium": ProviderModel("openai", "gpt-5.2"),
+        "high": ProviderModel("anthropic", "opus"),
     }
 
-    await dispatch_task(ctx, "reviewer", "go", model_tier="")
+    await dispatch_task(ctx, "reviewer", "go", tier="")
     inv = capture["inv"]
     assert inv.provider_name == "openai"      # fell through to frontmatter role
     assert inv.model_name == "gpt-5.2"
@@ -438,16 +438,16 @@ async def test_dispatch_task_unknown_tier_raises_listing_valid(tmp_path: Path) -
     ctx.spawn_subagent = lambda _inv: None  # type: ignore[assignment]
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
-    ctx.model_tiers = ("fast", "powerful")
-    ctx.resolved_roles = {"powerful": ProviderModel("anthropic", "opus")}
+    ctx.tiers = ("low", "high")
+    ctx.resolved_tiers = {"high": ProviderModel("anthropic", "opus")}
 
-    with pytest.raises(ValueError, match="fast, powerful"):
-        await dispatch_task(ctx, "reviewer", "go", model_tier="turbo")
+    with pytest.raises(ValueError, match="low, high"):
+        await dispatch_task(ctx, "reviewer", "go", tier="turbo")
 
 
 @pytest.mark.anyio
 async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
-    """Parent on anthropic; model_tier='powerful' resolves to openai/gpt-5.2 —
+    """Parent on anthropic; tier='high' resolves to openai/gpt-5.2 —
     the subagent jumps vendor to the tier's resolved model."""
     from imp.providers.config import ProviderModel
 
@@ -456,7 +456,7 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
     ctx = ToolContext(
         project_root=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
-    ctx.subagent_defs = {"reviewer": _agent("reviewer")}   # no static model_role
+    ctx.subagent_defs = {"reviewer": _agent("reviewer")}   # no static tier
     ctx.provider_name = "anthropic"                         # parent vendor
     ctx.model_name = "claude-sonnet-4-6"
     ctx.parent_transcript_dir = tmp_path / "steps/p/s"
@@ -466,14 +466,14 @@ async def test_dispatch_task_powerful_tier_cross_vendor(tmp_path: Path) -> None:
         capture=capture)
     ctx.change_context = ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
-    ctx.model_tiers = ("fast", "balanced", "powerful")
-    ctx.resolved_roles = {
-        "fast": ProviderModel("anthropic", "claude-haiku-4-5-20251001"),
-        "balanced": ProviderModel("anthropic", "claude-sonnet-4-6"),
-        "powerful": ProviderModel("openai", "gpt-5.2"),
+    ctx.tiers = ("low", "medium", "high")
+    ctx.resolved_tiers = {
+        "low": ProviderModel("anthropic", "claude-haiku-4-5-20251001"),
+        "medium": ProviderModel("anthropic", "claude-sonnet-4-6"),
+        "high": ProviderModel("openai", "gpt-5.2"),
     }
 
-    out = await dispatch_task(ctx, "reviewer", "hard problem", model_tier="powerful")
+    out = await dispatch_task(ctx, "reviewer", "hard problem", tier="high")
     assert json.loads(out) == {"status": "Success"}
     inv = capture["inv"]
     assert inv.provider_name == "openai"

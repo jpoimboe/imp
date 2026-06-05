@@ -15,11 +15,12 @@ from imp.engine.types import (
 
 
 def validate(
-    workflow: Workflow, *, configured_roles: frozenset[str] | None = None
+    workflow: Workflow, *, configured_tiers: frozenset[str] | None = None,
 ) -> tuple[list[LoadError], list[LoadError]]:
     """Run every validator. Returns (errors, warnings).
 
-    `configured_roles` enables _v_model_role_configured when supplied.
+    `configured_tiers` enables _v_step_tier_configured / subagent tier checks
+    when supplied (the change-creation backstop; resolve_run is authoritative).
     """
     errors: list[LoadError] = []
     warnings: list[LoadError] = []
@@ -34,9 +35,9 @@ def validate(
     _v_empty_phase_is_last(workflow, errors)
     _v_agent_has_file(workflow, errors)
     _v_fs_permissions_paths(workflow, errors)
-    if configured_roles is not None:
-        _v_model_role_configured(workflow, configured_roles, errors)
-        _v_model_tiers_configured(workflow, configured_roles, errors)
+    if configured_tiers is not None:
+        _v_step_tier_configured(workflow, configured_tiers, errors)
+    _v_differ_from_targets_exist(workflow, errors)
     _v_write_tool_needs_write_permission(workflow, errors)
 
     return errors, warnings
@@ -234,60 +235,66 @@ def _v_check_paths(rule: FsRule, errors: list[LoadError]) -> None:
             )
 
 
-def _v_model_role_configured(
-    workflow: Workflow, configured: frozenset[str], errors: list[LoadError]
+def _v_step_tier_configured(
+    workflow: Workflow, configured: frozenset[str], errors: list[LoadError],
 ) -> None:
+    """Every agent step's `tier:` (and every subagent frontmatter `tier:`
+    reachable one level deep) must be a configured tier name."""
     seen: set[tuple[str, str]] = set()
 
-    def check(role: str, source: SourceLoc | None) -> None:
-        if role in configured:
+    def check(tier: str, source: SourceLoc | None) -> None:
+        if tier in configured:
             return
-        key = (role, str(source))
+        key = (tier, str(source))
         if key in seen:
             return
         seen.add(key)
         errors.append(
             LoadError(
-                f"model_role {role!r} is not configured in imp/config.yaml",
+                f"tier {tier!r} is not configured in imp/config.yaml",
                 source,
-                hint=f"configured roles: {sorted(configured)}",
+                hint=f"configured tiers: {sorted(configured)}",
             )
         )
 
     for step in workflow.flat_steps():
         if step.kind != "agent":
             continue
-        check(step.model_role, step.source)
-        # Subagent frontmatter roles reachable one level deep.
+        check(step.tier, step.source)
         if step.file is not None:
             agent = workflow.agents.get(step.file.stem)
             if agent is not None:
                 for sub_name in agent.subagents:
                     sub = workflow.agents.get(sub_name)
-                    if sub is not None and sub.model_role is not None:
-                        check(sub.model_role, sub.source)
-
-    # Workflow-level constraint targets (early convenience only; resolve_roles is
-    # the backstop for config-introduced targets it never sees).
-    for _role, constraint in workflow.model_rules.items():
-        if constraint.differ_provider_from is not None:
-            check(constraint.differ_provider_from, constraint.source or workflow.source)
+                    if sub is not None and sub.tier is not None:
+                        check(sub.tier, sub.source)
 
 
-def _v_model_tiers_configured(
-    workflow: Workflow, configured: frozenset[str], errors: list[LoadError]
+def _v_differ_from_targets_exist(
+    workflow: Workflow, errors: list[LoadError],
 ) -> None:
-    """Each model_tiers entry must name a configured role. Convenience only;
-    resolve_roles is the authoritative backstop (it also covers config-introduced
-    menus this creation-time check never sees)."""
-    for tier in workflow.model_tiers:
-        if tier not in configured:
+    """Every step.differ_from must name an agent step in the same workflow.
+    (Cycle detection runs in loader.load_workflow.)"""
+    step_names = {s.name for s in workflow.flat_steps()
+                  if s.kind == "agent"}
+    for step in workflow.flat_steps():
+        if step.kind != "agent" or step.differ_from is None:
+            continue
+        target = step.differ_from
+        if target == step.name:
             errors.append(
                 LoadError(
-                    f"model_tiers entry {tier!r} is not a configured role "
-                    f"in imp/config.yaml",
-                    workflow.source,
-                    hint=f"configured roles: {sorted(configured)}",
+                    f"differ_from on step {step.name!r} cannot reference itself",
+                    step.source,
+                )
+            )
+            continue
+        if target not in step_names:
+            errors.append(
+                LoadError(
+                    f"differ_from target {target!r} (on step {step.name!r}) "
+                    f"does not name an agent step in this workflow",
+                    step.source,
                 )
             )
 

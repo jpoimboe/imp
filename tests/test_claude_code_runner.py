@@ -595,33 +595,67 @@ async def test_interactive_requery_across_two_receive_rounds_no_error(tmp_path: 
 
 
 def test_claude_code_provider_registered_and_resolves() -> None:
-    """The claude_code provider is registered eagerly; resolve_role picks it up
+    """The claude_code provider is registered eagerly; resolve_run picks it up
     when claude is on PATH."""
     import importlib
     import shutil
+    from pathlib import Path
 
     import imp.providers
+    from imp.engine.types import (
+        AgentDef,
+        OutputField,
+        OutputSchema,
+        Pause,
+        Phase,
+        SourceLoc,
+        Step,
+        Vars,
+        Workflow,
+        WorkflowDefaults,
+    )
     from imp.providers import resolve
     from imp.providers.claude_code import ClaudeCodeProvider
-    from imp.providers.config import ProviderModel, RoleConfig
+    from imp.providers.config import Config
 
-    # importlib.reload re-runs the package's top-level register_provider
-    # calls. import_module would be a no-op since the module is already
-    # cached in sys.modules.
     resolve.reset_providers_for_tests()
     importlib.reload(imp.providers)
 
-    role = RoleConfig(
-        name="r", prefer=(ProviderModel(provider="claude_code", model="claude-sonnet-4-5"),),
+    src = SourceLoc(file=Path("w.yaml"), line=1)
+    cfg = Config(
+        providers=("claude_code",),
+        tiers={
+            "low":    {"claude_code": "claude-haiku-4-5"},
+            "medium": {"claude_code": "claude-sonnet-4-5"},
+            "high":   {"claude_code": "claude-opus-4"},
+        },
     )
+    agent = AgentDef(
+        name="a", description="", tools=frozenset(), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error")),), source=src),
+        prompt_template_source="", source_path=Path("a.md"), source=src)
+    step = Step(name="s", phase="p", kind="agent", rules=(), options=(),
+                on_max_retries=Pause(), max_loops=6, source=src,
+                file=Path("agents/a.md"), tier="medium")
+    wf = Workflow(
+        name="w", description="",
+        phases=(Phase(name="p", steps=(step,), source=src),),
+        vars=Vars(decls=()),
+        defaults=WorkflowDefaults(max_retries=0, on_max_retries=Pause()),
+        agents={"a": agent}, workflow_dir=Path("."), source=src)
+
     if shutil.which("claude") is None:
         # Not on PATH — resolve should fail with ProviderUnavailable.
         with pytest.raises(resolve.ProviderUnavailable):
-            resolve.resolve_role(role)
+            resolve.resolve_run(wf, cfg)
         return
 
-    provider = resolve.resolve_role(role)
-    assert provider.name == "claude_code"
+    resolved_tiers, _, _ = resolve.resolve_run(wf, cfg)
+    pm = resolved_tiers["medium"]
+    assert pm.provider == "claude_code"
+    provider = resolve.provider_from_model(pm)
     assert isinstance(provider, ClaudeCodeProvider)
 
 

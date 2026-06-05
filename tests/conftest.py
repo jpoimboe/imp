@@ -75,7 +75,11 @@ def _seed_control(root: Path) -> None:
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
     (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
+        "providers: [anthropic]\n"
+        "tiers:\n"
+        "  low: {anthropic: x}\n"
+        "  medium: {anthropic: x}\n"
+        "  high: {anthropic: x}\n"
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")

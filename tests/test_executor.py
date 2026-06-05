@@ -35,11 +35,11 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
         "id": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
-    configured_roles: list[str] = []
+    configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_roles = load_config(root).role_names()
+        configured_tiers = load_config(root).tier_names()
 
-    workflow = load_workflow(src_wf, configured_roles=configured_roles)
+    workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
@@ -115,12 +115,12 @@ def _seed_minimal_workflow(
         "phases:\n"
         f"  - name: {phase_name}\n"
         "    steps:\n"
-        f"      - {{name: {step_name}, file: agents/{agent_stem}.md, model_role: default}}\n"
+        f"      - {{name: {step_name}, file: agents/{agent_stem}.md, tier: medium}}\n"
     )
     config = root / "imp" / "config.yaml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(root)
     return change, phase_name, step_name
@@ -176,13 +176,13 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
         "    steps:\n"
         "      - name: w\n"
         "        file: agents/writer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        rules:\n"
         "          - {else: true, continue: true, set: {review_done: true}}\n"
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
@@ -216,7 +216,7 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
         "    steps:\n"
         "      - name: writer\n"
         "        file: agents/writer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        rules:\n"
         "          - {else: true, continue: true, set: {review_done: true}}\n"
         "      - name: route\n"
@@ -228,7 +228,7 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
     )
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     return _make_change(root)
 
@@ -279,10 +279,10 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "phases:\n"
         "  - name: work\n"
         "    steps:\n"
-        "      - {name: writer, file: agents/writer.md, model_role: default}\n"
+        "      - {name: writer, file: agents/writer.md, tier: medium}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        max_loops: 2\n"
         "        rules:\n"
         "          - {if: {verdict: rework}, goto: writer}\n"
@@ -290,7 +290,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
 
@@ -351,7 +351,7 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
         "    steps:\n"
         "      - name: w\n"
         "        file: agents/writer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        rules:\n"
         "          - {else: true, goto: done}\n"
         "  - name: done\n"
@@ -359,7 +359,7 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
@@ -723,11 +723,11 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "phases:\n"
         "  - name: a\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, model_role: default}\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
 
@@ -790,11 +790,11 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
         "phases:\n"
         "  - name: a\n"
         "    steps:\n"
-        "      - {name: w, file: agents/asker.md, model_role: default, interactive: true}\n"
+        "      - {name: w, file: agents/asker.md, tier: medium, interactive: true}\n"
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
 
@@ -866,17 +866,17 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
         "phases:\n"
         "  - name: impl\n"
         "    steps:\n"
-        "      - {name: coder, file: agents/coder.md, model_role: default}\n"
+        "      - {name: coder, file: agents/coder.md, tier: medium}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        rules:\n"
         "          - {if: {verdict: Reject}, resume: coder, feedback: \"reviewer findings:\"}\n"
         "          - {else: true, continue: true}\n"
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
 
@@ -945,8 +945,8 @@ def test_action_payload_goto_carries_resume_bool() -> None:
 
 
 @pytest.mark.anyio
-async def test_run_change_computes_and_persists_resolved_roles(tmp_path):
-    """After a run, State carries resolved_roles and exactly one roles_resolved
+async def test_run_change_computes_and_persists_resolved_tiers(tmp_path):
+    """After a run, State carries resolved_tiers and exactly one tiers_resolved
     event was emitted."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
@@ -955,26 +955,27 @@ async def test_run_change_computes_and_persists_resolved_roles(tmp_path):
     await run_change(change, on_event=captured.append)
 
     state = State.load(change.state_dir)
-    assert state.resolved_roles is not None
-    assert "default" in state.resolved_roles
-    resolved_events = [e for e in captured if e["type"] == "roles_resolved"]
+    assert state.resolved_tiers is not None
+    assert "medium" in state.resolved_tiers
+    resolved_events = [e for e in captured if e["type"] == "tiers_resolved"]
     assert len(resolved_events) == 1
-    assert "roles" in resolved_events[0]["payload"]
+    assert "tiers" in resolved_events[0]["payload"]
+    assert "steps" in resolved_events[0]["payload"]
 
 
 @pytest.mark.anyio
-async def test_resume_reuses_resolved_roles_no_second_event(tmp_path):
+async def test_resume_reuses_resolved_tiers_no_second_event(tmp_path):
     """A second run_change re-entry reuses the persisted map and emits NO second
-    roles_resolved (compute-if-absent guard)."""
+    tiers_resolved (compute-if-absent guard)."""
     change, _, _ = _seed_minimal_workflow(tmp_path)
     _register_fake({"status": "Success"})
     await run_change(change)
 
     # Re-run run_change on the same (now-completed) change: it re-loads state,
-    # sees resolved_roles already set, and must not emit a second event.
+    # sees resolved_tiers already set, and must not emit a second event.
     captured: list[dict] = []
     await run_change(change, on_event=captured.append)
-    assert [e for e in captured if e["type"] == "roles_resolved"] == []
+    assert [e for e in captured if e["type"] == "tiers_resolved"] == []
 
 
 @pytest.fixture
@@ -1048,16 +1049,16 @@ def _seed_back_edge_workflow(
         "phases:\n"
         "  - name: impl\n"
         "    steps:\n"
-        "      - {name: coder, file: agents/coder.md, model_role: default}\n"
+        "      - {name: coder, file: agents/coder.md, tier: medium}\n"
         "      - name: reviewer\n"
         "        file: agents/reviewer.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        rules:\n"
         f"          - {{if: {{verdict: rework}}, {verb}: coder{feedback_fragment}}}\n"
         "          - {else: true, continue: true}\n")
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n")
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
     return _make_change(root)
 
 

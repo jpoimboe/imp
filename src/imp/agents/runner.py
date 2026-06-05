@@ -128,19 +128,19 @@ class AgentInvocation:
     # is_resume (a `resume:` edge). retry_feedback (above) now means "optional
     # wrapper text appended on that balancing user turn"; None = balance only.
     balance_on_resume: bool = False
-    # role → ProviderModel, the run's global resolution map. Threaded by the
-    # executor into every AgentInvocation; copied onto ToolContext so
-    # dispatch_task can place a subagent on its model_role's resolved provider.
-    # Typed Any to avoid importing ProviderModel here.
-    resolved_roles: dict[str, Any] | None = None
-    # The effective, config-overridden model-tier menu for this run (ordered
+    # tier name → ProviderModel, the run's tier map. Threaded by the executor
+    # into every AgentInvocation; copied onto ToolContext so dispatch_task can
+    # place a subagent on its tier's resolved provider. Typed Any to avoid
+    # importing ProviderModel here.
+    resolved_tiers: dict[str, Any] | None = None
+    # The effective, config tier menu for this run (ordered
     # cheapest->strongest). Copied onto ToolContext by the provider; surfaced to
-    # the model as the `task` tool's optional `model_tier` enum. () = feature off.
-    model_tiers: tuple[str, ...] = ()
+    # the model as the `task` tool's optional `tier` enum. () = feature off.
+    tiers: tuple[str, ...] = ()
     # Nesting bound's threading path: dispatch_task sets the child's depth to
     # parent + 1 and refuses past MAX_SUBAGENT_DEPTH. A field WITHOUT this
     # threading would read 0 forever and never trip. Each provider copies it
-    # onto the child ToolContext (alongside resolved_roles).
+    # onto the child ToolContext (alongside resolved_tiers).
     subagent_depth: int = 0
     # The run's InterruptCoordinator. Copied onto ToolContext so dispatch_task
     # can drive a subagent with pause detection + interrupt attachment. Any to

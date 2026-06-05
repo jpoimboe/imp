@@ -50,11 +50,11 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
         "id": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
-    configured_roles: list[str] = []
+    configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_roles = load_config(root).role_names()
+        configured_tiers = load_config(root).tier_names()
 
-    workflow = load_workflow(src_wf, configured_roles=configured_roles)
+    workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
     State(
         id=slug, step=flat[0].name if flat else None, step_attempt=0,
@@ -362,10 +362,10 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
         "phases:\n"
         "  - name: a\n"
         "    steps:\n"
-        "      - {name: work, file: agents/worker.md, model_role: default}\n"
+        "      - {name: work, file: agents/worker.md, tier: medium}\n"
         "      - name: check\n"
         "        file: agents/checker.md\n"
-        "        model_role: default\n"
+        "        tier: medium\n"
         "        rules:\n"
         "          - {if: {verdict: approve}, continue: true}\n"
         "          - {if: {verdict: rework}, goto: work}\n"
@@ -373,7 +373,7 @@ async def test_backward_goto_emits_step_started_each_iteration(tmp_path: Path) -
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer:\n      - {provider: fake, model: m}\n"
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
 

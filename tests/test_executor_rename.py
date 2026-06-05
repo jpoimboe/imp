@@ -128,7 +128,11 @@ def _seed_two_step_control(root: Path) -> None:
         "      - {name: s2, file: agents/b.md}\n"
     )
     (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
+        "providers: [anthropic]\n"
+        "tiers:\n"
+        "  low: {anthropic: x}\n"
+        "  medium: {anthropic: x}\n"
+        "  high: {anthropic: x}\n"
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")

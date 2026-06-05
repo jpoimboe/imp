@@ -119,13 +119,13 @@ async def drive_agent(
         fs_permissions=(),  # reviewers/judges are read-only; file tools via /project map
         events_path=events_path,
         subagent_defs={},  # reviewers/judges/normalizers have no subagents
-        model_tiers=(),
+        tiers=(),
         max_tool_calls=None,
         agent_id=agent_id,
         event_log=event_log,
         change_state=None,
         first_event_parent_id=None,
-        resolved_roles=None,  # model bound directly; no tier inheritance needed
+        resolved_tiers=None,  # model bound directly; no tier inheritance needed
         coordinator=None,
         non_interactive=True,
     )

@@ -171,48 +171,36 @@ def test_state_load_forward_compatible_without_resume_pending(tmp_path: Path) ->
     assert back.resume_pending is None
 
 
-def test_state_resolved_roles_roundtrip(tmp_path):
+def test_state_resolved_tiers_and_steps_roundtrip(tmp_path):
     from imp.engine.state import State
     from imp.providers.config import ProviderModel
     s = State(
         id="c1", step="a", step_attempt=0, status="running",
-        resolved_roles={
-            "code": ProviderModel(provider="anthropic", model="haiku"),
-            "code_review": ProviderModel(provider="openai", model="gpt-5.2"),
+        resolved_tiers={
+            "low":    ProviderModel(provider="anthropic", model="haiku"),
+            "medium": ProviderModel(provider="anthropic", model="sonnet"),
+            "high":   ProviderModel(provider="anthropic", model="opus"),
+        },
+        resolved_steps={
+            "code-reviewer": ProviderModel(provider="openai", model="gpt-5.5"),
         },
     )
     s.save(tmp_path)
     loaded = State.load(tmp_path)
-    assert loaded.resolved_roles is not None
-    assert loaded.resolved_roles["code"] == ProviderModel("anthropic", "haiku")
-    assert loaded.resolved_roles["code_review"].model == "gpt-5.2"
+    assert loaded.resolved_tiers is not None
+    assert loaded.resolved_tiers["medium"] == ProviderModel("anthropic", "sonnet")
+    assert loaded.resolved_steps is not None
+    assert loaded.resolved_steps["code-reviewer"].model == "gpt-5.5"
 
 
-def test_state_resolved_roles_none_preserved(tmp_path):
-    """A fresh State persists resolved_roles=null and loads back as None, so the
+def test_state_resolved_tiers_none_preserved(tmp_path):
+    """A fresh State persists resolved_tiers=null and loads back as None, so the
     executor's compute-if-absent (`is None`) check still fires after a resume."""
     from imp.engine.state import State
     s = State(id="c1", step="a", step_attempt=0, status="running")
-    assert s.resolved_roles is None
+    assert s.resolved_tiers is None
     s.save(tmp_path)
-    assert State.load(tmp_path).resolved_roles is None
-
-
-def test_state_round_trips_model_tiers(tmp_path) -> None:
-    from imp.engine.state import State
-    s = State(id="c1", step="x", step_attempt=0, status="running",
-              model_tiers=("fast", "powerful"))
-    s.save(tmp_path)
-    loaded = State.load(tmp_path)
-    assert loaded.model_tiers == ("fast", "powerful")
-
-
-def test_state_model_tiers_defaults_none(tmp_path) -> None:
-    from imp.engine.state import State
-    s = State(id="c1", step="x", step_attempt=0, status="running")
-    s.save(tmp_path)
-    loaded = State.load(tmp_path)
-    assert loaded.model_tiers is None
+    assert State.load(tmp_path).resolved_tiers is None
 
 
 def test_event_log_read_yields_malformed_sentinel_for_bad_lines(

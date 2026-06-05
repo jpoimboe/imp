@@ -16,7 +16,8 @@ def _seed_control_without_workflow(root: Path) -> None:
     _init_repo(root)
     (root / "imp").mkdir()
     (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n"
+        "providers: [anthropic]\n"
+        "tiers:\n  low: {anthropic: x}\n  medium: {anthropic: x}\n  high: {anthropic: x}\n"
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "config only")
@@ -82,18 +83,17 @@ def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
     LoadError). Change.create must still tear down the worktree+branch — a
     validator failure is just as much a failed create as a missing workflow."""
     # Seed a valid repo, then overwrite workflow.yaml so the step references
-    # a model_role that is not configured in imp/config.yaml. The YAML still
-    # parses (no LoadError), but _v_model_role_configured fires and LoadErrors
-    # is raised.
+    # a tier that is not configured in imp/config.yaml. The YAML still parses
+    # (no LoadError), but _v_step_tier_configured fires and LoadErrors is raised.
     _seed_control(tmp_path)
     workflow_yaml = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
     workflow_yaml.write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: p\n    steps:\n"
-        "      - {name: s, file: agents/stub.md, model_role: nonexistent_role}\n"
+        "      - {name: s, file: agents/stub.md, tier: nonexistent_tier}\n"
     )
     _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-qm", "break model_role")
+    _git(tmp_path, "commit", "-qm", "break tier")
 
     with pytest.raises(LoadErrors):
         Change.create(tmp_path, title="X", change_id="badwf", base_branch="main")

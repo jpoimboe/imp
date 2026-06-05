@@ -133,16 +133,19 @@ def test_diagnostics_holds_warnings_and_thinkings() -> None:
     assert d.thinkings == ("t1", "t2")
 
 
-def test_agent_invocation_has_model_tiers_field() -> None:
+def test_agent_invocation_has_tiers_field() -> None:
     import dataclasses
 
     from imp.agents.runner import AgentInvocation
     fields = {f.name: f for f in dataclasses.fields(AgentInvocation)}
-    assert "model_tiers" in fields
-    assert fields["model_tiers"].default == ()
+    assert "tiers" in fields
+    assert fields["tiers"].default == ()
+    assert "resolved_tiers" in fields
+    assert "model_role" not in fields
+    assert "model_tiers" not in fields
 
 
-def test_agent_invocation_resolved_roles_defaults_none():
+def test_agent_invocation_resolved_tiers_defaults_none():
     from pathlib import Path
 
     from imp.agents.runner import AgentInvocation, ChangeContext
@@ -162,4 +165,4 @@ def test_agent_invocation_resolved_roles_defaults_none():
                                      workflow_dir=Path(".") / ".imp" / "change" / "workflow"),
         interactive=False, transcript_dir=Path("."), fs_permissions=(),
         events_path=Path("e.jsonl"))
-    assert inv.resolved_roles is None
+    assert inv.resolved_tiers is None

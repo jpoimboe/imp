@@ -243,20 +243,12 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
 
     # Override config.yaml to pin the exact model string. run_init wrote
     # provider-default models; we want determinism across run_init updates.
-    role_line = "{prefer: [{provider: " + provider + ", model: " + model + "}]}"
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n"
-        f"  default:     {role_line}\n"
-        f"  spec:        {role_line}\n"
-        f"  spec_review: {role_line}\n"
-        f"  plan:        {role_line}\n"
-        f"  plan_review: {role_line}\n"
-        f"  task_lead:   {role_line}\n"
-        f"  code:        {role_line}\n"
-        f"  code_review: {role_line}\n"
-        f"  fast:        {role_line}\n"
-        f"  balanced:    {role_line}\n"
-        f"  powerful:    {role_line}\n"
+        f"providers: [{provider}]\n"
+        "tiers:\n"
+        f"  low:    {{{provider}: {model}}}\n"
+        f"  medium: {{{provider}: {model}}}\n"
+        f"  high:   {{{provider}: {model}}}\n"
         # Opt this run into the lint gate (off by default): exercises the
         # IMP_LINT_COMMAND pre-commit gate so the exemplar's deliberate F401
         # unused import is caught (Acceptance #3/#6). Top-level keys, parsed into

@@ -18,7 +18,12 @@ def test_init_writes_committed_imp_tree(tmp_path: Path) -> None:
     _init(tmp_path)
     assert (tmp_path / "imp" / "config.yaml").exists()
     assert (tmp_path / "imp" / "workflows" / "default" / "workflow.yaml").exists()
-    # config has only env-var NAMES, never key values (spec §8.1).
     cfg = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert cfg["providers"]["anthropic"]["env"] == "ANTHROPIC_API_KEY"
-    assert "roles" in cfg
+    # New shape: providers is a list, tiers is the tier table.
+    assert cfg["providers"] == ["anthropic"]
+    assert set(cfg["tiers"]) == {"low", "medium", "high"}
+    assert "roles" not in cfg
+    # provider_envs uses the default ANTHROPIC_API_KEY (env key omitted from
+    # file when blank input was given → uses default).
+    if "provider_envs" in cfg:
+        assert cfg["provider_envs"]["anthropic"]["env"] == "ANTHROPIC_API_KEY"

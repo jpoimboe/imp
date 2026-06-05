@@ -68,10 +68,10 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         initial_messages=(), change_context=_cc(tmp_path),
         interactive=False, user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=7, agent_id="sub:abc", event_log=None,
         change_state=None, first_event_parent_id="tc-1",
-        resolved_roles=None, coordinator=None, subagent_depth=2)
+        resolved_tiers=None, coordinator=None, subagent_depth=2)
 
     # System prompt = rendered body + the complete_step contract.
     assert inv.system_prompt.startswith("RENDERED BODY")
@@ -102,10 +102,10 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         initial_messages=(), change_context=_cc(tmp_path),
         interactive=False, user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
-        resolved_roles=None, coordinator=None)
+        resolved_tiers=None, coordinator=None)
 
     assert inv.system_prompt.startswith("RENDERED BODY")
     assert "IMP_PROJECT_ROOT" in inv.system_prompt
@@ -128,10 +128,10 @@ def test_build_agent_invocation_omits_bash_paths_note_without_bash(
         initial_messages=(), change_context=_cc(tmp_path),
         interactive=False, user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
-        resolved_roles=None, coordinator=None)
+        resolved_tiers=None, coordinator=None)
 
     assert "IMP_PROJECT_ROOT" not in inv.system_prompt
 
@@ -145,10 +145,10 @@ def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) -> 
         change_context=_cc(tmp_path), interactive=True,
         user_chat_input_fn=lambda _p: "hi",
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
-        resolved_roles=None, coordinator=None)
+        resolved_tiers=None, coordinator=None)
 
     assert inv.interactive is True
     assert inv.continuation_fn is not None
@@ -164,9 +164,9 @@ def test_build_agent_invocation_threads_lint_command(tmp_path: Path) -> None:
         change_context=_cc(tmp_path), interactive=False,
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
-        subagent_defs={}, model_tiers=(), max_tool_calls=None,
+        subagent_defs={}, tiers=(), max_tool_calls=None,
         agent_id="step:p/s", event_log=None, change_state=None,
-        first_event_parent_id=None, resolved_roles=None, coordinator=None,
+        first_event_parent_id=None, resolved_tiers=None, coordinator=None,
         lint_command="make lint")
     assert inv.lint_command == "make lint"
 
@@ -180,9 +180,9 @@ def test_build_agent_invocation_threads_test_command(tmp_path: Path) -> None:
         change_context=_cc(tmp_path), interactive=False,
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
-        subagent_defs={}, model_tiers=(), max_tool_calls=None,
+        subagent_defs={}, tiers=(), max_tool_calls=None,
         agent_id="step:p/s", event_log=None, change_state=None,
-        first_event_parent_id=None, resolved_roles=None, coordinator=None,
+        first_event_parent_id=None, resolved_tiers=None, coordinator=None,
         test_command="make test")
     assert inv.test_command == "make test"
 
@@ -195,9 +195,9 @@ def _inv(tmp_path: Path):
         change_context=_cc(tmp_path), interactive=False,
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
-        subagent_defs={}, model_tiers=(), max_tool_calls=None,
+        subagent_defs={}, tiers=(), max_tool_calls=None,
         agent_id="step:p/s", event_log=None, change_state=None,
-        first_event_parent_id=None, resolved_roles=None, coordinator=None)
+        first_event_parent_id=None, resolved_tiers=None, coordinator=None)
 
 
 class _Runner:
@@ -361,10 +361,10 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
         initial_messages=(), change_context=_cc(tmp_path),
         interactive=False, user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
-        resolved_roles=None, coordinator=None)
+        resolved_tiers=None, coordinator=None)
 
     assert "<imp:begin/>" in inv.system_prompt
     # The note explains the tag is engine-emitted, not user input.
@@ -383,10 +383,10 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
         initial_messages=(), change_context=_cc(tmp_path),
         interactive=False, user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
-        resolved_roles=None, coordinator=None)
+        resolved_tiers=None, coordinator=None)
 
     assert "IMP_PROJECT_ROOT" in inv2.system_prompt
     assert "<imp:begin/>" in inv2.system_prompt

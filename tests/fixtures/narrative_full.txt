@@ -1,7 +1,8 @@
 #add-auth  add auth  (paused)
-roles resolved:
-  code        → anthropic/claude-haiku-4-5-20251001
-  code_review → openai/gpt-5.2   (differ from code: tier 1, vendor jump)
+tiers resolved:
+  low    → anthropic/haiku
+  medium → anthropic/sonnet
+  high   → openai/gpt-5.5   (differ from medium: tier 1, vendor jump)
 design
   spec
     ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=50

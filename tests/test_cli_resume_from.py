@@ -9,25 +9,18 @@ from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _git, _init_repo, _seed_control
 
-# Roles referenced by the real default workflow (mirrors tests/test_default_workflow.py).
-_DEFAULT_ROLES = (
-    "default", "spec", "spec_review", "plan", "plan_review", "task_lead",
-    "code", "code_review", "fast", "balanced", "powerful",
-)
-
 
 def _seed_control_default(root: Path) -> None:
     """Like conftest._seed_control, but commits the REAL shipped default
-    workflow at imp/workflows/default plus a config.yaml defining every role it
+    workflow at imp/workflows/default plus a config.yaml defining every tier it
     uses — so Change.create copies the real workflow (with code-reviewer, gates,
     a merge phase) into the worktree."""
     _init_repo(root)
     shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
-    roles = "".join(
-        f"  {r}: {{prefer: [{{provider: anthropic, model: m}}]}}\n"
-        for r in _DEFAULT_ROLES
+    (root / "imp" / "config.yaml").write_text(
+        "providers: [anthropic]\n"
+        "tiers:\n  low: {anthropic: m}\n  medium: {anthropic: m}\n  high: {anthropic: m}\n"
     )
-    (root / "imp" / "config.yaml").write_text("roles:\n" + roles)
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup (default workflow)")
 
@@ -88,7 +81,7 @@ def test_resume_from_noop_appends_event_without_rewriting_history(
 
     st = State.load(ch.state_dir)            # stub workflow: cursor at step "s"
     wf = load_workflow(ch.workflow_dir,
-                       configured_roles=load_config(tmp_path).role_names())
+                       configured_tiers=load_config(tmp_path).tier_names())
     plan = plan_rewind(wf, st, st.step, force=False)   # no-op: --from current step
     apply_rewind(plan, wf, st, ch.event_log())
     st.save(ch.state_dir)

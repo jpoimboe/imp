@@ -4,14 +4,11 @@ from imp.assets import default_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.engine.state import InMemoryEventLog, State
 
-_ROLES = frozenset({
-    "default", "spec", "spec_review", "plan", "plan_review", "task_lead",
-    "code", "code_review", "fast", "balanced", "powerful",
-})
+_TIERS = frozenset({"low", "medium", "high"})
 
 
 def _wf():
-    return load_workflow(default_workflow_dir(), configured_roles=_ROLES)
+    return load_workflow(default_workflow_dir(), configured_tiers=_TIERS)
 
 
 def test_gate_steps_in_span_review_phase() -> None:

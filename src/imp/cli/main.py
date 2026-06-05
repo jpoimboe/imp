@@ -265,7 +265,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 try:
                     cfg = load_config(change.control_root)
                     workflow = load_workflow(
-                        change.workflow_dir, configured_roles=cfg.role_names())
+                        change.workflow_dir, configured_tiers=cfg.tier_names())
                 except (LoadError, LoadErrors) as e:
                     print(f"imp: {e}", file=sys.stderr)
                     return 2

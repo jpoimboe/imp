@@ -29,7 +29,7 @@ def _invocation(tmp_path: Path, provider: str) -> AgentInvocation:
             1, tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
         interactive=False, transcript_dir=tmp_path / "t", fs_permissions=(),
         events_path=tmp_path / "events.jsonl",
-        model_tiers=("fast", "powerful"))
+        tiers=("low", "high"))
 
 
 @pytest.mark.parametrize("module,provider", [
@@ -37,10 +37,10 @@ def _invocation(tmp_path: Path, provider: str) -> AgentInvocation:
     ("imp.providers.openai", "openai"),
     ("imp.providers.claude_code", "claude_code"),
 ])
-def test_build_tools_threads_model_tiers(module, provider, tmp_path: Path) -> None:
+def test_build_tools_threads_tiers(module, provider, tmp_path: Path) -> None:
     import importlib
     mod = importlib.import_module(module)
     inv = _invocation(tmp_path, provider)
     tools = mod._build_tools(inv)
     schema = tools["task"].input_schema
-    assert schema["properties"]["model_tier"]["enum"] == ["fast", "powerful"]
+    assert schema["properties"]["tier"]["enum"] == ["low", "high"]

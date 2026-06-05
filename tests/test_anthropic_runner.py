@@ -631,8 +631,8 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
 @pytest.mark.anyio
 async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
     """Full provider path: the model emits a `task` call carrying
-    model_tier='powerful'; the runner must forward it so the subagent spawns on
-    the powerful tier's resolved (cross-vendor) model. A dropped forward would
+    tier='high'; the runner must forward it so the subagent spawns on
+    the high tier's resolved (cross-vendor) model. A dropped forward would
     inherit the parent's anthropic model and fail the assertion."""
     import dataclasses
     import json as _json
@@ -669,7 +669,7 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
                                 values=("Success", "Error"), required=True),),
             source=SourceLoc(file=Path("r.md"), line=1)),
         prompt_template_source="review", source_path=Path("r.md"),
-        source=SourceLoc(file=Path("r.md"), line=1))   # no model_role
+        source=SourceLoc(file=Path("r.md"), line=1))
     parent_def = dataclasses.replace(
         _agent_def(tools=frozenset({"complete_step", "task"})),
         subagents=("reviewer",))
@@ -679,13 +679,13 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
         _inv(tmp_path, event_log=log),
         agent_def=parent_def,
         subagent_defs={"reviewer": reviewer_def},
-        model_tiers=("powerful",),
-        resolved_roles={"powerful": ProviderModel("openai", "gpt-5.2")})
+        tiers=("high",),
+        resolved_tiers={"high": ProviderModel("openai", "gpt-5.5")})
 
     parent_fake = FakeAsyncAnthropic([
         response(tool_use("t1", "task", {
             "subagent_name": "reviewer", "task_description": "hard one",
-            "model_tier": "powerful"})),
+            "tier": "high"})),
         response(tool_use("pc", "complete_step", {"status": "Success"})),
     ])
 
@@ -707,6 +707,6 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
             if e["type"] == "tool_result" and e["payload"].get("id") == "t1")
         child = _json.loads(task_result["payload"]["content"])
         assert child["ran_on"] == "openai"      # forwarded → tier vendor
-        assert child["model"] == "gpt-5.2"      # forwarded → tier model
+        assert child["model"] == "gpt-5.5"      # forwarded → tier model
     finally:
         _resolve.reset_providers_for_tests()

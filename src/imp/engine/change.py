@@ -72,11 +72,11 @@ class Change:
         # the worktree, no snapshot copy. This seed load doubles as the single
         # validator: raises LoadError on an absent/malformed workflow, or
         # LoadErrors when the workflow parses but fails validation (e.g. a step
-        # references a model_role not present in imp/config.yaml).
+        # references a model_tier not present in imp/config.yaml).
         try:
             workflow = load_workflow(
                 wt_path / "imp" / "workflows" / "default",
-                configured_roles=config.role_names(),
+                configured_tiers=config.tier_names(),
             )
         except (LoadError, LoadErrors):
             # Validation now runs post-create_worktree, so a base branch lacking a

@@ -55,9 +55,15 @@ def test_apply_overrides_string_var() -> None:
 
 
 def _write_config(root: Path, body: str) -> None:
-    (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n" + body
+    cfg_text = (
+        "providers: [anthropic]\n"
+        "tiers:\n"
+        "  low: {anthropic: x}\n"
+        "  medium: {anthropic: x}\n"
+        "  high: {anthropic: x}\n"
+        + body
     )
+    (root / "imp" / "config.yaml").write_text(cfg_text)
 
 
 def test_load_config_parses_vars_block(tmp_path: Path) -> None:
