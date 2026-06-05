@@ -82,13 +82,59 @@ def _read_turn(i: int) -> TurnRecord:
                            input={"path": f"f{i}.py"}, is_error=False)])
 
 
-def test_read_only_tools_are_not_progress() -> None:
-    # read_file/grep/glob are NOT in WRITE_CLASS_TOOLS, so a run of pure
-    # exploration turns DOES accumulate no_progress.
+def _read_path(path: str, tool_use_id: str) -> TurnRecord:
+    return TurnRecord(
+        assistant_text="", has_complete_step=False,
+        tools=[ToolOutcome(name="read_file", tool_use_id=tool_use_id,
+                           input={"path": path}, is_error=False)])
+
+
+def test_distinct_novel_reads_are_progress() -> None:
+    # Reading a NEW target each turn is information acquisition = progress, so a
+    # long read-heavy exploration (e.g. a code reviewer) must NOT trip. This is
+    # the regression that paused 2026-06-04-rim-sloe-timber at code-reviewer.
+    g = LoopGuard()
+    for i in range(DEFAULT_NOPROGRESS_N + DEFAULT_REPEAT_K + 5):
+        assert g.observe(_read_turn(i)) is None
+
+
+def test_rotating_seen_reads_trip_no_progress() -> None:
+    # Re-reading already-seen targets yields no new information. Rotating among
+    # them keeps each turn's signature distinct (so repeated_failure stays
+    # below K), but no_progress accumulates and trips.
+    g = LoopGuard()
+    assert g.observe(_read_path("a.py", "r-a0")) is None   # novel -> progress
+    assert g.observe(_read_path("b.py", "r-b0")) is None   # novel -> progress
+    last = None
+    for i in range(DEFAULT_NOPROGRESS_N):
+        path = "a.py" if i % 2 == 0 else "b.py"            # both already seen
+        last = g.observe(_read_path(path, f"r-rot{i}"))
+    assert last is not None
+    assert getattr(last, "kind", "") == "no_progress"
+
+
+def test_repeated_identical_read_trips_repeated_failure() -> None:
+    # Reading the SAME target with identical input every turn is a tight loop:
+    # the signature is constant, so repeated_failure (K) trips first.
+    g = LoopGuard()
+    assert g.observe(_read_path("a.py", "r-a0")) is None    # novel -> progress
+    last = None
+    for i in range(DEFAULT_REPEAT_K + 2):
+        last = g.observe(_read_path("a.py", f"r-dup{i}"))   # seen, identical sig
+    assert last is not None
+    assert getattr(last, "kind", "") == "repeated_failure"
+
+
+def test_errored_read_is_not_progress() -> None:
+    # A read whose RESULT errored acquired no information, so it is not progress
+    # even for a novel target.
     g = LoopGuard()
     last = None
     for i in range(DEFAULT_NOPROGRESS_N):
-        last = g.observe(_read_turn(i))
+        last = g.observe(TurnRecord(
+            assistant_text=f"try {i}", has_complete_step=False,
+            tools=[ToolOutcome(name="read_file", tool_use_id=f"e{i}",
+                               input={"path": f"f{i}.py"}, is_error=True)]))
     assert last is not None
     assert getattr(last, "kind", "") == "no_progress"
 
