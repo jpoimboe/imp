@@ -170,10 +170,17 @@ def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
     # run-tests uses, so the guard checks the invocation that actually bites.
     # IMP_PROJECT_ROOT == tmp_path for the dogfood, so "under the edit root"
     # means under tmp_path/src/imp.
+    # Scrub PYTHONPATH: `make test-dogfood` prepends PYTHONPATH=<checkout>/src
+    # (the worktree-safety pin in the Makefile). That host path would shadow the
+    # isolated venv's editable `imp`, defeating the very isolation this probe
+    # asserts. Isolation must not depend on the caller's env, so drop it here
+    # (and for the engine launch below).
+    probe_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     probe = subprocess.run(
         [str(venv_python), "-c", "import imp, sys; sys.stdout.write(imp.__file__)"],
         cwd=tmp_path,
         capture_output=True, text=True, check=True,
+        env=probe_env,
     )
     resolved = Path(probe.stdout.strip()).resolve()
     edit_root_pkg = (tmp_path / "src" / "imp").resolve()
@@ -305,6 +312,10 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     # subprocess pytest run.
     env.pop("IMP_LIVE_PROVIDERS", None)
     env.pop("IMP_RUN_LIVE_TESTS", None)
+    # Drop the host PYTHONPATH (`make test-dogfood` pins it to <checkout>/src):
+    # the engine and every descendant must resolve `imp` from the isolated venv
+    # copy, not the host source tree. Same isolation rationale as the seed probe.
+    env.pop("PYTHONPATH", None)
     # NOTE: keep this list in sync with any future opt-in/cost-guard env
     # vars added to tests/. Named list (not prefix sweep) is intentional:
     # explicit > clever, and a misnamed future guard wouldn't be caught
