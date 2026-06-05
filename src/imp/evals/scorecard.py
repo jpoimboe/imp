@@ -160,7 +160,14 @@ def render_markdown(sc: Scorecard) -> str:
     lines.append("## Q1 — drop spec-task-reviewer? (per model)")
     if sc.q1:
         for model_id, res in sorted(sc.q1.items()):
-            lines.append(f"- `{model_id}`: **{res.get('verdict')}**")
+            line = f"- `{model_id}`: **{res.get('verdict')}**"
+            if "unique_blocking_mean" in res:
+                ci = res.get("unique_blocking_ci") or (0.0, 1.0)
+                line += (
+                    f" — unique-blocking {res['unique_blocking_mean']:.2f} "
+                    f"CI [{ci[0]:.2f}, {ci[1]:.2f}] over n={res.get('n_diffs')} diffs"
+                )
+            lines.append(line)
     else:
         lines.append("- verdict: **insufficient-diffs** (no paired runs supplied)")
     lines.append("## Q2 — structure (monolithic vs completeness slice)")
@@ -176,7 +183,16 @@ def render_markdown(sc: Scorecard) -> str:
     lines.append("## Q4 — fast-path replaces per-task review? (per model)")
     if sc.q4:
         for model_id, res in sorted(sc.q4.items()):
-            lines.append(f"- `{model_id}`: **{res.get('verdict')}**")
+            line = f"- `{model_id}`: **{res.get('verdict')}**"
+            if "fast_total" in res:
+                line += (
+                    f" — fast-path {res.get('fast_caught')}/{res.get('fast_total')} "
+                    f"({res['fastpath_blocking_recall']:.2f}) vs union "
+                    f"{res.get('union_caught')}/{res.get('union_total')} "
+                    f"({res['union_blocking_recall']:.2f}) over "
+                    f"n={res.get('n_diffs')} diffs (point estimates, no CI)"
+                )
+            lines.append(line)
     else:
         lines.append("- verdict: **insufficient-diffs** (no fast-path comparison supplied)")
     if sc.notes:
