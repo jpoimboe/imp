@@ -64,7 +64,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     from imp.evals.provenance import fixture_label_hash as _flh
-    from imp.evals.provenance import provenance_digest, stamp
+    from imp.evals.provenance import core_digest, stamp
     from imp.evals.sweep import SweepError, run_sweep
 
     control_root = find_control_root(Path.cwd())
@@ -80,7 +80,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         pricing_version=PRICING_VERSION,
         fixture_label_hash=label_hash,
     )
-    prov = provenance_digest(run_stamp)
+    prov = core_digest(run_stamp)
     cache_dir = control_root / ".imp" / "eval-cache"
     try:
         grades = run_sweep(
