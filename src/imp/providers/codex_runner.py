@@ -17,6 +17,7 @@ from typing import Any
 
 from imp.agents.runner import AgentInvocation
 from imp.agents.tools.context import ToolContext, terminate_running_processes
+from imp.providers import errors as perr
 from imp.providers.codex_config import AuthMode, detect_auth_mode
 
 # ── PreflightError ────────────────────────────────────────────────────────────
@@ -298,3 +299,30 @@ def process_event(
 
     # Default arm: turn.failed / error / unknown —
     # handled by subsequent tasks. Falling through here is benign.
+
+
+# ── Error categorization ──────────────────────────────────────────────────────
+
+
+def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
+    """Map a codex ``turn.failed.error`` body into an imp ``ProviderError`` subclass.
+
+    Known cases:
+      - HTTP 401 / "Unauthorized" → ``AuthError``
+      - HTTP 400 "model … not supported … ChatGPT account" → ``ConfigError``
+      - subprocess network/timeout → ``NetworkError``
+      - any other → ``ApiError`` (terminal; maps to Pause).
+    """
+    if not isinstance(error, dict):
+        return perr.ApiError(str(error))
+    status = error.get("status")
+    message = str(error.get("message", "") or "")
+    kind = str(error.get("kind", "") or "")
+
+    if status == 401 or "unauthorized" in message.lower():
+        return perr.AuthError(f"codex: {message[:200]}")
+    if status == 400 and "chatgpt account" in message.lower():
+        return perr.ConfigError(f"codex: {message[:300]}")
+    if kind == "network" or "timeout" in message.lower() or "network" in message.lower():
+        return perr.NetworkError(f"codex: {message[:200]}")
+    return perr.ApiError(f"codex: {message[:200]}")
