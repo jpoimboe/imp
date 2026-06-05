@@ -34,3 +34,18 @@ def load_fixtures(root: Path) -> list[Fixture]:
         if (child / "fixture.json").exists():
             out.append(load_fixture(child))
     return out
+
+
+def check_cross_task_stratum(fixtures: list[Fixture]) -> list[str]:
+    """Lint (M2): any finding with cross_task=True implies its fixture is
+    stratum=="cross-cutting". Implication only — a cross-cutting fixture need NOT
+    carry a cross_task finding, so a cross-cutting fixture without one is fine.
+    Returns a list of violation messages (empty == clean)."""
+    violations: list[str] = []
+    for fx in fixtures:
+        if any(ef.cross_task for ef in fx.expected_findings) and fx.meta.stratum != "cross-cutting":
+            violations.append(
+                f"{fx.id}: has a cross_task finding but stratum={fx.meta.stratum!r} "
+                f"(must be 'cross-cutting')"
+            )
+    return violations
