@@ -15,6 +15,16 @@ from imp.evals.matching import match_kind
 from imp.evals.models import Fixture, GradeResult, RunResult
 
 
+def is_self_graded(fixture: Fixture, candidate_role: str) -> bool:
+    """True if scoring `candidate_role` against this fixture would grade the role
+    against a NOISY COPY OF ITS OWN historical mined output (spec Component 2),
+    which inflates that role's recall toward 'keep'. The `source == "mined"`
+    guard is load-bearing: curated fixtures are blind-/independently-authored, so
+    they are never self-graded even though all 7 carry reviewer_type=='code-reviewer'
+    and Q4's candidate role is code-reviewer."""
+    return fixture.source == "mined" and fixture.meta.reviewer_type == candidate_role
+
+
 def compute_q1(paired_by_fixture: Mapping[str, Mapping[str, RunResult]]) -> dict[str, Any]:
     """paired_by_fixture[fixture_id][agent_name] -> RunResult (from run_paired).
     Pools spec-task-reviewer's unique-blocking fraction over all fixtures."""
