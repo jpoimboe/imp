@@ -89,8 +89,8 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    from imp.evals.provenance import fixture_label_hash as _flh
     from imp.evals.provenance import core_digest, stamp
+    from imp.evals.provenance import fixture_label_hash as _flh
     from imp.evals.sweep import SweepError, run_sweep
 
     control_root = find_control_root(Path.cwd())

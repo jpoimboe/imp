@@ -76,8 +76,10 @@ def fixture_label_hash(fixtures: Any) -> str:
         h.update(fx.id.encode())
         h.update(b"\0")
         for ef in fx.expected_findings:
-            # all judge-visible label fields — a label edit (incl. description) must bust the cache (S4)
-            h.update(repr((ef.locus, ef.symbol, ef.description, ef.severity, ef.must_catch)).encode())
+            # all judge-visible label fields — a label edit (incl. description) must bust the
+            # cache (S4)
+            fields = (ef.locus, ef.symbol, ef.description, ef.severity, ef.must_catch)
+            h.update(repr(fields).encode())
             h.update(b"\0")
         for loc in getattr(fx, "clean_loci", ()):
             h.update(repr(loc).encode())
