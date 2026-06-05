@@ -55,6 +55,17 @@ def stamp(
     }
 
 
+def core_digest(stamp_dict: dict[str, Any]) -> str:
+    """The HARD cache key: a digest of everything that genuinely moves a number —
+    prompt hashes, cell models, judge model, pricing version, fixture label hash —
+    but NOT `imp_commit_sha`. A docs-only or harness-only imp commit no longer busts
+    the cache; a real scoring-input change still does. The SHA rides on each cached
+    cell (RunResult.imp_commit_sha) and is surfaced as a warn-prompt at re-render
+    time instead (cmd_scorecard)."""
+    core = {k: v for k, v in stamp_dict.items() if k != "imp_commit_sha"}
+    return provenance_digest(core)
+
+
 def provenance_digest(stamp_dict: dict[str, Any]) -> str:
     """A short, stable digest of a stamp — the cache-key provenance component
     (cache.py). Any change to imp SHA / prompts / models / pricing changes it, so
