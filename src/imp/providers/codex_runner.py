@@ -410,15 +410,58 @@ class CodexAgentRunner:
                             f"exceeded"}}
                     return
 
-                # Native-tool violation → fail-closed (autonomous): revert.
+                # Native-tool violation → fail-closed. AC #18:
+                #   - autonomous: unconditional revert + bail.
+                #   - interactive: prompt user (default revert); a "keep"
+                #     choice is explicitly logged BEFORE bytes are retained,
+                #     so a post-mortem reader sees the keep before any
+                #     subsequent event confirming retention.
                 if proc_state.get("native_violation") is not None:
-                    restore_to_snapshot(ctx.project_root, entry_snapshot)
                     detail = proc_state["native_violation"]
+                    keep = False
+                    if (invocation.interactive
+                            and self._user_input_fn is not None):
+                        import inspect as _inspect
+                        prompt = (
+                            f"codex used a native {detail['kind']} tool; the "
+                            "bytes are already on disk. Type 'keep' to retain "
+                            "them; anything else (default) reverts to entry "
+                            "state. > "
+                        )
+                        try:
+                            answer = self._user_input_fn(prompt)
+                            if _inspect.isawaitable(answer):
+                                answer = await answer
+                        except Exception:
+                            # If the prompt itself fails, default to the
+                            # spec-mandated revert. Do NOT swallow into a keep.
+                            answer = ""
+                        keep = str(answer or "").strip().lower() == "keep"
+                        # Log the decision BEFORE acting on it. This entry
+                        # must precede any event that could be construed as
+                        # confirming retention (the terminal error event is
+                        # the NEXT thing yielded; nothing else writes
+                        # between).
+                        elog.append(
+                            agent_id=aid, type="runner_warning",
+                            payload={
+                                "message": (
+                                    f"codex native-tool violation: user chose "
+                                    f"{'keep' if keep else 'revert'}"),
+                                "detail": detail,
+                                "decision": "keep" if keep else "revert",
+                            },
+                        )
+                    if not keep:
+                        restore_to_snapshot(ctx.project_root, entry_snapshot)
                     yield {"type": "error", "payload": {
                         "category": "config", "kind": "native_tool_violation",
-                        "message": f"codex used a native {detail['kind']} "
-                                   f"tool; worktree reverted to entry state.",
-                        "detail": detail}}
+                        "message": (
+                            f"codex used a native {detail['kind']} tool; "
+                            + ("bytes retained per user 'keep'."
+                               if keep else
+                               "worktree reverted to entry state.")),
+                        "detail": {**detail, "kept_bytes": keep}}}
                     return
 
                 # Mirror complete_step_args from the shared state into
