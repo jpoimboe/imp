@@ -11,13 +11,13 @@ is itself **calibrated against human labels** (Cohen's κ) so its numbers are
 trustworthy.
 
 > **Status (2026-06):** offline machinery complete and tested. Judge calibrated at
-> κ≈0.67 (substantial). **A first baseline sweep has run** (the 7 curated fixtures, single
-> `baseline-monolithic` model, 3 repeats) — scorecard at `.imp/eval-scorecard.md`
+> κ≈0.67 (substantial). **A first baseline sweep has run** (the 7 curated fixtures,
+> the five-model matrix (OpenAI `gpt-5.5`/`gpt-5.3-codex`/`gpt-5.4-mini` + `claude_code` opus-4-8/sonnet-4-6), 3 repeats each) — scorecard at `.imp/eval-scorecard.md`
 > (gitignored). Q3 has real per-cell recall + dollars; Q1/Q2/Q4 returned *insufficient* by
-> design (one model, one structure, <2 usable cross-cutting diffs). Notably the baseline
+> design (one structure, <2 usable cross-cutting diffs). Notably the baseline
 > already reproduces the experiment's signal — monolithic caught the cross-cutting `anyio`
 > gap only **1/3** and missed `hint-cap-inversion` and `cross-env-leak` outright. What
-> remains is widening models/structures and growing fixtures so Q1/Q2/Q4 get real verdicts
+> remains is widening structures and growing fixtures so Q1/Q2/Q4 get real verdicts
 > (see Roadmap).
 
 ---
@@ -150,9 +150,7 @@ is met, `calibrate` reports `floor_met=False` and the scorecard verdicts are not
 1. **Provenance pins the imp commit SHA**, so *any* new commit — even docs — invalidates
    the result cache (`imp eval scorecard` then says "no cached runs for this provenance").
    Run a sweep on a **stable HEAD** and render its scorecard before committing other work.
-2. **The default config is one model, one structure** (`_default_variants()` in `cli.py`:
-   `baseline-monolithic`, `claude-sonnet-4-6`, 3 repeats). It answers Q3 for that model and
-   honestly declines Q1/Q2/Q4. Widen it to make Q2/Q3 real comparisons.
+2. **The default config is a five-model matrix, one structure** (`_default_variants()` in `cli.py`). It answers Q3 across the model matrix; Q2 (structure) is still single (`monolithic`) until Stage 3 adds the completeness-slice variant.
 3. **`dry-run`'s estimate covers only the main sweep.** The Q1/Q4 paired runs (3 reviewers ×
    fixtures) add cost on top.
 4. **Every eval-agent run gets a throwaway event log outside its worktree** (`driver.py`).
@@ -169,9 +167,11 @@ is shaken out end-to-end. The work below turns that single-cell baseline into re
 verdicts. Always size with `imp eval dry-run` first and sweep on a **stable HEAD** (Gotcha 1).
 
 **Make the existing questions real (no new concepts, just more inputs):**
-- **Widen `_default_variants()`** to add (a) a `completeness-slice` panel variant and (b) a
-  second model (e.g. `openai`/`gpt-5.2`). Then Q2 becomes monolithic-vs-slice and Q3 becomes
-  an actual matrix instead of a single baseline.
+- **Widen `_default_variants()`** to add a `completeness-slice` panel variant so Q2 becomes
+  monolithic-vs-slice. ~~Add a second model so Q3 becomes an actual matrix~~ **Done** — the
+  OpenAI trio (`gpt-5.5`/`gpt-5.3-codex`/`gpt-5.4-mini`) + `claude_code` pair
+  (opus-4-8/sonnet-4-6) are now in the default matrix; the remaining future work is the
+  `completeness-slice` panel variant (Q2), which is Stage 3.
 - **(Optional) model the full bug-class panel**, not just the completeness slice. The
   experiment's §7.3 recommended a panel of slices (completeness + concurrency + termination +
   edge); Q2 today only contrasts the completeness slice with monolithic. Adding the other

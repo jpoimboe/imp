@@ -1,7 +1,8 @@
 """`imp eval` subcommand. dry-run never bills (matrix + dollar estimate); run is
 gated behind IMP_RUN_EVALS; scorecard re-renders from cache. The default Variant
-set is a single baseline code-reviewer; richer matrices are configured by editing
-the builder or passing a variants JSON (future)."""
+set is a five-model matrix (OpenAI gpt-5.5/gpt-5.3-codex/gpt-5.4-mini + claude_code
+opus-4-8/sonnet-4-6), one Variant per model binding the `code-reviewer` role, 3
+repeats each."""
 
 from __future__ import annotations
 
@@ -17,12 +18,25 @@ _CURATED = Path("src/imp/evals/data/curated")
 
 
 def _default_variants() -> list[Variant]:
+    """The reviewer model matrix: one Variant per model, each binding the single
+    `code-reviewer` role at the single-agent seam. The OpenAI trio is priced (real
+    Q3 $-axis); the claude_code pair runs on the subscription at $0 and is read on
+    the RECALL axis only (a $0 model looks infinitely cost-efficient on Q3).
+
+    Variant ids use a `mono-` prefix, NOT the literal `monolithic`/`completeness`
+    substrings Q2 selects on (scorecard.py:72-73) — so these model-matrix cells
+    stay out of the Q2 structure comparison by construction. Q2's structure
+    variants are Stage 3's job.
+    """
+    def _mono(vid: str, provider: str, model: str) -> Variant:
+        return Variant(id=vid, role_to_model_map={"code-reviewer": (provider, model)}, n_repeats=3)
+
     return [
-        Variant(
-            id="baseline-monolithic",
-            role_to_model_map={"code-reviewer": ("anthropic", "claude-sonnet-4-6")},
-            n_repeats=3,
-        )
+        _mono("mono-gpt-5.5", "openai", "gpt-5.5"),
+        _mono("mono-gpt-5.3-codex", "openai", "gpt-5.3-codex"),
+        _mono("mono-gpt-5.4-mini", "openai", "gpt-5.4-mini"),
+        _mono("mono-cc-opus-4-8", "claude_code", "claude-opus-4-8"),
+        _mono("mono-cc-sonnet-4-6", "claude_code", "claude-sonnet-4-6"),
     ]
 
 
