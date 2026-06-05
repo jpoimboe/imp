@@ -79,3 +79,42 @@ def test_read_text_capped_aborts_on_pause_promptly(tmp_path: Path) -> None:
         assert ei.value.reason == "interrupted"
 
     anyio.run(go)
+
+
+def test_read_text_capped_aborts_mid_read_between_chunks(tmp_path: Path) -> None:
+    # Load-bearing: preemption must happen BETWEEN chunks, not only before the
+    # first read. The coordinator stays clear for the first chunk's checkpoint,
+    # then trips — so the abort happens partway through a multi-chunk read,
+    # proving a runaway gigabyte read is abortable mid-stream.
+    #
+    # Threshold reasoning: tool_checkpoint reads `should_pause` once per loop
+    # iteration (before each chunk read). With _checks > 1:
+    #   check 1 (before chunk 1) → False → chunk 1 is read into buf
+    #   check 2 (before chunk 2) → True  → ToolAborted raised
+    # The abort therefore happens AFTER at least one chunk was consumed, not
+    # before the first read — that is the mid-read property under test.
+    from imp.agents.tools.limits import READ_CHUNK_BYTES
+
+    class _FlipCoord:
+        def __init__(self) -> None:
+            self._checks = 0
+
+        @property
+        def should_pause(self) -> bool:
+            self._checks += 1
+            # Clear for the first checkpoint (before chunk 1), trip afterward.
+            return self._checks > 1
+
+    f = tmp_path / "multi.bin"
+    f.write_bytes(b"q" * (READ_CHUNK_BYTES * 5))  # needs several chunks
+
+    async def go() -> None:
+        coord = _FlipCoord()
+        with pytest.raises(ToolAborted) as ei:
+            await read_text_capped(f, coordinator=coord)
+        assert ei.value.reason == "interrupted"
+        # Confirm at least two checkpoints fired: one clear pass (chunk 1 read)
+        # and one trip (abort before chunk 2).
+        assert coord._checks >= 2
+
+    anyio.run(go)
