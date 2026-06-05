@@ -1,0 +1,17 @@
+{
+  "id": "clean-test-docstring",
+  "source": "curated",
+  "base_sha": "96a443c16ef55c08509dcb26caa753b6fcc0c632",
+  "head_sha": "b3dadb6e4abbddad4d58b0bddbfbaab4c17ebd5b",
+  "task_context": "A small, correct change.",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "code-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": "clean",
+    "independence": "independent-history"
+  }
+}

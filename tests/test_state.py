@@ -5,7 +5,7 @@ from imp.engine.state import JsonlEventLog, State
 
 
 def test_state_roundtrip_vars_and_loop_counts(tmp_path: Path) -> None:
-    s = State(slug="c1", step="spec-writer", step_attempt=0, status="running",
+    s = State(id="c1", step="spec-writer", step_attempt=0, status="running",
               vars={"review_done": False, "round": 0},
               loop_counts={"spec-reviewer": 2})
     s.save(tmp_path)
@@ -17,7 +17,7 @@ def test_state_roundtrip_vars_and_loop_counts(tmp_path: Path) -> None:
 
 
 def test_state_defaults(tmp_path: Path) -> None:
-    s = State(slug="c1", step=None, step_attempt=0, status="running")
+    s = State(id="c1", step=None, step_attempt=0, status="running")
     s.save(tmp_path)
     back = State.load(tmp_path)
     assert back.vars == {}
@@ -26,7 +26,7 @@ def test_state_defaults(tmp_path: Path) -> None:
 
 def test_state_round_trip(tmp_path: Path) -> None:
     s = State(
-        slug="c5",
+        id="c5",
         step="intent",
         step_attempt=1,
         status="running",
@@ -38,12 +38,12 @@ def test_state_round_trip(tmp_path: Path) -> None:
 
 def test_state_atomic_overwrite(tmp_path: Path) -> None:
     s = State(
-        slug="c1", step=None, step_attempt=0,
+        id="c1", step=None, step_attempt=0,
         status="running",
     )
     s.save(tmp_path)
     s2 = State(
-        slug="c1", step="s", step_attempt=2,
+        id="c1", step="s", step_attempt=2,
         status="running",
     )
     s2.save(tmp_path)
@@ -54,7 +54,7 @@ def test_state_atomic_overwrite(tmp_path: Path) -> None:
 
 def test_state_no_partial_writes(tmp_path: Path) -> None:
     s = State(
-        slug="c1", step=None, step_attempt=0,
+        id="c1", step=None, step_attempt=0,
         status="running",
     )
     s.save(tmp_path)
@@ -102,7 +102,7 @@ def test_event_log_filter_by_step(tmp_path: Path) -> None:
 def test_state_round_trip_with_current_step(tmp_path: Path) -> None:
     from imp.engine.state import CurrentStep, State
     s = State(
-        slug="c5", step="coder", step_attempt=0,
+        id="c5", step="coder", step_attempt=0,
         status="running",
         current_step=CurrentStep(transcript_dir=tmp_path / "steps/coder"),
     )
@@ -115,7 +115,7 @@ def test_state_round_trip_with_current_step(tmp_path: Path) -> None:
 def test_state_round_trip_without_current_step(tmp_path: Path) -> None:
     from imp.engine.state import State
     s = State(
-        slug="c5", step=None, step_attempt=0,
+        id="c5", step=None, step_attempt=0,
         status="completed",
     )
     s.save(tmp_path)
@@ -125,7 +125,7 @@ def test_state_round_trip_without_current_step(tmp_path: Path) -> None:
 
 def test_state_round_trip_with_retry_feedback(tmp_path: Path) -> None:
     s = State(
-        slug="c7",
+        id="c7",
         step="coder",
         step_attempt=1,
         status="running",
@@ -139,7 +139,7 @@ def test_state_round_trip_with_retry_feedback(tmp_path: Path) -> None:
 
 def test_state_round_trip_retry_feedback_defaults_none(tmp_path: Path) -> None:
     s = State(
-        slug="c1", step=None, step_attempt=0,
+        id="c1", step=None, step_attempt=0,
         status="running",
     )
     s.save(tmp_path)
@@ -149,7 +149,7 @@ def test_state_round_trip_retry_feedback_defaults_none(tmp_path: Path) -> None:
 
 
 def test_state_resume_pending_roundtrip(tmp_path: Path) -> None:
-    s = State(slug="c1", step="coder", step_attempt=0, status="running",
+    s = State(id="c1", step="coder", step_attempt=0, status="running",
               resume_pending="coder")
     s.save(tmp_path)
     back = State.load(tmp_path)
@@ -157,14 +157,14 @@ def test_state_resume_pending_roundtrip(tmp_path: Path) -> None:
 
 
 def test_state_resume_pending_defaults_none() -> None:
-    s = State(slug="c1", step=None, step_attempt=0, status="running")
+    s = State(id="c1", step=None, step_attempt=0, status="running")
     assert s.resume_pending is None
 
 
 def test_state_load_forward_compatible_without_resume_pending(tmp_path: Path) -> None:
     # An older state.json (written before this field existed) still loads.
     (tmp_path / "state.json").write_text(json.dumps({
-        "slug": "c1", "step": "coder", "step_attempt": 0, "status": "running",
+        "id": "c1", "step": "coder", "step_attempt": 0, "status": "running",
         "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
     }))
     back = State.load(tmp_path)
@@ -175,7 +175,7 @@ def test_state_resolved_roles_roundtrip(tmp_path):
     from imp.engine.state import State
     from imp.providers.config import ProviderModel
     s = State(
-        slug="c1", step="a", step_attempt=0, status="running",
+        id="c1", step="a", step_attempt=0, status="running",
         resolved_roles={
             "code": ProviderModel(provider="anthropic", model="haiku"),
             "code_review": ProviderModel(provider="openai", model="gpt-5.2"),
@@ -192,7 +192,7 @@ def test_state_resolved_roles_none_preserved(tmp_path):
     """A fresh State persists resolved_roles=null and loads back as None, so the
     executor's compute-if-absent (`is None`) check still fires after a resume."""
     from imp.engine.state import State
-    s = State(slug="c1", step="a", step_attempt=0, status="running")
+    s = State(id="c1", step="a", step_attempt=0, status="running")
     assert s.resolved_roles is None
     s.save(tmp_path)
     assert State.load(tmp_path).resolved_roles is None
@@ -200,7 +200,7 @@ def test_state_resolved_roles_none_preserved(tmp_path):
 
 def test_state_round_trips_model_tiers(tmp_path) -> None:
     from imp.engine.state import State
-    s = State(slug="c1", step="x", step_attempt=0, status="running",
+    s = State(id="c1", step="x", step_attempt=0, status="running",
               model_tiers=("fast", "powerful"))
     s.save(tmp_path)
     loaded = State.load(tmp_path)
@@ -209,7 +209,7 @@ def test_state_round_trips_model_tiers(tmp_path) -> None:
 
 def test_state_model_tiers_defaults_none(tmp_path) -> None:
     from imp.engine.state import State
-    s = State(slug="c1", step="x", step_attempt=0, status="running")
+    s = State(id="c1", step="x", step_attempt=0, status="running")
     s.save(tmp_path)
     loaded = State.load(tmp_path)
     assert loaded.model_tiers is None
@@ -240,6 +240,6 @@ def test_state_roundtrips_abandoned_status(tmp_path: Path) -> None:
     from imp.engine.state import State
 
     state_dir = tmp_path / "state"
-    State(slug="s", step=None, step_attempt=0, status="abandoned").save(state_dir)
+    State(id="s", step=None, step_attempt=0, status="abandoned").save(state_dir)
     loaded = State.load(state_dir)
     assert loaded.status == "abandoned"

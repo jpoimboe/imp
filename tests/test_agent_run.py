@@ -343,3 +343,54 @@ async def test_drive_invocation_output_validation_failure(tmp_path: Path) -> Non
     error_events = [c for c in log.calls if c["type"] == "error" and c["agent_id"] is None]
     assert error_events, f"no synthesized error event found in log.calls: {log.calls}"
     assert error_events[0]["payload"]["category"] == "agent_output_missing"
+
+
+def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
+    tmp_path: Path,
+) -> None:
+    """Every agent's system prompt carries the `<imp:begin/>` engine-seed note,
+    regardless of whether it has the `bash` tool. The note sits between any
+    body addenda and the completion contract."""
+    from imp.engine.agent_run import build_agent_invocation
+
+    # Without bash: still gets the engine-seed note.
+    inv = build_agent_invocation(
+        agent_def=_agent(),  # tools = {complete_step} — no bash
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=(), change_context=_cc(tmp_path),
+        interactive=False, user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td", fs_permissions=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_roles=None, coordinator=None)
+
+    assert "<imp:begin/>" in inv.system_prompt
+    # The note explains the tag is engine-emitted, not user input.
+    assert "engine" in inv.system_prompt.lower()
+    # Order: rendered body first, engine-seed note before completion contract.
+    assert inv.system_prompt.startswith("RENDERED BODY")
+    assert inv.system_prompt.index("<imp:begin/>") < inv.system_prompt.index(
+        "complete_step")
+
+    # With bash too: both notes appear; bash note precedes engine-seed note,
+    # which in turn precedes the completion instruction.
+    inv2 = build_agent_invocation(
+        agent_def=_agent(tools={"complete_step", "bash"}),
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=(), change_context=_cc(tmp_path),
+        interactive=False, user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td", fs_permissions=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_roles=None, coordinator=None)
+
+    assert "IMP_PROJECT_ROOT" in inv2.system_prompt
+    assert "<imp:begin/>" in inv2.system_prompt
+    assert inv2.system_prompt.index("IMP_PROJECT_ROOT") < inv2.system_prompt.index(
+        "<imp:begin/>")
+    assert inv2.system_prompt.index("<imp:begin/>") < inv2.system_prompt.index(
+        "complete_step")

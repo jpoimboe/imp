@@ -1,0 +1,13 @@
+diff --git a/src/imp/engine/executor.py b/src/imp/engine/executor.py
+index 384d558..183c5b4 100644
+--- a/src/imp/engine/executor.py
++++ b/src/imp/engine/executor.py
+@@ -428,7 +428,7 @@ async def _route_agent(
+     coordinator: Any, wrapper_text: str | None, is_resume: bool,
+     lint_command: str | None = None,
+     test_command: str | None = None,
+-    non_interactive: bool = False,  # Task 12: §10/§12 wall-clock retry ceiling (not yet active)
++    non_interactive: bool = False,  # §10/§12: consumed by the headless wall-clock retry ceiling
+ ) -> tuple[Action, str | None, dict[str, object]]:
+     # step.file is guaranteed non-None: loader requires file:/prompt:, and
+     # _v_agent_has_file rejects inline prompt: agents this milestone.

@@ -80,22 +80,35 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     """Render one finalized prose block as markdown→ANSI at inner width, then
     prefix the depth gutter/indent. rich owns bold/heading/list/fence formatting;
     we own the magenta gutter. We never slice rich's output, so no escape is ever
-    cut; content rich won't reflow (code fences, tables) is allowed to overflow."""
+    cut; content rich won't reflow (code fences, tables) is allowed to overflow.
+
+    Theme override: rich's default `markdown.code` is bold+cyan+black-bg. We
+    drop the bold and dark bg by setting it to plain `cyan` so inline `code`
+    sits calmly in the prose. Fenced blocks (`markdown.code_block`) keep
+    rich's default formatting."""
     import io
 
     from rich.console import Console
     from rich.markdown import Markdown
+    from rich.theme import Theme
 
     inner = max(8, width - _INDENT_W * depth)
     buf = io.StringIO()
     console = Console(file=buf, width=inner, no_color=not color,
                       color_system="standard" if color else None,
-                      force_terminal=color, soft_wrap=False, highlight=False)
+                      force_terminal=color, soft_wrap=False, highlight=False,
+                      theme=Theme({"markdown.code": "cyan"}))
     console.print(Markdown(text))
     indent = _gutter_indent(depth, gutters, color)
     out: list[str] = []
     for raw in buf.getvalue().splitlines():
-        out.append(indent + raw.rstrip())
+        stripped = raw.rstrip()
+        if not stripped:
+            # Blank line inside the prose block — emit the bare gutter-indent
+            # so the magenta │ stays continuous inside a SubagentFold.
+            out.append(indent)
+        else:
+            out.append(indent + stripped)
     return out or [indent]
 
 
@@ -111,21 +124,22 @@ def is_prose_leaf(node: Any) -> bool:
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
                      width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     """Render a container's children in order, inserting ONE blank line between
-    two consecutive prose blocks. A child that renders nothing (lean-mode thinking
-    / empty tool burst) leaves the prose-adjacency state untouched, so
-    prose→thinking→prose still separates; any non-prose output (header, breadcrumb,
-    subagent block) resets it, so prose never gets a spurious leading blank."""
+    a prose block and ANY following emission. A child that renders nothing
+    (lean-mode thinking / empty tool burst) leaves the prose-adjacency state
+    untouched, so prose→thinking→prose still separates; any non-empty emission
+    resets it. The blank separator is the gutter-bearing indent at the child
+    depth (reusing `_wrap`'s blank-paragraph carrier) so the magenta │ stays
+    continuous inside a SubagentFold."""
     prev_prose = False
     for child in children:
         lines = list(_render(child, depth=depth, full=full, color=color, width=width,
                              gutters=gutters))
         if not lines:
             continue
-        cur_prose = is_prose_leaf(child)
-        if cur_prose and prev_prose:
-            yield ""
+        if prev_prose:
+            yield _gutter_indent(depth, gutters, color)
         yield from lines
-        prev_prose = cur_prose
+        prev_prose = is_prose_leaf(child)
 
 
 def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
@@ -270,12 +284,12 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.BreadcrumbLine):
         parts = [f"✓ {node.step_name}"]
-        if node.elapsed_s is not None:
-            parts.append(f"{int(node.elapsed_s)}s")
         parts.extend(node.extras)
         verb_text = pal.action_text(node.action) if node.action is not None else None
         if verb_text and verb_text != "continue":
             parts.append(f"→ {verb_text}")
+        if node.elapsed_s is not None:
+            parts.append(f"{int(node.elapsed_s)}s")
         ac = pal.accent_color(node.action)
         codes = (ac,) if ac else ()
         yield _line(" · ".join(parts), depth, color, *codes, gutters=gutters)

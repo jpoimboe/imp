@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -18,36 +17,33 @@ from imp.engine.state import State
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees.
 
-    The test sets up the workflow under root/.imp/workflows/default BEFORE
-    calling _make_change; this helper copies it into the change dir and seeds
-    the State so run_change can be invoked immediately.
+    The test sets up the workflow under root/imp/workflows/default BEFORE
+    calling _make_change; this helper seeds the State so run_change can be
+    invoked immediately (no snapshot copy needed — workflow_dir resolves to
+    root/imp/workflows/default directly).
     """
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    src_wf = root / ".imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
-    dest_wf = change_dir / "workflow"
-    if dest_wf.exists():
-        shutil.rmtree(dest_wf)
-    shutil.copytree(src_wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
 
     # Write change metadata
     (change_dir / "change.json").write_text(json.dumps({
-        "slug": slug, "title": title, "base_branch": "main",
+        "id": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_roles: list[str] = []
     with contextlib.suppress(Exception):
         configured_roles = load_config(root).role_names()
 
-    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    workflow = load_workflow(src_wf, configured_roles=configured_roles)
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
-        slug=slug,
+        id=slug,
         step=flat[0].name if flat else None,
         step_attempt=0,
         status="running",
@@ -56,12 +52,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     ).save(change_dir / "state")
 
     change = Change(
-        slug=slug, title=title, base_branch="main",
+        id=slug, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"slug": slug, "title": title},
+        payload={"id": slug, "slug": change.slug, "title": title},
     )
     return change
 
@@ -106,7 +102,7 @@ def _seed_minimal_workflow(
 ) -> tuple[Change, str, str]:
     """Create a minimal single-step workflow on disk and snapshot it into a
     Change. Returns ``(change, phase_name, step_name)``."""
-    wf_dir = root / ".imp" / "workflows" / "default"
+    wf_dir = root / "imp" / "workflows" / "default"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
         f"---\nname: {agent_stem}\ntools: [complete_step]\n"
@@ -165,7 +161,7 @@ async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
 async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
     """A rule with `set: {review_done: true}` updates state.vars; reload State
     and confirm the mutation persisted."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -205,7 +201,7 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
     """writer(agent); the branch loops back via resume: writer. writer sets
     review_done=true; a branch step continues while review_done is false, and
     gotos the trailing `done` phase once it's true."""
-    wf = root / ".imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -266,7 +262,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
     """A reviewer agent that always gotos backward to the writer, with
     max_loops: 2 → after exhausting, the run PAUSES and loop_counts reflects
     the cap."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -341,7 +337,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
 @pytest.mark.anyio
 async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
     """The last real step gotos a trailing empty phase → COMPLETED."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -712,7 +708,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
 ) -> None:
     from imp.providers import resolve
 
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -781,7 +777,7 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
 
     from imp.providers import resolve
 
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "asker.md").write_text(
         "---\nname: asker\ntools: [complete_step]\n"
@@ -853,7 +849,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     """A reviewer agent that resumes backward with a feedback: preamble string
     makes the coder's NEXT invocation carry the composed feedback text.
     The reviewer flips to approve on its 2nd pass so the run completes."""
-    wf = tmp_path / ".imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
         "---\nname: coder\ntools: [complete_step]\n"
@@ -986,13 +982,57 @@ def anyio_backend():
     return "asyncio"
 
 
+@pytest.mark.anyio
+async def test_fresh_start_seeds_initial_messages_with_imp_begin_tag(
+    tmp_path: Path,
+) -> None:
+    """On a fresh agent step (no resume marker, no wrapper_text), the executor
+    seeds the runner with exactly one user message whose sole TextBlock is the
+    literal `<imp:begin/>` engine tag (replacing the legacy `"begin"` opener)."""
+    from imp.providers import resolve
+
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    captured: dict[str, AgentInvocation] = {}
+
+    class _CapRunner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            captured["inv"] = invocation
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _CapProvider:
+        name = "fake"
+
+        def __init__(self, model: str = "m") -> None:
+            self.model = model
+
+        def create_runner(self, invocation: AgentInvocation) -> _CapRunner:
+            return _CapRunner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda model: _CapProvider(model))
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    inv = captured["inv"]
+    assert len(inv.initial_messages) == 1, inv.initial_messages
+    msg = inv.initial_messages[0]
+    assert msg.role == "user"
+    assert len(msg.content) == 1
+    assert msg.content[0].text == "<imp:begin/>"
+
+
 def _seed_back_edge_workflow(
     root: Path, verb: str, feedback: str | None = None
 ) -> Change:
     """coder(agent) -> reviewer(agent). reviewer rules: on rework, <verb>: coder;
     else continue. `verb` is 'goto' or 'resume'. `feedback` is an optional
     preamble string for the back edge (§6); None means bare (forwards nothing)."""
-    wf = root / ".imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
         "---\nname: coder\ntools: [complete_step]\n"
@@ -1227,3 +1267,60 @@ async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
     coder_balances = [bal for (aid, bal) in runs if aid.endswith("/coder")]
     # entry1 fresh; entry2 (paused) resumed; entry3 (post-reload) resumed
     assert coder_balances == [False, True, True]
+
+
+@pytest.mark.anyio
+async def test_resume_keep_branch_passes_empty_initial_messages(
+    tmp_path: Path,
+) -> None:
+    """On the resume keep-branch the executor must not construct any opener
+    message: providers replay the on-disk transcript and never iterate
+    initial_messages here. The first (fresh) coder entry still carries the
+    `<imp:begin/>` seed; the second (resumed) entry carries `()`."""
+    from imp.providers import resolve
+
+    change = _seed_back_edge_workflow(tmp_path, verb="resume")
+    invs: list[AgentInvocation] = []
+    reviewer_calls = {"n": 0}
+
+    class _Runner:
+        async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            invs.append(invocation)
+            if invocation.agent_def.name == "reviewer":
+                reviewer_calls["n"] += 1
+                verdict = "rework" if reviewer_calls["n"] == 1 else "approve"
+                yield {"type": "agent_output",
+                       "payload": {"status": "Success", "verdict": verdict}}
+            else:
+                yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _Provider:
+        name = "fake"
+        model = "m"
+
+        def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True, factory=lambda _m: _Provider())
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+
+    # Defensive: assert overall shape (coder, reviewer, coder, reviewer) before
+    # slicing — protects against a future workflow change re-ordering the
+    # back-edge dispatch and silently masking the resume-branch assertion.
+    assert [i.agent_def.name for i in invs] == ["coder", "reviewer", "coder", "reviewer"]
+    coder_invs = [i for i in invs if i.agent_def.name == "coder"]
+    assert len(coder_invs) == 2, [i.agent_def.name for i in invs]
+
+    # Fresh entry: one <imp:begin/> seed.
+    assert len(coder_invs[0].initial_messages) == 1
+    assert coder_invs[0].initial_messages[0].content[0].text == "<imp:begin/>"
+
+    # Resume-kept entry: NO seed message at all.
+    assert coder_invs[1].initial_messages == ()

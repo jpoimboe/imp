@@ -24,21 +24,21 @@ def test_replay_current_step_removed() -> None:
     )
 
 
-def _make_change_worktree(control: Path, slug: str, title: str,
+def _make_change_worktree(control: Path, change_id: str, title: str,
                            status: str = "paused") -> Path:
     """Create a minimal on-disk worktree for a Change (no real git worktree
     needed — Change.load only reads the .imp/change/ directory)."""
     from imp.engine.state import State
 
-    wt = control / ".imp" / "worktrees" / slug
+    wt = control / ".imp" / "worktrees" / change_id
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "state").mkdir()
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": title, "base_branch": "main"})
+        json.dumps({"id": change_id, "title": title, "base_branch": "main"})
     )
     (change_dir / "events.jsonl").write_text("")
-    state = State(slug=slug, status=status, step="spec", step_attempt=0)
+    state = State(id=change_id, status=status, step="spec", step_attempt=0)
     state.save(change_dir / "state")
     return wt
 
@@ -69,7 +69,7 @@ def test_resume_renders_through_live_driver_without_replay(tmp_path, monkeypatch
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
     buf = io.StringIO()
-    args = argparse.Namespace(slug="resume-test")
+    args = argparse.Namespace(token="resume-test")
     with redirect_stdout(buf):
         rc = anyio.run(m._async_cmd_resume, args)
     out = buf.getvalue()
@@ -128,7 +128,7 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
     buf = io.StringIO()
-    args = argparse.Namespace(slug="mb-test")
+    args = argparse.Namespace(token="mb-test")
     with redirect_stdout(buf):
         rc = anyio.run(m._async_cmd_resume, args)
 
@@ -160,7 +160,7 @@ def test_cli_log_pipes_through_narrative(
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": "smoke", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -204,7 +204,7 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": "smoke", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -253,7 +253,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": "sub", "base_branch": "main"}),
+        json.dumps({"id": slug, "title": "sub", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -285,6 +285,54 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     assert "\x1b[" not in result.stdout
 
 
+def test_main_swallows_broken_pipe(monkeypatch) -> None:
+    """A reader closing the pipe early (e.g. `imp log | less` quit) must not
+    surface a BrokenPipeError traceback: main() catches it and returns the
+    conventional 128+SIGPIPE status. os.dup2/os.open are stubbed so the real
+    handler's stdout-fd redirect can't clobber pytest's own stdout."""
+    import signal
+
+    import imp.cli.main as m
+
+    def boom(_ns: object) -> int:
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(m, "_cmd_status", boom)
+    monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
+    monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
+
+    rc = m.main(["status"])
+    assert rc == 128 + signal.SIGPIPE
+
+
+def test_main_swallows_broken_pipe_on_buffered_flush(monkeypatch) -> None:
+    """The command can return cleanly while output sits in stdout's buffer; the
+    broken pipe then surfaces only on flush. main() flushes inside its guard so
+    that case is caught too, instead of escaping to interpreter shutdown as an
+    uncatchable 'Exception ignored' traceback."""
+    import signal
+
+    import imp.cli.main as m
+
+    def quiet(_ns: object) -> int:
+        return 0  # returns normally; nothing written yet
+
+    class FakeStdout:
+        def flush(self) -> None:
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def fileno(self) -> int:
+            return 1
+
+    monkeypatch.setattr(m, "_cmd_status", quiet)
+    monkeypatch.setattr(m.sys, "stdout", FakeStdout())
+    monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
+    monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
+
+    rc = m.main(["status"])
+    assert rc == 128 + signal.SIGPIPE
+
+
 def test_cmd_log_auto_picks_latest_by_mtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -298,7 +346,7 @@ def test_cmd_log_auto_picks_latest_by_mtime(
         change_dir = wt / ".imp" / "change"
         change_dir.mkdir(parents=True)
         (change_dir / "change.json").write_text(
-            json.dumps({"slug": slug, "title": title, "base_branch": "main"}),
+            json.dumps({"id": slug, "title": title, "base_branch": "main"}),
         )
         events_path = change_dir / "events.jsonl"
         events_path.write_text(

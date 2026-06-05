@@ -1,0 +1,32 @@
+{
+  "id": "backoff-overflow",
+  "source": "curated",
+  "base_sha": "878068ef728f8bf9e73177e21ff83b58ec8e65ed",
+  "head_sha": "453f7466eb48128548129b9426468db651eaee56",
+  "task_context": "Implement per-category retry backoff in error_policy.decide(): RetryWithBackoff categories use delay = 1*2^n and honor a server Retry-After hint.",
+  "expected_findings": [
+    {
+      "locus": "src/imp/engine/error_policy.py:74",
+      "symbol": "decide",
+      "description": "deep-tail overflow at ~1024 retries: 2**1024 is a fine arbitrary-precision int, but the float multiply 1.0 * (2**1024) raises OverflowError('int too large to convert to float'). No exponent cap.",
+      "severity": "Major",
+      "must_catch": true
+    },
+    {
+      "locus": "src/imp/engine/error_policy.py:76",
+      "symbol": "decide",
+      "description": "co-located hint-cap inversion (min(60, max(delay, hint)) caps our own exponential); present here as context, not the target.",
+      "severity": "Major",
+      "must_catch": false
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "code-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": "deep-tail",
+    "independence": "experiment-seed"
+  }
+}

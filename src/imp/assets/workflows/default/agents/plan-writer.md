@@ -150,6 +150,11 @@ def function(input):
     return expected
 ```
 
+> **Note:** this skeleton shows step **structure** only. `expected` must be derived
+> from the spec's required behavior — never copied from Step 3's `return`. A test
+> whose `expected` is just the literal the implementation returns is a tautology
+> (plan-echo): it pins transcription, not behavior.
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/path/test_file.py::test_specific_behavior -v`
@@ -162,6 +167,14 @@ git add tests/path/test_file.py src/path/file.py
 git commit -m "feat: add specific feature"
 ```
 ````
+
+## Falsifiability of Tests
+
+Each task's test must assert an **externally observable consequence** — a return value
+that encodes real computation, emitted output, a raised error, or persisted state — not
+a value trivially echoed by the implementation written in the same task. Derive
+`expected` from the spec's required behavior, not from the sibling implementation. A
+test that cannot fail when the behavior is wrong pins transcription, not behavior.
 
 ## No Placeholders
 
@@ -195,6 +208,10 @@ After writing the complete plan, check it against the spec and prior plans with 
 **4. Bite-size check:** Could any task be split to give a natural commit boundary? Could any step be clarified without inflating the plan?
 
 **5. Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only. It never licenses a lint-dirty tree: if `$IMP_LINT_COMMAND` is configured, the implementer still runs it before committing.
+
+**6. Falsifiability:** For each test, would it fail if the implementation were wrong or
+absent? A test whose expected value is just the literal the implementation returns is a
+tautology (plan-echo) — pin an observable consequence instead.
 
 If you find issues, fix them inline. If you find a spec requirement with no task anywhere, add the task.
 

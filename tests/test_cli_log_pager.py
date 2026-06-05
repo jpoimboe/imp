@@ -21,7 +21,7 @@ def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"slug": slug, "title": title, "base_branch": "main"}),
+        json.dumps({"id": slug, "title": title, "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({

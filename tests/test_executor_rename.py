@@ -1,6 +1,7 @@
 # tests/test_executor_rename.py
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -9,56 +10,81 @@ import anyio
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
-from imp.engine import worktree as wt
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, apply_pending_rename, run_change
 from imp.engine.state import State
 from tests.conftest import _git, _seed_control
 
-# ── Unit tests: apply_pending_rename ────────────────────────────────────────
 
-
-def test_apply_pending_rename_repoints_paths(tmp_path: Path) -> None:
-    import json
+def test_apply_pending_rename_is_content_only(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="old", base_branch="main")
+    ch = Change.create(tmp_path, title="orig",
+                       change_id="2026-06-04-aaa111", base_branch="main")
     created_before = json.loads((ch.change_dir / "change.json").read_text())["created_at"]
-    # H1: the rename rests on `git worktree move` relocating the gitignored
-    # .imp/change/ intact. Write a sentinel event + state value BEFORE the move.
+    id_before, root_before = ch.id, ch.project_root
     ch.event_log().append(agent_id=None, type="sentinel", payload={"k": "v"})
     state = State.load(ch.state_dir)
-    state.vars["marker"] = "keep-me"
     state.pending_rename = "Add OAuth"
     state.save(ch.state_dir)
-    log = ch.event_log()
 
-    new_log = apply_pending_rename(ch, state, log, on_event=None)
-    assert ch.slug == "add-oauth"
-    assert ch.project_root == (tmp_path / ".imp" / "worktrees" / "add-oauth").resolve()
-    assert (ch.change_dir / "change.json").exists()
+    new_log = apply_pending_rename(ch, state, ch.event_log(), on_event=None)
+
+    assert ch.title == "Add OAuth"
+    assert ch.slug == "2026-06-04-add-oauth"
+    assert ch.id == id_before                       # id never changes
+    assert ch.project_root == root_before           # no worktree move
     assert state.pending_rename is None
+    meta = json.loads((ch.change_dir / "change.json").read_text())
+    assert meta["title"] == "Add OAuth"
+    assert meta["created_at"] == created_before
+    assert "id" in meta and "slug" not in meta
     types = [e["type"] for e in new_log.read()]
     assert "sentinel" in types and "change_renamed" in types
-    assert State.load(ch.state_dir).vars["marker"] == "keep-me"
-    meta_after = json.loads((ch.change_dir / "change.json").read_text())
-    assert meta_after["created_at"] == created_before
-    assert meta_after["slug"] == "add-oauth" and meta_after["base_branch"] == "main"
+    renamed = [e for e in new_log.read() if e["type"] == "change_renamed"][-1]
+    assert renamed["payload"] == {
+        "id": id_before, "old_title": "orig", "new_title": "Add OAuth"}
 
 
-def test_apply_pending_rename_collision_keeps_old(tmp_path: Path) -> None:
+def test_apply_pending_rename_moves_committed_spec(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="old", base_branch="main")
-    wt.create_worktree(tmp_path, "taken", "main")  # imp/taken exists
+    ch = Change.create(tmp_path, title="orig",
+                       change_id="2026-06-04-bbb222", base_branch="main")
+    specs = ch.project_root / "imp" / "specs"
+    specs.mkdir(parents=True)
+    old = specs / f"{ch.slug}.md"
+    old.write_text("# spec")
+    _git(ch.project_root, "add", "-A")
+    _git(ch.project_root, "commit", "-qm", "early spec")
+    old_slug = ch.slug
+
     state = State.load(ch.state_dir)
-    state.pending_rename = "taken"
-    returned = apply_pending_rename(ch, state, ch.event_log(), on_event=None)
-    assert ch.slug == "old"  # unchanged
-    assert state.pending_rename is None
-    assert "rename_blocked" in [e["type"] for e in returned.read()]
+    state.pending_rename = "Renamed"
+    state.save(ch.state_dir)
+    apply_pending_rename(ch, state, ch.event_log(), on_event=None)
+
+    assert not (specs / f"{old_slug}.md").exists()
+    assert (specs / f"{ch.slug}.md").exists()
 
 
-# ── Integration tests: run_change with rename + cwd restore ─────────────────
+def test_apply_pending_rename_moves_untracked_draft(tmp_path: Path) -> None:
+    # An UNTRACKED early draft must still be moved (filesystem fallback when
+    # `git mv` fails), or it lingers and blocks the merge. [review M2]
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="orig",
+                       change_id="2026-06-04-ggg777", base_branch="main")
+    specs = ch.project_root / "imp" / "specs"
+    specs.mkdir(parents=True)
+    old_slug = ch.slug
+    (specs / f"{old_slug}.md").write_text("# draft")   # never git-added
+
+    state = State.load(ch.state_dir)
+    state.pending_rename = "Renamed"
+    state.save(ch.state_dir)
+    apply_pending_rename(ch, state, ch.event_log(), on_event=None)
+
+    assert not (specs / f"{old_slug}.md").exists()      # nothing lingers at old name
+    assert (specs / f"{ch.slug}.md").exists()           # moved to settled name
 
 
 class _FakeRunner:
@@ -83,10 +109,7 @@ class _FakeProvider:
 
 
 def _seed_two_step_control(root: Path) -> None:
-    """Like _seed_control but a TWO-step workflow so there's a boundary between
-    step 1 and step 2 where a pending rename is applied mid-run."""
     from tests.conftest import _init_repo, write_agent_md
-
     _init_repo(root)
     src = root / "imp" / "workflows" / "default"
     (src / "agents").mkdir(parents=True)
@@ -111,12 +134,13 @@ def _seed_two_step_control(root: Path) -> None:
     _git(root, "commit", "-qm", "imp setup")
 
 
-def test_run_change_applies_rename_and_restores_cwd(
+def test_run_change_applies_rename_keeps_id_and_path(
     tmp_path: Path, provider_registry
 ) -> None:
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="old", base_branch="main")
+    ch = Change.create(tmp_path, title="x",
+                       change_id="2026-06-04-ccc333", base_branch="main")
     st = State.load(ch.state_dir)
     st.pending_rename = "Renamed Thing"
     st.save(ch.state_dir)
@@ -124,22 +148,23 @@ def test_run_change_applies_rename_and_restores_cwd(
     cwd_before = os.getcwd()
     result = anyio.run(run_change, ch)
     assert result is RunResult.COMPLETED
-    assert os.getcwd() == cwd_before                       # 4b: cwd restored
-    assert ch.slug == "renamed-thing"                      # 4c: rename applied mid-run
-    assert (tmp_path / ".imp" / "worktrees" / "renamed-thing").is_dir()
-    assert not (tmp_path / ".imp" / "worktrees" / "old").exists()
+    assert os.getcwd() == cwd_before
+    assert ch.title == "Renamed Thing"
+    assert ch.id == "2026-06-04-ccc333"                          # id stable
+    assert (tmp_path / ".imp" / "worktrees" / "2026-06-04-ccc333").is_dir()
 
 
 def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> None:
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="boom", base_branch="main")
-    (ch.workflow_dir / "workflow.yaml").write_text("}{ not yaml")  # loader raises mid-run
+    ch = Change.create(tmp_path, title="x",
+                       change_id="2026-06-04-ddd444", base_branch="main")
+    (ch.workflow_dir / "workflow.yaml").write_text("}{ not yaml")
 
     cwd_before = os.getcwd()
     with pytest.raises(LoadError):
         anyio.run(run_change, ch)
-    assert os.getcwd() == cwd_before                       # restored on error path
+    assert os.getcwd() == cwd_before
 
 
 @pytest.fixture

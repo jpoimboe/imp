@@ -41,6 +41,37 @@ def test_build_session_vi_mode() -> None:
     assert session.editing_mode == EditingMode.VI
 
 
+def test_build_session_color_true_paints_input_bg() -> None:
+    """When color is enabled, `_build_session` passes a prompt_toolkit Style
+    that paints the default class (the input region) with bright-blue bg —
+    matching the `bg_bright_blue` ANSI code used by imp log for
+    UserMessageNode. Both single- and multi-line input pick this style up
+    because PromptSession applies its `style=` to the whole input field."""
+    from imp.cli.prompt import _build_session
+    sess = _build_session(None, color=True)
+    assert sess.style is not None
+    rules = sess.style.style_rules
+    assert ("", "bg:ansibrightblue") in rules
+
+
+def test_build_session_color_false_omits_style() -> None:
+    """When color is disabled (NO_COLOR / non-TTY), no Style is passed and the
+    PromptSession falls back to the default (no bg)."""
+    from imp.cli.prompt import _build_session
+    sess = _build_session(None, color=False)
+    assert sess.style is None
+
+
+def test_prompt_threads_color_into_session_factory() -> None:
+    """The public Prompt(...) constructor accepts `color` and forwards it to
+    the default `_session_factory`."""
+    from imp.cli.prompt import Prompt
+    p_on = Prompt(color=True)
+    p_off = Prompt(color=False)
+    assert p_on._session.style is not None
+    assert p_off._session.style is None
+
+
 class _FakeSession:
     def __init__(self, answers: list[str] | None = None, raises=None) -> None:
         self.answers = list(answers or [])

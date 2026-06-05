@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -25,40 +24,41 @@ from imp.engine.state import State
 
 
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
-    """Construct a Change directly on disk without git worktrees."""
+    """Construct a Change directly on disk without git worktrees. The workflow is
+    read from root/imp/workflows/default (the branch-dir model — workflow_dir =
+    project_root/imp/workflows/default), so there is no snapshot copy to make."""
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    src_wf = root / ".imp" / "workflows" / "default"
+    wf_dir = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
-    dest_wf = change_dir / "workflow"
-    if dest_wf.exists():
-        shutil.rmtree(dest_wf)
-    shutil.copytree(src_wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
-        "slug": slug, "title": title, "base_branch": "main",
+        "id": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
     configured_roles: list[str] = []
     with contextlib.suppress(Exception):
         configured_roles = load_config(root).role_names()
 
-    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
+    workflow = load_workflow(wf_dir, configured_roles=configured_roles)
     flat = workflow.flat_steps()
+    # NOTE: production Change.create uses apply_var_overrides(...); this
+    # characterization fixture keeps the simpler defaults() form (unchanged from
+    # the prior fixture) — the exhaustion invariant doesn't depend on overrides.
     State(
-        slug=slug, step=flat[0].name if flat else None, step_attempt=0,
+        id=slug, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(change_dir / "state")
 
     change = Change(
-        slug=slug, title=title, base_branch="main",
+        id=slug, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"slug": slug, "title": title},
+        payload={"id": slug, "slug": change.slug, "title": title},
     )
     return change
 
@@ -82,7 +82,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
     """Characterization lock: exhausted step emits exactly one step_completed
     with action.verb == 'pause' (the on_max_retries action) and no spurious
     exhaustion events. workflow_paused is the only visible side-effect."""
-    wf_dir = tmp_path / ".imp" / "workflows" / "default"
+    wf_dir = tmp_path / "imp" / "workflows" / "default"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / "worker.md").write_text(
         "---\nname: worker\ntools: [complete_step]\n"

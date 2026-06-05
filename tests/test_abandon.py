@@ -9,7 +9,7 @@ from tests.conftest import _git, _seed_control
 
 def test_remove_worktree_force_tolerates_dirty_tree(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "dirty.txt").write_text("uncommitted")  # plain remove would error
     worktree.remove_worktree(tmp_path, "feat", force=True)
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
@@ -17,7 +17,7 @@ def test_remove_worktree_force_tolerates_dirty_tree(tmp_path: Path) -> None:
 
 def test_remove_worktree_force_tolerates_absent_worktree(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     worktree.remove_worktree(tmp_path, "feat", force=True)
     # Second call: worktree already gone + stale metadata; must not raise.
     worktree.remove_worktree(tmp_path, "feat", force=True)
@@ -25,7 +25,7 @@ def test_remove_worktree_force_tolerates_absent_worktree(tmp_path: Path) -> None
 
 def test_delete_branch_removes_and_is_idempotent(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     worktree.remove_worktree(tmp_path, "feat", force=True)  # branch must be uncheckedout first
     worktree.delete_branch(tmp_path, "feat")
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""
@@ -35,7 +35,7 @@ def test_delete_branch_removes_and_is_idempotent(tmp_path: Path) -> None:
 
 def test_abandon_happy_path_tears_down_and_journals(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
 
     rc = _abandon(tmp_path, "feat")
     assert rc == 0
@@ -51,7 +51,7 @@ def test_abandon_happy_path_tears_down_and_journals(tmp_path: Path) -> None:
 
 def test_abandon_surfaces_as_completed_not_inflight(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     _abandon(tmp_path, "feat")
 
     assert all(r[0] != "feat" for r in _status_rows(tmp_path))           # not in-flight
@@ -61,7 +61,7 @@ def test_abandon_surfaces_as_completed_not_inflight(tmp_path: Path) -> None:
 
 def test_abandon_allowed_from_completed_status(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "completed"          # completed-but-not-merged: abandon is the only verb
     st.save(ch.state_dir)
@@ -71,7 +71,7 @@ def test_abandon_allowed_from_completed_status(tmp_path: Path) -> None:
 
 def test_abandon_refuses_when_lock_held(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     with ProjectLock(ch.change_dir / "lock").acquire():     # simulate a live runner
         rc = _abandon(tmp_path, "feat")
     assert rc == 2
@@ -80,7 +80,7 @@ def test_abandon_refuses_when_lock_held(tmp_path: Path) -> None:
 
 def test_abandon_already_gone_is_idempotent_and_reaps_branch(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     # Simulate a crash between (d) worktree removal and (e) branch deletion:
     # worktree gone, branch orphaned.
     worktree.remove_worktree(tmp_path, "feat", force=True)

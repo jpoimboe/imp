@@ -1,0 +1,25 @@
+{
+  "id": "anyio-sleep-uncapped",
+  "source": "curated",
+  "base_sha": "896c64792255f25b5186e92481f8fd069ca7b6ae",
+  "head_sha": "3804c801992d0ae9a8aab05790921c69e8d662af",
+  "task_context": "Remove the per-call backoff cap so retry delay is governed centrally by error_policy/the executor wall-clock ceiling.",
+  "expected_findings": [
+    {
+      "locus": "src/imp/agents/subagents.py:203",
+      "symbol": "dispatch_task",
+      "description": "cross-cutting gap: removing the cap left a SECOND, un-enumerated caller's anyio.sleep unbounded. A monolithic in-diff review misses the parallel call site; a completeness pass that greps every caller of the changed path catches it.",
+      "severity": "Major",
+      "must_catch": true
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "code-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": true,
+    "stratum": "cross-cutting",
+    "independence": "experiment-seed"
+  }
+}

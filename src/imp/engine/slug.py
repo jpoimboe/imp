@@ -4,6 +4,7 @@ repeats, trim. One name for Change <-> branch <-> worktree <-> state dir."""
 from __future__ import annotations
 
 import re
+import secrets
 
 # Cap the slug length. The slug becomes a git branch (`imp/<slug>`), so an
 # unbounded slug from a long title produces a ref path that overflows the
@@ -31,11 +32,6 @@ def slugify(text: str) -> str:
     return s
 
 
-# `YYYY-MM-DD-<name>` slug identity (spec §12). The date gives every Change a
-# chronological, collision-resistant identity; doc filenames derive from the slug.
-DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.*)$")
-
-
 def dated_slug(name: str, *, date: str) -> str:
     """`<date>-<slugified name>`. `date` is a fixed-width `YYYY-MM-DD` string.
     The name keeps the MAX_SLUG_LEN cap (slugify), so the full slug is at most
@@ -44,10 +40,15 @@ def dated_slug(name: str, *, date: str) -> str:
     return f"{date}-{slugify(name)}"
 
 
-def split_date_prefix(slug: str) -> tuple[str | None, str]:
-    """Split `YYYY-MM-DD-<rest>` into (date, rest); (None, slug) when there is
-    no date prefix (e.g. a legacy or test slug created before this convention)."""
-    m = DATE_PREFIX_RE.match(slug)
-    if m is None:
-        return None, slug
-    return m.group(1), m.group(2)
+# Immutable Change identity (spec §1): YYYY-MM-DD- + 6 chars from [a-z0-9] drawn
+# with secrets. Ref-safe, coordination-free, collision-free at this scale
+# (~2.2 billion/day). The date prefix gives ULID-style chronological sort of the
+# stable key; the suffix is unique within a day, not globally.
+_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+def new_change_id(*, date: str) -> str:
+    """`<date>-<6 random ref-safe chars>`. `date` is a fixed-width YYYY-MM-DD
+    string (the caller passes today's date)."""
+    suffix = "".join(secrets.choice(_ID_ALPHABET) for _ in range(6))
+    return f"{date}-{suffix}"

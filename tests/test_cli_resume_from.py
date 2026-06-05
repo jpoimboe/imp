@@ -52,7 +52,7 @@ def test_no_fork_or_rebase_subcommand() -> None:
 
 def test_resume_from_rejects_nonresumable_status(tmp_path, monkeypatch) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "completed"
     st.save(ch.state_dir)
@@ -63,7 +63,7 @@ def test_resume_from_rejects_nonresumable_status(tmp_path, monkeypatch) -> None:
 
 def test_resume_from_unknown_target_rc2(tmp_path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.status = "paused"
     st.save(ch.state_dir)
@@ -83,7 +83,7 @@ def test_resume_from_noop_appends_event_without_rewriting_history(
     from imp.providers.config import load_config
 
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     before = _git(tmp_path, "rev-parse", "imp/feat").stdout.strip()
 
     st = State.load(ch.state_dir)            # stub workflow: cursor at step "s"
@@ -110,7 +110,7 @@ def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -
     from imp.engine.executor import RunResult
 
     _seed_control_default(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "code-reviewer"
     st.status = "paused"
@@ -123,7 +123,7 @@ def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
-    args = argparse.Namespace(slug="feat", from_target="code-reviewer", force=False)
+    args = argparse.Namespace(token="feat", from_target="code-reviewer", force=False)
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 0
 
@@ -152,7 +152,7 @@ def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) 
     from imp.engine.executor import RunResult
 
     _seed_control_default(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "code-reviewer"
     st.status = "paused"
@@ -164,7 +164,7 @@ def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) 
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
-    args = argparse.Namespace(slug="feat", from_target="merge", force=True)
+    args = argparse.Namespace(token="feat", from_target="merge", force=True)
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 0
 
@@ -195,7 +195,7 @@ def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> N
     import imp.cli.main as m
 
     _seed_control_default(tmp_path)
-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
     st.step = "code-reviewer"
     st.status = "paused"
@@ -222,7 +222,7 @@ def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(m, "run_change", fake_run_change)
     monkeypatch.setattr(m.State, "load", classmethod(fake_load))
 
-    args = argparse.Namespace(slug="feat", from_target=None, force=False)
+    args = argparse.Namespace(token="feat", from_target=None, force=False)
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 2
     assert ran["called"] is False    # never ran a Change abandon finalized

@@ -41,7 +41,7 @@ def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:
 
 def _state(step, *, loop_counts=None, vars=None):
     return State(
-        slug="s", step=step, step_attempt=3, status="paused",
+        id="s", step=step, step_attempt=3, status="paused",
         vars=vars if vars is not None else {"ready_to_merge": False},
         loop_counts=loop_counts or {},
         resume_pending="something", current_step=None,

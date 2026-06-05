@@ -7,7 +7,6 @@ from imp.engine.slug import (
     InvalidSlug,
     dated_slug,
     slugify,
-    split_date_prefix,
 )
 
 
@@ -69,11 +68,3 @@ def test_dated_slug_caps_name_not_date() -> None:
 def test_dated_slug_empty_name_raises() -> None:
     with pytest.raises(InvalidSlug):
         dated_slug("!!!", date="2026-06-01")
-
-
-def test_split_date_prefix_roundtrip() -> None:
-    assert split_date_prefix("2026-06-01-add-oauth") == ("2026-06-01", "add-oauth")
-
-
-def test_split_date_prefix_absent() -> None:
-    assert split_date_prefix("add-oauth") == (None, "add-oauth")
