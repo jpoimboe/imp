@@ -609,6 +609,35 @@ def _last_nonempty_line(data: bytes) -> bytes | None:
     return stripped[nl + 1:]
 
 
+_TAIL_CHUNK = 64 * 1024
+
+
+def _read_last_line(events_path: Path) -> bytes | None:
+    """Last non-empty line of `events_path`, read from the end without loading
+    the whole file. Returns None when the file has no non-empty line. Defined to
+    return exactly `_last_nonempty_line(events_path.read_bytes())` — it reads
+    backward in 64 KiB chunks only until the last line is fully in hand. Raises
+    FileNotFoundError if the file is absent (the caller maps that to '-')."""
+    with events_path.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        pos = f.tell()
+        buf = b""
+        while pos > 0:
+            step = min(_TAIL_CHUNK, pos)
+            pos -= step
+            f.seek(pos)
+            buf = f.read(step) + buf
+            stripped = buf.rstrip()
+            if not stripped:
+                continue  # only trailing whitespace seen so far
+            nl = stripped.rfind(b"\n")
+            if nl != -1:
+                return stripped[nl + 1:]
+            # No newline yet: the last line starts at or before `pos`; if pos
+            # has reached 0 the loop ends and the final return handles it.
+        return _last_nonempty_line(buf)
+
+
 def _format_last_timestamp(text: str) -> str:
     """Local-time YYYY-MM-DD HH:MM:SS of the last event line in `text`, or '-'
     when the text is empty / has a malformed trailing line."""
