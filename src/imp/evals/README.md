@@ -11,8 +11,46 @@ is itself **calibrated against human labels** (Cohen's κ) so its numbers are
 trustworthy.
 
 > **Status (2026-06):** offline machinery complete and tested. Judge calibrated at
-> κ≈0.67 (substantial). The default sweep answers **Q3 for one baseline model**;
-> Q1/Q2/Q4 need more variants/fixtures to move off *insufficient* (see Roadmap).
+> κ≈0.67 (substantial). **A first baseline sweep has run** (the 7 curated fixtures, single
+> `baseline-monolithic` model, 3 repeats) — scorecard at `.imp/eval-scorecard.md`
+> (gitignored). Q3 has real per-cell recall + dollars; Q1/Q2/Q4 returned *insufficient* by
+> design (one model, one structure, <2 usable cross-cutting diffs). Notably the baseline
+> already reproduces the experiment's signal — monolithic caught the cross-cutting `anyio`
+> gap only **1/3** and missed `hint-cap-inversion` and `cross-env-leak` outright. What
+> remains is widening models/structures and growing fixtures so Q1/Q2/Q4 get real verdicts
+> (see Roadmap).
+
+---
+
+## From experiment to framework (why this exists)
+
+This harness productizes a one-off, hand-run experiment:
+[`docs/2026-06-03-model-review-experiment.md`](docs/2026-06-03-model-review-experiment.md).
+That experiment took a real 3h32m imp run, re-ran its tasks/reviews across models in
+`/tmp` worktrees, and graded each review by the author's **own grep** for a seeded
+cross-cutting bug (an unbounded `anyio.sleep` in `subagents.py`). Its core result —
+**review *method* beats model tier; a "for every changed symbol, grep all callers"
+completeness slice caught the gap 6/6 (100%) where monolithic review failed (sonnet 0/5
+on the 38-file diff, codex 0/5)** — is what motivated building a real instrument instead
+of acting on n≈1. The hand harness, the by-grep judging, and the three confirmed bugs all
+became parts of this framework; calibration + pre-registered thresholds were added to
+close the rigor gaps the experiment itself flagged.
+
+**The experiment's §7 recommendations → what the framework encodes:**
+
+| §7 recommendation | Where it lives now |
+|---|---|
+| Drop spec-review-per-task | **Q1** (`decisions.q1_verdict`) |
+| Code-review as panel + **always a completeness slice** | **Q2** (`decisions.q2_verdict`) — *but only completeness-slice-vs-monolithic; the broader multi-bug-class panel (concurrency/termination/edge slices) is **not** modeled* |
+| Spend the model budget on the reviewer (gpt-5.5/opus strong, codex shallow) | **Q3** (`decisions.rank`, $-normalized) |
+| Fast-path → full-diff review instead of per-task | **Q4** (`decisions.q4_verdict`) |
+
+**Deliberately out of scope** (experiment recommendations this harness does *not* measure):
+- **Parallelize execution** (§7.1) — a workflow/runtime change, orthogonal to review quality.
+- **Stop pre-writing test assertions in the plan** (§7.5) — a planner/test-authoring change;
+  no eval home here. Worth its own measurement someday, but the harness only scores review.
+- **Implementer model tiering** (§2, "avoid haiku") — dropped on the experiment's
+  *model-invariant implement* finding; the harness does **not** re-check that assumption.
 
 ---
 
@@ -126,10 +164,19 @@ is met, `calibrate` reports `floor_met=False` and the scorecard verdicts are not
 
 ## Roadmap — what comes next
 
+**A first baseline sweep has run** (Q3 baseline at `.imp/eval-scorecard.md`); the live seam
+is shaken out end-to-end. The work below turns that single-cell baseline into real Q1/Q2/Q4
+verdicts. Always size with `imp eval dry-run` first and sweep on a **stable HEAD** (Gotcha 1).
+
 **Make the existing questions real (no new concepts, just more inputs):**
 - **Widen `_default_variants()`** to add (a) a `completeness-slice` panel variant and (b) a
   second model (e.g. `openai`/`gpt-5.2`). Then Q2 becomes monolithic-vs-slice and Q3 becomes
   an actual matrix instead of a single baseline.
+- **(Optional) model the full bug-class panel**, not just the completeness slice. The
+  experiment's §7.3 recommended a panel of slices (completeness + concurrency + termination +
+  edge); Q2 today only contrasts the completeness slice with monolithic. Adding the other
+  slices as variants would let the scorecard say whether the *panel* (not just completeness)
+  earns its cost.
 - **Grow the curated set** past the decision-rule floors (more `cross-cutting` and
   `deep-tail` fixtures), or turn the **136 reconstructable mined episodes** into fixtures
   via one billable normalizer pass.
