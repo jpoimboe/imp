@@ -23,7 +23,12 @@ import anyio
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext, kill_process_group
-from imp.agents.tools.limits import OUTPUT_TRUNCATION_MARKER, TOOL_OUTPUT_CAP_BYTES
+from imp.agents.tools.limits import (
+    OUTPUT_TRUNCATION_MARKER,
+    TOOL_OUTPUT_CAP_BYTES,
+    TOOL_WALLCLOCK_TIMEOUT_S,
+    ToolAborted,
+)
 from imp.engine.env import engine_env, overlay_engine_env
 
 # Rewrite a LEADING `cd /project` (optionally `/subpath`, optionally single- or
@@ -126,10 +131,21 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
                 return
 
     try:
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(_drain, proc.stdout, stdout_chunks, "stdout")
-            tg.start_soon(_drain, proc.stderr, stderr_chunks, "stderr")
-            await proc.wait()
+        try:
+            with anyio.fail_after(TOOL_WALLCLOCK_TIMEOUT_S):
+                async with anyio.create_task_group() as tg:
+                    # NOTE: keep the "stdout"/"stderr" name args from Task 6 —
+                    # they drive the S2 capped-stream marker (counter.which).
+                    tg.start_soon(_drain, proc.stdout, stdout_chunks, "stdout")
+                    tg.start_soon(_drain, proc.stderr, stderr_chunks, "stderr")
+                    await proc.wait()
+        except TimeoutError:
+            # B.1: the call outran the wall clock. Kill the group, reap, and
+            # surface a timeout the agent can react to (NOT a normal result).
+            await kill_process_group(proc, signal.SIGKILL)
+            with contextlib.suppress(Exception):
+                await proc.wait()
+            raise ToolAborted("timed-out") from None
     finally:
         with contextlib.suppress(ValueError):
             ctx.running_processes.remove(proc)

@@ -178,6 +178,20 @@ def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
     assert ctx.running_processes == []
 
 
+def test_bash_wall_clock_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # B.1: a command sleeping past the wall-clock is killed and raises ToolAborted
+    # ('timed-out'), asserted at the TOOL layer. Inject a short timeout.
+    import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools.limits import ToolAborted
+
+    monkeypatch.setattr(bash_mod, "TOOL_WALLCLOCK_TIMEOUT_S", 0.3)
+    ctx = _ctx(tmp_path)
+    with pytest.raises(ToolAborted) as ei:
+        _run_bash(ctx, {"command": "sleep 30"})
+    assert ei.value.reason == "timed-out"
+    assert ctx.running_processes == []
+
+
 def test_bash_normal_output_uncapped(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     out = json.loads(_run_bash(ctx, {"command": "echo hello"}))
