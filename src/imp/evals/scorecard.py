@@ -27,6 +27,7 @@ class Scorecard:
     q4: dict[str, Any]
     provenance: dict[str, Any]
     notes: list[str] = field(default_factory=list)
+    runs_shas: set[str] = field(default_factory=set)
 
 
 def _group(grades: Sequence[GradeResult]) -> dict[tuple[str, str], list[GradeResult]]:
@@ -69,6 +70,7 @@ def build_scorecard(
     paired_overlap: dict[str, Any] | None = None,
     fastpath: dict[str, Any] | None = None,
     min_diffs_available: int = 0,
+    runs_shas: set[str] | None = None,
 ) -> Scorecard:
     grouped = _group(grades)
     cells = [
@@ -140,6 +142,7 @@ def build_scorecard(
         q4=q4,
         provenance=provenance if provenance is not None else stamp(prompt_dirs=prompt_dirs),
         notes=notes,
+        runs_shas=runs_shas or set(),
     )
 
 
@@ -147,6 +150,10 @@ def render_markdown(sc: Scorecard) -> str:
     lines = ["# imp review-eval scorecard", ""]
     lines.append("## Provenance")
     lines.append(f"- imp commit: `{sc.provenance.get('imp_commit_sha')}`")
+    if sc.runs_shas:
+        runs = ", ".join(sorted(sc.runs_shas))
+        head = sc.provenance.get("imp_commit_sha")
+        lines.append(f"- cached runs produced at: `{runs}` (rendered at HEAD `{head}`)")
     for name, h in sc.provenance.get("prompt_hashes", {}).items():
         lines.append(f"- prompt `{name}`: `{h[:16]}`")
     lines.append("")
