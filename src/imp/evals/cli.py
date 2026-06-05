@@ -20,7 +20,17 @@ from imp.evals.models import ExpectedFinding, Fixture, Variant
 from imp.evals.pricing import PRICING_VERSION
 
 _CURATED = Path("src/imp/evals/data/curated")
+_MINED = Path("src/imp/evals/data/mined")
 _DEFAULT_CORPUS_GLOB = "/home/jpoimboe/.claude/projects/-home-jpoimboe-imp/*.jsonl"
+
+# Stage 2 (M3b): paired Q1/Q4 runs once per OpenAI model (each call binds all
+# three reviewer roles to that model). The claude_code pair is read on the Q3
+# RECALL axis only ($0 distorts the $-normalized ranking) and is not paired here.
+_PAIRED_MODELS = [
+    ("openai", "gpt-5.5"),
+    ("openai", "gpt-5.3-codex"),
+    ("openai", "gpt-5.4-mini"),
+]
 
 
 def _resolve_sha_mismatch(
@@ -77,6 +87,12 @@ def _curated_fixtures() -> list[Fixture]:
     return []
 
 
+def _mined_fixtures() -> list[Fixture]:
+    if _MINED.exists():
+        return load_fixtures(_MINED)
+    return []
+
+
 def cmd_dry_run(args: argparse.Namespace) -> int:
     from imp.evals.sweep import plan_sweep
 
@@ -128,34 +144,39 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     from imp.evals.analysis import run_q1_q4
 
-    fixture_list = fixtures_for_run
-    # Per-model Q1/Q4 SHAPE is landed here; EXECUTION stays at one model this
-    # sweep (S2): on the curated-only set both verdicts read insufficient-diffs
-    # and paired runs are not persisted, so the trio buys no decision yet. Stage 2
-    # flips this list to the OpenAI trio when the mined set crosses min_diff_count.
-    paired_models = [("anthropic", "claude-sonnet-4-6")]
+    # Q3 sweep + scorecard stay on the CURATED set; the paired Q1/Q4 pool ADDS the
+    # mined diffs (mined+curated) so n_diffs is non-trivial. Both verdicts still
+    # read insufficient-diffs while n_diffs < min_diff_count()=93 (spec M-c: we do
+    # NOT lower the gate); the RAW numbers rendered beside them are the read.
+    #
+    # The paired path is UNCACHED (run_paired has no cache) and re-bills every run —
+    # the dominant recurring Stage 2 cost. --skip-paired runs ONLY the cached Q3
+    # sweep, so routine Q3 re-renders don't drag it along. When skipped, Q1/Q4
+    # render the empty "insufficient-diffs (no paired runs supplied)" path.
     q1_by_model: dict[str, Any] = {}
     q4_by_model: dict[str, Any] = {}
-    for provider, model in paired_models:
-        q1, q4 = run_q1_q4(
-            control_root,
-            fixture_list,
-            {role: (provider, model) for role in
-             ("spec-task-reviewer", "quality-reviewer", "code-reviewer")},
-            judge_provider=args.judge_provider,
-            judge_model=args.judge_model,
-        )
-        q1_by_model[f"{provider}/{model}"] = q1
-        q4_by_model[f"{provider}/{model}"] = q4
+    if not getattr(args, "skip_paired", False):
+        paired_fixtures = _mined_fixtures() + fixtures_for_run
+        for provider, model in _PAIRED_MODELS:
+            q1, q4 = run_q1_q4(
+                control_root,
+                paired_fixtures,
+                {role: (provider, model) for role in
+                 ("spec-task-reviewer", "quality-reviewer", "code-reviewer")},
+                judge_provider=args.judge_provider,
+                judge_model=args.judge_model,
+            )
+            q1_by_model[f"{provider}/{model}"] = q1
+            q4_by_model[f"{provider}/{model}"] = q4
 
     from imp.evals.scorecard import build_scorecard, render_markdown
     from imp.evals.sweep import collect_dollars
 
-    fixtures = {f.id: f for f in fixture_list}
+    fixtures = {f.id: f for f in fixtures_for_run}
     sc = build_scorecard(
         grades=grades,
         fixtures=fixtures,
-        dollars_by_cell=collect_dollars(cache_dir, variants, fixture_list, prov),
+        dollars_by_cell=collect_dollars(cache_dir, variants, fixtures_for_run, prov),
         prompt_dirs=prompt_dirs,
         provenance=run_stamp,
         paired_overlap=q1_by_model,
@@ -344,6 +365,9 @@ def add_eval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     pr.add_argument("--judge-provider", default="anthropic")
     pr.add_argument("--judge-model", default="claude-opus-4-8")
     pr.add_argument("--concurrency", type=int, default=4)
+    pr.add_argument("--skip-paired", action="store_true",
+                    help="run only the cached Q3 sweep; skip the uncached, "
+                         "re-billed-every-run Q1/Q4 paired path")
     pr.set_defaults(func=cmd_run)
 
     pm = actions.add_parser("mine", help="Mine .claude session logs into fixtures")
