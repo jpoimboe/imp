@@ -13,7 +13,7 @@ from pathlib import Path
 
 from imp.evals.cache import load_run, store_run
 from imp.evals.grader import grade
-from imp.evals.models import Fixture, GradeResult, Telemetry, Variant
+from imp.evals.models import PER_TASK_STRUCTURES, Fixture, GradeResult, Telemetry, Variant
 from imp.evals.pricing import dollars_for
 from imp.evals.provenance import imp_commit_sha
 from imp.evals.structures import run_variant
@@ -101,6 +101,11 @@ def _run_fixture_cells(
     """All cells for ONE fixture, run sequentially (shared worktree slug)."""
     grades: list[GradeResult] = []
     for v in variants:
+        # Per-task variants have nothing to review on a single-task fixture; skip
+        # BEFORE run_variant so we produce no cell — running it would degrade to the
+        # whole-change path and duplicate baseline-monolithic at full cost.
+        if v.structure in PER_TASK_STRUCTURES and fixture.tasks == ():
+            continue
         for repeat in range(v.n_repeats):
             rr = run_variant(control_root, v, fixture, repeat_index=repeat)
             store_run(cache_dir, rr, provenance, imp_commit_sha=sha)
