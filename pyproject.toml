@@ -59,3 +59,10 @@ known-first-party = ["imp"]
 python_version = "3.11"
 strict = true
 warn_unreachable = true
+
+# The codex provider SDK is an optional runtime dependency (guarded by
+# try/except ImportError); it is not installed in the dev/test env, so mypy
+# can't resolve it. Treat it as a missing import rather than a hard error.
+[[tool.mypy.overrides]]
+module = "openai_codex_sdk"
+ignore_missing_imports = true

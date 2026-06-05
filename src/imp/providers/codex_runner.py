@@ -8,17 +8,30 @@ process_event() for basic event types. The full run() is added in later tasks.
 from __future__ import annotations
 
 import contextlib
+import os
+import secrets
 import shutil
 import subprocess
+import tempfile
 from collections.abc import AsyncGenerator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from imp.agents.runner import AgentInvocation
+from imp.agents.runner import AgentInvocation, Event
 from imp.agents.tools.context import ToolContext, terminate_running_processes
+from imp.engine.schema import validate_agent_output
+from imp.engine.state import JsonlEventLog
 from imp.providers import errors as perr
-from imp.providers.codex_config import AuthMode, detect_auth_mode
+from imp.providers.codex_config import (
+    AuthMode,
+    detect_auth_mode,
+    provision_codex_home,
+    seed_auth,
+    sweep_stale_codex_homes,
+    teardown_codex_home,
+)
+from imp.providers.codex_mcp import RunState, start_server
 
 # ── PreflightError ────────────────────────────────────────────────────────────
 
@@ -147,10 +160,288 @@ class CodexAgentRunner:
         self._ctx: ToolContext | None = None
         self._abort_controller: Any = None
 
-    async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Any, None]:
-        # Filled in by Tasks 27+.
-        raise NotImplementedError("CodexAgentRunner.run() not yet implemented")
-        yield {}  # type: ignore[unreachable]  # pragma: no cover
+    async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        try:
+            async for ev in self._run_loop(invocation):
+                yield ev
+        except PreflightError as exc:
+            yield {"type": "error", "payload": {
+                "category": exc.category, "kind": "preflight",
+                "message": str(exc), "detail": {}}}
+            return
+        except perr.ProviderError as exc:
+            yield perr.make_error_event(exc)
+            return
+        except Exception as exc:
+            yield perr.make_unknown_error_event(exc)
+            return
+
+    async def _run_loop(
+        self, invocation: AgentInvocation,
+    ) -> AsyncGenerator[Event, None]:
+        elog = invocation.event_log or JsonlEventLog(invocation.events_path)
+        aid = invocation.agent_id or "step:unnamed"
+
+        # 1. Preflight (auth / *-codex / non-git cwd) — raises PreflightError.
+        canonical_auth = self._canonical_auth_path()
+        cwd = invocation.change_context.project_root
+        auth_mode = preflight(
+            model=self.model, cwd=cwd, canonical_auth=canonical_auth,
+            env=os.environ,
+        )
+
+        # 2. Build tools + ToolContext (mirror the claude_code runner exactly).
+        from imp.providers.claude_code import _build_tools
+        from imp.providers.resolve import spawn_subagent_via_registry
+        tools = _build_tools(invocation)
+        ctx = ToolContext(
+            project_root=cwd,
+            fs_permissions=invocation.fs_permissions,
+            events_path=invocation.events_path,
+            subagent_defs=invocation.subagent_defs,
+            provider_name=invocation.provider_name,
+            model_name=invocation.model_name,
+            parent_transcript_dir=invocation.transcript_dir,
+            interactive=invocation.interactive,
+        )
+        ctx.change_context = invocation.change_context
+        ctx.change_state = invocation.change_state
+        ctx.spawn_subagent = spawn_subagent_via_registry
+        ctx.resolved_tiers = invocation.resolved_tiers
+        ctx.subagent_depth = invocation.subagent_depth
+        ctx.coordinator = invocation.coordinator
+        ctx.tiers = invocation.tiers
+        ctx.lint_command = invocation.lint_command
+        ctx.test_command = invocation.test_command
+        ctx.non_interactive = invocation.non_interactive
+        ctx.event_log = elog
+        if self._user_input_fn is not None:
+            ctx.user_input_fn = self._user_input_fn
+        self._ctx = ctx
+
+        state = RunState(cap=invocation.max_tool_calls or 1000)
+        # Shared event-processing state (process_event keys).
+        proc_state: dict[str, Any] = {
+            "thread_id": None, "complete_step_args": None,
+            "complete_step_called": False, "native_violation": None,
+            "auth_mode": auth_mode, "pending_usage": None,
+        }
+
+        # 3. Stale-CODEX_HOME sweep (best-effort).
+        tmp_root = Path(tempfile.gettempdir())
+        sweep_stale_codex_homes(tmp_root=tmp_root, max_age_seconds=24 * 3600)
+
+        # 4. Take entry snapshot for the fail-closed revert mechanism.
+        entry_snapshot = take_snapshot(cwd)
+
+        # 5. Start the in-process MCP server on an ephemeral port.
+        bearer_token = secrets.token_urlsafe(24)
+        server_handle = await start_server(
+            tools=tools, ctx=ctx, state=state,
+            bearer_token=bearer_token, host="127.0.0.1",
+        )
+
+        # 5a. Imp-side server-start ping: a single bearer-auth'd HTTP probe
+        # against `server_handle.url` to fail fast before provisioning if imp
+        # can't reach its own server.
+        try:
+            await _ping_mcp_server(
+                url=server_handle.url, bearer_token=bearer_token,
+                timeout_seconds=2.0,
+            )
+        except Exception as ping_exc:
+            await server_handle.shutdown()
+            yield perr.make_error_event(perr.NetworkError(
+                (
+                    f"imp-side MCP server-start ping failed; codex would not "
+                    f"be able to reach the MCP endpoint either. "
+                    f"({type(ping_exc).__name__}: {ping_exc})"),
+                detail={"url": server_handle.url},
+            ))
+            return
+
+        # 6. Provision CODEX_HOME + config.toml + seed auth.
+        codex_home = provision_codex_home(
+            tmp_root=tmp_root, host=server_handle.host,
+            port=server_handle.port, bearer_env_var="IMP_MCP_TOKEN",
+        )
+        seed_auth(mode=auth_mode, canonical_path=canonical_auth,
+                  codex_home=codex_home, env=os.environ)
+
+        # 7. Run the SDK turn(s) and consume events.
+        try:
+            client = self._build_client(codex_home=codex_home,
+                                        bearer_token=bearer_token)
+            async for ev in self._drive_turns(
+                client=client, invocation=invocation, elog=elog,
+                aid=aid, ctx=ctx, state=state, proc_state=proc_state,
+                entry_snapshot=entry_snapshot,
+            ):
+                yield ev
+        finally:
+            # 8. Lifecycle teardown — runs on EVERY exit (success, error,
+            #    abort, interrupt). (Task 31 hardens this further.)
+            await server_handle.shutdown()
+            teardown_codex_home(
+                codex_home=codex_home, mode=auth_mode,
+                canonical_path=canonical_auth,
+                lock_path=canonical_auth.parent / ".imp-auth.lock",
+            )
+
+    def _canonical_auth_path(self) -> Path:
+        """The user's real `~/.codex/auth.json`. Test seam: a runner attribute
+        can override this for the auth fixture tests."""
+        override = getattr(self, "_canonical_auth_override", None)
+        if override is not None:
+            return Path(override)
+        return Path.home() / ".codex" / "auth.json"
+
+    def _build_client(self, *, codex_home: Path, bearer_token: str) -> Any:
+        """Construct the SDK `Codex` client. Tests inject a `client_factory`
+        callable that takes `options=` and returns a FakeCodex."""
+        if self._client_factory is not None:
+            return self._client_factory(options=None)
+        from openai_codex_sdk import (
+            Codex,
+            CodexOptions,
+        )
+
+        from imp.engine.env import overlay_engine_env
+        env = overlay_engine_env(os.environ, {
+            "CODEX_HOME": str(codex_home),
+            "IMP_MCP_TOKEN": bearer_token,
+        })
+        return Codex(CodexOptions(env=env))
+
+    async def _drive_turns(
+        self, *, client: Any, invocation: AgentInvocation, elog: Any,
+        aid: str, ctx: ToolContext, state: RunState, proc_state: dict[str, Any],
+        entry_snapshot: EntrySnapshot,
+    ) -> AsyncGenerator[Event, None]:
+        """Start a thread, run the streamed turn, consume events.
+
+        Tasks 28-31 layer in: completion contract nudges, dead-server race,
+        interactive tripwire. This task keeps a single autonomous turn with
+        inline cap-abort / native-violation / turn.failed / turn.completed
+        handling.
+        """
+        thread_options = self._build_thread_options()
+        if thread_options is None:
+            # SDK unavailable (test/fake path): start with no options.
+            thread = client.start_thread()
+        else:
+            try:
+                thread = client.start_thread(thread_options)
+            except TypeError:
+                # Fakes ignore the options arg.
+                thread = client.start_thread()
+        # Build prompt with anti-native-tool instruction prepended.
+        prompt = self._build_prompt(invocation.system_prompt)
+        # Run a single turn (autonomous; nudges are Task 28).
+        streamed = await thread.run_streamed(prompt)
+        # AbortController for interrupt() — tolerate a fake/SDK without one.
+        try:
+            from openai_codex_sdk import (
+                AbortController,
+            )
+            self._abort_controller = AbortController()
+        except ImportError:
+            self._abort_controller = None
+
+        async for event in streamed.events:
+            if self._cancel:
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "interrupted",
+                    "message": "runner cancelled by interrupt"}}
+                return
+            etype = getattr(event, "type", None)
+            process_event(event, elog=elog, agent_id=aid, state=proc_state,
+                          provider=invocation.provider_name, model=self.model)
+
+            # Cap trip from inside the MCP wrapper → abort the SDK + bail.
+            if state.abort_requested:
+                if self._abort_controller is not None:
+                    with contextlib.suppress(Exception):
+                        self._abort_controller.abort()
+                await terminate_running_processes(ctx, timeout=2.0)
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "tool_call_ceiling_exceeded",
+                    "ceiling": state.cap,
+                    "message":
+                        f"codex tool dispatch cap ({state.cap}) exceeded"}}
+                return
+
+            # Native-tool violation → fail-closed (autonomous): revert + bail.
+            if proc_state.get("native_violation") is not None:
+                restore_to_snapshot(ctx.project_root, entry_snapshot)
+                detail = proc_state["native_violation"]
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "native_tool_violation",
+                    "message": f"codex used a native {detail['kind']} tool; "
+                               f"worktree reverted to entry state.",
+                    "detail": detail}}
+                return
+
+            # turn.failed → categorize + bail.
+            if etype == "turn.failed":
+                exc = categorize_turn_failed(getattr(event, "error", {}) or {})
+                yield perr.make_error_event(exc)
+                return
+
+            if etype == "turn.completed":
+                # Completion contract (full nudge logic is Task 28).
+                if proc_state.get("complete_step_called"):
+                    args = proc_state.get("complete_step_args") or {}
+                    try:
+                        validate_agent_output(
+                            args, invocation.agent_def.output_schema)
+                    except Exception as ve:
+                        yield {"type": "error", "payload": {
+                            "category": "agent_output_missing",
+                            "kind": "output_validation",
+                            "message": str(ve)}}
+                        return
+                    yield {"type": "agent_output", "payload": args}
+                    return
+                # Not captured → autonomous run ⇒ agent_output_missing.
+                yield {"type": "error", "payload": {
+                    "category": "agent_output_missing",
+                    "kind": "no_complete_step",
+                    "message":
+                        "codex completed turn without calling complete_step"}}
+                return
+
+    def _build_thread_options(self) -> Any:
+        """ThreadOptions with the design's exact production flags. Lives in its
+        own method so the test seam can replace it without touching
+        `_drive_turns`. Returns None when the SDK is unavailable (test/fake
+        path) so `_drive_turns` starts the thread without options."""
+        try:
+            from openai_codex_sdk import (
+                ThreadOptions,
+            )
+        except ImportError:
+            return None
+        return ThreadOptions(
+            model=self.model,
+            sandbox_mode="danger-full-access",
+            approval_policy="never",
+            web_search_enabled=False,
+            network_access_enabled=False,
+        )
+
+    def _build_prompt(self, system_prompt: str) -> str:
+        """Prepend the anti-native-tool instruction (design: soft enforcement
+        backstopped by the tripwire)."""
+        return (
+            system_prompt
+            + "\n\n"
+            + "IMPORTANT — Tool policy:\n"
+            + "- Use ONLY the `mcp__imp__*` tools exposed via the MCP server.\n"
+            + "- NEVER call native `apply_patch` or any other built-in tool.\n"
+            + "- Finish the task by calling the `complete_step` tool with the\n"
+            + "  structured answer.\n"
+        )
 
     async def interrupt(self) -> None:
         """Cancel the run — three effects:
@@ -326,3 +617,52 @@ def categorize_turn_failed(error: dict[str, Any] | Any) -> perr.ProviderError:
     if kind == "network" or "timeout" in message.lower() or "network" in message.lower():
         return perr.NetworkError(f"codex: {message[:200]}")
     return perr.ApiError(f"codex: {message[:200]}")
+
+
+# ── Imp-side MCP server-start ping ─────────────────────────────────────────────
+
+
+async def _ping_mcp_server(
+    *, url: str, bearer_token: str, timeout_seconds: float,
+) -> None:
+    """Imp-side server-start ping (spec run() flow step 2).
+
+    Sends a single bearer-auth'd POST to the MCP endpoint and treats any HTTP
+    response (even a 4xx body — initialize handshake details vary by mcp
+    version) as evidence the server is reachable. A 401 here would mean our
+    bearer-token gate is mis-wired; anything else (200/202/422/501) proves
+    reachability. Connection refused / DNS / timeout → raise so `run()`
+    fails fast with `network` ProviderError.
+
+    Bounded retry: up to `timeout_seconds` wall total, in 100 ms slices, so a
+    slow uvicorn startup (cold-import cost of starlette + mcp) doesn't
+    false-negative the ping.
+    """
+    import asyncio
+
+    import httpx
+    deadline = asyncio.get_event_loop().time() + timeout_seconds
+    last_exc: Exception | None = None
+    while asyncio.get_event_loop().time() < deadline:
+        try:
+            async with httpx.AsyncClient(timeout=0.5) as client:
+                r = await client.post(
+                    url,
+                    json={"jsonrpc": "2.0", "id": 0,
+                          "method": "initialize", "params": {}},
+                    headers={"Authorization": f"Bearer {bearer_token}"},
+                )
+                if r.status_code == 401:
+                    raise RuntimeError(
+                        "bearer-token gate rejected imp's own ping — "
+                        "middleware is mis-wired")
+                return
+        except (httpx.ConnectError, httpx.ReadError, httpx.ConnectTimeout,
+                httpx.ReadTimeout) as exc:
+            last_exc = exc
+            await asyncio.sleep(0.1)
+        except Exception:
+            raise
+    raise RuntimeError(
+        f"MCP endpoint not reachable within {timeout_seconds}s "
+        f"({last_exc!r})")
