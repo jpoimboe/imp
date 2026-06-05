@@ -206,6 +206,32 @@ def process_event(
                 auth_mode=state.get("auth_mode"),
             )
             return
+        if itype == "mcp_tool_call":
+            from imp.agents.runner import ToolResultBlock, ToolUseBlock
+            name = getattr(item, "name", "") or ""
+            args = getattr(item, "arguments", None) or {}
+            call_id = getattr(item, "id", "") or ""
+            elog.append_tool_call(
+                agent_id=agent_id,
+                block=ToolUseBlock(id=call_id, name=name, input=args),
+            )
+            result = getattr(item, "result", None)
+            content = result if isinstance(result, str) else (
+                "" if result is None else str(result)
+            )
+            status = getattr(item, "status", "completed")
+            is_error = status not in ("completed", "succeeded")
+            elog.append_tool_result(
+                agent_id=agent_id,
+                block=ToolResultBlock(
+                    tool_use_id=call_id, content=content, is_error=is_error,
+                ),
+            )
+            if name == "complete_step":
+                # Secondary capture path (idempotent — in-process wrapper sets it too).
+                state["complete_step_args"] = dict(args)
+                state["complete_step_called"] = True
+            return
         # Other item types mapped in later tasks; fall through to default arm.
         elog.append(agent_id=agent_id, type="runner_warning",
                     payload={"message": f"unhandled codex item type: {itype!r}"})
