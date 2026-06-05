@@ -161,6 +161,18 @@ def test_skill_args_event_still_records_name_only(tmp_path: Path) -> None:
     assert loads[0]["payload"] == {"name": "refactor", "source": "human"}
 
 
+def test_exit_and_quit_words_request_save_and_exit(tmp_path: Path) -> None:
+    # `exit` / `quit` typed at the prompt are the save-and-exit verbs (equivalent
+    # to Ctrl-D), surfaced as EOFError to the run loop's existing EOFError handler.
+    from imp.cli.slash import ask_line_with_slash
+
+    for i, word in enumerate(("exit", "quit", "  EXIT  ")):   # case/space-insensitive
+        change = _FakeChange(tmp_path / str(i))
+        prompt = _FakePrompt([word])
+        with pytest.raises(EOFError):
+            anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
+
+
 def test_one_blank_line_before_prompt_zero_after(tmp_path: Path,
                                                  capsys: pytest.CaptureFixture[str]) -> None:
     """slash.ask_line_with_slash prints exactly one blank line BEFORE showing

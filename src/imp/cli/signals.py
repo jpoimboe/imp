@@ -1,15 +1,18 @@
-"""Signal handling: pause-and-exit on Ctrl+C / Ctrl+D / SIGTERM.
+"""Signal handling: pause coordination on Ctrl+C / Ctrl+D / SIGTERM.
 
-The executor naturally yields control between events (it iterates the runner's
-generator and writes the log). Catching KeyboardInterrupt at the outer
-_cmd_new/_cmd_resume frame is sufficient — Python's default SIGINT raises in
-the main thread on the next bytecode boundary, interrupting whatever runner
-code is in flight (including blocking I/O).
+CORRECTION (was wrong): `run_signal_receiver` uses
+`anyio.open_signal_receiver(SIGINT, SIGTERM)` (:118), which INTERCEPTS SIGINT —
+Python does NOT raise KeyboardInterrupt on the main thread for it. That is the
+very reason a synchronous, loop-blocking tool swallows Ctrl-C: the receiver is an
+async task that needs the event loop to run, and a CPU-bound sync tool never
+yields it. In-process tools therefore cooperate via `ctx.coordinator.should_pause`
+at the bounded-read checkpoint (Part C-i); subprocesses are torn down via the
+process group (Part C-ii); the HTTP providers cancel their in-flight request via
+a cancel scope (Part C-iii).
 
-Ctrl+D arrives from prompt_toolkit as EOFError. Handled identically.
-
-Tool-kill escalation (Task 13) happens via the process-group mechanism
-installed when imp starts.
+prompt_toolkit's `prompt_async(handle_sigint=True)` installs its OWN SIGINT
+handler while the interactive prompt is active and raises KeyboardInterrupt there
+— handled in the REPL / cli.main, separately from this coordinator.
 """
 
 from __future__ import annotations
@@ -70,7 +73,7 @@ class InterruptCoordinator:
         """interrupt_fn is an `async def () -> None` callable. All three V1
         runners (AnthropicAgentRunner / OpenAIAgentRunner /
         ClaudeCodeAgentRunner) declare `async def interrupt(self) -> None`
-        per the AgentRunner protocol (`src/imp/agents/runner.py:85`).
+        per the AgentRunner protocol (`src/imp/agents/runner.py:172`).
 
         The run-level attach/detach API; the per-drive wrapper is
         `runner_attached` (used by `drive_invocation`), which the executor and
