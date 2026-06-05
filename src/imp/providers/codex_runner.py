@@ -160,6 +160,10 @@ class CodexAgentRunner:
         self._cancel = False
         self._ctx: ToolContext | None = None
         self._abort_controller: Any = None
+        # Test seam: overrides the canonical ~/.codex/auth.json path. Read by
+        # `_canonical_auth_path()`; declared here so the attribute the tests set
+        # is part of the class contract.
+        self._canonical_auth_override: Path | None = None
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         try:

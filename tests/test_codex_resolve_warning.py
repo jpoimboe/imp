@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from imp.agents.runner import AgentInvocation, AgentRunner
 from imp.engine.types import (
     AgentDef,
     OutputField,
@@ -27,12 +29,12 @@ class _FakeProvider:
     def __init__(self, name: str, model: str) -> None:
         self.name, self.model = name, model
 
-    def create_runner(self, invocation):
+    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
         raise NotImplementedError
 
 
 @pytest.fixture(autouse=True)
-def _providers():
+def _providers() -> Iterator[None]:
     resolve.reset_providers_for_tests()
     resolve.register_provider(
         "claude_code", env_check=lambda: True,
@@ -61,7 +63,7 @@ def _step(name: str, tier: str, differ_from: str | None = None) -> Step:
         file=Path(f"agents/{name}.md"), tier=tier, differ_from=differ_from)
 
 
-def _wf(steps, agents) -> Workflow:
+def _wf(steps: list[Step], agents: dict[str, AgentDef]) -> Workflow:
     return Workflow(
         name="w", description="",
         phases=(Phase(name="p", steps=tuple(steps), source=_SRC),),
@@ -70,7 +72,7 @@ def _wf(steps, agents) -> Workflow:
         agents=agents, workflow_dir=Path("."), source=_SRC)
 
 
-def _cfg(providers) -> Config:
+def _cfg(providers: tuple[str, ...]) -> Config:
     return Config(
         providers=tuple(providers),
         tiers={

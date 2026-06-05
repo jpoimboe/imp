@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from imp.engine.state import InMemoryEventLog
 from imp.providers.codex_runner import process_event
@@ -12,7 +13,7 @@ from tests.codex_fakes import (
 
 def test_web_search_emits_runner_warning() -> None:
     elog = InMemoryEventLog()
-    state: dict = {}
+    state: dict[str, Any] = {}
     process_event(web_search("hot tip"), elog=elog, agent_id="step:a",
                   state=state, provider="codex", model="gpt-5.5")
     warns = [e for e in elog.read() if e["type"] == "runner_warning"]
@@ -24,7 +25,7 @@ def test_unknown_item_type_logs_fallback_does_not_raise() -> None:
     class _Mystery:
         type: str = "todo_list"
     elog = InMemoryEventLog()
-    state: dict = {}
+    state: dict[str, Any] = {}
     # MUST NOT raise on unknown item types (L3 default arm).
     process_event(FakeItemEvent(type="item.completed", item=_Mystery()),
                   elog=elog, agent_id="step:a", state=state,
@@ -35,7 +36,7 @@ def test_unknown_item_type_logs_fallback_does_not_raise() -> None:
 
 def test_file_change_marks_native_violation_on_state() -> None:
     elog = InMemoryEventLog()
-    state: dict = {"native_violation": None}
+    state: dict[str, Any] = {"native_violation": None}
     process_event(file_change("/etc/passwd"), elog=elog, agent_id="step:a",
                   state=state, provider="codex", model="gpt-5.5")
     assert state["native_violation"] is not None
@@ -45,7 +46,7 @@ def test_file_change_marks_native_violation_on_state() -> None:
 
 def test_command_execution_marks_native_violation_on_state() -> None:
     elog = InMemoryEventLog()
-    state: dict = {"native_violation": None}
+    state: dict[str, Any] = {"native_violation": None}
     process_event(command_execution("rm -rf /"), elog=elog, agent_id="step:a",
                   state=state, provider="codex", model="gpt-5.5")
     assert state["native_violation"] is not None

@@ -135,9 +135,9 @@ async def test_server_shutdown_runs_when_provisioning_fails(
     inv = _inv(tmp_path)
 
     shutdown_calls: list[int] = []
-    real_start_server = None
-    from imp.providers import codex_runner as mod
-    real_start_server = mod.start_server
+    # Import from the defining module (codex_runner only re-imports it); the
+    # patch target below still points at the codex_runner-bound name.
+    from imp.providers.codex_mcp import start_server as real_start_server
 
     async def _tracked_start_server(**kwargs: Any) -> Any:
         handle = await real_start_server(**kwargs)

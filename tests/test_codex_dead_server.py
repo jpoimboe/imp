@@ -15,11 +15,11 @@ def anyio_backend() -> str:
 
 @pytest.mark.anyio
 async def test_dead_server_task_first_classifies_network() -> None:
-    async def _slow_consume():
+    async def _slow_consume() -> str:
         await asyncio.sleep(5.0)
         return "consume-done"
 
-    async def _server_dies():
+    async def _server_dies() -> None:
         await asyncio.sleep(0.05)
         raise RuntimeError("uvicorn fell over")
 
@@ -40,11 +40,11 @@ async def test_dead_server_task_first_classifies_network() -> None:
 
 @pytest.mark.anyio
 async def test_consume_finishes_first_returns_completed() -> None:
-    async def _fast_consume():
+    async def _fast_consume() -> str:
         await asyncio.sleep(0.05)
         return "done"
 
-    async def _server_runs():
+    async def _server_runs() -> None:
         await asyncio.sleep(5.0)
 
     consume = asyncio.create_task(_fast_consume())

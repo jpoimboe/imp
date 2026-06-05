@@ -21,6 +21,7 @@ continues.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -77,7 +78,8 @@ def _agent_def() -> AgentDef:
 
 
 def _invocation(
-    tmp_path: Path, *, interactive: bool, user_input_fn: object,
+    tmp_path: Path, *, interactive: bool,
+    user_input_fn: Callable[[str], str | Awaitable[str]] | None,
     event_log: object,
 ) -> AgentInvocation:
     return AgentInvocation(
