@@ -59,19 +59,26 @@ def _iter_files(target: Path) -> Iterator[Path]:
 
 @imp_tool(
     name="glob",
-    description="List file paths matching a virtual-prefixed glob (e.g. /project/**/*.py).",
+    description=(
+        "List file paths matching a virtual-prefixed glob (e.g. /project/**/*.py). "
+        "Skips .imp/ and .git/."
+    ),
 )
-def glob(ctx: ToolContext, pattern: str) -> str:
+async def glob(ctx: ToolContext, pattern: str) -> str:
     prefix, rel = _virtual_prefix(pattern)
     ctx.check_fs_permission("read", prefix + "/")
     root = _real_root(ctx, prefix)
-    matches = sorted(root.glob(rel))
-    if not matches:
-        return "(no matches)"
+    coordinator = getattr(ctx, "coordinator", None)
+    deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
+
     out: list[str] = []
-    for p in matches:
+    for p in sorted(root.glob(rel)):
+        await tool_checkpoint(coordinator, deadline)
+        rel_parts = p.relative_to(root).parts
+        if any(part in EXCLUDED_DIRS for part in rel_parts):
+            continue
         out.append(f"{prefix}/{p.relative_to(root).as_posix()}")
-    return "\n".join(out)
+    return "\n".join(out) if out else "(no matches)"
 
 
 @imp_tool(
@@ -129,6 +136,9 @@ async def grep(ctx: ToolContext, pattern: str, path: str = "/project") -> str:
 
 @imp_tool(name="ls", description="List directory contents at a virtual path.")
 def ls(ctx: ToolContext, path: str) -> str:
+    # NOTE: unlike grep/glob, ls does NOT exclude .imp/.git — it lists one level
+    # of NAMES only (no recursion, no reads), so it cannot reproduce the runaway
+    # and showing the control dirs as entries is intentional.
     prefix, rel = _virtual_prefix(path)
     ctx.check_fs_permission("read", path)
     root = _real_root(ctx, prefix)

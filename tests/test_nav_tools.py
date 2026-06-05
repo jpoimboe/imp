@@ -118,3 +118,26 @@ def test_grep_still_finds_normal_matches(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("def foo():\n    pass\n")
     out = _grep(_ctx(tmp_path), pattern=r"def foo")
     assert "a.py:1:def foo():" in out
+
+
+def test_glob_excludes_imp_and_git(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("x")
+    (tmp_path / ".imp").mkdir()
+    (tmp_path / ".imp" / "events.jsonl").write_text("x")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("x")
+
+    out = _glob(_ctx(tmp_path), pattern="/project/**/*")
+
+    assert "a.py" in out
+    assert ".imp" not in out
+    assert ".git" not in out
+
+
+def test_glob_aborts_promptly_on_pause(tmp_path: Path) -> None:
+    for i in range(50):
+        (tmp_path / f"f{i}.txt").write_text("x")
+    ctx = _ctx(tmp_path, coord=_Coord(should_pause=True))
+    with pytest.raises(ToolAborted) as ei:
+        _glob(ctx, pattern="/project/**/*")
+    assert ei.value.reason == "interrupted"
