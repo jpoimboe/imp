@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio
 import pytest
 
 import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
 from imp.agents.permissions import PermissionDenied
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.limits import ToolAborted
 from imp.engine.types import FsRule, SourceLoc
 
 
@@ -21,25 +23,62 @@ def _allow_all(*ops: str) -> tuple[FsRule, ...]:
     ),)
 
 
-def _ctx(tmp_path: Path, *ops: str) -> ToolContext:
-    return ToolContext(
+class _Coord:
+    def __init__(self, should_pause: bool = False) -> None:
+        self.should_pause = should_pause
+
+
+def _ctx(tmp_path: Path, *ops: str, coord: object | None = None) -> ToolContext:
+    ctx = ToolContext(
         project_root=tmp_path,
         fs_permissions=_allow_all(*ops) if ops else (),
         events_path=tmp_path / "events.jsonl",
     )
+    ctx.coordinator = coord
+    return ctx
+
+
+def _read_file(ctx: ToolContext, **args: object) -> str:
+    return anyio.run(get_registry()["read_file"].async_invoke, ctx, args)
 
 
 def test_read_file_returns_contents(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("hello")
-    out = get_registry()["read_file"].invoke(_ctx(tmp_path, "read"), {"path": "/project/a.txt"})
+    out = _read_file(_ctx(tmp_path, "read"), path="/project/a.txt")
     assert out == "hello"
 
 
 def test_read_file_scratch_returns_dict_value(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, "read")
     ctx.scratch["/scratch/x"] = "from-memory"
-    out = get_registry()["read_file"].invoke(ctx, {"path": "/scratch/x"})
+    out = _read_file(ctx, path="/scratch/x")
     assert out == "from-memory"
+
+
+def test_read_file_truncates_huge_file_at_output_cap(tmp_path: Path) -> None:
+    from imp.agents.tools.limits import TOOL_OUTPUT_CAP_BYTES
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"z" * (TOOL_OUTPUT_CAP_BYTES * 4))   # 200 KB
+    out = _read_file(_ctx(tmp_path, "read"), path="/project/big.bin")
+    assert "[output truncated at 50 KB]" in out
+    # Bounded to the 50 KB head cap + the marker — NOT the whole 200 KB.
+    assert len(out) <= TOOL_OUTPUT_CAP_BYTES + 100
+
+
+def test_read_file_small_unchanged(tmp_path: Path) -> None:
+    (tmp_path / "s.txt").write_text("hello world")
+    out = _read_file(_ctx(tmp_path, "read"), path="/project/s.txt")
+    assert out == "hello world"
+
+
+def test_read_file_aborts_on_pause(tmp_path: Path) -> None:
+    from imp.agents.tools.limits import TOOL_OUTPUT_CAP_BYTES
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"z" * (TOOL_OUTPUT_CAP_BYTES * 4))
+    ctx = _ctx(tmp_path, "read", coord=_Coord(should_pause=True))
+    with pytest.raises(ToolAborted) as ei:
+        _read_file(ctx, path="/project/big.bin")
+    assert ei.value.reason == "interrupted"
 
 
 def test_write_file_creates_file_and_dirs(tmp_path: Path) -> None:
