@@ -53,7 +53,7 @@ def cmd_dry_run(args: argparse.Namespace) -> int:
     plan = plan_sweep(
         _default_variants(), _curated_fixtures(),
         judge_provider=getattr(args, "judge_provider", "anthropic"),
-        judge_model=getattr(args, "judge_model", "claude-opus-4-7"),
+        judge_model=getattr(args, "judge_model", "claude-opus-4-8"),
     )
     print(
         f"matrix: {plan.n_cells} cells, {plan.n_agent_runs} reviewer runs, "
@@ -238,7 +238,7 @@ def add_eval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
 
     pr = actions.add_parser("run", help="Run the gated sweep and write a scorecard")
     pr.add_argument("--judge-provider", default="anthropic")
-    pr.add_argument("--judge-model", default="claude-opus-4-7")
+    pr.add_argument("--judge-model", default="claude-opus-4-8")
     pr.add_argument("--concurrency", type=int, default=4)
     pr.set_defaults(func=cmd_run)
 
@@ -254,11 +254,11 @@ def add_eval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         "scorecard", help="Re-render the scorecard from cached runs (no reviewer sweep)"
     )
     ps.add_argument("--judge-provider", default="anthropic")
-    ps.add_argument("--judge-model", default="claude-opus-4-7")
+    ps.add_argument("--judge-model", default="claude-opus-4-8")
     ps.set_defaults(func=cmd_scorecard)
 
     pc = actions.add_parser("calibrate", help="Run the judge calibration hop on judge_items.json")
     pc.add_argument("--judge-items", default="src/imp/evals/data/calibration/judge_items.json")
-    pc.add_argument("--judge-provider", default="openai")  # cross-vendor from Anthropic reviewers
-    pc.add_argument("--judge-model", default="gpt-5.2")
+    pc.add_argument("--judge-provider", default="anthropic")
+    pc.add_argument("--judge-model", default="claude-opus-4-8")  # the calibrated judge (README)
     pc.set_defaults(func=cmd_calibrate)

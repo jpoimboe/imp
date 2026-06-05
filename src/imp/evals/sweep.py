@@ -45,7 +45,7 @@ def plan_sweep(
     fixtures: list[Fixture],
     *,
     judge_provider: str = "anthropic",
-    judge_model: str = "claude-opus-4-7",
+    judge_model: str = "claude-opus-4-8",
 ) -> SweepPlan:
     """Dry-run: matrix size + dollar estimate (reviewer runs AND judge calls), no
     model calls. The judge fires once per expected finding per cell — omitting it
