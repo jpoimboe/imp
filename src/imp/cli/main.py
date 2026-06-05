@@ -597,6 +597,18 @@ def _cmd_log(args: argparse.Namespace) -> int:
     return 0
 
 
+def _last_nonempty_line(data: bytes) -> bytes | None:
+    """Last non-empty line of `data` with trailing whitespace removed, or None
+    when there is no non-empty line. Avoids splitting the whole buffer: a single
+    rstrip + rfind, used by the journal path (full blob already in memory) and
+    by the filesystem tail reader."""
+    stripped = data.rstrip()
+    if not stripped:
+        return None
+    nl = stripped.rfind(b"\n")
+    return stripped[nl + 1:]
+
+
 def _format_last_timestamp(text: str) -> str:
     """Local-time YYYY-MM-DD HH:MM:SS of the last event line in `text`, or '-'
     when the text is empty / has a malformed trailing line."""
