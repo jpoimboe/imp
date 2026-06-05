@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 from imp.engine.worktree import find_control_root
 from imp.evals.fixtures import load_fixtures
@@ -94,18 +95,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     from imp.evals.analysis import run_q1_q4
 
     fixture_list = _curated_fixtures()
-    paired_model = ("anthropic", "claude-sonnet-4-6")
-    q1, q4 = run_q1_q4(
-        control_root,
-        fixture_list,
-        {
-            "spec-task-reviewer": paired_model,
-            "quality-reviewer": paired_model,
-            "code-reviewer": paired_model,
-        },
-        judge_provider=args.judge_provider,
-        judge_model=args.judge_model,
-    )
+    # Per-model Q1/Q4 SHAPE is landed here; EXECUTION stays at one model this
+    # sweep (S2): on the curated-only set both verdicts read insufficient-diffs
+    # and paired runs are not persisted, so the trio buys no decision yet. Stage 2
+    # flips this list to the OpenAI trio when the mined set crosses min_diff_count.
+    paired_models = [("anthropic", "claude-sonnet-4-6")]
+    q1_by_model: dict[str, Any] = {}
+    q4_by_model: dict[str, Any] = {}
+    for provider, model in paired_models:
+        q1, q4 = run_q1_q4(
+            control_root,
+            fixture_list,
+            {role: (provider, model) for role in
+             ("spec-task-reviewer", "quality-reviewer", "code-reviewer")},
+            judge_provider=args.judge_provider,
+            judge_model=args.judge_model,
+        )
+        q1_by_model[f"{provider}/{model}"] = q1
+        q4_by_model[f"{provider}/{model}"] = q4
 
     from imp.evals.scorecard import build_scorecard, render_markdown
     from imp.evals.sweep import collect_dollars
@@ -117,8 +124,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         dollars_by_cell=collect_dollars(cache_dir, variants, fixture_list, prov),
         prompt_dirs=prompt_dirs,
         provenance=run_stamp,
-        paired_overlap=q1,
-        fastpath=q4,
+        paired_overlap=q1_by_model,
+        fastpath=q4_by_model,
     )
     out = control_root / ".imp" / "eval-scorecard.md"
     out.write_text(render_markdown(sc))

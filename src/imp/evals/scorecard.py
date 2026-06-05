@@ -89,9 +89,10 @@ def build_scorecard(
             f"Q2 down-ranked: {n_cc} cross-cutting fixture(s) < floor {CROSS_CUTTING_FLOOR}."
         )
 
-    # Q1 / Q4 use the paired-overlap / fast-path inputs the caller computed
-    q1 = paired_overlap or {"verdict": "insufficient-diffs", "reason": "no paired runs supplied"}
-    q4 = fastpath or {"verdict": "insufficient-diffs", "reason": "no fast-path comparison supplied"}
+    # Q1 / Q4 are now PER-MODEL maps {model_id: result}. Empty == no paired runs
+    # supplied (the curated-only sweep does not execute them; Stage 2 does).
+    q1 = dict(paired_overlap or {})
+    q4 = dict(fastpath or {})
 
     # Q3 ($-normalized): cheapest cell per blocking-recall point
     q3_rows = [
@@ -125,8 +126,12 @@ def render_markdown(sc: Scorecard) -> str:
     for name, h in sc.provenance.get("prompt_hashes", {}).items():
         lines.append(f"- prompt `{name}`: `{h[:16]}`")
     lines.append("")
-    lines.append("## Q1 — drop spec-task-reviewer?")
-    lines.append(f"- verdict: **{sc.q1.get('verdict')}**")
+    lines.append("## Q1 — drop spec-task-reviewer? (per model)")
+    if sc.q1:
+        for model_id, res in sorted(sc.q1.items()):
+            lines.append(f"- `{model_id}`: **{res.get('verdict')}**")
+    else:
+        lines.append("- verdict: **insufficient-diffs** (no paired runs supplied)")
     lines.append("## Q2 — structure (monolithic vs completeness slice)")
     lines.append(f"- verdict: **{sc.q2.get('verdict')}** "
                  f"({sc.q2.get('n_cross_cutting')} cross-cutting fixtures)")
@@ -137,8 +142,12 @@ def render_markdown(sc: Scorecard) -> str:
             f"ci={r['blocking_recall_ci']} ${r['dollars']:.4f}"
             + ("  ⚠ low-n" if r["low_n"] else "")
         )
-    lines.append("## Q4 — fast-path replaces per-task review?")
-    lines.append(f"- verdict: **{sc.q4.get('verdict')}**")
+    lines.append("## Q4 — fast-path replaces per-task review? (per model)")
+    if sc.q4:
+        for model_id, res in sorted(sc.q4.items()):
+            lines.append(f"- `{model_id}`: **{res.get('verdict')}**")
+    else:
+        lines.append("- verdict: **insufficient-diffs** (no fast-path comparison supplied)")
     if sc.notes:
         lines.append("")
         lines.append("## Notes")
