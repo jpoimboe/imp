@@ -15,9 +15,9 @@ tree with no live cursor, so it is unaffected.
 The fixture is a trimmed, real slice of the 2026-06-03-imp-new-open-by-asking
 run: the task-lead step spawns an `implementer` subagent (empty-id task call),
 the subagent reports, the non-matching close arrives, then task-lead completes
-and a `commit-check` step runs. The subagent's own prose streams (it is a
-descended container), but the parent step's completion breadcrumb and the
-entire following step are swallowed live.
+and a `commit-check` step runs. The subagent collapses to a single status row
+in lean/live (Part D); no internal prose is streamed. The parent step's
+completion breadcrumb and the entire following step were previously swallowed.
 
 This is a regression guard: it confirms the post-spawn parent content (the
 parent step's completion breadcrumb and the following step) is emitted live now

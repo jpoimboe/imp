@@ -173,14 +173,15 @@ class LiveDriver:
         return True
 
     def _gutters(self) -> tuple[int, ...]:
-        """Set of indent columns that are subagent boundaries, read from the
-        cursor stack. Since Part D made SubagentFold a LEAF (never pushed as a
-        cursor), no subagent boundary is ever open during the live walk, so this
-        returns the empty tuple in practice. It is kept gutter-aware so the shared
-        render helpers receive a consistent signature; the magenta │ gutter now
-        appears only in the imp log --full expanded subagent view (render_text)."""
-        return tuple(c.depth - 1 for c in self._frontier
-                     if isinstance(c.container, nv.SubagentFold))
+        """Subagent boundary columns for the shared render helpers.
+
+        Part D made SubagentFold a leaf: it is emitted via _emit_leaf and never
+        pushed onto the frontier as a cursor. Only PhaseNode/StepNode containers
+        are pushed (_is_container). Therefore there are no SubagentFold cursors
+        in self._frontier during the live walk and this always returns (). The
+        magenta │ gutter appears only in the imp log --full expanded subagent
+        view (render_text), not in live/lean."""
+        return ()
 
     def _emit_leaf(self, node: Any, depth: int,
                    gutters: tuple[int, ...] = ()) -> None:
