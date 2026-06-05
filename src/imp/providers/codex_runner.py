@@ -318,12 +318,14 @@ class CodexAgentRunner:
         aid: str, ctx: ToolContext, state: RunState, proc_state: dict[str, Any],
         entry_snapshot: EntrySnapshot,
     ) -> AsyncGenerator[Event, None]:
-        """Start a thread, run the streamed turn, consume events.
+        """Start a thread, run streamed turns, consume events.
 
-        Tasks 28-31 layer in: completion contract nudges, dead-server race,
-        interactive tripwire. This task keeps a single autonomous turn with
-        inline cap-abort / native-violation / turn.failed / turn.completed
-        handling.
+        Multi-turn nudge loop (Task 28): on a turn that completes without
+        `complete_step`, classified provider-error text short-circuits; an
+        interactive run with a wired `continuation_fn` is nudged for another
+        turn; autonomous or exhausted runs emit the appropriate terminal
+        error. Inline cap-abort / native-violation / turn.failed / interrupt
+        handling is preserved verbatim inside the inner loop.
         """
         thread_options = self._build_thread_options()
         if thread_options is None:
@@ -335,10 +337,12 @@ class CodexAgentRunner:
             except TypeError:
                 # Fakes ignore the options arg.
                 thread = client.start_thread()
-        # Build prompt with anti-native-tool instruction prepended.
-        prompt = self._build_prompt(invocation.system_prompt)
-        # Run a single turn (autonomous; nudges are Task 28).
-        streamed = await thread.run_streamed(prompt)
+        # Build initial prompt with anti-native-tool instruction prepended.
+        next_prompt = self._build_prompt(invocation.system_prompt)
+        # Whole-run nudge budget (across-turn). `continuation_fn` is the gate;
+        # this cap is the floor.
+        max_nudges = 3
+        nudges_used = 0
         # AbortController for interrupt() — tolerate a fake/SDK without one.
         try:
             from openai_codex_sdk import (
@@ -348,68 +352,149 @@ class CodexAgentRunner:
         except ImportError:
             self._abort_controller = None
 
-        async for event in streamed.events:
-            if self._cancel:
-                yield {"type": "error", "payload": {
-                    "category": "config", "kind": "interrupted",
-                    "message": "runner cancelled by interrupt"}}
-                return
-            etype = getattr(event, "type", None)
-            process_event(event, elog=elog, agent_id=aid, state=proc_state,
-                          provider=invocation.provider_name, model=self.model)
-
-            # Cap trip from inside the MCP wrapper → abort the SDK + bail.
-            if state.abort_requested:
-                if self._abort_controller is not None:
-                    with contextlib.suppress(Exception):
-                        self._abort_controller.abort()
-                await terminate_running_processes(ctx, timeout=2.0)
-                yield {"type": "error", "payload": {
-                    "category": "config", "kind": "tool_call_ceiling_exceeded",
-                    "ceiling": state.cap,
-                    "message":
-                        f"codex tool dispatch cap ({state.cap}) exceeded"}}
-                return
-
-            # Native-tool violation → fail-closed (autonomous): revert + bail.
-            if proc_state.get("native_violation") is not None:
-                restore_to_snapshot(ctx.project_root, entry_snapshot)
-                detail = proc_state["native_violation"]
-                yield {"type": "error", "payload": {
-                    "category": "config", "kind": "native_tool_violation",
-                    "message": f"codex used a native {detail['kind']} tool; "
-                               f"worktree reverted to entry state.",
-                    "detail": detail}}
-                return
-
-            # turn.failed → categorize + bail.
-            if etype == "turn.failed":
-                exc = categorize_turn_failed(getattr(event, "error", {}) or {})
-                yield perr.make_error_event(exc)
-                return
-
-            if etype == "turn.completed":
-                # Completion contract (full nudge logic is Task 28).
-                if proc_state.get("complete_step_called"):
-                    args = proc_state.get("complete_step_args") or {}
-                    try:
-                        validate_agent_output(
-                            args, invocation.agent_def.output_schema)
-                    except Exception as ve:
-                        yield {"type": "error", "payload": {
-                            "category": "agent_output_missing",
-                            "kind": "output_validation",
-                            "message": str(ve)}}
-                        return
-                    yield {"type": "agent_output", "payload": args}
+        while True:
+            # Reset per-turn completion-capture state before each turn so a
+            # stale flag from a missed-completion turn cannot satisfy the
+            # check on the next.
+            proc_state["complete_step_called"] = False
+            proc_state["complete_step_args"] = {}
+            # Mirror onto the shared MCP RunState (which the dispatcher writes).
+            state.complete_step_called = False
+            state.complete_step_args = {}
+            streamed = await thread.run_streamed(next_prompt)
+            need_nudge = False  # set when turn ends without complete_step
+            async for event in streamed.events:
+                if self._cancel:
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "interrupted",
+                        "message": "runner cancelled by interrupt"}}
                     return
-                # Not captured → autonomous run ⇒ agent_output_missing.
-                yield {"type": "error", "payload": {
-                    "category": "agent_output_missing",
-                    "kind": "no_complete_step",
-                    "message":
-                        "codex completed turn without calling complete_step"}}
+                etype = getattr(event, "type", None)
+                process_event(event, elog=elog, agent_id=aid, state=proc_state,
+                              provider=invocation.provider_name,
+                              model=self.model)
+
+                # Cap trip from inside the MCP wrapper → abort the SDK + bail.
+                if state.abort_requested:
+                    if self._abort_controller is not None:
+                        with contextlib.suppress(Exception):
+                            self._abort_controller.abort()
+                    await terminate_running_processes(ctx, timeout=2.0)
+                    yield {"type": "error", "payload": {
+                        "category": "config",
+                        "kind": "tool_call_ceiling_exceeded",
+                        "ceiling": state.cap,
+                        "message":
+                            f"codex tool dispatch cap ({state.cap}) "
+                            f"exceeded"}}
+                    return
+
+                # Native-tool violation → fail-closed (autonomous): revert.
+                if proc_state.get("native_violation") is not None:
+                    restore_to_snapshot(ctx.project_root, entry_snapshot)
+                    detail = proc_state["native_violation"]
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "native_tool_violation",
+                        "message": f"codex used a native {detail['kind']} "
+                                   f"tool; worktree reverted to entry state.",
+                        "detail": detail}}
+                    return
+
+                # Mirror complete_step_args from the shared state into
+                # proc_state so the across-turn check below sees them at the
+                # next boundary.
+                if state.complete_step_called:
+                    proc_state["complete_step_called"] = True
+                    proc_state["complete_step_args"] = dict(
+                        state.complete_step_args)
+
+                # turn.failed → categorize + bail.
+                if etype == "turn.failed":
+                    exc = categorize_turn_failed(
+                        getattr(event, "error", {}) or {})
+                    yield perr.make_error_event(exc)
+                    return
+
+                if etype == "turn.completed":
+                    if proc_state.get("complete_step_called"):
+                        args = proc_state.get("complete_step_args") or {}
+                        try:
+                            validate_agent_output(
+                                args, invocation.agent_def.output_schema)
+                        except Exception as ve:
+                            yield {"type": "error", "payload": {
+                                "category": "agent_output_missing",
+                                "kind": "output_validation",
+                                "message": str(ve)}}
+                            return
+                        yield {"type": "agent_output", "payload": args}
+                        return
+                    # Not captured: classified provider-error text wins over
+                    # both nudge and `no_complete_step`. Auth/quota substrings
+                    # must short-circuit nudge attempts (a nudge to a quota'd
+                    # account just burns more).
+                    last_text = proc_state.get("last_agent_text", "") or ""
+                    from imp.providers.claude_code import _classify_agent_text
+                    classified = _classify_agent_text(last_text)
+                    if classified is not None:
+                        yield perr.make_error_event(
+                            classified, kind=getattr(classified, "kind", ""))
+                        return
+                    # Interactive + continuation_fn → cross to outer loop.
+                    if (invocation.interactive
+                            and invocation.continuation_fn is not None
+                            and nudges_used < max_nudges):
+                        need_nudge = True
+                        break  # exit inner for; outer while handles nudge
+                    # Autonomous OR no continuation_fn OR nudges exhausted:
+                    # autonomous emits `no_complete_step`; interactive with a
+                    # wired continuation_fn that exhausted the budget emits the
+                    # distinct `no_complete_step_after_nudges`.
+                    if (invocation.interactive
+                            and invocation.continuation_fn is not None
+                            and nudges_used >= max_nudges):
+                        kind = "no_complete_step_after_nudges"
+                        category = "agent_incomplete"
+                        msg = ("codex did not call complete_step after "
+                               f"{max_nudges} nudges")
+                    else:
+                        kind = "no_complete_step"
+                        category = "agent_output_missing"
+                        msg = ("codex completed turn without calling "
+                               "complete_step")
+                    yield {"type": "error", "payload": {
+                        "category": category, "kind": kind, "message": msg,
+                        "detail": {"last_agent_text": last_text[:500]}}}
+                    return
+            # Inner loop exited. If we set need_nudge, invoke continuation_fn
+            # and either run another turn or yield the after-nudges error.
+            if not need_nudge:
                 return
+            last_text = proc_state.get("last_agent_text", "") or ""
+            import inspect as _inspect
+            cont = invocation.continuation_fn
+            assert cont is not None  # guarded by need_nudge condition
+            try:
+                nxt = cont(last_text)
+                if _inspect.isawaitable(nxt):
+                    nxt = await nxt
+            except Exception:
+                nxt = None
+            if nxt is None:
+                yield {"type": "error", "payload": {
+                    "category": "agent_incomplete",
+                    "kind": "no_complete_step_after_nudges",
+                    "message": ("codex did not call complete_step "
+                                f"after {nudges_used + 1} nudge(s)"),
+                    "detail": {"last_agent_text": last_text[:500]}}}
+                return
+            from imp.agents.runner import Message, TextBlock
+            elog.append_user_message(
+                agent_id=aid,
+                message=Message(role="user",
+                                content=(TextBlock(text=str(nxt)),)))
+            next_prompt = str(nxt)
+            nudges_used += 1
 
     def _build_thread_options(self) -> Any:
         """ThreadOptions with the design's exact production flags. Lives in its
@@ -500,6 +585,7 @@ def process_event(
             return
         if itype == "agent_message":
             text = getattr(item, "text", "") or ""
+            state["last_agent_text"] = text
             elog.append_llm_response(
                 agent_id=agent_id, provider=provider, model=model,
                 raw={"content": [{"type": "text", "text": text}]},
