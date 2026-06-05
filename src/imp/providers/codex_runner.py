@@ -242,35 +242,41 @@ class CodexAgentRunner:
             bearer_token=bearer_token, host="127.0.0.1",
         )
 
-        # 5a. Imp-side server-start ping: a single bearer-auth'd HTTP probe
-        # against `server_handle.url` to fail fast before provisioning if imp
-        # can't reach its own server.
+        # 5a..8. Everything after the server starts runs inside ONE try/finally
+        # so the MCP server is ALWAYS shut down and any provisioned CODEX_HOME
+        # is ALWAYS torn down — even if the ping, provision, or seed_auth step
+        # raises (Task 31: close the provision/seed teardown leak window).
+        codex_home: Path | None = None
         try:
-            await _ping_mcp_server(
-                url=server_handle.url, bearer_token=bearer_token,
-                timeout_seconds=2.0,
+            # 5a. Imp-side server-start ping: a single bearer-auth'd HTTP probe
+            # against `server_handle.url` to fail fast before provisioning if
+            # imp can't reach its own server. On failure we just return; the
+            # finally below shuts the server down (codex_home is still None, so
+            # teardown_codex_home is correctly skipped).
+            try:
+                await _ping_mcp_server(
+                    url=server_handle.url, bearer_token=bearer_token,
+                    timeout_seconds=2.0,
+                )
+            except Exception as ping_exc:
+                yield perr.make_error_event(perr.NetworkError(
+                    (
+                        f"imp-side MCP server-start ping failed; codex would "
+                        f"not be able to reach the MCP endpoint either. "
+                        f"({type(ping_exc).__name__}: {ping_exc})"),
+                    detail={"url": server_handle.url},
+                ))
+                return
+
+            # 6. Provision CODEX_HOME + config.toml + seed auth.
+            codex_home = provision_codex_home(
+                tmp_root=tmp_root, host=server_handle.host,
+                port=server_handle.port, bearer_env_var="IMP_MCP_TOKEN",
             )
-        except Exception as ping_exc:
-            await server_handle.shutdown()
-            yield perr.make_error_event(perr.NetworkError(
-                (
-                    f"imp-side MCP server-start ping failed; codex would not "
-                    f"be able to reach the MCP endpoint either. "
-                    f"({type(ping_exc).__name__}: {ping_exc})"),
-                detail={"url": server_handle.url},
-            ))
-            return
+            seed_auth(mode=auth_mode, canonical_path=canonical_auth,
+                      codex_home=codex_home, env=os.environ)
 
-        # 6. Provision CODEX_HOME + config.toml + seed auth.
-        codex_home = provision_codex_home(
-            tmp_root=tmp_root, host=server_handle.host,
-            port=server_handle.port, bearer_env_var="IMP_MCP_TOKEN",
-        )
-        seed_auth(mode=auth_mode, canonical_path=canonical_auth,
-                  codex_home=codex_home, env=os.environ)
-
-        # 7. Run the SDK turn(s) and consume events.
-        try:
+            # 7. Run the SDK turn(s) and consume events.
             client = self._build_client(codex_home=codex_home,
                                         bearer_token=bearer_token)
             async for ev in self._drive_turns(
@@ -281,13 +287,16 @@ class CodexAgentRunner:
                 yield ev
         finally:
             # 8. Lifecycle teardown — runs on EVERY exit (success, error,
-            #    abort, interrupt). (Task 31 hardens this further.)
+            #    abort, interrupt, AND a ping/provision/seed failure). The
+            #    server shutdown ALWAYS runs; CODEX_HOME teardown runs only when
+            #    a codex_home was actually provisioned.
             await server_handle.shutdown()
-            teardown_codex_home(
-                codex_home=codex_home, mode=auth_mode,
-                canonical_path=canonical_auth,
-                lock_path=canonical_auth.parent / ".imp-auth.lock",
-            )
+            if codex_home is not None:
+                teardown_codex_home(
+                    codex_home=codex_home, mode=auth_mode,
+                    canonical_path=canonical_auth,
+                    lock_path=canonical_auth.parent / ".imp-auth.lock",
+                )
 
     def _canonical_auth_path(self) -> Path:
         """The user's real `~/.codex/auth.json`. Test seam: a runner attribute
