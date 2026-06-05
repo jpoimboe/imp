@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from imp.evals.aggregate import aggregate_cell, macro_average
+from imp.evals.aggregate import aggregate_cell, macro_average, wilson_ci
 from imp.evals.decisions import CROSS_CUTTING_FLOOR, q2_verdict
-from imp.evals.models import CellResult, Fixture, GradeResult
+from imp.evals.models import BLOCKING_SEVERITIES, CellResult, Fixture, GradeResult
 from imp.evals.provenance import stamp
 
 
@@ -28,6 +28,7 @@ class Scorecard:
     provenance: dict[str, Any]
     notes: list[str] = field(default_factory=list)
     runs_shas: set[str] = field(default_factory=set)
+    granularity: dict[str, Any] = field(default_factory=dict)
 
 
 def _group(grades: Sequence[GradeResult]) -> dict[tuple[str, str], list[GradeResult]]:
@@ -58,6 +59,69 @@ def _oracle_independence_notes(provenance: dict[str, Any] | None) -> list[str]:
                     f"axis only."
                 )
     return notes
+
+
+# 2x2 granularity cells, pinned to their variant ids. The whole-change-slice cell
+# MUST carry the `completeness` substring (Q2 routing) and the per-task pair must
+# carry NEITHER `monolithic` nor `completeness`.
+_GRANULARITY_CELLS = (
+    ("whole-change", "monolithic", "baseline-monolithic"),
+    ("whole-change", "slice", "whole-change-completeness"),
+    ("per-task", "monolithic", "per-task-mono"),
+    ("per-task", "slice", "per-task-slice"),
+)
+
+
+def _split_recall(grades: list[GradeResult], *, cross_task: bool) -> dict[str, Any] | None:
+    """Blocking recall over must_catch findings of one cross_task stratum (matches
+    GradeResult._recall(blocking_only=True) plus the cross_task filter)."""
+    succ = trials = 0
+    for g in grades:
+        for m in g.matches:
+            e = m.expected
+            if (
+                e.must_catch
+                and e.severity in BLOCKING_SEVERITIES
+                and bool(e.cross_task) == cross_task
+            ):
+                trials += 1
+                if m.caught:
+                    succ += 1
+    if trials == 0:
+        return None
+    return {"recall": succ / trials, "ci": wilson_ci(succ, trials), "n": trials}
+
+
+def _granularity_section(
+    grades: Sequence[GradeResult],
+    fixtures: dict[str, Fixture],
+    dollars_by_cell: dict[tuple[str, str], list[float]],
+) -> dict[str, Any]:
+    by_variant: dict[str, list[GradeResult]] = defaultdict(list)
+    for g in grades:
+        by_variant[g.variant_id].append(g)
+    rows = []
+    for granularity, structure, vid in _GRANULARITY_CELLS:
+        gs = by_variant.get(vid, [])
+        dollars = [d for (v, _f), vals in dollars_by_cell.items() if v == vid for d in vals]
+        rows.append({
+            "granularity": granularity,
+            "structure": structure,
+            "variant": vid,
+            "local": _split_recall(gs, cross_task=False),
+            "cross_task": _split_recall(gs, cross_task=True),
+            "dollars": (sum(dollars) / len(dollars)) if dollars else 0.0,
+        })
+    n_cross_task = sum(
+        1 for f in fixtures.values()
+        if f.tasks and any(ef.cross_task for ef in f.expected_findings)
+    )
+    return {
+        "rows": rows,
+        "n_cross_task_fixtures": n_cross_task,
+        "floor": CROSS_CUTTING_FLOOR,
+        "insufficient_data": n_cross_task < CROSS_CUTTING_FLOOR,
+    }
 
 
 def build_scorecard(
@@ -134,6 +198,7 @@ def build_scorecard(
     q3 = {"rows": q3_rows, "axis": "dollars-per-unit-detection"}
 
     notes.extend(_oracle_independence_notes(provenance))
+    granularity = _granularity_section(grades, dict(fixtures), dollars_by_cell)
     return Scorecard(
         cells=cells,
         q1=q1,
@@ -143,7 +208,15 @@ def build_scorecard(
         provenance=provenance if provenance is not None else stamp(prompt_dirs=prompt_dirs),
         notes=notes,
         runs_shas=runs_shas or set(),
+        granularity=granularity,
     )
+
+
+def _fmt_split(s: dict[str, Any] | None) -> str:
+    if s is None:
+        return "n/a"
+    lo, hi = s["ci"]
+    return f"{s['recall']:.2f} [{lo:.2f},{hi:.2f}] n={s['n']}"
 
 
 def render_markdown(sc: Scorecard) -> str:
@@ -179,6 +252,28 @@ def render_markdown(sc: Scorecard) -> str:
             lines.append(f"- `{model_id}`: **{res.get('verdict')}**")
     else:
         lines.append("- verdict: **insufficient-diffs** (no fast-path comparison supplied)")
+    g = sc.granularity
+    if g:
+        lines.append("## Granularity - per-task vs whole-change x monolithic vs slice")
+        if g.get("insufficient_data"):
+            lines.append(
+                f"- **insufficient-data**: {g['n_cross_task_fixtures']} cross-task "
+                f"multi-task fixture(s) < floor {g['floor']} (read directionally only)"
+            )
+        for r in g["rows"]:
+            lines.append(
+                f"- {r['granularity']}/{r['structure']} (`{r['variant']}`): "
+                f"local={_fmt_split(r['local'])} "
+                f"cross-task={_fmt_split(r['cross_task'])} ${r['dollars']:.4f}"
+            )
+        grows = {r["variant"]: r for r in g["rows"]}
+        ptm = (grows.get("per-task-mono") or {}).get("cross_task")
+        wcs = (grows.get("whole-change-completeness") or {}).get("cross_task")
+        if ptm and wcs:
+            lines.append(
+                f"- read: per-task monolithic cross-task recall = {ptm['recall']:.2f} vs "
+                f"whole-change sliced = {wcs['recall']:.2f}"
+            )
     if sc.notes:
         lines.append("")
         lines.append("## Notes")
