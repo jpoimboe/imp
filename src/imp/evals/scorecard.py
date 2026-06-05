@@ -36,6 +36,29 @@ def _group(grades: Sequence[GradeResult]) -> dict[tuple[str, str], list[GradeRes
     return out
 
 
+def _oracle_independence_notes(provenance: dict[str, Any] | None) -> list[str]:
+    """Flag any variant whose reviewer model basename equals the judge's basename
+    across the claude_code/anthropic boundary (same underlying model, but the
+    exact (provider, model) tuple differs so require_oracle_independence misses
+    it). Decision S3: label, don't re-route."""
+    if not provenance:
+        return []
+    judge = provenance.get("judge_model") or ""
+    judge_base = judge.split("/")[-1]
+    if not judge_base:
+        return []
+    notes: list[str] = []
+    for vid, models in (provenance.get("cell_models") or {}).items():
+        for pm in models:
+            if pm.split("/")[-1] == judge_base and pm != judge:
+                notes.append(
+                    f"`{vid}` is NOT oracle-independent (reviewer {pm} shares the "
+                    f"judge's underlying model {judge_base}); read it on the recall "
+                    f"axis only."
+                )
+    return notes
+
+
 def build_scorecard(
     *,
     grades: Sequence[GradeResult],
@@ -108,6 +131,7 @@ def build_scorecard(
     ]
     q3 = {"rows": q3_rows, "axis": "dollars-per-unit-detection"}
 
+    notes.extend(_oracle_independence_notes(provenance))
     return Scorecard(
         cells=cells,
         q1=q1,
