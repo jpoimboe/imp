@@ -9,7 +9,7 @@ number. Each hop needs enough items to report an agreement rate with a CI
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -132,6 +132,20 @@ class NormalizationItem:
     review_prose: str
     human_findings: tuple[ExpectedFinding, ...]
 
+    @classmethod
+    def from_dict(cls, d: dict[str, object]) -> NormalizationItem:
+        raw = d.get("human_findings", [])
+        findings = tuple(
+            ExpectedFinding.from_dict(f)
+            for f in (raw if isinstance(raw, list) else [])
+            if isinstance(f, dict)
+        )
+        return cls(
+            output_style=str(d["output_style"]),
+            review_prose=str(d["review_prose"]),
+            human_findings=findings,
+        )
+
 
 def normalization_agreement(
     human: Sequence[ExpectedFinding], machine: Sequence[ExpectedFinding]
@@ -152,3 +166,95 @@ def normalization_agreement(
     if recall + precision == 0:
         return 0.0
     return 2 * recall * precision / (recall + precision)
+
+
+def severity_must_catch_agreement(
+    human: Sequence[ExpectedFinding], machine: Sequence[ExpectedFinding]
+) -> tuple[float | None, float | None]:
+    """Over the human findings the normalizer MATCHED (shared symbol/locus), the
+    fraction whose `severity` agrees and whose `must_catch` (the blocking signal
+    the verdicts consume) agrees. (None, None) when nothing matched — no basis to
+    compare. This is the dimension the '19/20 obvious' identity datum did NOT
+    measure, so it is the real residual risk to eyeball (spec Component 1 / S-1)."""
+
+    def _best(h: ExpectedFinding) -> ExpectedFinding | None:
+        for m in machine:
+            if match_kind(h.symbol, h.locus, m.symbol, m.locus) != "none":
+                return m
+        return None
+
+    pairs = [(h, _best(h)) for h in human]
+    matched = [(h, m) for h, m in pairs if m is not None]
+    if not matched:
+        return (None, None)
+    sev = sum(1 for h, m in matched if h.severity == m.severity) / len(matched)
+    mc = sum(1 for h, m in matched if h.must_catch == m.must_catch) / len(matched)
+    return (sev, mc)
+
+
+@dataclass(frozen=True)
+class NormalizationStyleAgreement:
+    n: int
+    identity_f1: float                      # mean per-item identity F1
+    severity_agreement: float | None        # mean over items with >=1 matched finding
+    must_catch_agreement: float | None
+
+
+@dataclass(frozen=True)
+class NormalizationHopReport:
+    pooled: NormalizationStyleAgreement
+    by_style: dict[str, NormalizationStyleAgreement]
+
+
+def _mean_opt(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return (sum(present) / len(present)) if present else None
+
+
+def _normalization_style_agreement(
+    rows: list[tuple[float, float | None, float | None]],
+) -> NormalizationStyleAgreement:
+    return NormalizationStyleAgreement(
+        n=len(rows),
+        identity_f1=(sum(r[0] for r in rows) / len(rows)) if rows else 0.0,
+        severity_agreement=_mean_opt([r[1] for r in rows]),
+        must_catch_agreement=_mean_opt([r[2] for r in rows]),
+    )
+
+
+def calibrate_normalization_hop(
+    items: Sequence[NormalizationItem],
+    *,
+    project_root: Path,
+    normalizer_provider: str,
+    normalizer_model: str,
+    normalize: Callable[..., tuple[ExpectedFinding, ...]] | None = None,
+) -> NormalizationHopReport:
+    """Hop-2: run the normalizer over human-labeled prose and REPORT identity +
+    severity/must_catch agreement per output-style. Reporting only — no gate, no CI
+    (spec Component 1: the cut 0.80 thresholds were policing a 5%-disagreement
+    regime). `normalize` is injectable for tests; production uses normalize_findings."""
+    _normalize: Callable[..., tuple[ExpectedFinding, ...]]
+    if normalize is None:
+        from imp.evals.normalize import normalize_findings as _normalize
+    else:
+        _normalize = normalize
+
+    by_style: dict[str, list[tuple[float, float | None, float | None]]] = defaultdict(list)
+    pooled: list[tuple[float, float | None, float | None]] = []
+    for it in items:
+        machine = _normalize(
+            it.review_prose,
+            project_root=project_root,
+            provider=normalizer_provider,
+            model=normalizer_model,
+        )
+        f1 = normalization_agreement(it.human_findings, machine)
+        sev, mc = severity_must_catch_agreement(it.human_findings, machine)
+        row = (f1, sev, mc)
+        by_style[it.output_style].append(row)
+        pooled.append(row)
+    return NormalizationHopReport(
+        pooled=_normalization_style_agreement(pooled),
+        by_style={s: _normalization_style_agreement(rows) for s, rows in by_style.items()},
+    )

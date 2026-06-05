@@ -363,6 +363,39 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         print(f"  {style}: agree={ag.agreement:.3f} kappa={ag.kappa} n={ag.n}")
     if not report.floor_met:
         print("WARNING: calibration floor unmet — scorecard verdicts are NOT trustworthy yet")
+
+    norm_path = Path(args.normalization_items)
+    if norm_path.exists():
+        from imp.evals.calibration import (
+            NormalizationItem,
+            calibrate_normalization_hop,
+        )
+
+        norm_items = [
+            NormalizationItem.from_dict(d) for d in json.loads(norm_path.read_text())
+        ]
+        # Normalize with the MINING normalizer (default haiku), NOT the opus judge —
+        # hop-2 must calibrate the model that actually labels the fixtures.
+        norm = calibrate_normalization_hop(
+            norm_items, project_root=Path.cwd(),
+            normalizer_provider=args.normalizer_provider,
+            normalizer_model=args.normalizer_model,
+        )
+        print(
+            f"normalization hop (normalizer {args.normalizer_provider}/"
+            f"{args.normalizer_model}; report-only; eyeball disagreements, no gate):"
+        )
+        def _fmt(v: float | None) -> str:
+            return f"{v:.3f}" if v is not None else "n/a (no matched findings)"
+
+        for style, nag in norm.by_style.items():
+            print(
+                f"  {style}: identity_f1={nag.identity_f1:.3f} "
+                f"severity={_fmt(nag.severity_agreement)} "
+                f"must_catch={_fmt(nag.must_catch_agreement)} n={nag.n}"
+            )
+    else:
+        print(f"(no normalization_items at {norm_path}; skipping hop-2)")
     return 0
 
 
@@ -411,4 +444,14 @@ def add_eval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     pc.add_argument("--judge-items", default="src/imp/evals/data/calibration/judge_items.json")
     pc.add_argument("--judge-provider", default="anthropic")
     pc.add_argument("--judge-model", default="claude-opus-4-8")  # the calibrated judge (README)
+    pc.add_argument(
+        "--normalization-items",
+        default="src/imp/evals/data/calibration/normalization_items.json",
+        help="when this file exists, calibrate ALSO runs the billable hop-2 "
+             "normalizer (not just the judge hop); point at a missing path to skip",
+    )
+    pc.add_argument("--normalizer-provider", default="anthropic")
+    pc.add_argument("--normalizer-model", default="claude-haiku-4-5-20251001",
+                    help="must match `imp eval mine`'s --judge-model (the normalizer "
+                         "that labels fixtures), NOT the opus judge")
     pc.set_defaults(func=cmd_calibrate)
