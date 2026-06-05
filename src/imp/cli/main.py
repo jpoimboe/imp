@@ -654,10 +654,12 @@ def _format_last_timestamp(line: str) -> str:
 
 def _last_event_timestamp(events_path: Path) -> str:
     try:
-        text = events_path.read_text()
+        line = _read_last_line(events_path)
     except FileNotFoundError:
         return "-"
-    return _format_last_timestamp(text)
+    if line is None:
+        return "-"
+    return _format_last_timestamp(line.decode("utf-8", errors="replace"))
 
 
 def _journal_last_activity(control: Path, change_id: str) -> str:

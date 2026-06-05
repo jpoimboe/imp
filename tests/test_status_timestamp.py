@@ -4,6 +4,7 @@ import pytest
 
 from imp.cli.main import (
     _format_last_timestamp,
+    _last_event_timestamp,
     _last_nonempty_line,
     _read_last_line,
 )
@@ -92,3 +93,25 @@ def test_format_last_timestamp_valid_line() -> None:
 )
 def test_format_last_timestamp_bad_input(line: str) -> None:
     assert _format_last_timestamp(line) == "-"
+
+
+def test_last_event_timestamp_missing_file(tmp_path: Path) -> None:
+    assert _last_event_timestamp(tmp_path / "nope.jsonl") == "-"
+
+
+def test_last_event_timestamp_reads_last_event(tmp_path: Path) -> None:
+    p = tmp_path / "events.jsonl"
+    p.write_bytes(
+        b'{"timestamp":"2026-06-01T00:00:00+00:00"}\n'
+        b'{"timestamp":"2026-06-05T12:00:00+00:00"}\n'
+    )
+    out = _last_event_timestamp(p)
+    assert len(out) == 19 and out != "-"  # parsed the LAST line, not the first
+
+
+def test_last_event_timestamp_non_utf8_last_line(tmp_path: Path) -> None:
+    # A non-UTF-8 byte in the last line must render '-', not crash. This closes
+    # a latent UnicodeDecodeError in the old strict read_text() path.
+    p = tmp_path / "events.jsonl"
+    p.write_bytes(b'{"timestamp":"2026-06-01T00:00:00+00:00"}\n\xff\xfe garbage\n')
+    assert _last_event_timestamp(p) == "-"
