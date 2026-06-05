@@ -242,6 +242,68 @@ def mark_rework(episodes: list[RawEpisode]) -> list[RawEpisode]:
     return out
 
 
+# Eyeballed go/no-go floors (spec S-1/S-2/S-3): NOT derived, judgment calls that
+# carry the "should we pay for the billable run" decision because the formal
+# min_diff_count()=93 gate is known-dead on this thin regime. The aggregate floor
+# is necessary but not sufficient — self-grading exclusion is per role, so one
+# question can be starved while the aggregate clears.
+AGGREGATE_BLOCKING_FLOOR = 10
+PER_QUESTION_BLOCKING_FLOOR = 8
+
+# The candidate role each question would DROP from its own scoring pool (the
+# self-grading exclusion): Q1 evaluates dropping spec-task-reviewer, Q4 evaluates
+# code-reviewer as the fast path. A diff is "available" to a question only if a
+# blocking signal survives after that role's episodes are excluded.
+_Q1_EXCLUDED_ROLE = "spec-task-reviewer"
+_Q4_EXCLUDED_ROLE = "code-reviewer"
+
+
+@dataclass(frozen=True)
+class FeasibilityCount:
+    """Free pre-count proxy (spec Component 0): distinct blocking-bearing head_shas
+    overall and per question, with each question's own go/no-go. A LOWER-BOUND
+    heuristic on the mined yield — it counts diffs (head_shas), not fixtures, and
+    is mined-only, so it under-counts the grade's true n (which also pools curated
+    fixtures). Read per-question, never just the aggregate."""
+
+    aggregate_blocking_diffs: int
+    q1_blocking_diffs: int
+    q4_blocking_diffs: int
+    aggregate_ok: bool
+    q1_ok: bool
+    q4_ok: bool
+
+
+def count_blocking_diffs(episodes: list[RawEpisode]) -> FeasibilityCount:
+    """Count distinct blocking-bearing head_shas, overall and per question. Input
+    episodes MUST already be mark_rework'd (the `blocking` flag set). Pure count —
+    never calls assemble_fixtures or the normalizer, so the pre-count stays free."""
+
+    def _heads(excluded_role: str | None) -> set[str]:
+        out: set[str] = set()
+        for ep in episodes:
+            if not ep.blocking:
+                continue
+            if excluded_role is not None and ep.reviewer_type == excluded_role:
+                continue
+            head = extract_shas(ep.dispatch_prompt)[1]
+            if head:
+                out.add(head)
+        return out
+
+    aggregate = len(_heads(None))
+    q1 = len(_heads(_Q1_EXCLUDED_ROLE))
+    q4 = len(_heads(_Q4_EXCLUDED_ROLE))
+    return FeasibilityCount(
+        aggregate_blocking_diffs=aggregate,
+        q1_blocking_diffs=q1,
+        q4_blocking_diffs=q4,
+        aggregate_ok=aggregate >= AGGREGATE_BLOCKING_FLOOR,
+        q1_ok=q1 >= PER_QUESTION_BLOCKING_FLOOR,
+        q4_ok=q4 >= PER_QUESTION_BLOCKING_FLOOR,
+    )
+
+
 def dedup_episodes(episodes: list[RawEpisode]) -> list[RawEpisode]:
     """Collapse rework passes per (head_sha, reviewer). Run AFTER mark_rework.
     Keeps a BLOCKING representative when the group has one (it carries the bug
