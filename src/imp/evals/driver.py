@@ -6,6 +6,7 @@ model_name), bypassing tier/role inheritance (spec Variant §)."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 from importlib.resources import files
@@ -59,6 +60,35 @@ def _provider_for(provider: str, model: str) -> Any:
     return provider_from_model(ProviderModel(provider=provider, model=model))
 
 
+def _eval_log_root() -> Path:
+    """Durable root for preserved eval event/transcript logs. Defaults under the
+    system temp dir ($TMPDIR/imp-eval-logs) — deliberately OUT of the repo so a
+    sweep's logs never clutter or risk being committed to the working tree.
+    Override with IMP_EVAL_LOG_DIR to point at a managed path."""
+    override = os.environ.get("IMP_EVAL_LOG_DIR")
+    return Path(override) if override else Path(tempfile.gettempdir()) / "imp-eval-logs"
+
+
+def _preserve_eval_dir(
+    events_dir: Path, provider_name: str, model_name: str, safe_id: str,
+) -> None:
+    """Move a finished run's events dir into _eval_log_root() so its
+    events.jsonl + transcript survive for inspection instead of being rmtree'd.
+
+    Named `<provider>_<model>_<safe_id>_<unique>` so variants that share an
+    agent_id (e.g. cc-opus vs cc-sonnet, both `eval:code-reviewer`) never
+    collide. The trailing `<unique>` is the mkdtemp basename, so repeat runs of
+    the same variant accumulate side by side rather than overwrite. Falls back
+    to rmtree on any failure — a logging hiccup must never fail the eval run."""
+    slug = f"{provider_name}_{model_name}_{safe_id}".replace("/", "_").replace(":", "_")
+    try:
+        dest = _eval_log_root() / f"{slug}_{events_dir.name}"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(events_dir), str(dest))
+    except OSError:
+        shutil.rmtree(events_dir, ignore_errors=True)
+
+
 async def drive_agent(
     *,
     agent_def: AgentDef,
@@ -85,8 +115,12 @@ async def drive_agent(
     #   2. Volatility: a reviewer's project_root is a DISPOSABLE worktree that the
     #      paired-run path tears down (and the reviewer's own bash can mutate); an
     #      events file under it can vanish mid-run -> FileNotFoundError on append.
-    # Both are solved by giving every call its own throwaway events dir OUTSIDE
-    # project_root, torn down once telemetry has been read back.
+    # Both are solved by giving every call its own fresh events dir OUTSIDE
+    # project_root. After telemetry is read back the dir is PRESERVED (moved into
+    # _eval_log_root()) rather than deleted, so a failed/slow/empty run's
+    # events.jsonl + transcript can be inspected post hoc without re-running a
+    # billable eval. The next call still mkdtemps a brand-new dir, so the
+    # resume/collision hazards above never reappear from the preserved logs.
     events_dir = Path(tempfile.mkdtemp(prefix="imp-eval-"))
     events_path = events_dir / f"{safe_id}.events.jsonl"
     event_log = JsonlEventLog(events_path)
@@ -137,7 +171,7 @@ async def drive_agent(
         telem = read_telemetry(events_path, agent_id)
         return result.output, telem
     finally:
-        shutil.rmtree(events_dir, ignore_errors=True)
+        _preserve_eval_dir(events_dir, provider_name, model_name, safe_id)
 
 
 def drive_agent_sync(**kwargs: Any) -> tuple[dict[str, Any] | None, Telemetry]:
