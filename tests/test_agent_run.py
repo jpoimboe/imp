@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import anyio
 import pytest
 
 from imp.agents.runner import ChangeContext
@@ -343,6 +344,66 @@ async def test_drive_invocation_output_validation_failure(tmp_path: Path) -> Non
     error_events = [c for c in log.calls if c["type"] == "error" and c["agent_id"] is None]
     assert error_events, f"no synthesized error event found in log.calls: {log.calls}"
     assert error_events[0]["payload"]["category"] == "agent_output_missing"
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_stalls_on_inactivity(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """B.2: a runner that emits NOTHING past the inactivity window is killed; the
+    runner's own interrupt() runs and the result is errored with kind 'stalled'."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+
+    interrupted = {"called": False}
+
+    class _StallRunner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+        async def run(self, _invocation):
+            await anyio.sleep(3600)   # emit nothing, ever
+            yield {"type": "agent_output", "payload": {}}  # never reached
+
+    with anyio.fail_after(5):
+        result = await ar.drive_invocation(
+            _inv(tmp_path), _StallRunner(), coordinator=None, log=None,
+            emit_events=False)
+    assert result.errored is True
+    assert result.error is not None and result.error.kind == "stalled"
+    assert interrupted["called"] is True
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_stalls_mid_stream(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """F6: the runner emits SOME events, then goes silent past the window. The
+    watchdog must still fire (exercises the wrapper after the loop body has run a
+    few times)."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    interrupted = {"called": False}
+
+    class _MidStallRunner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+        async def run(self, _invocation):
+            yield {"type": "thinking", "payload": {"content": "warming up"}}
+            yield {"type": "thinking", "payload": {"content": "still going"}}
+            await anyio.sleep(3600)        # now go silent forever
+            yield {"type": "agent_output", "payload": {}}  # never reached
+
+    with anyio.fail_after(5):
+        result = await ar.drive_invocation(
+            _inv(tmp_path), _MidStallRunner(), coordinator=None, log=None,
+            emit_events=False)
+    assert result.errored is True
+    assert result.error is not None and result.error.kind == "stalled"
+    assert interrupted["called"] is True
 
 
 def test_build_agent_invocation_appends_engine_seed_note_unconditionally(

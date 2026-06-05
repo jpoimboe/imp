@@ -445,6 +445,40 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
 
 
 @pytest.mark.anyio
+async def test_interrupt_cancels_in_flight_request(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    started = anyio.Event()
+
+    class _HangingClient:
+        class responses:
+            @staticmethod
+            async def create(**_kw):
+                started.set()
+                await anyio.sleep(3600)
+
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini", client_factory=lambda: _HangingClient(),
+    )
+    inv = _inv(tmp_path)
+
+    events: list = []
+    async def _drive():
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    with anyio.fail_after(5):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_drive)
+            await started.wait()
+            await anyio.sleep(0.05)
+            await runner.interrupt()
+
+    kinds = [e.get("payload", {}).get("kind")
+             for e in events if e["type"] == "error"]
+    assert "interrupted" in kinds
+
+
+@pytest.mark.anyio
 async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     from dataclasses import replace
 

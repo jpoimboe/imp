@@ -103,6 +103,10 @@ async def ask_line_with_slash(prompt: Any, status: Any, change: Any) -> str:
         with status.suspend():
             print()                       # §3: separate the prompt from prior output
             line: str = await prompt.ask_async("> ")
+            if line.strip().lower() in ("exit", "quit"):
+                # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the run
+                # loop's existing EOFError handler (cli/main.py) pauses and exits.
+                raise EOFError
             if not is_slash_command(line):
                 return line
             result = handle_slash_line(line, change=change, output_fn=print)

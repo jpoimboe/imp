@@ -240,5 +240,14 @@ async def dispatch_task(
         # must not kill the task-lead. error_policy backoff has already been
         # applied above, so transient errors retried before reaching here.
         cat = result.error.category if result.error else "unknown"
-        raise RuntimeError(f"subagent {subagent_name!r} failed ({cat})")
+        kind = result.error.kind if result.error else None
+        # Embed the kind (e.g. "stalled" from the B.2 watchdog) so the parent's
+        # is_error tool_result content carries it — Part D derives the subagent's
+        # terminal glyph from this marker. Without it, a stalled subagent reads
+        # as a generic ✗ failed and the operator can't tell it timed out.
+        # CONSUMER CONTRACT: narrative._close_subagent_fold scans this error
+        # content for the literal "[<kind>]" marker (only on is_error closes).
+        # Keep the bracketed format and kind vocabulary in sync with that scan.
+        suffix = f" [{kind}]" if kind else ""
+        raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
     return json.dumps(result.output)

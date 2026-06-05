@@ -76,6 +76,30 @@ def test_burst_dropped_prose_kept_in_order() -> None:
     assert any("the answer" in ln for ln in body)
 
 
+def test_live_subagent_only_status_rows() -> None:
+    # Feed a subagent burst: live must show only the status row, never the
+    # subagent's streamed children or the SDK sentinel outcome.
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("3", "step_started", step="spec", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("4", "tool_call", agent_id="a", id="t1", name="task",
+           input={"subagent_name": "reviewer"}),
+        ev("5", "llm_response", agent_id="sub:4",
+           raw={"content": [{"type": "text", "text": "some internal chatter"}]},
+           usage={}),
+        ev("6", "tool_result", agent_id="a", id="t1",
+           content="The user doesn't want to proceed with this tool use..."),
+    ]:
+        drv.on_event(e)
+    drv.finish()
+    out_text = out.getvalue()
+    assert "↳ task → reviewer" in out_text
+    assert "some internal chatter" not in out_text
+    assert "doesn't want to proceed" not in out_text
+
+
 def test_subagent_descends_but_nested_burst_does_not_leak() -> None:
     drv, out = _driver()
     for e in [
@@ -91,10 +115,10 @@ def test_subagent_descends_but_nested_burst_does_not_leak() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    # New boundary-header shape: ↳ glyph, no `· N events` suffix.
-    assert any(ln.strip() == "↳ task → coder" for ln in body)
+    # Part D: the subagent collapses to one resolved status row.
+    assert any(ln.strip() == "↳ task → coder  ⟨✓ done⟩" for ln in body)
     assert not any("▸ task" in ln for ln in body)
-    # The nested tool burst must still NOT leak into the stream (A2 filters it).
+    # The nested tool burst must still NOT leak into the stream.
     assert not any("secret.py" in ln for ln in body)
 
 
@@ -250,7 +274,10 @@ def test_open_burst_flushes_to_nothing_at_pause() -> None:
     assert not any("tools" in ln for ln in _body(out))   # nothing to emit (A2)
 
 
-def test_subagent_prose_streams_before_close() -> None:
+def test_subagent_row_resolves_only_on_close() -> None:
+    # Part D: a running subagent is a blocking leaf — NOTHING (not even its row)
+    # emits until it closes; its internal prose never appears. On close the single
+    # resolved status row emits.
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -262,20 +289,21 @@ def test_subagent_prose_streams_before_close() -> None:
            raw={"content": [{"type": "text", "text": "interim finding"}]}, usage={}),
     ]:
         drv.on_event(e)
-    # Prose appears WHILE the subagent is still running (before the close event).
+    # While running: internal prose hidden and no row yet (it resolves on close).
     body_before = _body(out)
-    assert any("interim finding" in ln for ln in body_before)
-    assert not any("→ status" in ln for ln in body_before)   # no outcome yet
-    # Close the subagent; the outcome lands now.
+    assert not any("interim finding" in ln for ln in body_before)
+    assert not any("↳ task → reviewer" in ln for ln in body_before)
+    # Close the subagent; the single resolved row lands now, with no outcome.
     drv.on_event(ev("6", "tool_result", agent_id="a", id="t1",
                     content='{"status":"Success"}'))
     body_after = _body(out)
-    assert any("→ status=Success" in ln for ln in body_after)
+    assert any(ln.strip() == "↳ task → reviewer  ⟨✓ done⟩" for ln in body_after)
+    assert not any("status=Success" in ln for ln in body_after)
 
 
-def test_subagent_outcome_column_matches_prose_column() -> None:
-    drv, out = _driver()
-    for e in [
+def test_subagent_status_row_column_matches_render_tree() -> None:
+    # The collapsed status row sits at the same column in live and imp log.
+    events = [
         ev("1", "change_created", change_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
@@ -285,16 +313,15 @@ def test_subagent_outcome_column_matches_prose_column() -> None:
            raw={"content": [{"type": "text", "text": "finding"}]}, usage={}),
         ev("6", "tool_result", agent_id="a", id="t1",
            content='{"status":"Success"}'),
-    ]:
+    ]
+    drv, out = _driver()
+    for e in events:
         drv.on_event(e)
+    drv.finish()
     body = _body(out)
-    prose_line = next(ln for ln in body if "finding" in ln)
-    outcome_line = next(ln for ln in body if "→ status=Success" in ln)
-
-    def indent(s: str) -> int:
-        return len(s) - len(s.lstrip())
-
-    assert indent(prose_line) == indent(outcome_line)
+    live_row = next(ln for ln in body if "↳ task → reviewer" in ln)
+    log_row = next(ln for ln in _render_body(events) if "↳ task → reviewer" in ln)
+    assert live_row == log_row
 
 
 def test_finish_force_pops_running_subagent_without_outcome() -> None:
@@ -309,20 +336,20 @@ def test_finish_force_pops_running_subagent_without_outcome() -> None:
            raw={"content": [{"type": "text", "text": "partial work"}]}, usage={}),
     ]:
         drv.on_event(e)
-    # Subagent never closes; finish() must force-pop it without crashing.
+    # Subagent never closes; finish() force-emits its leaf without crashing. The
+    # row shows the (still-running) status; internal prose and outcome stay hidden.
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
-    assert any("partial work" in ln for ln in body)
-    assert not any("→ status" in ln for ln in body)   # empty outcome → nothing
+    assert any(ln.strip() == "↳ task → reviewer  ⟨⏳ running⟩" for ln in body)
+    assert not any("partial work" in ln for ln in body)
+    assert not any("→ status" in ln for ln in body)   # no outcome ever
 
 
 def test_subagent_body_parity_with_render_tree() -> None:
     # The stated invariant: snapshot (imp log) and live stay BYTE-IDENTICAL via the
-    # shared header/outcome helpers. The subagent path is where the two renderers
-    # diverge most (descended-container + outcome-on-pop vs. a single
-    # _render_subagent call), so assert full-line parity for a subagent with prose
-    # AND a structured outcome.
+    # shared subagent_status_row helper. Both now collapse the subagent to one
+    # resolved status row, so assert full-body parity for a subagent that had
+    # internal prose AND a structured outcome (neither of which must render).
     events = [
         ev("1", "change_created", change_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
@@ -350,7 +377,9 @@ def test_subagent_body_parity_with_render_tree() -> None:
 # matching note in tests/test_render_text.py.
 
 
-def test_nested_open_burst_emits_nothing_and_does_not_reorder() -> None:
+def test_nested_subagent_io_never_leaks() -> None:
+    # Part D: a subagent is a leaf — none of its internal I/O (nested tool bursts
+    # or prose) ever reaches the live view, regardless of whether it closed.
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -365,19 +394,17 @@ def test_nested_open_burst_emits_nothing_and_does_not_reorder() -> None:
            raw={"content": [{"type": "text", "text": "after burst"}]}, usage={}),
     ]:
         drv.on_event(e)
+    drv.finish()
     body = _body(out)
-    assert not any("tools" in ln for ln in body)       # nested open burst emits nothing
-    assert any("after burst" in ln for ln in body)     # prose still streams, in order
-    # No duplicate prose line (guards against double-emit).
-    assert sum("after burst" in ln for ln in body) == 1
+    assert not any("tools" in ln for ln in body)        # nested burst hidden
+    assert not any("after burst" in ln for ln in body)  # internal prose hidden
+    assert any("↳ task → reviewer" in ln for ln in body)  # only the status row
 
 
-def test_subagent_closing_with_open_nested_burst_still_emits_outcome() -> None:
+def test_subagent_closing_with_open_nested_burst_emits_only_status_row() -> None:
     # A subagent can close (parent task tool_result) while a nested burst is still
-    # the nested builder's current_burst (no trailing prose flushed it). The
-    # builder-aware _is_final must NOT block the cursor on that burst once the
-    # subagent has closed — the outcome must still emit on the normal (non-force)
-    # walk. Regression guard for the _is_final builder-awareness fix.
+    # open. Part D: the close resolves the single status row on the normal (non-
+    # force) walk; no nested I/O and no outcome render.
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -393,9 +420,9 @@ def test_subagent_closing_with_open_nested_burst_still_emits_outcome() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
-    assert not any("tools" in ln for ln in body)        # nested burst dropped (A2)
-    assert any("→ status=Success" in ln for ln in body)  # outcome emitted on close, non-force
+    assert any(ln.strip() == "↳ task → reviewer  ⟨✓ done⟩" for ln in body)
+    assert not any("tools" in ln for ln in body)        # nested burst hidden
+    assert not any("status=Success" in ln for ln in body)  # outcome hidden
 
 
 def test_phase_b_streams_live_without_finish() -> None:
@@ -429,7 +456,10 @@ def _driver_color():
     return drv, out
 
 
-def test_live_subagent_prose_carries_gutter_byte_identical_to_log() -> None:
+def test_live_subagent_collapses_to_status_row_byte_identical_to_log() -> None:
+    # Part D: a subagent is a LEAF — it collapses to one resolved status row, with
+    # no streamed children, no gutter, and no outcome. The whole body is byte-
+    # identical to the imp log replay (shared subagent_status_row layer).
     events = [
         ev("1", "change_created", change_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
@@ -445,10 +475,10 @@ def test_live_subagent_prose_carries_gutter_byte_identical_to_log() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    # The streamed `↳` header and the `│ ` gutter on prose + outcome…
-    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
-    assert any(ln.endswith("│ the finding") for ln in body)
-    # …and the whole body is byte-identical to the imp log replay (shared layer).
+    # The single resolved status row — no streamed prose, no gutter, no outcome.
+    assert any(ln.strip() == "↳ task → reviewer  ⟨✓ done⟩" for ln in body)
+    assert not any("the finding" in ln for ln in body)
+    assert not any("│" in ln for ln in body)
     assert body == _render_body(events)
 
 
@@ -563,11 +593,10 @@ def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
     assert body == _render_body(events)
 
 
-def test_live_subagent_outcome_NOT_blank_separated_from_prose() -> None:
-    """The subagent outcome line emits on cursor pop (a structural emission
-    outside the children-flow), so it must NOT receive the prose-adjacency
-    blank — matching render_text where the outcome is yielded directly from
-    _render_subagent, bypassing _render_children's prev_prose tracking."""
+def test_live_subagent_emits_no_internal_io_or_outcome() -> None:
+    """Part D: a subagent collapses to one status row — its internal prose and the
+    structured return value (the SDK cancellation-sentinel carrier) never reach the
+    live view. The body stays byte-identical to the imp log replay."""
     events = [
         ev("1", "change_created", change_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
@@ -584,10 +613,9 @@ def test_live_subagent_outcome_NOT_blank_separated_from_prose() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    prose_i = next(i for i, ln in enumerate(body) if "the finding" in ln)
-    outcome_i = next(i for i, ln in enumerate(body) if "→ status=Success" in ln)
-    assert outcome_i == prose_i + 1, (
-        "outcome must immediately follow prose; no blank separator")
+    assert any(ln.strip() == "↳ task → reviewer  ⟨✓ done⟩" for ln in body)
+    assert not any("the finding" in ln for ln in body)        # internal prose hidden
+    assert not any("status=Success" in ln for ln in body)     # outcome hidden
     assert body == _render_body(events)
 
 

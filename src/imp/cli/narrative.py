@@ -143,6 +143,8 @@ class SubagentFold:
     running: bool = True
     outcome: str | None = None         # result summary when task tool_result lands
     is_error: bool = False
+    terminal_state: str | None = None  # 'stalled' (live via B.2); 'interrupted'
+                                       # is forward-compat scaffolding; else None
     collapsible = True
 
     @property
@@ -677,6 +679,23 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any]) -> None:
     fold.running = False
     fold.is_error = bool(p.get("error", False))
     fold.outcome = _summarize_result(p.get("content"))
+    # Terminal state for Part D's glyph. Prefer an explicit payload kind (forward
+    # compatible); else detect the bracketed marker dispatch_task embeds in the
+    # failure message ("... failed (config) [stalled]"). The brackets keep the
+    # match precise (low false-positive). 'interrupted' is matched too for
+    # forward compatibility, though no subagent path emits it today.
+    kind = p.get("kind")
+    if kind not in ("stalled", "interrupted"):
+        # The bracketed marker only originates from the failure path; a
+        # SUCCESSFUL subagent's content is agent-controlled JSON that may
+        # legitimately contain "[stalled]". Gate the scan on is_error so such
+        # text can't false-positive into a terminal state.
+        text = fold.outcome if fold.is_error else ""
+        kind = next(
+            (s for s in ("stalled", "interrupted") if f"[{s}]" in (text or "")),
+            None)
+    if kind in ("stalled", "interrupted"):
+        fold.terminal_state = kind
 
 
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

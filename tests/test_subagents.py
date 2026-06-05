@@ -78,6 +78,53 @@ def anyio_backend():
     return "asyncio"
 
 
+def _dispatch_ctx(tmp_path: Path) -> ToolContext:
+    """Minimal ToolContext that lets dispatch_task reach drive_invocation.
+    Mirrors the existing dispatch tests above (spawn_subagent + a 'reviewer'
+    def + coordinator + change_context). drive_invocation is monkeypatched by
+    the caller, so the spawned runner's events are never consumed."""
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"reviewer": _agent("reviewer")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "claude-sonnet-4-6"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}])
+    ctx.change_context = ChangeContext(
+        slug="change-42", title="Change 42", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow")
+    return ctx
+
+
+def test_dispatch_task_surfaces_stalled_kind(tmp_path: Path) -> None:
+    # PRODUCER: when drive_invocation returns ErrorInfo(category='config',
+    # kind='stalled') (the B.2 watchdog outcome), dispatch_task must surface the
+    # kind to the parent — its RuntimeError message must carry the '[stalled]'
+    # marker so the provider's is_error tool_result content includes it.
+    import anyio
+
+    from imp.engine.agent_run import AgentRunResult, ErrorInfo
+
+    ctx = _dispatch_ctx(tmp_path)
+
+    async def _fake_drive(*_a, **_k):
+        return AgentRunResult(output=None, errored=True, paused=False,
+                              fatal=False, delay=None,
+                              error=ErrorInfo("config", "stalled"))
+
+    import imp.agents.subagents as sub_mod
+    orig = sub_mod.drive_invocation
+    sub_mod.drive_invocation = _fake_drive  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError) as ei:
+            anyio.run(dispatch_task, ctx, "reviewer", "do x")
+    finally:
+        sub_mod.drive_invocation = orig  # type: ignore[assignment]
+    assert "[stalled]" in str(ei.value)
+
+
 def test_task_tool_invoke_raises_sentinel(tmp_path: Path) -> None:
     """`.invoke()` must never be called — runner special-cases name=='task'."""
     ctx = ToolContext(

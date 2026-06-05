@@ -21,12 +21,15 @@ import it.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import anyio
+
 from imp.agents.runner import AgentInvocation, ChangeContext, Message
+from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S
 from imp.engine.completion import build_continuation_fn, completion_instruction
 from imp.engine.types import AgentDef
 
@@ -96,6 +99,30 @@ class SubagentSuspended(Exception):
     run-loop (transcript left ending at the dangling `task` tool_use) ->
     parent drive_invocation -> executor, which persists status="paused".
     Resume re-enters the step fresh and re-dispatches the subagent subtree."""
+
+
+async def _pull_with_inactivity_watchdog(
+    gen: Any, *, runner: Any, stall: dict[str, bool],
+) -> AsyncIterator[Any]:
+    """Yield events from `gen`, racing each pull against AGENT_INACTIVITY_TIMEOUT_S
+    (B.2). On a stall, drive the agent's OWN teardown (its runner interrupt +
+    generator aclose) so the in-flight work actually dies — not just this await —
+    set stall['hit'], and end iteration. The caller observes the early end +
+    stall['hit'] and returns the stalled result."""
+    while True:
+        try:
+            with anyio.fail_after(AGENT_INACTIVITY_TIMEOUT_S):
+                ev = await gen.__anext__()
+        except StopAsyncIteration:
+            return
+        except TimeoutError:
+            stall["hit"] = True
+            with contextlib.suppress(Exception):
+                await runner.interrupt()
+            with contextlib.suppress(Exception):
+                await gen.aclose()
+            return
+        yield ev
 
 
 def build_agent_invocation(
@@ -218,11 +245,14 @@ async def drive_invocation(
     from imp.engine.schema import validate_agent_output
 
     agent_output: dict[str, Any] | None = None
+    stall = {"hit": False}
     attach = (coordinator.runner_attached(runner.interrupt)
               if coordinator is not None else contextlib.nullcontext())
     try:
         with attach:
-            async for event in runner.run(invocation):
+            gen = runner.run(invocation)
+            async for event in _pull_with_inactivity_watchdog(
+                    gen, runner=runner, stall=stall):
                 if emit_events and log is not None:
                     log.append(agent_id=invocation.agent_id,
                                type=event["type"], payload=event.get("payload", {}))
@@ -251,6 +281,15 @@ async def drive_invocation(
     except SubagentSuspended:
         # A nested subagent paused; unwind this drive as paused too.
         return AgentRunResult(None, False, True, False, None)
+
+    if stall["hit"]:
+        # B.2: the watchdog tore the agent down. Surface as errored/'stalled'.
+        if emit_events and log is not None:
+            log.append(agent_id=invocation.agent_id, type="error",
+                       payload={"category": "config", "kind": "stalled",
+                                "message": f"no events for {AGENT_INACTIVITY_TIMEOUT_S:.0f}s"})
+        return AgentRunResult(None, True, False, False, None,
+                              ErrorInfo("config", "stalled"))
 
     if agent_output is None:
         return AgentRunResult(None, True, False, False, None)

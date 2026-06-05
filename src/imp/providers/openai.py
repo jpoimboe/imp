@@ -22,6 +22,8 @@ import os
 from collections.abc import AsyncGenerator
 from typing import Any, cast
 
+import anyio
+
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
 from imp.agents.runner import (
@@ -374,6 +376,7 @@ class OpenAIAgentRunner:
         self._user_input_fn = user_input_fn
         self._client: Any = None
         self._cancel = False
+        self._cancel_scope: Any = None
         self._ctx: ToolContext | None = None
 
     def _get_client(self) -> Any:
@@ -554,14 +557,29 @@ class OpenAIAgentRunner:
 
         while not self._cancel:
             client = self._get_client()
-            response = await client.responses.create(
-                model=self.model,
-                instructions=invocation.system_prompt,
-                input=_imp_to_responses_input(messages),
-                tools=openai_tools,
-                store=False,
-                prompt_cache_key=prompt_cache_key,
-            )
+            # N4 race note: an interrupt() between the loop-head _cancel check and
+            # this assignment leaves this one request uncancelled (loop exits next
+            # iteration via _cancel). One extra in-flight request, worst case.
+            self._cancel_scope = anyio.CancelScope()
+            response = None
+            try:
+                with self._cancel_scope:
+                    response = await client.responses.create(
+                        model=self.model,
+                        instructions=invocation.system_prompt,
+                        input=_imp_to_responses_input(messages),
+                        tools=openai_tools,
+                        store=False,
+                        prompt_cache_key=prompt_cache_key,
+                    )
+            finally:
+                # N3: reset even on a genuine API error so a later interrupt()
+                # never cancels a stale exited scope.
+                self._cancel_scope = None
+            if response is None:
+                # interrupt() cancelled the in-flight request — exit the loop and
+                # fall through to the "cancelled (interrupt)" yield below.
+                break
 
             raw = _serialize_responses_response(response)
             assistant_msg = _parse_responses_message(raw)
@@ -763,8 +781,14 @@ class OpenAIAgentRunner:
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
+        # M5: the run loop's `finally` may have just set _cancel_scope to None and
+        # exited the scope. Calling .cancel() on an already-exited anyio CancelScope
+        # is a no-op (safe on the pinned anyio >=4,<5), and `_cancel` still stops
+        # the loop on its next iteration — so the inverse race is benign.
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
         if self._ctx is not None:
-            await terminate_running_processes(self._ctx, timeout=2.0)
+            await terminate_running_processes(self._ctx)
 
 
 class OpenAIProvider:
