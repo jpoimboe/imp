@@ -81,6 +81,55 @@ def plan_sweep(
     )
 
 
+@dataclass(frozen=True)
+class PairedPlan:
+    n_paired_models: int
+    n_reviewer_runs: int
+    n_judge_calls: int
+    estimated_dollars: float
+
+
+def plan_paired(
+    paired_models: list[tuple[str, str]],
+    fixtures: list[Fixture],
+    *,
+    judge_provider: str = "anthropic",
+    judge_model: str = "claude-opus-4-8",
+) -> PairedPlan:
+    """Dry-run estimate for the per-model Q1/Q4 paired path (run_q1_q4). Per model,
+    per fixture: 3 reviewer runs (all three roles bound to that model) + 2 grades
+    (code-reviewer fast-path + cross-task union), each grade firing one judge call
+    per expected finding. UNCACHED — run_paired takes no cache arg, so this re-bills
+    on every `imp eval run`, unlike the swept cells. The runtime self-grading
+    exclusion drops a few fixtures per question, so this is a slight UPPER bound."""
+    rev_telem = Telemetry(_EST_INPUT_TOKENS, _EST_OUTPUT_TOKENS, 0, 0, 0, 0.0)
+    judge_telem = Telemetry(_EST_JUDGE_INPUT_TOKENS, _EST_JUDGE_OUTPUT_TOKENS, 0, 0, 0, 0.0)
+
+    def _add(telem: Telemetry, provider: str, model: str) -> float:
+        try:
+            return dollars_for(telem, provider, model)
+        except KeyError:
+            return 0.0
+
+    n_reviewer_runs = 0
+    n_judge_calls = 0
+    est = 0.0
+    for provider, model in paired_models:
+        for fx in fixtures:
+            for _role in ("spec-task-reviewer", "quality-reviewer", "code-reviewer"):
+                n_reviewer_runs += 1
+                est += _add(rev_telem, provider, model)
+            judge_calls = 2 * len(fx.expected_findings)  # code-reviewer grade + union grade
+            n_judge_calls += judge_calls
+            est += judge_calls * _add(judge_telem, judge_provider, judge_model)
+    return PairedPlan(
+        n_paired_models=len(paired_models),
+        n_reviewer_runs=n_reviewer_runs,
+        n_judge_calls=n_judge_calls,
+        estimated_dollars=est,
+    )
+
+
 def require_optin() -> None:
     if os.environ.get(EVAL_OPTIN_ENV) != "1":
         raise SweepError(

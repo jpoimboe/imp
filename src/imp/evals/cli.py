@@ -94,16 +94,28 @@ def _mined_fixtures() -> list[Fixture]:
 
 
 def cmd_dry_run(args: argparse.Namespace) -> int:
-    from imp.evals.sweep import plan_sweep
+    from imp.evals.sweep import plan_paired, plan_sweep
 
+    judge_provider = getattr(args, "judge_provider", "anthropic")
+    judge_model = getattr(args, "judge_model", "claude-opus-4-8")
     plan = plan_sweep(
         _default_variants(), _curated_fixtures(),
-        judge_provider=getattr(args, "judge_provider", "anthropic"),
-        judge_model=getattr(args, "judge_model", "claude-opus-4-8"),
+        judge_provider=judge_provider, judge_model=judge_model,
     )
     print(
         f"matrix: {plan.n_cells} cells, {plan.n_agent_runs} reviewer runs, "
         f"{plan.n_judge_calls} judge calls; estimated ${plan.estimated_dollars:.2f}"
+    )
+    # The paired Q1/Q4 path (Stage 2): OpenAI trio x (mined + curated) fixtures,
+    # UNCACHED, so it re-bills every run and is invisible to plan_sweep above.
+    paired = plan_paired(
+        _PAIRED_MODELS, _mined_fixtures() + _curated_fixtures(),
+        judge_provider=judge_provider, judge_model=judge_model,
+    )
+    print(
+        f"paired Q1/Q4 (UNCACHED — re-billed each run): {paired.n_paired_models} models, "
+        f"{paired.n_reviewer_runs} reviewer runs, {paired.n_judge_calls} judge calls; "
+        f"estimated ${paired.estimated_dollars:.2f}"
     )
     return 0
 
