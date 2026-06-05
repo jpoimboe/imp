@@ -666,7 +666,10 @@ def _journal_last_activity(control: Path, change_id: str) -> str:
     raw = journal.journal_show(control, change_id, "events.jsonl")
     if raw is None:
         return "-"
-    return _format_last_timestamp(raw.decode("utf-8", errors="replace"))
+    line = _last_nonempty_line(raw)
+    if line is None:
+        return "-"
+    return _format_last_timestamp(line.decode("utf-8", errors="replace"))
 
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.

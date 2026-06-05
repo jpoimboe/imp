@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.cli import main as cli_main
 from imp.cli.main import (
     _format_last_timestamp,
     _last_event_timestamp,
@@ -115,3 +116,22 @@ def test_last_event_timestamp_non_utf8_last_line(tmp_path: Path) -> None:
     p = tmp_path / "events.jsonl"
     p.write_bytes(b'{"timestamp":"2026-06-01T00:00:00+00:00"}\n\xff\xfe garbage\n')
     assert _last_event_timestamp(p) == "-"
+
+
+def test_journal_last_activity_uses_last_line(monkeypatch, tmp_path: Path) -> None:
+    blob = (
+        b'{"timestamp":"2026-06-01T00:00:00+00:00"}\n'
+        b'{"timestamp":"2026-06-05T12:00:00+00:00"}\n'
+    )
+    monkeypatch.setattr(
+        cli_main.journal, "journal_show", lambda control, cid, name: blob
+    )
+    out = cli_main._journal_last_activity(tmp_path, "some-id")
+    assert len(out) == 19 and out != "-"
+
+
+def test_journal_last_activity_absent(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        cli_main.journal, "journal_show", lambda control, cid, name: None
+    )
+    assert cli_main._journal_last_activity(tmp_path, "x") == "-"
