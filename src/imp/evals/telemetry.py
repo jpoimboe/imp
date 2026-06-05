@@ -90,6 +90,15 @@ def read_telemetry(events_path: Path, agent_id: str) -> Telemetry:
             am = payload.get("auth_mode")
             if isinstance(am, str):
                 auth_mode = am
+        elif etype == "llm_response_usage_patch":
+            # Fold patch into the running totals; the matching llm_response was
+            # already counted above. No new response counted.
+            u = payload.get("usage") or {}
+            f_in, f_out, f_cr, f_cc = _normalize_usage(u, provider=None)
+            inp += f_in
+            out += f_out
+            cr += f_cr
+            cc += f_cc
         elif etype == "tool_call":
             tool_calls += 1
     wall = (max(timestamps) - min(timestamps)).total_seconds() if len(timestamps) >= 2 else 0.0

@@ -175,6 +175,9 @@ class EventLog(Protocol):
     def append(self, *, agent_id: str | None, type: str,
                payload: dict[str, Any]) -> dict[str, Any]: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
+    def update_last_llm_response_usage(
+        self, *, agent_id: str, usage: dict[str, Any],
+    ) -> None: ...
 
 
 class _BaseEventLog:
@@ -344,6 +347,19 @@ class JsonlEventLog(_BaseEventLog):
                 except json.JSONDecodeError:
                     yield {"_malformed": True, "raw": line}
 
+    def update_last_llm_response_usage(
+        self, *, agent_id: str, usage: dict[str, Any],
+    ) -> None:
+        # JsonlEventLog is append-only on disk. Write a usage-patch row so
+        # read_telemetry can fold it into the preceding llm_response totals.
+        # NOT a second llm_response — that would double-count under telemetry's
+        # one-response-per-turn invariant.
+        self._persist({
+            "type": "llm_response_usage_patch",
+            "agent_id": agent_id,
+            "payload": {"usage": usage},
+        })
+
     def events_for_current_step(self, step_name: str) -> Iterable[dict[str, Any]]:
         """Replay-helper for `imp resume`: yield events from the last
         `step_started` for `step_name` until the next different step starts.
@@ -378,6 +394,21 @@ class InMemoryEventLog(_BaseEventLog):
 
     def read(self) -> Iterator[dict[str, Any]]:
         yield from list(self._events)
+
+    def update_last_llm_response_usage(
+        self, *, agent_id: str, usage: dict[str, Any],
+    ) -> None:
+        for ev in reversed(self._events):
+            if ev.get("type") == "llm_response" and ev.get("agent_id") == agent_id:
+                payload = ev.setdefault("payload", {})
+                existing = payload.get("usage") or {}
+                # Merge: codex emits full usage at turn.completed; the prior
+                # llm_response (from item:agent_message) carries no usage.
+                payload["usage"] = {**existing, **usage}
+                return
+        raise RuntimeError(
+            f"no prior llm_response for agent_id={agent_id!r} to attach usage to"
+        )
 
 
 class LockHeld(Exception):

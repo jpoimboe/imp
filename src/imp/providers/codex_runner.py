@@ -168,6 +168,15 @@ class CodexAgentRunner:
 # ── Event mapping ─────────────────────────────────────────────────────────────
 
 
+def _attach_usage_to_last_llm_response(
+    elog: Any, *, agent_id: str, usage: dict[str, Any],
+) -> None:
+    """Patch the most recent `llm_response` payload for `agent_id` with
+    `usage`. Required on every `EventLog` implementation — see
+    `src/imp/engine/state.py`."""
+    elog.update_last_llm_response_usage(agent_id=agent_id, usage=usage)
+
+
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str,
@@ -237,5 +246,32 @@ def process_event(
                     payload={"message": f"unhandled codex item type: {itype!r}"})
         return
 
-    # Default arm: turn.completed / turn.failed / error / unknown —
+    if etype == "turn.completed":
+        usage = getattr(event, "usage", None)
+        if usage is None:
+            return
+        # Map flat codex keys explicitly. The existing `_normalize_usage`
+        # OpenAI-shape detector reads `input_tokens_details.cached_tokens`
+        # (nested) — codex emits a FLAT `cached_input_tokens` instead, so
+        # without this mapping cache would silently record as zero.
+        input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+        cached = int(getattr(usage, "cached_input_tokens", 0) or 0)
+        output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+        reasoning_tokens = int(getattr(usage, "reasoning_output_tokens", 0) or 0)
+        normalized = {
+            # `input_tokens` here means FRESH input (anthropic-style) so the
+            # downstream `_normalize_usage` anthropic branch picks it up
+            # correctly: fresh = anthropic input, cache_read = cache.
+            "input_tokens": max(0, input_tokens - cached),
+            "output_tokens": output_tokens,
+            "cache_read_input_tokens": cached,
+            "cache_creation_input_tokens": 0,
+            "reasoning_output_tokens": reasoning_tokens,
+        }
+        # Attach to the most recent llm_response payload for this agent_id.
+        _attach_usage_to_last_llm_response(elog, agent_id=agent_id,
+                                           usage=normalized)
+        return
+
+    # Default arm: turn.failed / error / unknown —
     # handled by subsequent tasks. Falling through here is benign.
