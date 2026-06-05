@@ -162,10 +162,10 @@ def header_line(node: Any, *, depth: int, color: bool,
     SubagentFold), with no children. Shared by `_render` and the live driver so
     indentation/label/color stay identical in both paths. For a SubagentFold this
     is the `↳ task → {name}` boundary: subagent color, ↳ descent marker (not a
-    fold/expand glyph), and no (running)/(error) suffix — the live driver prints
-    it while the subagent is still running, so any status suffix would be
-    permanently wrong once it completes (completion is signaled by the outcome
-    line instead)."""
+    fold/expand glyph), and no (running)/(error) suffix. Note: the lean/live views
+    no longer use this for subagents — they emit `subagent_status_row` (a single
+    resolved `↳ task → {name} ⟨status⟩` row that signals completion). This bare
+    header survives only for the --full expanded fold and PhaseNode/StepNode."""
     if isinstance(node, nv.PhaseNode):
         return _line(node.name, depth, color, *pal.NODE_COLORS["phase"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):

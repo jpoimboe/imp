@@ -18,9 +18,11 @@ Not-final children (the only things that block a cursor):
     nested burst the owner is the subagent's nested builder, not the main one),
   - an unresolved human GateNode (action is None) — deferred until the human
     step's step_completed stamps the resolved route onto it.
-Everything else is final on append. A SubagentFold is NOT a blocking leaf: it is
-a descended container (like a PhaseNode/StepNode), so its children stream live as
-their events route in, and its structured return value is emitted on close.
+Everything else is final on append. A SubagentFold is a LEAF (Part D): it
+collapses to a single `↳ task → {name} ⟨status⟩` status row emitted once the
+subagent stops running — its streamed children and structured return value are
+never rendered in the live/lean views (this structurally eliminates the SDK
+cancellation-sentinel leak).
 """
 from __future__ import annotations
 
@@ -43,22 +45,15 @@ class _Cursor:
 
 
 def _is_container(node: Any) -> bool:
-    return isinstance(node, (nv.PhaseNode, nv.StepNode, nv.SubagentFold))
+    return isinstance(node, (nv.PhaseNode, nv.StepNode))
 
 
 def _container_children(container: Any) -> list[Any]:
-    # A SubagentFold's children live on its nested tree, not a `.children` attr.
-    if isinstance(container, nv.SubagentFold):
-        children: list[Any] = container.tree.root.children
-    else:
-        children = container.children
+    children: list[Any] = container.children
     return children
 
 
 def _container_closed(container: Any) -> bool:
-    # A SubagentFold has no `closed` attr; "closed" means it stopped running.
-    if isinstance(container, nv.SubagentFold):
-        return not container.running
     return getattr(container, "closed", False)
 
 
@@ -134,17 +129,7 @@ class LiveDriver:
                 if len(self._frontier) == 1:
                     return                      # root: never pop; await more children
                 if force or _container_closed(cur.container):
-                    # A drained+closed subagent emits its return value before pop,
-                    # at the prose depth (cur.depth) so it matches imp log. A still-
-                    # running subagent force-popped at finish() has an empty outcome
-                    # and emits nothing.
-                    if isinstance(cur.container, nv.SubagentFold):
-                        self._prev_prose = False  # structural emission: no blank-sep
-                        self._print_lines(list(rt.subagent_outcome_lines(
-                            cur.container, depth=cur.depth, color=self._color,
-                            width=self._width, gutters=self._gutters()
-                        )))
-                    elif (isinstance(cur.container, nv.PhaseNode)
+                    if (isinstance(cur.container, nv.PhaseNode)
                           and _container_closed(cur.container)
                           and nv.phase_elapsed(cur.container) is not None):
                         self._prev_prose = False  # structural emission: no blank-sep
@@ -159,9 +144,8 @@ class LiveDriver:
                 return                          # block on a not-final child
             cur.index += 1
             if _is_container(child):
-                # Subagent header is the shared `↳ task → {name}` boundary; the live
-                # driver prints it the instant the subagent starts (while running),
-                # then streams the subagent's children as their events route in.
+                # PhaseNode/StepNode: print the header now and descend, streaming
+                # the container's children as their events route in.
                 gutters = self._gutters()
                 self._stream_or_hold(
                     rt.header_line(child, depth=cur.depth, color=self._color,
@@ -172,45 +156,43 @@ class LiveDriver:
                 self._emit_leaf(child, cur.depth, gutters=self._gutters())
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
+        if isinstance(node, nv.SubagentFold):
+            # A subagent is a LEAF (Part D): final once it stops running, so the
+            # status row resolves to its terminal status on close. While running it
+            # blocks the cursor (its row is shown only resolved); the running cue
+            # lives in the status line via current_activity.
+            return not node.running
         if isinstance(node, nv.ToolBurstFold):
             # A burst is "open" (not yet final) only against the current_burst of
-            # the builder that OWNS it: a top-level burst belongs to the main
-            # builder; a *nested* subagent's burst belongs to that subagent's
-            # nested builder. Comparing against the owning builder keeps this
-            # correct regardless of whether render_text renders bursts in
-            # full=False — no reliance on the A2 drop.
-            if isinstance(container, nv.SubagentFold):
-                # Once the subagent has closed, no more nested events arrive, so a
-                # still-"open" nested burst is final — otherwise the cursor would
-                # block here forever and the subagent's outcome would never emit on
-                # the normal (non-force) walk.
-                return (not container.running
-                        or node is not container.nested.current_burst)
+            # the builder that OWNS it. With subagents now leaves, only top-level
+            # bursts reach the live walk, so the owning builder is always the main
+            # one — no reliance on the A2 drop.
             return node is not self._builder.current_burst
         if isinstance(node, nv.GateNode) and node.kind == "human":
             return node.action is not None     # deferred until step_completed
-        # SubagentFold is no longer a blocking leaf — it is a descended container
-        # (see _is_container / _walk), streamed child-by-child as events arrive.
         return True
 
     def _gutters(self) -> tuple[int, ...]:
         """Set of indent columns that are subagent boundaries, read from the
-        cursor stack. A SubagentFold cursor's `.depth` is its CHILDREN depth, so
-        the subagent's own header column is `.depth - 1`. The self-inclusion rule
-        falls out of WHEN this is called: the header is emitted BEFORE self's
-        cursor is pushed (so self is excluded), and the outcome is emitted BEFORE
-        self's cursor is popped (so self is included) — matching imp log.
-
-        Single-level routing (spawned subagents get subagent_defs={}) means a live
-        nested subagent can't occur, so this returns a 0- or 1-tuple in practice;
-        the multi-entry/ordering behavior is covered by the imp log nested test
-        (test_nested_subagent_emits_two_gutter_levels), which builds the nested
-        fold directly — there is no live nested test."""
+        cursor stack. Since Part D made SubagentFold a LEAF (never pushed as a
+        cursor), no subagent boundary is ever open during the live walk, so this
+        returns the empty tuple in practice. It is kept gutter-aware so the shared
+        render helpers receive a consistent signature; the magenta │ gutter now
+        appears only in the imp log --full expanded subagent view (render_text)."""
         return tuple(c.depth - 1 for c in self._frontier
                      if isinstance(c.container, nv.SubagentFold))
 
     def _emit_leaf(self, node: Any, depth: int,
                    gutters: tuple[int, ...] = ()) -> None:
+        if isinstance(node, nv.SubagentFold):
+            # Part D: a subagent collapses to a single resolved status row — no
+            # streamed children, no outcome. Shares render_text.subagent_status_row
+            # with the lean view so live and imp log stay byte-identical.
+            self._print_lines(
+                [rt.subagent_status_row(node, depth=depth, color=self._color,
+                                        gutters=gutters)],
+                separator_indent=rt._gutter_indent(depth, gutters, self._color))
+            return
         if isinstance(node, nv.UserMessageNode):
             # §4: live already showed the user's input via prompt_toolkit's raw
             # echo; re-emitting the guttered node would duplicate it. imp log,
