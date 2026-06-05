@@ -574,6 +574,44 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
 
 
 @pytest.mark.anyio
+async def test_interrupt_cancels_in_flight_request(tmp_path: Path) -> None:
+    """C-iii: a stalled messages.create() is cancelled by interrupt() — the run
+    returns the 'interrupted' error promptly, not after the request completes."""
+    started = anyio.Event()
+
+    class _HangingClient:
+        class messages:
+            @staticmethod
+            async def create(**_kw):
+                started.set()
+                await anyio.sleep(3600)  # never returns on its own
+
+    runner = AnthropicAgentRunner(
+        model_name="claude-x", client_factory=lambda: _HangingClient(),
+    )
+    inv = _inv(tmp_path)
+
+    events: list = []
+    with anyio.fail_after(5):
+        async with anyio.create_task_group() as tg:
+            async def _drive():
+                async for ev in runner.run(inv):
+                    events.append(ev)
+
+            tg.start_soon(_drive)
+            await started.wait()
+            await anyio.sleep(0.05)
+            await runner.interrupt()
+
+    kinds = [
+        e.get("payload", {}).get("kind")
+        for e in events
+        if e["type"] == "error"
+    ]
+    assert "interrupted" in kinds
+
+
+@pytest.mark.anyio
 async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     """Prose once → continuation injects a nudge → agent then calls
     complete_step → agent_output, no error. The nudge user-message is recorded."""
