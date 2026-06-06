@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from imp.agents.runner import TextBlock, ToolUseBlock
-from imp.engine.replay import parse_message
+from imp.engine.replay import extract_diagnostics, parse_message
 
 
 def test_parse_codex_text_only_message() -> None:
@@ -37,3 +37,19 @@ def test_parse_codex_web_search_block_is_query_only() -> None:
         ToolUseBlock(id="ws-1", name="web_search",
                      input={"query": "python asyncio"}),
     )
+
+
+def test_codex_diagnostics_empty_for_known_blocks() -> None:
+    raw = {"content": [
+        {"type": "text", "text": "hi"},
+        {"type": "tool_use", "id": "c1", "name": "edit_file", "input": {}},
+    ]}
+    diag = extract_diagnostics("codex", raw)
+    assert diag.block_warnings == ()
+    assert diag.thinkings == ()
+
+
+def test_codex_diagnostics_warns_on_unknown_block() -> None:
+    raw = {"content": [{"type": "mystery_block", "data": 1}]}
+    diag = extract_diagnostics("codex", raw)
+    assert any("mystery_block" in w for w in diag.block_warnings)

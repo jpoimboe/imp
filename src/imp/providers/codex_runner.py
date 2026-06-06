@@ -23,6 +23,7 @@ from typing import Any
 
 from imp.agents.runner import (
     AgentInvocation,
+    Diagnostics,
     Event,
     Message,
     TextBlock,
@@ -742,6 +743,20 @@ def _parse_codex_message(raw: dict[str, Any]) -> Message:
                 input=block.get("input", {})))
         # unknown: skipped (see _extract_codex_diagnostics)
     return Message(role="assistant", content=tuple(content))
+
+
+def _extract_codex_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+    """Render-only diagnostics for codex. text/tool_use are conversation
+    history (not warnings); any other block type is surfaced as a warning.
+    codex's reasoning is emitted as a separate `thinking` event, not in
+    `llm_response.raw`, so there are no inline thinkings to extract here."""
+    warnings: list[str] = []
+    for block in raw.get("content", []):
+        kind = block.get("type")
+        if kind in ("text", "tool_use"):
+            continue
+        warnings.append(f"skipped unknown block type {kind!r}")
+    return Diagnostics(block_warnings=tuple(warnings), thinkings=())
 
 
 def process_event(

@@ -30,7 +30,10 @@ from imp.providers.claude_code import (
     _extract_claude_code_diagnostics,
     _parse_claude_code_message,
 )
-from imp.providers.codex_runner import _parse_codex_message
+from imp.providers.codex_runner import (
+    _extract_codex_diagnostics,
+    _parse_codex_message,
+)
 from imp.providers.openai import (
     _extract_responses_diagnostics,
     _parse_responses_message,
@@ -47,6 +50,7 @@ _DIAGNOSTICS_EXTRACTORS: dict[str, Callable[[dict[str, Any]], Diagnostics]] = {
     "anthropic": _extract_anthropic_diagnostics,
     "openai": _extract_responses_diagnostics,
     "claude_code": _extract_claude_code_diagnostics,
+    "codex": _extract_codex_diagnostics,
 }
 
 
