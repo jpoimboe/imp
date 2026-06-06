@@ -139,6 +139,29 @@ def wait(idle: float = 0.3, hard: float = 15.0) -> str:
 
 
 @mcp.tool()
+def snapshot(path: str | None = None) -> str:
+    """Render the CURRENT screen to a PNG (true color, bold weight, box-drawing
+    glyphs) and return its path — for SEEING the TUI, not just the grid text that
+    view()/transcript() return. The image reflects the live session's size.
+
+    `path` defaults to a fresh temp file (read it back to view the image). Faint
+    (dim) text isn't shown — pyte discards SGR 2 at parse time — but color, bold,
+    and layout are faithful.
+    """
+    import os
+    import tempfile
+
+    from impty.render import render_screen
+
+    session = _require()
+    if path is None:
+        fd, path = tempfile.mkstemp(prefix="impty-", suffix=".png")
+        os.close(fd)
+    render_screen(session.screen, path)
+    return f"[wrote {path}]"
+
+
+@mcp.tool()
 def transcript(limit: int | None = None) -> str:
     """The whole run so far in order (scrolled-off history + current screen).
 

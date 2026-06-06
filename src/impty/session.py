@@ -116,6 +116,12 @@ class TerminalSession:
     def pid(self) -> int:
         return self._proc.pid
 
+    @property
+    def screen(self) -> _ReplyScreen:
+        """The live pyte screen — for renderers (impty.render) that need the cell
+        grid + attributes, not just the text viewport()/transcript() return."""
+        return self._screen
+
     def _write_reply(self, data: str) -> None:
         """Feed a pyte-generated terminal reply (CPR / device-attribute answer)
         back into the program's stdin. Best-effort and non-blocking: only write
