@@ -54,7 +54,6 @@ class State:
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
-    pending_rename: str | None = None
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None
 
@@ -97,7 +96,6 @@ class State:
             "current_step": self.current_step.to_dict() if self.current_step else None,
             "retry_feedback": self.retry_feedback,
             "resume_pending": self.resume_pending,
-            "pending_rename": self.pending_rename,
             "resolved_tiers": (
                 {t: {"provider": pm.provider, "model": pm.model}
                  for t, pm in self.resolved_tiers.items()}

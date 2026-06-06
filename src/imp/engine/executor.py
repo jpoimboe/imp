@@ -191,9 +191,6 @@ async def run_change(
                 state.retry_feedback = {
                     "target_step": flat[target_idx].name, "text": feedback_text}
             state.save(change.state_dir)
-
-            if state.pending_rename:
-                log = apply_pending_rename(change, state, log, on_event=on_event)
     finally:
         # prev_cwd may have been removed (e.g. resume from inside a worktree this
         # run merged + tore down). Don't let the restore mask the result/exception.
@@ -220,11 +217,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
       status=completed and worktree gone on success, or re-tries from state on
       block — never data loss, never a double-merge (resume rejects completed).
     """
-    # M4: a rename requested on the very last step never reached the boundary
-    # hook. Don't let it vanish silently — record why.
-    if state.pending_rename:
-        _emit(log, "rename_dropped", {"requested": state.pending_rename})
-        state.pending_rename = None
     state.step = None  # terminal cursor (safe to persist early; status is NOT yet)
 
     # CRITICAL ordering: never write status="completed" until the run has truly
@@ -271,56 +263,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     })
     worktree.remove_worktree(change.control_root, change.id)  # steps/ goes with it
     return RunResult.COMPLETED
-
-
-def apply_pending_rename(
-    change: Change, state: State, log: EventLog, *, on_event: EventCallback | None,
-) -> EventLog:
-    """Apply state.pending_rename at a step boundary (spec §5.3). CONTENT-ONLY:
-    the id is immutable, so this never touches a git ref or worktree path. It (a)
-    rewrites `title` in change.json, (b) git-mv's the spec file old-slug -> new-slug
-    if it already exists, (c) emits change_renamed. The slug is derived, so there
-    is nothing to reassign on the Change beyond `title`."""
-    import json as _json
-
-    name = state.pending_rename
-    assert name is not None
-    old_title = change.title
-    old_slug = change.slug
-    change.title = name          # slug property now derives from the new title
-    new_slug = change.slug
-    if name == old_title:
-        state.pending_rename = None
-        state.save(change.state_dir)
-        return log
-
-    # Persist the new title (created_at + id preserved).
-    meta_path = change.change_dir / "change.json"
-    meta = _json.loads(meta_path.read_text())
-    meta["title"] = name
-    meta_path.write_text(_json.dumps(meta, indent=2, sort_keys=True))
-
-    # If an early spec file exists under the old slug, move it so the filename
-    # tracks the settled name. `git mv` for a tracked/staged file; fall back to a
-    # filesystem rename for an UNTRACKED early draft (git mv fails "not under
-    # version control" on those). The fallback is essential: a lingering untracked
-    # imp/specs/<old-slug>.md is seen by is_dirty() and would later block the merge
-    # (the exact failure the deleted spec-writer warning guarded against).
-    old_spec = change.project_root / "imp" / "specs" / f"{old_slug}.md"
-    if old_spec.exists() and old_slug != new_slug:
-        from imp.engine import worktree
-        new_spec = change.project_root / "imp" / "specs" / f"{new_slug}.md"
-        proc = worktree._git(
-            change.project_root, "mv", f"imp/specs/{old_slug}.md",
-            f"imp/specs/{new_slug}.md")
-        if proc.returncode != 0:                 # untracked draft: plain rename
-            old_spec.rename(new_spec)
-
-    state.pending_rename = None
-    state.save(change.state_dir)
-    _emit(log, "change_renamed",
-          {"id": change.id, "old_title": old_title, "new_title": name})
-    return log
 
 
 async def _dispatch_step(

@@ -37,7 +37,6 @@ def test_rename_applies_immediately_and_returns_slug(tmp_path: Path) -> None:
     assert "imp/specs/2026-06-05-add-oauth.md" in msg
     meta = json.loads((ch.change_dir / "change.json").read_text())
     assert meta["title"] == "Add OAuth"
-    assert state.pending_rename is None if hasattr(state, "pending_rename") else True
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
     assert renamed and renamed[-1]["payload"]["new_title"] == "Add OAuth"
 
