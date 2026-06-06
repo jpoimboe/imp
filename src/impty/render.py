@@ -16,34 +16,27 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-from imp.cli import palette as pal
+# impty is a GENERIC pty/pyte harness — it knows nothing about imp. The defaults
+# below are a neutral dark terminal so a standalone render (e.g. the live MCP
+# snapshot) just works. An app-aware caller that wants its OWN theme in the PNG
+# (scripts/snap_imp_ui.py renders imp's Selenized palette) injects it via
+# render_screen(palette=, bg=, fg=) and show_faint(gray=); nothing here imports
+# the app. Truecolor cells (`\x1b[38;2;…m`) always render their exact RGB via
+# _rgb regardless, so an injected palette only matters for named-SGR content.
+_BG = (0x1C, 0x1C, 0x1C)
+_FG = (0xCC, 0xCC, 0xCC)
 
-# The mockup paints imp's OWN palette, sourced from imp.cli.palette so it can't
-# drift from what imp emits live. Dark/light accent cells arrive as truecolor
-# (imp emits `\x1b[38;2;…m`) and render their exact RGB directly via _rgb; the
-# named map below is consulted only for the `ansi`-theme snapshot (named SGR
-# codes) and for the surface defaults — both built from imp's representative
-# (dark) palette so there is one source of truth.
-_BG, _FG = pal.surface("dark")
-
-
-def _named_palette() -> dict[str, tuple[int, int, int]]:
-    """pyte color name → RGB, built from imp's live palette. Only the eight names
-    imp actually emits need entries ('brown' is pyte's name for ANSI yellow,
-    'brightblack' the dim chrome gray, 'brightblue' the user's turn); anything
-    else falls back to the surface foreground/background."""
-    rgb = pal.theme_rgb("dark")
-    bg, fg = pal.surface("dark")
-    return {
-        "red": rgb["red"], "green": rgb["green"],
-        "yellow": rgb["yellow"], "brown": rgb["yellow"],
-        "blue": rgb["blue"], "magenta": rgb["magenta"], "cyan": rgb["cyan"],
-        "brightblack": rgb["gray"], "brightblue": rgb["bright_blue"],
-        "black": bg, "white": fg, "brightwhite": fg,
-    }
-
-
-_PALETTE: dict[str, tuple[int, int, int]] = _named_palette()
+_PALETTE: dict[str, tuple[int, int, int]] = {
+    "black": (0x00, 0x00, 0x00), "red": (0xCD, 0x00, 0x00),
+    "green": (0x00, 0xCD, 0x00), "brown": (0xCD, 0xCD, 0x00),
+    "yellow": (0xCD, 0xCD, 0x00), "blue": (0x33, 0x66, 0xCC),
+    "magenta": (0xCD, 0x00, 0xCD), "cyan": (0x00, 0xCD, 0xCD),
+    "white": (0xE5, 0xE5, 0xE5), "brightblack": (0x7F, 0x7F, 0x7F),
+    "brightred": (0xFF, 0x00, 0x00), "brightgreen": (0x00, 0xFF, 0x00),
+    "brightbrown": (0xFF, 0xFF, 0x00), "brightyellow": (0xFF, 0xFF, 0x00),
+    "brightblue": (0x55, 0x88, 0xFF), "brightmagenta": (0xFF, 0x00, 0xFF),
+    "brightcyan": (0x00, 0xFF, 0xFF), "brightwhite": (0xFF, 0xFF, 0xFF),
+}
 
 # Adwaita Mono — monospace with box-drawing AND the symbol glyphs imp's TUI uses
 # (✓ ↳ ⏺ · → ⟨⟩ │). Noto Sans Mono (the earlier choice) renders ✓/↳/⏺ as .notdef
@@ -68,21 +61,23 @@ def _load_font(path: str, size: int, bold: bool) -> ImageFont.FreeTypeFont:
 # (metadata / thinking / tiers), so substituting a flat dim-gray foreground is
 # faithful; the trailing reset (CSI 0 m) clears it like any other attribute.
 _FAINT_RE = re.compile("\x1b\\[2m")
-# Dim text (SGR 2) renders as the theme's chrome gray, sourced from imp's palette.
-_FAINT_GRAY = "\x1b[38;2;{};{};{}m".format(*pal.theme_rgb("dark")["gray"])
+# Neutral dim-gray for faint text; a caller can pass its theme's chrome gray.
+_FAINT_GRAY = "\x1b[38;2;127;127;127m"
 
 
-def show_faint(ansi: str) -> str:
+def show_faint(ansi: str, gray: str = _FAINT_GRAY) -> str:
     """Rewrite the faint SGR (CSI 2 m) into an explicit dim-gray fg so the
-    renderer shows dimmed text. Apply to a byte/str stream before feeding pyte."""
-    return _FAINT_RE.sub(_FAINT_GRAY, ansi)
+    renderer shows dimmed text. Apply to a byte/str stream before feeding pyte.
+    `gray` overrides the dim-gray fg (pass a theme's chrome color as a full SGR)."""
+    return _FAINT_RE.sub(gray, ansi)
 
 
-def _rgb(name: str, default: tuple[int, int, int]) -> tuple[int, int, int]:
+def _rgb(name: str, default: tuple[int, int, int],
+         palette: dict[str, tuple[int, int, int]]) -> tuple[int, int, int]:
     """Resolve a pyte color (a 16-color name, a 6-hex string, or 'default')."""
     if name == "default":
         return default
-    hit = _PALETTE.get(name)
+    hit = palette.get(name)
     if hit is not None:
         return hit
     if len(name) == 6:  # pyte stores 256/truecolor as a bare hex string
@@ -91,11 +86,6 @@ def _rgb(name: str, default: tuple[int, int, int]) -> tuple[int, int, int]:
         except ValueError:
             pass
     return default
-
-
-# The light surface, for previewing the `light` theme — sourced from imp's palette
-# (a warm cream with dark slate text, mirroring what a light terminal paints).
-_LIGHT_BG, _LIGHT_FG = pal.surface("light")
 
 
 def render_screen(
@@ -108,6 +98,7 @@ def render_screen(
     pad: int = 12,
     bg: tuple[int, int, int] | None = None,
     fg: tuple[int, int, int] | None = None,
+    palette: dict[str, tuple[int, int, int]] | None = None,
 ) -> str:
     """Paint the current viewport of `screen` to a PNG at `path`. Returns path.
 
@@ -115,10 +106,12 @@ def render_screen(
     Cell size is fixed (monospace), so columns stay aligned and box-drawing
     characters meet — the thing that makes a TUI look crisp or broken.
 
-    `bg`/`fg` override the default dark surface — pass `_LIGHT_BG`/`_LIGHT_FG`
-    to preview the `light` theme on a near-white background."""
+    `bg`/`fg` override the default dark surface and `palette` the named-color map
+    (pyte color name → RGB) — an app-aware caller passes its own theme so the PNG
+    matches what that app paints. Defaults are a neutral dark terminal."""
     surface_bg = bg if bg is not None else _BG
     surface_fg = fg if fg is not None else _FG
+    colors = palette if palette is not None else _PALETTE
     rows = screen.lines
     cols = screen.columns
     w = cols * cell_w + 2 * pad
@@ -133,8 +126,8 @@ def render_screen(
         for x in range(cols):
             ch = row[x]
             data = ch.data or " "
-            fg_px = _rgb(ch.fg, surface_fg)
-            bg_px = _rgb(ch.bg, surface_bg)
+            fg_px = _rgb(ch.fg, surface_fg, colors)
+            bg_px = _rgb(ch.bg, surface_bg, colors)
             if ch.reverse:
                 fg_px, bg_px = bg_px, fg_px
             px = pad + x * cell_w

@@ -39,20 +39,39 @@ from impty.render import render_screen, show_faint  # noqa: E402
 _OUT_DIR = Path("/tmp/imp_ui")
 
 
-def _feed_screen(ansi: str, *, cols: int, rows: int) -> pyte.Screen:
+def _imp_theme(theme: str) -> dict:
+    """imp's theme as render_screen kwargs (bg/fg/palette) + a faint-gray SGR.
+    Built here — the imp-aware layer — from imp.cli.palette, so the generic impty
+    renderer stays free of any imp dependency. Maps imp's color names to pyte's
+    (pyte calls ANSI-yellow 'brown', the dim chrome gray 'brightblack', the user's
+    bright_blue 'brightblue'); names imp never emits fall back to the surface."""
+    from imp.cli import palette as pal
+
+    bg, fg = pal.surface(theme)
+    rgb = pal.theme_rgb(theme)
+    palette = {
+        "red": rgb["red"], "green": rgb["green"],
+        "yellow": rgb["yellow"], "brown": rgb["yellow"],
+        "blue": rgb["blue"], "magenta": rgb["magenta"], "cyan": rgb["cyan"],
+        "brightblack": rgb["gray"], "brightblue": rgb["bright_blue"],
+        "black": bg, "white": fg, "brightwhite": fg,
+    }
+    faint = "\x1b[38;2;{};{};{}m".format(*rgb["gray"])
+    return {"bg": bg, "fg": fg, "palette": palette, "faint": faint}
+
+
+def _feed_screen(ansi: str, *, cols: int, rows: int, faint: str) -> pyte.Screen:
     """A pyte screen with `ansi` drawn into it. LiveDriver emits bare '\\n';
     a real pty maps that to CRLF (ONLCR), so we do the same before feeding.
     show_faint() rewrites dim text into a color pyte preserves (it drops SGR 2)."""
     screen = pyte.Screen(cols, rows)
-    pyte.Stream(screen).feed(show_faint(ansi).replace("\n", "\r\n"))
+    pyte.Stream(screen).feed(show_faint(ansi, faint).replace("\n", "\r\n"))
     return screen
 
 
 def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None,
                 theme: str = "dark") -> None:
     import capture_imp_ui as cap
-
-    from impty.render import _LIGHT_BG, _LIGHT_FG
 
     ansi = cap.stream_text(color=True, width=cols, limit=limit, theme=theme)
     n = len(ansi.rstrip("\n").split("\n"))
@@ -62,9 +81,10 @@ def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None,
     if n > height:
         print(f"note: {n} lines of output; image shows the last {height} "
               f"(use --limit to focus, or --rows to grow)")
-    # `light` previews on a near-white surface; dark/ansi on the default dark one.
-    surface = {"bg": _LIGHT_BG, "fg": _LIGHT_FG} if theme == "light" else {}
-    render_screen(_feed_screen(ansi, cols=cols, rows=height), str(out), **surface)
+    # Inject imp's own theme so the PNG matches what imp paints on that theme.
+    th = _imp_theme(theme)
+    screen = _feed_screen(ansi, cols=cols, rows=height, faint=th.pop("faint"))
+    render_screen(screen, str(out), **th)
 
 
 def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int) -> None:
@@ -77,7 +97,9 @@ def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int) -> None:
         if type_text:
             sess.send(type_text)
             sess.wait_idle(idle=0.5, hard=8)
-        render_screen(sess._screen, str(out))
+        th = _imp_theme("dark")          # the prompt scene runs the dark theme
+        th.pop("faint")                  # live capture, no SGR-2 rewrite needed
+        render_screen(sess._screen, str(out), **th)
     finally:
         sess.close()
 
