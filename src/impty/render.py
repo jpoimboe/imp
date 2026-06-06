@@ -23,8 +23,9 @@ from PIL import Image, ImageDraw, ImageFont
 # render_screen(palette=, bg=, fg=) and show_faint(gray=); nothing here imports
 # the app. Truecolor cells (`\x1b[38;2;…m`) always render their exact RGB via
 # _rgb regardless, so an injected palette only matters for named-SGR content.
-_BG = (0x1C, 0x1C, 0x1C)
-_FG = (0xCC, 0xCC, 0xCC)
+# The default surface is a common dark terminal (#1e1e1e on white text).
+_BG = (0x1E, 0x1E, 0x1E)
+_FG = (0xFF, 0xFF, 0xFF)
 
 _PALETTE: dict[str, tuple[int, int, int]] = {
     "black": (0x00, 0x00, 0x00), "red": (0xCD, 0x00, 0x00),

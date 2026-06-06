@@ -21,40 +21,43 @@ _ANSI_NAMED: dict[str, str] = {
     "gray": "\x1b[90m", "bright_blue": "\x1b[94m",
 }
 
-# The Selenized palette (https://github.com/jan-warchol/selenized) — a cohesive,
-# accessibility-tuned scheme with matched variants. We use its published RGB
-# values verbatim (not a hand-tuned lookalike): the six accents from the normal
-# set, `gray` from `dim_0` (Selenized's de-emphasis color, for breadcrumbs /
-# chrome), and `bright_blue` from `br_blue` (the user's turn). `dark` uses the
-# `selenized black` variant — a NEUTRAL near-black surface, not the tinted teal of
-# `selenized dark`, so the dim chrome stays legible (its gray isn't lost in a
-# same-hue background) and the surface reads as black, not blue. `light` uses
-# `selenized light`. Emitted as 24-bit truecolor so the look is identical in every
-# truecolor terminal (and in the snap-ui mockup, which renders whatever imp emits).
-# These apply only when the resolved theme is dark/light; the `ansi` theme above is
-# the fallback for non-truecolor terminals.
-_DARK_RGB: dict[str, tuple[int, int, int]] = {  # selenized black
-    "red": (0xED, 0x4A, 0x46), "green": (0x70, 0xB4, 0x33),
-    "yellow": (0xDB, 0xB3, 0x2D), "blue": (0x36, 0x8A, 0xEB),
-    "magenta": (0xEB, 0x6E, 0xB7), "cyan": (0x3F, 0xC5, 0xB7),
-    "gray": (0x77, 0x77, 0x77), "bright_blue": (0x4F, 0x9C, 0xFE),
+# A CUSTOM low-saturation ACCENT palette — not a crib of any published theme, and
+# (deliberately) no foreground/background here: imp never paints the prose fg or
+# the terminal bg, it only paints these accents on top of whatever surface the
+# terminal supplies. It's hand-tuned: the six accents all sit around ~40-50%
+# saturation and ~70% value, and that uniform flatness (not any hue scheme — the
+# hues are a normal 6-way terminal spread) is what makes it read as one calm, muted
+# family. The neutral `gray` is deliberately dim so chrome (breadcrumbs / step +
+# tool lines) recedes almost to nothing. We surveyed Selenized / Everforest /
+# Kanagawa / Gruvbox / Zenburn / Catppuccin / Melange and none matched this look, so
+# it stays bespoke. `light` re-tunes the same roles (darker, for legibility on a
+# near-white surface). Emitted as 24-bit truecolor so the look is identical in every
+# truecolor terminal (and in the snap-ui mockup). These apply only when the resolved
+# theme is dark/light; the `ansi` theme above is the fallback for non-truecolor
+# terminals.
+_DARK_RGB: dict[str, tuple[int, int, int]] = {
+    "red": (0xC0, 0x6A, 0x66), "green": (0x90, 0xA9, 0x59),
+    "yellow": (0xC9, 0xA5, 0x54), "blue": (0x6E, 0x90, 0xB8),
+    "magenta": (0xA8, 0x84, 0xB5), "cyan": (0x5E, 0xA0, 0x9E),
+    "gray": (0x55, 0x57, 0x53), "bright_blue": (0x7F, 0xA2, 0xCA),
 }
-_LIGHT_RGB: dict[str, tuple[int, int, int]] = {  # selenized light
-    "red": (0xD2, 0x21, 0x2D), "green": (0x48, 0x91, 0x00),
-    "yellow": (0xAD, 0x89, 0x00), "blue": (0x00, 0x72, 0xD4),
-    "magenta": (0xCA, 0x48, 0x98), "cyan": (0x00, 0x9C, 0x8F),
-    "gray": (0x90, 0x99, 0x95), "bright_blue": (0x00, 0x6D, 0xCE),
+_LIGHT_RGB: dict[str, tuple[int, int, int]] = {
+    "red": (0xA8, 0x3B, 0x38), "green": (0x55, 0x6F, 0x22),
+    "yellow": (0x8A, 0x6D, 0x12), "blue": (0x2F, 0x5C, 0x96),
+    "magenta": (0x7A, 0x49, 0x96), "cyan": (0x2A, 0x73, 0x70),
+    "gray": (0xA6, 0xAA, 0xA6), "bright_blue": (0x27, 0x5A, 0xA0),
 }
 
 
-# The surface each truecolor theme is designed for: (background, foreground). imp
-# never paints a background — these are the single source of truth for the theme's
-# intended surface, consumed by the snap-ui mockup (impty.render) so a rendered PNG
-# matches a real terminal on that theme. Selenized bg_0 / fg_0 per variant
-# (dark = `selenized black` — neutral near-black; light = `selenized light`).
+# A REPRESENTATIVE terminal surface — (background, foreground) — for previewing
+# each theme. imp never paints either: in a real run the terminal supplies the
+# background and the prose foreground, and imp only paints accents on top. So these
+# are NOT imp's colors; they exist purely so the snap-ui mockup (impty.render) draws
+# imp's accents on a realistic terminal, the way you'd actually see them. `dark` is
+# a common dark terminal (#1e1e1e on white text); `light` a common light one.
 _SURFACES: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
-    "dark": ((0x18, 0x18, 0x18), (0xB9, 0xB9, 0xB9)),
-    "light": ((0xFB, 0xF3, 0xDB), (0x53, 0x67, 0x6D)),
+    "dark": ((0x1E, 0x1E, 0x1E), (0xFF, 0xFF, 0xFF)),
+    "light": ((0xFA, 0xFA, 0xF8), (0x2A, 0x2A, 0x2A)),
 }
 
 
