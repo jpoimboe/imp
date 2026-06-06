@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -197,3 +200,94 @@ def test_wait_hangs_then_run_to_completion_drains_same_session() -> None:
         rc = s.run_to_completion(hard=5.0)  # same blocked child, now drained
         assert rc == 0
         assert "DONE-5" in s.transcript()
+
+
+# A child that forks a grandchild which calls setsid() (so it survives the
+# child's exit), inherits the pty slave (fds 0/1/2) and keeps it open, pinning
+# the slave so the master never sees EOF. The child records the grandchild PID
+# to a side-channel file (argv[1]) — NOT the slave — then exits with code 7.
+_QUIET_GRANDCHILD = (
+    "import os, sys, time\n"
+    "pidfile = sys.argv[1]\n"
+    "pid = os.fork()\n"
+    "if pid == 0:\n"
+    "    os.setsid()\n"  # detach into own session: outlive the child, hold slave
+    "    time.sleep(30)\n"  # ≫ grace; silently pins the slave
+    "    os._exit(0)\n"
+    "else:\n"
+    "    with open(pidfile, 'w') as f:\n"  # side channel (NOT the slave)
+    "        f.write(str(pid))\n"  # explicit flush — os._exit() skips stdio flush
+    "    os._exit(7)\n"
+)
+
+# Same shape, but the grandchild streams continuously and the child stays alive
+# ~0.2 s while it streams — so Phase 1 sees select() always-readable and MUST
+# re-check poll() every iteration to exit. The grandchild self-cleans on EIO
+# when the master closes.
+_STREAMING_GRANDCHILD = (
+    "import os, sys, time\n"
+    "pidfile = sys.argv[1]\n"
+    "pid = os.fork()\n"
+    "if pid == 0:\n"
+    "    os.setsid()\n"
+    "    while True:\n"
+    "        try:\n"
+    "            os.write(1, b'g')\n"  # stream to the slave forever
+    "        except OSError:\n"
+    "            os._exit(0)\n"  # master closed → EIO → self-clean
+    "        time.sleep(0.001)\n"
+    "else:\n"
+    "    time.sleep(0.2)\n"  # stay alive while the gc streams...
+    "    with open(pidfile, 'w') as f:\n"
+    "        f.write(str(pid))\n"  # explicit flush — os._exit() skips stdio flush
+    "    os._exit(7)\n"  # ...so Phase 1 must re-check poll() each iteration
+)
+
+
+def test_run_to_completion_fast_on_quiet_slave_pinning_grandchild(tmp_path: Path) -> None:
+    # AC4 (quiet): child exits while a silent grandchild pins the slave. Phase 2
+    # stops on the first quiet select → fast completion, not a hard-cap stall.
+    pidfile = tmp_path / "gc.pid"
+    gc_pid: int | None = None
+    try:
+        with TerminalSession([sys.executable, "-c", _QUIET_GRANDCHILD, str(pidfile)]) as s:
+            start = time.monotonic()
+            rc = s.run_to_completion(hard=5.0)
+            elapsed = time.monotonic() - start
+            assert rc == 7
+            assert elapsed < 1.0, f"stalled toward hard cap (elapsed={elapsed:.2f}s)"
+            gc_pid = int(pidfile.read_text())
+    finally:
+        # The sleep-blocked grandchild ignores os.close(master); reap it by PID
+        # so it can't leak past the test reparented to a subreaper.
+        if gc_pid is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(gc_pid, signal.SIGKILL)
+
+
+def test_run_to_completion_fast_on_streaming_slave_pinning_grandchild(
+    tmp_path: Path,
+) -> None:
+    # AC4 (streaming): the grandchild streams continuously and the child stays
+    # alive ~0.2 s while it does. Continuous output keeps select() always
+    # readable, so ONLY a per-iteration poll() check lets Phase 1 exit — a
+    # not-readable-branch-only poll() would stall to the hard cap. Phase 2 then
+    # stops on `grace` expiry.
+    pidfile = tmp_path / "gc.pid"
+    gc_pid: int | None = None
+    try:
+        with TerminalSession(
+            [sys.executable, "-c", _STREAMING_GRANDCHILD, str(pidfile)]
+        ) as s:
+            start = time.monotonic()
+            rc = s.run_to_completion(hard=5.0)
+            elapsed = time.monotonic() - start
+            assert rc == 7
+            assert elapsed < 2.0, f"stalled toward hard cap (elapsed={elapsed:.2f}s)"
+            gc_pid = int(pidfile.read_text())
+    finally:
+        # The streaming grandchild self-cleans on EIO, but kill by PID uniformly
+        # in case it's mid-sleep when the master closes.
+        if gc_pid is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(gc_pid, signal.SIGKILL)
