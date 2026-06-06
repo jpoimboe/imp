@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -20,7 +21,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from imp.agents.runner import AgentInvocation, Event
+from imp.agents.runner import (
+    AgentInvocation,
+    Diagnostics,
+    Event,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
@@ -34,6 +43,8 @@ from imp.providers.codex_config import (
     teardown_codex_home,
 )
 from imp.providers.codex_mcp import RunState, start_server
+
+_logger = logging.getLogger(__name__)
 
 # ── PreflightError ────────────────────────────────────────────────────────────
 
@@ -295,6 +306,7 @@ class CodexAgentRunner:
                 client=client, invocation=invocation, elog=elog,
                 aid=aid, ctx=ctx, state=state, proc_state=proc_state,
                 entry_snapshot=entry_snapshot, server_handle=server_handle,
+                codex_home=codex_home,
             ):
                 yield ev
         finally:
@@ -304,6 +316,22 @@ class CodexAgentRunner:
             #    a codex_home was actually provisioned.
             await server_handle.shutdown()
             if codex_home is not None:
+                # Own codex's native rollout across the pause BEFORE teardown
+                # deletes CODEX_HOME (Fix 1). Best-effort: a persist failure must
+                # not skip the auth-shredding teardown below. A later resume that
+                # finds no persisted rollout fails loudly in restore_rollout.
+                tid = proc_state.get("thread_id")
+                if tid:
+                    from imp.providers.codex_rollout import persist_rollout
+                    try:
+                        persist_rollout(
+                            codex_home=codex_home, thread_id=tid,
+                            transcript_dir=invocation.transcript_dir,
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        _logger.warning(
+                            "codex: rollout persist failed (resume may be "
+                            "unavailable): %s", exc)
                 teardown_codex_home(
                     codex_home=codex_home, mode=auth_mode,
                     canonical_path=canonical_auth,
@@ -325,6 +353,9 @@ class CodexAgentRunner:
             return self._client_factory(options=None)
         from openai_codex_sdk import Codex
 
+        from imp.providers.codex_stream_limit import install_codex_stream_limit
+        install_codex_stream_limit()
+
         # `CodexOptions` is not re-exported at the package top level in the
         # pinned SDK (0.1.11) — only `openai_codex_sdk.types` (and .codex/.thread)
         # expose it. Import from the submodule so client construction works
@@ -342,7 +373,7 @@ class CodexAgentRunner:
     async def _drive_turns(
         self, *, client: Any, invocation: AgentInvocation, elog: Any,
         aid: str, ctx: ToolContext, state: RunState, proc_state: dict[str, Any],
-        entry_snapshot: EntrySnapshot, server_handle: Any,
+        entry_snapshot: EntrySnapshot, server_handle: Any, codex_home: Path,
     ) -> AsyncGenerator[Event, None]:
         """Start a thread, run streamed turns, consume events.
 
@@ -361,7 +392,26 @@ class CodexAgentRunner:
         web_enabled = "web_search" in declared_web_tools(invocation.agent_def)
         proc_state["web_search_enabled"] = web_enabled
         thread_options = self._build_thread_options()
-        if thread_options is None:
+        if invocation.balance_on_resume:
+            # Resume edge (Fix 1): restore codex's rollout into the fresh
+            # CODEX_HOME, then resume the native thread by id instead of starting
+            # a new one. restore_rollout fails loudly if the rollout is missing.
+            from imp.providers.codex_rollout import restore_rollout
+            thread_id = restore_rollout(
+                codex_home=codex_home,
+                transcript_dir=invocation.transcript_dir)
+            # Seed thread_id now so a subsequent pause persists the resumed
+            # thread even if the SDK does not re-emit thread.started on resume
+            # (process_event overwrites this with the same id if it does).
+            proc_state["thread_id"] = thread_id
+            if thread_options is None:
+                thread = client.resume_thread(thread_id)
+            else:
+                try:
+                    thread = client.resume_thread(thread_id, thread_options)
+                except TypeError:
+                    thread = client.resume_thread(thread_id)
+        elif thread_options is None:
             # SDK unavailable (test/fake path): start with no options.
             thread = client.start_thread()
         else:
@@ -575,7 +625,6 @@ class CodexAgentRunner:
                                 f"after {nudges_used + 1} nudge(s)"),
                     "detail": {"last_agent_text": last_text[:500]}}}
                 return
-            from imp.agents.runner import Message, TextBlock
             elog.append_user_message(
                 agent_id=aid,
                 message=Message(role="user",
@@ -682,6 +731,79 @@ def _serialize_mcp_result(result: Any) -> str:
     return str(result)
 
 
+def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
+    """Reassemble one codex turn's ``item.completed`` items into a full-turn
+    ``llm_response.raw`` (``{"content": [...]}``) carrying text + tool_use
+    blocks, so the audit reconstruction (``build_messages_from_events``) can
+    pair tool_use/tool_result correctly.
+
+    LATENT/AUDIT-ONLY: not wired into the live emit path (live raw stays
+    text-only — see the Fix 2 part-2 scope decision). A web_search item becomes
+    a query-only tool_use (codex exposes no results/citations).
+    """
+    content: list[dict[str, Any]] = []
+    for item in items:
+        itype = getattr(item, "type", None)
+        if itype == "agent_message":
+            content.append({"type": "text",
+                             "text": getattr(item, "text", "") or ""})
+        elif itype == "mcp_tool_call":
+            name = (getattr(item, "tool", "")
+                    or getattr(item, "name", "") or "")
+            content.append({
+                "type": "tool_use",
+                "id": getattr(item, "id", "") or "",
+                "name": name,
+                "input": getattr(item, "arguments", None) or {},
+            })
+        elif itype == "web_search":
+            content.append({
+                "type": "tool_use",
+                "id": getattr(item, "id", "") or "",
+                "name": "web_search",
+                "input": {"query": getattr(item, "query", "") or ""},
+            })
+        # reasoning/command_execution/file_change/error are not part of the
+        # assistant message's reconstructable content.
+    return {"content": content}
+
+
+def _parse_codex_message(raw: dict[str, Any]) -> Message:
+    """raw → assistant Message for codex. codex's live `llm_response.raw` is
+    text-only; the reassembled full-turn raw (`reassemble_codex_turn`) also
+    carries `tool_use` blocks (a web_search appears as a query-only tool_use).
+    Unknown blocks are dropped (surfaced via `_extract_codex_diagnostics`).
+
+    Lives here (not in replay.py) per the provider-exports-its-parser convention:
+    replay.py imports + registers it, runner can reuse it, no replay-import cycle.
+    """
+    content: list[Any] = []
+    for block in raw.get("content", []):
+        kind = block.get("type")
+        if kind == "text":
+            content.append(TextBlock(text=block.get("text", "")))
+        elif kind == "tool_use":
+            content.append(ToolUseBlock(
+                id=block["id"], name=block["name"],
+                input=block.get("input", {})))
+        # unknown: skipped (see _extract_codex_diagnostics)
+    return Message(role="assistant", content=tuple(content))
+
+
+def _extract_codex_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+    """Render-only diagnostics for codex. text/tool_use are conversation
+    history (not warnings); any other block type is surfaced as a warning.
+    codex's reasoning is emitted as a separate `thinking` event, not in
+    `llm_response.raw`, so there are no inline thinkings to extract here."""
+    warnings: list[str] = []
+    for block in raw.get("content", []):
+        kind = block.get("type")
+        if kind in ("text", "tool_use"):
+            continue
+        warnings.append(f"skipped unknown block type {kind!r}")
+    return Diagnostics(block_warnings=tuple(warnings), thinkings=())
+
+
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str,
@@ -722,7 +844,6 @@ def process_event(
             )
             return
         if itype == "mcp_tool_call":
-            from imp.agents.runner import ToolResultBlock, ToolUseBlock
             # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
             # `name` silently recorded "" for every call (and made the
             # complete_step capture below dead). Fall back to `name` only for
@@ -748,7 +869,12 @@ def process_event(
                 ),
             )
             if name == "complete_step":
-                # Secondary capture path (idempotent — in-process wrapper sets it too).
+                # Fallback capture from the RAW SDK item args, which carry no
+                # Pydantic None-injection (unlike the in-process MCP wrapper, so
+                # no None-filtering is needed here). When the wrapper's
+                # RunState capture ran, the consume loop's mirror overwrites
+                # proc_state with its already-filtered args; this write is the
+                # fallback for when that path didn't run.
                 state["complete_step_args"] = dict(args)
                 state["complete_step_called"] = True
             return
@@ -759,7 +885,6 @@ def process_event(
                 # model-hosted search. Surface it as a tool_call so it shows in
                 # the narrative/`imp log`. codex's WebSearchItem exposes only the
                 # query (no results/citations), so the result is informational.
-                from imp.agents.runner import ToolResultBlock, ToolUseBlock
                 call_id = getattr(item, "id", "") or ""
                 elog.append_tool_call(
                     agent_id=agent_id,

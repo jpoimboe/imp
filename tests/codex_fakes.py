@@ -160,10 +160,17 @@ class FakeCodex:
         self._on_turn_start = on_turn_start
         self.thread: FakeThread | None = None
         self.start_thread_calls: list[Any] = []
+        self.resume_thread_calls: list[tuple[str, Any]] = []
         self.options_seen: Any = None
 
     def start_thread(self, options: Any = None) -> FakeThread:
         self.start_thread_calls.append(options)
+        self.thread = FakeThread(self._scripted,
+                                 on_turn_start=self._on_turn_start)
+        return self.thread
+
+    def resume_thread(self, thread_id: str, options: Any = None) -> FakeThread:
+        self.resume_thread_calls.append((thread_id, options))
         self.thread = FakeThread(self._scripted,
                                  on_turn_start=self._on_turn_start)
         return self.thread

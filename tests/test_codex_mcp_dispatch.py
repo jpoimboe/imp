@@ -6,8 +6,10 @@ from typing import Any
 
 import pytest
 
+from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
+from imp.engine.agent_run import SubagentSuspended
 from imp.providers.codex_mcp import RunState, dispatch_tool
 
 
@@ -104,6 +106,164 @@ def test_dispatch_awaits_async_tool(tmp_path: Path) -> None:
         tool=async_tool, args={"text": "hello"}, ctx=ctx, state=state))
     assert out == "async:hello"
     assert state.dispatch_count == 1
+
+
+def test_complete_step_drops_none_valued_optional_args(tmp_path: Path) -> None:
+    """codex's arg-model defaults absent optional fields to None via
+    PydanticField(None); the capture must drop them so output validation
+    doesn't reject a present-but-None optional field with 'expected string,
+    got NoneType' (regression: spec-writer spec_path omitted by codex)."""
+    ctx = _ctx(tmp_path)
+    state = RunState(cap=50)
+
+    def _cs(ctx: Any, **kwargs: Any) -> str:
+        raise AssertionError("complete_step body must not run inside the wrapper")
+
+    cs = Tool(name="complete_step", description="",
+              input_schema={"type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "phase": {"type": "string"},
+                                "complexity": {"type": "string"},
+                                "spec_path": {"type": "string"},
+                            },
+                            "required": ["status"]},
+              fn=_cs)
+
+    # Simulate codex omitting the optional spec_path — the arg-model
+    # materialises spec_path=None; the fix must strip it.
+    out = asyncio.run(dispatch_tool(
+        tool=cs,
+        args={"status": "Success", "phase": "drafting",
+              "complexity": "trivial", "spec_path": None},
+        ctx=ctx, state=state,
+    ))
+    assert state.complete_step_called is True
+    assert state.complete_step_args == {
+        "status": "Success", "phase": "drafting", "complexity": "trivial"}
+    assert "spec_path" not in state.complete_step_args
+    assert out == "step complete"
+
+
+def test_complete_step_preserves_non_none_optional_arg(tmp_path: Path) -> None:
+    """A non-None optional field (e.g. spec_path provided) must NOT be dropped —
+    the filter is None-only, not 'optional field' blanket removal."""
+    ctx = _ctx(tmp_path)
+    state = RunState(cap=50)
+
+    def _cs(ctx: Any, **kwargs: Any) -> str:
+        raise AssertionError("complete_step body must not run inside the wrapper")
+
+    cs = Tool(name="complete_step", description="",
+              input_schema={"type": "object",
+                            "properties": {
+                                "status": {"type": "string"},
+                                "spec_path": {"type": "string"},
+                            },
+                            "required": ["status"]},
+              fn=_cs)
+
+    out = asyncio.run(dispatch_tool(
+        tool=cs,
+        args={"status": "Success", "spec_path": "docs/my-spec.md"},
+        ctx=ctx, state=state,
+    ))
+    assert state.complete_step_called is True
+    assert state.complete_step_args == {
+        "status": "Success", "spec_path": "docs/my-spec.md"}
+    assert out == "step complete"
+
+
+# ── task tool special-case tests ─────────────────────────────────────────────
+
+
+def test_dispatch_task_happy_path_returns_subagent_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dispatch_tool with tool.name=='task' must await dispatch_task directly
+    and return its output — NOT go through async_invoke (which raises
+    TaskMustBeAwaited by design)."""
+    expected = '{"status": "done", "summary": "all tests passed"}'
+
+    async def _stub_dispatch_task(
+        ctx: Any, subagent_name: str, task_description: str,
+        *, tool_call_event_id: str = "", tier: Any = None,
+    ) -> str:
+        assert subagent_name == "impl"
+        assert task_description == "do it"
+        return expected
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
+
+    task_tool = make_task_tool()
+    ctx = _ctx(tmp_path)
+    state = RunState(cap=50)
+
+    result = asyncio.run(dispatch_tool(
+        tool=task_tool,
+        args={"subagent_name": "impl", "task_description": "do it", "tier": None},
+        ctx=ctx,
+        state=state,
+    ))
+    assert result == expected
+    assert state.dispatch_count == 1
+
+
+def test_dispatch_task_subagent_suspended_reraises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SubagentSuspended must unwind out of dispatch_tool, not be swallowed
+    into an is_error string — it signals a coordinator-requested pause that
+    must propagate up the call stack."""
+
+    async def _stub_dispatch_task(
+        ctx: Any, subagent_name: str, task_description: str,
+        *, tool_call_event_id: str = "", tier: Any = None,
+    ) -> str:
+        raise SubagentSuspended("paused by coordinator")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
+
+    task_tool = make_task_tool()
+    ctx = _ctx(tmp_path)
+    state = RunState(cap=50)
+
+    with pytest.raises(SubagentSuspended):
+        asyncio.run(dispatch_tool(
+            tool=task_tool,
+            args={"subagent_name": "coder", "task_description": "write code"},
+            ctx=ctx,
+            state=state,
+        ))
+
+
+def test_dispatch_task_generic_error_becomes_is_error_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-suspend exception from dispatch_task is converted to an error
+    string (returned as the tool result) and recorded in state.runtime_errors."""
+
+    async def _stub_dispatch_task(
+        ctx: Any, subagent_name: str, task_description: str,
+        *, tool_call_event_id: str = "", tier: Any = None,
+    ) -> str:
+        raise ValueError("boom")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
+
+    task_tool = make_task_tool()
+    ctx = _ctx(tmp_path)
+    state = RunState(cap=50)
+
+    result = asyncio.run(dispatch_tool(
+        tool=task_tool,
+        args={"subagent_name": "reviewer", "task_description": "review code"},
+        ctx=ctx,
+        state=state,
+    ))
+    assert "ValueError" in result
+    assert "boom" in result
+    assert any("ValueError" in e and "boom" in e for e in state.runtime_errors)
 
 
 def test_cap_rmw_literal_has_no_await_between_read_and_decision() -> None:

@@ -81,8 +81,48 @@ async def dispatch_tool(
         # runner reads `state.complete_step_args` at that boundary, not via
         # a call-stack return (design "complete_step capture").
         state.complete_step_called = True
-        state.complete_step_args = dict(args)
+        # The dynamic arg-model (_register_imp_tool) defaults every non-required
+        # property to None (PydanticField(None)), so model_dump materializes
+        # e.g. spec_path=None even when codex omitted it. Drop None-valued keys
+        # so complete_step_args reflects what the agent ACTUALLY sent —
+        # otherwise output-schema validation rejects a present-but-None optional
+        # field ("expected string, got NoneType"). imp output types are never
+        # nullable, so a None here always means "field not provided".
+        state.complete_step_args = {k: v for k, v in args.items() if v is not None}
         return "step complete"
+    if tool.name == "task":
+        # task special-case (mirrors anthropic/openai/claude_code): the task
+        # tool must NOT go through async_invoke — its _invoke raises
+        # TaskMustBeAwaited by design. Dispatch the subagent directly and return
+        # its structured output JSON as the tool result. A task dispatch counts
+        # against the cap (RMW above), same as any tool call.
+        #
+        # KNOWN LIMITATION: a subagent-origin pause (SubagentSuspended) re-raised
+        # here propagates out through the in-process MCP request handler rather
+        # than cleanly unwinding the parent codex run (anthropic re-raises inside
+        # its own Python tool loop). The default workflow's subagents are
+        # autonomous and complete without suspending, so the happy path is
+        # unaffected; clean pause-unwind across the codex MCP boundary is a
+        # follow-up.
+        #
+        # AUDIT GAP: peer providers pass tool_call_event_id=tc_ev["id"] to link
+        # the subagent's events to the parent tool-call event. The codex SDK
+        # emits the mcp_tool_call item only AFTER this MCP call returns, so no
+        # durable event id exists here yet; dispatch_task falls back to "" (a
+        # weaker parent-link for codex subagent events). Also a follow-up.
+        from imp.agents.subagents import dispatch_task, raise_if_suspended
+        try:
+            return await dispatch_task(
+                ctx,
+                args["subagent_name"],
+                args["task_description"],
+                tier=args.get("tier"),
+            )
+        except Exception as exc:
+            raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
+            text = f"{type(exc).__name__}: {exc}"
+            state.runtime_errors.append(text)
+            return text
     try:
         raw = await tool.async_invoke(ctx, args)
     except Exception as exc:
