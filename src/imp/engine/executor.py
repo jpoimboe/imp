@@ -71,6 +71,19 @@ class RunResult(Enum):
     ERRORED = "errored"
 
 
+def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, ...]:
+    """Fresh-entry seed. `<imp:begin/>` (or the wrapper text on a fresh goto),
+    plus a name line when the Change is named — so a named Change conveys its
+    slug through the immutable conversation record, never the cached prefix.
+    Unnamed Changes get the begin token alone (no leaked provisional name). One
+    TextBlock with a blank-line separator, so every provider's text join keeps
+    the token and the name line apart on the wire."""
+    opening = wrapper_text or "<imp:begin/>"
+    text = (f"{opening}\n\nThis Change is named `{change.slug}`."
+            if change.slug else opening)
+    return (Message(role="user", content=(TextBlock(text=text),)),)
+
+
 async def run_change(
     change: Change,
     *,
@@ -387,11 +400,8 @@ async def _route_agent(
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = False
-        opening = wrapper_text or "<imp:begin/>"           # fresh-seed via initial_messages
         retry_wrapper: str | None = None
-        initial: tuple[Message, ...] = (
-            Message(role="user", content=(TextBlock(text=opening),)),
-        )
+        initial: tuple[Message, ...] = _seed_messages(change, wrapper_text)
     else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = True

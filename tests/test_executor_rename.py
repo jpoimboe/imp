@@ -130,6 +130,35 @@ def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> 
     assert os.getcwd() == cwd_before
 
 
+def test_seed_messages_named_carries_the_name(tmp_path: Path) -> None:
+    from imp.engine.executor import _seed_messages
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Add OAuth",
+                       change_id="2026-06-05-eee555", base_branch="main")
+    msgs = _seed_messages(ch, None)
+    assert len(msgs) == 1
+    blocks = msgs[0].content
+    assert len(blocks) == 1                       # single block, separator inside
+    text = blocks[0].text
+    assert text.startswith("<imp:begin/>")
+    assert "2026-06-05-add-oauth" in text
+    assert "\n\n" in text                         # token and name line kept apart
+
+
+def test_seed_messages_unnamed_has_no_name_block(tmp_path: Path) -> None:
+    from imp.engine.executor import _seed_messages
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="",
+                       change_id="2026-06-05-fff666", base_branch="main")
+    msgs = _seed_messages(ch, None)
+    assert len(msgs) == 1
+    blocks = msgs[0].content
+    assert len(blocks) == 1
+    assert blocks[0].text == "<imp:begin/>"       # exactly the begin token, nothing else
+
+
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
