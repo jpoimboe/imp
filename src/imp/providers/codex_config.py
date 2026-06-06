@@ -37,15 +37,28 @@ _logger = logging.getLogger(__name__)
 
 # ── render_config_toml ──────────────────────────────────────────────────────
 
-def render_config_toml(*, host: str, port: int, bearer_env_var: str) -> str:
+def render_config_toml(
+    *, host: str, port: int, bearer_env_var: str, web_search_enabled: bool,
+) -> str:
     """Emit the `config.toml` text for a per-run CODEX_HOME.
 
-    Only the MCP server entry and the [features] toggles — SDK-expressible
-    keys (model, sandbox, web_search, etc.) live in SDK options, not here, so
-    precedence stays single-channel and safety-critical settings can never
-    silently drift via config.toml.
+    Carries the MCP server entry, the [features] toggles, and the top-level
+    `web_search` control. `web_search` lives **here**, not in SDK options,
+    because codex >=0.137 deprecated the SDK-emitted `features.web_search_request`
+    key and ignores it for disabling (web search is on by default) — so the
+    SDK-option channel can no longer turn it off. The top-level `web_search` key
+    is the only mechanism that actually disables model-hosted search, which is a
+    security boundary (model-hosted search bypasses the `networkAccessEnabled=
+    False` sandbox lock). It is set to "disabled" unless the running agent
+    declared the `web_search` tool. Verified live 2026-06-05 on codex 0.137.0.
+
+    A top-level key must precede every `[table]` in TOML, so `web_search` is
+    emitted first.
     """
+    web_search = "live" if web_search_enabled else "disabled"
     return (
+        f'web_search = "{web_search}"\n'
+        "\n"
         "[mcp_servers.imp]\n"
         f'url = "http://{host}:{port}/mcp"\n'
         f'bearer_token_env_var = "{bearer_env_var}"\n'
@@ -64,6 +77,7 @@ _DIR_PREFIX = "imp-codex-"
 
 def provision_codex_home(
     *, tmp_root: Path, host: str, port: int, bearer_env_var: str,
+    web_search_enabled: bool,
 ) -> Path:
     """Create a per-run CODEX_HOME under `tmp_root` mode 0700, write its
     config.toml mode 0600, and return the dir path.
@@ -71,6 +85,11 @@ def provision_codex_home(
     Dir name shape: `imp-codex-<pid>-<8-hex>` — the pid lets the startup sweep
     (L4) skip live-owner dirs without depending on the age bound; the entropy
     suffix makes the name unique across concurrent runs from one pid.
+
+    `web_search_enabled` is True only when the running agent declared the
+    `web_search` tool; it drives the top-level `web_search` key in config.toml
+    (see `render_config_toml`). Required (no default) because it gates a
+    security boundary.
     """
     tmp_root.mkdir(parents=True, exist_ok=True)
     name = f"{_DIR_PREFIX}{os.getpid()}-{secrets.token_hex(4)}"
@@ -80,6 +99,7 @@ def provision_codex_home(
     home.chmod(stat.S_IRWXU)
     config_text = render_config_toml(
         host=host, port=port, bearer_env_var=bearer_env_var,
+        web_search_enabled=web_search_enabled,
     )
     cfg = home / "config.toml"
     cfg.write_text(config_text)

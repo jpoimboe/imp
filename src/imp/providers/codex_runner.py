@@ -273,10 +273,16 @@ class CodexAgentRunner:
                 ))
                 return
 
-            # 6. Provision CODEX_HOME + config.toml + seed auth.
+            # 6. Provision CODEX_HOME + config.toml + seed auth. web_search is
+            #    controlled via config.toml's top-level key (the deprecated SDK
+            #    flag no longer disables it on codex >=0.137), so it must be
+            #    decided here, at provision time, from the agent's declared tools.
+            from imp.providers.web_native import declared_web_tools
+            web_enabled = "web_search" in declared_web_tools(invocation.agent_def)
             codex_home = provision_codex_home(
                 tmp_root=tmp_root, host=server_handle.host,
                 port=server_handle.port, bearer_env_var="IMP_MCP_TOKEN",
+                web_search_enabled=web_enabled,
             )
             seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                       codex_home=codex_home, env=os.environ)
@@ -353,7 +359,7 @@ class CodexAgentRunner:
         from imp.providers.web_native import declared_web_tools
         web_enabled = "web_search" in declared_web_tools(invocation.agent_def)
         proc_state["web_search_enabled"] = web_enabled
-        thread_options = self._build_thread_options(web_search_enabled=web_enabled)
+        thread_options = self._build_thread_options()
         if thread_options is None:
             # SDK unavailable (test/fake path): start with no options.
             thread = client.start_thread()
@@ -576,17 +582,19 @@ class CodexAgentRunner:
             next_prompt = str(nxt)
             nudges_used += 1
 
-    def _build_thread_options(self, *, web_search_enabled: bool = False) -> Any:
+    def _build_thread_options(self) -> Any:
         """ThreadOptions with the design's exact production flags. Lives in its
         own method so the test seam can replace it without touching
         `_drive_turns`. Returns None when the SDK is unavailable (test/fake
         path) so `_drive_turns` starts the thread without options.
 
-        `web_search_enabled` is True only when the running agent declared the
-        `web_search` tool (see `_drive_turns`). It is the lone native tool imp
-        permits codex: model-hosted, so `networkAccessEnabled` stays False (the
-        command sandbox cannot reach the network); the search itself is
-        ungoverned (imp observes the query event but does not mediate it)."""
+        `webSearchEnabled` is deliberately NOT set: codex >=0.137 deprecated the
+        SDK-emitted `features.web_search_request` flag (it no longer disables and
+        emits a noisy `error` item every turn), so web_search is controlled via
+        config.toml's top-level `web_search` key instead (see
+        `render_config_toml`). web_search is model-hosted, so
+        `networkAccessEnabled` stays False regardless (the command sandbox cannot
+        reach the network)."""
         try:
             from openai_codex_sdk import (
                 ThreadOptions,
@@ -602,7 +610,6 @@ class CodexAgentRunner:
             model=self.model,
             sandboxMode="danger-full-access",
             approvalPolicy="never",
-            webSearchEnabled=web_search_enabled,
             networkAccessEnabled=False,
         )
 

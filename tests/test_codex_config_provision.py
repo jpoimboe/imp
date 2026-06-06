@@ -8,7 +8,7 @@ from imp.providers.codex_config import provision_codex_home
 def test_provision_codex_home_modes_and_pid_dirname(tmp_path: Path) -> None:
     home = provision_codex_home(
         tmp_root=tmp_path, host="127.0.0.1", port=49152,
-        bearer_env_var="IMP_MCP_TOKEN",
+        bearer_env_var="IMP_MCP_TOKEN", web_search_enabled=False,
     )
     # Directory under tmp_root, mode 0700.
     assert home.parent == tmp_path
@@ -24,9 +24,13 @@ def test_provision_codex_home_modes_and_pid_dirname(tmp_path: Path) -> None:
     txt = cfg.read_text()
     assert "[mcp_servers.imp]" in txt
     assert "[features]" in txt
+    # web_search disabled by default (no declared web tool).
+    assert 'web_search = "disabled"' in txt
 
 
 def test_provision_codex_home_dirs_are_unique(tmp_path: Path) -> None:
-    a = provision_codex_home(tmp_root=tmp_path, host="127.0.0.1", port=1, bearer_env_var="X")
-    b = provision_codex_home(tmp_root=tmp_path, host="127.0.0.1", port=1, bearer_env_var="X")
+    a = provision_codex_home(tmp_root=tmp_path, host="127.0.0.1", port=1,
+                             bearer_env_var="X", web_search_enabled=False)
+    b = provision_codex_home(tmp_root=tmp_path, host="127.0.0.1", port=1,
+                             bearer_env_var="X", web_search_enabled=False)
     assert a != b
