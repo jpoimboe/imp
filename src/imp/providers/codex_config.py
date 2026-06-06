@@ -1,10 +1,12 @@
 """Per-run CODEX_HOME provisioning + auth handling (spec §3, design "run() flow"
 step 3, "Lifecycle / teardown", and "Auth copy-in + propagate-back").
 
-Implements only what the SDK can't express: the MCP server URL + bearer-token
-env-var name, the [features] toggles, and the auth.json seed. Everything else
-(model, sandbox_mode, approval_policy, web_search_enabled, network_access_enabled)
-goes through SDK options to keep config precedence single-channel.
+Implements what the SDK can't express (or can't express correctly): the MCP
+server URL + bearer-token env-var name, the [features] toggles, the top-level
+`web_search` control, and the auth.json seed. `web_search` lives here because the
+SDK's `features.web_search_request` flag is deprecated/ineffective on codex
+>=0.137 (see `render_config_toml`). The rest (model, sandbox_mode,
+approval_policy, network_access_enabled) still goes through SDK options.
 
 Filesystem invariants:
   - CODEX_HOME dir is mode 0700 under TMPDIR, with the owner pid encoded in
