@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import gzip
+import io
 import json
 import sys
 from pathlib import Path
@@ -37,24 +38,35 @@ def _events() -> list[dict]:
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def scene_stream(*, color: bool, width: int, limit: int | None) -> None:
-    """Replay the recorded journal through the real LiveDriver to stdout.
+class _Pipe(io.StringIO):
+    """A non-tty sink so LiveStatus stays a no-op during offline replay."""
 
-    Append-only: the captured screen shows the tail (last `rows` lines). Pick
-    `limit` to end the slice on the visual state you want to inspect — a small
-    N for the header, a larger N to land on agent prose / a gate / completion."""
+    def isatty(self) -> bool:
+        return False
+
+
+def stream_text(*, color: bool, width: int, limit: int | None) -> str:
+    """The live body the recorded journal produces, as a string — replayed
+    through the real LiveDriver. `limit` truncates to the first N events so a
+    slice ends on the visual state you want (header, prose, gate, completion).
+    Reused by scene_stream (prints it) and snap_imp_ui (renders it to a PNG)."""
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
 
     events = _events()
     if limit is not None:
         events = events[:limit]
-    drv = LiveDriver(
-        stream=sys.stdout, color=color, width=width, status=LiveStatus(sys.stdout)
-    )
+    buf = _Pipe()
+    drv = LiveDriver(stream=buf, color=color, width=width, status=LiveStatus(buf))
     for e in events:
         drv.on_event(e)
     drv.finish()
+    return buf.getvalue()
+
+
+def scene_stream(*, color: bool, width: int, limit: int | None) -> None:
+    """Replay the recorded journal through the real LiveDriver to stdout."""
+    sys.stdout.write(stream_text(color=color, width=width, limit=limit))
     sys.stdout.flush()
 
 
