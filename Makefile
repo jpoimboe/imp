@@ -124,6 +124,10 @@ clean: ## Remove build artifacts and caches.
 snap-ui: ## Render the full run-journal fixture to a PNG and open it. Extra: SNAP_ARGS="--limit 40".
 	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --open $(SNAP_ARGS)
 
+.PHONY: snap-ui-light
+snap-ui-light: ## Same as snap-ui but the light theme on a near-white surface.
+	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --theme light --out /tmp/imp_ui/stream-light.png --open $(SNAP_ARGS)
+
 
 # ── private helpers ─────────────────────────────────────────────────────────
 
