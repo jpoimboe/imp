@@ -321,18 +321,17 @@ def test_spec_writer_prompt_mandates_opening_question() -> None:
 def test_spec_writer_prompt_mandates_proactive_rename() -> None:
     # Acceptance #4: the agent renames proactively via rename_change as soon
     # as intent is clear, ANNOUNCING the name in prose WITHOUT asking the
-    # user. The iron-rule sentence is preserved verbatim.
+    # user. The new guidance (name-on-intent) instructs rename+commit same turn.
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
     assert "without asking the user" in lowered
-    assert "announce" in lowered  # "Announce the new name in prose"
-    # Iron-rule sentence preserved verbatim (acceptance #4):
-    assert (
-        "**Iron rule: never call `rename_change` and write/commit the spec "
-        "in the same turn.**"
-    ) in body
+    assert "announce" in lowered  # "Announce the name in prose"
+    # Name-on-intent: rename_change applies immediately and rename+commit happen
+    # this same turn (the old iron-rule forbidding same-turn is now inverted).
+    assert "this same turn" in body
+    assert "immediately" in body
 
 
 def test_spec_writer_prompt_drops_skip_reflexive_paragraph() -> None:
@@ -357,6 +356,16 @@ def test_spec_writer_prompt_has_trivial_carveout() -> None:
     assert "opening question" in lowered
     # The carve-out must explicitly say the opening question does not count.
     assert "does not count" in lowered or "does NOT count" in body
+
+
+def test_spec_writer_prompt_has_no_slug_interpolation() -> None:
+    from pathlib import Path
+    src = Path("src/imp/assets/workflows/default/agents/spec-writer.md")
+    text = src.read_text()
+    assert "{{ change.slug }}" not in text
+    assert "{{change.slug}}" not in text
+    # And no leftover "provisional slug" framing.
+    assert "provisional" not in text.lower()
 
 
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
