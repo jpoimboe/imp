@@ -69,18 +69,21 @@ _DEFAULT_FONT_SIZE = 10
 # The layout is identical; only the pixel density changes.
 _DEFAULT_SCALE = 3
 
-# Fallback fonts for codepoints the mono font lacks. Source Code Pro covers imp's
-# whole chrome alphabet (· → │ ⏸ ▾ ✓ ─ …) but NOT emoji (which agents emit in
-# prose, e.g. 👋) or a few misc symbols (⚠). Without a fallback those render as
-# .notdef tofu (□) in the PNG, so a design capture lies about what an emoji-
-# capable terminal actually shows. (family, path-hint) pairs, consulted per-glyph
-# in priority order; the first whose cmap covers the codepoint wins. Monochrome
-# Noto Emoji (not the color bitmap font) so it scales to any cell size and paints
-# in the cell's fg. A family that resolves nowhere just drops out (→ tofu again).
+# Fallback fonts for codepoints the mono font lacks. Source Code Pro covers most
+# of imp's chrome (· → │ ▾ ✓ ─) but NOT some UI symbols (⏸, ⚠) or emoji (which
+# agents emit in prose, e.g. 👋); without a fallback those render as .notdef tofu
+# (□), so a design capture lies about what a capable terminal shows. (family,
+# path-hint) pairs, consulted per-glyph in priority order; the first whose cmap
+# covers the codepoint wins. ORDER MATTERS: the TEXT-presentation symbol fonts
+# come first so a glyph like ⏸ renders as a slim text mark (matching a real
+# terminal), not Noto Emoji's chunky emoji-style pause; the emoji font is LAST so
+# only true emoji (which the symbol fonts lack, e.g. 👋) reach it. Monochrome Noto
+# Emoji (not the color bitmap font) so it scales to any cell size and paints in
+# the cell's fg. A family that resolves nowhere just drops out (→ tofu again).
 _FALLBACK_SPECS = (
-    ("Noto Emoji", "/usr/share/fonts/google-noto-emoji-fonts/NotoEmoji-Regular.ttf"),
     ("Noto Sans Symbols 2", "/usr/share/fonts/google-noto/NotoSansSymbols2-Regular.ttf"),
     ("DejaVu Sans", "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf"),
+    ("Noto Emoji", "/usr/share/fonts/google-noto-emoji-fonts/NotoEmoji-Regular.ttf"),
 )
 
 
