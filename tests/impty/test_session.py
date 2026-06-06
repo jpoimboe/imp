@@ -64,3 +64,27 @@ def test_default_term_is_set_for_color_fidelity() -> None:
     with TerminalSession([sys.executable, "-c", prog]) as s:
         s.wait_idle()
         assert "xterm-256color" in s.viewport()
+
+
+def test_transcript_captures_scrolled_output() -> None:
+    prog = "[print(f'line {i:02d}') for i in range(1, 41)]"
+    with TerminalSession([sys.executable, "-c", prog], cols=80, rows=24) as s:
+        s.wait_idle()
+        transcript = s.transcript()
+        lines = [ln for ln in transcript.split("\n") if ln.startswith("line ")]
+        assert lines[0] == "line 01"
+        assert lines[-1] == "line 40"
+        assert len(lines) == 40
+
+
+def test_is_alive_and_wait_report_exit() -> None:
+    with TerminalSession([sys.executable, "-c", "print('bye')"]) as s:
+        rc = s.wait(timeout=5.0)
+        assert rc == 0
+        assert s.is_alive() is False
+
+
+def test_cli_under_test_is_not_alt_screen() -> None:
+    with TerminalSession([sys.executable, "-c", "print('plain cli')"]) as s:
+        s.wait_idle()
+        assert s.is_alt_screen() is False
