@@ -368,6 +368,17 @@ def test_spec_writer_prompt_has_no_slug_interpolation() -> None:
     assert "provisional" not in text.lower()
 
 
+def test_no_goto_spec_writer_edge() -> None:
+    from pathlib import Path
+    wf = Path("src/imp/assets/workflows/default/workflow.yaml").read_text()
+    # Every edge back into spec-writer must be a `resume:` (transcript kept), so a
+    # resumed spec-writer always has its rename_change result in history and never
+    # needs the slug from the system prompt. A fresh `goto: spec-writer` would
+    # drop the transcript and reintroduce the dependency Part A removes.
+    assert "goto: spec-writer" not in wf
+    assert "goto: spec_writer" not in wf
+
+
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     # Acceptance #1/#2/#6: in this repo, imp/workflows/default must be a
     # symlink whose resolved target equals src/imp/assets/workflows/default.
