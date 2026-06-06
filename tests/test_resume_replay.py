@@ -29,9 +29,9 @@ def test_latest_step_context_none_when_absent() -> None:
 
 
 def test_missing_copy_nonempty_transcript_aborts(tmp_path: Path) -> None:
-    from imp.engine.executor import _resume_system_prompt
     from imp.agents.runner import Message, TextBlock
     from imp.agents.transcript import Transcript
+    from imp.engine.executor import _resume_system_prompt
     t = Transcript(tmp_path / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="<imp:begin/>"),)))
     with pytest.raises(RuntimeError):
