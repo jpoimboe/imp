@@ -390,8 +390,13 @@ def _stream_history(messages: list[Message]) -> Any:
     Streaming chunks from claude-p (thinking, then text, then tool_use) land
     in transcript.jsonl as separate assistant messages — the persistence path
     runs once per yielded SDK message. The Anthropic API rejects consecutive
-    assistant turns ("tool use concurrency issues"), so we fold streamed
-    fragments back into one assistant message per logical turn before replay.
+    same-role turns ("tool use concurrency issues"), so we fold streamed
+    fragments back into one message per logical turn before replay. This applies
+    to BOTH roles: an interrupted turn can leave consecutive *user* messages too
+    (a tool_result, then claude-p's "[Request interrupted by user]" marker, then
+    imp's complete_step nudge — see change 2026-06-06-06x3ml), and replaying
+    three user turns in a row trips the same 400.
+
     Drop empty assistant content (thinking-only fragments after we extracted
     the thinking blocks) since "assistant with no content" is also invalid.
     """
@@ -403,9 +408,9 @@ def _merge_assistant_fragments(messages: list[Message]) -> list[Message]:
     for m in messages:
         if m.role == "assistant" and not m.content:
             continue
-        if m.role == "assistant" and out and out[-1].role == "assistant":
+        if out and out[-1].role == m.role and m.role in ("assistant", "user"):
             out[-1] = Message(
-                role="assistant",
+                role=m.role,
                 content=out[-1].content + m.content,
             )
         else:
@@ -1197,8 +1202,23 @@ class ClaudeCodeAgentRunner:
                 break
 
         # Fell out of the async-with block without yielding a ResultMessage.
-        # Use the diagnostics captured inside the block (transport was live).
-        # Classification stays `network` (retryable).
+        # If we were cancelled (Ctrl-C), the subprocess was torn down mid-turn
+        # and the re-query's receive_response yields nothing — so the per-message
+        # cancel check above never runs. Report the cancellation here too, as
+        # `config`/interrupted (a Pause), NOT `network` (a retry): auto-retrying
+        # an interrupted turn replays a transcript the API rejects with a 400
+        # ("tool use concurrency issues"). See change 2026-06-06-06x3ml.
+        if self._cancel:
+            yield {"type": "error", "payload": {
+                "category": "config",
+                "kind": "interrupted",
+                "message": "runner cancelled by interrupt",
+            }}
+            return
+
+        # Otherwise this is a genuine early close. Use the diagnostics captured
+        # inside the block (transport was live). Classification stays `network`
+        # (retryable).
         diag = self._last_no_result_diag
         message = "SDK closed without yielding a ResultMessage"
         if diag:

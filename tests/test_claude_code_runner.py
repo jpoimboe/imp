@@ -123,6 +123,40 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_cancelled_no_result_yields_interrupted_not_network(
+    tmp_path: Path,
+) -> None:
+    """Ctrl-C tears down the claude subprocess; the re-query's receive_response
+    then yields zero messages and the runner falls through the no-result path.
+    When the runner was cancelled, that fallthrough MUST report the cancellation
+    (config/interrupted -> Pause), not a retryable `network`/no_result_message
+    error. A `network` classification auto-retries and replays the interrupted
+    transcript, which the API rejects with a 400 ("tool use concurrency issues").
+
+    Regression for change 2026-06-06-06x3ml: Ctrl-C surfaced as a network error
+    + retry + 400 pause instead of a clean interrupt pause.
+    """
+    (tmp_path / "art").mkdir()
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        # Dead subprocess: receive_response yields nothing, no ResultMessage.
+        return FakeClaudeSDKClient(opts, scripted_messages=[])
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    await runner.interrupt()  # the SIGINT-driven cancel that already fired
+
+    inv = _inv(tmp_path)
+    events = [ev async for ev in runner.run(inv)]
+
+    errs = [e for e in events if e["type"] == "error"]
+    assert len(errs) == 1, errs
+    assert errs[0]["payload"]["category"] == "config", errs[0]["payload"]
+    assert errs[0]["payload"]["kind"] == "interrupted", errs[0]["payload"]
+
+
+@pytest.mark.anyio
 async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
     """Pre-populate transcript with a user/assistant/user(tool_result) sequence;
     runner skips initial_messages and replays history via client.query."""
