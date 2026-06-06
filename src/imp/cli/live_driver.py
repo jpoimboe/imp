@@ -145,13 +145,17 @@ class LiveDriver:
             cur.index += 1
             if _is_container(child):
                 # PhaseNode/StepNode: print the header now and descend, streaming
-                # the container's children as their events route in.
+                # the container's children as their events route in. A phase
+                # indents its steps (+1); a step's content flows at the step's
+                # OWN depth (no +1) so prose aligns under the header instead of
+                # burying it — must match render_text._render. (aligned indent)
                 gutters = self._gutters()
                 self._stream_or_hold(
                     rt.header_line(child, depth=cur.depth, color=self._color,
                                    gutters=gutters),
                     depth=cur.depth, gutters=gutters)
-                self._frontier.append(_Cursor(container=child, depth=cur.depth + 1))
+                child_depth = cur.depth + 1 if isinstance(child, nv.PhaseNode) else cur.depth
+                self._frontier.append(_Cursor(container=child, depth=child_depth))
             else:
                 self._emit_leaf(child, cur.depth, gutters=self._gutters())
 

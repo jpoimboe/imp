@@ -246,8 +246,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.StepNode):
+        # A step's content flows at the step's OWN indent (no +1): the header is a
+        # label and its prose/context/breadcrumb align directly beneath it, rather
+        # than indenting a further level and burying the agent's words. Phases
+        # still indent their steps (the +1 lives in PhaseNode above); subagent
+        # folds add their own level + gutter internally. (design: aligned indent)
         yield header_line(node, depth=depth, color=color, gutters=gutters)
-        yield from _render_children(node.children, depth=depth + 1, full=full,
+        yield from _render_children(node.children, depth=depth, full=full,
                                     color=color, width=width, gutters=gutters)
         return
 
@@ -326,18 +331,24 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.TiersResolvedNode):
-        yield _line("tiers resolved:", depth, color, gutters=gutters)
+        # Setup metadata: dim the whole block so it recedes like the context fold
+        # rather than shouting at the top of every run.
+        dim = pal.NODE_COLORS["metadata"]
+        yield _line("tiers resolved:", depth, color, *dim, gutters=gutters)
         col_w = max((len(r["tier"]) for r in node.rows), default=0)  # tier-name column
         for r in node.rows:
             # two-space sub-indent under the "tiers resolved:" header
-            line = f"  {r['tier']:<{col_w}} → {r['provider']}/{r['model']}"
+            yield _line(f"  {r['tier']:<{col_w}} → {r['provider']}/{r['model']}",
+                        depth, color, *dim, gutters=gutters)
             if r["differ_tier"] is not None:
+                # On its OWN line (not appended) so a long note can't overflow the
+                # row and hard-wrap mid-word; indented to sit under the row.
                 label = _DIFFER_LABELS.get(r["differ_tier"], "?")
-                line += (f"   (differ from {r['differ_from']}: "
-                         f"tier {r['differ_tier']}, {label})")
-            yield _line(line, depth, color, gutters=gutters)
+                yield _line(f"    differ from {r['differ_from']}: "
+                            f"tier {r['differ_tier']}, {label}",
+                            depth, color, *dim, gutters=gutters)
             if r.get("warning"):
-                yield _line(f"    ⚠ {r['warning']}", depth, color, gutters=gutters)
+                yield _line(f"    ⚠ {r['warning']}", depth, color, *dim, gutters=gutters)
         return
 
     if isinstance(node, nv.FallbackLine):

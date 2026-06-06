@@ -435,15 +435,18 @@ def test_tiers_resolved_renders_constrained_and_unconstrained() -> None:
     assert "→ anthropic/sonnet" in code_line
     assert "differ from" not in code_line
 
-    # tier-1 constrained: vendor jump
+    # tier-1 constrained: vendor jump. The differ note is now on its OWN line
+    # (not appended to the row) so a long note can't overflow and wrap mid-word.
     cr_line = next(ln for ln in out if "code-reviewer" in ln)
     assert "→ openai/gpt-5.5" in cr_line
-    assert "(differ from task-lead: tier 1, vendor jump)" in cr_line
+    assert "differ from" not in cr_line
+    assert any("differ from task-lead: tier 1, vendor jump" in ln for ln in out)
 
     # tier-2 constrained: same-vendor fallback
     spec_line = next(ln for ln in out if ln.lstrip().startswith("high"))
     assert "→ anthropic/opus" in spec_line
-    assert "(differ from code-reviewer: tier 2, same-vendor fallback)" in spec_line
+    assert "differ from" not in spec_line
+    assert any("differ from code-reviewer: tier 2, same-vendor fallback" in ln for ln in out)
 
 
 def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
@@ -565,9 +568,10 @@ def test_full_subagent_content_carries_magenta_gutter() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
     ], full=True)
-    # prose + outcome at depth 3: cols 0,1 plain + col 2 gutter.
-    assert any(ln == "    │ looks good" for ln in out)
-    assert any(ln == "    │ → status=Success" for ln in out)
+    # prose + outcome at depth 2 (aligned indent: the step no longer adds a
+    # level): col 0 plain + col 1 gutter.
+    assert any(ln == "  │ looks good" for ln in out)
+    assert any(ln == "  │ → status=Success" for ln in out)
 
 
 def test_subagent_header_excludes_own_gutter() -> None:

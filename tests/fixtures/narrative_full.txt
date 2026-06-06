@@ -2,41 +2,42 @@
 tiers resolved:
   low    → anthropic/haiku
   medium → anthropic/sonnet
-  high   → openai/gpt-5.5   (differ from medium: tier 1, vendor jump)
+  high   → openai/gpt-5.5
+    differ from medium: tier 1, vendor jump
 design
   spec
-    ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=50
-      system_prompt:
-        You are a spec writer. Draft a detailed specification.
-      tools:
-        - bash
-        - read_file
-    Drafting the spec.
-    
-    ▾ thinking
-      I need to consider the auth requirements carefully before writing the
-      spec. Let me think about OAuth2 vs API keys.
-    ▾ tools
-      ⏺ read_file  path=README.md  → # Project Auth module needed. [killed]
-      ⏺ bash  command=ls src/  → auth.py main.py
-    ▾ task → reviewer
-    │ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
-    │   system_prompt:
-    │     You are a reviewer.
-    │   tools:
-    │ The spec looks good. Auth flows are clearly defined.
-    │ → status=Success · summary=Spec approved
-    ❯ Please add a section on token expiry.
-    ✓ spec · status=Success · summary=Spec drafted
+  ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=50
+    system_prompt:
+      You are a spec writer. Draft a detailed specification.
+    tools:
+      - bash
+      - read_file
+  Drafting the spec.
+  
+  ▾ thinking
+    I need to consider the auth requirements carefully before writing the spec.
+    Let me think about OAuth2 vs API keys.
+  ▾ tools
+    ⏺ read_file  path=README.md  → # Project Auth module needed. [killed]
+    ⏺ bash  command=ls src/  → auth.py main.py
+  ▾ task → reviewer
+  │ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
+  │   system_prompt:
+  │     You are a reviewer.
+  │   tools:
+  │ The spec looks good. Auth flows are clearly defined.
+  │ → status=Success · summary=Spec approved
+  ❯ Please add a section on token expiry.
+  ✓ spec · status=Success · summary=Spec drafted
   approve
-    human gate → continue
-      Approve the design spec?
-      - yes
-      - no
-    ✓ approve
+  human gate → continue
+    Approve the design spec?
+    - yes
+    - no
+  ✓ approve
 implement
   build
-    error: [provider] rate limited
-    warning: dropped block
-    phase_exhausted  phase=implement
-    error: [ctrl-c] paused: ctrl-c
+  error: [provider] rate limited
+  warning: dropped block
+  phase_exhausted  phase=implement
+  error: [ctrl-c] paused: ctrl-c
