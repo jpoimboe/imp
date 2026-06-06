@@ -42,7 +42,7 @@ class Change:
         meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
         log.append(agent_id=None, type="change_renamed",
                    payload={"id": self.id, "old_title": old_title,
-                            "new_title": name})
+                            "new_title": name, "new_slug": self.slug})
         return self.slug
 
     @property

@@ -953,3 +953,28 @@ def test_close_subagent_success_with_marker_text_is_not_terminal_state():
          "error": False})
     assert fold.terminal_state is None
     assert fold.is_error is False
+
+
+def test_change_renamed_updates_root_title_and_slug() -> None:
+    # The narrative builder must reflect the settled name after change_renamed.
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", slug="", title=""))
+    b.add(ev("2", "change_renamed", id="2026-06-05-aaa111",
+             old_title="", new_title="Add OAuth",
+             new_slug="2026-06-05-add-oauth"))
+    assert b.tree.root.title == "Add OAuth"
+    assert b.tree.root.slug == "2026-06-05-add-oauth"
+
+
+def test_change_renamed_ignores_legacy_partial_event() -> None:
+    # The handler applies new_title + new_slug atomically. A legacy/partial event
+    # missing new_title (old schema: old_slug/new_slug/title) must be IGNORED, not
+    # half-applied — otherwise the header would show a new slug beside a stale title.
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", slug="2026-06-05-orig", title="orig"))
+    b.add(ev("2", "change_renamed",
+             old_slug="2026-06-05-orig",
+             new_slug="2026-06-05-renamed",
+             title="renamed"))   # NO new_title — legacy/partial schema
+    assert b.tree.root.title == "orig"          # unchanged (event ignored)
+    assert b.tree.root.slug == "2026-06-05-orig"  # unchanged (no half-update)

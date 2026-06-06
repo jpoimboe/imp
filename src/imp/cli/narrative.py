@@ -387,6 +387,21 @@ def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 
+def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # A rename carries the new title + slug as a unit (current schema). Apply them
+    # together; ignore a legacy/partial event missing either, rather than leaving
+    # the header half-updated (e.g. new slug beside a stale title).
+    new_title = p.get("new_title")
+    new_slug = p.get("new_slug")
+    if new_title is None or new_slug is None:
+        return
+    self._root.title = new_title
+    self._root.slug = new_slug
+
+
+NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
+
+
 def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it

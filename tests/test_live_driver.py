@@ -691,6 +691,35 @@ def test_refresh_status_no_newline_on_non_tty_even_with_prev_prose() -> None:
     assert drv._prev_prose is True   # untouched on non-TTY
 
 
+def test_header_emitted_on_rename_when_unnamed_at_create() -> None:
+    # UNNAMED->RENAMED: the header (#slug  title) must appear after
+    # change_renamed, never before.
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", slug="", title=""))
+    assert out.getvalue() == ""   # still nothing — unnamed
+    drv.on_event(ev("2", "change_renamed", id="ch1",
+                    old_title="", new_title="Add OAuth",
+                    new_slug="2026-06-05-add-oauth"))
+    body = _body(out)
+    # The header line must be exactly the styled slug + title (not a FallbackLine).
+    assert any(ln.startswith("#2026-06-05-add-oauth") and "Add OAuth" in ln
+               for ln in body)
+
+
+def test_header_emitted_exactly_once_when_named_from_start_then_renamed() -> None:
+    # NAMED-FROM-START then renamed: the header must appear exactly once (no
+    # duplicate on change_renamed).
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", slug="2026-06-05-first",
+                    title="First"))
+    drv.on_event(ev("2", "change_renamed", id="ch1",
+                    old_title="First", new_title="Second",
+                    new_slug="2026-06-05-second"))
+    body = _body(out)
+    header_lines = [ln for ln in body if ln.startswith("#")]
+    assert len(header_lines) == 1   # header emitted exactly once
+
+
 def test_user_message_resets_status_span() -> None:
     """The status-line elapsed timer measures 'time the agent has been working
     since the last user reply' — across tools, thinks, and multiple

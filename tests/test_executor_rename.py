@@ -37,7 +37,8 @@ def test_change_rename_is_content_only(tmp_path: Path) -> None:
     assert "id" in meta and "slug" not in meta
     renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"][-1]
     assert renamed["payload"] == {
-        "id": id_before, "old_title": "orig", "new_title": "Add OAuth"}
+        "id": id_before, "old_title": "orig", "new_title": "Add OAuth",
+        "new_slug": "2026-06-04-add-oauth"}
 
 
 class _RenamingRunner:
