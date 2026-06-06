@@ -156,7 +156,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            print(f"Created Change {change.id}: {change.title!r}")
+            # No "Created Change …" line: the driver's `change_created` event
+            # prints the bold `#slug  title` workflow header as the opener, so a
+            # second headline here would just duplicate it.
             non_interactive = bool(getattr(args, "non_interactive", False))
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
@@ -284,7 +286,12 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 2
-            print(f"Resuming Change {change.id}: {change.title!r}")
+            # Resume gets no `change_created` event, so the driver won't print the
+            # workflow header — emit a matching one here (bold `#slug  title`) with
+            # a dim resuming marker, so a resumed run opens like a fresh one.
+            _color = should_use_color(sys.stdout)
+            print(ansi(f"#{change.slug}  {change.title}", "bold", "magenta", enabled=_color)
+                  + ansi(" · resuming", "dim", enabled=_color))
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
             # + gate-check FIRST (plan_rewind raises before mutating/emitting) so
