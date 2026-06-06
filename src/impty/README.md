@@ -11,7 +11,9 @@ from impty import TerminalSession
 with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
     s.wait_idle()                 # read until output goes quiet (select-based)
     if "Project name?" in s.viewport():
-        s.send("myproj\r")        # raw keystrokes; \r=Enter, \x1b[B=Down, \x03=Ctrl-C
+        s.send("myproj\r")        # raw keystrokes; \r=Enter, \x1b[B=Down
+        # \x03 = Ctrl-C: a real SIGINT in cooked mode, a raw byte in raw mode;
+        # use send_signal() for a mode-independent signal.
     s.wait_idle()
     print(s.transcript())         # whole run in order (history + viewport)
     print(s.cell(0, 0).fg)        # style at a cell: 'cyan' (for color assertions)
@@ -21,7 +23,8 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 
 - `wait_idle(idle=0.2, hard=10.0) -> bool` — read until quiet; `False` on hard timeout.
 - `run_to_completion(hard=60.0) -> int` — drive the child to exit, draining ALL remaining output into pyte first; returns the exit code, raises `TimeoutExpired` on hard timeout (child still alive). Use this (not `wait()`) when the child floods after your last `send()`.
-- `send(bytes | str)` — raw keystrokes to the program.
+- `send(bytes | str)` — raw keystrokes to the program. `\x03` (Ctrl-C) is faithful: a real `SIGINT` to the child's process group in cooked mode (the controlling terminal is set up at spawn), a raw byte in raw mode (the app makes its own `KeyboardInterrupt`), exactly like a real terminal.
+- `send_signal(sig=signal.SIGINT)` — deliver a real signal directly to the child's process group, regardless of tty mode (cooked or raw). The deterministic escape hatch when you don't want to depend on tty mode; a no-op once the child has exited. Reaches only the child's process group — a grandchild that `setsid()`'d into its own session is not signalled, exactly like a real Ctrl-C.
 - `viewport() -> str` — current visible screen (act on this each turn).
 - `transcript(limit=None) -> str` — full run in order, bounded by `limit`.
 - `cell(x, y) -> Cell` — glyph + style (`fg/bg/bold/...`) for appearance assertions.
