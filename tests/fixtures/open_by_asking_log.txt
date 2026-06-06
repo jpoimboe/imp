@@ -4,152 +4,154 @@ spec
   
   spec-writer · claude-opus-4-7
   
-  · ToolSearch · 1 call · 0s
+    ToolSearch · 1 call · 0s
   
-  The starting intent "vine salt kelp" looks like an auto-generated placeholder
-  rather than a real description of a change. I don't have enough information to
-  write a spec.
+  · The starting intent "vine salt kelp" looks like an auto-generated
+    placeholder rather than a real description of a change. I don't have enough
+    information to write a spec.
   
-  What change do you actually want to make? A short prose description of the
-  goal is enough to start.
+    What change do you actually want to make? A short prose description of the
+    goal is enough to start.
   
   > I want to change "imp new" such that it doesn't pass the title as the first
-  prompt to the LLM.  maybe the first prompt to the LLM should be something that
-  would prompt the LLM to ask the user what they want to do
+    prompt to the LLM.  maybe the first prompt to the LLM should be something
+    that would prompt the LLM to ask the user what they want to do
   
-  · bash · grep · read_file · 14 calls · 54s
+    bash · grep · read_file · 14 calls · 54s
   
-  I read the relevant code. Here's what's happening today:
+  · I read the relevant code. Here's what's happening today:
   
-   • imp new with no title generates a random three-word phrase (e.g. vine salt
-     kelp) and stores it as change.title with auto_titled=True.
-   • The first user message sent to the LLM on each agent step is just the
-     literal string "begin" (executor.py:436).
-   • The title appears in the system prompt: the spec-writer.md template renders
-     Change title (user's starting intent): \{{ change.title }}``
-     unconditionally, so the random words get presented to the model as if they
-     were the user's stated intent.
+     • imp new with no title generates a random three-word phrase (e.g. vine
+       salt kelp) and stores it as change.title with auto_titled=True.
+     • The first user message sent to the LLM on each agent step is just the
+       literal string "begin" (executor.py:436).
+     • The title appears in the system prompt: the spec-writer.md template
+       renders Change title (user's starting intent): \{{ change.title }}``
+       unconditionally, so the random words get presented to the model as if
+       they were the user's stated intent.
   
-  So the actual "title-passed-to-LLM" surface is the spec-writer system prompt,
-  not the first user message. When auto-titled, the model is being told the
-  user's intent is vine salt kelp, which is nonsense and pushes the agent toward
-  fabricating context.
+    So the actual "title-passed-to-LLM" surface is the spec-writer system
+    prompt, not the first user message. When auto-titled, the model is being
+    told the user's intent is vine salt kelp, which is nonsense and pushes the
+    agent toward fabricating context.
   
-  Two questions before I propose options — I'll ask the first one now.
+    Two questions before I propose options — I'll ask the first one now.
   
-  When the user does supply a real title (imp new "add --version flag"), should
-  the title still flow into the spec-writer prompt as the starting intent
-  (current behavior), or do you want it removed in that case too — so that imp
-  new always opens by asking the user what they want, regardless of whether a
-  title was given?
+    When the user does supply a real title (imp new "add --version flag"),
+    should the title still flow into the spec-writer prompt as the starting
+    intent (current behavior), or do you want it removed in that case too — so
+    that imp new always opens by asking the user what they want, regardless of
+    whether a title was given?
   
   > ask regardless
   
-  Let me check a couple more places before proposing the design.
+  · Let me check a couple more places before proposing the design.
   
-  · grep · read_file · bash · 8 calls · 46s
+    grep · read_file · bash · 8 calls · 46s
   
-  Let me check one more thing — how the dogfood live test interacts with the
-  title.
+  · Let me check one more thing — how the dogfood live test interacts with the
+    title.
   
-  · bash · 3 calls · 12s
+    bash · 3 calls · 12s
   
-  I have enough context. Here's the proposed design:
+  · I have enough context. Here's the proposed design:
   
-  Goal: When imp new enters the spec-writer step, the agent opens by asking the
-  user what change they want to make. The title (whether random-default or
-  user-supplied) is no longer rendered into the spec-writer's system prompt as
-  "starting intent".
+    Goal: When imp new enters the spec-writer step, the agent opens by asking
+    the user what change they want to make. The title (whether random-default or
+    user-supplied) is no longer rendered into the spec-writer's system prompt as
+    "starting intent".
   
-  Changes:
+    Changes:
   
-   1 src/imp/assets/workflows/default/agents/spec-writer.md
-      • Remove line 16: Change title (user's starting intent): \{{ change.title
-        }}``
-      • Remove the "Auto-titled" line too (we're not differentiating in-prompt
-        anymore — the slug-settling section folds into one branch).
-      • Remove the "Skip reflexive questions on fully-specified requests"
-        paragraph (it presupposed a title that conveyed intent).
-      • Add an explicit "Open the dialogue" instruction at the top of "Your
-        Role" / "Brainstorm Discipline": the first turn MUST be a single
-        question to the user asking what change they want to make. Do not
-        explore the codebase or propose anything before the user answers.
-      • Simplify the "Slug Settling" section: drop the {% if change.auto_titled
-        %} / {% else %} split. Always treat the slug as provisional — once the
-        agent understands the change, call rename_change if the slug doesn't
-        already match (the user-supplied case will usually skip rename if the
-        user repeats their intent verbatim; nothing forces a rename).
-   2 tests/test_default_workflow_dogfood_live.py
-      • Drop TASK_IS_ZERO_AMBIGUITY = True and its branch — every run now
-        produces at least one ask (the opening question).
-      • On the first awaiting_user_input event, the PTY driver replies with the
-        full title text (the feature intent). On subsequent asks it keeps the
-        generic "looks good, proceed with reasonable defaults\n" reply.
-      • Assert asks_answered >= 1 unconditionally.
-   3 Out of scope:
-      • spec-reviewer.md and plan-reviewer.md still render change.title for
-        intent-alignment checks (they run after the user-confirmed spec is on
-        disk, so they're not "the first prompt" the user was concerned about).
-        Leave them alone — YAGNI.
-      • No CLI change; imp new [title] still accepts and uses the title for slug
-        derivation. The title just stops being shown to the spec-writer LLM as
-        authoritative intent.
+     1 src/imp/assets/workflows/default/agents/spec-writer.md
+        • Remove line 16: Change title (user's starting intent): \{{
+          change.title }}``
+        • Remove the "Auto-titled" line too (we're not differentiating in-prompt
+          anymore — the slug-settling section folds into one branch).
+        • Remove the "Skip reflexive questions on fully-specified requests"
+          paragraph (it presupposed a title that conveyed intent).
+        • Add an explicit "Open the dialogue" instruction at the top of "Your
+          Role" / "Brainstorm Discipline": the first turn MUST be a single
+          question to the user asking what change they want to make. Do not
+          explore the codebase or propose anything before the user answers.
+        • Simplify the "Slug Settling" section: drop the {% if
+          change.auto_titled %} / {% else %} split. Always treat the slug as
+          provisional — once the agent understands the change, call
+          rename_change if the slug doesn't already match (the user-supplied
+          case will usually skip rename if the user repeats their intent
+          verbatim; nothing forces a rename).
+     2 tests/test_default_workflow_dogfood_live.py
+        • Drop TASK_IS_ZERO_AMBIGUITY = True and its branch — every run now
+          produces at least one ask (the opening question).
+        • On the first awaiting_user_input event, the PTY driver replies with
+          the full title text (the feature intent). On subsequent asks it keeps
+          the generic "looks good, proceed with reasonable defaults\n" reply.
+        • Assert asks_answered >= 1 unconditionally.
+     3 Out of scope:
+        • spec-reviewer.md and plan-reviewer.md still render change.title for
+          intent-alignment checks (they run after the user-confirmed spec is on
+          disk, so they're not "the first prompt" the user was concerned about).
+          Leave them alone — YAGNI.
+        • No CLI change; imp new [title] still accepts and uses the title for
+          slug derivation. The title just stops being shown to the spec-writer
+          LLM as authoritative intent.
   
-  I'll rename the slug to imp-new-open-by-asking.
+    I'll rename the slug to imp-new-open-by-asking.
   
-  Sound right, or do you want any of those scope calls flipped (e.g. also strip
-  title from the reviewer prompts, or leave the dogfood test out)?
+    Sound right, or do you want any of those scope calls flipped (e.g. also
+    strip title from the reviewer prompts, or leave the dogfood test out)?
   
   > does spec-writer change the slug and the title?
   
-  · bash · grep · 2 calls · 0s
+    bash · grep · 2 calls · 0s
   
-  Yes. The rename_change tool sets state.pending_rename; at the next step
-  boundary apply_pending_rename (executor.py:268–) updates both:
+  · Yes. The rename_change tool sets state.pending_rename; at the next step
+    boundary apply_pending_rename (executor.py:268–) updates both:
   
-   • change.slug → new dated slug derived from the name
-   • change.title → the new name verbatim
-   • change.auto_titled → flipped to False (the rename is intentional)
-   • Worktree directory + git branch are also renamed
-   • change.json and state.json are rewritten
+     • change.slug → new dated slug derived from the name
+     • change.title → the new name verbatim
+     • change.auto_titled → flipped to False (the rename is intentional)
+     • Worktree directory + git branch are also renamed
+     • change.json and state.json are rewritten
   
-  So both slug and title move together — the title isn't a separate, stickier
-  piece of state. After the spec-writer renames, downstream agents
-  (spec-reviewer, plan-reviewer) see the updated title in their templates.
+    So both slug and title move together — the title isn't a separate, stickier
+    piece of state. After the spec-writer renames, downstream agents
+    (spec-reviewer, plan-reviewer) see the updated title in their templates.
   
-  Does that resolve the question, or does it shift the design? My read is it
-  doesn't — the design above stands. Shall I proceed and rename the slug to
-  imp-new-open-by-asking?
+    Does that resolve the question, or does it shift the design? My read is it
+    doesn't — the design above stands. Shall I proceed and rename the slug to
+    imp-new-open-by-asking?
   
   > yes, but also change it such that 1) it automatically changes the title/slug
-  as early as possible (often after the 1st or 2nd message), and then
-  potentially changes it again before the end.  and doesn't ask the user before
-  doing so, just states that it's doing it.
+    as early as possible (often after the 1st or 2nd message), and then
+    potentially changes it again before the end.  and doesn't ask the user
+    before doing so, just states that it's doing it.
   
-  Got it. Updated design:
+  · Got it. Updated design:
   
-  Spec-writer behavior (revised):
+    Spec-writer behavior (revised):
   
-   1 Opening turn: ask the user what change they want; nothing else.
-   2 As soon as intent is clear (typically after the user's 1st or 2nd reply),
-     the agent calls rename_change(name=...) proactively — does not ask
-     permission, just announces it in prose ("Calling this add-version-flag.").
-     The agent must complete the step with phase="drafting" after the
-     announcement so the rename lands at the boundary (this matches the existing
-     "iron rule" mechanism).
-   3 May rename again later if scope clarifies before the spec is written. Same
-     pattern: announce, don't ask. Same iron rule: never rename and commit-spec
-     in the same turn.
-   4 The current {% if change.auto_titled %} / {% else %} split in
-     spec-writer.md collapses to a single unconditional flow (the user-supplied
-     case is no longer special — the agent will still typically end up calling
-     rename_change to re-derive the slug from the user's actual stated intent,
-     but if that matches the existing slug exactly, no-op is fine since
-     rename_change already handles new == old cleanly per executor.py:288).
+     1 Opening turn: ask the user what change they want; nothing else.
+     2 As soon as intent is clear (typically after the user's 1st or 2nd reply),
+       the agent calls rename_change(name=...) proactively — does not ask
+       permission, just announces it in prose ("Calling this
+       add-version-flag."). The agent must complete the step with
+       phase="drafting" after the announcement so the rename lands at the
+       boundary (this matches the existing "iron rule" mechanism).
+     3 May rename again later if scope clarifies before the spec is written.
+       Same pattern: announce, don't ask. Same iron rule: never rename and
+       commit-spec in the same turn.
+     4 The current {% if change.auto_titled %} / {% else %} split in
+       spec-writer.md collapses to a single unconditional flow (the
+       user-supplied case is no longer special — the agent will still typically
+       end up calling rename_change to re-derive the slug from the user's actual
+       stated intent, but if that matches the existing slug exactly, no-op is
+       fine since rename_change already handles new == old cleanly per
+       executor.py:288).
   
-  I'll land the slug rename now and write the spec on the next turn.
+    I'll land the slug rename now and write the spec on the next turn.
   
-  · rename_change · complete_step · 2 calls · 2s
+    rename_change · complete_step · 2 calls · 2s
   
   spec-writer complete · goto(spec-writer) [resume] · 13m 35s
   
@@ -157,15 +159,15 @@ spec
   
   spec-writer · claude-opus-4-7
   
-  · ToolSearch · 1 call · 0s
+    ToolSearch · 1 call · 0s
   
-  Now I can actually explore the code. Let me verify my earlier assumptions.
+  · Now I can actually explore the code. Let me verify my earlier assumptions.
   
-  · bash · read_file · 13 calls · 45s
+    bash · read_file · 13 calls · 45s
   
-  I have everything I need. Writing the spec now.
+  · I have everything I need. Writing the spec now.
   
-  · write_file · bash · complete_step · 3 calls · 6s
+    write_file · bash · complete_step · 3 calls · 6s
   
   spec-writer complete · 1m 55s
   
@@ -177,53 +179,53 @@ spec
   
   spec-reviewer · claude-opus-4-7
   
-  · ToolSearch · read_file · query_events · complete_step · 4 calls · 25s
+    ToolSearch · read_file · query_events · complete_step · 4 calls · 25s
   
-  No Critical or Major findings. The spec is complete, internally consistent,
-  and aligns with the user's brainstorm clarifications (don't pass title as
-  first prompt; ask regardless of whether the title was user-supplied or
-  auto-generated; auto-rename slug/title proactively after 1st or 2nd message
-  without asking permission; may rename again later).
+  · No Critical or Major findings. The spec is complete, internally consistent,
+    and aligns with the user's brainstorm clarifications (don't pass title as
+    first prompt; ask regardless of whether the title was user-supplied or
+    auto-generated; auto-rename slug/title proactively after 1st or 2nd message
+    without asking permission; may rename again later).
   
-  Strengths:
+    Strengths:
   
-   • Acceptance criteria are concrete and verifiable (specific template strings
-     to remove, specific test constant to delete, specific assertions like
-     asks_answered >= 1, gated IMP_RUN_DOGFOOD=1 end-to-end check).
-   • Scope is explicit on both sides: reviewer prompts and CLI surface are
-     documented as untouched with rationale; the dead auto_titled field is
-     acknowledged and deferred (YAGNI-respectful).
-   • Decisions summary explains why template-not-engine, why always-ask, why a
-     carve-out in the trivial rubric is required — preempting the most likely
-     sources of misinterpretation.
-   • Dogfood test change (first awaiting_user_input reply carries the task) is a
-     clean, well-justified consequence of removing the title from the system
-     prompt.
+     • Acceptance criteria are concrete and verifiable (specific template
+       strings to remove, specific test constant to delete, specific assertions
+       like asks_answered >= 1, gated IMP_RUN_DOGFOOD=1 end-to-end check).
+     • Scope is explicit on both sides: reviewer prompts and CLI surface are
+       documented as untouched with rationale; the dead auto_titled field is
+       acknowledged and deferred (YAGNI-respectful).
+     • Decisions summary explains why template-not-engine, why always-ask, why a
+       carve-out in the trivial rubric is required — preempting the most likely
+       sources of misinterpretation.
+     • Dogfood test change (first awaiting_user_input reply carries the task) is
+       a clean, well-justified consequence of removing the title from the system
+       prompt.
   
-  Minor:
+    Minor:
   
-   • AC #4 says the iron rule remains "verbatim" but does not quote the exact
-     sentence the reviewer should grep for; the implementor will have to read
-     the current template to find it. Not blocking — it's clearly the existing
-     "never rename and commit-spec in the same turn" sentence.
-   • AC #3 says the opening turn must be "a single plain-prose question" but
-     doesn't constrain length or content beyond that; an implementor could pick
-     any phrasing. Probably intentional (leaves room for the agent), so this is
-     at most a Nit.
+     • AC #4 says the iron rule remains "verbatim" but does not quote the exact
+       sentence the reviewer should grep for; the implementor will have to read
+       the current template to find it. Not blocking — it's clearly the existing
+       "never rename and commit-spec in the same turn" sentence.
+     • AC #3 says the opening turn must be "a single plain-prose question" but
+       doesn't constrain length or content beyond that; an implementor could
+       pick any phrasing. Probably intentional (leaves room for the agent), so
+       this is at most a Nit.
   
-  Nit:
+    Nit:
   
-   • "typically after the user's 1st or 2nd reply" appears in both Scope and AC
-     #4 — a single source would reduce drift if the spec is later edited, but
-     the duplication is intentional emphasis and harmless.
+     • "typically after the user's 1st or 2nd reply" appears in both Scope and
+       AC #4 — a single source would reduce drift if the spec is later edited,
+       but the duplication is intentional emphasis and harmless.
   
-  Spec is ready for planning.
+    Spec is ready for planning.
   
   spec-reviewer complete · goto(spec-writer) [resume] · 31s
   
   spec-writer · claude-opus-4-7
   
-  · ToolSearch · bash · edit_file · complete_step · 5 calls · 22s
+    ToolSearch · bash · edit_file · complete_step · 5 calls · 22s
   
   spec-writer complete · 35s
   
@@ -237,7 +239,7 @@ plan
   
   plan-writer · claude-opus-4-7
   
-  · ToolSearch · read_file · glob · grep +3 · 25 calls · 4m 7s
+    ToolSearch · read_file · glob · grep +3 · 25 calls · 4m 7s
   
   plan-writer complete · 4m 43s
   
@@ -249,16 +251,16 @@ plan
   
   plan-review · claude-opus-4-7
   
-  · ToolSearch · glob · read_file · grep · 29 calls · 5m 58s
+    ToolSearch · glob · read_file · grep · 29 calls · 5m 58s
   
-  API Error: 529 Overloaded. This is a server-side issue, usually temporary —
-  try again in a moment. If it persists, check status.claude.com.
+  · API Error: 529 Overloaded. This is a server-side issue, usually temporary —
+    try again in a moment. If it persists, check status.claude.com.
   
-  API Error: 529 Overloaded. This is a server-side issue, usually temporary —
-  try again in a moment. If it persists, check status.claude.com.
+  · API Error: 529 Overloaded. This is a server-side issue, usually temporary —
+    try again in a moment. If it persists, check status.claude.com.
   
-  API Error: 529 Overloaded. This is a server-side issue, usually temporary —
-  try again in a moment. If it persists, check status.claude.com.
+  · API Error: 529 Overloaded. This is a server-side issue, usually temporary —
+    try again in a moment. If it persists, check status.claude.com.
   
   error: [agent_incomplete] agent did not call complete_step after nudges
   
@@ -268,63 +270,63 @@ plan
   
   plan-review · claude-opus-4-7
   
-  · ToolSearch · glob · read_file · 8 calls · 15s
+    ToolSearch · glob · read_file · 8 calls · 15s
   
-  I'll verify the plan by checking that its "exact block" replacements match the
-  current files and the contract tests would actually pass on the rewritten
-  template.
+  · I'll verify the plan by checking that its "exact block" replacements match
+    the current files and the contract tests would actually pass on the
+    rewritten template.
   
-  · grep · 2 calls · 0s
+    grep · 2 calls · 0s
   
-  Confirmed the discrepancy. Let me finalize.
+  · Confirmed the discrepancy. Let me finalize.
   
-  · complete_step · 1 call · 0s
+    complete_step · 1 call · 0s
   
-  Plan reviewed. Approved with one Minor finding (a test-assertion vs.
-  template-wording mismatch that the implementor will catch at Step 7 and
-  resolve in one line either direction). No blocking issues.
+  · Plan reviewed. Approved with one Minor finding (a test-assertion vs.
+    template-wording mismatch that the implementor will catch at Step 7 and
+    resolve in one line either direction). No blocking issues.
   
-  No Critical or Major findings — the plan is complete, spec coverage is full,
-  the "replace this exact block" snippets in both Task 1 and Task 2 match the
-  current contents of src/imp/assets/workflows/default/agents/spec-writer.md and
-  tests/test_default_workflow_dogfood_live.py byte-for-byte, the iron-rule
-  sentence is preserved verbatim by the Slug Settling rewrite, and every
-  acceptance criterion (#1–#9) is traced to specific steps with verifiable
-  assertions.
+  · No Critical or Major findings — the plan is complete, spec coverage is full,
+    the "replace this exact block" snippets in both Task 1 and Task 2 match the
+    current contents of src/imp/assets/workflows/default/agents/spec-writer.md
+    and tests/test_default_workflow_dogfood_live.py byte-for-byte, the iron-rule
+    sentence is preserved verbatim by the Slug Settling rewrite, and every
+    acceptance criterion (#1–#9) is traced to specific steps with verifiable
+    assertions.
   
-  Minor:
+    Minor:
   
-   • The new contract test test_spec_writer_prompt_mandates_proactive_rename
-     asserts "without asking the user" in lowered, but the rewritten Slug
-     Settling block (Task 1 Step 5) uses "Rename proactively, without asking."
-     and "do NOT ask the user for permission." — neither contains the contiguous
-     substring "without asking the user". So Task 1 Step 7's "Expected: all six
-     PASS" will actually fail one of the six. The fix is one line in either
-     direction (e.g. tweak the template to "Rename proactively, without asking
-     the user for permission." or relax the assertion to "ask the user for
-     permission" in lowered). The intent of the spec (acceptance #4: "without
-     asking the user for permission") is unambiguous and the implementor will
-     resolve this at the Step 7 failure, but the plan's expected outcome is
-     technically wrong as written.
+     • The new contract test test_spec_writer_prompt_mandates_proactive_rename
+       asserts "without asking the user" in lowered, but the rewritten Slug
+       Settling block (Task 1 Step 5) uses "Rename proactively, without asking."
+       and "do NOT ask the user for permission." — neither contains the
+       contiguous substring "without asking the user". So Task 1 Step 7's
+       "Expected: all six PASS" will actually fail one of the six. The fix is
+       one line in either direction (e.g. tweak the template to "Rename
+       proactively, without asking the user for permission." or relax the
+       assertion to "ask the user for permission" in lowered). The intent of the
+       spec (acceptance #4: "without asking the user for permission") is
+       unambiguous and the implementor will resolve this at the Step 7 failure,
+       but the plan's expected outcome is technically wrong as written.
   
-  Nit:
+    Nit:
   
-   • Task 1 Step 4's "Replace this exact block" introduces the discipline items
-     in a new order (Open by asking → Explore context once intent is in hand →
-     One question at a time). This is correct and matches the new flow; just
-     worth noting the implementor must understand they are also reordering, not
-     only replacing, the existing items. The block is shown in full so this is
-     self-evident; no action needed.
-   • Task 2 Step 7 (live dogfood) is correctly labelled optional and tied to
-     acceptance #8, but the plan could have noted that make test-dogfood is the
-     canonical entry point per project_live_dogfood.md; the explicit env-var
-     form shown still works. Cosmetic.
+     • Task 1 Step 4's "Replace this exact block" introduces the discipline
+       items in a new order (Open by asking → Explore context once intent is in
+       hand → One question at a time). This is correct and matches the new flow;
+       just worth noting the implementor must understand they are also
+       reordering, not only replacing, the existing items. The block is shown in
+       full so this is self-evident; no action needed.
+     • Task 2 Step 7 (live dogfood) is correctly labelled optional and tied to
+       acceptance #8, but the plan could have noted that make test-dogfood is
+       the canonical entry point per project_live_dogfood.md; the explicit
+       env-var form shown still works. Cosmetic.
   
   plan-review complete · goto(plan-writer) [resume] · 2m 37s
   
   plan-writer · claude-opus-4-7
   
-  · ToolSearch · edit_file · bash · complete_step · 4 calls · 17s
+    ToolSearch · edit_file · bash · complete_step · 4 calls · 17s
   
   plan-writer complete · 26s
   
@@ -338,110 +340,111 @@ implement
   
   task-lead · claude-sonnet-4-6
   
-  · ToolSearch · glob · bash · read_file · 7 calls · 14s
+    ToolSearch · glob · bash · read_file · 7 calls · 14s
   
   · implementer · 2m 56s
   
   ✓ load skill test-driven-development
   
-  · bash · 1 call · 28s
+    bash · 1 call · 28s
   
-  Good. make test green at 9cf3c7b (1072 passed, 7 skipped). Now dispatching
-  both reviewers in parallel.
+  · Good. make test green at 9cf3c7b (1072 passed, 7 skipped). Now dispatching
+    both reviewers in parallel.
   
   · spec-task-reviewer (running)
   
   · quality-reviewer · 0s
   
-  · ToolSearch · 1 call · 5s
+    ToolSearch · 1 call · 5s
   
   ✓ load skill receiving-code-review
   
-  Adjudicating findings:
+  · Adjudicating findings:
   
-   1 Minor/Blocking — "Your Role" summary contradiction: The summary still says
-     "Explore the codebase first, ask questions one at a time…" but the new
-     discipline mandates asking first. This is a real coherence issue in the
-     prompt that could confuse the model. Valid — fix it.
-   2 Nit — {% else %} check is overly broad: The assertion assert "{% else %}"
-     not in body would break on any future legitimate {% else %} in the
-     template. The change.auto_titled check already covers the intent. Defer as
-     followup.
+     1 Minor/Blocking — "Your Role" summary contradiction: The summary still
+       says "Explore the codebase first, ask questions one at a time…" but the
+       new discipline mandates asking first. This is a real coherence issue in
+       the prompt that could confuse the model. Valid — fix it.
+     2 Nit — {% else %} check is overly broad: The assertion assert "{% else %}"
+       not in body would break on any future legitimate {% else %} in the
+       template. The change.auto_titled check already covers the intent. Defer
+       as followup.
   
-  Dispatching the implementer to fix the "Your Role" summary:
+    Dispatching the implementer to fix the "Your Role" summary:
   
   · implementer · 26s
   
-  · bash · 2 calls · 32s
+    bash · 2 calls · 32s
   
-  Fix confirmed. The "Your Role" summary now reads "Ask one question to learn
-  what they want to build, explore the codebase, propose approaches…" —
-  consistent with the new discipline.
+  · Fix confirmed. The "Your Role" summary now reads "Ask one question to learn
+    what they want to build, explore the codebase, propose approaches…" —
+    consistent with the new discipline.
   
-  Now let me write progress.md and proceed to Task 2.
+    Now let me write progress.md and proceed to Task 2.
   
-  · ToolSearch · write_file · 2 calls · 11s
+    ToolSearch · write_file · 2 calls · 11s
   
-  Now dispatching the implementer for Task 2:
+  · Now dispatching the implementer for Task 2:
   
   · implementer · 1m 21s
   
-  · bash · 1 call · 29s
+    bash · 1 call · 29s
   
-  Tests green at f012793. Dispatching both reviewers:
+  · Tests green at f012793. Dispatching both reviewers:
   
   · spec-task-reviewer (running)
   
   · quality-reviewer · 0s
   
-  Both reviewers approved Task 2 with no blocking findings.
+  · Both reviewers approved Task 2 with no blocking findings.
   
-  Now let me verify the plan is fully complete before returning done: true:
+    Now let me verify the plan is fully complete before returning done: true:
   
-  · bash · 1 call · 33s
+    bash · 1 call · 33s
   
   ✓ load skill verification-before-completion
   
-  All verifications pass:
+  · All verifications pass:
   
-   • TASK_IS_ZERO_AMBIGUITY fully removed
-   • {{ change.title }} / {{ change.auto_titled }} fully absent from
-     spec-writer.md
-   • Iron rule preserved verbatim
-   • make test: 1072 passed, 7 skipped at f012793
+     • TASK_IS_ZERO_AMBIGUITY fully removed
+     • {{ change.title }} / {{ change.auto_titled }} fully absent from
+       spec-writer.md
+     • Iron rule preserved verbatim
+     • make test: 1072 passed, 7 skipped at f012793
   
-  · write_file · ToolSearch · complete_step · 3 calls · 10s
+    write_file · ToolSearch · complete_step · 3 calls · 10s
   
-  Both plan tasks fully implemented and reviewed.
+  · Both plan tasks fully implemented and reviewed.
   
-  Task 1 (feat(spec-writer): open by asking; rename without asking permission —
-  9cf3c7b + fixup bc62118):
+    Task 1 (feat(spec-writer): open by asking; rename without asking permission
+    — 9cf3c7b + fixup bc62118):
   
-   • Added 6 contract tests to tests/test_assets_workflow.py pinning all 5
-     acceptance criteria
-   • Rewrote src/imp/assets/workflows/default/agents/spec-writer.md in 4 places:
-     header (removed {{ change.title }} / {{ change.auto_titled }}), Brainstorm
-     Discipline (new "Open by asking" discipline, removed "Skip reflexive
-     questions"), Slug Settling (dropped {% if change.auto_titled %}
-     conditional, added proactive-rename guidance), and complexity criterion 1
-     (added opening-question carve-out)
-   • Fixed "Your Role" summary contradiction (was "Explore the codebase first";
-     now "Ask one question to learn what they want to build") via fixup
+     • Added 6 contract tests to tests/test_assets_workflow.py pinning all 5
+       acceptance criteria
+     • Rewrote src/imp/assets/workflows/default/agents/spec-writer.md in 4
+       places: header (removed {{ change.title }} / {{ change.auto_titled }}),
+       Brainstorm Discipline (new "Open by asking" discipline, removed "Skip
+       reflexive questions"), Slug Settling (dropped {% if change.auto_titled %}
+       conditional, added proactive-rename guidance), and complexity criterion 1
+       (added opening-question carve-out)
+     • Fixed "Your Role" summary contradiction (was "Explore the codebase
+       first"; now "Ask one question to learn what they want to build") via
+       fixup
   
-  Task 2 (test(dogfood): deliver task via first reply for always-ask spec-writer
-  — f012793):
+    Task 2 (test(dogfood): deliver task via first reply for always-ask
+    spec-writer — f012793):
   
-   • Removed TASK_IS_ZERO_AMBIGUITY constant and its branch
-   • Updated awaiting_user_input handler: first event delivers title text;
-     subsequent events get generic reply
-   • Replaced gated assertion with unconditional assert asks_answered >= 1
+     • Removed TASK_IS_ZERO_AMBIGUITY constant and its branch
+     • Updated awaiting_user_input handler: first event delivers title text;
+       subsequent events get generic reply
+     • Replaced gated assertion with unconditional assert asks_answered >= 1
   
-  make test green (1072 passed, 7 skipped) at f012793. All reviewers approved
-  both tasks.
+    make test green (1072 passed, 7 skipped) at f012793. All reviewers approved
+    both tasks.
   
-  Deferred nit: {% else %} assertion in test_assets_workflow.py is overly broad
-  (future unrelated Jinja2 {% else %} would cause spurious failure); recorded in
-  progress.md.
+    Deferred nit: {% else %} assertion in test_assets_workflow.py is overly
+    broad (future unrelated Jinja2 {% else %} would cause spurious failure);
+    recorded in progress.md.
   
   task-lead complete · 16m 46s
   
@@ -453,32 +456,32 @@ implement
   
   plan-cycle-check · claude-sonnet-4-6
   
-  · ToolSearch · read_file · glob · grep · 7 calls · 9s
+    ToolSearch · read_file · glob · grep · 7 calls · 9s
   
-  The grep confirms implementation is complete:
+  · The grep confirms implementation is complete:
   
-   • spec-writer.md has zero matches for change.title, change.auto_titled, or
-     TASK_IS_ZERO_AMBIGUITY
-   • test_default_workflow_dogfood_live.py shows the correct asks_answered == 0
-     first-reply branch, unconditional asks_answered >= 1 assertion, and no
-     TASK_IS_ZERO_AMBIGUITY
+     • spec-writer.md has zero matches for change.title, change.auto_titled, or
+       TASK_IS_ZERO_AMBIGUITY
+     • test_default_workflow_dogfood_live.py shows the correct asks_answered ==
+       0 first-reply branch, unconditional asks_answered >= 1 assertion, and no
+       TASK_IS_ZERO_AMBIGUITY
   
-  All 9 acceptance criteria are covered by the single plan (Task 1 + Task 2),
-  both tasks are committed, and make test passed at f012793.
+    All 9 acceptance criteria are covered by the single plan (Task 1 + Task 2),
+    both tasks are committed, and make test passed at f012793.
   
-  · complete_step · 1 call · 0s
+    complete_step · 1 call · 0s
   
-  The single plan (plan-1) fully covers the entire spec. Task 1 rewrote
-  spec-writer.md (removing change.title/change.auto_titled/auto_titled
-  conditional, adding open-by-asking mandate, proactive-rename discipline,
-  trivial carve-out, dropping "Skip reflexive questions") and added 6 contract
-  tests. Task 2 updated the dogfood PTY driver (removed TASK_IS_ZERO_AMBIGUITY,
-  delivers title on first ask, unconditional asks_answered >= 1 assertion). Both
-  tasks are committed (9cf3c7b / f012793), make test passed with 1072 tests.
-  Spot-checks confirm: spec-writer.md has no {{ change.title }} or {% if
-  change.auto_titled %} occurrences; dogfood test has the correct first-ask
-  branch and unconditional assertion. All 9 acceptance criteria are satisfied.
-  No remaining spec scope.
+  · The single plan (plan-1) fully covers the entire spec. Task 1 rewrote
+    spec-writer.md (removing change.title/change.auto_titled/auto_titled
+    conditional, adding open-by-asking mandate, proactive-rename discipline,
+    trivial carve-out, dropping "Skip reflexive questions") and added 6 contract
+    tests. Task 2 updated the dogfood PTY driver (removed
+    TASK_IS_ZERO_AMBIGUITY, delivers title on first ask, unconditional
+    asks_answered >= 1 assertion). Both tasks are committed (9cf3c7b / f012793),
+    make test passed with 1072 tests. Spot-checks confirm: spec-writer.md has no
+    {{ change.title }} or {% if change.auto_titled %} occurrences; dogfood test
+    has the correct first-ask branch and unconditional assertion. All 9
+    acceptance criteria are satisfied. No remaining spec scope.
   
   plan-cycle-check complete · 34s
 
@@ -492,190 +495,195 @@ review
   
   code-reviewer · claude-sonnet-4-6
   
-  · ToolSearch · read_file · glob · 5 calls · 9s
+    ToolSearch · read_file · glob · 5 calls · 9s
   
-  Now let me look at the actual implementation by examining the committed code:
+  · Now let me look at the actual implementation by examining the committed
+    code:
   
-  · bash · read_file · 29 calls · 2m 49s
+    bash · read_file · 29 calls · 2m 49s
   
-  Now let me verify the dogfood test more carefully and cross-check a few
-  specifics:
+  · Now let me verify the dogfood test more carefully and cross-check a few
+    specifics:
   
-  · bash · 3 calls · 6s
+    bash · 3 calls · 6s
   
-  All checks pass. Let me do one final verification of the iron rule exact text
-  match and the "Your Role" summary update:
+  · All checks pass. Let me do one final verification of the iron rule exact
+    text match and the "Your Role" summary update:
   
-  · bash · 1 call · 0s
+    bash · 1 call · 0s
   
-  All 9 acceptance criteria verified. Let me compile the final review:
+  · All 9 acceptance criteria verified. Let me compile the final review:
   
-  · complete_step · 1 call · 0s
+    complete_step · 1 call · 0s
   
-  The review is complete. Verdict: approve.
+  · The review is complete. Verdict: approve.
   
-  Summary: Both tasks were implemented cleanly and fully against the spec:
+    Summary: Both tasks were implemented cleanly and fully against the spec:
   
-   1 spec-writer.md — Header, "Your Role" summary, Brainstorm Discipline, and
-     Slug Settling sections were all correctly rewritten. All old template
-     variables ({{ change.title }}, {{ change.auto_titled }}) and the {% if
-     change.auto_titled %} conditional are gone. The mandatory opening-question
-     discipline, proactive rename discipline (with the iron-rule preserved
-     verbatim), "Skip reflexive questions" removal, and trivial carve-out are
-     all present and correctly expressed.
-   2 Dogfood test — TASK_IS_ZERO_AMBIGUITY removed, first-ask handler delivers
-     the title text, subsequent asks get the generic reply, and the assertion is
-     the unconditional asks_answered >= 1.
+     1 spec-writer.md — Header, "Your Role" summary, Brainstorm Discipline, and
+       Slug Settling sections were all correctly rewritten. All old template
+       variables ({{ change.title }}, {{ change.auto_titled }}) and the {% if
+       change.auto_titled %} conditional are gone. The mandatory
+       opening-question discipline, proactive rename discipline (with the
+       iron-rule preserved verbatim), "Skip reflexive questions" removal, and
+       trivial carve-out are all present and correctly expressed.
+     2 Dogfood test — TASK_IS_ZERO_AMBIGUITY removed, first-ask handler delivers
+       the title text, subsequent asks get the generic reply, and the assertion
+       is the unconditional asks_answered >= 1.
   
-  All 1072 tests pass, lint is clean, and typecheck reports no issues. The only
-  open item is a pre-acknowledged Nit: the "{% else %}" not in body assertion in
-  one contract test is overly broad, but it doesn't block merging.
+    All 1072 tests pass, lint is clean, and typecheck reports no issues. The
+    only open item is a pre-acknowledged Nit: the "{% else %}" not in body
+    assertion in one contract test is overly broad, but it doesn't block
+    merging.
   
-  Strengths
+  · Strengths
   
-  Spec coverage is complete. All 9 acceptance criteria are satisfied:
+    Spec coverage is complete. All 9 acceptance criteria are satisfied:
   
-   • AC1–2 (spec-writer.md): {{ change.title }}, {{ change.auto_titled }}, {% if
-     change.auto_titled %}, {% else %}, {% endif %} are entirely absent from the
-     template. Verified by direct grep and six passing contract tests.
-   • AC3 (mandatory opening-question discipline): spec-writer.md header and the
-     "Open by asking" Brainstorm Discipline item both state the
-     first-turn-is-a-question rule, explicitly forbidding tool calls and
-     codebase exploration on turn 1
-     (tests/test_spec_writer_prompt_mandates_opening_question passes).
-   • AC4 (proactive rename without asking): The Slug Settling section instructs
-     the agent to rename proactively, "Announce the new name in prose", and the
-     iron-rule sentence is preserved verbatim.
-     test_spec_writer_prompt_mandates_proactive_rename asserts the exact
-     iron-rule string.
-   • AC5 ("Skip reflexive questions" removed; trivial carve-out added): The
-     paragraph is gone; criterion 1 gained the explicit carve-out ("does NOT
-     count against this criterion"). Both tests pass.
-   • AC6–7 (dogfood test driver): TASK_IS_ZERO_AMBIGUITY is fully removed; the
-     handler now delivers title.encode("utf-8") + b"\n" on asks_answered == 0
-     and the generic reply on subsequent events; the assertion is the
-     unconditional assert asks_answered >= 1.
-   • AC8 (live dogfood): Not exercisable in CI (gated on IMP_RUN_DOGFOOD=1); the
-     driver changes are structurally correct for when the live run fires.
-   • AC9 (gate): make test → 1072 passed, 7 skipped; make lint → all checks
-     passed; make typecheck → no issues in 71 source files.
+     • AC1–2 (spec-writer.md): {{ change.title }}, {{ change.auto_titled }}, {%
+       if change.auto_titled %}, {% else %}, {% endif %} are entirely absent
+       from the template. Verified by direct grep and six passing contract
+       tests.
+     • AC3 (mandatory opening-question discipline): spec-writer.md header and
+       the "Open by asking" Brainstorm Discipline item both state the
+       first-turn-is-a-question rule, explicitly forbidding tool calls and
+       codebase exploration on turn 1
+       (tests/test_spec_writer_prompt_mandates_opening_question passes).
+     • AC4 (proactive rename without asking): The Slug Settling section
+       instructs the agent to rename proactively, "Announce the new name in
+       prose", and the iron-rule sentence is preserved verbatim.
+       test_spec_writer_prompt_mandates_proactive_rename asserts the exact
+       iron-rule string.
+     • AC5 ("Skip reflexive questions" removed; trivial carve-out added): The
+       paragraph is gone; criterion 1 gained the explicit carve-out ("does NOT
+       count against this criterion"). Both tests pass.
+     • AC6–7 (dogfood test driver): TASK_IS_ZERO_AMBIGUITY is fully removed; the
+       handler now delivers title.encode("utf-8") + b"\n" on asks_answered == 0
+       and the generic reply on subsequent events; the assertion is the
+       unconditional assert asks_answered >= 1.
+     • AC8 (live dogfood): Not exercisable in CI (gated on IMP_RUN_DOGFOOD=1);
+       the driver changes are structurally correct for when the live run fires.
+     • AC9 (gate): make test → 1072 passed, 7 skipped; make lint → all checks
+       passed; make typecheck → no issues in 71 source files.
   
-  Quality of the prompt rewrite. The spec-writer.md edit is clean: the header,
-  "Your Role" summary, Brainstorm Discipline intro, and Slug Settling section
-  all read coherently together. The "Your Role" fixup ("Ask one question to
-  learn what they want to build, explore the codebase…") correctly reflects the
-  new flow after the reviewer caught the earlier contradiction.
+    Quality of the prompt rewrite. The spec-writer.md edit is clean: the header,
+    "Your Role" summary, Brainstorm Discipline intro, and Slug Settling section
+    all read coherently together. The "Your Role" fixup ("Ask one question to
+    learn what they want to build, explore the codebase…") correctly reflects
+    the new flow after the reviewer caught the earlier contradiction.
   
-  Test design. The six new contract tests in test_assets_workflow.py are crisp
-  and test behavior rather than implementation details — each one loads the
-  bundled workflow and asserts a meaningful property of the prompt body. They
-  serve as regression guards for future template edits.
+    Test design. The six new contract tests in test_assets_workflow.py are crisp
+    and test behavior rather than implementation details — each one loads the
+    bundled workflow and asserts a meaningful property of the prompt body. They
+    serve as regression guards for future template edits.
   
-  Issues
+    Issues
   
-  Critical (Must Fix)
+    Critical (Must Fix)
   
-  None.
+    None.
   
-  Important (Should Fix)
+    Important (Should Fix)
   
-  None.
+    None.
   
-  Minor / Nit
+    Minor / Nit
   
-   • tests/test_assets_workflow.py —
-     test_spec_writer_prompt_drops_auto_titled_conditional asserts "{% else %}"
-     not in body. This is overly broad: any future Jinja2 {% else %} anywhere in
-     spec-writer.md (for an unrelated feature) would cause a spurious failure.
-     The "change.auto_titled" not in body assertion already covers AC2's intent.
-     The progress tracker correctly flagged this as a deferred Nit; the fix is
-     to either scope the check to "{% if change.auto_titled" → "{% else %}" →
-     "{% endif %}" as a block, or simply drop the {% else %} assertion since the
-     auto_titled assertion is sufficient.
+     • tests/test_assets_workflow.py —
+       test_spec_writer_prompt_drops_auto_titled_conditional asserts "{% else
+       %}" not in body. This is overly broad: any future Jinja2 {% else %}
+       anywhere in spec-writer.md (for an unrelated feature) would cause a
+       spurious failure. The "change.auto_titled" not in body assertion already
+       covers AC2's intent. The progress tracker correctly flagged this as a
+       deferred Nit; the fix is to either scope the check to "{% if
+       change.auto_titled" → "{% else %}" → "{% endif %}" as a block, or simply
+       drop the {% else %} assertion since the auto_titled assertion is
+       sufficient.
   
-  Verdict
+    Verdict
   
-  approve — the implementation faithfully satisfies every acceptance criterion
-  in the spec and the two plan tasks, all tests pass, lint and typecheck are
-  green, and no bugs or regressions were found. The single Minor/Nit (overly
-  broad {% else %} assertion) is a pre-existing open item recorded in the
-  progress tracker and does not block merging.
+    approve — the implementation faithfully satisfies every acceptance criterion
+    in the spec and the two plan tasks, all tests pass, lint and typecheck are
+    green, and no bugs or regressions were found. The single Minor/Nit (overly
+    broad {% else %} assertion) is a pre-existing open item recorded in the
+    progress tracker and does not block merging.
   
   code-reviewer complete · 4m 26s
   
   summarizer · claude-sonnet-4-6
   
-  · ToolSearch · read_file · glob · bash +1 · 12 calls · 1m 12s
+    ToolSearch · read_file · glob · bash +1 · 12 calls · 1m 12s
   
-  Task 1 — spec-writer: open by asking; rename without asking permission (commit
-  86100c8)
+  · Task 1 — spec-writer: open by asking; rename without asking permission
+    (commit 86100c8)
   
-   • Rewrote the spec-writer prompt
-     (src/imp/assets/workflows/default/agents/spec-writer.md) across three
-     regions:
-      • Header: removed {{ change.title }} / {{ change.auto_titled }}
-        injections; replaced with a plain instruction that the slug is
-        provisional and the agent's very first turn must be a single plain-prose
-        question to the user — no tool calls, no codebase exploration before the
-        user replies.
-      • Brainstorm Discipline: replaced "Explore context first" + "Skip
-        reflexive questions" paragraphs with two new paragraphs: "Open by
-        asking" (mandatory turn-1 question, no tool calls) and "Explore context
-        once intent is in hand" (codebase reading deferred until after the
-        opening reply).
-      • Slug Settling: removed the {% if change.auto_titled %} / {% else %}
-        conditional entirely; replaced with a single unconditional block
-        instructing proactive rename without asking permission — the agent picks
-        the name and announces it, it doesn't request approval.
-      • "Your Role" summary: updated to reflect the ask-first flow ("Ask one
-        question to learn what they want to build, explore the codebase, propose
-        approaches…").
-      • Complexity criterion 1: added an explicit carve-out exempting the
-        mandatory opening question from the "≤1 ask" threshold for a trivial
-        classification.
-   • Added 6 new contract tests in tests/test_assets_workflow.py pinning
-     acceptance criteria 1–5 (opening question present; no title/auto_titled in
-     header; no {% else %} block; proactive-rename prose; carve-out language
-     present).
+     • Rewrote the spec-writer prompt
+       (src/imp/assets/workflows/default/agents/spec-writer.md) across three
+       regions:
+        • Header: removed {{ change.title }} / {{ change.auto_titled }}
+          injections; replaced with a plain instruction that the slug is
+          provisional and the agent's very first turn must be a single
+          plain-prose question to the user — no tool calls, no codebase
+          exploration before the user replies.
+        • Brainstorm Discipline: replaced "Explore context first" + "Skip
+          reflexive questions" paragraphs with two new paragraphs: "Open by
+          asking" (mandatory turn-1 question, no tool calls) and "Explore
+          context once intent is in hand" (codebase reading deferred until after
+          the opening reply).
+        • Slug Settling: removed the {% if change.auto_titled %} / {% else %}
+          conditional entirely; replaced with a single unconditional block
+          instructing proactive rename without asking permission — the agent
+          picks the name and announces it, it doesn't request approval.
+        • "Your Role" summary: updated to reflect the ask-first flow ("Ask one
+          question to learn what they want to build, explore the codebase,
+          propose approaches…").
+        • Complexity criterion 1: added an explicit carve-out exempting the
+          mandatory opening question from the "≤1 ask" threshold for a trivial
+          classification.
+     • Added 6 new contract tests in tests/test_assets_workflow.py pinning
+       acceptance criteria 1–5 (opening question present; no title/auto_titled
+       in header; no {% else %} block; proactive-rename prose; carve-out
+       language present).
   
-  Task 2 — dogfood test: deliver task via first reply for always-ask spec-writer
-  (commit b1b89fc)
+    Task 2 — dogfood test: deliver task via first reply for always-ask
+    spec-writer (commit b1b89fc)
   
-   • Updated tests/test_default_workflow_dogfood_live.py:
-      • Removed TASK_IS_ZERO_AMBIGUITY = True constant and its gating logic.
-      • Modified the awaiting_user_input handler so the first reply
-        (asks_answered == 0) delivers the title/feature-intent text; all
-        subsequent replies send the generic "use defaults" answer.
-      • Replaced the conditional asks_answered == 0 assertion with an
-        unconditional assert asks_answered >= 1 with a clear regression message.
+     • Updated tests/test_default_workflow_dogfood_live.py:
+        • Removed TASK_IS_ZERO_AMBIGUITY = True constant and its gating logic.
+        • Modified the awaiting_user_input handler so the first reply
+          (asks_answered == 0) delivers the title/feature-intent text; all
+          subsequent replies send the generic "use defaults" answer.
+        • Replaced the conditional asks_answered == 0 assertion with an
+          unconditional assert asks_answered >= 1 with a clear regression
+          message.
   
-  1072 passed, 7 skipped — make test green at HEAD (b1b89fc). All 7 skips are
-  live-provider tests (no provider credentials in the test environment). make
-  lint and make typecheck both clean (ruff: all checks passed; mypy: no issues
-  in 71 source files).
+  · 1072 passed, 7 skipped — make test green at HEAD (b1b89fc). All 7 skips are
+    live-provider tests (no provider credentials in the test environment). make
+    lint and make typecheck both clean (ruff: all checks passed; mypy: no issues
+    in 71 source files).
   
-  Deferred Nit (carried from progress.md): In tests/test_assets_workflow.py, the
-  assertion assert "{% else %}" not in body is overly broad — any future
-  legitimate {% else %} added to the spec-writer template would cause a spurious
-  failure. The actual intent (removal of the change.auto_titled conditional
-  block) is already covered by the assert '{% if change.auto_titled %}' not in
-  body check. The {% else %} assertion could be scoped to the specific removed
-  text or dropped entirely.
+  · Deferred Nit (carried from progress.md): In tests/test_assets_workflow.py,
+    the assertion assert "{% else %}" not in body is overly broad — any future
+    legitimate {% else %} added to the spec-writer template would cause a
+    spurious failure. The actual intent (removal of the change.auto_titled
+    conditional block) is already covered by the assert '{% if
+    change.auto_titled %}' not in body check. The {% else %} assertion could be
+    scoped to the specific removed text or dropped entirely.
   
   
-   1 Monitor dogfood live run — the updated dogfood test now delivers the task
-     on the first reply rather than having zero asks. The first full live
-     IMP_RUN_DOGFOOD=1 run with the new spec-writer will validate the ask-first
-     flow end-to-end.
-   2 Address the {% else %} overly-broad assertion (see open_items) — either
-     scope it to the removed conditional text or drop it to avoid fragile false
-     failures as the template evolves.
-   3 Observe real spec-writer sessions to confirm UX: the mandatory opening
-     question is the right friction level — users opening imp new expect to be
-     asked what they want, not immediately see codebase exploration.
-   4 Consider documenting the slug-is-provisional contract in the
-     operator/contributor docs so future prompt authors know change.slug is not
-     a reliable source of intent.
+  ·  1 Monitor dogfood live run — the updated dogfood test now delivers the task
+       on the first reply rather than having zero asks. The first full live
+       IMP_RUN_DOGFOOD=1 run with the new spec-writer will validate the
+       ask-first flow end-to-end.
+     2 Address the {% else %} overly-broad assertion (see open_items) — either
+       scope it to the removed conditional text or drop it to avoid fragile
+       false failures as the template evolves.
+     3 Observe real spec-writer sessions to confirm UX: the mandatory opening
+       question is the right friction level — users opening imp new expect to be
+       asked what they want, not immediately see codebase exploration.
+     4 Consider documenting the slug-is-provisional contract in the
+       operator/contributor docs so future prompt authors know change.slug is
+       not a reliable source of intent.
   
   summarizer complete · 1m 18s
   
@@ -683,84 +691,86 @@ review
   
   final-review · claude-sonnet-4-6
   
-  · ToolSearch · query_events · 2 calls · 2s
+    ToolSearch · query_events · 2 calls · 2s
   
-  Here's the summary of the change ready for your review:
+  · Here's the summary of the change ready for your review:
   
-  ------------------------------------------------------------------------------
+    ----------------------------------------------------------------------------
   
-  📋 Change Summary: imp new opens by asking; spec-writer renames without asking
-  permission
+    📋 Change Summary: imp new opens by asking; spec-writer renames without
+    asking permission
   
-  What was built
+    What was built
   
-  Task 1 — spec-writer prompt rewrite (commit 86100c8)
+    Task 1 — spec-writer prompt rewrite (commit 86100c8)
   
-  The spec-writer.md prompt was rewritten in four places:
+    The spec-writer.md prompt was rewritten in four places:
   
-   • Header: Removed {{ change.title }} and {{ change.auto_titled }} injections.
-     The agent's very first turn must now be a single plain-prose question to
-     the user — no tool calls, no codebase exploration until after the user
-     replies.
-   • Brainstorm Discipline: Replaced "Explore context first" + "Skip reflexive
-     questions" with two new paragraphs: "Open by asking" (mandatory turn-1
-     question) and "Explore context once intent is in hand" (codebase reading
-     deferred).
-   • Slug Settling: Removed the {% if change.auto_titled %} / {% else %}
-     conditional entirely. Now an unconditional block: the agent proactively
-     picks and announces a new name without asking permission.
-   • "Your Role" summary + Complexity criterion 1: Updated to reflect ask-first
-     flow; added carve-out so the mandatory opening question doesn't count
-     against the "≤1 ask = trivial" threshold.
+     • Header: Removed {{ change.title }} and {{ change.auto_titled }}
+       injections. The agent's very first turn must now be a single plain-prose
+       question to the user — no tool calls, no codebase exploration until after
+       the user replies.
+     • Brainstorm Discipline: Replaced "Explore context first" + "Skip reflexive
+       questions" with two new paragraphs: "Open by asking" (mandatory turn-1
+       question) and "Explore context once intent is in hand" (codebase reading
+       deferred).
+     • Slug Settling: Removed the {% if change.auto_titled %} / {% else %}
+       conditional entirely. Now an unconditional block: the agent proactively
+       picks and announces a new name without asking permission.
+     • "Your Role" summary + Complexity criterion 1: Updated to reflect
+       ask-first flow; added carve-out so the mandatory opening question doesn't
+       count against the "≤1 ask = trivial" threshold.
   
-  6 new contract tests added in tests/test_assets_workflow.py pinning these
-  behaviors.
+    6 new contract tests added in tests/test_assets_workflow.py pinning these
+    behaviors.
   
-  Task 2 — dogfood test update (commit b1b89fc)
+    Task 2 — dogfood test update (commit b1b89fc)
   
-   • Removed TASK_IS_ZERO_AMBIGUITY constant and its gating logic.
-   • First awaiting_user_input reply now delivers the feature-intent/title text;
-     subsequent replies send the generic "use defaults" answer.
-   • Assertion changed from conditional to unconditional: assert asks_answered
-     >= 1.
+     • Removed TASK_IS_ZERO_AMBIGUITY constant and its gating logic.
+     • First awaiting_user_input reply now delivers the feature-intent/title
+       text; subsequent replies send the generic "use defaults" answer.
+     • Assertion changed from conditional to unconditional: assert asks_answered
+       >= 1.
   
-  Test status
+    Test status
   
-  ✅ 1072 passed, 7 skipped — make test green. make lint and make typecheck both
-  clean (ruff + mypy, 71 source files).
+    ✅ 1072 passed, 7 skipped — make test green. make lint and make typecheck
+    both clean (ruff + mypy, 71 source files).
   
-  Open items (non-blocking)
+    Open items (non-blocking)
   
-   • Deferred nit: assert "{% else %}" not in body in the contract tests is
-     overly broad — any future legitimate {% else %} in the template would cause
-     a spurious failure. The real guard ({% if change.auto_titled %} not in
-     body) already covers the intent. Can be scoped or dropped in a follow-up.
+     • Deferred nit: assert "{% else %}" not in body in the contract tests is
+       overly broad — any future legitimate {% else %} in the template would
+       cause a spurious failure. The real guard ({% if change.auto_titled %} not
+       in body) already covers the intent. Can be scoped or dropped in a
+       follow-up.
   
-  Code reviewer verdict: ✅ Approve — no Critical or Important issues found.
+    Code reviewer verdict: ✅ Approve — no Critical or Important issues found.
   
-  ------------------------------------------------------------------------------
+    ----------------------------------------------------------------------------
   
-  Would you like to merge this, or send it back to implement with feedback?
+    Would you like to merge this, or send it back to implement with feedback?
   
   > hello?
   
-  Hi! I'm here. 👋
+  · Hi! I'm here. 👋
   
-  I just presented the change summary above — the imp new ask-first /
-  proactive-rename spec-writer rewrite. Everything looks good: all tests pass,
-  lint and typecheck are clean, and the code reviewer approved it.
+    I just presented the change summary above — the imp new ask-first /
+    proactive-rename spec-writer rewrite. Everything looks good: all tests pass,
+    lint and typecheck are clean, and the code reviewer approved it.
   
-  Do you want to merge this, or send it back to implement with feedback?
+    Do you want to merge this, or send it back to implement with feedback?
   
   > merge
   
-  · complete_step · 1 call · 0s
+    complete_step · 1 call · 0s
   
-  Merged! 🎉 The imp new ask-first change is in. Enjoy the new spec-writer flow.
+  · Merged! 🎉 The imp new ask-first change is in. Enjoy the new spec-writer
+    flow.
   
-  User approved merge. All acceptance criteria satisfied, 1072 tests passing,
-  lint and typecheck clean. One deferred nit (overly broad {% else %} assertion)
-  to address in a follow-up.
+  · User approved merge. All acceptance criteria satisfied, 1072 tests passing,
+    lint and typecheck clean. One deferred nit (overly broad {% else %}
+    assertion) to address in a follow-up.
   
   final-review complete · 49m 43s
   

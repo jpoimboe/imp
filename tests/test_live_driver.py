@@ -50,13 +50,13 @@ def test_burst_recap_streams_then_prose_in_live_path() -> None:
     ]
     for e in events:
         drv.on_event(e)
-    assert not any(ln.lstrip().startswith("· ") for ln in _body(out))  # burst open — held
+    assert not any("call" in ln for ln in _body(out))  # burst open — held
     drv.on_event(ev("8", "llm_response", agent_id="a",
                     raw={"content": [{"type": "text", "text": "done"}]},
                     usage={}))
     body = _body(out)
     # point 8: the closed burst leaves a single dark-gray recap line, then prose.
-    assert any("· read_file · glob · 2 calls" in ln for ln in body)
+    assert any("read_file · glob · 2 calls" in ln for ln in body)
     assert any("done" in ln for ln in body)        # prose still streams after it
 
 
@@ -73,7 +73,7 @@ def test_burst_recap_then_prose_kept_in_order() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    recap_i = next(i for i, ln in enumerate(body) if "· grep · 1 call" in ln)
+    recap_i = next(i for i, ln in enumerate(body) if "grep · 1 call" in ln)
     answer_i = next(i for i, ln in enumerate(body) if "the answer" in ln)
     assert recap_i < answer_i          # recap precedes the prose it preceded live
 
@@ -279,10 +279,10 @@ def test_open_burst_recap_emitted_at_finish() -> None:
         ev("5", "tool_result", agent_id="a", id="b1", content="ok"),
     ]:
         drv.on_event(e)
-    assert not any(ln.lstrip().startswith("· ") for ln in _body(out))   # still open — held
+    assert not any("call" in ln for ln in _body(out))   # still open — held
     drv.finish()
     # finish() force-flushes the open burst, leaving its recap (point 8).
-    assert any("· read_file · 1 call" in ln for ln in _body(out))
+    assert any("read_file · 1 call" in ln for ln in _body(out))
 
 
 def test_subagent_row_resolves_only_on_close() -> None:

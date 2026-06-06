@@ -80,6 +80,27 @@ def _wrap(text: str, width: int, depth: int, color: bool, *codes: str,
     return out
 
 
+def _hang_wrap(text: str, marker: str, width: int, depth: int, color: bool,
+               *codes: str, gutters: tuple[int, ...] = ()) -> list[str]:
+    """Wrap `text` with a `marker` ("> ", "· ") on the first line and a matching-
+    width blank hang on every continuation line, so wrapped text lines up under
+    the words after the marker (not under the marker itself)."""
+    indent = _gutter_indent(depth, gutters, color)
+    hang = " " * len(marker)
+    avail = max(8, width - _INDENT_W * depth - len(marker))
+    out: list[str] = []
+    first = True
+    for para in text.split("\n"):
+        if not para:
+            out.append(indent)
+            continue
+        for line in textwrap.wrap(para, width=avail) or [""]:
+            out.append(indent + pal.ansi((marker if first else hang) + line,
+                                         *codes, enabled=color))
+            first = False
+    return out
+
+
 def _line(text: str, depth: int, color: bool, *codes: str,
           gutters: tuple[int, ...] = ()) -> str:
     # Indent (with any gutters) is composed separately from the content so the
@@ -104,7 +125,11 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     from rich.markdown import Markdown
     from rich.theme import Theme
 
-    inner = max(8, width - _INDENT_W * depth)
+    # An agent turn is marked with a leading "· " and hang-indented: the dot sits
+    # at the base column and every wrapped/continuation line aligns 2 cols in,
+    # under the first word. Render markdown 2 cols narrower to leave room for the
+    # hang, then place the dot on the first non-blank line and the hang on the rest.
+    inner = max(8, width - _INDENT_W * depth - 2)
     buf = io.StringIO()
     console = Console(file=buf, width=inner, no_color=not color,
                       color_system="standard" if color else None,
@@ -113,15 +138,19 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     console.print(Markdown(text))
     indent = _gutter_indent(depth, gutters, color)
     out: list[str] = []
+    first = True
     for raw in buf.getvalue().splitlines():
         stripped = raw.rstrip()
         if not stripped:
             # Blank line inside the prose block — emit the bare gutter-indent
             # so the magenta │ stays continuous inside a SubagentFold.
             out.append(indent)
+        elif first:
+            out.append(indent + "· " + stripped)
+            first = False
         else:
-            out.append(indent + stripped)
-    return out or [indent]
+            out.append(indent + "  " + stripped)
+    return out or [indent + "· "]
 
 
 def is_prose_leaf(node: Any) -> bool:
@@ -367,8 +396,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
             # something the human typed, so it never renders as a `❯` turn.
             return
-        yield from _wrap(f"{pal.CARET}{node.text}", width, depth, color,
-                         *pal.NODE_COLORS["user"], gutters=gutters)
+        yield from _hang_wrap(node.text, pal.CARET, width, depth, color,
+                              *pal.NODE_COLORS["user"], gutters=gutters)
         return
 
     if isinstance(node, nv.ThinkingFold):
@@ -499,9 +528,10 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     n = len(calls)
     elapsed = nv._elapsed_seconds(burst.start_ts, burst.end_ts)
     secs = "" if elapsed is None else f" · {fmt_seconds(elapsed)}"
-    # Lead with the same small `·` the line uses as a separator (not the heavy
-    # `⏺`, which over-weighted routine tool work); one space around every dot.
-    return f"· {shown}{more} · {n} call{'s' if n != 1 else ''}{secs}"
+    # No leading marker: a tool burst is sub-detail of the agent's turn, so it
+    # carries no dot — it's indented (by _render_burst) to sit under the turn's
+    # words instead. Internal `·` separators stay.
+    return f"{shown}{more} · {n} call{'s' if n != 1 else ''}{secs}"
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
@@ -512,7 +542,9 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
         # so interleaved tool work stays visible between prose turns (point 8).
         summary = _burst_summary(burst)
         if summary is not None:
-            yield _line(summary, depth, color,
+            # Indent 2 cols so the burst lines up under the agent turn's words
+            # (the column after the turn's "· "), reading as sub-detail of it.
+            yield _line("  " + summary, depth, color,
                         *pal.NODE_COLORS["tools"], gutters=gutters)
         return
     yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
