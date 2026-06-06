@@ -181,6 +181,52 @@ class TerminalSession:
             if time.monotonic() - start > hard:
                 return False
 
+    def run_to_completion(self, hard: float = 60.0) -> int:
+        """Drive the child to exit, feeding ALL remaining output to pyte first.
+
+        Two phases:
+          Phase 1 (child running) — drain the master, checking proc.poll()
+            EVERY iteration, until the child exits (poll() set) or the slave
+            closes (EOF). Checking poll() each iteration (not only when
+            not-readable) is what lets a continuously-streaming, slave-pinning
+            grandchild terminate instead of stalling to the hard cap.
+          Phase 2 (child exited) — a time-bounded sweep of the kernel buffer
+            until EOF or the first quiet select, or `grace` expiry. In the
+            normal flood case (no grandchild) the exited child's output is
+            finite and fully buffered, so Phase 2 reaches EOF in microseconds →
+            full capture. A slave-pinning grandchild yields a fast completion
+            instead of a `hard`-length stall (its trailing bytes may be
+            truncated by `grace` — desired; they are the grandchild's).
+
+        Returns the child's exit code. Raises subprocess.TimeoutExpired if
+        `hard` elapses while the child is STILL ALIVE; the process is left
+        as-is for the caller's close() to tear down. The raise may originate
+        from either the Phase-1 deadline check (child still running) or the
+        final reap (child closed the slave but hasn't called _exit() yet) —
+        in both cases `hard` elapsed with the child alive. `hard=60.0` is a
+        fast-path/test default — streaming (LLM) callers pass a larger budget."""
+        deadline = time.monotonic() + hard
+        # Phase 1 — child running: drain, watching for exit every iteration.
+        while self._proc.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(self._proc.args, hard)
+            if self._read_step(_select_slice(remaining)) is _StepResult.EOF:
+                break
+        # Phase 2 — child exited: bounded sweep of buffered bytes.
+        grace_deadline = time.monotonic() + _GRACE
+        while True:
+            remaining = grace_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if self._read_step(_select_slice(remaining)) is not _StepResult.DATA:
+                break  # EOF (full capture) or QUIET (nothing more) — done
+        # Reap, bounded by the remaining hard budget (floored so a Phase-2 stop
+        # right at the deadline can't hand wait() a ~0 timeout and spuriously
+        # raise for an already-dead child).
+        reap = max(_FLOOR, deadline - time.monotonic())
+        return self._proc.wait(timeout=reap)
+
     # --- read snapshots (delegate to pure view helpers) ------------------
     def viewport(self) -> str:
         return view.viewport_text(self._screen)

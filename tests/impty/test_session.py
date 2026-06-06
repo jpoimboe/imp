@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -137,3 +139,36 @@ def test_cursor_parks_after_prompt_string() -> None:
         x, y = s.cursor()
         assert s.viewport().split("\n")[y].rstrip() == "Project name?"  # text (trimmed)
         assert x == len("Project name? ")                               # cursor past the space
+
+
+def test_run_to_completion_drains_flood_and_keeps_trailing_sentinel() -> None:
+    # AC1+AC2: a child that floods ≫ one tty-buffer, then prints a sentinel and
+    # exits. run_to_completion must drain PAST the buffer-fill point to the end,
+    # WITHOUT relying on the hard cap — so assert elapsed ≪ hard with a wide
+    # margin (sub-second vs. multi-second, so it won't flake under CI load).
+    prog = (
+        "import sys\n"
+        "sys.stdout.write('A' * 200000)\n"  # ≫ 64 KiB kernel tty buffer
+        "sys.stdout.write('\\nDONE-1\\n')\n"  # trailing sentinel AFTER the flood
+        "sys.stdout.flush()\n"
+    )
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        start = time.monotonic()
+        rc = s.run_to_completion(hard=5.0)
+        elapsed = time.monotonic() - start
+        assert rc == 0
+        assert elapsed < 1.0, f"drained via hard cap, not EOF (elapsed={elapsed:.2f}s)"
+        # Assert on the pyte-RENDERED line: the pty line discipline maps \n→\r\n
+        # (ONLCR), so the raw master tail isn't byte-exact. transcript() is
+        # history-bounded (pyte history=2000), but the trailing line survives.
+        assert "DONE-1" in s.transcript()
+
+
+def test_run_to_completion_raises_when_child_never_exits() -> None:
+    # AC3: a child that stays alive (silent, never exits) must hit the hard cap
+    # and raise TimeoutExpired, leaving the process for close() to reap.
+    prog = "import time\nwhile True: time.sleep(0.05)"
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        with pytest.raises(subprocess.TimeoutExpired):
+            s.run_to_completion(hard=0.3)
+        assert s.is_alive() is True  # left running for close()
