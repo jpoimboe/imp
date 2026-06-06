@@ -868,7 +868,12 @@ def process_event(
                 ),
             )
             if name == "complete_step":
-                # Secondary capture path (idempotent — in-process wrapper sets it too).
+                # Fallback capture from the RAW SDK item args, which carry no
+                # Pydantic None-injection (unlike the in-process MCP wrapper, so
+                # no None-filtering is needed here). When the wrapper's
+                # RunState capture ran, the consume loop's mirror overwrites
+                # proc_state with its already-filtered args; this write is the
+                # fallback for when that path didn't run.
                 state["complete_step_args"] = dict(args)
                 state["complete_step_called"] = True
             return
