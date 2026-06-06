@@ -352,6 +352,9 @@ class CodexAgentRunner:
             return self._client_factory(options=None)
         from openai_codex_sdk import Codex
 
+        from imp.providers.codex_stream_limit import install_codex_stream_limit
+        install_codex_stream_limit()
+
         # `CodexOptions` is not re-exported at the package top level in the
         # pinned SDK (0.1.11) — only `openai_codex_sdk.types` (and .codex/.thread)
         # expose it. Import from the submodule so client construction works
