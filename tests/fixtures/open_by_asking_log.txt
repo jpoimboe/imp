@@ -155,8 +155,6 @@ spec
   
   spec-writer complete · goto(spec-writer) [resume] · 13m 35s
   
-  change_renamed  old_slug=2026-06-03-vine-salt-kelp new_slug=2026-06-03-imp-new-open-by-asking title=imp new open by asking
-  
   spec-writer · claude-opus-4-7
   
     ToolSearch · 1 call · 0s
