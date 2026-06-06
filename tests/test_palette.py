@@ -26,10 +26,10 @@ def test_default_theme_is_ansi_named_codes() -> None:
 def test_dark_theme_emits_truecolor() -> None:
     pal.set_theme("dark")
     assert pal.active_theme() == "dark"
-    # magenta becomes the Selenized-dark truecolor sequence (#f275be), not the
+    # magenta becomes the Selenized-black truecolor sequence (#eb6eb7), not the
     # named code.
-    assert pal._ANSI["magenta"] == "\x1b[38;2;242;117;190m"
-    assert pal.ansi("hi", "magenta", enabled=True) == "\x1b[38;2;242;117;190mhi\x1b[0m"
+    assert pal._ANSI["magenta"] == "\x1b[38;2;235;110;183m"
+    assert pal.ansi("hi", "magenta", enabled=True) == "\x1b[38;2;235;110;183mhi\x1b[0m"
     # attributes are theme-independent.
     assert pal._ANSI["bold"] == "\x1b[1m"
 
