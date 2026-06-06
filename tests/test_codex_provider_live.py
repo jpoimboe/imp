@@ -116,12 +116,17 @@ async def test_codex_live_round_trip_under_production_flags(tmp_path: Path) -> N
         if ln and json.loads(ln).get("type") == "tool_call"
     ]
     assert len(tool_calls) >= 1
-    # No web_search runner_warning items.
+    # No *unexpected web_search tool* tripwire. (Match the tripwire marker, not a
+    # bare "web_search" substring: codex >=0.137 emits a deprecation `error` item
+    # mentioning `web_search_request` every turn, now surfaced as an informational
+    # diagnostic — that is expected noise, not a web-tool violation.)
     warns = [
         json.loads(ln) for ln in ev_lines
         if ln and json.loads(ln).get("type") == "runner_warning"
     ]
-    assert all("web_search" not in str(w.get("payload", {})) for w in warns)
+    assert all(
+        "unexpected codex web_search" not in str(w.get("payload", {})) for w in warns
+    )
 
 
 @pytest.mark.anyio

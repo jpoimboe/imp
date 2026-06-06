@@ -34,11 +34,14 @@ class FakeAgentMessageItem:
 
 @dataclass
 class FakeMcpToolCallItem:
+    # Mirrors openai_codex_sdk McpToolCallItem: the tool name is `tool` (+`server`),
+    # NOT `name`. Keeping this aligned with the SDK is what catches runner drift.
     type: str = "mcp_tool_call"
     server: str = "imp"
-    name: str = ""
+    tool: str = ""
     arguments: dict[str, Any] = field(default_factory=dict)
     result: Any = None
+    error: Any = None
     status: str = "completed"
     id: str = ""
 
@@ -52,8 +55,10 @@ class FakeCommandExecutionItem:
 
 @dataclass
 class FakeFileChangeItem:
+    # Mirrors openai_codex_sdk FileChangeItem: edits live in `changes:[{path,kind}]`,
+    # NOT a top-level `path`.
     type: str = "file_change"
-    path: str = ""
+    changes: list[dict[str, Any]] = field(default_factory=list)
     status: str = "completed"
 
 
@@ -180,13 +185,14 @@ def mcp_call(name: str, *, args: dict[str, Any] | None = None,
              result: Any = None, item_id: str = "call-1") -> FakeItemEvent:
     return FakeItemEvent(type="item.completed",
                          item=FakeMcpToolCallItem(
-                             name=name, arguments=args or {},
+                             tool=name, arguments=args or {},
                              result=result, id=item_id))
 
 
 def file_change(path: str) -> FakeItemEvent:
     return FakeItemEvent(type="item.completed",
-                         item=FakeFileChangeItem(path=path))
+                         item=FakeFileChangeItem(
+                             changes=[{"path": path, "kind": "update"}]))
 
 
 def command_execution(command: str) -> FakeItemEvent:

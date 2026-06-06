@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 import secrets
 import shutil
@@ -644,6 +645,35 @@ def _attach_usage_to_last_llm_response(
     elog.update_last_llm_response_usage(agent_id=agent_id, usage=usage)
 
 
+def _serialize_mcp_result(result: Any) -> str:
+    """Render an SDK ``McpToolCallResult`` to text for the tool_result event.
+
+    The SDK shape is ``.content`` (a list of MCP content-block dicts) plus
+    ``.structured_content``; a plain ``str``/``None`` (older or duck-typed
+    shapes) is passed through. Previously the runner did ``str(result)`` on the
+    whole object, which serialized a pydantic repr instead of the tool output.
+    """
+    if result is None:
+        return ""
+    if isinstance(result, str):
+        return result
+    blocks = getattr(result, "content", None)
+    if isinstance(blocks, list):
+        parts: list[str] = []
+        for b in blocks:
+            if isinstance(b, dict):
+                parts.append(b.get("text") or b.get("data") or json.dumps(b))
+            else:
+                parts.append(str(b))
+        text = "\n".join(p for p in parts if p)
+        if text:
+            return text
+    structured = getattr(result, "structured_content", None)
+    if structured is not None:
+        return structured if isinstance(structured, str) else json.dumps(structured)
+    return str(result)
+
+
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str,
@@ -685,19 +715,24 @@ def process_event(
             return
         if itype == "mcp_tool_call":
             from imp.agents.runner import ToolResultBlock, ToolUseBlock
-            name = getattr(item, "name", "") or ""
+            # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
+            # `name` silently recorded "" for every call (and made the
+            # complete_step capture below dead). Fall back to `name` only for
+            # older/duck-typed shapes.
+            name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
             args = getattr(item, "arguments", None) or {}
             call_id = getattr(item, "id", "") or ""
             elog.append_tool_call(
                 agent_id=agent_id,
                 block=ToolUseBlock(id=call_id, name=name, input=args),
             )
-            result = getattr(item, "result", None)
-            content = result if isinstance(result, str) else (
-                "" if result is None else str(result)
-            )
+            err = getattr(item, "error", None)
             status = getattr(item, "status", "completed")
-            is_error = status not in ("completed", "succeeded")
+            is_error = err is not None or status not in ("completed", "succeeded")
+            if err is not None:
+                content = getattr(err, "message", "") or str(err)
+            else:
+                content = _serialize_mcp_result(getattr(item, "result", None))
             elog.append_tool_result(
                 agent_id=agent_id,
                 block=ToolResultBlock(
@@ -743,14 +778,35 @@ def process_event(
             # happened — recording it here triggers the runner's revert path
             # at the next turn boundary. Autonomous: hard run failure.
             # Interactive: user keep-or-revert prompt; default revert.
-            detail = (getattr(item, "path", None) or
-                      getattr(item, "command", None) or "?")
+            if itype == "file_change":
+                # SDK `FileChangeItem` carries `changes: [{path, kind}, …]`, not a
+                # top-level `path`; reading `path` yielded "?" for real edits.
+                changes = getattr(item, "changes", None) or []
+                paths = []
+                for c in changes:
+                    p = c.get("path") if isinstance(c, dict) else getattr(c, "path", None)
+                    if p:
+                        paths.append(p)
+                detail = ", ".join(paths) or getattr(item, "path", None) or "?"
+            else:
+                detail = getattr(item, "command", None) or "?"
             state["native_violation"] = {
                 "kind": itype, "detail": detail,
             }
             elog.append(agent_id=agent_id, type="runner_warning",
                         payload={
                             "message": f"native {itype} detected: {detail!r}"})
+            return
+        if itype == "error":
+            # codex surfaces some non-fatal conditions as `error` items (e.g. the
+            # config-deprecation notice emitted every turn on codex >=0.137).
+            # Record the real message as a diagnostic instead of the misleading
+            # "unhandled codex item type" warning. Hard turn failures arrive
+            # separately as `turn.failed` events, handled below.
+            msg = getattr(item, "message", "") or ""
+            elog.append(agent_id=agent_id, type="runner_warning",
+                        payload={"message": f"codex error item: {msg}",
+                                 "codex_error_item": True})
             return
         # Other item types mapped in later tasks; fall through to default arm.
         elog.append(agent_id=agent_id, type="runner_warning",
