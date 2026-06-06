@@ -75,9 +75,9 @@ def test_resume_renders_through_live_driver_without_replay(tmp_path, monkeypatch
     out = buf.getvalue()
     assert rc == 0
     # The step header is rendered exactly once — no replay duplicate. The header
-    # now carries the model on the same line ("  spec  ·  m"); match its start,
+    # now carries the model on the same line ("  spec · m"); match its start,
     # NOT the "Phase: design, step: spec" banner (which begins with "Phase:").
-    step_lines = [ln for ln in out.splitlines() if ln.strip().startswith("spec  ·")]
+    step_lines = [ln for ln in out.splitlines() if ln.strip().startswith("spec ·")]
     assert len(step_lines) == 1
 
     # Side-effect assertions: workflow_resumed was appended to events.jsonl.

@@ -67,12 +67,12 @@ def test_live_emits_content_after_a_subagent_spawn() -> None:
     log = _log_body(events)
 
     # Sanity: imp log shows the post-spawn parent content (the run did progress).
-    assert "✓ task-lead" in log
+    assert "task-lead complete" in log
     assert "commit-check" in log
 
     # The bug: live emission stalls on the never-closing subagent fold, so the
     # parent step's completion and the entire following step never appear live.
-    assert "✓ task-lead" in live, (
+    assert "task-lead complete" in live, (
         "task-lead completion breadcrumb missing from live output — the live "
         "cursor is wedged behind a never-closing SubagentFold"
     )

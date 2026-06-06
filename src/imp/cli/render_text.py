@@ -135,6 +135,15 @@ def spaces_after(node: Any, *, full: bool) -> bool:
     )
 
 
+def spaces_before(node: Any) -> bool:
+    """A node that wants a blank line ABOVE it regardless of what preceded it.
+    Only an interactive step qualifies: the human's turn is a conversational beat,
+    so it gets air above the `name · model` header to set it apart from the prior
+    step's completion line. The batch walk and the live driver both key off this so
+    the lead-in blank lands identically in `imp log` and the live view."""
+    return isinstance(node, nv.StepNode) and node.interactive
+
+
 def is_chrome_step(node: Any) -> bool:
     """True for a no-op structural step (a script gate / branch) whose whole
     contribution is a 0s completion breadcrumb. These collapse to that single
@@ -158,7 +167,7 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
                              gutters=gutters))
         if not lines:
             continue
-        if prev_prose:
+        if prev_prose or spaces_before(child):
             yield _gutter_indent(depth, gutters, color)
         yield from lines
         prev_prose = spaces_after(child, full=full)
@@ -174,7 +183,9 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
     ever nested inside SubagentFolds."""
     elapsed = nv.phase_elapsed(node)
     secs = "" if elapsed is None else f" · {int(elapsed)}s"
-    return _line(f"✓ {node.name}{secs}", depth, color, *pal.NODE_COLORS["phase"],
+    # No checkmark — same as the step breadcrumb (`<name> complete · …`), so the
+    # whole family of completion lines reads consistently as quiet gray chrome.
+    return _line(f"{node.name} complete{secs}", depth, color, *pal.NODE_COLORS["phase"],
                  gutters=gutters)
 
 
@@ -194,14 +205,15 @@ def header_line(node: Any, *, depth: int, color: bool,
         return _line(f"↳ subagent → {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
     label = node.name
-    if node.interactive:
-        label += " (interactive)"
     if node.model:
         # The model rides on the step line itself (design: drop the separate
         # `▸ context · provider/model · N tools` line from the lean view — it
         # survives only in `imp log --full`). Same gray as the rest of the step
-        # chrome; the provider and tool count are detail that the full view owns.
-        label += f"  ·  {node.model}"
+        # chrome, one space around the `·` to match every other dotted line; the
+        # provider and tool count are detail that the full view owns. An
+        # interactive step carries no `(interactive)` tag — its blank-line lead-in
+        # (spaces_before) is the only marker it needs.
+        label += f" · {node.model}"
     return _line(label, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
 
 
@@ -215,13 +227,13 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     `⟨…⟩` tag so a subagent that didn't cleanly finish still stands out."""
     label = f"↳ subagent → {sub.subagent_name}"
     if sub.running:
-        label += "  ⟨⏳ running⟩"
+        label += " ⟨⏳ running⟩"
     elif sub.terminal_state == "stalled":
-        label += "  ⟨⊘ stalled⟩"
+        label += " ⟨⊘ stalled⟩"
     elif sub.terminal_state == "interrupted":
-        label += "  ⟨⊘ interrupted⟩"
+        label += " ⟨⊘ interrupted⟩"
     elif sub.is_error:
-        label += "  ⟨✗ failed⟩"
+        label += " ⟨✗ failed⟩"
     return _line(label, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
 
 
@@ -351,7 +363,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.BreadcrumbLine):
-        parts = [f"✓ {node.step_name}"]
+        # No checkmark: a completed step reads as `<name> complete · …` — the word
+        # carries the meaning, and dropping the glyph keeps the gray line quiet
+        # (the `✓` drew the eye to navigational chrome it shouldn't).
+        parts = [f"{node.step_name} complete"]
         parts.extend(node.extras)
         verb_text = pal.action_text(node.action) if node.action is not None else None
         if verb_text and verb_text != "continue":
@@ -433,7 +448,9 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     n = len(calls)
     elapsed = nv._elapsed_seconds(burst.start_ts, burst.end_ts)
     secs = "" if elapsed is None else f" · {int(elapsed)}s"
-    return f"⏺ {shown}{more} · {n} call{'s' if n != 1 else ''}{secs}"
+    # Lead with the same small `·` the line uses as a separator (not the heavy
+    # `⏺`, which over-weighted routine tool work); one space around every dot.
+    return f"· {shown}{more} · {n} call{'s' if n != 1 else ''}{secs}"
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
@@ -455,7 +472,7 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
         result = (c.result or "").replace("\n", " ")
         if len(result) > 60:
             result = result[:60] + "…"
-        line = f"⏺ {c.name}  {args}  → {result}{killed}".rstrip()
+        line = f"· {c.name}  {args}  → {result}{killed}".rstrip()
         yield from _wrap(line, width, depth + 1, color, *pal.NODE_COLORS["tools"],
                          gutters=gutters)
 

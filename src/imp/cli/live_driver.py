@@ -173,6 +173,12 @@ class LiveDriver:
                     # the header line; descend so that breadcrumb still streams.
                     pass
                 else:
+                    if rt.spaces_before(child):
+                        # An interactive step gets a blank line above its header
+                        # (matching render_text._render_children). Arming the
+                        # prose-adjacency flag makes the next emission — the header
+                        # — carry the leading separator.
+                        self._prev_prose = True
                     self._stream_or_hold(
                         rt.header_line(child, depth=cur.depth, color=self._color,
                                        gutters=gutters),

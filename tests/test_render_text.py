@@ -35,7 +35,7 @@ def test_header_phase_step_outcome_render() -> None:
     assert "#add-auth-7" in out and "add auth" in out
     assert "design" in out
     assert "spec" in out
-    assert "✓ spec" in out          # merged breadcrumb (was: "continue" in out)
+    assert "spec complete" in out          # merged breadcrumb (was: "continue" in out)
 
 
 def test_agent_text_rendered_in_full_not_truncated() -> None:
@@ -68,8 +68,9 @@ def test_collapsed_folds_drop_thinking_keep_burst_recap() -> None:
     assert "thinking" not in out
     # The tool burst now leaves ONE dark-gray recap line (point 8): distinct tool
     # names (first-seen order) + the call count — not the full per-call dump.
-    assert "⏺ bash · ls · 3 calls" in out
-    assert out.count("⏺") == 1          # one recap line, not one per call
+    assert "· bash · ls · 3 calls" in out
+    # one recap line, not one per call (recap lines lead with a bare "· ")
+    assert sum(1 for ln in out.splitlines() if ln.lstrip().startswith("· ")) == 1
     assert "→ ok" not in out            # per-call results stay in --full only
 
 
@@ -94,8 +95,8 @@ def test_collapsed_subagent_renders_single_status_row() -> None:
     # The lean step-context line is gone (the model rides on the step header);
     # the context detail survives only in imp log --full.
     assert "▸ context" not in joined
-    assert "s  ·  m" in joined          # model on the step header
-    # Subagent: single status row, ✓ done. No recursed prose, no outcome.
+    assert "s · m" in joined          # model on the step header
+    # Subagent: single status row, complete. No recursed prose, no outcome.
     assert any(ln.strip() == "↳ subagent → reviewer" for ln in out)
     assert "looks good" not in joined
     assert "status=Success" not in joined
@@ -168,7 +169,7 @@ def test_subagent_error_renders_failed_status_row() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ], width=80))
-    assert any("↳ subagent → reviewer  ⟨✗ failed⟩" in ln for ln in out)
+    assert any("↳ subagent → reviewer ⟨✗ failed⟩" in ln for ln in out)
     assert not any("dispatch failed: boom" in ln for ln in out)   # outcome suppressed
     # The status row carries the subagent (magenta) color when color is on.
     color_out = list(render_tree(nv.build_tree([
@@ -233,7 +234,7 @@ def test_full_mode_expands_tools_thinking_and_subagent() -> None:
     ], full=True))
     assert "▾ thinking" in out and "deep thoughts here" in out
     assert "▾ tools" in out
-    assert "⏺ bash" in out and "command=ls -la" in out and "total 0" in out
+    assert "· bash" in out and "command=ls -la" in out and "total 0" in out
     assert "▾ subagent → reviewer" in out
     # nested subagent prose appears, indented under the fold
     assert "subagent verdict: approve" in out
@@ -279,7 +280,7 @@ def test_step_context_dropped_from_lean_model_on_step_header() -> None:
     lean = "\n".join(_lines(events, full=False))
     assert "▸ context" not in lean
     assert "SYSTEM PROMPT TEXT" not in lean
-    assert "s  ·  claude-opus-4-7" in lean      # model on the step header
+    assert "s · claude-opus-4-7" in lean      # model on the step header
     full = "\n".join(_lines(events, full=True))
     assert "context" in full and "SYSTEM PROMPT TEXT" in full
 
@@ -324,7 +325,7 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
 
 
 def test_chrome_step_collapses_to_single_breadcrumb() -> None:
-    # point 5: a no-op gate/script step renders ONLY its `✓ name` breadcrumb —
+    # point 5: a no-op gate/script step renders ONLY its `<name> complete` breadcrumb —
     # the redundant name-only header line above it is dropped.
     out = _lines([
         _ev("1", "change_created", slug="s", title="t"),
@@ -334,7 +335,7 @@ def test_chrome_step_collapses_to_single_breadcrumb() -> None:
     ])
     hits = [ln for ln in out if "spec-verify-commit" in ln]
     assert len(hits) == 1                       # one line, not header + breadcrumb
-    assert hits[0].strip().startswith("✓ spec-verify-commit")
+    assert hits[0].strip().startswith("spec-verify-commit complete")
 
 
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:
@@ -357,7 +358,7 @@ def test_header_line_matches_render_for_phase_and_step() -> None:
     step = nv.StepNode(name="spec", kind="agent", interactive=True)
     human = nv.StepNode(name="approve", kind="human")
     assert rt.header_line(phase, depth=0, color=False) == "design"
-    assert rt.header_line(step, depth=1, color=False) == "  spec (interactive)"
+    assert rt.header_line(step, depth=1, color=False) == "  spec"
     # Every kind renders as the bare step name (no special-case label).
     assert rt.header_line(human, depth=2, color=False) == "    approve"
 
@@ -530,19 +531,19 @@ def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
     bc = nv.BreadcrumbLine(step_name="spec", elapsed_s=12.4,
                            action={"verb": "continue"}, extras=[])
     line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
-    assert line == "  ✓ spec · 12s"
+    assert line == "  spec complete · 12s"
     assert "→ continue" not in line
     # non-continue action: extras and → suffix sit BEFORE elapsed (last field).
     bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
                             action={"verb": "goto", "target": "implement"},
                             extras=["status=Success"])
     line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert line2 == "  ✓ code-reviewer · status=Success · → goto(implement) · 41s"
+    assert line2 == "  code-reviewer complete · status=Success · → goto(implement) · 41s"
     # No elapsed (elapsed_s is None) → no trailing seconds field at all.
     bc3 = nv.BreadcrumbLine(step_name="quick", elapsed_s=None,
                             action={"verb": "continue"}, extras=[])
     line3 = "\n".join(rt._render(bc3, depth=1, full=False, color=False, width=80))
-    assert line3 == "  ✓ quick"
+    assert line3 == "  quick complete"
 
 
 def _sub(outcome=None, *, is_error=False, name="reviewer"):
@@ -722,12 +723,12 @@ def test_phase_breadcrumb_renders_after_closed_phase() -> None:
     out = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
     joined = "\n".join(out)
     # closed spec phase gets a breadcrumb with seconds suffix
-    assert "✓ spec" in joined
-    spec_line = next(ln for ln in out if "✓ spec" in ln)
+    assert "spec complete" in joined
+    spec_line = next(ln for ln in out if "spec complete" in ln)
     assert "s" in spec_line    # e.g. "7s"
     assert "7" in spec_line    # computed from timestamps
     # the breadcrumb is at depth 0 (same as the phase header)
-    assert spec_line == "✓ spec · 7s"
+    assert spec_line == "spec complete · 7s"
 
 
 _ANSI_RE = _re.compile(r"\x1b\[[0-9;]*m")
@@ -812,7 +813,7 @@ def test_prose_then_structural_leaf_separated_by_blank() -> None:
             action={"verb": "continue"}, var_mutations={}),
     ])
     prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
-    bc_i = next(i for i, ln in enumerate(out) if "✓ spec" in ln)
+    bc_i = next(i for i, ln in enumerate(out) if "spec complete" in ln)
     assert bc_i > prose_i
     assert out[bc_i - 1].strip() == "", (
         "prose must be blank-separated from the following breadcrumb")

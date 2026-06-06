@@ -1,25 +1,25 @@
 #add-auth  add auth  (paused)
 design
-  spec  ·  claude-sonnet-4-6
+  spec · claude-sonnet-4-6
   
   Drafting the spec.
   
-  ⏺ read_file · bash · 2 calls
+  · read_file · bash · 2 calls
   
   ↳ subagent → reviewer
   
   > Please add a section on token expiry.
   
-  ✓ spec · status=Success · summary=Spec drafted
+  spec complete · status=Success · summary=Spec drafted
   approve
   
   human gate → continue
     Approve the design spec?
     - yes
     - no
-  ✓ approve
+  approve complete
 implement
-  build  ·  claude-sonnet-4-6
+  build · claude-sonnet-4-6
   
   error: [provider] rate limited
   warning: dropped block

@@ -50,13 +50,13 @@ def test_burst_recap_streams_then_prose_in_live_path() -> None:
     ]
     for e in events:
         drv.on_event(e)
-    assert not any("⏺" in ln for ln in _body(out))  # burst still open — held
+    assert not any(ln.lstrip().startswith("· ") for ln in _body(out))  # burst open — held
     drv.on_event(ev("8", "llm_response", agent_id="a",
                     raw={"content": [{"type": "text", "text": "done"}]},
                     usage={}))
     body = _body(out)
     # point 8: the closed burst leaves a single dark-gray recap line, then prose.
-    assert any("⏺ read_file · glob · 2 calls" in ln for ln in body)
+    assert any("· read_file · glob · 2 calls" in ln for ln in body)
     assert any("done" in ln for ln in body)        # prose still streams after it
 
 
@@ -73,7 +73,7 @@ def test_burst_recap_then_prose_kept_in_order() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    recap_i = next(i for i, ln in enumerate(body) if "⏺ grep · 1 call" in ln)
+    recap_i = next(i for i, ln in enumerate(body) if "· grep · 1 call" in ln)
     answer_i = next(i for i, ln in enumerate(body) if "the answer" in ln)
     assert recap_i < answer_i          # recap precedes the prose it preceded live
 
@@ -265,7 +265,7 @@ def test_human_gate_blocks_following_nodes_until_resolved() -> None:
                     action={"verb": "continue"}, var_mutations={}))
     body = _body(out)
     gate_i = next(i for i, ln in enumerate(body) if "human gate → continue" in ln)
-    outcome_i = next(i for i, ln in enumerate(body) if ln.strip() == "✓ approve")
+    outcome_i = next(i for i, ln in enumerate(body) if ln.strip() == "approve complete")
     assert gate_i < outcome_i                      # tree order preserved
 
 
@@ -279,10 +279,10 @@ def test_open_burst_recap_emitted_at_finish() -> None:
         ev("5", "tool_result", agent_id="a", id="b1", content="ok"),
     ]:
         drv.on_event(e)
-    assert not any("⏺" in ln for ln in _body(out))      # still open — held
+    assert not any(ln.lstrip().startswith("· ") for ln in _body(out))   # still open — held
     drv.finish()
     # finish() force-flushes the open burst, leaving its recap (point 8).
-    assert any("⏺ read_file · 1 call" in ln for ln in _body(out))
+    assert any("· read_file · 1 call" in ln for ln in _body(out))
 
 
 def test_subagent_row_resolves_only_on_close() -> None:
@@ -351,7 +351,7 @@ def test_finish_force_pops_running_subagent_without_outcome() -> None:
     # row shows the (still-running) status; internal prose and outcome stay hidden.
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "↳ subagent → reviewer  ⟨⏳ running⟩" for ln in body)
+    assert any(ln.strip() == "↳ subagent → reviewer ⟨⏳ running⟩" for ln in body)
     assert not any("partial work" in ln for ln in body)
     assert not any("→ status" in ln for ln in body)   # no outcome ever
 
@@ -534,7 +534,7 @@ def test_user_message_shown_in_nontty_live_suppressed_on_tty() -> None:
 
 
 def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:
-    """The final (never-closed) phase must NOT emit a ✓ <phase> breadcrumb in
+    """The final (never-closed) phase must NOT emit a <phase> complete breadcrumb in
     either the live path (finish()/force-pop) or the log (render_tree gated on
     node.closed). Uses distinct names for phase ("finalize") and step ("deploy")
     so a phase-level assert cannot accidentally match a step-level breadcrumb."""
@@ -558,11 +558,11 @@ def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:
     log_lines = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
 
     # The phase-level breadcrumb must be absent in BOTH renderers.
-    assert not any("✓ finalize ·" in ln for ln in live_lines), (
+    assert not any("finalize complete ·" in ln for ln in live_lines), (
         f"phase breadcrumb leaked into live: {live_lines}")
-    assert not any("✓ finalize ·" in ln for ln in log_lines), (
+    assert not any("finalize complete ·" in ln for ln in log_lines), (
         f"phase breadcrumb leaked into log: {log_lines}")
-    # The step-level breadcrumb (✓ deploy) may still appear — we don't assert on it.
+    # The step-level breadcrumb (deploy complete) may still appear — we don't assert on it.
 
 
 def test_phase_breadcrumb_identical_in_live_and_log() -> None:
@@ -587,9 +587,9 @@ def test_phase_breadcrumb_identical_in_live_and_log() -> None:
     for e in events:
         drv.on_event(e)
     drv.finish()
-    live_line = next(ln for ln in out.getvalue().splitlines() if "✓ spec" in ln)
+    live_line = next(ln for ln in out.getvalue().splitlines() if "spec complete" in ln)
     log_lines = render_tree(nv.build_tree(events), full=False, color=False, width=80)
-    log_line = next(ln for ln in log_lines if "✓ spec" in ln)
+    log_line = next(ln for ln in log_lines if "spec complete" in ln)
     assert live_line == log_line   # byte-identical indent + content across both paths
 
 
@@ -610,7 +610,7 @@ def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    bc_i = next(i for i, ln in enumerate(body) if "✓ spec" in ln)
+    bc_i = next(i for i, ln in enumerate(body) if "spec complete" in ln)
     assert body[bc_i - 1].strip() == ""
     assert body == _render_body(events)
 

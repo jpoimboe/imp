@@ -5,7 +5,7 @@ tiers resolved:
   high   → openai/gpt-5.5
     differ from medium: tier 1, vendor jump
 design
-  spec  ·  claude-sonnet-4-6
+  spec · claude-sonnet-4-6
   
   ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=50
     system_prompt:
@@ -19,8 +19,8 @@ design
     I need to consider the auth requirements carefully before writing the spec.
     Let me think about OAuth2 vs API keys.
   ▾ tools
-    ⏺ read_file  path=README.md  → # Project Auth module needed. [killed]
-    ⏺ bash  command=ls src/  → auth.py main.py
+    · read_file  path=README.md  → # Project Auth module needed. [killed]
+    · bash  command=ls src/  → auth.py main.py
   ▾ subagent → reviewer
   │ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
   │   system_prompt:
@@ -31,16 +31,16 @@ design
   
   > Please add a section on token expiry.
   
-  ✓ spec · status=Success · summary=Spec drafted
+  spec complete · status=Success · summary=Spec drafted
   approve
   
   human gate → continue
     Approve the design spec?
     - yes
     - no
-  ✓ approve
+  approve complete
 implement
-  build  ·  claude-sonnet-4-6
+  build · claude-sonnet-4-6
   
   error: [provider] rate limited
   warning: dropped block
