@@ -131,6 +131,7 @@ def build_agent_invocation(
     provider_name: str,
     model_name: str,
     rendered_system_prompt: str,
+    system_prompt_override: str | None = None,
     initial_messages: tuple[Message, ...],
     change_context: ChangeContext,
     interactive: bool,
@@ -144,6 +145,7 @@ def build_agent_invocation(
     agent_id: str,
     event_log: Any,
     change_state: Any,
+    change: Any = None,
     first_event_parent_id: str | None,
     resolved_tiers: dict[str, Any] | None,
     coordinator: Any,
@@ -165,11 +167,17 @@ def build_agent_invocation(
     is a value, not a policy, here.
     """
     instruction = completion_instruction(agent_def.output_schema)
-    body = rendered_system_prompt
-    if "bash" in agent_def.tools:
-        body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
-    body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
-    system_prompt = f"{body}\n\n{instruction}"
+    if system_prompt_override is not None:
+        # Resume-replay (Part B): the override IS the previously-assembled,
+        # stored step_context.system_prompt — use it verbatim, never re-append
+        # the bash/seed/instruction notes (that would double them).
+        system_prompt = system_prompt_override
+    else:
+        body = rendered_system_prompt
+        if "bash" in agent_def.tools:
+            body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
+        body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
+        system_prompt = f"{body}\n\n{instruction}"
     continuation_fn = build_continuation_fn(
         interactive=interactive,
         user_chat_input_fn=user_chat_input_fn,
@@ -195,6 +203,7 @@ def build_agent_invocation(
         agent_id=agent_id,
         event_log=event_log,
         change_state=change_state,
+        change=change,
         first_event_parent_id=first_event_parent_id,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,

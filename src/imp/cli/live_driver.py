@@ -69,6 +69,10 @@ class LiveDriver:
         # so the live view and `imp log` look identical (design §5.4). Any non-prose
         # output resets it; an empty emission leaves it untouched.
         self._prev_prose = False
+        # True once the root header (#slug  title) has been printed. Guards
+        # against double-printing when change_renamed fires after a named
+        # change_created, or when _emit_header is called from both events.
+        self._header_emitted = False
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
             _Cursor(container=self._builder.tree.root, depth=0)]
@@ -76,7 +80,8 @@ class LiveDriver:
     # -- engine callbacks -----------------------------------------------------
     def on_event(self, event: Any) -> None:
         self._builder.add(event)
-        if isinstance(event, dict) and event.get("type") == "change_created":
+        if isinstance(event, dict) and event.get("type") in (
+                "change_created", "change_renamed"):
             self._emit_header()
         if isinstance(event, dict) and event.get("type") in (
                 "step_started", "user_message"):
@@ -119,16 +124,19 @@ class LiveDriver:
 
     # -- emission -------------------------------------------------------------
     def _emit_header(self) -> None:
+        if self._header_emitted:
+            return
         root = self._builder.tree.root
         # Option B: a title-less change defers its header rather than opening with
-        # a degenerate `#<date>` (no name yet). The header appears once the change
-        # has a title — today there's always one; when the title-less flow lands,
-        # its naming step surfaces the name here.
+        # a degenerate `#<date>` (no name yet). This is the normal case for `imp
+        # new` without --title; the header appears once the change is named (the
+        # agent's rename_change step, or a user-supplied --title).
         if not (root.title and root.title.strip()):
             return
-        head = (f"#{root.slug if root.slug is not None else '?'}  "
+        head = (f"#{root.slug or '?'}  "
                 f"{root.title}").rstrip()
         self._print_lines([pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=self._color)])
+        self._header_emitted = True
 
     def _walk(self, *, force: bool = False) -> None:
         while self._frontier:

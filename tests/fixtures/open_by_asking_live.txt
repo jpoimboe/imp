@@ -131,7 +131,6 @@ spec
   I'll land the slug rename now and write the spec on the next turn.
   
   ✓ spec-writer · status=Success · phase=drafting · complexity=standard · → goto(spec-writer) [resume] · 815s
-  change_renamed  old_slug=2026-06-03-vine-salt-kelp new_slug=2026-06-03-imp-new-open-by-asking title=imp new open by asking
   spec-writer (interactive)
   Now I can actually explore the code. Let me verify my earlier assumptions.
   

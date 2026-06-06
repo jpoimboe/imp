@@ -12,87 +12,47 @@ import pytest
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
-from imp.engine.executor import RunResult, apply_pending_rename, run_change
-from imp.engine.state import State
-from tests.conftest import _git, _seed_control
+from imp.engine.executor import RunResult, run_change
+from tests.conftest import _git
 
 
-def test_apply_pending_rename_is_content_only(tmp_path: Path) -> None:
+def test_change_rename_is_content_only(tmp_path: Path) -> None:
+    from tests.conftest import _seed_control
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="orig",
                        change_id="2026-06-04-aaa111", base_branch="main")
-    created_before = json.loads((ch.change_dir / "change.json").read_text())["created_at"]
+    created_before = json.loads(
+        (ch.change_dir / "change.json").read_text())["created_at"]
     id_before, root_before = ch.id, ch.project_root
-    ch.event_log().append(agent_id=None, type="sentinel", payload={"k": "v"})
-    state = State.load(ch.state_dir)
-    state.pending_rename = "Add OAuth"
-    state.save(ch.state_dir)
 
-    new_log = apply_pending_rename(ch, state, ch.event_log(), on_event=None)
+    new_slug = ch.rename("Add OAuth", log=ch.event_log())
 
+    assert new_slug == "2026-06-04-add-oauth"
     assert ch.title == "Add OAuth"
-    assert ch.slug == "2026-06-04-add-oauth"
     assert ch.id == id_before                       # id never changes
     assert ch.project_root == root_before           # no worktree move
-    assert state.pending_rename is None
     meta = json.loads((ch.change_dir / "change.json").read_text())
     assert meta["title"] == "Add OAuth"
     assert meta["created_at"] == created_before
     assert "id" in meta and "slug" not in meta
-    types = [e["type"] for e in new_log.read()]
-    assert "sentinel" in types and "change_renamed" in types
-    renamed = [e for e in new_log.read() if e["type"] == "change_renamed"][-1]
+    renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"][-1]
     assert renamed["payload"] == {
-        "id": id_before, "old_title": "orig", "new_title": "Add OAuth"}
+        "id": id_before, "old_title": "orig", "new_title": "Add OAuth",
+        "new_slug": "2026-06-04-add-oauth"}
 
 
-def test_apply_pending_rename_moves_committed_spec(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="orig",
-                       change_id="2026-06-04-bbb222", base_branch="main")
-    specs = ch.project_root / "imp" / "specs"
-    specs.mkdir(parents=True)
-    old = specs / f"{ch.slug}.md"
-    old.write_text("# spec")
-    _git(ch.project_root, "add", "-A")
-    _git(ch.project_root, "commit", "-qm", "early spec")
-    old_slug = ch.slug
+class _RenamingRunner:
+    """Fake runner: on its single turn, calls Change.rename via the tool path by
+    mutating through the invocation's live change, then returns Success."""
 
-    state = State.load(ch.state_dir)
-    state.pending_rename = "Renamed"
-    state.save(ch.state_dir)
-    apply_pending_rename(ch, state, ch.event_log(), on_event=None)
-
-    assert not (specs / f"{old_slug}.md").exists()
-    assert (specs / f"{ch.slug}.md").exists()
-
-
-def test_apply_pending_rename_moves_untracked_draft(tmp_path: Path) -> None:
-    # An UNTRACKED early draft must still be moved (filesystem fallback when
-    # `git mv` fails), or it lingers and blocks the merge. [review M2]
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="orig",
-                       change_id="2026-06-04-ggg777", base_branch="main")
-    specs = ch.project_root / "imp" / "specs"
-    specs.mkdir(parents=True)
-    old_slug = ch.slug
-    (specs / f"{old_slug}.md").write_text("# draft")   # never git-added
-
-    state = State.load(ch.state_dir)
-    state.pending_rename = "Renamed"
-    state.save(ch.state_dir)
-    apply_pending_rename(ch, state, ch.event_log(), on_event=None)
-
-    assert not (specs / f"{old_slug}.md").exists()      # nothing lingers at old name
-    assert (specs / f"{ch.slug}.md").exists()           # moved to settled name
-
-
-class _FakeRunner:
-    def __init__(self, output: dict) -> None:
-        self._output = output
+    def __init__(self, invocation: AgentInvocation) -> None:
+        self._inv = invocation
 
     async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
-        yield {"type": "agent_output", "payload": self._output}
+        ch = invocation.change
+        if ch is not None and ch.title == "x":
+            ch.rename("Renamed Thing", log=invocation.event_log or ch.event_log())
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
 
     async def interrupt(self) -> None:
         pass
@@ -105,7 +65,7 @@ class _FakeProvider:
         self.model = model
 
     def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
-        return _FakeRunner({"status": "Success"})
+        return _RenamingRunner(invocation)
 
 
 def _seed_two_step_control(root: Path) -> None:
@@ -138,23 +98,23 @@ def _seed_two_step_control(root: Path) -> None:
     _git(root, "commit", "-qm", "imp setup")
 
 
-def test_run_change_applies_rename_keeps_id_and_path(
+def test_run_change_rename_keeps_id_and_path(
     tmp_path: Path, provider_registry
 ) -> None:
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
     _seed_two_step_control(tmp_path)
     ch = Change.create(tmp_path, title="x",
                        change_id="2026-06-04-ccc333", base_branch="main")
-    st = State.load(ch.state_dir)
-    st.pending_rename = "Renamed Thing"
-    st.save(ch.state_dir)
 
     cwd_before = os.getcwd()
     result = anyio.run(run_change, ch)
     assert result is RunResult.COMPLETED
     assert os.getcwd() == cwd_before
-    assert ch.title == "Renamed Thing"
-    assert ch.id == "2026-06-04-ccc333"                          # id stable
+    # Reload to confirm the rename persisted to change.json (the in-memory ch is
+    # the same object the runner mutated; reloading proves durability).
+    reloaded = Change.load(tmp_path, "2026-06-04-ccc333")
+    assert reloaded.title == "Renamed Thing"
+    assert reloaded.id == "2026-06-04-ccc333"
     assert (tmp_path / ".imp" / "worktrees" / "2026-06-04-ccc333").is_dir()
 
 
@@ -169,6 +129,35 @@ def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> 
     with pytest.raises(LoadError):
         anyio.run(run_change, ch)
     assert os.getcwd() == cwd_before
+
+
+def test_seed_messages_named_carries_the_name(tmp_path: Path) -> None:
+    from imp.engine.executor import _seed_messages
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Add OAuth",
+                       change_id="2026-06-05-eee555", base_branch="main")
+    msgs = _seed_messages(ch, None)
+    assert len(msgs) == 1
+    blocks = msgs[0].content
+    assert len(blocks) == 1                       # single block, separator inside
+    text = blocks[0].text
+    assert text.startswith("<imp:begin/>")
+    assert "2026-06-05-add-oauth" in text
+    assert "\n\n" in text                         # token and name line kept apart
+
+
+def test_seed_messages_unnamed_has_no_name_block(tmp_path: Path) -> None:
+    from imp.engine.executor import _seed_messages
+    from tests.conftest import _seed_control
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="",
+                       change_id="2026-06-05-fff666", base_branch="main")
+    msgs = _seed_messages(ch, None)
+    assert len(msgs) == 1
+    blocks = msgs[0].content
+    assert len(blocks) == 1
+    assert blocks[0].text == "<imp:begin/>"       # exactly the begin token, nothing else
 
 
 @pytest.fixture

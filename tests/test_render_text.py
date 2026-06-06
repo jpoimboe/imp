@@ -245,6 +245,21 @@ def test_full_mode_expands_step_context_config_dump() -> None:
     assert "- bash" in out
 
 
+def test_full_mode_shows_the_replay_source_system_prompt() -> None:
+    # The system prompt rendered by --full is the SAME step_context.system_prompt
+    # that Task 11 replays on resume — so the displayed prompt is exactly what the
+    # model saw on every turn, not a first-entry snapshot that drifts.
+    stored = "ASSEMBLED SYSTEM PROMPT v1"
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
+            model="claude", system_prompt=stored, tools_schema=[{"name": "bash"}],
+            params={"max_tokens": 8192}, max_tool_calls=50),
+    ], full=True))
+    assert stored in out
+
+
 def test_step_context_collapsed_even_in_default_mode() -> None:
     # design §5.1: step_context is folded by default in BOTH views.
     out = "\n".join(_lines([

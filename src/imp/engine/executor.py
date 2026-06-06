@@ -71,6 +71,50 @@ class RunResult(Enum):
     ERRORED = "errored"
 
 
+def _latest_step_context_system_prompt(log: EventLog, agent_id: str) -> str | None:
+    """The verbatim system_prompt from the LATEST step_context for this agent_id,
+    or None if none exists. 'Latest' matters: a goto re-entry renders afresh and
+    emits a newer step_context; resume must replay the newest, not an earlier row.
+    Resume is not a hot path and the log is per-Change, so a linear scan is fine."""
+    found: str | None = None
+    for e in log.read():
+        if e.get("type") == "step_context" and e.get("agent_id") == agent_id:
+            found = (e.get("payload") or {}).get("system_prompt")
+    return found
+
+
+def _resume_system_prompt(
+    log: EventLog, agent_id: str, transcript_dir: Any,
+) -> str | None:
+    """Resume-replay source. Returns the stored prompt to replay verbatim, or
+    None when the caller should re-render. Aborts on the invariant violation:
+    a non-empty transcript with no stored step_context means messages were
+    rendered against a now-lost prompt — re-rendering would silently diverge."""
+    from imp.agents.transcript import Transcript
+    stored = _latest_step_context_system_prompt(log, agent_id)
+    if stored is not None:
+        return stored
+    if Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
+        raise RuntimeError(
+            f"resume invariant violated: step {agent_id!r} has a non-empty "
+            "transcript but no stored step_context system prompt; refusing to "
+            "re-render against a lost prompt")
+    return None       # empty transcript (pre-emit crash, or no-transcript provider)
+
+
+def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, ...]:
+    """Fresh-entry seed. `<imp:begin/>` (or the wrapper text on a fresh goto),
+    plus a name line when the Change is named — so a named Change conveys its
+    slug through the immutable conversation record, never the cached prefix.
+    Unnamed Changes get the begin token alone (no leaked provisional name). One
+    TextBlock with a blank-line separator, so every provider's text join keeps
+    the token and the name line apart on the wire."""
+    opening = wrapper_text or "<imp:begin/>"
+    text = (f"{opening}\n\nThis Change is named `{change.slug}`."
+            if change.slug else opening)
+    return (Message(role="user", content=(TextBlock(text=text),)),)
+
+
 async def run_change(
     change: Change,
     *,
@@ -191,9 +235,6 @@ async def run_change(
                 state.retry_feedback = {
                     "target_step": flat[target_idx].name, "text": feedback_text}
             state.save(change.state_dir)
-
-            if state.pending_rename:
-                log = apply_pending_rename(change, state, log, on_event=on_event)
     finally:
         # prev_cwd may have been removed (e.g. resume from inside a worktree this
         # run merged + tore down). Don't let the restore mask the result/exception.
@@ -220,11 +261,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
       status=completed and worktree gone on success, or re-tries from state on
       block — never data loss, never a double-merge (resume rejects completed).
     """
-    # M4: a rename requested on the very last step never reached the boundary
-    # hook. Don't let it vanish silently — record why.
-    if state.pending_rename:
-        _emit(log, "rename_dropped", {"requested": state.pending_rename})
-        state.pending_rename = None
     state.step = None  # terminal cursor (safe to persist early; status is NOT yet)
 
     # CRITICAL ordering: never write status="completed" until the run has truly
@@ -271,56 +307,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     })
     worktree.remove_worktree(change.control_root, change.id)  # steps/ goes with it
     return RunResult.COMPLETED
-
-
-def apply_pending_rename(
-    change: Change, state: State, log: EventLog, *, on_event: EventCallback | None,
-) -> EventLog:
-    """Apply state.pending_rename at a step boundary (spec §5.3). CONTENT-ONLY:
-    the id is immutable, so this never touches a git ref or worktree path. It (a)
-    rewrites `title` in change.json, (b) git-mv's the spec file old-slug -> new-slug
-    if it already exists, (c) emits change_renamed. The slug is derived, so there
-    is nothing to reassign on the Change beyond `title`."""
-    import json as _json
-
-    name = state.pending_rename
-    assert name is not None
-    old_title = change.title
-    old_slug = change.slug
-    change.title = name          # slug property now derives from the new title
-    new_slug = change.slug
-    if name == old_title:
-        state.pending_rename = None
-        state.save(change.state_dir)
-        return log
-
-    # Persist the new title (created_at + id preserved).
-    meta_path = change.change_dir / "change.json"
-    meta = _json.loads(meta_path.read_text())
-    meta["title"] = name
-    meta_path.write_text(_json.dumps(meta, indent=2, sort_keys=True))
-
-    # If an early spec file exists under the old slug, move it so the filename
-    # tracks the settled name. `git mv` for a tracked/staged file; fall back to a
-    # filesystem rename for an UNTRACKED early draft (git mv fails "not under
-    # version control" on those). The fallback is essential: a lingering untracked
-    # imp/specs/<old-slug>.md is seen by is_dirty() and would later block the merge
-    # (the exact failure the deleted spec-writer warning guarded against).
-    old_spec = change.project_root / "imp" / "specs" / f"{old_slug}.md"
-    if old_spec.exists() and old_slug != new_slug:
-        from imp.engine import worktree
-        new_spec = change.project_root / "imp" / "specs" / f"{new_slug}.md"
-        proc = worktree._git(
-            change.project_root, "mv", f"imp/specs/{old_slug}.md",
-            f"imp/specs/{new_slug}.md")
-        if proc.returncode != 0:                 # untracked draft: plain rename
-            old_spec.rename(new_spec)
-
-    state.pending_rename = None
-    state.save(change.state_dir)
-    _emit(log, "change_renamed",
-          {"id": change.id, "old_title": old_title, "new_title": name})
-    return log
 
 
 async def _dispatch_step(
@@ -445,11 +431,8 @@ async def _route_agent(
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = False
-        opening = wrapper_text or "<imp:begin/>"           # fresh-seed via initial_messages
         retry_wrapper: str | None = None
-        initial: tuple[Message, ...] = (
-            Message(role="user", content=(TextBlock(text=opening),)),
-        )
+        initial: tuple[Message, ...] = _seed_messages(change, wrapper_text)
     else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = True
@@ -480,7 +463,8 @@ async def _route_agent(
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
-            initial_messages=initial, lint_command=lint_command,
+            initial_messages=initial, is_resume=is_resume,
+            lint_command=lint_command,
             test_command=test_command, non_interactive=non_interactive)
         if result.delay is None:
             break
@@ -583,6 +567,7 @@ async def _run_agent_invocation(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
     initial_messages: tuple[Message, ...],
+    is_resume: bool = False,
     prior_backoff_attempts: int = 0,
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
@@ -608,12 +593,18 @@ async def _run_agent_invocation(
         provider_model = state.resolved_tiers[tier]
     provider = provider_from_model(provider_model)
 
-    rendered = render_prompt(
-        agent_def.prompt_template_source, build_context(
-            change_id=change.id, change_slug=change.slug, change_title=change.title,
-            event_log=log, vars=state.vars,
-        ),
-    )
+    stored = _resume_system_prompt(log, agent_id, transcript_dir) if is_resume else None
+    if stored is not None:
+        rendered = stored
+        system_prompt_override: str | None = stored
+    else:
+        rendered = render_prompt(
+            agent_def.prompt_template_source, build_context(
+                change_id=change.id, change_slug=change.slug, change_title=change.title,
+                event_log=log, vars=state.vars,
+            ),
+        )
+        system_prompt_override = None
 
     subagent_defs = {
         name: workflow.agents[name]
@@ -644,6 +635,7 @@ async def _run_agent_invocation(
         provider_name=provider.name,
         model_name=provider.model,
         rendered_system_prompt=rendered,
+        system_prompt_override=system_prompt_override,
         initial_messages=initial_messages,
         change_context=ChangeContext(
             id=change.id, slug=change.slug, title=change.title,
@@ -660,6 +652,7 @@ async def _run_agent_invocation(
         agent_id=agent_id,
         event_log=log,
         change_state=state,
+        change=change,
         first_event_parent_id=started["id"],
         resolved_tiers=state.resolved_tiers,
         coordinator=coordinator,

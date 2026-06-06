@@ -30,6 +30,21 @@ class Change:
         from imp.engine.slug import dated_slug
         return dated_slug(self.title, date=self.id[:10])
 
+    def rename(self, name: str, *, log: JsonlEventLog) -> str:
+        """Content-only rename (no git): set title, rewrite change.json under the
+        gitignored .imp/ (never dirties the tracked worktree), emit change_renamed.
+        Returns the new derived slug. The id is immutable, so nothing else moves."""
+        old_title = self.title
+        self.title = name                       # slug property now derives anew
+        meta_path = self.change_dir / "change.json"
+        meta = json.loads(meta_path.read_text())
+        meta["title"] = name
+        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        log.append(agent_id=None, type="change_renamed",
+                   payload={"id": self.id, "old_title": old_title,
+                            "new_title": name, "new_slug": self.slug})
+        return self.slug
+
     @property
     def workflow_dir(self) -> Path:
         # The Change's own worktree carries the tracked workflow; the branch IS

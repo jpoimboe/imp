@@ -30,7 +30,6 @@ from imp.engine import journal, recovery, worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
-from imp.engine.naming import random_title
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import dated_slug, new_change_id
 from imp.engine.state import LockHeld, ProjectLock, State
@@ -140,7 +139,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         return 2
 
     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
-    title = args.title if args.title is not None else random_title()
+    # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
+    # names it via rename_change once intent is clear, or the user passes --title.
+    title = args.title if args.title is not None else ""
     try:
         change = Change.create(control, title=title, change_id=change_id,
                                base_branch=base)

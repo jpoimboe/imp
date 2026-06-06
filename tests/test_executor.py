@@ -1024,7 +1024,7 @@ async def test_fresh_start_seeds_initial_messages_with_imp_begin_tag(
     msg = inv.initial_messages[0]
     assert msg.role == "user"
     assert len(msg.content) == 1
-    assert msg.content[0].text == "<imp:begin/>"
+    assert msg.content[0].text.startswith("<imp:begin/>")
 
 
 def _seed_back_edge_workflow(
@@ -1319,9 +1319,9 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
     coder_invs = [i for i in invs if i.agent_def.name == "coder"]
     assert len(coder_invs) == 2, [i.agent_def.name for i in invs]
 
-    # Fresh entry: one <imp:begin/> seed.
+    # Fresh entry: one seed message containing <imp:begin/> plus the Change name.
     assert len(coder_invs[0].initial_messages) == 1
-    assert coder_invs[0].initial_messages[0].content[0].text == "<imp:begin/>"
+    assert coder_invs[0].initial_messages[0].content[0].text.startswith("<imp:begin/>")
 
     # Resume-kept entry: NO seed message at all.
     assert coder_invs[1].initial_messages == ()
