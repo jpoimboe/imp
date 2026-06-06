@@ -345,7 +345,14 @@ class CodexAgentRunner:
         error. Inline cap-abort / native-violation / turn.failed / interrupt
         handling is preserved verbatim inside the inner loop.
         """
-        thread_options = self._build_thread_options()
+        # Enable codex's model-hosted web_search ONLY when this agent declared
+        # the tool (governance: agents opt in via `tools:`). The flag also gates
+        # how process_event surfaces a web_search item (expected tool_call vs
+        # disabled-state tripwire).
+        from imp.providers.web_native import declared_web_tools
+        web_enabled = "web_search" in declared_web_tools(invocation.agent_def)
+        proc_state["web_search_enabled"] = web_enabled
+        thread_options = self._build_thread_options(web_search_enabled=web_enabled)
         if thread_options is None:
             # SDK unavailable (test/fake path): start with no options.
             thread = client.start_thread()
@@ -568,11 +575,17 @@ class CodexAgentRunner:
             next_prompt = str(nxt)
             nudges_used += 1
 
-    def _build_thread_options(self) -> Any:
+    def _build_thread_options(self, *, web_search_enabled: bool = False) -> Any:
         """ThreadOptions with the design's exact production flags. Lives in its
         own method so the test seam can replace it without touching
         `_drive_turns`. Returns None when the SDK is unavailable (test/fake
-        path) so `_drive_turns` starts the thread without options."""
+        path) so `_drive_turns` starts the thread without options.
+
+        `web_search_enabled` is True only when the running agent declared the
+        `web_search` tool (see `_drive_turns`). It is the lone native tool imp
+        permits codex: model-hosted, so `networkAccessEnabled` stays False (the
+        command sandbox cannot reach the network); the search itself is
+        ungoverned (imp observes the query event but does not mediate it)."""
         try:
             from openai_codex_sdk import (
                 ThreadOptions,
@@ -588,7 +601,7 @@ class CodexAgentRunner:
             model=self.model,
             sandboxMode="danger-full-access",
             approvalPolicy="never",
-            webSearchEnabled=False,
+            webSearchEnabled=web_search_enabled,
             networkAccessEnabled=False,
         )
 
@@ -697,13 +710,33 @@ def process_event(
                 state["complete_step_called"] = True
             return
         if itype == "web_search":
-            # `web_search_enabled=False` should remove the tool entirely.
+            query = getattr(item, "query", "") or ""
+            if state.get("web_search_enabled"):
+                # Expected: the agent declared `web_search` and the SDK ran the
+                # model-hosted search. Surface it as a tool_call so it shows in
+                # the narrative/`imp log`. codex's WebSearchItem exposes only the
+                # query (no results/citations), so the result is informational.
+                from imp.agents.runner import ToolResultBlock, ToolUseBlock
+                call_id = getattr(item, "id", "") or ""
+                elog.append_tool_call(
+                    agent_id=agent_id,
+                    block=ToolUseBlock(
+                        id=call_id, name="web_search",
+                        input={"query": query}),
+                )
+                elog.append_tool_result(
+                    agent_id=agent_id,
+                    block=ToolResultBlock(
+                        tool_use_id=call_id, content="", is_error=False),
+                )
+                return
+            # Disabled (`webSearchEnabled=False`): the tool should be gone.
             # Seeing one is a soft tripwire (not fail-closed by itself; the
             # SDK-form disable is verified live in the e2e test).
             elog.append(agent_id=agent_id, type="runner_warning",
                         payload={"message":
                                  f"unexpected codex web_search item "
-                                 f"(query={getattr(item, 'query', '')!r})"})
+                                 f"(query={query!r})"})
             return
         if itype in ("file_change", "command_execution"):
             # Fail-closed tripwire (design HIGH-3). The native edit ALREADY

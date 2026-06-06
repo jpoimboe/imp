@@ -42,6 +42,18 @@ def test_capability_openai_web_search_ok() -> None:
     wn.check_web_capability("openai", _agent(frozenset({"web_search"})))
 
 
+def test_capability_codex_web_search_ok() -> None:
+    # codex supports model-hosted web_search (option B) — must not raise.
+    wn.check_web_capability("codex", _agent(frozenset({"web_search"})))
+
+
+def test_capability_codex_web_fetch_fails_loud() -> None:
+    # codex has no web_fetch (only web_search).
+    with pytest.raises(perr.ConfigError) as ei:
+        wn.check_web_capability("codex", _agent(frozenset({"web_fetch"})))
+    assert "codex" in str(ei.value)
+
+
 def test_anthropic_specs() -> None:
     specs = wn.anthropic_web_tool_specs(_agent(frozenset({"web_search", "web_fetch"})))
     types = {s["type"] for s in specs}
