@@ -7,6 +7,8 @@ spawn idiom matches tests/test_human_gate_pty.py (stdlib pty, start_new_session)
 from __future__ import annotations
 
 import contextlib
+import enum
+import errno
 import fcntl
 import os
 import pty
@@ -21,6 +23,28 @@ import pyte
 
 from impty import view
 from impty.view import Cell
+
+_READ_CHUNK = 65536
+_FLOOR = 0.01  # 10 ms — minimum strictly-positive select() slice (deadline safety)
+_POLL = 0.02  # 20 ms — nominal Phase-1 poll cadence cap
+_GRACE = 0.1  # 100 ms — Phase-2 best-effort sweep margin (latency/flake knob, not correctness)
+
+
+def _select_slice(remaining: float) -> float:
+    """A small, strictly-positive select() slice: poll at most every _POLL s,
+    never block past the remaining budget, never <= 0 (so select() stays valid
+    right at a deadline)."""
+    return max(_FLOOR, min(remaining, _POLL))
+
+
+class _StepResult(enum.Enum):
+    """Outcome of one drain step. DATA: bytes read and fed to pyte. EOF: the
+    slave is fully closed. QUIET: the select slice elapsed with nothing
+    readable."""
+
+    DATA = "data"
+    EOF = "eof"
+    QUIET = "quiet"
 
 
 def _set_winsize(fd: int, rows: int, cols: int) -> None:
@@ -93,8 +117,15 @@ class TerminalSession:
         return self._proc.pid
 
     def _write_reply(self, data: str) -> None:
-        """Feed a pyte-generated terminal reply back into the program's stdin."""
-        os.write(self._master, data.encode("utf-8"))
+        """Feed a pyte-generated terminal reply (CPR / device-attribute answer)
+        back into the program's stdin. Best-effort and non-blocking: only write
+        when the master is immediately writable, else drop the reply — a drain
+        loop must never block on a reply when the child has stopped reading its
+        stdin and the input buffer is full."""
+        _, writable, _ = select.select([], [self._master], [], 0)
+        if writable:
+            with contextlib.suppress(OSError):
+                os.write(self._master, data.encode("utf-8"))
 
     def send(self, data: bytes | str) -> None:
         """Write raw keystrokes to the program. Strings are UTF-8 encoded.
@@ -102,6 +133,28 @@ class TerminalSession:
         if isinstance(data, str):
             data = data.encode("utf-8")
         os.write(self._master, data)
+
+    def _read_step(self, timeout: float) -> _StepResult:
+        """One select→read→feed step, classified tri-state.
+
+        DATA  — bytes were read and fed to pyte.
+        EOF   — the slave is fully closed: os.read returned b'', or raised
+                OSError with errno == EIO (the Linux master-EOF surface; macOS
+                yields b''). Other OSErrors propagate as genuine errors.
+        QUIET — the select slice elapsed with nothing readable."""
+        readable, _, _ = select.select([self._master], [], [], timeout)
+        if not readable:
+            return _StepResult.QUIET
+        try:
+            chunk = os.read(self._master, _READ_CHUNK)
+        except OSError as exc:
+            if exc.errno == errno.EIO:
+                return _StepResult.EOF
+            raise
+        if not chunk:
+            return _StepResult.EOF
+        self._stream.feed(chunk)
+        return _StepResult.DATA
 
     def wait_idle(self, idle: float = 0.2, hard: float = 10.0) -> bool:
         """Block until the child produces output and then goes quiet for `idle`
@@ -117,15 +170,10 @@ class TerminalSession:
         start = time.monotonic()
         saw_output = False
         while True:
-            readable, _, _ = select.select([self._master], [], [], idle)
-            if readable:
-                try:
-                    chunk = os.read(self._master, 65536)
-                except OSError:
-                    return True  # pty closed
-                if not chunk:
-                    return True  # EOF — child exited
-                self._stream.feed(chunk)
+            result = self._read_step(idle)
+            if result is _StepResult.EOF:
+                return True  # child exited / pty closed
+            if result is _StepResult.DATA:
                 saw_output = True
             elif saw_output or self._proc.poll() is not None:
                 return True  # quiet after output, or child already gone
