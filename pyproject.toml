@@ -65,7 +65,7 @@ warn_unreachable = true
 # try/except ImportError); it is not installed in the dev/test env, so mypy
 # can't resolve it. Treat it as a missing import rather than a hard error.
 [[tool.mypy.overrides]]
-module = "openai_codex_sdk"
+module = ["openai_codex_sdk", "openai_codex_sdk.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
