@@ -126,7 +126,7 @@ class LiveDriver:
         # agent's rename_change step, or a user-supplied --title).
         if not (root.title and root.title.strip()):
             return
-        head = (f"#{root.slug if root.slug else root.title}  "
+        head = (f"#{root.slug or '?'}  "
                 f"{root.title}").rstrip()
         self._print_lines([pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=self._color)])
 
