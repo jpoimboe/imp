@@ -16,37 +16,34 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-# A dark terminal theme for the mockup. The 16 ANSI names map to ONE cohesive,
-# desaturated family (low-saturation pastels on near-black, in the spirit of
-# Selenized / ayu-mirage) so the render reads as a single designed surface rather
-# than the default Tango neon — the saturated cyan/green were the loudest, so they
-# recede the most. This affects only the snap-ui PNG (real terminals paint ANSI
-# from the user's own theme); it exists so colour cohesion can be judged from the
-# mockup. Every hue is reachable from ANSI-16, so nothing here steers the design
-# toward colours the codes can't emit.
-_BG = (0x1B, 0x1D, 0x21)
-_FG = (0xC5, 0xC8, 0xC6)
+from imp.cli import palette as pal
 
-_PALETTE: dict[str, tuple[int, int, int]] = {
-    "black": (0x2A, 0x2D, 0x32),
-    "red": (0xC0, 0x6A, 0x66),
-    "green": (0x90, 0xA9, 0x59),  # muted olive, not neon lime
-    "brown": (0xC4, 0xA0, 0x00),  # pyte's name for ANSI yellow
-    "yellow": (0xC9, 0xA5, 0x54),
-    "blue": (0x6E, 0x90, 0xB8),
-    "magenta": (0xA8, 0x84, 0xB5),
-    "cyan": (0x5E, 0xA0, 0x9E),  # muted teal, not neon cyan
-    "white": (0xC5, 0xC8, 0xC6),
-    "brightblack": (0x55, 0x57, 0x53),  # chrome / breadcrumbs — almost invisible
-    "brightred": (0xD6, 0x7B, 0x76),
-    "brightgreen": (0xA1, 0xBA, 0x6A),
-    "brightbrown": (0xDB, 0xBC, 0x6A),
-    "brightyellow": (0xDB, 0xBC, 0x6A),
-    "brightblue": (0x7F, 0xA2, 0xCA),
-    "brightmagenta": (0xBA, 0x96, 0xC6),
-    "brightcyan": (0x6F, 0xB3, 0xB0),
-    "brightwhite": (0xE6, 0xE8, 0xE6),
-}
+# The mockup paints imp's OWN palette, sourced from imp.cli.palette so it can't
+# drift from what imp emits live. Dark/light accent cells arrive as truecolor
+# (imp emits `\x1b[38;2;…m`) and render their exact RGB directly via _rgb; the
+# named map below is consulted only for the `ansi`-theme snapshot (named SGR
+# codes) and for the surface defaults — both built from imp's representative
+# (dark) palette so there is one source of truth.
+_BG, _FG = pal.surface("dark")
+
+
+def _named_palette() -> dict[str, tuple[int, int, int]]:
+    """pyte color name → RGB, built from imp's live palette. Only the eight names
+    imp actually emits need entries ('brown' is pyte's name for ANSI yellow,
+    'brightblack' the dim chrome gray, 'brightblue' the user's turn); anything
+    else falls back to the surface foreground/background."""
+    rgb = pal.theme_rgb("dark")
+    bg, fg = pal.surface("dark")
+    return {
+        "red": rgb["red"], "green": rgb["green"],
+        "yellow": rgb["yellow"], "brown": rgb["yellow"],
+        "blue": rgb["blue"], "magenta": rgb["magenta"], "cyan": rgb["cyan"],
+        "brightblack": rgb["gray"], "brightblue": rgb["bright_blue"],
+        "black": bg, "white": fg, "brightwhite": fg,
+    }
+
+
+_PALETTE: dict[str, tuple[int, int, int]] = _named_palette()
 
 # Adwaita Mono — monospace with box-drawing AND the symbol glyphs imp's TUI uses
 # (✓ ↳ ⏺ · → ⟨⟩ │). Noto Sans Mono (the earlier choice) renders ✓/↳/⏺ as .notdef
@@ -71,7 +68,8 @@ def _load_font(path: str, size: int, bold: bool) -> ImageFont.FreeTypeFont:
 # (metadata / thinking / tiers), so substituting a flat dim-gray foreground is
 # faithful; the trailing reset (CSI 0 m) clears it like any other attribute.
 _FAINT_RE = re.compile("\x1b\\[2m")
-_FAINT_GRAY = "\x1b[38;2;133;133;133m"
+# Dim text (SGR 2) renders as the theme's chrome gray, sourced from imp's palette.
+_FAINT_GRAY = "\x1b[38;2;{};{};{}m".format(*pal.theme_rgb("dark")["gray"])
 
 
 def show_faint(ansi: str) -> str:
@@ -95,10 +93,9 @@ def _rgb(name: str, default: tuple[int, int, int]) -> tuple[int, int, int]:
     return default
 
 
-# A light-terminal surface, for previewing the `light` theme (dark text on a
-# near-white background, mirroring what a light terminal paints).
-_LIGHT_BG = (0xFA, 0xFA, 0xF8)
-_LIGHT_FG = (0x2A, 0x2A, 0x2A)
+# The light surface, for previewing the `light` theme — sourced from imp's palette
+# (a warm cream with dark slate text, mirroring what a light terminal paints).
+_LIGHT_BG, _LIGHT_FG = pal.surface("light")
 
 
 def render_screen(

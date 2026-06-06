@@ -21,25 +21,48 @@ _ANSI_NAMED: dict[str, str] = {
     "gray": "\x1b[90m", "bright_blue": "\x1b[94m",
 }
 
-# One muted, desaturated family, defined as RGB once and emitted as 24-bit
-# truecolor so the look is identical in every truecolor terminal (and in the
-# snap-ui mockup, which renders whatever imp emits). `dark` is tuned for a
-# near-black background; `light` re-tunes the SAME semantic roles for a
-# near-white one (darker hues so they stay legible, a lighter chrome gray so it
-# still recedes). These apply only when the resolved theme is dark/light; the
-# `ansi` theme above is the fallback for non-truecolor terminals.
-_DARK_RGB: dict[str, tuple[int, int, int]] = {
-    "red": (0xC0, 0x6A, 0x66), "green": (0x90, 0xA9, 0x59),
-    "yellow": (0xC9, 0xA5, 0x54), "blue": (0x6E, 0x90, 0xB8),
-    "magenta": (0xA8, 0x84, 0xB5), "cyan": (0x5E, 0xA0, 0x9E),
-    "gray": (0x55, 0x57, 0x53), "bright_blue": (0x7F, 0xA2, 0xCA),
+# The Selenized palette (https://github.com/jan-warchol/selenized) — a cohesive,
+# accessibility-tuned 16-color scheme with matched dark and light variants. We use
+# its published RGB values verbatim (not a hand-tuned lookalike): the six accents
+# from the normal set, `gray` from `dim_0` (Selenized's de-emphasis color, for
+# breadcrumbs / chrome), and `bright_blue` from `br_blue` (the user's turn).
+# Defined once and emitted as 24-bit truecolor so the look is identical in every
+# truecolor terminal (and in the snap-ui mockup, which renders whatever imp emits).
+# These apply only when the resolved theme is dark/light; the `ansi` theme above is
+# the fallback for non-truecolor terminals.
+_DARK_RGB: dict[str, tuple[int, int, int]] = {  # selenized dark
+    "red": (0xFA, 0x57, 0x50), "green": (0x75, 0xB9, 0x38),
+    "yellow": (0xDB, 0xB3, 0x2D), "blue": (0x46, 0x95, 0xF7),
+    "magenta": (0xF2, 0x75, 0xBE), "cyan": (0x41, 0xC7, 0xB9),
+    "gray": (0x72, 0x89, 0x8F), "bright_blue": (0x58, 0xA3, 0xFF),
 }
-_LIGHT_RGB: dict[str, tuple[int, int, int]] = {
-    "red": (0xA8, 0x3B, 0x38), "green": (0x55, 0x6F, 0x22),
-    "yellow": (0x8A, 0x6D, 0x12), "blue": (0x2F, 0x5C, 0x96),
-    "magenta": (0x7A, 0x49, 0x96), "cyan": (0x2A, 0x73, 0x70),
-    "gray": (0xA6, 0xAA, 0xA6), "bright_blue": (0x27, 0x5A, 0xA0),
+_LIGHT_RGB: dict[str, tuple[int, int, int]] = {  # selenized light
+    "red": (0xD2, 0x21, 0x2D), "green": (0x48, 0x91, 0x00),
+    "yellow": (0xAD, 0x89, 0x00), "blue": (0x00, 0x72, 0xD4),
+    "magenta": (0xCA, 0x48, 0x98), "cyan": (0x00, 0x9C, 0x8F),
+    "gray": (0x90, 0x99, 0x95), "bright_blue": (0x00, 0x6D, 0xCE),
 }
+
+
+# The surface each truecolor theme is designed for: (background, foreground). imp
+# never paints a background — these are the single source of truth for the theme's
+# intended surface, consumed by the snap-ui mockup (impty.render) so a rendered PNG
+# matches a real terminal on that theme. Selenized bg_0 / fg_0 for each variant.
+_SURFACES: dict[str, tuple[tuple[int, int, int], tuple[int, int, int]]] = {
+    "dark": ((0x10, 0x3C, 0x48), (0xAD, 0xBC, 0xBC)),
+    "light": ((0xFB, 0xF3, 0xDB), (0x53, 0x67, 0x6D)),
+}
+
+
+def theme_rgb(theme: str) -> dict[str, tuple[int, int, int]]:
+    """The accent name→RGB map for a truecolor theme. `ansi` has no canonical RGB
+    (the terminal paints it), so the dark map stands in when a mockup needs one."""
+    return {"dark": _DARK_RGB, "light": _LIGHT_RGB}.get(theme, _DARK_RGB)
+
+
+def surface(theme: str) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """The (background, foreground) the theme is designed for (see _SURFACES)."""
+    return _SURFACES.get(theme, _SURFACES["dark"])
 
 
 def _truecolor_map(rgb: dict[str, tuple[int, int, int]]) -> dict[str, str]:
