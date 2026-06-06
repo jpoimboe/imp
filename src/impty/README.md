@@ -20,6 +20,7 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 ## API
 
 - `wait_idle(idle=0.2, hard=10.0) -> bool` — read until quiet; `False` on hard timeout.
+- `run_to_completion(hard=60.0) -> int` — drive the child to exit, draining ALL remaining output into pyte first; returns the exit code, raises `TimeoutExpired` on hard timeout (child still alive). Use this (not `wait()`) when the child floods after your last `send()`.
 - `send(bytes | str)` — raw keystrokes to the program.
 - `viewport() -> str` — current visible screen (act on this each turn).
 - `transcript(limit=None) -> str` — full run in order, bounded by `limit`.
