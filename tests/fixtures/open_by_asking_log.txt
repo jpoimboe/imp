@@ -1,172 +1,72 @@
 
 spec
   
-  spec-writer · claude-opus-4-7
+  spec-writer · opus
   
-    ToolSearch · 1 call · 0s
+  • What change would you like to make?
   
-  • The starting intent "vine salt kelp" looks like an auto-generated
-    placeholder rather than a real description of a change. I don't have enough
-    information to write a spec.
+  > Add a top-level `--version` flag (with a `-V` short alias) to the `imp` CLI
+    that prints the installed imp version and exits 0, without requiring a
+    subcommand. Read the version from the installed package metadata
+    (importlib.metadata) so it stays in sync with pyproject.toml.
   
-    What change do you actually want to make? A short prose description of the
-    goal is enough to start.
+  • Let me explore the CLI structure before proposing a design.
   
-  > I want to change "imp new" such that it doesn't pass the title as the first
-    prompt to the LLM.  maybe the first prompt to the LLM should be something
-    that would prompt the LLM to ask the user what they want to do
+    ToolSearch · 2 calls · 2s
   
-    bash · grep · read_file · 14 calls · 54s
+  • Let me explore the CLI structure.
   
-  • I read the relevant code. Here's what's happening today:
+    grep · glob · 2 calls · 0s
   
-     • imp new with no title generates a random three-word phrase (e.g. vine
-       salt kelp) and stores it as change.title with auto_titled=True.
-     • The first user message sent to the LLM on each agent step is just the
-       literal string "begin" (executor.py:436).
-     • The title appears in the system prompt: the spec-writer.md template
-       renders Change title (user's starting intent): \{{ change.title }}``
-       unconditionally, so the random words get presented to the model as if
-       they were the user's stated intent.
+  • Let me look at the main parser setup and how the package is named.
   
-    So the actual "title-passed-to-LLM" surface is the spec-writer system
-    prompt, not the first user message. When auto-titled, the model is being
-    told the user's intent is vine salt kelp, which is nonsense and pushes the
-    agent toward fabricating context.
+    read_file · 1 call · 0s
   
-    Two questions before I propose options — I'll ask the first one now.
+  • Let me check the package metadata and any existing version handling/tests.
   
-    When the user does supply a real title (imp new "add --version flag"),
-    should the title still flow into the spec-writer prompt as the starting
-    intent (current behavior), or do you want it removed in that case too — so
-    that imp new always opens by asking the user what they want, regardless of
-    whether a title was given?
+    read_file · grep · 2 calls · 0s
   
-  > ask regardless
+  • The codebase is clear. The package is named imp (version 0.0.1 in
+    pyproject.toml), and the CLI is a single argparse parser in
+    src/imp/cli/main.py with required=True subparsers.
   
-  • Let me check a couple more places before proposing the design.
+    Here's my proposed design:
   
-    grep · read_file · bash · 8 calls · 46s
+     • Add parser.add_argument("--version", "-V", action="version",
+       version=f"imp {<version>}") to the top-level parser in main(). Argparse's
+       version action fires during parse_args and exits 0 before the
+       required-subparser check, so imp --version / imp -V work with no
+       subcommand — no special-casing needed.
+     • Read the version via a small helper using
+       importlib.metadata.version("imp").
+     • Output format: imp 0.0.1 (one line, to stdout, exit 0) — the argparse
+       version action default.
+     • Add a CLI test asserting imp --version and imp -V print the metadata
+       version and exit 0.
   
-  • Let me check one more thing — how the dogfood live test interacts with the
-    title.
+    One decision worth your call: if the package metadata can't be found
+    (PackageNotFoundError — e.g. running from a source checkout that was never
+    installed), should --version (a) print a fallback like imp unknown and still
+    exit 0, or (b) let it error out? I lean toward (a) so --version never
+    crashes.
   
-    bash · 3 calls · 12s
+    Does this look right, and which fallback do you want?
   
-  • I have enough context. Here's the proposed design:
+  > Design looks right. Go with (a): on PackageNotFoundError, print `imp
+    unknown` and still exit 0 so --version never crashes. Please also assert
+    that fallback path in the test.
   
-    Goal: When imp new enters the spec-writer step, the agent opens by asking
-    the user what change they want to make. The title (whether random-default or
-    user-supplied) is no longer rendered into the spec-writer's system prompt as
-    "starting intent".
+  • Naming this add-version-flag.
   
-    Changes:
+    rename_change · write_file · bash · complete_step · 4 calls · 22s
   
-     1 src/imp/assets/workflows/default/agents/spec-writer.md
-        • Remove line 16: Change title (user's starting intent): \{{
-          change.title }}``
-        • Remove the "Auto-titled" line too (we're not differentiating in-prompt
-          anymore — the slug-settling section folds into one branch).
-        • Remove the "Skip reflexive questions on fully-specified requests"
-          paragraph (it presupposed a title that conveyed intent).
-        • Add an explicit "Open the dialogue" instruction at the top of "Your
-          Role" / "Brainstorm Discipline": the first turn MUST be a single
-          question to the user asking what change they want to make. Do not
-          explore the codebase or propose anything before the user answers.
-        • Simplify the "Slug Settling" section: drop the {% if
-          change.auto_titled %} / {% else %} split. Always treat the slug as
-          provisional — once the agent understands the change, call
-          rename_change if the slug doesn't already match (the user-supplied
-          case will usually skip rename if the user repeats their intent
-          verbatim; nothing forces a rename).
-     2 tests/test_default_workflow_dogfood_live.py
-        • Drop TASK_IS_ZERO_AMBIGUITY = True and its branch — every run now
-          produces at least one ask (the opening question).
-        • On the first awaiting_user_input event, the PTY driver replies with
-          the full title text (the feature intent). On subsequent asks it keeps
-          the generic "looks good, proceed with reasonable defaults\n" reply.
-        • Assert asks_answered >= 1 unconditionally.
-     3 Out of scope:
-        • spec-reviewer.md and plan-reviewer.md still render change.title for
-          intent-alignment checks (they run after the user-confirmed spec is on
-          disk, so they're not "the first prompt" the user was concerned about).
-          Leave them alone — YAGNI.
-        • No CLI change; imp new [title] still accepts and uses the title for
-          slug derivation. The title just stops being shown to the spec-writer
-          LLM as authoritative intent.
+  • Spec written and committed as imp/specs/2026-06-06-add-version-flag.md. It
+    captures the top-level --version/-V flag, version resolution via
+    importlib.metadata.version("imp"), the imp unknown fallback on
+    PackageNotFoundError (still exit 0), and tests covering both the success and
+    fallback paths.
   
-    I'll rename the slug to imp-new-open-by-asking.
-  
-    Sound right, or do you want any of those scope calls flipped (e.g. also
-    strip title from the reviewer prompts, or leave the dogfood test out)?
-  
-  > does spec-writer change the slug and the title?
-  
-    bash · grep · 2 calls · 0s
-  
-  • Yes. The rename_change tool sets state.pending_rename; at the next step
-    boundary apply_pending_rename (executor.py:268–) updates both:
-  
-     • change.slug → new dated slug derived from the name
-     • change.title → the new name verbatim
-     • change.auto_titled → flipped to False (the rename is intentional)
-     • Worktree directory + git branch are also renamed
-     • change.json and state.json are rewritten
-  
-    So both slug and title move together — the title isn't a separate, stickier
-    piece of state. After the spec-writer renames, downstream agents
-    (spec-reviewer, plan-reviewer) see the updated title in their templates.
-  
-    Does that resolve the question, or does it shift the design? My read is it
-    doesn't — the design above stands. Shall I proceed and rename the slug to
-    imp-new-open-by-asking?
-  
-  > yes, but also change it such that 1) it automatically changes the title/slug
-    as early as possible (often after the 1st or 2nd message), and then
-    potentially changes it again before the end.  and doesn't ask the user
-    before doing so, just states that it's doing it.
-  
-  • Got it. Updated design:
-  
-    Spec-writer behavior (revised):
-  
-     1 Opening turn: ask the user what change they want; nothing else.
-     2 As soon as intent is clear (typically after the user's 1st or 2nd reply),
-       the agent calls rename_change(name=...) proactively — does not ask
-       permission, just announces it in prose ("Calling this
-       add-version-flag."). The agent must complete the step with
-       phase="drafting" after the announcement so the rename lands at the
-       boundary (this matches the existing "iron rule" mechanism).
-     3 May rename again later if scope clarifies before the spec is written.
-       Same pattern: announce, don't ask. Same iron rule: never rename and
-       commit-spec in the same turn.
-     4 The current {% if change.auto_titled %} / {% else %} split in
-       spec-writer.md collapses to a single unconditional flow (the
-       user-supplied case is no longer special — the agent will still typically
-       end up calling rename_change to re-derive the slug from the user's actual
-       stated intent, but if that matches the existing slug exactly, no-op is
-       fine since rename_change already handles new == old cleanly per
-       executor.py:288).
-  
-    I'll land the slug rename now and write the spec on the next turn.
-  
-    rename_change · complete_step · 2 calls · 2s
-  
-  spec-writer complete · goto(spec-writer) [resume] · 13m 35s
-  
-  spec-writer · claude-opus-4-7
-  
-    ToolSearch · 1 call · 0s
-  
-  • Now I can actually explore the code. Let me verify my earlier assumptions.
-  
-    bash · read_file · 13 calls · 45s
-  
-  • I have everything I need. Writing the spec now.
-  
-    write_file · bash · complete_step · 3 calls · 6s
-  
-  spec-writer complete · 1m 55s
+  spec-writer complete · 1m 44s
   
   spec-verify-commit · 0s
   
@@ -174,71 +74,143 @@ spec
   
   fast-path-spec-gate · 0s
   
-  spec-reviewer · claude-opus-4-7
+  spec-reviewer · opus
   
-    ToolSearch · read_file · query_events · complete_step · 4 calls · 25s
+    ToolSearch · read_file · glob · query_events · 7 calls · 31s
   
-  • No Critical or Major findings. The spec is complete, internally consistent,
-    and aligns with the user's brainstorm clarifications (don't pass title as
-    first prompt; ask regardless of whether the title was user-supplied or
-    auto-generated; auto-rename slug/title proactively after 1st or 2nd message
-    without asking permission; may rename again later).
+  • The events file is large and the spec's factual claims are already verified
+    against source. Let me check for the relevant brainstorm turn type.
   
-    Strengths:
+    query_events · 1 call · 0s
   
-     • Acceptance criteria are concrete and verifiable (specific template
-       strings to remove, specific test constant to delete, specific assertions
-       like asks_answered >= 1, gated IMP_RUN_DOGFOOD=1 end-to-end check).
-     • Scope is explicit on both sides: reviewer prompts and CLI surface are
-       documented as untouched with rationale; the dead auto_titled field is
-       acknowledged and deferred (YAGNI-respectful).
-     • Decisions summary explains why template-not-engine, why always-ask, why a
-       carve-out in the trivial rubric is required — preempting the most likely
-       sources of misinterpretation.
-     • Dogfood test change (first awaiting_user_input reply carries the task) is
-       a clean, well-justified consequence of removing the title from the system
-       prompt.
+  • I have verified all of the spec's load-bearing claims against the actual
+    source. Findings:
   
-    Minor:
+    Verified facts (all correct):
   
-     • AC #4 says the iron rule remains "verbatim" but does not quote the exact
-       sentence the reviewer should grep for; the implementor will have to read
-       the current template to find it. Not blocking — it's clearly the existing
-       "never rename and commit-spec in the same turn" sentence.
-     • AC #3 says the opening turn must be "a single plain-prose question" but
-       doesn't constrain length or content beyond that; an implementor could
-       pick any phrasing. Probably intentional (leaves room for the agent), so
-       this is at most a Nit.
+     • src/imp/cli/main.py defines main(argv) with a top-level
+       argparse.ArgumentParser(prog="imp") ✓
+     • The exact line sub = parser.add_subparsers(dest="cmd", required=True)
+       exists ✓
+     • Subcommands init, new, resume, log, status, abandon plus eval (via
+       add_eval_parser) ✓
+     • pyproject.toml [project].name = "imp", version = "0.0.1", entry point imp
+       = "imp.cli.main:main" ✓
+     • A CLI test suite exists (tests/test_cli_smoke.py, etc.) ✓
+     • The argparse-behavior claim (the version action fires during parse_args
+       and exits before the required-subparser check) is accurate;
+       action="version" prints to stdout and exits 0 by default.
   
-    Nit:
+    The spec is complete, internally consistent, has concrete/testable
+    acceptance criteria, explicit in/out scope, no TODOs/placeholders, and no
+    over-engineering (the PackageNotFoundError fallback is a justified
+    robustness requirement, not smuggled scope).
   
-     • "typically after the user's 1st or 2nd reply" appears in both Scope and
-       AC #4 — a single source would reduce drift if the spec is later edited,
-       but the duplication is intentional emphasis and harmless.
+    complete_step · 1 call · 0s
   
-    Spec is ready for planning.
+  • Spec review complete. The add-version-flag spec is approved (non-blocking).
   
-  spec-reviewer complete · goto(spec-writer) [resume] · 31s
+    Every factual claim it makes about the existing codebase checked out against
+    the actual source — the top-level argparse parser in main(), the exact
+    required=True subparsers line, the subcommand list, the pyproject.toml
+    distribution name/version/entry point, and the existence of a CLI test
+    suite. The central design assumption (argparse's version action exits before
+    the required-subparser check) is correct, so imp --version/-V will work
+    without a subcommand as specified.
   
-  spec-writer · claude-opus-4-7
+    The criteria are concrete and testable, scope boundaries are explicit, and
+    there are no TODOs, contradictions, or over-engineering. The only note is an
+    advisory nit about how the version helper should import
+    importlib.metadata.version to keep the fallback test patchable — an
+    implementation detail, not a blocker.
   
-    ToolSearch · bash · edit_file · complete_step · 5 calls · 22s
+  • No Critical/Major findings. Spec is complete, consistent, and ready for
+    planning.
   
-  spec-writer complete · 35s
+    All load-bearing claims about existing code were verified against source:
+  
+     • main.py main() uses a top-level argparse parser (prog="imp"); the exact
+       cited line sub = parser.add_subparsers(dest="cmd", required=True) is
+       present.
+     • Subcommand list (init, new, resume, log, status, abandon, eval) matches
+       the actual parsers.
+     • pyproject.toml has [project].name="imp", version="0.0.1", and entry point
+       imp=imp.cli.main:main — confirming importlib.metadata.version("imp") is
+       the correct distribution name.
+     • A CLI test suite exists (tests/test_cli_*.py).
+     • The argparse behavior the design relies on (version action exits during
+       parse_args before the required-subparser check; prints to stdout, exit 0)
+       is correct.
+  
+    Acceptance criteria are concrete and testable; scope in/out boundaries are
+    explicit; no TODOs/placeholders/contradictions; no YAGNI (the
+    PackageNotFoundError fallback is justified robustness, not smuggled scope).
+  
+    Nit (advisory, non-blocking): For AC #6's fallback test to work, the version
+    helper should call importlib.metadata.version() at call time (so patching
+    importlib.metadata.version takes effect) rather than binding the name via
+    from importlib.metadata import version; this is an implementation detail,
+    not a spec defect.
+  
+  spec-reviewer complete · goto(spec-writer) [resume] · 1m 2s
+  
+  spec-writer · opus
+  
+  • This is the final advisory polish pass (blocking: false). The reviewer's nit
+    is worth integrating — I'll add a note that the helper must resolve the
+    version at call time so the fallback test's patch takes effect. Let me load
+    tools and amend.
+  
+    ToolSearch · read_file · 2 calls · 3s
+  
+  • I'll integrate the reviewer's nit by adding a call-time resolution note to
+    the decisions summary.
+  
+    edit_file · bash · complete_step · 3 calls · 4s
+  
+  • Polish pass complete. Integrated the reviewer's advisory nit — added a
+    "Resolve the version at call time" decision so the helper calls
+    importlib.metadata.version(...) at call time rather than binding the name
+    eagerly, which keeps AC #6's fallback patch effective. Amended the spec
+    commit and completed the written phase at standard complexity.
+  
+  spec-writer complete · 22s
   
   spec-verify-commit · 0s
   
   spec-final-review-gate · goto(plan-writer) · 0s
 
-spec complete · 16m 37s
+spec complete · 3m 9s
 
 plan
   
-  plan-writer · claude-opus-4-7
+  plan-writer · opus
   
-    ToolSearch · read_file · glob · grep +3 · 25 calls · 4m 7s
+    ToolSearch · read_file · glob · bash · 14 calls · 1m 12s
   
-  plan-writer complete · 4m 43s
+  • Now I have a clear picture. No prior plan files exist, so I'll author plan 1
+    fresh. Let me write the plan.
+  
+    write_file · bash · complete_step · 3 calls · 6s
+  
+  • Plan 1 authored and committed. It delivers the --version / -V flag in two
+    atomic tasks:
+  
+     1 Task 1 — a _resolve_version() helper in src/imp/cli/main.py that reads
+       importlib.metadata.version("imp") at call time with an "unknown" fallback
+       on PackageNotFoundError, plus unit tests (patched-metadata success path +
+       fallback path).
+     2 Task 2 — wires --version/-V into the top-level argparse parser via
+       action="version" with version=f"imp {_resolve_version()}", plus CLI tests
+       asserting AC 1–2 (printed line + exit 0 for both flags, no subcommand)
+       and AC 4 (fallback prints imp unknown, exit 0), and a regression run of
+       existing CLI tests.
+  
+    All seven acceptance criteria map to a task, tests are falsifiable (patched
+    sentinel values, not literals echoed by the implementation), and
+    pyproject.toml is untouched.
+  
+  plan-writer complete · 2m 16s
   
   plan-verify-commit · 0s
   
@@ -246,204 +218,225 @@ plan
   
   fast-path-plan-gate · 0s
   
-  plan-review · claude-opus-4-7
+  plan-review · opus
   
-    ToolSearch · glob · read_file · grep · 29 calls · 5m 58s
+    ToolSearch · glob · read_file · 4 calls · 7s
   
-  • API Error: 529 Overloaded. This is a server-side issue, usually temporary —
-    try again in a moment. If it persists, check status.claude.com.
+  • Now let me verify the plan's claims against the actual source code.
   
-  • API Error: 529 Overloaded. This is a server-side issue, usually temporary —
-    try again in a moment. If it persists, check status.claude.com.
+    read_file · glob · 4 calls · 5s
   
-  • API Error: 529 Overloaded. This is a server-side issue, usually temporary —
-    try again in a moment. If it persists, check status.claude.com.
+  • The plan's core claims about main.py check out: the main(argv: list[str] |
+    None = None) -> int signature, the exact two-line parser/subparser block,
+    the import order (argparse then json), and the subcommand set all match. Let
+    me verify the regression test files and ruff config the plan references.
   
-  error: [agent_incomplete] agent did not call complete_step after nudges
+    glob · read_file · 5 calls · 1s
   
-  plan-review complete · pause · 16m 42s
+  • All of the plan's load-bearing claims are verified against the actual
+    source:
   
-  ⏸ paused (agent_incomplete)
+     • src/imp/cli/main.py exists; main(argv: list[str] | None = None) -> int
+       matches; the exact two-line parser = argparse.ArgumentParser(prog="imp")
+       / sub = parser.add_subparsers(dest="cmd", required=True) block is
+       present.
+     • Import order claim is correct: actual imports are import argparse then
+       import json, so inserting import importlib.metadata between them
+       satisfies ruff's I (isort) ordering.
+     • Distribution name is imp ([project].name), version 0.0.1 — matches the
+       spec example and the version("imp") call.
+     • ruff config is line-length 100 / py311; the regression test files
+       (test_cli_smoke.py, test_cli_status.py, test_journal_read_cli.py) all
+       exist; test_cli_version.py does not yet exist (plan creates it).
+     • Subcommand set (init/new/resume/log/status/abandon/eval) matches AC #5.
+     • The "version action fires before required-subparser check" claim is
+       correct argparse behavior; the call-time-resolution / patchability design
+       is sound and the tests are non-tautological.
   
-  plan-review · claude-opus-4-7
-  
-    ToolSearch · glob · read_file · 8 calls · 15s
-  
-  • I'll verify the plan by checking that its "exact block" replacements match
-    the current files and the contract tests would actually pass on the
-    rewritten template.
-  
-    grep · 2 calls · 0s
-  
-  • Confirmed the discrepancy. Let me finalize.
+    Recording findings.
   
     complete_step · 1 call · 0s
   
-  • Plan reviewed. Approved with one Minor finding (a test-assertion vs.
-    template-wording mismatch that the implementor will catch at Step 7 and
-    resolve in one line either direction). No blocking issues.
+  • Plan review complete. The plan is approved (non-blocking).
   
-  • No Critical or Major findings — the plan is complete, spec coverage is full,
-    the "replace this exact block" snippets in both Task 1 and Task 2 match the
-    current contents of src/imp/assets/workflows/default/agents/spec-writer.md
-    and tests/test_default_workflow_dogfood_live.py byte-for-byte, the iron-rule
-    sentence is preserved verbatim by the Slug Settling rewrite, and every
-    acceptance criterion (#1–#9) is traced to specific steps with verifiable
-    assertions.
+    I verified every load-bearing claim against the actual source — the main.py
+    path and main() signature, the exact parser/subparser lines being edited,
+    the import ordering, the distribution name and version in pyproject.toml,
+    the ruff config, the existence of the cited regression test files, and the
+    subcommand set. All match.
   
-    Minor:
+    The plan fully covers all 7 acceptance criteria, decomposes cleanly into two
+    bite-sized TDD tasks with complete code blocks and exact commands, has no
+    placeholders, maintains type/name consistency between the helper definition
+    and its call site, and stays within scope (pyproject untouched).
   
-     • The new contract test test_spec_writer_prompt_mandates_proactive_rename
-       asserts "without asking the user" in lowered, but the rewritten Slug
-       Settling block (Task 1 Step 5) uses "Rename proactively, without asking."
-       and "do NOT ask the user for permission." — neither contains the
-       contiguous substring "without asking the user". So Task 1 Step 7's
-       "Expected: all six PASS" will actually fail one of the six. The fix is
-       one line in either direction (e.g. tweak the template to "Rename
-       proactively, without asking the user for permission." or relax the
-       assertion to "ask the user for permission" in lowered). The intent of the
-       spec (acceptance #4: "without asking the user for permission") is
-       unambiguous and the implementor will resolve this at the Step 7 failure,
-       but the plan's expected outcome is technically wrong as written.
+    Only two non-blocking notes: a Minor observation that mypy (configured
+    --strict) isn't run by either task (though the code is fully annotated), and
+    a Nit about PackageNotFoundError instantiation (which works fine in 3.11).
   
-    Nit:
+  • No Critical or Major findings. The single plan (plan-1) fully covers all 7
+    acceptance criteria of the spec, and every load-bearing claim about existing
+    code was verified against source:
   
-     • Task 1 Step 4's "Replace this exact block" introduces the discipline
-       items in a new order (Open by asking → Explore context once intent is in
-       hand → One question at a time). This is correct and matches the new flow;
-       just worth noting the implementor must understand they are also
-       reordering, not only replacing, the existing items. The block is shown in
-       full so this is self-evident; no action needed.
-     • Task 2 Step 7 (live dogfood) is correctly labelled optional and tied to
-       acceptance #8, but the plan could have noted that make test-dogfood is
-       the canonical entry point per project_live_dogfood.md; the explicit
-       env-var form shown still works. Cosmetic.
+     • main.py path, main(argv: list[str] | None = None) -> int signature, and
+       the exact two-line parser/subparser block all match the actual file.
+     • Import-order claim verified: actual imports are import argparse then
+       import json, so inserting import importlib.metadata between them is
+       correct for ruff's isort (I) rule.
+     • Distribution name imp and version 0.0.1 confirmed in pyproject
+       ([project].name/version); the spec's imp 0.0.1 example is consistent.
+     • ruff config is line-length 100 / target py311 (plan lints with python -m
+       ruff check); the three regression test files cited in Task 2 Step 5 all
+       exist; test_cli_version.py correctly does not yet exist.
+     • Subcommand set (init/new/resume/log/status/abandon/eval) matches AC #5.
+     • argparse action="version" firing before the required-subparser check is
+       correct behavior; the call-time resolution design makes the
+       monkeypatch-based fallback test (AC #4/#6) effective, and the success
+       test uses a patched sentinel value so it is non-tautological.
   
-  plan-review complete · goto(plan-writer) [resume] · 2m 37s
+    All steps are bite-sized with complete code blocks and exact
+    commands+expected output; no placeholders/TBD/TODO; type usage
+    (_resolve_version() -> str) is consistent between definition (Task 1) and
+    call site (Task 2). No scope creep — pyproject is untouched (AC #7).
   
-  plan-writer · claude-opus-4-7
+    Minor (non-blocking): The project configures mypy in --strict mode, but
+    neither task runs mypy (only ruff). The added code and tests are fully
+    type-annotated, so this is unlikely to surface an issue; an explicit python
+    -m mypy step would be a small robustness improvement but is not required to
+    build correctly.
   
-    ToolSearch · edit_file · bash · complete_step · 4 calls · 17s
+    Nit (non-blocking): importlib.metadata.PackageNotFoundError(dist) is
+    instantiated with a single positional arg in the fallback tests; this works
+    in 3.11, so no action needed.
   
-  plan-writer complete · 26s
+  plan-review complete · goto(plan-writer) [resume] · 1m 11s
+  
+  plan-writer · opus
+  
+  • This is a final advisory polish pass (blocking: False). The Minor finding —
+    adding an explicit mypy step given the project's --strict mypy config — is
+    worth integrating. Let me load tools and revise.
+  
+    ToolSearch · read_file · 2 calls · 3s
+  
+  • I'll integrate the Minor finding by adding an explicit mypy type-check to
+    the verification steps of each task (the project uses --strict mypy).
+  
+    edit_file · bash · 4 calls · 13s
+  
+  • Integrated the Minor finding — added an explicit mypy --strict type-check
+    step to both tasks (and updated Self-Review §5), then folded the edit into
+    the plan commit via fixup.
+  
+    complete_step · 1 call · 0s
+  
+  • Final advisory polish pass complete. The plan was already approved
+    (blocking: False); I integrated the single actionable Minor finding by
+    adding an explicit python -m mypy type-check step to each task's
+    verification sequence (the project runs mypy in --strict mode) and updated
+    the Self-Review lint-scope note accordingly. The Nit required no action. The
+    change was committed as a fixup onto the original plan-1 commit.
+  
+  plan-writer complete · 39s
   
   plan-verify-commit · 0s
   
   plan-final-review-gate · goto(task-lead) · 0s
 
-plan complete · 489m 1s
+plan complete · 4m 7s
 
 implement
   
-  task-lead · claude-sonnet-4-6
+  task-lead · sonnet
   
-    ToolSearch · glob · bash · read_file · 7 calls · 14s
+    ToolSearch · glob · read_file · bash · 6 calls · 8s
   
-    implementer · claude-haiku-4-5-20251001 · 2m 56s
+  • No progress file yet — both tasks are unimplemented. Let me dispatch the
+    implementer for Task 1: Version-resolution helper.
   
-    load skill test-driven-development
+    implementer · haiku · 1m 26s
   
-    bash · 1 call · 28s
+  • Good. Now let me verify the state before dispatching reviewers.
   
-  • Good. make test green at 9cf3c7b (1072 passed, 7 skipped). Now dispatching
-    both reviewers in parallel.
+    bash · 2 calls · 1s
   
-    spec-task-reviewer · claude-sonnet-4-6 (running)
+  • Tests are green at 0e1b4c2. Now dispatching both reviewers.
   
-    quality-reviewer · claude-sonnet-4-6 · 0s
+    read_file · 2 calls · 0s
   
-    ToolSearch · 1 call · 5s
+  • Now dispatching both reviewers for Task 1.
+  
+    spec-task-reviewer · sonnet · 34s
+  
+    quality-reviewer · sonnet · 1m 10s
+  
+  • Both reviewers approved. Let me load the receiving-code-review skill to
+    formally adjudicate.
   
     load skill receiving-code-review
   
-  • Adjudicating findings:
+  • Task 1 is clean — both reviewers found no blocking issues. One Minor finding
+    (test doesn't verify the dist name argument) is deferred as a followup. Let
+    me write progress.md and proceed to Task 2.
   
-     1 Minor/Blocking — "Your Role" summary contradiction: The summary still
-       says "Explore the codebase first, ask questions one at a time…" but the
-       new discipline mandates asking first. This is a real coherence issue in
-       the prompt that could confuse the model. Valid — fix it.
-     2 Nit — {% else %} check is overly broad: The assertion assert "{% else %}"
-       not in body would break on any future legitimate {% else %} in the
-       template. The change.auto_titled check already covers the intent. Defer
-       as followup.
+    bash · write_file · 2 calls · 5s
   
-    Dispatching the implementer to fix the "Your Role" summary:
+  • Now dispatching the implementer for Task 2.
   
-    implementer · claude-haiku-4-5-20251001 · 26s
+    implementer · haiku · 1m 5s
   
-    bash · 2 calls · 32s
+    load skill test-driven-development
   
-  • Fix confirmed. The "Your Role" summary now reads "Ask one question to learn
-    what they want to build, explore the codebase, propose approaches…" —
-    consistent with the new discipline.
+  • Let me verify the state.
   
-    Now let me write progress.md and proceed to Task 2.
+    bash · 2 calls · 1s
   
-    ToolSearch · write_file · 2 calls · 11s
+  • All 5 tests green at 7dd20b8. Now reading the updated main.py diff for
+    reviewers.
   
-  • Now dispatching the implementer for Task 2:
+    bash · 1 call · 0s
   
-    implementer · claude-haiku-4-5-20251001 · 1m 21s
+    spec-task-reviewer · sonnet · 59s
   
-    bash · 1 call · 29s
+    quality-reviewer · sonnet · 1m 22s
   
-  • Tests green at f012793. Dispatching both reviewers:
+  • Both reviewers approved Task 2. One Nit-level observation (eager evaluation
+    on every main() call) is functionally harmless — deferred as a followup
+    note.
   
-    spec-task-reviewer · claude-sonnet-4-6 (running)
+    Let me update progress.md and verify completeness.
   
-    quality-reviewer · claude-sonnet-4-6 · 0s
+    write_file · 1 call · 0s
   
-  • Both reviewers approved Task 2 with no blocking findings.
+  • Now load the verification skill and confirm all tasks are done.
   
-    Now let me verify the plan is fully complete before returning done: true:
-  
-    bash · 1 call · 33s
+    bash · 1 call · 3s
   
     load skill verification-before-completion
   
-  • All verifications pass:
+  • All 5 tests pass. Both plan tasks are committed and verified. The plan is
+    fully implemented.
   
-     • TASK_IS_ZERO_AMBIGUITY fully removed
-     • {{ change.title }} / {{ change.auto_titled }} fully absent from
-       spec-writer.md
-     • Iron rule preserved verbatim
-     • make test: 1072 passed, 7 skipped at f012793
+    complete_step · 1 call · 0s
   
-    write_file · ToolSearch · complete_step · 3 calls · 10s
+  • Both plan tasks implemented and verified.
   
-  • Both plan tasks fully implemented and reviewed.
+    Task 1 (commit 0e1b4c2 "feat: add _resolve_version helper for imp
+    --version"): Added import importlib.metadata and _resolve_version() helper
+    to src/imp/cli/main.py, plus tests/test_cli_version.py with 2 unit tests
+    covering the success and PackageNotFoundError fallback paths.
   
-    Task 1 (feat(spec-writer): open by asking; rename without asking permission
-    — 9cf3c7b + fixup bc62118):
+    Task 2 (commit 7dd20b8 "feat: add --version/-V flag to imp CLI top-level
+    parser"): Wired --version/-V into the top-level argparse parser using
+    action="version" with version=f"imp {_resolve_version()}", and added 3 CLI
+    integration tests covering AC1 (--version), AC2 (-V), and AC4 (fallback to
+    "imp unknown").
   
-     • Added 6 contract tests to tests/test_assets_workflow.py pinning all 5
-       acceptance criteria
-     • Rewrote src/imp/assets/workflows/default/agents/spec-writer.md in 4
-       places: header (removed {{ change.title }} / {{ change.auto_titled }}),
-       Brainstorm Discipline (new "Open by asking" discipline, removed "Skip
-       reflexive questions"), Slug Settling (dropped {% if change.auto_titled %}
-       conditional, added proactive-rename guidance), and complexity criterion 1
-       (added opening-question carve-out)
-     • Fixed "Your Role" summary contradiction (was "Explore the codebase
-       first"; now "Ask one question to learn what they want to build") via
-       fixup
+    All 5 tests pass. No blocking reviewer findings. Carried followups: one
+    Minor (test could assert dist name "imp" is passed) and one Nit (eager
+    evaluation on every main() call is harmless).
   
-    Task 2 (test(dogfood): deliver task via first reply for always-ask
-    spec-writer — f012793):
-  
-     • Removed TASK_IS_ZERO_AMBIGUITY constant and its branch
-     • Updated awaiting_user_input handler: first event delivers title text;
-       subsequent events get generic reply
-     • Replaced gated assertion with unconditional assert asks_answered >= 1
-  
-    make test green (1072 passed, 7 skipped) at f012793. All reviewers approved
-    both tasks.
-  
-    Deferred nit: {% else %} assertion in test_assets_workflow.py is overly
-    broad (future unrelated Jinja2 {% else %} would cause spurious failure);
-    recorded in progress.md.
-  
-  task-lead complete · 16m 46s
+  task-lead complete · 9m 36s
   
   commit-check · 0s
   
@@ -451,38 +444,36 @@ implement
   
   fast-path-cycle-gate · 0s
   
-  plan-cycle-check · claude-sonnet-4-6
+  plan-cycle-check · sonnet
   
-    ToolSearch · read_file · glob · grep · 7 calls · 9s
+    ToolSearch · read_file · glob · grep · 10 calls · 18s
   
-  • The grep confirms implementation is complete:
+  • The implementation is complete. Both tasks from plan-1 are committed:
   
-     • spec-writer.md has zero matches for change.title, change.auto_titled, or
-       TASK_IS_ZERO_AMBIGUITY
-     • test_default_workflow_dogfood_live.py shows the correct asks_answered ==
-       0 first-reply branch, unconditional asks_answered >= 1 assertion, and no
-       TASK_IS_ZERO_AMBIGUITY
+     • Task 1 (SHA 0e1b4c2): _resolve_version() helper with importlib.metadata +
+       fallback
+     • Task 2 (SHA 7dd20b8): --version/-V wired into the top-level argparse
+       parser
   
-    All 9 acceptance criteria are covered by the single plan (Task 1 + Task 2),
-    both tasks are committed, and make test passed at f012793.
+    All 7 acceptance criteria are satisfied: the helper is in main.py, the flag
+    is on the top-level parser only, all 5 tests in test_cli_version.py cover
+    the success path (--version, -V) and the PackageNotFoundError fallback, and
+    pyproject.toml is untouched. The spec scope is fully covered by plan-1.
   
     complete_step · 1 call · 0s
   
-  • The single plan (plan-1) fully covers the entire spec. Task 1 rewrote
-    spec-writer.md (removing change.title/change.auto_titled/auto_titled
-    conditional, adding open-by-asking mandate, proactive-rename discipline,
-    trivial carve-out, dropping "Skip reflexive questions") and added 6 contract
-    tests. Task 2 updated the dogfood PTY driver (removed
-    TASK_IS_ZERO_AMBIGUITY, delivers title on first ask, unconditional
-    asks_answered >= 1 assertion). Both tasks are committed (9cf3c7b / f012793),
-    make test passed with 1072 tests. Spot-checks confirm: spec-writer.md has no
-    {{ change.title }} or {% if change.auto_titled %} occurrences; dogfood test
-    has the correct first-ask branch and unconditional assertion. All 9
-    acceptance criteria are satisfied. No remaining spec scope.
+  • The single plan (plan-1) fully covers the entire spec. Both tasks are
+    committed: Task 1 adds the _resolve_version() helper in src/imp/cli/main.py
+    (using importlib.metadata at call time, with PackageNotFoundError fallback
+    to "unknown"), and Task 2 wires --version/-V onto the top-level argparse
+    parser via action="version". The test file tests/test_cli_version.py
+    contains all 5 tests covering ACs 1–4 and 6. AC 5 (top-level only,
+    subcommands unchanged) and AC 7 (pyproject.toml unmodified) are satisfied by
+    the implementation. No spec scope remains uncovered.
   
-  plan-cycle-check complete · 34s
+  plan-cycle-check complete · 41s
 
-implement complete · 17m 20s
+implement complete · 10m 17s
 
 review
   
@@ -490,89 +481,27 @@ review
   
   stamp-trailers · 0s
   
-  code-reviewer · claude-sonnet-4-6
+  code-reviewer · gpt-5.5
   
-    ToolSearch · read_file · glob · 5 calls · 9s
-  
-  • Now let me look at the actual implementation by examining the committed
-    code:
-  
-    bash · read_file · 29 calls · 2m 49s
-  
-  • Now let me verify the dogfood test more carefully and cross-check a few
-    specifics:
-  
-    bash · 3 calls · 6s
-  
-  • All checks pass. Let me do one final verification of the iron rule exact
-    text match and the "Your Role" summary update:
-  
-    bash · 1 call · 0s
-  
-  • All 9 acceptance criteria verified. Let me compile the final review:
-  
-    complete_step · 1 call · 0s
-  
-  • The review is complete. Verdict: approve.
-  
-    Summary: Both tasks were implemented cleanly and fully against the spec:
-  
-     1 spec-writer.md — Header, "Your Role" summary, Brainstorm Discipline, and
-       Slug Settling sections were all correctly rewritten. All old template
-       variables ({{ change.title }}, {{ change.auto_titled }}) and the {% if
-       change.auto_titled %} conditional are gone. The mandatory
-       opening-question discipline, proactive rename discipline (with the
-       iron-rule preserved verbatim), "Skip reflexive questions" removal, and
-       trivial carve-out are all present and correctly expressed.
-     2 Dogfood test — TASK_IS_ZERO_AMBIGUITY removed, first-ask handler delivers
-       the title text, subsequent asks get the generic reply, and the assertion
-       is the unconditional asks_answered >= 1.
-  
-    All 1072 tests pass, lint is clean, and typecheck reports no issues. The
-    only open item is a pre-acknowledged Nit: the "{% else %}" not in body
-    assertion in one contract test is overly broad, but it doesn't block
-    merging.
+    read_file · glob · bash · grep +1 · 13 calls · 40s
   
   • Strengths
   
-    Spec coverage is complete. All 9 acceptance criteria are satisfied:
-  
-     • AC1–2 (spec-writer.md): {{ change.title }}, {{ change.auto_titled }}, {%
-       if change.auto_titled %}, {% else %}, {% endif %} are entirely absent
-       from the template. Verified by direct grep and six passing contract
-       tests.
-     • AC3 (mandatory opening-question discipline): spec-writer.md header and
-       the "Open by asking" Brainstorm Discipline item both state the
-       first-turn-is-a-question rule, explicitly forbidding tool calls and
-       codebase exploration on turn 1
-       (tests/test_spec_writer_prompt_mandates_opening_question passes).
-     • AC4 (proactive rename without asking): The Slug Settling section
-       instructs the agent to rename proactively, "Announce the new name in
-       prose", and the iron-rule sentence is preserved verbatim.
-       test_spec_writer_prompt_mandates_proactive_rename asserts the exact
-       iron-rule string.
-     • AC5 ("Skip reflexive questions" removed; trivial carve-out added): The
-       paragraph is gone; criterion 1 gained the explicit carve-out ("does NOT
-       count against this criterion"). Both tests pass.
-     • AC6–7 (dogfood test driver): TASK_IS_ZERO_AMBIGUITY is fully removed; the
-       handler now delivers title.encode("utf-8") + b"\n" on asks_answered == 0
-       and the generic reply on subsequent events; the assertion is the
-       unconditional assert asks_answered >= 1.
-     • AC8 (live dogfood): Not exercisable in CI (gated on IMP_RUN_DOGFOOD=1);
-       the driver changes are structurally correct for when the live run fires.
-     • AC9 (gate): make test → 1072 passed, 7 skipped; make lint → all checks
-       passed; make typecheck → no issues in 71 source files.
-  
-    Quality of the prompt rewrite. The spec-writer.md edit is clean: the header,
-    "Your Role" summary, Brainstorm Discipline intro, and Slug Settling section
-    all read coherently together. The "Your Role" fixup ("Ask one question to
-    learn what they want to build, explore the codebase…") correctly reflects
-    the new flow after the reviewer caught the earlier contradiction.
-  
-    Test design. The six new contract tests in test_assets_workflow.py are crisp
-    and test behavior rather than implementation details — each one loads the
-    bundled workflow and asserts a meaningful property of the prompt body. They
-    serve as regression guards for future template edits.
+     • Implementation satisfies the core spec: src/imp/cli/main.py imports
+       importlib.metadata, adds _resolve_version() that calls
+       importlib.metadata.version("imp") at call time, and falls back to
+       "unknown" on PackageNotFoundError.
+     • The version flag is wired on the top-level parser only, before
+       add_subparsers(required=True), using argparse's action="version" with
+       output format imp <version>. This allows imp --version and imp -V to exit
+       0 without a subcommand.
+     • The diff is tightly scoped to src/imp/cli/main.py and
+       tests/test_cli_version.py; pyproject.toml remains unchanged.
+     • Tests cover the helper success/fallback paths and CLI behavior for
+       --version, -V, and metadata-missing fallback. I spot-checked python -m
+       pytest tests/test_cli_version.py -q, python -m ruff check
+       src/imp/cli/main.py tests/test_cli_version.py, and python -m mypy
+       src/imp/cli/main.py tests/test_cli_version.py; all passed.
   
     Issues
   
@@ -586,190 +515,171 @@ review
   
     Minor / Nit
   
-     • tests/test_assets_workflow.py —
-       test_spec_writer_prompt_drops_auto_titled_conditional asserts "{% else
-       %}" not in body. This is overly broad: any future Jinja2 {% else %}
-       anywhere in spec-writer.md (for an unrelated feature) would cause a
-       spurious failure. The "change.auto_titled" not in body assertion already
-       covers AC2's intent. The progress tracker correctly flagged this as a
-       deferred Nit; the fix is to either scope the check to "{% if
-       change.auto_titled" → "{% else %}" → "{% endif %}" as a block, or simply
-       drop the {% else %} assertion since the auto_titled assertion is
-       sufficient.
+     • Existing carried followup remains:
+       test_resolve_version_reads_package_metadata and the CLI success tests
+       patch importlib.metadata.version with lambdas that ignore the dist
+       argument. The implementation correctly uses "imp", so this is not
+       blocking, but asserting dist == "imp" in the fake would make the tests
+       catch wrong-distribution regressions more directly.
+     • Existing carried followup remains: _resolve_version() is evaluated when
+       main() builds the parser, even for non-version invocations. This is
+       acceptable for a small CLI metadata lookup and keeps the code simple.
   
     Verdict
   
-    approve — the implementation faithfully satisfies every acceptance criterion
-    in the spec and the two plan tasks, all tests pass, lint and typecheck are
-    green, and no bugs or regressions were found. The single Minor/Nit (overly
-    broad {% else %} assertion) is a pre-existing open item recorded in the
-    progress tracker and does not block merging.
+    approve — the implementation meets the acceptance criteria, is well scoped,
+    and the behavior is covered by passing tests.
   
-  code-reviewer complete · 4m 26s
+  code-reviewer complete · 59s
   
-  summarizer · claude-sonnet-4-6
+  summarizer · opus
   
-    ToolSearch · read_file · glob · bash +1 · 12 calls · 1m 12s
+    ToolSearch · glob · bash · read_file · 10 calls · 30s
   
-  • Task 1 — spec-writer: open by asking; rename without asking permission
-    (commit 86100c8)
+  • Now let me inspect the actual diff and the test state.
   
-     • Rewrote the spec-writer prompt
-       (src/imp/assets/workflows/default/agents/spec-writer.md) across three
-       regions:
-        • Header: removed {{ change.title }} / {{ change.auto_titled }}
-          injections; replaced with a plain instruction that the slug is
-          provisional and the agent's very first turn must be a single
-          plain-prose question to the user — no tool calls, no codebase
-          exploration before the user replies.
-        • Brainstorm Discipline: replaced "Explore context first" + "Skip
-          reflexive questions" paragraphs with two new paragraphs: "Open by
-          asking" (mandatory turn-1 question, no tool calls) and "Explore
-          context once intent is in hand" (codebase reading deferred until after
-          the opening reply).
-        • Slug Settling: removed the {% if change.auto_titled %} / {% else %}
-          conditional entirely; replaced with a single unconditional block
-          instructing proactive rename without asking permission — the agent
-          picks the name and announces it, it doesn't request approval.
-        • "Your Role" summary: updated to reflect the ask-first flow ("Ask one
-          question to learn what they want to build, explore the codebase,
-          propose approaches…").
-        • Complexity criterion 1: added an explicit carve-out exempting the
-          mandatory opening question from the "≤1 ask" threshold for a trivial
-          classification.
-     • Added 6 new contract tests in tests/test_assets_workflow.py pinning
-       acceptance criteria 1–5 (opening question present; no title/auto_titled
-       in header; no {% else %} block; proactive-rename prose; carve-out
-       language present).
+    bash · 2 calls · 0s
   
-    Task 2 — dogfood test: deliver task via first reply for always-ask
-    spec-writer (commit b1b89fc)
+  • Now let me run the test suite for the version tests (cheap, no code
+    changes).
   
-     • Updated tests/test_default_workflow_dogfood_live.py:
-        • Removed TASK_IS_ZERO_AMBIGUITY = True constant and its gating logic.
-        • Modified the awaiting_user_input handler so the first reply
-          (asks_answered == 0) delivers the title/feature-intent text; all
-          subsequent replies send the generic "use defaults" answer.
-        • Replaced the conditional asks_answered == 0 assertion with an
-          unconditional assert asks_answered >= 1 with a clear regression
-          message.
+    bash · 4 calls · 11s
   
-  • 1072 passed, 7 skipped — make test green at HEAD (b1b89fc). All 7 skips are
-    live-provider tests (no provider credentials in the test environment). make
-    lint and make typecheck both clean (ruff: all checks passed; mypy: no issues
-    in 71 source files).
-  
-  • Deferred Nit (carried from progress.md): In tests/test_assets_workflow.py,
-    the assertion assert "{% else %}" not in body is overly broad — any future
-    legitimate {% else %} added to the spec-writer template would cause a
-    spurious failure. The actual intent (removal of the change.auto_titled
-    conditional block) is already covered by the assert '{% if
-    change.auto_titled %}' not in body check. The {% else %} assertion could be
-    scoped to the specific removed text or dropped entirely.
-  
-  
-  •  1 Monitor dogfood live run — the updated dogfood test now delivers the task
-       on the first reply rather than having zero asks. The first full live
-       IMP_RUN_DOGFOOD=1 run with the new spec-writer will validate the
-       ask-first flow end-to-end.
-     2 Address the {% else %} overly-broad assertion (see open_items) — either
-       scope it to the removed conditional text or drop it to avoid fragile
-       false failures as the template evolves.
-     3 Observe real spec-writer sessions to confirm UX: the mandatory opening
-       question is the right friction level — users opening imp new expect to be
-       asked what they want, not immediately see codebase exploration.
-     4 Consider documenting the slug-is-provisional contract in the
-       operator/contributor docs so future prompt authors know change.slug is
-       not a reliable source of intent.
-  
-  summarizer complete · 1m 18s
-  
-  final-review-gate · 0s
-  
-  final-review · claude-sonnet-4-6
-  
-    ToolSearch · query_events · 2 calls · 2s
-  
-  • Here's the summary of the change ready for your review:
-  
-    ----------------------------------------------------------------------------
-  
-    📋 Change Summary: imp new opens by asking; spec-writer renames without
-    asking permission
-  
-    What was built
-  
-    Task 1 — spec-writer prompt rewrite (commit 86100c8)
-  
-    The spec-writer.md prompt was rewritten in four places:
-  
-     • Header: Removed {{ change.title }} and {{ change.auto_titled }}
-       injections. The agent's very first turn must now be a single plain-prose
-       question to the user — no tool calls, no codebase exploration until after
-       the user replies.
-     • Brainstorm Discipline: Replaced "Explore context first" + "Skip reflexive
-       questions" with two new paragraphs: "Open by asking" (mandatory turn-1
-       question) and "Explore context once intent is in hand" (codebase reading
-       deferred).
-     • Slug Settling: Removed the {% if change.auto_titled %} / {% else %}
-       conditional entirely. Now an unconditional block: the agent proactively
-       picks and announces a new name without asking permission.
-     • "Your Role" summary + Complexity criterion 1: Updated to reflect
-       ask-first flow; added carve-out so the mandatory opening question doesn't
-       count against the "≤1 ask = trivial" threshold.
-  
-    6 new contract tests added in tests/test_assets_workflow.py pinning these
-    behaviors.
-  
-    Task 2 — dogfood test update (commit b1b89fc)
-  
-     • Removed TASK_IS_ZERO_AMBIGUITY constant and its gating logic.
-     • First awaiting_user_input reply now delivers the feature-intent/title
-       text; subsequent replies send the generic "use defaults" answer.
-     • Assertion changed from conditional to unconditional: assert asks_answered
-       >= 1.
-  
-    Test status
-  
-    ✅ 1072 passed, 7 skipped — make test green. make lint and make typecheck
-    both clean (ruff + mypy, 71 source files).
-  
-    Open items (non-blocking)
-  
-     • Deferred nit: assert "{% else %}" not in body in the contract tests is
-       overly broad — any future legitimate {% else %} in the template would
-       cause a spurious failure. The real guard ({% if change.auto_titled %} not
-       in body) already covers the intent. Can be scoped or dropped in a
-       follow-up.
-  
-    Code reviewer verdict: ✅ Approve — no Critical or Important issues found.
-  
-    ----------------------------------------------------------------------------
-  
-    Would you like to merge this, or send it back to implement with feedback?
-  
-  > hello?
-  
-  • Hi! I'm here. 👋
-  
-    I just presented the change summary above — the imp new ask-first /
-    proactive-rename spec-writer rewrite. Everything looks good: all tests pass,
-    lint and typecheck are clean, and the code reviewer approved it.
-  
-    Do you want to merge this, or send it back to implement with feedback?
-  
-  > merge
+  • Everything verifies. Let me complete.
   
     complete_step · 1 call · 0s
   
-  • Merged! 🎉 The imp new ask-first change is in. Enjoy the new spec-writer
-    flow.
+  • Summary recorded. The change 2026-06-06-add-version-flag is complete: both
+    planned tasks landed cleanly on HEAD, the --version/-V flag works end-to-end
+    (imp 0.0.1, exit 0), and all version tests, ruff, and mypy pass. Two
+    non-blocking Minor/Nit followups remain noted for optional cleanup.
   
-  • User approved merge. All acceptance criteria satisfied, 1072 tests passing,
-    lint and typecheck clean. One deferred nit (overly broad {% else %}
-    assertion) to address in a follow-up.
+  • Added a top-level --version / -V flag to the imp CLI, delivered across the
+    two tasks of plan 1, both landed.
   
-  final-review complete · 49m 43s
+    Task 1 — Version-resolution helper (SHA 0b30278, "feat: add _resolve_version
+    helper for imp --version"): added a module-level _resolve_version() to
+    src/imp/cli/main.py that reads importlib.metadata.version("imp") at call
+    time (with a new import importlib.metadata) so the printed version stays in
+    sync with packaged metadata, and returns "unknown" on PackageNotFoundError
+    so the flag never crashes on an uninstalled source checkout. The function
+    deliberately references the lookup via the importlib.metadata module
+    attribute (not an eager from … import version) so the fallback path is
+    patchable in tests. Created tests/test_cli_version.py with two unit tests
+    covering the success and fallback paths.
   
-  merge_blocked  reason=base_dirty base=master
-  change_merged  base=master commit=3dfa5c5221a434472965e08d390f970ac76fc248
+    Task 2 — Wire --version/-V into the top-level parser (HEAD 5db7b46, "feat:
+    add --version/-V flag to imp CLI top-level parser"): added
+    parser.add_argument("--version", "-V", action="version", version=f"imp
+    {_resolve_version()}") to the top-level argparse parser in main(), placed
+    before add_subparsers(..., required=True). argparse's version action fires
+    during parse_args and exits 0 before the required-subparser check, so imp
+    --version / imp -V work with no subcommand. Appended three CLI tests to
+    tests/test_cli_version.py asserting the printed line and exit-0 for the long
+    flag, the short flag, and the fallback. No subparser or pyproject.toml
+    change; the version value remains sourced solely from package metadata. All
+    7 acceptance criteria are satisfied.
+  
+  • Verified clean (no code changes made during summary). python -m pytest
+    tests/test_cli_version.py -q → 5 passed. python -m ruff check
+    src/imp/cli/main.py tests/test_cli_version.py → All checks passed. python -m
+    mypy src/imp/cli/main.py tests/test_cli_version.py → Success: no issues
+    found in 2 source files. End-to-end smoke: imp --version and imp -V both
+    print imp 0.0.1 and exit 0. Working tree is clean (both task commits present
+    on HEAD). The broader suite (e.g. test_cli_smoke / test_cli_status) was not
+    re-run during this summary step, but the change is additive and subparser
+    wiring is untouched.
+  
+  • Two carried followups from progress.md, both non-blocking:
+  
+     • Minor (quality-reviewer): test_resolve_version_reads_package_metadata
+       uses lambda dist: "9.9.9-test", ignoring the dist arg; could assert dist
+       == "imp" to catch a wrong-package-name regression.
+     • Nit (quality-reviewer): _resolve_version() is evaluated eagerly on every
+       main() invocation via the f-string in add_argument. Functionally harmless
+       (fast, short-lived process); no fix needed.
+  
+  
+  •  • Optionally tighten the helper success test to assert the requested
+       distribution name (dist == "imp") per the carried Minor finding.
+     • Consider documenting the new --version/-V flag in user-facing CLI
+       docs/README if one enumerates global flags.
+     • If eager evaluation ever matters, the version= string could be computed
+       lazily, but this is purely cosmetic and not warranted now.
+  
+  summarizer complete · 1m 15s
+  
+  final-review-gate · 0s
+  
+  final-review · sonnet
+  
+    ToolSearch · query_events · 2 calls · 2s
+  
+  • Change Summary: 2026-06-06-add-version-flag
+  
+    What was built
+  
+    A --version / -V flag was added to the top-level imp CLI, delivered in two
+    commits:
+  
+    Task 1 — _resolve_version() helper (SHA 0b30278)
+  
+     • Added import importlib.metadata and a new _resolve_version() function to
+       src/imp/cli/main.py.
+     • The function reads importlib.metadata.version("imp") at call time, so the
+       version stays in sync with the installed package metadata.
+     • Falls back to "unknown" on PackageNotFoundError (e.g., uninstalled source
+       checkout) — no crash.
+     • Created tests/test_cli_version.py with 2 unit tests covering success and
+       fallback paths.
+  
+    Task 2 — Wire the flag (HEAD 5db7b46)
+  
+     • Added parser.add_argument("--version", "-V", action="version",
+       version=f"imp {_resolve_version()}") to the top-level argparse parser in
+       main(), placed before add_subparsers(..., required=True).
+     • argparse's version action fires during parse_args and exits 0 before the
+       required-subparser check fires — so imp --version and imp -V work even
+       with no subcommand.
+     • 3 additional CLI integration tests added: long flag, short flag, and
+       metadata-missing fallback.
+     • pyproject.toml and all subparsers are untouched.
+  
+    Test status ✅
+  
+     • pytest tests/test_cli_version.py -q → 5 passed
+     • ruff check → all checks passed
+     • mypy → no issues found
+     • Smoke test: imp --version and imp -V both print imp 0.0.1 and exit 0.
+  
+    Open (non-blocking) items
+  
+     • Minor: The helper unit test uses lambda dist: "9.9.9-test" without
+       asserting dist == "imp" — a tweak that would catch wrong-package-name
+       regressions.
+     • Nit: _resolve_version() is called eagerly on every main() invocation
+       (harmless for a short-lived CLI process).
+  
+    ----------------------------------------------------------------------------
+  
+    All 7 acceptance criteria are satisfied. The code reviewer gave an approve
+    verdict with no critical or important findings.
+  
+    Would you like to merge this change, or send it back to implement with
+    feedback?
+  
+  > Merge it. The two items are non-blocking nits and the change is clean.
+  
+    complete_step · 1 call · 0s
+  
+  • Merged! The 2026-06-06-add-version-flag change is done. 🎉
+  
+  • User approved merge. The change is clean: all 7 acceptance criteria
+    satisfied, 5 tests pass, ruff and mypy clean, smoke test confirmed. The two
+    open items (asserting dist name in unit test, eager _resolve_version()
+    evaluation) are acknowledged non-blocking nits and do not require follow-up
+    action.
+  
+  final-review complete · 42s
+  
+  change_merged  base=master commit=36faeecb9b6f777552d8a1bb6cc3cdd6271693d6
