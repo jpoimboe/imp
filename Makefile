@@ -120,6 +120,10 @@ clean: ## Remove build artifacts and caches.
 	find . -type d -name __pycache__ -not -path './.git/*' -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name '*.pyc' -not -path './.git/*' -delete
 
+.PHONY: snap-ui
+snap-ui: ## Render the full run-journal fixture to a PNG and open it. Extra: SNAP_ARGS="--limit 40".
+	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --open $(SNAP_ARGS)
+
 
 # ── private helpers ─────────────────────────────────────────────────────────
 

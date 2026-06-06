@@ -52,7 +52,9 @@ def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None) ->
 
     ansi = cap.stream_text(color=True, width=cols, limit=limit)
     n = len(ansi.rstrip("\n").split("\n"))
-    height = rows or min(200, max(10, n + 1))
+    # Auto-fit the whole slice (the point of a mockup); cap only as a sane
+    # backstop against a pathologically long run. Use --limit to focus.
+    height = rows or min(1000, max(10, n + 1))
     if n > height:
         print(f"note: {n} lines of output; image shows the last {height} "
               f"(use --limit to focus, or --rows to grow)")
