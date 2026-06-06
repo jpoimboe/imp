@@ -36,8 +36,15 @@ def dated_slug(name: str, *, date: str) -> str:
     """`<date>-<slugified name>`. `date` is a fixed-width `YYYY-MM-DD` string.
     The name keeps the MAX_SLUG_LEN cap (slugify), so the full slug is at most
     11 + MAX_SLUG_LEN chars — the date prefix does not eat the name budget.
-    Raises InvalidSlug if `name` has no slug-able characters."""
-    return f"{date}-{slugify(name)}"
+
+    Returns `""` when `name` is blank or has no slug-able characters: an unnamed
+    Change has an empty title, and `""` is the canonical "unnamed" signal
+    (Change.slug derives from this). slugify itself still raises on empty — it is
+    the validator rename_change uses for a *new* name."""
+    try:
+        return f"{date}-{slugify(name)}"
+    except InvalidSlug:
+        return ""
 
 
 # Immutable Change identity (spec §1): YYYY-MM-DD- + 6 chars from [a-z0-9] drawn
