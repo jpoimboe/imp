@@ -166,6 +166,27 @@ class TerminalSession:
             data = data.encode("utf-8")
         os.write(self._master, data)
 
+    def send_signal(self, sig: int = signal.SIGINT) -> None:
+        """Deliver a real signal to the child's foreground process group, bypassing
+        the tty line discipline (works regardless of cooked/raw mode). Mirrors what
+        the tty would do on ^C by signalling the whole process group, not just the
+        immediate child. A no-op if the child has already exited (and been reaped).
+
+        Reaches only the child's process group: a grandchild that has setsid()'d
+        into its own session is deliberately NOT signalled, exactly like a real
+        Ctrl-C (which hits only the controlling terminal's foreground pgrp). Do not
+        "fix" this to walk descendants.
+
+        We pass os.getpgid(pid) (not pid) to killpg so the argument is self-
+        documenting as a pgid and stays correct if start_new_session is ever
+        reconsidered. start_new_session=True isolates the child in its own
+        session/pgrp (pgid == pid), so killpg can only ever hit the child's group,
+        never the test runner. The getpgid->killpg TOCTOU is a microsecond window
+        on a not-aggressively-recycled pgid; ProcessLookupError suppression covers
+        both calls (dead-child contract: a reaped child makes both raise ESRCH)."""
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(os.getpgid(self._proc.pid), sig)
+
     def _read_step(self, timeout: float) -> _StepResult:
         """One select→read→feed step, classified tri-state.
 

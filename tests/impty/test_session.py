@@ -179,6 +179,23 @@ def test_ctrl_c_byte_delivers_sigint() -> None:
                     os.kill(s.pid, signal.SIGKILL)
 
 
+def test_send_signal_delivers_sigint() -> None:
+    # Direct path: send_signal() delivers SIGINT to the child's process group
+    # regardless of tty mode, bypassing the line discipline.
+    with TerminalSession([sys.executable, "-c", _SIGINT_CHILD]) as s:
+        s.wait_idle(idle=0.2, hard=5.0)
+        assert "READY" in s.viewport()
+        try:
+            s.send_signal(signal.SIGINT)
+            rc = s.run_to_completion(hard=5.0)
+            assert rc == 42
+            assert "GOT-SIGINT" in s.transcript()
+        finally:
+            if s.is_alive():
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(s.pid, signal.SIGKILL)
+
+
 def test_run_to_completion_drains_flood_and_keeps_trailing_sentinel() -> None:
     # AC1+AC2: a child that floods ≫ one tty-buffer, then prints a sentinel and
     # exits. run_to_completion must drain PAST the buffer-fill point to the end,
