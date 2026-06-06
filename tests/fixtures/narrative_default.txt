@@ -1,9 +1,4 @@
 #add-auth  add auth  (paused)
-tiers resolved:
-  low    → anthropic/haiku
-  medium → anthropic/sonnet
-  high   → openai/gpt-5.5
-    differ from medium: tier 1, vendor jump
 design
   spec  ·  claude-sonnet-4-6
   
@@ -11,8 +6,9 @@ design
   
   ⏺ read_file · bash · 2 calls
   
-  ↳ task → reviewer  ⟨✓ done⟩
-  ❯ Please add a section on token expiry.
+  ↳ subagent → reviewer
+  
+  > Please add a section on token expiry.
   
   ✓ spec · status=Success · summary=Spec drafted
   approve

@@ -116,7 +116,7 @@ def test_user_color_is_bright_blue_foreground() -> None:
 def test_caret_and_rule_helpers() -> None:
     # The input-field chrome: a bright-blue caret and a gray rule, both plain
     # when color is disabled (the rule's dashes are structural, kept regardless).
-    assert pal.caret(enabled=True) == "\x1b[94m❯ \x1b[0m"
-    assert pal.caret(enabled=False) == "❯ "
+    assert pal.caret(enabled=True) == "\x1b[94m> \x1b[0m"
+    assert pal.caret(enabled=False) == "> "
     assert pal.rule(4, enabled=True) == "\x1b[90m────\x1b[0m"
     assert pal.rule(4, enabled=False) == "────"

@@ -96,7 +96,7 @@ def test_collapsed_subagent_renders_single_status_row() -> None:
     assert "▸ context" not in joined
     assert "s  ·  m" in joined          # model on the step header
     # Subagent: single status row, ✓ done. No recursed prose, no outcome.
-    assert any(ln.strip() == "↳ task → reviewer  ⟨✓ done⟩" for ln in out)
+    assert any(ln.strip() == "↳ subagent → reviewer" for ln in out)
     assert "looks good" not in joined
     assert "status=Success" not in joined
     # The old one-liner / events shape is gone.
@@ -121,7 +121,7 @@ def test_subagent_lean_suppresses_all_nested_io() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
     ]))
-    assert "↳ task → reviewer  ⟨✓ done⟩" in out   # the single status row
+    assert "↳ subagent → reviewer" in out   # the single status row
     assert "nested prose" not in out       # subagent prose NOT recursed in lean
     assert "nested musings" not in out     # nested thinking suppressed
     assert "status=Success" not in out     # outcome NOT shown in lean
@@ -141,7 +141,7 @@ def test_subagent_outcome_suppressed_in_lean() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success","summary":"done"}', error=False),
     ]))
-    assert "↳ task → reviewer  ⟨✓ done⟩" in out
+    assert "↳ subagent → reviewer" in out
     assert "the prose" not in out
     assert "status=Success" not in out
 
@@ -168,7 +168,7 @@ def test_subagent_error_renders_failed_status_row() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ], width=80))
-    assert any("↳ task → reviewer  ⟨✗ failed⟩" in ln for ln in out)
+    assert any("↳ subagent → reviewer  ⟨✗ failed⟩" in ln for ln in out)
     assert not any("dispatch failed: boom" in ln for ln in out)   # outcome suppressed
     # The status row carries the subagent (magenta) color when color is on.
     color_out = list(render_tree(nv.build_tree([
@@ -197,7 +197,7 @@ def test_full_mode_also_emits_subagent_outcome() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success","summary":"ok"}', error=False),
     ], full=True))
-    assert "▾ task → reviewer" in out      # expanded fold header (full shape)
+    assert "▾ subagent → reviewer" in out      # expanded fold header (full shape)
     assert "verdict: approve" in out        # recursed prose
     assert "→ status=Success · summary=ok" in out   # outcome now present in full too
 
@@ -234,7 +234,7 @@ def test_full_mode_expands_tools_thinking_and_subagent() -> None:
     assert "▾ thinking" in out and "deep thoughts here" in out
     assert "▾ tools" in out
     assert "⏺ bash" in out and "command=ls -la" in out and "total 0" in out
-    assert "▾ task → reviewer" in out
+    assert "▾ subagent → reviewer" in out
     # nested subagent prose appears, indented under the fold
     assert "subagent verdict: approve" in out
 
@@ -309,7 +309,7 @@ def test_snapshot_full(monkeypatch) -> None:
 
 
 def test_synthetic_user_message_dropped_genuine_shown() -> None:
-    # point 3: only a human reply the engine awaited renders as `❯ …`; the
+    # point 3: only a human reply the engine awaited renders as `> …`; the
     # synthetic "begin" kickoff (no preceding awaiting_user_input) is dropped.
     out = "\n".join(_lines([
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
@@ -319,8 +319,8 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
         _ev("4", "user_message", agent_id="step:p/s",
             content=[{"type": "text", "text": "do the real thing"}]),
     ]))
-    assert "❯ begin" not in out
-    assert "❯ do the real thing" in out
+    assert "> begin" not in out
+    assert "> do the real thing" in out
 
 
 def test_chrome_step_collapses_to_single_breadcrumb() -> None:
@@ -499,7 +499,8 @@ def test_tiers_resolved_renders_constrained_and_unconstrained() -> None:
         {"tier": "high", "provider": "anthropic", "model": "opus",
          "differ_tier": 2, "differ_from": "code-reviewer"},
     ])
-    out = list(rt._render(node, depth=0, full=False, color=False, width=120))
+    # The tier table is lean-suppressed (point 2) — it renders only in --full.
+    out = list(rt._render(node, depth=0, full=True, color=False, width=120))
 
     assert out[0] == "tiers resolved:"
 
@@ -554,7 +555,7 @@ def _sub(outcome=None, *, is_error=False, name="reviewer"):
 def test_header_line_renders_subagent_boundary() -> None:
     sub = _sub(name="reviewer")
     # Subagent color, no fold glyph, no (running)/(error) suffix.
-    assert rt.header_line(sub, depth=2, color=False) == "    ↳ task → reviewer"
+    assert rt.header_line(sub, depth=2, color=False) == "    ↳ subagent → reviewer"
 
 
 def test_subagent_outcome_empty_yields_nothing() -> None:
@@ -649,9 +650,9 @@ def test_full_subagent_content_carries_magenta_gutter() -> None:
 
 def test_subagent_header_excludes_own_gutter() -> None:
     sub = _sub(name="reviewer")
-    assert rt.header_line(sub, depth=0, color=False) == "↳ task → reviewer"
+    assert rt.header_line(sub, depth=0, color=False) == "↳ subagent → reviewer"
     # ancestor gutters show; the header's own column does not.
-    assert rt.header_line(sub, depth=1, color=False, gutters=(0,)) == "│ ↳ task → reviewer"
+    assert rt.header_line(sub, depth=1, color=False, gutters=(0,)) == "│ ↳ subagent → reviewer"
 
 
 def test_nested_subagent_emits_two_gutter_levels() -> None:
@@ -665,8 +666,8 @@ def test_nested_subagent_emits_two_gutter_levels() -> None:
                             nested=nv.NarrativeBuilder(), running=False)
     outer.nested.tree.root.children.append(inner)
     out = list(rt._render(outer, depth=0, full=True, color=False, width=80))
-    assert out[0] == "▾ task → outer"                       # depth 0, no gutter
-    assert any(ln == "│ ▾ task → inner" for ln in out)      # depth 1, one gutter
+    assert out[0] == "▾ subagent → outer"                       # depth 0, no gutter
+    assert any(ln == "│ ▾ subagent → inner" for ln in out)      # depth 1, one gutter
     assert any(ln == "│ │ deep finding" for ln in out)      # depth 2, two gutters
 
 
@@ -833,23 +834,23 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
             content='{"status":"Success"}'),
     ])
     prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
-    hdr_i = next(i for i, ln in enumerate(out) if "↳ task → reviewer" in ln)
+    hdr_i = next(i for i, ln in enumerate(out) if "↳ subagent → reviewer" in ln)
     assert hdr_i > prose_i
     assert out[hdr_i - 1].strip() == ""
 
 
 def test_user_message_paints_bright_blue_caret_on_every_line_color_on() -> None:
     """Multi-line user input is bright-blue FOREGROUND on every wrapped line; the
-    leading `❯ ` caret marks the first line (and isn't duplicated on
+    leading `> ` caret marks the first line (and isn't duplicated on
     continuations). No background fill (the old bright-blue bg is gone)."""
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    # First line: `❯ ` caret + bright-blue fg; second line: fg without the caret.
-    assert "\x1b[94m" in out[0] and "❯ line one" in out[0]
+    # First line: `> ` caret + bright-blue fg; second line: fg without the caret.
+    assert "\x1b[94m" in out[0] and "> line one" in out[0]
     assert "\x1b[104m" not in out[0]     # no background fill anymore
     assert "\x1b[94m" in out[1] and "line two" in out[1]
-    assert "❯ line two" not in out[1]    # `❯ ` is a first-line speaker marker
+    assert "> line two" not in out[1]    # `> ` is a first-line speaker marker
 
 
 def test_user_message_no_color_when_off_but_keeps_caret() -> None:
@@ -857,7 +858,7 @@ def test_user_message_no_color_when_off_but_keeps_caret() -> None:
     out = list(rt._render(node, depth=1, full=False, color=False, width=80))
     joined = "\n".join(out)
     assert "\x1b[94m" not in joined and "\x1b[104m" not in joined  # no color off-TTY
-    assert "❯ line one" in joined           # `❯ ` still anchors the speaker
+    assert "> line one" in joined           # `> ` still anchors the speaker
 
 
 def test_lean_subagent_is_single_status_row() -> None:
@@ -873,8 +874,7 @@ def test_lean_subagent_is_single_status_row() -> None:
                     "The tool use was rejected...")  # the sentinel
     lines = list(_render(fold, depth=0, full=False, color=False, width=80))
     text = "\n".join(lines)
-    assert "reviewer" in text
-    assert "done" in text                 # ✓ done status
+    assert "↳ subagent → reviewer" in text         # one clean row, no status suffix
     assert "doesn't want to proceed" not in text   # sentinel never surfaces
     assert len(lines) == 1                # exactly one status row
 
@@ -890,8 +890,11 @@ def test_lean_subagent_status_glyphs() -> None:
             setattr(f, k, v)
         return subagent_status_row(f, depth=0, color=False, gutters=())
 
+    # Success carries NO status suffix (point 6 — it read as noise); only the
+    # abnormal terminal states keep a ⟨…⟩ tag so a broken subagent still stands out.
+    assert row(running=False) == "↳ subagent → s"
+    assert "⟨" not in row(running=False)
     assert "⏳ running" in row(running=True)
-    assert "✓ done" in row(running=False)
     assert "✗ failed" in row(running=False, is_error=True)
     assert "⊘ stalled" in row(running=False, is_error=True, terminal_state="stalled")
     assert "⊘ interrupted" in row(running=False, is_error=True,

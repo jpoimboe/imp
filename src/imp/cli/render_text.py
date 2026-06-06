@@ -130,7 +130,7 @@ def spaces_after(node: Any, *, full: bool) -> bool:
     the live driver both key spacing off this, so they stay identical."""
     return bool(
         is_prose_leaf(node)
-        or isinstance(node, nv.UserMessageNode)
+        or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
@@ -183,15 +183,15 @@ def header_line(node: Any, *, depth: int, color: bool,
     """The single header line for a container node (PhaseNode / StepNode /
     SubagentFold), with no children. Shared by `_render` and the live driver so
     indentation/label/color stay identical in both paths. For a SubagentFold this
-    is the `↳ task → {name}` boundary: subagent color, ↳ descent marker (not a
+    is the `↳ subagent → {name}` boundary: subagent color, ↳ descent marker (not a
     fold/expand glyph), and no (running)/(error) suffix. Note: the lean/live views
     no longer use this for subagents — they emit `subagent_status_row` (a single
-    resolved `↳ task → {name} ⟨status⟩` row that signals completion). This bare
-    header survives only for the --full expanded fold and PhaseNode/StepNode."""
+    `↳ subagent → {name}` row). This bare header survives only for the --full
+    expanded fold and PhaseNode/StepNode."""
     if isinstance(node, nv.PhaseNode):
         return _line(node.name, depth, color, *pal.NODE_COLORS["phase"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):
-        return _line(f"↳ task → {node.subagent_name}", depth, color,
+        return _line(f"↳ subagent → {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
     label = node.name
     if node.interactive:
@@ -207,22 +207,22 @@ def header_line(node: Any, *, depth: int, color: bool,
 
 def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
                         gutters: tuple[int, ...] = ()) -> str:
-    """The single lean/live status row for a subagent:
-    `↳ task → {name}  ⟨{status}⟩` — and NOTHING else (no prompt, no streamed
-    output, no outcome prose). This is what structurally eliminates the SDK
-    cancellation-sentinel leak from the default views."""
+    """The single lean/live row for a subagent: `↳ subagent → {name}` — and
+    NOTHING else (no prompt, no streamed output, no outcome prose). This is what
+    structurally eliminates the SDK cancellation-sentinel leak from the default
+    views. The ordinary success case carries NO status suffix (it reads as noise);
+    only an abnormal terminal state (running-at-pause, failed, stalled) appends a
+    `⟨…⟩` tag so a subagent that didn't cleanly finish still stands out."""
+    label = f"↳ subagent → {sub.subagent_name}"
     if sub.running:
-        status = "⏳ running"
+        label += "  ⟨⏳ running⟩"
     elif sub.terminal_state == "stalled":
-        status = "⊘ stalled"
+        label += "  ⟨⊘ stalled⟩"
     elif sub.terminal_state == "interrupted":
-        status = "⊘ interrupted"
+        label += "  ⟨⊘ interrupted⟩"
     elif sub.is_error:
-        status = "✗ failed"
-    else:
-        status = "✓ done"
-    return _line(f"↳ task → {sub.subagent_name}  ⟨{status}⟩", depth, color,
-                 *pal.NODE_COLORS["subagent"], gutters=gutters)
+        label += "  ⟨✗ failed⟩"
+    return _line(label, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
 
 
 def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
@@ -375,7 +375,18 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                         *pal.NODE_COLORS["error"], gutters=gutters)
         return
 
+    if isinstance(node, nv.SkillLoadNode):
+        # A loaded skill, shown once as a quiet `✓ load skill {name}` line (the
+        # redundant `load_skill` tool call is dropped from the burst recap).
+        yield _line(f"✓ load skill {node.name}", depth, color,
+                    *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+        return
+
     if isinstance(node, nv.TiersResolvedNode):
+        if not full:
+            # Run-level tier resolution is setup noise at the top of every run —
+            # dropped from the lean view; it survives in imp log --full below.
+            return
         # Setup metadata: dim the whole block so it recedes like the context fold
         # rather than shouting at the top of every run.
         dim = pal.NODE_COLORS["metadata"]
@@ -403,16 +414,26 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
 
-def _burst_summary(burst: nv.ToolBurstFold) -> str:
+def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     """One-line recap of a finished tool burst for the lean view: the distinct
-    tool names (first-seen order, capped) and the call count. Mirrors what the
-    live status line showed WHILE the burst ran, left behind as a quiet marker so
-    a `prose → tools → prose` turn shows the work happened without expanding it."""
-    names = list(dict.fromkeys(c.name for c in burst.calls))
+    tool names (first-seen order, capped), the call count, and the burst duration.
+    Mirrors what the live status line showed WHILE the burst ran, left behind as a
+    quiet marker so a `prose → tools → prose` turn shows the work happened without
+    expanding it. Two names are omitted: `load_skill` (it renders as its own
+    `✓ load skill …` line, so counting it here would double up) and the bare
+    `tool` placeholder (the sentinel name for an orphan/unnamed result — no real
+    tool info). Returns None when nothing renderable remains."""
+    _OMIT = {"load_skill", "tool"}
+    calls = [c for c in burst.calls if c.name not in _OMIT]
+    if not calls:
+        return None
+    names = list(dict.fromkeys(c.name for c in calls))
     shown = " · ".join(names[:4])
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
-    n = len(burst.calls)
-    return f"⏺ {shown}{more} · {n} call{'s' if n != 1 else ''}"
+    n = len(calls)
+    elapsed = nv._elapsed_seconds(burst.start_ts, burst.end_ts)
+    secs = "" if elapsed is None else f" · {int(elapsed)}s"
+    return f"⏺ {shown}{more} · {n} call{'s' if n != 1 else ''}{secs}"
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
@@ -421,8 +442,9 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
     if not full:
         # Lean: leave a single dark-gray recap line (not the full per-call dump),
         # so interleaved tool work stays visible between prose turns (point 8).
-        if burst.calls:
-            yield _line(_burst_summary(burst), depth, color,
+        summary = _burst_summary(burst)
+        if summary is not None:
+            yield _line(summary, depth, color,
                         *pal.NODE_COLORS["tools"], gutters=gutters)
         return
     yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
@@ -447,10 +469,10 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
         # I/O at all, only `↳ task → {name}  ⟨{status}⟩`.
         yield subagent_status_row(sub, depth=depth, color=color, gutters=gutters)
         return
-    # --full: unchanged — expanded `▾ task → {name}` fold header, full recursion of
+    # --full: expanded `▾ subagent → {name}` fold header, full recursion of
     # the subagent's narrative (nested thinking/tools expanded), then the structured
     # return value. --full stays a superset of the lean view.
-    yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
+    yield _line(f"{pal.fold_glyph(expanded=True)} subagent → {sub.subagent_name}",
                 depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
                                 color=color, width=width, gutters=(*gutters, depth))

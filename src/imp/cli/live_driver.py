@@ -226,6 +226,7 @@ class LiveDriver:
             self._print_lines(
                 [rt.subagent_status_row(node, depth=depth, color=self._color,
                                         gutters=gutters)],
+                prose=rt.spaces_after(node, full=False),
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
         if isinstance(node, nv.UserMessageNode):

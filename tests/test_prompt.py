@@ -51,13 +51,13 @@ def test_build_session_applies_no_style_override() -> None:
 
 def test_caret_is_bright_blue_under_color() -> None:
     """With color on, the prompt message is a prompt_toolkit ANSI caret carrying
-    the bright-blue ❯; with color off it's the plain ❯ string."""
+    the bright-blue '>'; with color off it's the plain '> ' string."""
     from prompt_toolkit.formatted_text import ANSI
 
     on = Prompt(color=True)._message(None)
     assert isinstance(on, ANSI)
-    assert "\x1b[94m" in on.value and "❯" in on.value
-    assert Prompt(color=False)._message(None) == "❯ "
+    assert "\x1b[94m" in on.value and ">" in on.value
+    assert Prompt(color=False)._message(None) == "> "
 
 
 class _FakeSession:

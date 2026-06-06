@@ -13,7 +13,8 @@ def test_codex_warning_renders_as_subline() -> None:
         {"tier": "low", "provider": "anthropic", "model": "haiku",
          "differ_tier": None, "differ_from": None, "warning": None},
     ])
-    out = list(rt._render(node, depth=0, full=False, color=False, width=120))
+    # The tier table (and its warning sub-line) is lean-suppressed — render --full.
+    out = list(rt._render(node, depth=0, full=True, color=False, width=120))
     # the codex row's main line, then a warning sub-line immediately after
     hi = next(i for i, ln in enumerate(out) if ln.lstrip().startswith("high "))
     assert "→ codex/gpt-5.5" in out[hi]

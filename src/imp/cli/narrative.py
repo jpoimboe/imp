@@ -133,7 +133,19 @@ class ToolCall:
 @dataclass
 class ToolBurstFold:
     calls: list[ToolCall] = field(default_factory=list)
+    start_ts: str | None = None        # first tool_call.timestamp (burst timing)
+    end_ts: str | None = None          # last tool_result.timestamp
     collapsible = True
+
+
+@dataclass
+class SkillLoadNode:
+    """A skill the agent pulled in mid-run (the skill_load event). Rendered as a
+    quiet `✓ load skill {name}` line — distinct from the redundant `load_skill`
+    tool call, which the lean burst recap drops so the skill shows exactly once."""
+    name: str
+    source: str | None = None
+    collapsible = False
 
 
 @dataclass
@@ -695,6 +707,8 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         _open_subagent_fold(self, event, p)     # defined in Task 6
         return
     burst = _ensure_burst(self)
+    if burst.start_ts is None:
+        burst.start_ts = event.get("timestamp")  # burst clock starts at first call
     burst.calls.append(ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
         input=p.get("input") or {}))
@@ -734,6 +748,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     footer = _format_citations_footer(p.get("citations"))
     burst = self._current_burst
     if burst is not None:
+        burst.end_ts = event.get("timestamp")    # advance the burst clock
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
                 call.result = _summarize_result(p.get("content")) + footer
@@ -828,6 +843,19 @@ def _summarize_result(content: Any) -> str:
 NarrativeBuilder._HANDLERS["tool_call"] = _h_tool_call
 NarrativeBuilder._HANDLERS["tool_result"] = _h_tool_result
 NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
+
+
+def _h_skill_load(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # The agent pulled in a skill. Render it once, as its own `✓ load skill …`
+    # line; the matching `load_skill` tool call is dropped from the burst recap
+    # (render_text) so the same action doesn't show up twice. Do NOT flush the
+    # open burst: this event fires BETWEEN a tool_call and its tool_result (the
+    # load_skill round-trip), so flushing would orphan that pending result into a
+    # stray `tool` burst.
+    self._append(SkillLoadNode(name=str(p.get("name", "?")), source=p.get("source")))
+
+
+NarrativeBuilder._HANDLERS["skill_load"] = _h_skill_load
 
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -938,6 +966,8 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "calls": [
             {"name": c.name, "call_id": c.call_id, "result": c.result,
              "is_error": c.is_error, "killed": c.killed} for c in node.calls]}
+    if isinstance(node, SkillLoadNode):
+        return {"t": t, "name": node.name, "source": node.source}
     if isinstance(node, SubagentFold):
         return {"t": t, "subagent_name": node.subagent_name, "event_id": node.event_id,
                 "block_id": node.block_id, "running": node.running,

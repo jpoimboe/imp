@@ -30,7 +30,7 @@ def ansi(text: str, *codes: str, enabled: bool) -> str:
 # quiet replacement for the old bright-blue background fill. bright_blue keeps
 # the "user = blue" identity (NODE_COLORS["user"]); rules stay gray so they
 # recede like other navigational chrome.
-CARET = "❯ "
+CARET = "> "
 
 
 def caret(*, enabled: bool) -> str:

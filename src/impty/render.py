@@ -48,11 +48,12 @@ _PALETTE: dict[str, tuple[int, int, int]] = {
     "brightwhite": (0xE6, 0xE8, 0xE6),
 }
 
-# Noto Sans Mono — a variable font with full box-drawing + block-element
-# coverage (Liberation Mono renders those as .notdef tofu, which would
-# misrepresent any TUI that uses block glyphs for logos/borders/markers).
-_MONO = "/usr/share/fonts/google-noto-vf/NotoSansMono[wght].ttf"
-_MONO_BOLD = _MONO  # same file; weight is selected via the variation axis
+# Adwaita Mono — monospace with box-drawing AND the symbol glyphs imp's TUI uses
+# (✓ ↳ ⏺ · → ⟨⟩ │). Noto Sans Mono (the earlier choice) renders ✓/↳/⏺ as .notdef
+# tofu, so those markers vanished from the mockup; Adwaita has them. Separate
+# Regular/Bold files (not a variable font), so bold selects the Bold file.
+_MONO = "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Regular.ttf"
+_MONO_BOLD = "/usr/share/fonts/adwaita-mono-fonts/AdwaitaMono-Bold.ttf"
 
 
 def _load_font(path: str, size: int, bold: bool) -> ImageFont.FreeTypeFont:
