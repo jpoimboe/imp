@@ -126,7 +126,7 @@ def test_node_colors_calm_scheme() -> None:
     assert pal.NODE_COLORS["agent"] == ()                  # plain default fg (was bold)
     assert pal.NODE_COLORS["user"] == ("bright_blue",)     # bright-blue caret marks user turn
     assert pal.NODE_COLORS["phase"] == ("cyan",)           # recedes (was bold blue)
-    assert pal.NODE_COLORS["step"] == ("gray",)            # navigational chrome (was cyan)
+    assert pal.NODE_COLORS["step"] == ("step",)            # darker-cyan "mini-phase" label
     assert pal.NODE_COLORS["subagent"] == ("magenta",)     # unchanged
     assert pal.NODE_COLORS["workflow"] == ("bold", "magenta")  # lone bold anchor, unchanged
     # Semantic colors untouched.

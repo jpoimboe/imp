@@ -18,7 +18,7 @@ _ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m", "reset": "\x1b[0m
 _ANSI_NAMED: dict[str, str] = {
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
     "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
-    "gray": "\x1b[90m", "bright_blue": "\x1b[94m",
+    "gray": "\x1b[90m", "bright_blue": "\x1b[94m", "step": "\x1b[36m",
 }
 
 # A CUSTOM low-saturation ACCENT palette — not a crib of any published theme, and
@@ -40,12 +40,15 @@ _DARK_RGB: dict[str, tuple[int, int, int]] = {
     "yellow": (0xC9, 0xA5, 0x54), "blue": (0x6E, 0x90, 0xB8),
     "magenta": (0xA8, 0x84, 0xB5), "cyan": (0x5E, 0xA0, 0x9E),
     "gray": (0x55, 0x57, 0x53), "bright_blue": (0x7F, 0xA2, 0xCA),
+    # `step` is a darker cyan than `phase` — a step reads as a "mini-phase".
+    "step": (0x4D, 0x8C, 0x8A),
 }
 _LIGHT_RGB: dict[str, tuple[int, int, int]] = {
     "red": (0xA8, 0x3B, 0x38), "green": (0x55, 0x6F, 0x22),
     "yellow": (0x8A, 0x6D, 0x12), "blue": (0x2F, 0x5C, 0x96),
     "magenta": (0x7A, 0x49, 0x96), "cyan": (0x2A, 0x73, 0x70),
     "gray": (0xA6, 0xAA, 0xA6), "bright_blue": (0x27, 0x5A, 0xA0),
+    "step": (0x3A, 0x84, 0x80),   # darker-cyan step on the light surface too
 }
 
 
@@ -175,7 +178,7 @@ def action_text(action: Any) -> str:
 NODE_COLORS: dict[str, tuple[str, ...]] = {
     "workflow": ("bold", "magenta"),   # appears once at top — the lone bold anchor
     "phase": ("cyan",),                # recedes: muted, no bold
-    "step": ("gray",),                 # navigational chrome, not speech
+    "step": ("step",),                 # a darker-cyan "mini-phase" label
     "breadcrumb": ("gray",),           # per-step completion line — recede entirely
     "gate": ("yellow",),               # semantic
     "tools": ("gray",),                # lean one-line recap + --full per-call dump
