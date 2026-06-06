@@ -50,9 +50,14 @@ def stream_text(*, color: bool, width: int, limit: int | None) -> str:
     through the real LiveDriver. `limit` truncates to the first N events so a
     slice ends on the visual state you want (header, prose, gate, completion).
     Reused by scene_stream (prints it) and snap_imp_ui (renders it to a PNG)."""
+    from imp.cli import palette as pal
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
 
+    # The mockup showcases the `dark` truecolor theme (what a dark terminal sees
+    # live). render_screen renders the truecolor hexes imp emits, so the PNG and a
+    # real dark terminal match. Plain (color=False) output is unaffected.
+    pal.set_theme("dark")
     events = _events()
     if limit is not None:
         events = events[:limit]
@@ -75,7 +80,10 @@ def scene_prompt(*, color: bool) -> None:
 
     Blocks on prompt_toolkit input so a driver can snapshot the empty field,
     type into it, and snapshot again. Ctrl-C/Ctrl-D end it."""
+    from imp.cli import palette as pal
     from imp.cli.prompt import Prompt
+
+    pal.set_theme("dark")   # mockup showcases the dark truecolor theme
 
     # Print a couple of lines of faux prior output so the prompt's separation
     # from preceding content is visible in the capture (matches real use, where

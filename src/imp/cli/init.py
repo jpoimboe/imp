@@ -61,16 +61,29 @@ _PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code", "codex"})
 _TIERS: tuple[str, ...] = ("low", "medium", "high")
 
 
-def _build_config(providers: list[str], env_vars: dict[str, str]) -> dict[str, Any]:
+def _default_detect_theme() -> str:
+    """Real terminal-theme detection (dark | light | ansi). Wrapped so a failure
+    in the OSC-11 path can never abort init — any error degrades to 'ansi'."""
+    try:
+        from imp.cli.term_theme import detect_theme
+        return detect_theme()
+    except Exception:
+        return "ansi"
+
+
+def _build_config(
+    providers: list[str], env_vars: dict[str, str], theme: str = "ansi",
+) -> dict[str, Any]:
     """Build the new `providers:` / `tiers:` / `provider_envs:` config block."""
     tiers_block = {
         tier: {prov: _PROVIDER_MODELS[prov][tier] for prov in providers}
         for tier in _TIERS
     }
-    out = {"providers": list(providers), "tiers": tiers_block}
+    out: dict[str, Any] = {"providers": list(providers), "tiers": tiers_block}
     provider_envs = {p: {"env": env_vars[p]} for p in providers if p in env_vars}
     if provider_envs:
         out["provider_envs"] = provider_envs
+    out["theme"] = theme   # detected once here; runtime reads it, never re-queries
     return out
 
 
@@ -166,6 +179,7 @@ def run_init(
     input_fn: Callable[[str], str],
     output_fn: Callable[[str], None],
     picker_fn: Callable[[list[str]], list[str]] | None = None,
+    detect_theme_fn: Callable[[], str] | None = None,
 ) -> None:
     imp_dir = project_root / "imp"
     if imp_dir.exists():
@@ -191,11 +205,18 @@ def run_init(
         ans = input_fn(f"For {prov!r}: API key env var [{default_env}]: ")
         env_vars[prov] = (ans.strip() or default_env)
 
+    # Detect the terminal theme now (interactive, TTY available) and persist it,
+    # so the runtime never has to re-query the terminal. Falls back to 'ansi'.
+    detect = detect_theme_fn or _default_detect_theme
+    theme = detect()
+    if theme != "ansi":
+        output_fn(f"Detected a {theme} terminal — colors tuned to match.")
+
     imp_dir.mkdir()
     (imp_dir / "workflows").mkdir()
     shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
 
-    cfg = _build_config(providers, env_vars)
+    cfg = _build_config(providers, env_vars, theme)
     body = yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False)
     lint_hint = (
         "\n# Optional lint-clean gate: a command the implementer runs before each\n"

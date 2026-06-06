@@ -29,6 +29,20 @@ def test_load_config_basic(tmp_path: Path) -> None:
     assert cfg.tier_names() == frozenset({"low", "medium", "high"})
 
 
+def test_theme_defaults_to_ansi_when_absent(tmp_path: Path) -> None:
+    # Pre-theme configs (no `theme:` key) load as the universal 'ansi'.
+    assert load_config(_write(tmp_path, _OK_BODY)).theme == "ansi"
+
+
+def test_theme_parsed_and_validated(tmp_path: Path) -> None:
+    for sub in ("d", "l", "x"):
+        (tmp_path / sub).mkdir()
+    assert load_config(_write(tmp_path / "d", _OK_BODY + "theme: dark\n")).theme == "dark"
+    assert load_config(_write(tmp_path / "l", _OK_BODY + "theme: light\n")).theme == "light"
+    with pytest.raises(LoadError, match="theme"):
+        load_config(_write(tmp_path / "x", _OK_BODY + "theme: neon\n"))
+
+
 def test_load_config_missing_providers(tmp_path: Path) -> None:
     with pytest.raises(LoadError, match="providers"):
         load_config(_write(tmp_path,

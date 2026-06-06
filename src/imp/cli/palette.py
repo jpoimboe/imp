@@ -9,13 +9,67 @@ from __future__ import annotations
 import os
 from typing import Any
 
-_ANSI: dict[str, str] = {
-    "dim": "\x1b[2m", "bold": "\x1b[1m",
+# Weight/reset are theme-independent (not hue), so they live outside the themes.
+_ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m", "reset": "\x1b[0m"}
+
+# The `ansi` theme: the 16 named SGR colors. The terminal paints these from its
+# OWN palette, so they adapt to any background — the safe, universal default and
+# the only theme that's correct without knowing the terminal's background.
+_ANSI_NAMED: dict[str, str] = {
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
     "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
     "gray": "\x1b[90m", "bright_blue": "\x1b[94m",
-    "bg_bright_blue": "\x1b[104m", "reset": "\x1b[0m",
 }
+
+# One muted, desaturated family, defined as RGB once and emitted as 24-bit
+# truecolor so the look is identical in every truecolor terminal (and in the
+# snap-ui mockup, which renders whatever imp emits). `dark` is tuned for a
+# near-black background; `light` re-tunes the SAME semantic roles for a
+# near-white one (darker hues so they stay legible, a lighter chrome gray so it
+# still recedes). These apply only when the resolved theme is dark/light; the
+# `ansi` theme above is the fallback for non-truecolor terminals.
+_DARK_RGB: dict[str, tuple[int, int, int]] = {
+    "red": (0xC0, 0x6A, 0x66), "green": (0x90, 0xA9, 0x59),
+    "yellow": (0xC9, 0xA5, 0x54), "blue": (0x6E, 0x90, 0xB8),
+    "magenta": (0xA8, 0x84, 0xB5), "cyan": (0x5E, 0xA0, 0x9E),
+    "gray": (0x55, 0x57, 0x53), "bright_blue": (0x7F, 0xA2, 0xCA),
+}
+_LIGHT_RGB: dict[str, tuple[int, int, int]] = {
+    "red": (0xA8, 0x3B, 0x38), "green": (0x55, 0x6F, 0x22),
+    "yellow": (0x8A, 0x6D, 0x12), "blue": (0x2F, 0x5C, 0x96),
+    "magenta": (0x7A, 0x49, 0x96), "cyan": (0x2A, 0x73, 0x70),
+    "gray": (0xA6, 0xAA, 0xA6), "bright_blue": (0x27, 0x5A, 0xA0),
+}
+
+
+def _truecolor_map(rgb: dict[str, tuple[int, int, int]]) -> dict[str, str]:
+    return {name: f"\x1b[38;2;{r};{g};{b}m" for name, (r, g, b) in rgb.items()}
+
+
+# Theme name → escape map (color name → SGR sequence).
+THEMES: tuple[str, ...] = ("dark", "light", "ansi")
+_THEMES: dict[str, dict[str, str]] = {
+    "ansi": {**_ATTRS, **_ANSI_NAMED},
+    "dark": {**_ATTRS, **_truecolor_map(_DARK_RGB)},
+    "light": {**_ATTRS, **_truecolor_map(_LIGHT_RGB)},
+}
+
+# The ACTIVE escape map, consulted by ansi(). Defaults to `ansi` — universal,
+# and what the golden/SGR-literal tests expect. The CLI calls set_theme() once
+# at startup from the resolved config; the snap-ui mockup sets `dark`.
+_active_theme = "ansi"
+_ANSI: dict[str, str] = dict(_THEMES["ansi"])
+
+
+def set_theme(name: str) -> None:
+    """Swap the active color theme. An unknown name falls back to `ansi`."""
+    global _ANSI, _active_theme
+    _active_theme = name if name in _THEMES else "ansi"
+    _ANSI = dict(_THEMES[_active_theme])
+
+
+def active_theme() -> str:
+    return _active_theme
 
 
 def ansi(text: str, *codes: str, enabled: bool) -> str:

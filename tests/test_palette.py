@@ -8,6 +8,46 @@ import pytest
 from imp.cli import palette as pal
 
 
+@pytest.fixture(autouse=True)
+def _reset_theme():
+    """Every test starts from the default `ansi` theme; restore it after, so a
+    test that flips to dark/light can't leak truecolor codes into the next."""
+    pal.set_theme("ansi")
+    yield
+    pal.set_theme("ansi")
+
+
+def test_default_theme_is_ansi_named_codes() -> None:
+    assert pal.active_theme() == "ansi"
+    assert pal._ANSI["magenta"] == "\x1b[35m"
+    assert pal._ANSI["gray"] == "\x1b[90m"
+
+
+def test_dark_theme_emits_truecolor() -> None:
+    pal.set_theme("dark")
+    assert pal.active_theme() == "dark"
+    # magenta becomes the muted-violet truecolor sequence, not the named code.
+    assert pal._ANSI["magenta"] == "\x1b[38;2;168;132;181m"
+    assert pal.ansi("hi", "magenta", enabled=True) == "\x1b[38;2;168;132;181mhi\x1b[0m"
+    # attributes are theme-independent.
+    assert pal._ANSI["bold"] == "\x1b[1m"
+
+
+def test_light_theme_differs_from_dark() -> None:
+    pal.set_theme("dark")
+    dark = pal._ANSI["green"]
+    pal.set_theme("light")
+    light = pal._ANSI["green"]
+    assert dark != light
+    assert light.startswith("\x1b[38;2;")    # still truecolor, different RGB
+
+
+def test_unknown_theme_falls_back_to_ansi() -> None:
+    pal.set_theme("rainbow")
+    assert pal.active_theme() == "ansi"
+    assert pal._ANSI["cyan"] == "\x1b[36m"
+
+
 def test_ansi_disabled_returns_plain() -> None:
     assert pal.ansi("hi", "red", enabled=False) == "hi"
 
@@ -97,13 +137,6 @@ def test_node_colors_calm_scheme() -> None:
 def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
     # agent = () means pal.ansi returns prose unwrapped even when color is on.
     assert pal.ansi("prose", *pal.NODE_COLORS["agent"], enabled=True) == "prose"
-
-
-def test_bg_bright_blue_ansi_code() -> None:
-    # The bright-blue background ANSI 104 lives in the palette so both renderers
-    # (imp log via _wrap; prompt_toolkit via Style) reference the same constant.
-    assert pal._ANSI["bg_bright_blue"] == "\x1b[104m"
-    assert pal.ansi("hi", "bg_bright_blue", enabled=True) == "\x1b[104mhi\x1b[0m"
 
 
 def test_user_color_is_bright_blue_foreground() -> None:

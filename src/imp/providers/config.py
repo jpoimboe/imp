@@ -48,6 +48,7 @@ class Config:
     lint_command: str | None = field(hash=False, default=None)
     test_command: str | None = field(hash=False, default=None)
     editing_mode: str = field(hash=False, default="emacs")
+    theme: str = field(hash=False, default="ansi")
 
     def tier_names(self) -> frozenset[str]:
         return frozenset(self.tiers)
@@ -99,10 +100,16 @@ def load_config(project_root: Path) -> Config:
     if editing_mode not in ("vi", "emacs"):
         raise LoadError("'editing_mode' must be 'vi' or 'emacs'", src)
 
+    # Color theme, detected once at `imp init` (see cli/term_theme.py). Absent in
+    # pre-theme configs → 'ansi' (the universal, terminal-adaptive default).
+    theme = raw.get("theme", "ansi")
+    if theme not in ("dark", "light", "ansi"):
+        raise LoadError("'theme' must be 'dark', 'light', or 'ansi'", src)
+
     return Config(
         providers=providers, tiers=tiers, provider_envs=provider_envs,
         source=src, var_overrides=var_overrides, lint_command=lint_command,
-        test_command=test_command, editing_mode=editing_mode,
+        test_command=test_command, editing_mode=editing_mode, theme=theme,
     )
 
 

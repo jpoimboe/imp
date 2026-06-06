@@ -19,6 +19,7 @@ from typing import Any, NoReturn
 
 import anyio
 
+from imp.cli import palette as pal
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
@@ -110,6 +111,24 @@ def _project_root() -> Path:
 
 def _control_root() -> Path:
     return worktree.find_control_root(Path.cwd())
+
+
+def _apply_theme() -> None:
+    """Pick the active color theme once, before any command renders. `IMP_THEME`
+    overrides everything; otherwise the value detected and persisted at `imp init`
+    (config.theme); otherwise the universal `ansi`. Best-effort — a missing or
+    unreadable config must never fail a command over theming, it just stays ansi."""
+    override = os.environ.get("IMP_THEME", "").strip().lower()
+    if override in pal.THEMES:
+        pal.set_theme(override)
+        return
+    from imp.providers.config import load_config
+    for root_fn in (_control_root, _project_root):
+        try:
+            pal.set_theme(load_config(root_fn()).theme)
+            return
+        except Exception:
+            continue
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -953,6 +972,7 @@ def main(argv: list[str] | None = None) -> int:
     add_eval_parser(sub)
 
     ns = parser.parse_args(args)
+    _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
         rc: int = ns.func(ns)
         # Flush here, inside the guard: output small enough to fit Python's

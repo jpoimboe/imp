@@ -19,6 +19,14 @@ def _picks(*selected: str) -> object:
     return lambda _available: list(selected)
 
 
+@pytest.fixture(autouse=True)
+def _stub_theme_detection(monkeypatch):
+    # init tests must NOT fire a real OSC-11 query at the terminal — pin the
+    # detector to a deterministic 'ansi'. Persistence of a detected theme is
+    # covered separately via the detect_theme_fn injection point.
+    monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
+
+
 def test_writes_config_workflows_gitignore(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
@@ -31,8 +39,9 @@ def test_writes_config_workflows_gitignore(tmp_path: Path) -> None:
     data = yaml.safe_load(cfg.read_text())
     assert set(data) <= {
         "providers", "tiers", "provider_envs",
-        "lint_command", "test_command", "editing_mode", "vars",
+        "lint_command", "test_command", "editing_mode", "vars", "theme",
     }
+    assert data["theme"] == "ansi"      # stubbed detector
     assert "roles" not in data
     assert "model_rules" not in data
     assert "model_tiers" not in data
@@ -46,6 +55,17 @@ def test_writes_config_workflows_gitignore(tmp_path: Path) -> None:
     assert wf.is_file()
     # No per-.imp .gitignore anymore; .imp/ is ignored wholesale.
     assert not (tmp_path / ".imp").exists()
+
+
+def test_persists_detected_theme(tmp_path: Path) -> None:
+    # The detected theme is written to config.yaml so the runtime never re-queries.
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs("ANTHROPIC_API_KEY"), output_fn=lambda _msg: None,
+        detect_theme_fn=lambda: "dark",
+    )
+    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    assert data["theme"] == "dark"
 
 
 def test_appends_to_project_gitignore(tmp_path: Path) -> None:
