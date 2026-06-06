@@ -111,8 +111,11 @@ class LiveDriver:
         activity = self._builder.current_activity()
         if activity is None:
             return None
-        spin = _SPINNER[frame % len(_SPINNER)]
-        return f"{spin} {activity} · {int(elapsed)}s"
+        # cyan spinner draws the eye; the elapsed tail dims so it doesn't compete
+        # with the activity text. Plain when color is off (byte-identical to before).
+        spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=self._color)
+        tail = pal.ansi(f"· {int(elapsed)}s", "dim", enabled=self._color)
+        return f"{spin} {activity} {tail}"
 
     # -- emission -------------------------------------------------------------
     def _emit_header(self) -> None:

@@ -54,6 +54,57 @@ def make_stdin_reply_fn(default_reply: str) -> Callable[[], Awaitable[str]]:
     return _reply
 
 
+# -- end-of-run status lines ------------------------------------------------
+# Semantic color + a leading glyph tell you at a glance how a run ended. The
+# decoration is gated on `should_use_color` (TTY + NO_COLOR aware), so piped /
+# redirected output stays plain and script-parseable. Shared by `new`/`resume`.
+
+def _emit_completed(change: Change, value: str, *, merged: bool) -> None:
+    """Run finished cleanly — green, ✓ on the headline."""
+    color = should_use_color(sys.stdout)
+    mark = "✓ " if color else ""
+    if merged:
+        print(ansi(f"{mark}Merged {change.id} into {change.base_branch}.", "green",
+                   enabled=color))
+        print(ansi(f"Change {change.id}: {value}", "green", enabled=color))
+    else:
+        print(ansi(f"{mark}Change {change.id}: {value}", "green", enabled=color))
+
+
+def _emit_paused(change: Change, how: str) -> None:
+    """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim, ⏸."""
+    color = should_use_color(sys.stdout)
+    mark = "⏸ " if color else ""
+    print("\n" + ansi(f"{mark}Change {change.id}: paused ({how})", "dim", enabled=color))
+
+
+def _emit_paused_summary(change: Change, value: str) -> None:
+    """The trailing run-status line on a non-interactive pause / merge-block."""
+    color = should_use_color(sys.stdout)
+    mark = "⏸ " if color else ""
+    print(ansi(f"{mark}Change {change.id}: {value}", "dim", enabled=color))
+
+
+def _emit_merge_blocked(change: Change, reason: str | None) -> None:
+    """Merge couldn't complete — the user must act: yellow, ⚠."""
+    color = should_use_color(sys.stdout)
+    mark = "⚠ " if color else ""
+    cid, base = change.id, change.base_branch
+    if reason == "worktree_dirty":
+        msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
+    elif reason == "base_dirty":
+        msg = (f"Uncommitted changes on `{base}`; commit or stash them, "
+               f"then `imp resume {cid}`.")
+    elif reason == "conflict":
+        msg = (f"`imp/{cid}` doesn't auto-merge into `{base}`. imp can't resolve "
+               f"conflicts in this version — merge `imp/{cid}` into `{base}` manually, "
+               f"then the Change is done (its worktree at `.imp/worktrees/{cid}` "
+               f"can be removed).")
+    else:
+        msg = f"Change {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
+    print(ansi(f"{mark}{msg}", "yellow", enabled=color))
+
+
 def _project_root() -> Path:
     return find_project_root()
 
@@ -146,7 +197,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 except EOFError:
                     driver.finish()
                     pause_and_exit(change, reason="ctrl-d")
-                    print(f"\nChange {change.id}: paused (ctrl-d)")
+                    _emit_paused(change, "ctrl-d")
                     rc = 130
                 except KeyboardInterrupt:
                     # prompt_toolkit's prompt_async (handle_sigint=True) installs
@@ -156,50 +207,31 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                     # pauses instead of escaping the task group as a crash.
                     driver.finish()
                     pause_and_exit(change, reason="ctrl-c")
-                    print(f"\nChange {change.id}: paused (ctrl-c)")
+                    _emit_paused(change, "ctrl-c")
                     rc = 130
                 else:
                     driver.finish()
                     if coord.should_pause:
                         pause_and_exit(change, reason="ctrl-c")
-                        print(f"\nChange {change.id}: paused (ctrl-c)")
+                        _emit_paused(change, "ctrl-c")
                         rc = 130
                     else:
                         if result is RunResult.COMPLETED:
-                            # Print merge headline when the worktree was removed by
-                            # merge (worktree gone = merge gate was exercised).
+                            # Worktree gone = the merge gate was exercised.
                             wt_path = change.control_root / ".imp" / "worktrees" / change.id
-                            if not wt_path.exists():
-                                print(f"Merged {change.id} into {change.base_branch}.")
-                            print(f"Change {change.id}: {result.value}")
+                            _emit_completed(change, result.value,
+                                            merged=not wt_path.exists())
                             rc = 0
                         else:
-                            # PAUSED — check for merge_blocked and print remediation.
+                            # PAUSED — surface merge_blocked remediation, if any.
                             final_state = State.load(change.state_dir)
                             if final_state.status == "merge_blocked":
-                                # Read the reason from the last merge_blocked event.
                                 reason = None
                                 for ev in change.event_log().read():
                                     if ev.get("type") == "merge_blocked":
                                         reason = (ev.get("payload") or {}).get("reason")
-                                base = change.base_branch
-                                cid = change.id
-                                if reason == "worktree_dirty":
-                                    print(f"Uncommitted work in the worktree; commit it, "
-                                          f"then `imp resume {cid}`.")
-                                elif reason == "base_dirty":
-                                    print(f"Uncommitted changes on `{base}`; commit or stash "
-                                          f"them, then `imp resume {cid}`.")
-                                elif reason == "conflict":
-                                    print(f"`imp/{cid}` doesn't auto-merge into `{base}`. "
-                                          f"imp can't resolve conflicts in this version — "
-                                          f"merge `imp/{cid}` into `{base}` manually, then "
-                                          f"the Change is done (its worktree at "
-                                          f"`.imp/worktrees/{cid}` can be removed).")
-                                else:
-                                    print(f"Change {change.id}: merge_blocked. "
-                                          f"Resolve, then `imp resume {cid}`.")
-                            print(f"Change {change.id}: {result.value}")
+                                _emit_merge_blocked(change, reason)
+                            _emit_paused_summary(change, result.value)
                             rc = 1
                 finally:
                     status.reset()
@@ -340,7 +372,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 except EOFError:
                     driver.finish()
                     pause_and_exit(change, reason="ctrl-d")
-                    print(f"\nChange {change.id}: paused (ctrl-d)")
+                    _emit_paused(change, "ctrl-d")
                     rc = 130
                 except KeyboardInterrupt:
                     # prompt_toolkit's prompt_async (handle_sigint=True) installs
@@ -350,50 +382,31 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     # pauses instead of escaping the task group as a crash.
                     driver.finish()
                     pause_and_exit(change, reason="ctrl-c")
-                    print(f"\nChange {change.id}: paused (ctrl-c)")
+                    _emit_paused(change, "ctrl-c")
                     rc = 130
                 else:
                     driver.finish()
                     if coord.should_pause:
                         pause_and_exit(change, reason="ctrl-c")
-                        print(f"\nChange {change.id}: paused (ctrl-c)")
+                        _emit_paused(change, "ctrl-c")
                         rc = 130
                     else:
                         if result is RunResult.COMPLETED:
-                            # Print merge headline when the worktree was removed by
-                            # merge (worktree gone = merge gate was exercised).
+                            # Worktree gone = the merge gate was exercised.
                             wt_path = change.control_root / ".imp" / "worktrees" / change.id
-                            if not wt_path.exists():
-                                print(f"Merged {change.id} into {change.base_branch}.")
-                            print(f"Change {change.id}: {result.value}")
+                            _emit_completed(change, result.value,
+                                            merged=not wt_path.exists())
                             rc = 0
                         else:
-                            # PAUSED — check for merge_blocked and print remediation.
+                            # PAUSED — surface merge_blocked remediation, if any.
                             final_state = State.load(change.state_dir)
                             if final_state.status == "merge_blocked":
-                                # Read the reason from the last merge_blocked event.
                                 reason = None
                                 for ev in change.event_log().read():
                                     if ev.get("type") == "merge_blocked":
                                         reason = (ev.get("payload") or {}).get("reason")
-                                base = change.base_branch
-                                cid = change.id
-                                if reason == "worktree_dirty":
-                                    print(f"Uncommitted work in the worktree; commit it, "
-                                          f"then `imp resume {cid}`.")
-                                elif reason == "base_dirty":
-                                    print(f"Uncommitted changes on `{base}`; commit or stash "
-                                          f"them, then `imp resume {cid}`.")
-                                elif reason == "conflict":
-                                    print(f"`imp/{cid}` doesn't auto-merge into `{base}`. "
-                                          f"imp can't resolve conflicts in this version — "
-                                          f"merge `imp/{cid}` into `{base}` manually, then "
-                                          f"the Change is done (its worktree at "
-                                          f"`.imp/worktrees/{cid}` can be removed).")
-                                else:
-                                    print(f"Change {change.id}: merge_blocked. "
-                                          f"Resolve, then `imp resume {cid}`.")
-                            print(f"Change {change.id}: {result.value}")
+                                _emit_merge_blocked(change, reason)
+                            _emit_paused_summary(change, result.value)
                             rc = 1
                 finally:
                     status.reset()
