@@ -258,15 +258,33 @@ def test_wait_hangs_then_run_to_completion_drains_same_session() -> None:
 # child's exit), inherits the pty slave (fds 0/1/2) and keeps it open, pinning
 # the slave so the master never sees EOF. The child records the grandchild PID
 # to a side-channel file (argv[1]) — NOT the slave — then exits with code 7.
+#
+# Pipe handshake (do NOT remove): with a controlling terminal, the child's exit
+# sends SIGHUP to its foreground process group. The grandchild must be OUT of
+# that pgrp (setsid'd) BEFORE the child exits, or it dies on SIGHUP, its slave
+# fds close, and the master hits EOF — a FALSE pass via the EOF path even if the
+# per-iteration poll() regressed. The fork-time pipe orders child-exit after
+# grandchild-setsid: the child blocks on os.read(r) until the grandchild writes.
+# Create the pipe BEFORE fork so both ends are inherited; each side closes the
+# end it does not use (so the child's read can't hang on a write end it holds).
+# signal(SIGHUP, SIG_IGN) is defense-in-depth for the fork->SIG_IGN window; keep
+# it too.
 _QUIET_GRANDCHILD = (
-    "import os, sys, time\n"
+    "import os, signal, sys, time\n"
     "pidfile = sys.argv[1]\n"
+    "r, w = os.pipe()\n"  # BEFORE fork: both ends inherited by child + grandchild
     "pid = os.fork()\n"
     "if pid == 0:\n"
-    "    os.setsid()\n"  # detach into own session: outlive the child, hold slave
-    "    time.sleep(30)\n"  # ≫ grace; silently pins the slave
+    "    os.close(r)\n"  # grandchild uses only the write end
+    "    signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"  # cover fork->SIG_IGN window
+    "    os.setsid()\n"  # leave the fg pgrp; keep inherited slave fds open
+    "    os.write(w, b'x')\n"  # handshake: tell the child we've detached
+    "    os.close(w)\n"  # symmetric close; no dangling write end on the long-lived gc
+    "    time.sleep(30)\n"  # >> grace; silently pins the slave by staying alive
     "    os._exit(0)\n"
     "else:\n"
+    "    os.close(w)\n"  # child uses only the read end (so the read can't self-hang)
+    "    os.read(r, 1)\n"  # block until the gc has setsid'd out of the fg pgrp
     "    with open(pidfile, 'w') as f:\n"  # side channel (NOT the slave)
     "        f.write(str(pid))\n"  # explicit flush — os._exit() skips stdio flush
     "    os._exit(7)\n"
@@ -276,12 +294,29 @@ _QUIET_GRANDCHILD = (
 # ~0.2 s while it streams — so Phase 1 sees select() always-readable and MUST
 # re-check poll() every iteration to exit. The grandchild self-cleans on EIO
 # when the master closes.
+#
+# Pipe handshake (do NOT remove — same rationale as _QUIET_GRANDCHILD): orders
+# child-exit after grandchild-setsid so the grandchild can't die on SIGHUP and
+# cause a false EOF-path pass. The child reads the handshake byte FIRST, THEN
+# sleeps 0.2 s — ordering preserved AND window preserved. The sleep(0.2) is
+# load-bearing: it is the only reason select() stays continuously readable while
+# the child is alive, which is what forces the per-iteration poll() check. A
+# naive "read byte -> exit immediately" handshake would delete the window — the
+# child would exit right after setsid, Phase 1 would see a dead child on its
+# first check, and the test would pass (rc 7, elapsed < 2.0) WITHOUT witnessing
+# the per-iteration poll. Do NOT collapse the read and the sleep, and do NOT
+# remove either.
 _STREAMING_GRANDCHILD = (
-    "import os, sys, time\n"
+    "import os, signal, sys, time\n"
     "pidfile = sys.argv[1]\n"
+    "r, w = os.pipe()\n"  # BEFORE fork: both ends inherited by child + grandchild
     "pid = os.fork()\n"
     "if pid == 0:\n"
+    "    os.close(r)\n"
+    "    signal.signal(signal.SIGHUP, signal.SIG_IGN)\n"
     "    os.setsid()\n"
+    "    os.write(w, b'x')\n"  # handshake: detached
+    "    os.close(w)\n"
     "    while True:\n"
     "        try:\n"
     "            os.write(1, b'g')\n"  # stream to the slave forever
@@ -289,10 +324,12 @@ _STREAMING_GRANDCHILD = (
     "            os._exit(0)\n"  # master closed → EIO → self-clean
     "        time.sleep(0.001)\n"
     "else:\n"
-    "    time.sleep(0.2)\n"  # stay alive while the gc streams...
+    "    os.close(w)\n"
+    "    os.read(r, 1)\n"  # handshake FIRST: proves the gc detached...
+    "    time.sleep(0.2)\n"  # ...THEN the alive-window — load-bearing, do NOT remove
     "    with open(pidfile, 'w') as f:\n"
     "        f.write(str(pid))\n"  # explicit flush — os._exit() skips stdio flush
-    "    os._exit(7)\n"  # ...so Phase 1 must re-check poll() each iteration
+    "    os._exit(7)\n"
 )
 
 
@@ -335,6 +372,12 @@ def test_run_to_completion_fast_on_streaming_slave_pinning_grandchild(
             rc = s.run_to_completion(hard=5.0)
             elapsed = time.monotonic() - start
             assert rc == 7
+            # elapsed < bound is the ONLY thing that catches a regressed per-
+            # iteration poll(): a regression leaves select() always-readable and
+            # stalls to the hard cap, blowing this bound. The grandchild handshake
+            # keeps the master from EOF so this bound stays meaningful (no EOF-path
+            # shortcut). The test does not otherwise witness which internal path
+            # ran — this assertion is load-bearing, not decorative.
             assert elapsed < 2.0, f"stalled toward hard cap (elapsed={elapsed:.2f}s)"
             gc_pid = int(pidfile.read_text())
     finally:
