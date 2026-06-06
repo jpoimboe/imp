@@ -375,6 +375,31 @@ async def test_drive_invocation_stalls_on_inactivity(
     assert interrupted["called"] is True
 
 
+def _build_inv(tmp_path: Path, **kw):
+    from imp.engine.agent_run import build_agent_invocation
+    return build_agent_invocation(
+        agent_def=_agent(tools=frozenset({"bash", "complete_step"})),
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="BODY", initial_messages=(),
+        change_context=_cc(tmp_path), interactive=False, user_chat_input_fn=None,
+        transcript_dir=tmp_path, fs_permissions=(), events_path=tmp_path / "e",
+        subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
+        event_log=None, change_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None, **kw,
+    )
+
+
+def test_build_invocation_override_is_used_verbatim(tmp_path: Path) -> None:
+    inv = _build_inv(tmp_path, system_prompt_override="EXACT STORED PROMPT")
+    assert inv.system_prompt == "EXACT STORED PROMPT"        # no notes appended
+
+
+def test_build_invocation_no_override_assembles_with_notes(tmp_path: Path) -> None:
+    inv = _build_inv(tmp_path)
+    assert inv.system_prompt.startswith("BODY")
+    assert "Session start: `<imp:begin/>`" in inv.system_prompt   # seed note appended
+
+
 @pytest.mark.anyio
 async def test_drive_invocation_stalls_mid_stream(
     tmp_path: Path, monkeypatch,
