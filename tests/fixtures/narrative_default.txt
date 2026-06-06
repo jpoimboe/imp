@@ -4,11 +4,11 @@ design
   
   spec · claude-sonnet-4-6
   
-  · Drafting the spec.
+  ● Drafting the spec.
   
     read_file · bash · 2 calls
   
-  · reviewer
+  · reviewer · claude-sonnet-4-6
   
   > Please add a section on token expiry.
   

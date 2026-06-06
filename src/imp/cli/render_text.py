@@ -125,10 +125,12 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     from rich.markdown import Markdown
     from rich.theme import Theme
 
-    # An agent turn is marked with a leading "· " and hang-indented: the dot sits
-    # at the base column and every wrapped/continuation line aligns 2 cols in,
-    # under the first word. Render markdown 2 cols narrower to leave room for the
-    # hang, then place the dot on the first non-blank line and the hang on the rest.
+    # An agent turn is marked with a leading bold "● " bullet and hang-indented:
+    # the bullet sits at the base column and every wrapped/continuation line aligns
+    # 2 cols in, under the first word. (A medium bold dot — heavier than the small
+    # "·" chrome separators — so the turn marker clearly leads.) Render markdown 2
+    # cols narrower to leave room for the hang, then place the bullet on the first
+    # non-blank line and the hang on the rest.
     inner = max(8, width - _INDENT_W * depth - 2)
     buf = io.StringIO()
     console = Console(file=buf, width=inner, no_color=not color,
@@ -137,6 +139,7 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
                       theme=Theme({"markdown.code": "cyan"}))
     console.print(Markdown(text))
     indent = _gutter_indent(depth, gutters, color)
+    bullet = pal.ansi("● ", "bold", enabled=color)   # bold medium dot marks the turn
     out: list[str] = []
     first = True
     for raw in buf.getvalue().splitlines():
@@ -146,11 +149,11 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
             # so the magenta │ stays continuous inside a SubagentFold.
             out.append(indent)
         elif first:
-            out.append(indent + "· " + stripped)
+            out.append(indent + bullet + stripped)
             first = False
         else:
             out.append(indent + "  " + stripped)
-    return out or [indent + "· "]
+    return out or [indent + bullet]
 
 
 def is_prose_leaf(node: Any) -> bool:
@@ -281,6 +284,25 @@ def header_line(node: Any, *, depth: int, color: bool,
     return _line(label, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
 
 
+def _subagent_model(sub: nv.SubagentFold) -> str | None:
+    """The subagent's model, dug out of its nested narrative (its step_context /
+    step carries provider+model). Returns the first model found, or None."""
+    def find(nodes: list[Any]) -> str | None:
+        for n in nodes:
+            if isinstance(n, nv.StepNode):
+                if n.model:
+                    return n.model
+                inner = find(n.children)
+                if inner:
+                    return inner
+            elif isinstance(n, (nv.StepContextNode, nv.AgentTextNode)):
+                m = n.payload.get("model")
+                if m:
+                    return str(m)
+        return None
+    return find(sub.tree.root.children)
+
+
 def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
                         gutters: tuple[int, ...] = ()) -> str:
     """The single lean/live row for a subagent: `· {name}` — and NOTHING else (no
@@ -291,6 +313,10 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     abnormal terminal state (running-at-pause, failed, stalled) appends a plain
     `(state)` tag so a subagent that didn't cleanly finish still stands out."""
     label = f"· {sub.subagent_name}"
+    model = _subagent_model(sub)
+    if model:
+        # Show the subagent's model on the row, the same way a step header does.
+        label += f" · {model}"
     if sub.running:
         label += " (running)"
     elif sub.terminal_state == "stalled":
@@ -453,10 +479,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             parts.append(verb_text)
         if node.elapsed_s is not None:
             parts.append(fmt_seconds(node.elapsed_s))
-        # The per-step completion line is navigational chrome, not a result the
-        # eye should land on — dark gray, almost invisible, regardless of the
-        # routing verb. Real outcomes (errors, pauses) carry their own red lines.
-        yield _line(" · ".join(parts), depth, color, *pal.NODE_COLORS["breadcrumb"],
+        # A step's completion line carries the step color (the same darker cyan as
+        # its header), so a step's open and close read as one unit — distinct from
+        # the dim gray of tool/skill chrome.
+        yield _line(" · ".join(parts), depth, color, *pal.NODE_COLORS["step"],
                     gutters=gutters)
         return
 

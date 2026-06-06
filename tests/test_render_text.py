@@ -97,7 +97,7 @@ def test_collapsed_subagent_renders_single_status_row() -> None:
     assert "▸ context" not in joined
     assert "s · m" in joined          # model on the step header
     # Subagent: single status row, complete. No recursed prose, no outcome.
-    assert any(ln.strip() == "· reviewer" for ln in out)
+    assert any(ln.strip().startswith("· reviewer") for ln in out)  # + model
     assert "looks good" not in joined
     assert "status=Success" not in joined
     # The old one-liner / events shape is gone.
@@ -341,14 +341,13 @@ def test_chrome_step_collapses_to_single_breadcrumb() -> None:
 
 
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:
-    # point 4: the per-step completion line and stray event lines are chrome —
-    # dark gray, never the routing-verb accent (cyan/green) they used to carry.
+    # the per-step completion line carries the step color (ties open+close);
+    # stray event (fallback) lines stay dark-gray chrome.
     crumb = next(iter(rt._render(
         nv.BreadcrumbLine(step_name="x", elapsed_s=3,
                           action={"verb": "goto", "target": "y"}),
         depth=0, full=False, color=True, width=80)))
-    assert pal._ANSI["gray"] in crumb
-    assert pal._ANSI["cyan"] not in crumb       # the goto accent is gone
+    assert pal._ANSI["step"] in crumb           # step color, not the goto accent
     fallback = next(iter(rt._render(
         nv.FallbackLine(event_type="change_merged", payload={"slug": "s"}),
         depth=0, full=False, color=True, width=80)))
@@ -369,8 +368,8 @@ def test_agent_text_is_plain_when_color_enabled() -> None:
     node = nv.AgentTextNode(payload={})
     node._cache = _FakeRendered(["hello world"])
     out = list(rt._render(node, depth=0, full=False, color=True, width=80))
-    # agent = () → calm baseline: prose carries NO ANSI, just the turn dot.
-    assert out == ["· hello world"]
+    # calm baseline: the prose text carries no ANSI; only the turn bullet is bold.
+    assert out == ["\x1b[1m● \x1b[0mhello world"]
 
 
 def test_empty_thinking_is_suppressed_both_modes() -> None:
@@ -647,7 +646,7 @@ def test_full_subagent_content_carries_magenta_gutter() -> None:
     ], full=True)
     # prose + outcome at depth 2 (aligned indent: the step no longer adds a
     # level): col 0 plain + col 1 gutter.
-    assert any(ln == "  │ · looks good" for ln in out)
+    assert any("│ \x1b[1m● \x1b[0mlooks good" in ln or ln == "  │ ● looks good" for ln in out)
     assert any(ln == "  │ → status=Success" for ln in out)
 
 
@@ -671,7 +670,7 @@ def test_nested_subagent_emits_two_gutter_levels() -> None:
     out = list(rt._render(outer, depth=0, full=True, color=False, width=80))
     assert out[0] == "▾ outer"                       # depth 0, no gutter
     assert any(ln == "│ ▾ inner" for ln in out)      # depth 1, one gutter
-    assert any(ln == "│ │ · deep finding" for ln in out)      # depth 2, two gutters
+    assert any("│ \x1b[1m● \x1b[0mdeep finding" in ln or ln == "│ │ ● deep finding" for ln in out)      # depth 2, two gutters
 
 
 def test_errored_subagent_gutter_stays_magenta_with_red_outcome() -> None:
@@ -774,7 +773,7 @@ def test_inline_code_is_cyan_not_bold_and_no_dark_bg() -> None:
                                    color=True, gutters=())
     joined = "\n".join(lines)
     assert "inline code" in _visible(joined)
-    assert "\x1b[1m" not in joined          # no bold
+    assert joined.count("\x1b[1m") == 1     # only the turn bullet is bold
     assert "\x1b[40m" not in joined         # no dark default-bg
     assert "\x1b[1;36;40m" not in joined    # no rich-default combined code
     assert "\x1b[36m" in joined             # still cyan foreground
