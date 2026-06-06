@@ -723,6 +723,43 @@ def _serialize_mcp_result(result: Any) -> str:
     return str(result)
 
 
+def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
+    """Reassemble one codex turn's ``item.completed`` items into a full-turn
+    ``llm_response.raw`` (``{"content": [...]}``) carrying text + tool_use
+    blocks, so the audit reconstruction (``build_messages_from_events``) can
+    pair tool_use/tool_result correctly.
+
+    LATENT/AUDIT-ONLY: not wired into the live emit path (live raw stays
+    text-only — see the Fix 2 part-2 scope decision). A web_search item becomes
+    a query-only tool_use (codex exposes no results/citations).
+    """
+    content: list[dict[str, Any]] = []
+    for item in items:
+        itype = getattr(item, "type", None)
+        if itype == "agent_message":
+            content.append({"type": "text",
+                             "text": getattr(item, "text", "") or ""})
+        elif itype == "mcp_tool_call":
+            name = (getattr(item, "tool", "")
+                    or getattr(item, "name", "") or "")
+            content.append({
+                "type": "tool_use",
+                "id": getattr(item, "id", "") or "",
+                "name": name,
+                "input": getattr(item, "arguments", None) or {},
+            })
+        elif itype == "web_search":
+            content.append({
+                "type": "tool_use",
+                "id": getattr(item, "id", "") or "",
+                "name": "web_search",
+                "input": {"query": getattr(item, "query", "") or ""},
+            })
+        # reasoning/command_execution/file_change/error are not part of the
+        # assistant message's reconstructable content.
+    return {"content": content}
+
+
 def _parse_codex_message(raw: dict[str, Any]) -> Message:
     """raw → assistant Message for codex. codex's live `llm_response.raw` is
     text-only; the reassembled full-turn raw (`reassemble_codex_turn`) also
