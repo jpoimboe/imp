@@ -115,6 +115,9 @@ class AgentInvocation:
     # Live engine State for the rename_change tool to mutate. Any to avoid an
     # import cycle. None for subagents / legacy tests.
     change_state: Any = None
+    # The LIVE, mutable Change for the rename_change tool. Any to avoid an import
+    # cycle. None for subagents / legacy tests (no rename authority anyway).
+    change: Any = None
     # parent_id override for this agent's FIRST emitted event (step_context):
     # the spawning step_started id (steps/gates) or task tool_call id (subagents).
     first_event_parent_id: str | None = None

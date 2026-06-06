@@ -761,6 +761,7 @@ class ClaudeCodeAgentRunner:
         )
         ctx.change_context = invocation.change_context
         ctx.change_state = invocation.change_state
+        ctx.change = invocation.change          # live Change for rename_change
         ctx.spawn_subagent = spawn_subagent_via_registry
         ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth

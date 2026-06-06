@@ -38,6 +38,10 @@ class ToolContext:
     # Live State of the running Change; the rename_change tool sets
     # pending_rename on it. None for subagents (no rename authority).
     change_state: Any = None
+    # The LIVE, mutable Change (top-level steps only; None for subagents). The
+    # rename_change tool mutates change.title + rewrites change.json through it.
+    # Distinct from change_context, which is the FROZEN render-time snapshot.
+    change: Any = None
     # The runner injects this callable so the PROMPT_USER resume path can read
     # the user's reply when an interactive transcript ends on assistant text.
     user_input_fn: Any = None

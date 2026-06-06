@@ -660,6 +660,7 @@ async def _run_agent_invocation(
         agent_id=agent_id,
         event_log=log,
         change_state=state,
+        change=change,
         first_event_parent_id=started["id"],
         resolved_tiers=state.resolved_tiers,
         coordinator=coordinator,
