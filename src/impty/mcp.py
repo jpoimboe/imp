@@ -20,11 +20,33 @@ for a full alt-screen TUI like claude code.
 
 from __future__ import annotations
 
+import codecs
+import re
+
 from mcp.server.fastmcp import FastMCP
 
 from impty import TerminalSession
 
 mcp = FastMCP("impty")
+
+# C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
+# Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
+# and lone backslashes — passes through untouched.
+_ESCAPE_RE = re.compile(
+    r"\\(?:x[0-9a-fA-F]{2}|[0-7]{1,3}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[\\'\"abfnrtv0])"
+)
+
+
+def _decode_keys(data: str) -> str:
+    r"""Decode the keystroke escape mnemonics send() documents (``\r``, ``\t``,
+    ``\x03``, ``\x1b[B`` …) into the real control bytes they name.
+
+    The agent→MCP JSON boundary delivers a written ``\r`` as the two literal
+    characters backslash + 'r', not a carriage return — so without this the
+    documented mnemonics never reach the program and Enter can't submit a
+    prompt. Each matched token is pure ASCII, so unicode_escape is safe; real
+    Unicode and unrecognized lone backslashes are left exactly as typed."""
+    return _ESCAPE_RE.sub(lambda m: codecs.decode(m.group(0), "unicode_escape"), data)
 
 # One lazy session at a time. `start` replaces any existing one. This is the
 # most playable default, NOT a commitment to the deferred lifecycle question.
@@ -96,7 +118,7 @@ def send(data: str, wait: bool = True) -> str:
     without waiting (e.g. mid-stream input).
     """
     session = _require()
-    session.send(data)
+    session.send(_decode_keys(data))
     if not wait:
         return "[sent]"
     session.wait_idle(idle=0.3, hard=15.0)

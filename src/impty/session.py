@@ -15,7 +15,7 @@ import struct
 import subprocess
 import termios
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import pyte
 
@@ -25,6 +25,24 @@ from impty.view import Cell
 
 def _set_winsize(fd: int, rows: int, cols: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+
+class _ReplyScreen(pyte.HistoryScreen):  # type: ignore[misc]  # pyte is untyped
+    """A pyte screen that writes terminal replies back to the program.
+
+    pyte computes answers to query sequences — cursor-position reports (CPR /
+    DSR 6: ESC[6n) and device-attribute requests — and emits them via
+    write_process_input(), which is a no-op by default. A real terminal feeds
+    those replies into the program's stdin. prompt_toolkit and curses apps
+    BLOCK on the CPR reply before enabling normal key bindings, so without it
+    line input degrades (Enter stops submitting). We forward the reply to the
+    pty master so the program reads it, just like a real terminal."""
+
+    reply: Callable[[str], None] | None = None  # set after the pty opens
+
+    def write_process_input(self, data: str) -> None:
+        if self.reply is not None:
+            self.reply(data)
 
 
 class TerminalSession:
@@ -46,9 +64,12 @@ class TerminalSession:
     ) -> None:
         self._cols = cols
         self._rows = rows
-        self._screen = pyte.HistoryScreen(cols, rows, history=history, ratio=0.5)
+        self._screen = _ReplyScreen(cols, rows, history=history, ratio=0.5)
         self._stream = pyte.ByteStream(self._screen)
         self._master, slave = pty.openpty()
+        # Forward pyte's terminal-query replies (CPR, device attributes) to the
+        # program's stdin, exactly as a real terminal does.
+        self._screen.reply = self._write_reply
         _set_winsize(slave, rows, cols)
         # Default TERM so color emission (and thus cell().fg) is deterministic
         # across machines/CI where TERM may be unset or minimal. An explicit
@@ -70,6 +91,10 @@ class TerminalSession:
     @property
     def pid(self) -> int:
         return self._proc.pid
+
+    def _write_reply(self, data: str) -> None:
+        """Feed a pyte-generated terminal reply back into the program's stdin."""
+        os.write(self._master, data.encode("utf-8"))
 
     def send(self, data: bytes | str) -> None:
         """Write raw keystrokes to the program. Strings are UTF-8 encoded.

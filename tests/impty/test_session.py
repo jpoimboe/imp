@@ -90,6 +90,37 @@ def test_cli_under_test_is_not_alt_screen() -> None:
         assert s.is_alt_screen() is False
 
 
+def test_cpr_query_is_answered_so_program_can_read_reply() -> None:
+    # A real terminal answers a cursor-position request (CPR / DSR 6: ESC[6n)
+    # by writing ESC[<row>;<col>R back to the program's stdin. prompt_toolkit
+    # (and curses apps) issue this and BLOCK on the reply before enabling their
+    # normal key bindings; without it, line input degrades and Enter never
+    # submits. The child here emits ESC[6n, reads the reply byte-by-byte until
+    # 'R', and echoes the row;col payload — proving the reply reached it.
+    # Raw mode mirrors what CPR users (prompt_toolkit, curses) actually do:
+    # read the reply byte-by-byte with no line buffering and no echo.
+    prog = (
+        "import sys, tty, termios\n"
+        "fd = sys.stdin.fileno()\n"
+        "old = termios.tcgetattr(fd)\n"
+        "tty.setraw(fd)\n"
+        "try:\n"
+        "    sys.stdout.write('\\x1b[6n'); sys.stdout.flush()\n"
+        "    buf = ''\n"
+        "    while True:\n"
+        "        c = sys.stdin.read(1)\n"
+        "        if not c or c == 'R': break\n"
+        "        buf += c\n"
+        "finally:\n"
+        "    termios.tcsetattr(fd, termios.TCSADRAIN, old)\n"
+        "sys.stdout.write('CPR=' + buf.lstrip('\\x1b[') + '\\n'); sys.stdout.flush()\n"
+    )
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        s.wait_idle(idle=0.3, hard=5.0)
+        # Cursor starts at row 1, col 1 (1-based, as DSR reports it).
+        assert "CPR=1;1" in s.viewport()
+
+
 def test_cursor_parks_after_prompt_string() -> None:
     # "Waiting for input looks like": cursor sits immediately after the prompt
     # text, on the bottom non-blank row, with no further output. This is the
