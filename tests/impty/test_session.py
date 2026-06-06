@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import os
+import sys
+
+import pytest
+
+from impty import TerminalSession
+
+
+def _can_pty() -> bool:
+    try:
+        import pty
+
+        m, s = pty.openpty()
+        os.close(m)
+        os.close(s)
+        return True
+    except Exception:
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _can_pty(), reason="pty not available")
+
+
+def test_spawn_and_read_startup_output() -> None:
+    with TerminalSession([sys.executable, "-c", "print('hello world')"]) as s:
+        s.wait_idle()
+        assert "hello world" in s.viewport()
+
+
+def test_send_is_received_by_child() -> None:
+    prog = "import sys; print(sys.stdin.readline().strip().upper())"
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        s.send("abc\r")
+        s.wait_idle()
+        assert "ABC" in s.viewport()
+
+
+def test_wait_idle_returns_while_child_blocks_on_input() -> None:
+    # The readiness trap: child prints a prompt then blocks on stdin with no
+    # EOF. A blocking read would hang forever; select-based wait_idle returns.
+    prog = "import sys; sys.stdout.write('Name? '); sys.stdout.flush(); sys.stdin.readline()"
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        settled = s.wait_idle(idle=0.2, hard=5.0)
+        assert settled is True
+        assert "Name?" in s.viewport()
+
+
+def test_wait_idle_hard_timeout_returns_false_on_chatty_child() -> None:
+    # A child that never goes quiet hits the hard cap and reports it.
+    prog = (
+        "import sys,time\n"
+        "while True: sys.stdout.write('x'); sys.stdout.flush(); time.sleep(0.01)"
+    )
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        assert s.wait_idle(idle=0.5, hard=1.0) is False
+
+
+def test_default_term_is_set_for_color_fidelity() -> None:
+    # The child inherits TERM=xterm-256color by default, so a real program's
+    # color emission (and thus cell().fg) is deterministic across machines/CI.
+    prog = "import os; print(os.environ.get('TERM', 'UNSET'))"
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        s.wait_idle()
+        assert "xterm-256color" in s.viewport()
