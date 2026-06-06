@@ -1137,6 +1137,20 @@ class ClaudeCodeAgentRunner:
                             next_text = cont(last_text)
                             if inspect.isawaitable(next_text):
                                 next_text = await next_text
+                            if self._interrupted():
+                                # The interrupt landed while we were resolving the
+                                # continuation. Don't nudge the model to keep going
+                                # after a Ctrl-C — pause at the turn boundary.
+                                # Without this the nudge + re-query proceeds and the
+                                # cancel is only caught later at the no-result
+                                # fallthrough, after a wasted round-trip that
+                                # surfaces a spurious `network` warning.
+                                yield {"type": "error", "payload": {
+                                    "category": "config",
+                                    "kind": "interrupted",
+                                    "message": "runner cancelled by interrupt",
+                                }}
+                                return
                             if next_text is None:
                                 yield {"type": "error", "payload": {
                                     "category": "agent_incomplete",
@@ -1229,6 +1243,13 @@ class ClaudeCodeAgentRunner:
             "message": message,
             "detail": diag,
         }}
+
+    def _interrupted(self) -> bool:
+        """Read the cancel flag through a call so mypy doesn't narrow it to a
+        constant after the per-message guard. interrupt() flips `_cancel` from
+        another task, which mypy's flow analysis can't model — without this
+        indirection the mid-turn cancel check reads as unreachable."""
+        return self._cancel
 
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_running_processes

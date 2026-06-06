@@ -157,6 +157,55 @@ async def test_cancelled_no_result_yields_interrupted_not_network(
 
 
 @pytest.mark.anyio
+async def test_cancel_during_continuation_skips_nudge_and_requery(
+    tmp_path: Path,
+) -> None:
+    """If the interrupt lands while imp is resolving the end-of-turn
+    continuation (the complete_step nudge), the runner must pause at the turn
+    boundary instead of appending the nudge and re-querying. Skipping the doomed
+    re-query is what suppresses the spurious `[network] SDK closed` warning a
+    user sees after Ctrl-C.
+
+    Distinguishing signal: exactly ONE query reached the client (the initial
+    history replay, no nudge re-query).
+    """
+    from dataclasses import replace
+
+    (tmp_path / "art").mkdir()
+
+    scripted = [
+        assistant(text("thinking about the plan")),  # no complete_step
+        result(),
+    ]
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+
+    def cancelling_cont(_last_text: str) -> str:
+        # The Ctrl-C lands here, mid-continuation.
+        runner._cancel = True
+        return "You ended your turn without calling complete_step"
+
+    inv = replace(_inv(tmp_path), continuation_fn=cancelling_cont)
+    events = [ev async for ev in runner.run(inv)]
+
+    errs = [e for e in events if e["type"] == "error"]
+    assert len(errs) == 1, errs
+    assert errs[0]["payload"]["category"] == "config", errs[0]["payload"]
+    assert errs[0]["payload"]["kind"] == "interrupted", errs[0]["payload"]
+    # The nudge re-query must NOT have fired: only the initial history replay.
+    assert len(created[0].queries) == 1, (
+        f"expected no re-query after cancel, got {created[0].queries}")
+
+
+@pytest.mark.anyio
 async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
     """Pre-populate transcript with a user/assistant/user(tool_result) sequence;
     runner skips initial_messages and replays history via client.query."""
