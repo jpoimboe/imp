@@ -34,7 +34,6 @@ phases:
           - {operations: [write], paths: ["/project/imp/specs/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
         rules:
-          - {if: {phase: drafting}, resume: spec-writer}    # used for rename at step boundary
           - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
       - name: spec-verify-commit

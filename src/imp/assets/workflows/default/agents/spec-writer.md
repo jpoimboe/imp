@@ -4,8 +4,8 @@ description: Interactively brainstorm with the user, settle the slug, then write
 tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search, rename_change]
 output:
   status: {type: enum, values: [Success, Error]}
-  phase: {type: enum, values: [drafting, written]}
-  spec_path: {type: string, required: false}
+  phase: {type: enum, values: [written]}
+  spec_path: {type: string}
   complexity: {type: enum, values: [trivial, standard]}
 ---
 

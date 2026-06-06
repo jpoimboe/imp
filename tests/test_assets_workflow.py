@@ -176,15 +176,6 @@ def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
     assert m2.var_mutations["fast_path"] is False
 
 
-def test_spec_writer_drafting_turn_never_evaluates_set() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    rules = _steps(wf)["spec-writer"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"phase": "drafting", "complexity": "trivial", "status": "Success"})
-    assert m.var_mutations == {}
-
-
 def test_commit_tool_is_removed_from_registry() -> None:
     # Fix #3: the commit tool is gone; all agents commit with raw git.
     import imp.agents.tools  # noqa: F401 — triggers _register_builtins
