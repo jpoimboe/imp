@@ -81,7 +81,14 @@ async def dispatch_tool(
         # runner reads `state.complete_step_args` at that boundary, not via
         # a call-stack return (design "complete_step capture").
         state.complete_step_called = True
-        state.complete_step_args = dict(args)
+        # The dynamic arg-model (_register_imp_tool) defaults every non-required
+        # property to None (PydanticField(None)), so model_dump materializes
+        # e.g. spec_path=None even when codex omitted it. Drop None-valued keys
+        # so complete_step_args reflects what the agent ACTUALLY sent —
+        # otherwise output-schema validation rejects a present-but-None optional
+        # field ("expected string, got NoneType"). imp output types are never
+        # nullable, so a None here always means "field not provided".
+        state.complete_step_args = {k: v for k, v in args.items() if v is not None}
         return "step complete"
     try:
         raw = await tool.async_invoke(ctx, args)
