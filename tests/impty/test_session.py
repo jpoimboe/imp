@@ -88,3 +88,21 @@ def test_cli_under_test_is_not_alt_screen() -> None:
     with TerminalSession([sys.executable, "-c", "print('plain cli')"]) as s:
         s.wait_idle()
         assert s.is_alt_screen() is False
+
+
+def test_cursor_parks_after_prompt_string() -> None:
+    # "Waiting for input looks like": cursor sits immediately after the prompt
+    # text, on the bottom non-blank row, with no further output. This is the
+    # cheap signal an agent-arbiter uses to recognize a prompt — no /proc.
+    # NB: viewport_text right-trims, so the rendered row is "Project name?"
+    # (no trailing space); the cursor x still sits PAST the space at col 14.
+    # Assert the two facts separately — don't expect the trailing space in text.
+    prog = (
+        "import sys; sys.stdout.write('Project name? ');"
+        " sys.stdout.flush(); sys.stdin.readline()"
+    )
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        s.wait_idle(idle=0.2, hard=5.0)
+        x, y = s.cursor()
+        assert s.viewport().split("\n")[y].rstrip() == "Project name?"  # text (trimmed)
+        assert x == len("Project name? ")                               # cursor past the space
