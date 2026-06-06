@@ -74,10 +74,10 @@ def test_resume_renders_through_live_driver_without_replay(tmp_path, monkeypatch
         rc = anyio.run(m._async_cmd_resume, args)
     out = buf.getvalue()
     assert rc == 0
-    # The step header is rendered exactly once — no replay duplicate. Match the
-    # rendered header ("  spec" -> strip == "spec"), NOT the "Phase: design,
-    # step: spec" banner (whose strip ends with "spec" but isn't equal to it).
-    step_lines = [ln for ln in out.splitlines() if ln.strip() == "spec"]
+    # The step header is rendered exactly once — no replay duplicate. The header
+    # now carries the model on the same line ("  spec  ·  m"); match its start,
+    # NOT the "Phase: design, step: spec" banner (which begins with "Phase:").
+    step_lines = [ln for ln in out.splitlines() if ln.strip().startswith("spec  ·")]
     assert len(step_lines) == 1
 
     # Side-effect assertions: workflow_resumed was appended to events.jsonl.

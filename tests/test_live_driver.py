@@ -37,7 +37,7 @@ def _render_body(events) -> list[str]:
     return list(render_tree(tree, full=False, color=False, width=80))
 
 
-def test_burst_renders_nothing_in_live_path() -> None:
+def test_burst_recap_streams_then_prose_in_live_path() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -50,16 +50,17 @@ def test_burst_renders_nothing_in_live_path() -> None:
     ]
     for e in events:
         drv.on_event(e)
-    assert not any("tools" in ln for ln in _body(out))
+    assert not any("⏺" in ln for ln in _body(out))  # burst still open — held
     drv.on_event(ev("8", "llm_response", agent_id="a",
                     raw={"content": [{"type": "text", "text": "done"}]},
                     usage={}))
     body = _body(out)
-    assert not any("tools" in ln for ln in body)   # burst dropped (A2)
-    assert any("done" in ln for ln in body)        # prose still streams
+    # point 8: the closed burst leaves a single dark-gray recap line, then prose.
+    assert any("⏺ read_file · glob · 2 calls" in ln for ln in body)
+    assert any("done" in ln for ln in body)        # prose still streams after it
 
 
-def test_burst_dropped_prose_kept_in_order() -> None:
+def test_burst_recap_then_prose_kept_in_order() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -72,8 +73,9 @@ def test_burst_dropped_prose_kept_in_order() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    assert not any("tools" in ln for ln in body)
-    assert any("the answer" in ln for ln in body)
+    recap_i = next(i for i, ln in enumerate(body) if "⏺ grep · 1 call" in ln)
+    answer_i = next(i for i, ln in enumerate(body) if "the answer" in ln)
+    assert recap_i < answer_i          # recap precedes the prose it preceded live
 
 
 def test_live_subagent_only_status_rows() -> None:
@@ -267,7 +269,7 @@ def test_human_gate_blocks_following_nodes_until_resolved() -> None:
     assert gate_i < outcome_i                      # tree order preserved
 
 
-def test_open_burst_flushes_to_nothing_at_pause() -> None:
+def test_open_burst_recap_emitted_at_finish() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -277,9 +279,10 @@ def test_open_burst_flushes_to_nothing_at_pause() -> None:
         ev("5", "tool_result", agent_id="a", id="b1", content="ok"),
     ]:
         drv.on_event(e)
-    assert not any("tools" in ln for ln in _body(out))
+    assert not any("⏺" in ln for ln in _body(out))      # still open — held
     drv.finish()
-    assert not any("tools" in ln for ln in _body(out))   # nothing to emit (A2)
+    # finish() force-flushes the open burst, leaving its recap (point 8).
+    assert any("⏺ read_file · 1 call" in ln for ln in _body(out))
 
 
 def test_subagent_row_resolves_only_on_close() -> None:
@@ -498,25 +501,36 @@ def test_print_chrome_renders_plain_and_carries_no_gutter() -> None:
     assert "\x1b[" not in body   # agent = () → no codes; main-agent sink → no gutter
 
 
-def test_user_message_suppressed_in_live_present_in_log() -> None:
-    # §4: prompt_toolkit already echoed the user's input in live mode; re-rendering
-    # the UserMessageNode would duplicate it. imp log has no terminal echo so it
-    # must still render the node as the sole record.
+def test_user_message_shown_in_nontty_live_suppressed_on_tty() -> None:
+    # point 3: the interactive prompt must be visible in the transcript. On a real
+    # terminal prompt_toolkit already echoed it, so the live driver suppresses the
+    # node to avoid a duplicate. But a non-TTY sink (offline capture, `imp run |
+    # tee`, the snap-ui mockup) has no echo, so there the node IS rendered — and
+    # imp log always renders it.
     events = [
         ev("1", "change_created", change_id=1, title="t"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
+        ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
         ev("3", "user_message", content=[{"type": "text", "text": "do the thing"}]),
     ]
+    # non-TTY live (the _Pipe sink reports isatty() == False)
     drv, out = _driver()
     for e in events:
         drv.on_event(e)
     drv.finish()
-    live = out.getvalue()
-    log = "\n".join(_render_body(events))
+    assert "❯ do the thing" in out.getvalue()
 
-    assert "❯ do the thing" not in live   # suppressed in live (prompt_toolkit echoed)
-    assert "❯ do the thing" in log        # the only record in imp log
+    # TTY live: prompt_toolkit echoed the line, so suppress to avoid a dup.
+    tout = _TTYPipe()
+    tdrv = LiveDriver(stream=tout, color=False, width=80, status=LiveStatus(tout))
+    for e in events:
+        tdrv.on_event(e)
+    tdrv.finish()
+    assert "❯ do the thing" not in tout.getvalue()
+
+    # imp log (no terminal echo) always renders the user turn.
+    assert "❯ do the thing" in "\n".join(_render_body(events))
 
 
 def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:

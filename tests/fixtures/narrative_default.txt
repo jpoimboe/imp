@@ -5,21 +5,26 @@ tiers resolved:
   high   → openai/gpt-5.5
     differ from medium: tier 1, vendor jump
 design
-  spec
-  ▸ context · anthropic/claude-sonnet-4-6 · 2 tools
+  spec  ·  claude-sonnet-4-6
+  
   Drafting the spec.
+  
+  ⏺ read_file · bash · 2 calls
   
   ↳ task → reviewer  ⟨✓ done⟩
   ❯ Please add a section on token expiry.
+  
   ✓ spec · status=Success · summary=Spec drafted
   approve
+  
   human gate → continue
     Approve the design spec?
     - yes
     - no
   ✓ approve
 implement
-  build
+  build  ·  claude-sonnet-4-6
+  
   error: [provider] rate limited
   warning: dropped block
   phase_exhausted  phase=implement

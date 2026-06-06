@@ -6,6 +6,7 @@ import re as _re
 from pathlib import Path
 
 from imp.cli import narrative as nv
+from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.render_text import render_tree
 
@@ -51,7 +52,7 @@ def test_agent_text_rendered_in_full_not_truncated() -> None:
     assert out.count("\n") >= 5
 
 
-def test_collapsed_folds_drop_thinking_and_tool_summaries() -> None:
+def test_collapsed_folds_drop_thinking_keep_burst_recap() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
             model="m", provider="anthropic"),
@@ -63,10 +64,13 @@ def test_collapsed_folds_drop_thinking_and_tool_summaries() -> None:
         _ev("8", "tool_call", agent_id="step:p/s", id="b3", name="ls", input={}),
         _ev("9", "tool_result", agent_id="step:p/s", id="b3", content="ok", error=False),
     ]))
-    # Default mode drops both the thinking line and the tool-burst summary line.
+    # Thinking is still noise in the lean view — dropped entirely.
     assert "thinking" not in out
-    assert "tools" not in out
-    assert "⏺" not in out
+    # The tool burst now leaves ONE dark-gray recap line (point 8): distinct tool
+    # names (first-seen order) + the call count — not the full per-call dump.
+    assert "⏺ bash · ls · 3 calls" in out
+    assert out.count("⏺") == 1          # one recap line, not one per call
+    assert "→ ok" not in out            # per-call results stay in --full only
 
 
 def test_collapsed_subagent_renders_single_status_row() -> None:
@@ -87,8 +91,10 @@ def test_collapsed_subagent_renders_single_status_row() -> None:
             content='{"status":"Success","summary":"ok"}', error=False),
     ])
     joined = "\n".join(out)
-    # Step-context still collapses to its one-line summary (untouched).
-    assert "▸ context · anthropic/claude · 2 tools" in joined
+    # The lean step-context line is gone (the model rides on the step header);
+    # the context detail survives only in imp log --full.
+    assert "▸ context" not in joined
+    assert "s  ·  m" in joined          # model on the step header
     # Subagent: single status row, ✓ done. No recursed prose, no outcome.
     assert any(ln.strip() == "↳ task → reviewer  ⟨✓ done⟩" for ln in out)
     assert "looks good" not in joined
@@ -260,16 +266,22 @@ def test_full_mode_shows_the_replay_source_system_prompt() -> None:
     assert stored in out
 
 
-def test_step_context_collapsed_even_in_default_mode() -> None:
-    # design §5.1: step_context is folded by default in BOTH views.
-    out = "\n".join(_lines([
+def test_step_context_dropped_from_lean_model_on_step_header() -> None:
+    # Lean view: no `▸ context …` line at all — the model rides on the step
+    # header (point 1); the system prompt / tool list survive in --full only.
+    events = [
         _ev("2", "step_started", step="s", kind="agent", phase="p",
-            model="m", provider="anthropic"),
-        _ev("3", "step_context", agent_id="step:p/s", provider="anthropic", model="claude",
-            system_prompt="SYSTEM PROMPT TEXT", tools_schema=[], params={}, max_tool_calls=50),
-    ], full=False))
-    assert "SYSTEM PROMPT TEXT" not in out
-    assert "▸ context" in out
+            model="claude-opus-4-7", provider="anthropic"),
+        _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
+            model="claude-opus-4-7", system_prompt="SYSTEM PROMPT TEXT",
+            tools_schema=[], params={}, max_tool_calls=50),
+    ]
+    lean = "\n".join(_lines(events, full=False))
+    assert "▸ context" not in lean
+    assert "SYSTEM PROMPT TEXT" not in lean
+    assert "s  ·  claude-opus-4-7" in lean      # model on the step header
+    full = "\n".join(_lines(events, full=True))
+    assert "context" in full and "SYSTEM PROMPT TEXT" in full
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -294,6 +306,50 @@ def test_snapshot_full(monkeypatch) -> None:
     golden = (FIXTURES / "narrative_full.txt").read_text()
     assert actual == golden, ("full-mode drift; to accept, rewrite "
                               "tests/fixtures/narrative_full.txt with the actual output")
+
+
+def test_synthetic_user_message_dropped_genuine_shown() -> None:
+    # point 3: only a human reply the engine awaited renders as `❯ …`; the
+    # synthetic "begin" kickoff (no preceding awaiting_user_input) is dropped.
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("2", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "begin"}]),
+        _ev("3", "awaiting_user_input", agent_id="step:p/s"),
+        _ev("4", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "do the real thing"}]),
+    ]))
+    assert "❯ begin" not in out
+    assert "❯ do the real thing" in out
+
+
+def test_chrome_step_collapses_to_single_breadcrumb() -> None:
+    # point 5: a no-op gate/script step renders ONLY its `✓ name` breadcrumb —
+    # the redundant name-only header line above it is dropped.
+    out = _lines([
+        _ev("1", "change_created", slug="s", title="t"),
+        _ev("2", "step_started", step="spec-verify-commit", kind="script", phase="spec"),
+        _ev("3", "step_completed", step="spec-verify-commit", kind="script",
+            action={"verb": "continue"}),
+    ])
+    hits = [ln for ln in out if "spec-verify-commit" in ln]
+    assert len(hits) == 1                       # one line, not header + breadcrumb
+    assert hits[0].strip().startswith("✓ spec-verify-commit")
+
+
+def test_breadcrumb_and_fallback_recede_to_gray() -> None:
+    # point 4: the per-step completion line and stray event lines are chrome —
+    # dark gray, never the routing-verb accent (cyan/green) they used to carry.
+    crumb = next(iter(rt._render(
+        nv.BreadcrumbLine(step_name="x", elapsed_s=3,
+                          action={"verb": "goto", "target": "y"}),
+        depth=0, full=False, color=True, width=80)))
+    assert pal._ANSI["gray"] in crumb
+    assert pal._ANSI["cyan"] not in crumb       # the goto accent is gone
+    fallback = next(iter(rt._render(
+        nv.FallbackLine(event_type="change_merged", payload={"slug": "s"}),
+        depth=0, full=False, color=True, width=80)))
+    assert pal._ANSI["gray"] in fallback
 
 
 def test_header_line_matches_render_for_phase_and_step() -> None:
@@ -403,15 +459,17 @@ def test_consecutive_prose_turns_separated_by_blank_line() -> None:
     assert out[second - 1].strip() == "", "consecutive prose turns must be blank-separated"
 
 
-def test_single_prose_turn_has_no_leading_blank() -> None:
-    # The FIRST prose block under a step must not get a spurious leading blank.
+def test_step_header_separated_from_first_prose_by_one_blank() -> None:
+    # design (point 2): exactly ONE blank line between the step header and the
+    # agent's first words — the label and the speech get air, but not a double gap.
     out = _lines([
         _ev("1", "step_started", step="spec", kind="agent", phase="design"),
         _ev("2", "llm_response", agent_id="a",
             raw={"content": [{"type": "text", "text": "Only prose."}]}, usage={}),
     ])
     idx = next(i for i, ln in enumerate(out) if "Only prose." in ln)
-    assert out[idx - 1].strip() != "", "step header should sit directly above first prose"
+    assert out[idx - 1].strip() == "", "one blank separates the header from prose"
+    assert out[idx - 2].strip() != "", "the step header sits just above that blank"
 
 
 def test_tiers_resolved_attaches_at_root() -> None:
@@ -784,7 +842,7 @@ def test_user_message_paints_bright_blue_caret_on_every_line_color_on() -> None:
     """Multi-line user input is bright-blue FOREGROUND on every wrapped line; the
     leading `❯ ` caret marks the first line (and isn't duplicated on
     continuations). No background fill (the old bright-blue bg is gone)."""
-    node = nv.UserMessageNode(text="line one\nline two")
+    node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
     # First line: `❯ ` caret + bright-blue fg; second line: fg without the caret.
@@ -795,7 +853,7 @@ def test_user_message_paints_bright_blue_caret_on_every_line_color_on() -> None:
 
 
 def test_user_message_no_color_when_off_but_keeps_caret() -> None:
-    node = nv.UserMessageNode(text="line one\nline two")
+    node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=False, width=80))
     joined = "\n".join(out)
     assert "\x1b[94m" not in joined and "\x1b[104m" not in joined  # no color off-TTY

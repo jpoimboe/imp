@@ -16,31 +16,36 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-# A dark terminal theme. Default fg/bg are what an unstyled cell paints as;
-# the 16 named ANSI colors use a standard, slightly-muted palette so the
-# render reads like a real modern terminal rather than 1980s neon.
-_BG = (0x1E, 0x1E, 0x1E)
-_FG = (0xD0, 0xD0, 0xD0)
+# A dark terminal theme for the mockup. The 16 ANSI names map to ONE cohesive,
+# desaturated family (low-saturation pastels on near-black, in the spirit of
+# Selenized / ayu-mirage) so the render reads as a single designed surface rather
+# than the default Tango neon — the saturated cyan/green were the loudest, so they
+# recede the most. This affects only the snap-ui PNG (real terminals paint ANSI
+# from the user's own theme); it exists so colour cohesion can be judged from the
+# mockup. Every hue is reachable from ANSI-16, so nothing here steers the design
+# toward colours the codes can't emit.
+_BG = (0x1B, 0x1D, 0x21)
+_FG = (0xC5, 0xC8, 0xC6)
 
 _PALETTE: dict[str, tuple[int, int, int]] = {
-    "black": (0x2E, 0x34, 0x36),
-    "red": (0xCC, 0x57, 0x57),
-    "green": (0x8A, 0xE2, 0x34),
+    "black": (0x2A, 0x2D, 0x32),
+    "red": (0xC0, 0x6A, 0x66),
+    "green": (0x90, 0xA9, 0x59),  # muted olive, not neon lime
     "brown": (0xC4, 0xA0, 0x00),  # pyte's name for ANSI yellow
-    "yellow": (0xCE, 0xA8, 0x36),
-    "blue": (0x72, 0x9F, 0xCF),
-    "magenta": (0xAD, 0x7F, 0xA8),
-    "cyan": (0x34, 0xE2, 0xE2),
-    "white": (0xD0, 0xD0, 0xD0),
-    "brightblack": (0x55, 0x57, 0x53),
-    "brightred": (0xEF, 0x29, 0x29),
-    "brightgreen": (0x8A, 0xE2, 0x34),
-    "brightbrown": (0xFC, 0xE9, 0x4F),
-    "brightyellow": (0xFC, 0xE9, 0x4F),
-    "brightblue": (0x72, 0x9F, 0xCF),
-    "brightmagenta": (0xAD, 0x7F, 0xA8),
-    "brightcyan": (0x34, 0xE2, 0xE2),
-    "brightwhite": (0xEE, 0xEE, 0xEC),
+    "yellow": (0xC9, 0xA5, 0x54),
+    "blue": (0x6E, 0x90, 0xB8),
+    "magenta": (0xA8, 0x84, 0xB5),
+    "cyan": (0x5E, 0xA0, 0x9E),  # muted teal, not neon cyan
+    "white": (0xC5, 0xC8, 0xC6),
+    "brightblack": (0x55, 0x57, 0x53),  # chrome / breadcrumbs — almost invisible
+    "brightred": (0xD6, 0x7B, 0x76),
+    "brightgreen": (0xA1, 0xBA, 0x6A),
+    "brightbrown": (0xDB, 0xBC, 0x6A),
+    "brightyellow": (0xDB, 0xBC, 0x6A),
+    "brightblue": (0x7F, 0xA2, 0xCA),
+    "brightmagenta": (0xBA, 0x96, 0xC6),
+    "brightcyan": (0x6F, 0xB3, 0xB0),
+    "brightwhite": (0xE6, 0xE8, 0xE6),
 }
 
 # Noto Sans Mono — a variable font with full box-drawing + block-element

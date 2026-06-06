@@ -107,6 +107,10 @@ class AgentTextNode:
 @dataclass
 class UserMessageNode:
     text: str
+    interactive: bool = False           # True only for a genuine human reply (one
+                                        # the engine blocked for via awaiting_user_input).
+                                        # Synthetic prompts — the "begin" kickoff, a
+                                        # resume nudge — are False and never rendered.
     collapsible = False
 
 
@@ -263,6 +267,10 @@ class NarrativeBuilder:
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
         self._resuming = False
+        # True between an awaiting_user_input event and the user_message that
+        # answers it, so the next user_message is tagged as a genuine human turn
+        # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
+        self._awaiting_reply = False
 
     # -- public API -----------------------------------------------------------
     @property
@@ -544,8 +552,9 @@ def _h_awaiting_user_input(
 ) -> None:
     # Programmatic marker that the engine is blocking for an interactive
     # end-of-turn reply. The question already rendered as agent text and the
-    # reply renders as the next user_message, so render nothing here — this
-    # exists for out-of-process drivers, not the human narrative.
+    # reply renders as the next user_message, so render nothing here — but arm
+    # the flag so that next user_message is tagged as a genuine human turn.
+    self._awaiting_reply = True
     return None
 
 
@@ -620,7 +629,8 @@ def _elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
 
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
-    self._append(UserMessageNode(text=_user_message_text(p)))
+    interactive, self._awaiting_reply = self._awaiting_reply, False
+    self._append(UserMessageNode(text=_user_message_text(p), interactive=interactive))
 
 
 def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -921,7 +931,7 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, AgentTextNode):
         return {"t": t, "text": node.text}
     if isinstance(node, UserMessageNode):
-        return {"t": t, "text": node.text}
+        return {"t": t, "text": node.text, "interactive": node.interactive}
     if isinstance(node, ThinkingFold):
         return {"t": t, "content": node.content}
     if isinstance(node, ToolBurstFold):

@@ -167,10 +167,23 @@ class LiveDriver:
                 # OWN depth (no +1) so prose aligns under the header instead of
                 # burying it — must match render_text._render. (aligned indent)
                 gutters = self._gutters()
-                self._stream_or_hold(
-                    rt.header_line(child, depth=cur.depth, color=self._color,
-                                   gutters=gutters),
-                    depth=cur.depth, gutters=gutters)
+                if rt.is_chrome_step(child):
+                    # A no-op gate/script step has no header — it collapses to the
+                    # single dark-gray breadcrumb its step_completed appends. Skip
+                    # the header line; descend so that breadcrumb still streams.
+                    pass
+                else:
+                    self._stream_or_hold(
+                        rt.header_line(child, depth=cur.depth, color=self._color,
+                                       gutters=gutters),
+                        depth=cur.depth, gutters=gutters)
+                    if isinstance(child, nv.StepNode):
+                        # One blank line between an agent step's header and its
+                        # first words (point 2). Arm the prose-adjacency flag so
+                        # the next real emission carries a leading separator;
+                        # the dropped lean context line is an empty emission that
+                        # leaves this untouched, so the blank lands before prose.
+                        self._prev_prose = True
                 child_depth = cur.depth + 1 if isinstance(child, nv.PhaseNode) else cur.depth
                 self._frontier.append(_Cursor(container=child, depth=child_depth))
             else:
@@ -216,11 +229,20 @@ class LiveDriver:
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
         if isinstance(node, nv.UserMessageNode):
-            # §4: live already showed the user's input via prompt_toolkit's raw
-            # echo; re-emitting the guttered node would duplicate it. imp log,
-            # which has no terminal echo, still renders the node normally.
-            # _prev_prose is intentionally left untouched — the node isn't a
-            # prose leaf, so the early return won't disturb prose blank-line spacing.
+            # §4: on a real terminal prompt_toolkit already echoed the typed line,
+            # so re-emitting the node would duplicate it — suppress there. But a
+            # non-TTY sink (offline capture / `imp run | tee` / the snap-ui mockup)
+            # has no echo, so the interactive turn would otherwise vanish. Render
+            # it there as a user turn (caret + blue), spaced like a chat message,
+            # so the transcript shows the prompts that drove the run (point 3).
+            stream_isatty = getattr(self._stream, "isatty", lambda: False)()
+            if stream_isatty:
+                return
+            lines = rt._render(node, depth=depth, full=False, color=self._color,
+                               width=self._width, gutters=gutters)
+            self._print_lines(
+                list(lines), prose=True,
+                separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
         if isinstance(node, nv.GateNode) and node.kind == "human":
             # Live renders the resolved header only; run_human_gate already showed
@@ -231,7 +253,7 @@ class LiveDriver:
         else:
             lines = rt._render(node, depth=depth, full=False, color=self._color,
                                width=self._width, gutters=gutters)
-            prose = rt.is_prose_leaf(node)
+            prose = rt.spaces_after(node, full=False)
         self._print_lines(
             list(lines), prose=prose,
             separator_indent=rt._gutter_indent(depth, gutters, self._color))

@@ -115,7 +115,8 @@ def test_render_text_shows_coder_header_once_with_flat_error_indent() -> None:
     tree = nv.build_tree(_retry_sequence())
     lines = list(render_tree(tree, full=False, color=False, width=120))
 
-    coder_header_lines = [ln for ln in lines if ln.rstrip() == "  coder"]
+    # The header now carries the model on the same line ("  coder  ·  m").
+    coder_header_lines = [ln for ln in lines if ln.rstrip() == "  coder  ·  m"]
     assert len(coder_header_lines) == 1, (
         f"`coder` step header must render exactly once, not once per attempt; "
         f"got {len(coder_header_lines)}: {coder_header_lines!r}"

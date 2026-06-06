@@ -121,6 +121,28 @@ def is_prose_leaf(node: Any) -> bool:
     return isinstance(node, (nv.AgentTextNode, nv.LiteralTextNode))
 
 
+def spaces_after(node: Any, *, full: bool) -> bool:
+    """A "spaced block": one a blank separator follows (and precedes, when it
+    trails another spaced block). Prose leaves and user turns always qualify; a
+    collapsed tool-burst summary qualifies in the lean view, where it sits as a
+    single line between two prose turns and wants air on both sides (so the run
+    reads `…prose / ⏺ burst / prose…` rather than bunching). The batch walk and
+    the live driver both key spacing off this, so they stay identical."""
+    return bool(
+        is_prose_leaf(node)
+        or isinstance(node, nv.UserMessageNode)
+        or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
+    )
+
+
+def is_chrome_step(node: Any) -> bool:
+    """True for a no-op structural step (a script gate / branch) whose whole
+    contribution is a 0s completion breadcrumb. These collapse to that single
+    dark-gray line — the redundant `name` header above the `✓ name · 0s` line is
+    pure noise. Agent (and human) steps carry real content and keep their header."""
+    return isinstance(node, nv.StepNode) and node.kind in ("script", "branch")
+
+
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
                      width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     """Render a container's children in order, inserting ONE blank line between
@@ -139,7 +161,7 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
         if prev_prose:
             yield _gutter_indent(depth, gutters, color)
         yield from lines
-        prev_prose = is_prose_leaf(child)
+        prev_prose = spaces_after(child, full=full)
 
 
 def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
@@ -174,6 +196,12 @@ def header_line(node: Any, *, depth: int, color: bool,
     label = node.name
     if node.interactive:
         label += " (interactive)"
+    if node.model:
+        # The model rides on the step line itself (design: drop the separate
+        # `▸ context · provider/model · N tools` line from the lean view — it
+        # survives only in `imp log --full`). Same gray as the rest of the step
+        # chrome; the provider and tool count are detail that the full view owns.
+        label += f"  ·  {node.model}"
     return _line(label, depth, color, *pal.NODE_COLORS["step"], gutters=gutters)
 
 
@@ -247,13 +275,24 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.StepNode):
         # A step's content flows at the step's OWN indent (no +1): the header is a
-        # label and its prose/context/breadcrumb align directly beneath it, rather
-        # than indenting a further level and burying the agent's words. Phases
-        # still indent their steps (the +1 lives in PhaseNode above); subagent
-        # folds add their own level + gutter internally. (design: aligned indent)
+        # label and its prose/breadcrumb align directly beneath it, rather than
+        # indenting a further level and burying the agent's words. Phases still
+        # indent their steps (the +1 lives in PhaseNode above); subagent folds add
+        # their own level + gutter internally. (design: aligned indent)
+        if is_chrome_step(node):
+            # A no-op gate/script step collapses to its single dark-gray
+            # breadcrumb (`✓ name · 0s`); the name-only header above it is noise.
+            yield from _render_children(node.children, depth=depth, full=full,
+                                        color=color, width=width, gutters=gutters)
+            return
         yield header_line(node, depth=depth, color=color, gutters=gutters)
-        yield from _render_children(node.children, depth=depth, full=full,
-                                    color=color, width=width, gutters=gutters)
+        body = list(_render_children(node.children, depth=depth, full=full,
+                                     color=color, width=width, gutters=gutters))
+        if body:
+            # One blank line between the step header and the agent's first words,
+            # so the speaker label and the speech don't bunch (design: §5.4 air).
+            yield _gutter_indent(depth, gutters, color)
+            yield from body
         return
 
     if isinstance(node, nv.AgentTextNode):
@@ -265,6 +304,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.UserMessageNode):
+        if not node.interactive:
+            # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
+            # something the human typed, so it never renders as a `❯` turn.
+            return
         yield from _wrap(f"{pal.CARET}{node.text}", width, depth, color,
                          *pal.NODE_COLORS["user"], gutters=gutters)
         return
@@ -315,9 +358,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             parts.append(f"→ {verb_text}")
         if node.elapsed_s is not None:
             parts.append(f"{int(node.elapsed_s)}s")
-        ac = pal.accent_color(node.action)
-        codes = (ac,) if ac else ()
-        yield _line(" · ".join(parts), depth, color, *codes, gutters=gutters)
+        # The per-step completion line is navigational chrome, not a result the
+        # eye should land on — dark gray, almost invisible, regardless of the
+        # routing verb. Real outcomes (errors, pauses) carry their own red lines.
+        yield _line(" · ".join(parts), depth, color, *pal.NODE_COLORS["breadcrumb"],
+                    gutters=gutters)
         return
 
     if isinstance(node, nv.ErrorNode):
@@ -353,16 +398,33 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.FallbackLine):
         kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
-        yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color, "dim",
-                    gutters=gutters)
+        yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color,
+                    *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
+
+
+def _burst_summary(burst: nv.ToolBurstFold) -> str:
+    """One-line recap of a finished tool burst for the lean view: the distinct
+    tool names (first-seen order, capped) and the call count. Mirrors what the
+    live status line showed WHILE the burst ran, left behind as a quiet marker so
+    a `prose → tools → prose` turn shows the work happened without expanding it."""
+    names = list(dict.fromkeys(c.name for c in burst.calls))
+    shown = " · ".join(names[:4])
+    more = f" +{len(names) - 4}" if len(names) > 4 else ""
+    n = len(burst.calls)
+    return f"⏺ {shown}{more} · {n} call{'s' if n != 1 else ''}"
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
                   color: bool, width: int,
                   gutters: tuple[int, ...] = ()) -> Iterator[str]:
     if not full:
-        return  # tool bursts are noise in the default view — render nothing.
+        # Lean: leave a single dark-gray recap line (not the full per-call dump),
+        # so interleaved tool work stays visible between prose turns (point 8).
+        if burst.calls:
+            yield _line(_burst_summary(burst), depth, color,
+                        *pal.NODE_COLORS["tools"], gutters=gutters)
+        return
     yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
                 *pal.NODE_COLORS["tools"], gutters=gutters)
     for c in burst.calls:
@@ -404,9 +466,9 @@ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
     model = p.get("model", "?")
     tools = p.get("tools_schema") or []
     if not full:
-        yield _line(f"{pal.fold_glyph(expanded=False)} context · {provider}/{model} · "
-                    f"{len(tools)} tools", depth, color, *pal.NODE_COLORS["metadata"],
-                    gutters=gutters)
+        # Lean view: the model now rides on the step header (see header_line);
+        # the provider and tool count are detail the eye doesn't need every step,
+        # so render nothing here. The full block below survives for imp log --full.
         return
     yield _line(f"{pal.fold_glyph(expanded=True)} context · {provider}/{model} · "
                 f"max_tool_calls={p.get('max_tool_calls', '?')}", depth, color,

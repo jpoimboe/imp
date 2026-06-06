@@ -92,8 +92,9 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "workflow": ("bold", "magenta"),   # appears once at top — the lone bold anchor
     "phase": ("cyan",),                # recedes: muted, no bold
     "step": ("gray",),                 # navigational chrome, not speech
+    "breadcrumb": ("gray",),           # per-step completion line — recede entirely
     "gate": ("yellow",),               # semantic
-    "tools": ("gray",),                # --full only
+    "tools": ("gray",),                # lean one-line recap + --full per-call dump
     "subagent": ("magenta",),          # header + gutter + outcome; never bold
     "thinking": ("dim",),              # --full only
     "metadata": ("dim",),              # --full only
