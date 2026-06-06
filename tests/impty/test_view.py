@@ -44,3 +44,28 @@ def test_cell_at_carries_style() -> None:
     plain = view.cell_at(screen, 1, 0)
     assert plain.data == "o"
     assert plain.bold is False
+
+
+def test_transcript_stitches_history_and_viewport_in_order() -> None:
+    # Emit more lines than the 8-row viewport so some scroll into history.
+    chunks = [f"line {i:02d}\r\n".encode() for i in range(1, 21)]
+    screen = _screen(*chunks, cols=40, rows=8)
+    transcript = view.transcript_text(screen)
+    lines = transcript.split("\n")
+    assert lines[0] == "line 01"          # came from history.top
+    assert lines[-1] == "line 20"         # came from the viewport
+    assert len(lines) == 20               # no gaps, no double-counting
+
+
+def test_transcript_limit_returns_last_n_lines() -> None:
+    chunks = [f"line {i:02d}\r\n".encode() for i in range(1, 21)]
+    screen = _screen(*chunks, cols=40, rows=8)
+    lines = view.transcript_text(screen, limit=3).split("\n")
+    assert lines == ["line 18", "line 19", "line 20"]
+
+
+def test_is_alt_screen_detects_1049() -> None:
+    plain = _screen(b"hi")
+    assert view.is_alt_screen(plain) is False
+    alt = _screen(b"\x1b[?1049h")        # enter alternate screen
+    assert view.is_alt_screen(alt) is True

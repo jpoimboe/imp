@@ -44,3 +44,34 @@ def cell_at(screen: Any, x: int, y: int) -> Cell:
         underscore=bool(ch.underscore),
         reverse=bool(ch.reverse),
     )
+
+
+# pyte stores private modes left-shifted by 5; alt-screen 1049 -> 1049<<5.
+_ALT_SCREEN_MODES = frozenset((1049 << 5, 1047 << 5, 47 << 5))
+
+
+def is_alt_screen(screen: Any) -> bool:
+    """True if the program has switched to the alternate screen buffer
+    (a TUI like claude code). Detection only — buffer-swap fidelity is a
+    later slice. For a plain CLI like imp this is always False."""
+    return bool(_ALT_SCREEN_MODES & set(screen.mode))
+
+
+def _row_text(row: Any, cols: int) -> str:
+    return "".join(row[x].data if x in row else " " for x in range(cols)).rstrip()
+
+
+def transcript_text(screen: Any, limit: int | None = None) -> str:
+    """The whole run in order: scrolled-off history + the current viewport.
+    For an append-only CLI this is the full scroll. `limit` keeps only the
+    last N non-trailing-blank lines (bounded by construction — never an
+    unbounded dump)."""
+    cols = screen.columns
+    history = [_row_text(row, cols) for row in screen.history.top]
+    viewport = [line.rstrip() for line in screen.display]
+    lines = history + viewport
+    while lines and not lines[-1]:        # drop viewport bottom padding
+        lines.pop()
+    if limit is not None:
+        lines = lines[-limit:]
+    return "\n".join(lines)
