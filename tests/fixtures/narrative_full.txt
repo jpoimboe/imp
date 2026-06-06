@@ -26,7 +26,7 @@ design
     │   tools:
     │ The spec looks good. Auth flows are clearly defined.
     │ → status=Success · summary=Spec approved
-    > Please add a section on token expiry.
+    ❯ Please add a section on token expiry.
     ✓ spec · status=Success · summary=Spec drafted
   approve
     human gate → continue

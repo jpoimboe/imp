@@ -84,33 +84,41 @@ def _help(out: Callable[[str], None]) -> None:
     out("  Tab                Complete a /command or skill name")
 
 
-async def ask_line_with_slash(prompt: Any, status: Any, change: Any) -> str:
+async def ask_line_with_slash(
+    prompt: Any, status: Any, change: Any, *, color: bool = False, width: int = 80,
+) -> str:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> returns the
     resolved skill body; anything else returns as-is.
 
-    Spacing: one blank line BEFORE the prompt (so the `> …` field is visually
-    separated from prior output). NONE after the user submits — prompt_toolkit
-    already terminates the `> …` line with a newline, and the unified prose-
-    adjacency rule produces the single separator before the next agent block.
+    Framing (spec §3): a gray rule ABOVE the field (separates it from prior
+    output) and, on a real submit, a matching rule BELOW — bracketing the
+    user's turn so the input field reads as input, not agent output. The rules
+    replace the old bright-blue background. Re-prompts (/help, /skills, unknown)
+    and Ctrl-C/Ctrl-D exits draw no closing rule — only a submitted line does.
 
     Shared by the run and resume paths so the slash/skills logic exists once."""
+    from imp.cli import palette as pal
+
     while True:
         # Keep the whole turn inside status.suspend(): /help, /skills, and
         # not-found messages print via handle_slash_line, and the live status
         # display must stay suspended while they do, or it interleaves/clobbers
         # them before the loop re-prompts.
         with status.suspend():
-            print()                       # §3: separate the prompt from prior output
-            line: str = await prompt.ask_async("> ")
+            print()                                    # breathing room above the rule
+            print(pal.rule(width, enabled=color))      # §3: rule ABOVE the field
+            line: str = await prompt.ask_async()
             if line.strip().lower() in ("exit", "quit"):
                 # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the run
                 # loop's existing EOFError handler (cli/main.py) pauses and exits.
                 raise EOFError
             if not is_slash_command(line):
+                print(pal.rule(width, enabled=color))  # rule BELOW closes the turn
                 return line
             result = handle_slash_line(line, change=change, output_fn=print)
             if result is REPROMPT:
                 continue
             assert isinstance(result, str)  # handle_slash_line returns str for skill body
+            print(pal.rule(width, enabled=color))      # rule BELOW closes the turn
             return result

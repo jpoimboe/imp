@@ -507,8 +507,8 @@ def test_user_message_suppressed_in_live_present_in_log() -> None:
     live = out.getvalue()
     log = "\n".join(_render_body(events))
 
-    assert "> do the thing" not in live   # suppressed in live (prompt_toolkit echoed)
-    assert "> do the thing" in log        # the only record in imp log
+    assert "❯ do the thing" not in live   # suppressed in live (prompt_toolkit echoed)
+    assert "❯ do the thing" in log        # the only record in imp log
 
 
 def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:

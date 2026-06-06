@@ -173,16 +173,16 @@ def test_exit_and_quit_words_request_save_and_exit(tmp_path: Path) -> None:
             anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
 
 
-def test_one_blank_line_before_prompt_zero_after(tmp_path: Path,
-                                                 capsys: pytest.CaptureFixture[str]) -> None:
-    """slash.ask_line_with_slash prints exactly one blank line BEFORE showing
-    the prompt and ZERO after the user submits. The post-submission newline is
-    supplied by prompt_toolkit terminating the `> …` line, and the unified
-    prose-adjacency rule (Tasks 4/7) inserts the separator before the next
-    agent block. Two stacked blanks around `> …` looked unbalanced."""
+def test_rules_bracket_the_submitted_prompt(tmp_path: Path,
+                                            capsys: pytest.CaptureFixture[str]) -> None:
+    """ask_line_with_slash frames the input field: a blank line + a rule ABOVE
+    before prompting, then a matching rule BELOW once the user submits — the
+    pair brackets the user's turn (replacing the old bright-blue background).
+    The dashes are structural, so they appear even with color off (default)."""
+    from imp.cli import palette as pal
     from imp.cli.slash import ask_line_with_slash
     prompt = _FakePrompt(["hello"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeChange(tmp_path))
     assert line == "hello"
-    out = capsys.readouterr().out
-    assert out == "\n"
+    rule = pal.rule(80, enabled=False)
+    assert capsys.readouterr().out == f"\n{rule}\n{rule}\n"

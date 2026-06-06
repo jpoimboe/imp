@@ -121,7 +121,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                                 color=should_use_color(sys.stdout))
 
                 async def _ask_line() -> str:
-                    return await ask_line_with_slash(prompt, status, change)
+                    return await ask_line_with_slash(
+                        prompt, status, change,
+                        color=should_use_color(sys.stdout), width=_term_width())
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
@@ -313,7 +315,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                                 color=should_use_color(sys.stdout))
 
                 async def _ask_line() -> str:
-                    return await ask_line_with_slash(prompt, status, change)
+                    return await ask_line_with_slash(
+                        prompt, status, change,
+                        color=should_use_color(sys.stdout), width=_term_width())
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)

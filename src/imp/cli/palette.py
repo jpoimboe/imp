@@ -13,7 +13,8 @@ _ANSI: dict[str, str] = {
     "dim": "\x1b[2m", "bold": "\x1b[1m",
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
     "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
-    "gray": "\x1b[90m", "bg_bright_blue": "\x1b[104m", "reset": "\x1b[0m",
+    "gray": "\x1b[90m", "bright_blue": "\x1b[94m",
+    "bg_bright_blue": "\x1b[104m", "reset": "\x1b[0m",
 }
 
 
@@ -22,6 +23,25 @@ def ansi(text: str, *codes: str, enabled: bool) -> str:
         return text
     prefix = "".join(_ANSI[c] for c in codes)
     return f"{prefix}{text}{_ANSI['reset']}"
+
+
+# The interactive input field (spec §3). The caret marks the user's turn; the
+# rules bracket it so the field is unmistakably input, not agent output — a
+# quiet replacement for the old bright-blue background fill. bright_blue keeps
+# the "user = blue" identity (NODE_COLORS["user"]); rules stay gray so they
+# recede like other navigational chrome.
+CARET = "❯ "
+
+
+def caret(*, enabled: bool) -> str:
+    """The styled prompt caret as a raw ANSI string (callers that drive
+    prompt_toolkit must wrap it in ANSI(); plain-stdout callers print it)."""
+    return ansi(CARET, "bright_blue", enabled=enabled)
+
+
+def rule(width: int, *, enabled: bool) -> str:
+    """A horizontal rule the width of the terminal, gray so it recedes."""
+    return ansi("─" * max(1, width), "gray", enabled=enabled)
 
 
 def should_use_color(stream: Any) -> bool:
@@ -79,7 +99,7 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "metadata": ("dim",),              # --full only
     "error": ("bold", "red"),          # semantic
     "warning": ("yellow",),            # semantic
-    "user": ("bg_bright_blue",),       # bright-blue bg paints the input region
+    "user": ("bright_blue",),          # bright-blue caret/text marks the user's turn
     "agent": (),                       # calm baseline — plain default fg; eye rests
 }
 

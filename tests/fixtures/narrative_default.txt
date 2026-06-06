@@ -9,7 +9,7 @@ design
     Drafting the spec.
     
     ↳ task → reviewer  ⟨✓ done⟩
-    > Please add a section on token expiry.
+    ❯ Please add a section on token expiry.
     ✓ spec · status=Success · summary=Spec drafted
   approve
     human gate → continue

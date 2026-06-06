@@ -761,25 +761,26 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
     assert out[hdr_i - 1].strip() == ""
 
 
-def test_user_message_paints_bright_blue_bg_on_every_line_color_on() -> None:
-    """Multi-line user input gets the bg on every wrapped line; the leading `> `
-    prefix is preserved on the first line (and not duplicated on continuations).
-    """
+def test_user_message_paints_bright_blue_caret_on_every_line_color_on() -> None:
+    """Multi-line user input is bright-blue FOREGROUND on every wrapped line; the
+    leading `❯ ` caret marks the first line (and isn't duplicated on
+    continuations). No background fill (the old bright-blue bg is gone)."""
     node = nv.UserMessageNode(text="line one\nline two")
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    # First line: `> ` prefix + bg span; second line: bg span without `> `.
-    assert "\x1b[104m" in out[0] and "> line one" in out[0]
-    assert "\x1b[104m" in out[1] and "line two" in out[1]
-    assert "> line two" not in out[1]    # `> ` is a first-line speaker marker
+    # First line: `❯ ` caret + bright-blue fg; second line: fg without the caret.
+    assert "\x1b[94m" in out[0] and "❯ line one" in out[0]
+    assert "\x1b[104m" not in out[0]     # no background fill anymore
+    assert "\x1b[94m" in out[1] and "line two" in out[1]
+    assert "❯ line two" not in out[1]    # `❯ ` is a first-line speaker marker
 
 
-def test_user_message_no_bg_when_color_off_but_keeps_prefix() -> None:
+def test_user_message_no_color_when_off_but_keeps_caret() -> None:
     node = nv.UserMessageNode(text="line one\nline two")
     out = list(rt._render(node, depth=1, full=False, color=False, width=80))
     joined = "\n".join(out)
-    assert "\x1b[104m" not in joined        # bg suppressed under NO_COLOR / non-TTY
-    assert "> line one" in joined           # `> ` still anchors the speaker
+    assert "\x1b[94m" not in joined and "\x1b[104m" not in joined  # no color off-TTY
+    assert "❯ line one" in joined           # `❯ ` still anchors the speaker
 
 
 def test_lean_subagent_is_single_status_row() -> None:

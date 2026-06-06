@@ -106,7 +106,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
             ("bold", "Which providers do you want to enable?\n"),
         ]
         for i, name in enumerate(available):
-            arrow = "❯ " if i == cursor else "  "  # noqa: RUF001
+            arrow = "❯ " if i == cursor else "  "
             box = "[x] " if i in selected else "[ ] "
             style = "ansicyan bold" if i == cursor else ""
             out.append((style, f"{arrow}{box}{name}\n"))

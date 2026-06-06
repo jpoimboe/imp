@@ -21,6 +21,7 @@ dependencies = [
   "prompt_toolkit>=3.0,<4.0",
   "rich>=13.0,<15.0",
   "pyte>=0.8,<0.9",
+  "pillow>=10.0",
   "mcp>=1.27,<2.0",
 ]
 
@@ -50,6 +51,9 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# ❯ (U+276F) is the intentional prompt caret (palette.CARET); it reads as a
+# confusable for '>' but is a deliberate UI glyph, so don't flag it (RUF001-003).
+allowed-confusables = ["❯"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["imp", "impty"]

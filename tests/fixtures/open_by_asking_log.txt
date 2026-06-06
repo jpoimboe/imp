@@ -7,7 +7,7 @@ tiers resolved:
 spec
   spec-writer (interactive)
     ▸ context · claude_code/claude-opus-4-7 · 10 tools
-    > begin
+    ❯ begin
     The starting intent "vine salt kelp" looks like an auto-generated
     placeholder rather than a real description of a change. I don't have enough
     information to write a spec.
@@ -15,7 +15,7 @@ spec
     What change do you actually want to make? A short prose description of the
     goal is enough to start.
     
-    > I want to change "imp new" such that it doesn't pass the title as the
+    ❯ I want to change "imp new" such that it doesn't pass the title as the
     first prompt to the LLM.  maybe the first prompt to the LLM should be
     something that would prompt the LLM to ask the user what they want to do
     I read the relevant code. Here's what's happening today:
@@ -42,7 +42,7 @@ spec
     that imp new always opens by asking the user what they want, regardless of
     whether a title was given?
     
-    > ask regardless
+    ❯ ask regardless
     Let me check a couple more places before proposing the design.
     
     Let me check one more thing — how the dogfood live test interacts with the
@@ -95,7 +95,7 @@ spec
     Sound right, or do you want any of those scope calls flipped (e.g. also
     strip title from the reviewer prompts, or leave the dogfood test out)?
     
-    > does spec-writer change the slug and the title?
+    ❯ does spec-writer change the slug and the title?
     Yes. The rename_change tool sets state.pending_rename; at the next step
     boundary apply_pending_rename (executor.py:268–) updates both:
     
@@ -113,7 +113,7 @@ spec
     doesn't — the design above stands. Shall I proceed and rename the slug to
     imp-new-open-by-asking?
     
-    > yes, but also change it such that 1) it automatically changes the
+    ❯ yes, but also change it such that 1) it automatically changes the
     title/slug as early as possible (often after the 1st or 2nd message), and
     then potentially changes it again before the end.  and doesn't ask the user
     before doing so, just states that it's doing it.
@@ -144,7 +144,7 @@ spec
     ✓ spec-writer · status=Success · phase=drafting · complexity=standard · → goto(spec-writer) [resume] · 815s
   change_renamed  old_slug=2026-06-03-vine-salt-kelp new_slug=2026-06-03-imp-new-open-by-asking title=imp new open by asking
   spec-writer (interactive)
-    > Your previous attempt completed but was not accepted. The spec-writer
+    ❯ Your previous attempt completed but was not accepted. The spec-writer
     reviewed your work and did not accept it.
     status: Success
     phase: drafting
@@ -162,7 +162,7 @@ spec
     ✓ fast-path-spec-gate · 0s
   spec-reviewer
     ▸ context · claude_code/claude-opus-4-7 · 6 tools
-    > begin
+    ❯ begin
     No Critical or Major findings. The spec is complete, internally consistent,
     and aligns with the user's brainstorm clarifications (don't pass title as
     first prompt; ask regardless of whether the title was user-supplied or
@@ -205,7 +205,7 @@ spec
     
     ✓ spec-reviewer · status=Success · blocking=False · → goto(spec-writer) [resume] · 31s
   spec-writer (interactive)
-    > Your previous attempt completed but was not accepted. The spec-reviewer
+    ❯ Your previous attempt completed but was not accepted. The spec-reviewer
     reviewed your work and did not accept it.
     status: Success
     findings: No Critical or Major findings. The spec is complete, internally
@@ -254,7 +254,7 @@ spec
 plan
   plan-writer
     ▸ context · claude_code/claude-opus-4-7 · 9 tools
-    > begin
+    ❯ begin
     ✓ plan-writer · status=Success · plan_path=imp/plans/2026-06-03-imp-new-open-by-asking-plan-1.md · plan_number=1 · 283s
   plan-verify-commit
     ✓ plan-verify-commit · 0s
@@ -264,18 +264,18 @@ plan
     ✓ fast-path-plan-gate · 0s
   plan-review
     ▸ context · claude_code/claude-opus-4-7 · 6 tools
-    > begin
+    ❯ begin
     API Error: 529 Overloaded. This is a server-side issue, usually temporary —
     try again in a moment. If it persists, check status.claude.com.
     
-    > You ended your turn without calling `complete_step`. To finish this step
+    ❯ You ended your turn without calling `complete_step`. To finish this step
     you MUST call the `complete_step` tool with: `status` (Success|Error),
     `findings` (string), `blocking` (bool). Do not answer in prose — call the
     tool.
     API Error: 529 Overloaded. This is a server-side issue, usually temporary —
     try again in a moment. If it persists, check status.claude.com.
     
-    > You ended your turn without calling `complete_step`. To finish this step
+    ❯ You ended your turn without calling `complete_step`. To finish this step
     you MUST call the `complete_step` tool with: `status` (Success|Error),
     `findings` (string), `blocking` (bool). Do not answer in prose — call the
     tool.
@@ -287,7 +287,7 @@ plan
   error: [agent_incomplete] paused: agent_incomplete (no_complete_step_after_nudges)
   plan-review
     ▸ context · claude_code/claude-opus-4-7 · 6 tools
-    > begin
+    ❯ begin
     I'll verify the plan by checking that its "exact block" replacements match
     the current files and the contract tests would actually pass on the
     rewritten template.
@@ -336,7 +336,7 @@ plan
     
     ✓ plan-review · status=Success · blocking=False · → goto(plan-writer) [resume] · 157s
   plan-writer
-    > Your previous attempt completed but was not accepted. The plan-review
+    ❯ Your previous attempt completed but was not accepted. The plan-review
     reviewed your work and did not accept it.
     status: Success
     findings: No Critical or Major findings — the plan is complete, spec
@@ -383,7 +383,7 @@ plan
 implement
   task-lead
     ▸ context · claude_code/claude-sonnet-4-6 · 10 tools
-    > begin
+    ❯ begin
     ↳ task → implementer  ⟨✓ done⟩
     skill_load  name=test-driven-development source=agent
     Good. make test green at 9cf3c7b (1072 passed, 7 skipped). Now dispatching
@@ -473,7 +473,7 @@ implement
     ✓ fast-path-cycle-gate · 0s
   plan-cycle-check
     ▸ context · claude_code/claude-sonnet-4-6 · 6 tools
-    > begin
+    ❯ begin
     The grep confirms implementation is complete:
     
      • spec-writer.md has zero matches for change.title, change.auto_titled, or
@@ -506,7 +506,7 @@ review
     ✓ stamp-trailers · 0s
   code-reviewer
     ▸ context · claude_code/claude-sonnet-4-6 · 7 tools
-    > begin
+    ❯ begin
     Now let me look at the actual implementation by examining the committed
     code:
     
@@ -613,7 +613,7 @@ review
     ✓ code-reviewer · status=Success · verdict=approve · 266s
   summarizer
     ▸ context · claude_code/claude-sonnet-4-6 · 7 tools
-    > begin
+    ❯ begin
     Task 1 — spec-writer: open by asking; rename without asking permission
     (commit 86100c8)
     
@@ -690,7 +690,7 @@ review
     ✓ final-review-gate · 0s
   final-review (interactive)
     ▸ context · claude_code/claude-sonnet-4-6 · 6 tools
-    > begin
+    ❯ begin
     Here's the summary of the change ready for your review:
     
     ----------------------------------------------------------------------------
@@ -749,7 +749,7 @@ review
     
     Would you like to merge this, or send it back to implement with feedback?
     
-    > hello?
+    ❯ hello?
     Hi! I'm here. 👋
     
     I just presented the change summary above — the imp new ask-first /
@@ -758,7 +758,7 @@ review
     
     Do you want to merge this, or send it back to implement with feedback?
     
-    > merge
+    ❯ merge
     Merged! 🎉 The imp new ask-first change is in. Enjoy the new spec-writer
     flow.
     

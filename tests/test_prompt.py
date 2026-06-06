@@ -41,35 +41,23 @@ def test_build_session_vi_mode() -> None:
     assert session.editing_mode == EditingMode.VI
 
 
-def test_build_session_color_true_paints_input_bg() -> None:
-    """When color is enabled, `_build_session` passes a prompt_toolkit Style
-    that paints the default class (the input region) with bright-blue bg —
-    matching the `bg_bright_blue` ANSI code used by imp log for
-    UserMessageNode. Both single- and multi-line input pick this style up
-    because PromptSession applies its `style=` to the whole input field."""
+def test_build_session_applies_no_style_override() -> None:
+    """The input region keeps the terminal default — user-turn identity now
+    lives in the caret/rules, not a PromptSession bg fill. So no style override
+    is set (the field never paints its own background again)."""
     from imp.cli.prompt import _build_session
-    sess = _build_session(None, color=True)
-    assert sess.style is not None
-    rules = sess.style.style_rules
-    assert ("", "bg:ansibrightblue") in rules
+    assert _build_session(None).style is None
 
 
-def test_build_session_color_false_omits_style() -> None:
-    """When color is disabled (NO_COLOR / non-TTY), no Style is passed and the
-    PromptSession falls back to the default (no bg)."""
-    from imp.cli.prompt import _build_session
-    sess = _build_session(None, color=False)
-    assert sess.style is None
+def test_caret_is_bright_blue_under_color() -> None:
+    """With color on, the prompt message is a prompt_toolkit ANSI caret carrying
+    the bright-blue ❯; with color off it's the plain ❯ string."""
+    from prompt_toolkit.formatted_text import ANSI
 
-
-def test_prompt_threads_color_into_session_factory() -> None:
-    """The public Prompt(...) constructor accepts `color` and forwards it to
-    the default `_session_factory`."""
-    from imp.cli.prompt import Prompt
-    p_on = Prompt(color=True)
-    p_off = Prompt(color=False)
-    assert p_on._session.style is not None
-    assert p_off._session.style is None
+    on = Prompt(color=True)._message(None)
+    assert isinstance(on, ANSI)
+    assert "\x1b[94m" in on.value and "❯" in on.value
+    assert Prompt(color=False)._message(None) == "❯ "
 
 
 class _FakeSession:

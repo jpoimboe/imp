@@ -83,7 +83,7 @@ def test_fold_glyphs_default_unicode() -> None:
 def test_node_colors_calm_scheme() -> None:
     # The most frequent content is calmest; weight/color go to identity + structure.
     assert pal.NODE_COLORS["agent"] == ()                  # plain default fg (was bold)
-    assert pal.NODE_COLORS["user"] == ("bg_bright_blue",) # bright-blue bg on user input
+    assert pal.NODE_COLORS["user"] == ("bright_blue",)     # bright-blue caret marks user turn
     assert pal.NODE_COLORS["phase"] == ("cyan",)           # recedes (was bold blue)
     assert pal.NODE_COLORS["step"] == ("gray",)            # navigational chrome (was cyan)
     assert pal.NODE_COLORS["subagent"] == ("magenta",)     # unchanged
@@ -106,8 +106,17 @@ def test_bg_bright_blue_ansi_code() -> None:
     assert pal.ansi("hi", "bg_bright_blue", enabled=True) == "\x1b[104mhi\x1b[0m"
 
 
-def test_user_color_is_bright_blue_background() -> None:
-    # NODE_COLORS["user"] now paints the user-input region rather than coloring
-    # the foreground. _wrap applies these codes to every wrapped line, so multi-
-    # line user input gets the bg on every line.
-    assert pal.NODE_COLORS["user"] == ("bg_bright_blue",)
+def test_user_color_is_bright_blue_foreground() -> None:
+    # User-turn identity is now a bright-blue FOREGROUND caret (not a bg fill):
+    # the live prompt (slash/prompt) and the imp-log replay both reference this.
+    assert pal.NODE_COLORS["user"] == ("bright_blue",)
+    assert pal._ANSI["bright_blue"] == "\x1b[94m"
+
+
+def test_caret_and_rule_helpers() -> None:
+    # The input-field chrome: a bright-blue caret and a gray rule, both plain
+    # when color is disabled (the rule's dashes are structural, kept regardless).
+    assert pal.caret(enabled=True) == "\x1b[94m❯ \x1b[0m"
+    assert pal.caret(enabled=False) == "❯ "
+    assert pal.rule(4, enabled=True) == "\x1b[90m────\x1b[0m"
+    assert pal.rule(4, enabled=False) == "────"

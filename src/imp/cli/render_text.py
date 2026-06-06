@@ -260,7 +260,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.UserMessageNode):
-        yield from _wrap(f"> {node.text}", width, depth, color,
+        yield from _wrap(f"{pal.CARET}{node.text}", width, depth, color,
                          *pal.NODE_COLORS["user"], gutters=gutters)
         return
 
