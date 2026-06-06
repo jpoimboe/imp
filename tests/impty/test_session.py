@@ -144,6 +144,41 @@ def test_cursor_parks_after_prompt_string() -> None:
         assert x == len("Project name? ")                               # cursor past the space
 
 
+# A child that installs a SIGINT handler emitting an async-signal-safe marker and
+# exiting via the handler. The ready marker uses ordinary buffered output + flush
+# (it prints before any signal can fire); the HANDLER must use os.write(1, ...) —
+# print() from a signal handler followed by os._exit(42) would drop the marker
+# (buffered I/O is signal-unsafe and _exit skips the flush). Sleeps well past the
+# test deadline so the ONLY exit path is the handler.
+_SIGINT_CHILD = (
+    "import os, signal, sys, time\n"
+    "def _handler(signum, frame):\n"
+    "    os.write(1, b'GOT-SIGINT\\n')\n"
+    "    os._exit(42)\n"
+    "signal.signal(signal.SIGINT, _handler)\n"
+    "print('READY', flush=True)\n"
+    "time.sleep(30)\n"
+)
+
+
+def test_ctrl_c_byte_delivers_sigint() -> None:
+    # Faithful byte path (cooked mode): with a controlling terminal set up, the
+    # tty line discipline turns send("\x03") into a real SIGINT to the child's
+    # foreground process group, firing its handler.
+    with TerminalSession([sys.executable, "-c", _SIGINT_CHILD]) as s:
+        s.wait_idle(idle=0.2, hard=5.0)
+        assert "READY" in s.viewport()
+        try:
+            s.send("\x03")
+            rc = s.run_to_completion(hard=5.0)
+            assert rc == 42
+            assert "GOT-SIGINT" in s.transcript()
+        finally:
+            if s.is_alive():
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(s.pid, signal.SIGKILL)
+
+
 def test_run_to_completion_drains_flood_and_keeps_trailing_sentinel() -> None:
     # AC1+AC2: a child that floods ≫ one tty-buffer, then prints a sentinel and
     # exits. run_to_completion must drain PAST the buffer-fill point to the end,

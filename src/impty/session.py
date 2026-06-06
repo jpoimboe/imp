@@ -13,6 +13,7 @@ import fcntl
 import os
 import pty
 import select
+import signal
 import struct
 import subprocess
 import termios
@@ -49,6 +50,23 @@ class _StepResult(enum.Enum):
 
 def _set_winsize(fd: int, rows: int, cols: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+
+def _make_controlling_tty(
+    _ioctl: Callable[..., int] = fcntl.ioctl,
+    _tiocsctty: int = termios.TIOCSCTTY,
+) -> None:
+    # start_new_session already ran setsid() in the child, making it a session
+    # leader with no controlling tty. Claim the slave (now fd 0) as this
+    # session's controlling terminal so the line discipline turns ^C/^Z/^\ into
+    # real signals to our foreground process group. MUST stay exactly this one
+    # ioctl — no logging, no allocation, no added Python — because it runs
+    # post-fork() in a process that may hold threads (the MCP server forks from a
+    # worker thread). The names are bound as default arguments so the post-fork
+    # body resolves them via LOAD_FAST off the function object, touching neither
+    # the module dict nor any attribute lookup at fork time. Do NOT add anything
+    # here; any addition reintroduces the fork-under-threads deadlock window.
+    _ioctl(0, _tiocsctty, 0)
 
 
 class _ReplyScreen(pyte.HistoryScreen):
@@ -108,6 +126,7 @@ class TerminalSession:
             stdout=slave,
             stderr=slave,
             start_new_session=True,
+            preexec_fn=_make_controlling_tty,
         )
         os.close(slave)
         self._closed = False
@@ -135,7 +154,14 @@ class TerminalSession:
 
     def send(self, data: bytes | str) -> None:
         """Write raw keystrokes to the program. Strings are UTF-8 encoded.
-        Keys are literal bytes: '\\r' Enter, '\\x1b[B' Down, '\\x03' Ctrl-C, '\\t' Tab."""
+        Keys are literal bytes: '\\r' Enter, '\\x1b[B' Down, '\\t' Tab.
+
+        '\\x03' (Ctrl-C) behaves exactly as on a real terminal: in cooked mode
+        (ISIG on) the tty line discipline turns it into a real SIGINT to the
+        child's foreground process group (the controlling terminal is set up at
+        spawn); in raw mode (ISIG off, e.g. prompt_toolkit) it stays a raw byte
+        the app turns into its own KeyboardInterrupt. For a mode-independent
+        signal, use send_signal()."""
         if isinstance(data, str):
             data = data.encode("utf-8")
         os.write(self._master, data)
