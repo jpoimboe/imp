@@ -288,10 +288,12 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 return 2
             # Resume gets no `change_created` event, so the driver won't print the
             # workflow header — emit a matching one here (bold `#slug  title`) with
-            # a dim resuming marker, so a resumed run opens like a fresh one.
+            # a dim resuming marker, so a resumed run opens like a fresh one. A
+            # title-less change defers its header too (Option B), matching new.
             _color = should_use_color(sys.stdout)
-            print(ansi(f"#{change.slug}  {change.title}", "bold", "magenta", enabled=_color)
-                  + ansi(" · resuming", "dim", enabled=_color))
+            if change.title and change.title.strip():
+                print(ansi(f"#{change.slug}  {change.title}", "bold", "magenta", enabled=_color)
+                      + ansi(" · resuming", "dim", enabled=_color))
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
             # + gate-check FIRST (plan_rewind raises before mutating/emitting) so

@@ -212,6 +212,14 @@ def test_header_emitted_on_change_created() -> None:
     assert _body(out)[0] == "#add-auth-7  add auth"
 
 
+def test_header_deferred_when_titleless() -> None:
+    # Option B: a change created without a title opens with NO header rather than
+    # a degenerate `#<slug>` line — the header waits until the change is named.
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", slug="2026-06-03", title=""))
+    assert out.getvalue() == ""  # nothing emitted yet
+
+
 from imp.cli.render_text import render_tree as _rt_full  # noqa: E402
 
 

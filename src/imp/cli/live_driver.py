@@ -120,6 +120,12 @@ class LiveDriver:
     # -- emission -------------------------------------------------------------
     def _emit_header(self) -> None:
         root = self._builder.tree.root
+        # Option B: a title-less change defers its header rather than opening with
+        # a degenerate `#<date>` (no name yet). The header appears once the change
+        # has a title — today there's always one; when the title-less flow lands,
+        # its naming step surfaces the name here.
+        if not (root.title and root.title.strip()):
+            return
         head = (f"#{root.slug if root.slug is not None else '?'}  "
                 f"{root.title}").rstrip()
         self._print_lines([pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=self._color)])
