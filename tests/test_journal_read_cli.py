@@ -7,6 +7,7 @@ the CLI. No live providers needed.
 from __future__ import annotations
 
 import io
+import json
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -17,6 +18,28 @@ from imp.engine import worktree
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
+
+# A phase that renders through the narrative — the proof the journal was read.
+# (change_created emits no line now that the slug/title banner is gone, so we
+# need a real rendered node to assert on.)
+_JOURNAL_MARKER_PHASE = "summary"
+
+
+def _seed_marker_phase(control: Path, slug: str) -> None:
+    """Append a step_started event so the change has a node that renders through
+    the narrative — change_created emits no line now that the slug/title banner
+    is gone, so a log test needs a real rendered marker to assert on. Reuses the
+    change's own first-event timestamp so it never perturbs last-activity sorting.
+    Call BEFORE _complete_and_journal."""
+    ch = Change.load(control, slug)
+    with ch.events_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "id": "marker", "agent_id": None,
+            "timestamp": "2026-05-27T10:00:01+00:00",
+            "type": "step_started",
+            "payload": {"step": "s", "kind": "agent", "phase": _JOURNAL_MARKER_PHASE,
+                        "model": "m", "provider": "anthropic"},
+        }) + "\n")
 
 
 def _complete_and_journal(control: Path, slug: str) -> None:
@@ -41,6 +64,7 @@ def test_log_falls_back_to_journal_after_merge(
 
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Done Thing", change_id="done-thing", base_branch="main")
+    _seed_marker_phase(tmp_path, "done-thing")
     _complete_and_journal(tmp_path, "done-thing")
     # Worktree is gone: Change.load now raises; log must use the journal.
     assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
@@ -53,7 +77,7 @@ def test_log_falls_back_to_journal_after_merge(
     with redirect_stdout(buf):
         rc = main(["log", "done-thing"])
     assert rc == 0
-    assert "Done Thing" in buf.getvalue()
+    assert _JOURNAL_MARKER_PHASE in buf.getvalue()
 
 
 def test_log_unknown_slug_returns_rc_2(
@@ -78,6 +102,7 @@ def test_log_no_slug_falls_through_to_journal(
 
     _seed_control(tmp_path)
     Change.create(tmp_path, title="Only One", change_id="only-one", base_branch="main")
+    _seed_marker_phase(tmp_path, "only-one")
     _complete_and_journal(tmp_path, "only-one")
 
     monkeypatch.chdir(tmp_path)
@@ -88,7 +113,7 @@ def test_log_no_slug_falls_through_to_journal(
     with redirect_stdout(buf):
         rc = main(["log"])  # no slug, no in-flight worktrees
     assert rc == 0
-    assert "Only One" in buf.getvalue()
+    assert _JOURNAL_MARKER_PHASE in buf.getvalue()
 
 
 def test_status_shows_completed_section_from_journal(

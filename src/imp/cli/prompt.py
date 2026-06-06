@@ -26,12 +26,16 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     mode = EditingMode.VI if editing_mode == "vi" else EditingMode.EMACS
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
-    # No style override: the input region keeps the terminal's default fg/bg.
-    # User-turn identity now lives in the bright-blue caret (see ask_async) and
-    # the gray rules that bracket the field (slash.ask_line_with_slash), not a
-    # background fill. `color` is unused here but kept for call-site symmetry.
+    # No style override: while the user types, the input region keeps the
+    # terminal's default fg/bg (a bright-blue caret is the only marker). On
+    # submit, erase_when_done wipes prompt_toolkit's whole rendered region —
+    # prompt + input + the menu-reservation row that caused the old stray bottom
+    # bar — so NOTHING it drew survives in scroll-back. The live driver then
+    # reprints the entered turn as a UserMessageNode with the subtle "entered
+    # input" background (render_text), giving the after-not-during highlight and
+    # one shared rendering for the user turn in live and `imp log`.
     return PromptSession(history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
-                         editing_mode=mode)
+                         editing_mode=mode, erase_when_done=True)
 
 
 class SlashCompleter:

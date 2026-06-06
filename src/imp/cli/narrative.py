@@ -141,7 +141,7 @@ class ToolBurstFold:
 @dataclass
 class SkillLoadNode:
     """A skill the agent pulled in mid-run (the skill_load event). Rendered as a
-    quiet `✓ load skill {name}` line — distinct from the redundant `load_skill`
+    quiet `load skill {name}` line — distinct from the redundant `load_skill`
     tool call, which the lean burst recap drops so the skill shows exactly once."""
     name: str
     source: str | None = None
@@ -190,6 +190,18 @@ class ErrorNode:
     message: str
     category: str | None = None
     is_warning: bool = False
+    collapsible = False
+
+
+@dataclass
+class PauseNode:
+    """A workflow pause — a resumable stop, NOT an error, whatever drove it
+    (ctrl-c / ctrl-d / interrupt, or an error category like api / max_loops /
+    retry_ceiling). Renders as a quiet dim `⏸ paused (reason)` line, mirroring the
+    live `_emit_paused` / `_emit_paused_summary` chrome, so `imp log` and the live
+    view agree. For an error-driven pause the underlying failure already appears as
+    its own `error:` event just above this line."""
+    reason: str
     collapsible = False
 
 
@@ -534,14 +546,18 @@ NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 
 
 def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # EVERY pause is a pause, not an error — a resumable stop. Live frames them all
+    # the same way (_emit_paused / _emit_paused_summary print a dim `⏸ … paused`),
+    # so `imp log` renders a matching PauseNode rather than an `error:` line. The
+    # reason that drove it (ctrl-c, api, max_loops, retry_ceiling, …) rides the ⏸
+    # line; for an error-driven pause the underlying failure was already shown as
+    # its own `error:` event just above, so re-stating it as an error here would
+    # both double up and mismatch the live view (the bug this fixes).
     self._flush_burst()
     self._root.status = "paused"
     reason = p.get("reason")
     if reason:
-        kind = p.get("kind")
-        suffix = f" ({kind})" if kind else ""
-        self._append(ErrorNode(
-            message=f"paused: {reason}{suffix}", category=reason, is_warning=False))
+        self._append(PauseNode(reason=reason))
 
 
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -858,7 +874,7 @@ NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
 
 
 def _h_skill_load(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
-    # The agent pulled in a skill. Render it once, as its own `✓ load skill …`
+    # The agent pulled in a skill. Render it once, as its own `load skill …`
     # line; the matching `load_skill` tool call is dropped from the burst recap
     # (render_text) so the same action doesn't show up twice. Do NOT flush the
     # open burst: this event fires BETWEEN a tool_call and its tool_result (the
@@ -993,6 +1009,8 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, ErrorNode):
         return {"t": t, "message": node.message, "category": node.category,
                 "is_warning": node.is_warning}
+    if isinstance(node, PauseNode):
+        return {"t": t, "reason": node.reason}
     if isinstance(node, StepContextNode):
         return {"t": t, "payload": node.payload}
     if isinstance(node, OutcomeLine):

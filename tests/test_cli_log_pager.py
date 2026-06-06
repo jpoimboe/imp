@@ -28,6 +28,15 @@ def _make_change_worktree(control: Path, slug: str, title: str) -> Path:
             "timestamp": "2026-05-27T10:00:00+00:00",
             "type": "change_created",
             "payload": {"slug": slug, "title": title},
+        }) + "\n"
+        # A step renders the phase name; the slug/title banner no longer renders,
+        # so the phase is what proves the narrative reached stdout.
+        + json.dumps({
+            "id": "e2", "agent_id": None,
+            "timestamp": "2026-05-27T10:00:01+00:00",
+            "type": "step_started",
+            "payload": {"step": "s", "kind": "agent", "phase": "spec",
+                        "model": "m", "provider": "anthropic"},
         }) + "\n",
     )
     return wt
@@ -39,7 +48,7 @@ def test_log_prints_rendered_lines_to_stdout(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """`main(["log", "<slug>"])` writes the narrative to stdout directly —
-    no pager subprocess. The title "smoke" appears in captured stdout."""
+    no pager subprocess. The rendered phase "spec" appears in captured stdout."""
     import imp.cli.main as m
 
     slug = "my-smoke"
@@ -51,7 +60,7 @@ def test_log_prints_rendered_lines_to_stdout(
     rc = main(["log", slug])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "smoke" in out
+    assert "spec" in out
 
 
 def test_log_no_pager_flag_is_gone(

@@ -24,7 +24,7 @@ def _ev(eid, etype, agent_id=None, **payload):
     return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
 
 
-def test_header_phase_step_outcome_render() -> None:
+def test_phase_step_outcome_render_without_header() -> None:
     out = "\n".join(_lines([
         _ev("1", "change_created", slug="add-auth-7", title="add auth"),
         _ev("3", "step_started", step="spec", kind="agent", phase="design",
@@ -32,7 +32,8 @@ def test_header_phase_step_outcome_render() -> None:
         _ev("4", "step_completed", step="spec", kind="agent",
             action={"verb": "continue"}, var_mutations={}),
     ]))
-    assert "#add-auth-7" in out and "add auth" in out
+    # No slug/title banner: the transcript opens directly on the first phase.
+    assert "#add-auth-7" not in out
     assert "design" in out
     assert "spec" in out
     assert "spec complete" in out          # merged breadcrumb (was: "continue" in out)
@@ -96,8 +97,9 @@ def test_collapsed_subagent_renders_single_status_row() -> None:
     # the context detail survives only in imp log --full.
     assert "▸ context" not in joined
     assert "s · m" in joined          # model on the step header
-    # Subagent: single status row, complete. No recursed prose, no outcome.
-    assert any(ln.strip().startswith("· reviewer") for ln in out)  # + model
+    # Subagent: single status row, complete. No bullet, no recursed prose, no outcome.
+    assert any(ln.strip().startswith("reviewer") for ln in out)  # + model
+    assert "· reviewer" not in joined   # the leading bullet is gone
     assert "looks good" not in joined
     assert "status=Success" not in joined
     # The old one-liner / events shape is gone.
@@ -122,7 +124,8 @@ def test_subagent_lean_suppresses_all_nested_io() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
     ]))
-    assert "· reviewer" in out   # the single status row
+    assert "reviewer" in out   # the single status row (no leading bullet)
+    assert "· reviewer" not in out
     assert "nested prose" not in out       # subagent prose NOT recursed in lean
     assert "nested musings" not in out     # nested thinking suppressed
     assert "status=Success" not in out     # outcome NOT shown in lean
@@ -142,7 +145,8 @@ def test_subagent_outcome_suppressed_in_lean() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success","summary":"done"}', error=False),
     ]))
-    assert "· reviewer" in out
+    assert "reviewer" in out
+    assert "· reviewer" not in out
     assert "the prose" not in out
     assert "status=Success" not in out
 
@@ -169,7 +173,8 @@ def test_subagent_error_renders_failed_status_row() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ], width=80))
-    assert any("· reviewer (failed)" in ln for ln in out)
+    assert any("reviewer (failed)" in ln for ln in out)
+    assert not any("· reviewer" in ln for ln in out)              # no leading bullet
     assert not any("dispatch failed: boom" in ln for ln in out)   # outcome suppressed
     # The status row carries the subagent (magenta) color when color is on.
     color_out = list(render_tree(nv.build_tree([
@@ -836,23 +841,42 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
             content='{"status":"Success"}'),
     ])
     prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
-    hdr_i = next(i for i, ln in enumerate(out) if "· reviewer" in ln)
+    hdr_i = next(i for i, ln in enumerate(out) if ln.strip().startswith("reviewer"))
     assert hdr_i > prose_i
     assert out[hdr_i - 1].strip() == ""
 
 
-def test_user_message_paints_bright_blue_caret_on_every_line_color_on() -> None:
-    """Multi-line user input is bright-blue FOREGROUND on every wrapped line; the
-    leading `> ` caret marks the first line (and isn't duplicated on
-    continuations). No background fill (the old bright-blue bg is gone)."""
+def test_user_message_blue_caret_then_fg_text_color_on() -> None:
+    """The user turn renders at the node's own depth (depth=1 → a 2-space indent,
+    aligning the caret with the step column): a bright-blue `> ` caret leads, then
+    returns to DEFAULT fg (39, not a full reset) so the body stays uncolored.
+    Continuation lines hang under the text (caret-width blank) so the body aligns
+    with itself. The ansi theme (the test default) has no subtle-slate background,
+    so only the caret colors the line and the bare hang carries no escape."""
     node = nv.UserMessageNode(text="line one\nline two", interactive=True)
     out = list(rt._render(node, depth=1, full=False, color=True, width=80))
     assert len(out) == 2
-    # First line: `> ` caret + bright-blue fg; second line: fg without the caret.
-    assert "\x1b[94m" in out[0] and "> line one" in out[0]
-    assert "\x1b[104m" not in out[0]     # no background fill anymore
-    assert "\x1b[94m" in out[1] and "line two" in out[1]
-    assert "> line two" not in out[1]    # `> ` is a first-line speaker marker
+    # 2-space structural indent, then bright-blue caret, fg-only reset (39), body.
+    assert out[0] == "  \x1b[94m> \x1b[39mline one\x1b[0m"
+    assert "\x1b[104m" not in out[0]     # no background fill under the ansi theme
+    # Continuation: indent (2) + hang under the text (2), no opened escape → bare.
+    assert out[1] == "    line two"
+
+
+def test_user_message_carries_subtle_bg_under_truecolor_theme() -> None:
+    """Under a truecolor theme the entered turn carries the subtle "entered input"
+    background (the replacement for the old gray rule): a 48;2 bg opens each line,
+    survives the caret's fg-only reset, and a single reset closes the line."""
+    pal.set_theme("dark")
+    try:
+        node = nv.UserMessageNode(text="hello", interactive=True)
+        out = list(rt._render(node, depth=0, full=False, color=True, width=80))
+    finally:
+        pal.set_theme("ansi")
+    assert len(out) == 1
+    assert out[0].startswith("\x1b[48;2;")          # subtle bg opens the line
+    assert "\x1b[39m" in out[0]                      # caret returns to default fg, bg persists
+    assert out[0].endswith("hello\x1b[0m")           # body then one closing reset
 
 
 def test_user_message_no_color_when_off_but_keeps_caret() -> None:
@@ -876,7 +900,8 @@ def test_lean_subagent_is_single_status_row() -> None:
                     "The tool use was rejected...")  # the sentinel
     lines = list(_render(fold, depth=0, full=False, color=False, width=80))
     text = "\n".join(lines)
-    assert "· reviewer" in text         # one clean row, no status suffix
+    assert "reviewer" in text            # one clean row, no bullet, no status suffix
+    assert "· reviewer" not in text
     assert "doesn't want to proceed" not in text   # sentinel never surfaces
     assert len(lines) == 1                # exactly one status row
 
@@ -894,7 +919,8 @@ def test_lean_subagent_status_glyphs() -> None:
 
     # Success carries NO status suffix (point 6 — it read as noise); only the
     # abnormal terminal states keep a (state) tag so a broken subagent still stands out.
-    assert row(running=False) == "· s"
+    # No leading bullet: the name is indented two cols under the agent turn.
+    assert row(running=False) == "  s"
     assert "(" not in row(running=False)
     assert "(running)" in row(running=True)
     assert "(failed)" in row(running=False, is_error=True)

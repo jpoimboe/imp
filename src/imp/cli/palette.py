@@ -18,7 +18,7 @@ _ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m", "reset": "\x1b[0m
 _ANSI_NAMED: dict[str, str] = {
     "red": "\x1b[31m", "green": "\x1b[32m", "yellow": "\x1b[33m",
     "blue": "\x1b[34m", "magenta": "\x1b[35m", "cyan": "\x1b[36m",
-    "gray": "\x1b[90m", "bright_blue": "\x1b[94m", "step": "\x1b[36m",
+    "gray": "\x1b[90m", "bright_blue": "\x1b[94m", "step": "\x1b[34m",
 }
 
 # A CUSTOM low-saturation ACCENT palette — not a crib of any published theme, and
@@ -40,15 +40,16 @@ _DARK_RGB: dict[str, tuple[int, int, int]] = {
     "yellow": (0xC9, 0xA5, 0x54), "blue": (0x6E, 0x90, 0xB8),
     "magenta": (0xA8, 0x84, 0xB5), "cyan": (0x5E, 0xA0, 0x9E),
     "gray": (0x55, 0x57, 0x53), "bright_blue": (0x7F, 0xA2, 0xCA),
-    # `step` is a darker cyan than `phase` — a step reads as a "mini-phase".
-    "step": (0x4D, 0x8C, 0x8A),
+    # `step` is a darker blue than `phase`'s blue — a step reads as a "mini-phase"
+    # (both bold; cyan is now reserved for inline code, not structure).
+    "step": (0x55, 0x70, 0x8F),
 }
 _LIGHT_RGB: dict[str, tuple[int, int, int]] = {
     "red": (0xA8, 0x3B, 0x38), "green": (0x55, 0x6F, 0x22),
     "yellow": (0x8A, 0x6D, 0x12), "blue": (0x2F, 0x5C, 0x96),
     "magenta": (0x7A, 0x49, 0x96), "cyan": (0x2A, 0x73, 0x70),
     "gray": (0xA6, 0xAA, 0xA6), "bright_blue": (0x27, 0x5A, 0xA0),
-    "step": (0x3A, 0x84, 0x80),   # darker-cyan step on the light surface too
+    "step": (0x23, 0x46, 0x73),   # darker-blue step on the light surface too
 }
 
 
@@ -112,11 +113,44 @@ def ansi(text: str, *codes: str, enabled: bool) -> str:
     return f"{prefix}{text}{_ANSI['reset']}"
 
 
-# The interactive input field (spec §3). The caret marks the user's turn; the
-# rules bracket it so the field is unmistakably input, not agent output — a
-# quiet replacement for the old bright-blue background fill. bright_blue keeps
-# the "user = blue" identity (NODE_COLORS["user"]); rules stay gray so they
-# recede like other navigational chrome.
+def sgr(*codes: str, enabled: bool) -> str:
+    """Just the OPENING escape for `codes` — no text, no trailing reset. For
+    composing a line where an outer attribute (a background) must survive an
+    inner fg change: the caret sets bright_blue then returns to default fg with
+    `\\x1b[39m` (fg-only reset) so the line's background keeps painting under the
+    typed text. `ansi()`'s full reset would clear the background mid-line."""
+    if not enabled or not codes:
+        return ""
+    return "".join(_ANSI[c] for c in codes)
+
+
+# Subtle "entered input" background, per truecolor theme — the quiet highlight
+# that marks a submitted user turn (replacing the old bright-blue fill and the
+# gray rule). The `ansi` 16-color theme has no good subtle slate, so it gets no
+# background; the bright-blue caret alone marks the turn there. dark: a hair
+# above a #1e1e1e surface; light: a pale blue tint on a near-white surface.
+_USER_BG_RGB: dict[str, tuple[int, int, int]] = {
+    "dark": (0x2B, 0x2F, 0x3A),
+    "light": (0xE4, 0xEA, 0xF2),
+}
+
+
+def user_bg_open(*, enabled: bool) -> str:
+    """The opening SGR for the entered-input background, or '' when color is off
+    or the active theme is `ansi` (no subtle slate in 16 colors)."""
+    if not enabled:
+        return ""
+    rgb = _USER_BG_RGB.get(_active_theme)
+    if rgb is None:
+        return ""
+    return "\x1b[48;2;{};{};{}m".format(*rgb)
+
+
+# The interactive input field. The bright-blue caret marks the user's turn; once
+# submitted, the typed line carries a subtle background (user_bg_open) so it reads
+# as input, not agent output — replacing the old bright-blue background fill and
+# the gray bracketing rules. bright_blue keeps the "user = blue" identity
+# (NODE_COLORS["user"]).
 CARET = "> "
 
 
@@ -177,8 +211,8 @@ def action_text(action: Any) -> str:
 # calmest; weight + color are reserved for speaker identity and structure.
 NODE_COLORS: dict[str, tuple[str, ...]] = {
     "workflow": ("bold", "magenta"),   # appears once at top — the lone bold anchor
-    "phase": ("cyan",),                # recedes: muted, no bold
-    "step": ("step",),                 # a darker-cyan "mini-phase" label
+    "phase": ("bold", "blue"),         # structure stands out: bold blue
+    "step": ("bold", "step"),          # a bold darker-blue "mini-phase" label
     "breadcrumb": ("gray",),           # per-step completion line — recede entirely
     "gate": ("yellow",),               # semantic
     "tools": ("gray",),                # lean one-line recap + --full per-call dump

@@ -40,11 +40,10 @@ def fmt_seconds(seconds: float | int | None) -> str:
 
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80) -> Iterator[str]:
+    # No slug/title header: the transcript opens directly on the first turn. The
+    # change id/title belong to `imp` chrome (the run header, `imp list`), not the
+    # narrative body — so live and log both start with content, not a banner.
     root = tree.root
-    head = f"#{root.slug or '?'}  {root.title}".rstrip()
-    if root.status != "running":
-        head = f"{head}  ({root.status})"
-    yield pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
     yield from _render_children(root.children, depth=0, full=full, color=color, width=width,
                                 gutters=())
 
@@ -181,7 +180,7 @@ def spaces_after(node: Any, *, full: bool) -> bool:
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
-                             nv.ErrorNode, nv.GateNode))
+                             nv.ErrorNode, nv.PauseNode, nv.GateNode))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
@@ -200,7 +199,7 @@ def spaces_before(node: Any) -> bool:
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
         or is_chrome_step(node)
-        or isinstance(node, (nv.PhaseNode, nv.ErrorNode))
+        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode))
     )
 
 
@@ -252,7 +251,7 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
     secs = "" if elapsed is None else f" · {fmt_seconds(elapsed)}"
     # No checkmark, and dark gray (the breadcrumb color) — identical treatment to
     # the step-completion line, so the whole family of `<name> complete · …` lines
-    # reads consistently as quiet chrome rather than the cyan of a phase header.
+    # reads consistently as quiet chrome rather than the bold blue of a phase header.
     return _line(f"{node.name} complete{secs}", depth, color,
                  *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
 
@@ -305,14 +304,15 @@ def _subagent_model(sub: nv.SubagentFold) -> str | None:
 
 def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
                         gutters: tuple[int, ...] = ()) -> str:
-    """The single lean/live row for a subagent: `· {name}` — and NOTHING else (no
+    """The single lean/live row for a subagent: `{name}` — and NOTHING else (no
     prompt, no streamed output, no outcome prose). This is what structurally
-    eliminates the SDK cancellation-sentinel leak from the default views. The dot
-    matches the tool-burst lead-in; the magenta color marks it as subagent
+    eliminates the SDK cancellation-sentinel leak from the default views. No
+    leading bullet: the row is indented two cols (like the tool-burst recap) to
+    sit under the agent turn's words, and the magenta color marks it as subagent
     identity. A finished subagent appends `· {elapsed}` (how long it ran); an
     abnormal terminal state (running-at-pause, failed, stalled) appends a plain
     `(state)` tag so a subagent that didn't cleanly finish still stands out."""
-    label = f"· {sub.subagent_name}"
+    label = f"  {sub.subagent_name}"
     model = _subagent_model(sub)
     if model:
         # Show the subagent's model on the row, the same way a step header does.
@@ -420,10 +420,38 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
     if isinstance(node, nv.UserMessageNode):
         if not node.interactive:
             # Synthetic engine prompt (the "begin" kickoff, a resume nudge) — not
-            # something the human typed, so it never renders as a `❯` turn.
+            # something the human typed, so it never renders as a `>` turn.
             return
-        yield from _hang_wrap(node.text, pal.CARET, width, depth, color,
-                              *pal.NODE_COLORS["user"], gutters=gutters)
+        # The user's turn renders at the node's own depth (the step's content
+        # column), so the `> ` caret lines up with the step header / agent bullet
+        # rather than hanging out at the far-left margin. A bright-blue caret leads
+        # the first line; the typed text stays in the terminal's default fg.
+        # Continuation lines hang-indent under the text (a blank the width of the
+        # caret) so the message body aligns with ITSELF. Each line carries the
+        # subtle "entered input" background (the replacement for the old gray
+        # rule), opened AFTER the structural indent so the highlight hugs the
+        # content (not the indent): the caret returns to default fg (39), NOT a
+        # full reset, so the bg keeps painting under the text; one reset closes it.
+        indent = _gutter_indent(depth, gutters, color)
+        bg = pal.user_bg_open(enabled=color)
+        if color:
+            caret = pal.sgr(*pal.NODE_COLORS["user"], enabled=True) + pal.CARET + "\x1b[39m"
+        else:
+            caret = pal.CARET
+        hang = " " * len(pal.CARET)
+        avail = max(8, width - _INDENT_W * depth - len(pal.CARET))
+        first = True
+        for para in node.text.split("\n"):
+            if not para:
+                yield indent
+                continue
+            for line in textwrap.wrap(para, width=avail) or [""]:
+                prefix = bg + (caret if first else hang)
+                # Close the line only when it opened an escape (a bg and/or the
+                # colored caret); a plain hang under the ansi theme / color-off
+                # stays bare — no dangling reset.
+                yield indent + prefix + line + ("\x1b[0m" if "\x1b" in prefix else "")
+                first = False
         return
 
     if isinstance(node, nv.ThinkingFold):
@@ -479,11 +507,20 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             parts.append(verb_text)
         if node.elapsed_s is not None:
             parts.append(fmt_seconds(node.elapsed_s))
-        # A step's completion line carries the step color (the same darker cyan as
-        # its header), so a step's open and close read as one unit — distinct from
+        # A step's completion line carries the step color (the same bold darker-blue
+        # as its header), so a step's open and close read as one unit — distinct from
         # the dim gray of tool/skill chrome.
         yield _line(" · ".join(parts), depth, color, *pal.NODE_COLORS["step"],
                     gutters=gutters)
+        return
+
+    if isinstance(node, nv.PauseNode):
+        # A resumable stop — dim `⏸ paused (reason)`, the same quiet treatment the
+        # live view gives every pause (_emit_paused / _emit_paused_summary), so a
+        # pause never reads as an `error:` in `imp log`. The driving failure, if
+        # any, was already shown as its own `error:` event above.
+        yield _line(f"⏸ paused ({node.reason})", depth, color,
+                    *pal.NODE_COLORS["metadata"], gutters=gutters)
         return
 
     if isinstance(node, nv.ErrorNode):
@@ -497,9 +534,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.SkillLoadNode):
-        # A loaded skill, shown once as a quiet `✓ load skill {name}` line (the
-        # redundant `load_skill` tool call is dropped from the burst recap).
-        yield _line(f"✓ load skill {node.name}", depth, color,
+        # A loaded skill, shown once as a quiet `load skill {name}` line (the
+        # redundant `load_skill` tool call is dropped from the burst recap). No
+        # checkmark — indented two cols like the other sub-detail chrome.
+        yield _line(f"  load skill {node.name}", depth, color,
                     *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
 
@@ -541,7 +579,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     Mirrors what the live status line showed WHILE the burst ran, left behind as a
     quiet marker so a `prose → tools → prose` turn shows the work happened without
     expanding it. Two names are omitted: `load_skill` (it renders as its own
-    `✓ load skill …` line, so counting it here would double up) and the bare
+    `load skill …` line, so counting it here would double up) and the bare
     `tool` placeholder (the sentinel name for an orphan/unnamed result — no real
     tool info). Returns None when nothing renderable remains."""
     _OMIT = {"load_skill", "tool"}

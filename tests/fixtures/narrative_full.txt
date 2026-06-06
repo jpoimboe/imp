@@ -1,4 +1,3 @@
-#add-auth  add auth  (paused)
 tiers resolved:
   low    → anthropic/haiku
   medium → anthropic/sonnet
@@ -54,4 +53,4 @@ implement
   
   phase_exhausted  phase=implement
   
-  error: [ctrl-c] paused: ctrl-c
+  ⏸ paused (ctrl-c)

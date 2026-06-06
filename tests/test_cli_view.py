@@ -184,8 +184,8 @@ def test_cli_log_pipes_through_narrative(
     rc = main(["log", slug])
     assert rc == 0
     out = capsys.readouterr().out
-    # Narrative header contains the title
-    assert "smoke" in out
+    # No slug/title banner — the transcript opens on the first phase.
+    assert "smoke" not in out
     # Phase rendered by name (derived from step_started.payload.phase)
     assert "onboard" in out
     # No raw JSON braces in narrative rendering
@@ -231,8 +231,8 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
         rc = main(["log", slug])
     assert rc == 0
     out = buf.getvalue()
-    # Good events still rendered
-    assert "smoke" in out
+    # Good events still rendered (no title banner; the phase carries the proof)
+    assert "smoke" not in out
     assert "onboard" in out
     # Malformed line rendered as an error line (narrative ErrorNode)
     assert "malformed event" in out
@@ -278,8 +278,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     assert result.returncode == 0, (
         f"stderr: {result.stderr!r}\nstdout: {result.stdout!r}"
     )
-    # Narrative header: title "sub", phase: "spec"
-    assert "sub" in result.stdout
+    # No title banner; the phase name is the proof the narrative rendered.
     assert "spec" in result.stdout
     # Pipe → not a tty → no ANSI codes regardless of NO_COLOR.
     assert "\x1b[" not in result.stdout
@@ -355,6 +354,15 @@ def test_cmd_log_auto_picks_latest_by_mtime(
                 "timestamp": "2026-05-27T10:00:00+00:00",
                 "type": "change_created",
                 "payload": {"slug": slug, "title": title},
+            }) + "\n"
+            # A step renders the phase name (the title banner is gone), so use a
+            # per-change phase name to prove WHICH change's log was picked.
+            + json.dumps({
+                "id": "e2", "agent_id": None,
+                "timestamp": "2026-05-27T10:00:01+00:00",
+                "type": "step_started",
+                "payload": {"step": "s", "kind": "agent", "phase": title,
+                            "model": "m", "provider": "anthropic"},
             }) + "\n",
         )
         # Stagger mtimes so the last one is clearly newest
@@ -368,7 +376,7 @@ def test_cmd_log_auto_picks_latest_by_mtime(
         rc = main(["log"])
     assert rc == 0
     out = buf.getvalue()
-    # tenth-change was written last, so its title should render.
+    # tenth-change was written last, so its phase should render.
     assert "tenth" in out
     assert "first" not in out
     assert "second" not in out
@@ -423,7 +431,8 @@ def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
         rc = anyio.run(m._async_cmd_new, args)
     out = buf.getvalue()
     assert rc == 0
-    assert "#" in out and "design" in out
+    assert "#" not in out          # no slug/title banner
+    assert "design" in out         # the phase renders through the folded renderer
     assert "{" not in out          # narrative, not raw json
 
 

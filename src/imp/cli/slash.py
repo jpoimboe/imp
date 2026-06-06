@@ -91,34 +91,28 @@ async def ask_line_with_slash(
     unknown, and not-found commands print and re-prompt; /<name> returns the
     resolved skill body; anything else returns as-is.
 
-    Framing (spec §3): a gray rule ABOVE the field (separates it from prior
-    output) and, on a real submit, a matching rule BELOW — bracketing the
-    user's turn so the input field reads as input, not agent output. The rules
-    replace the old bright-blue background. Re-prompts (/help, /skills, unknown)
-    and Ctrl-C/Ctrl-D exits draw no closing rule — only a submitted line does.
+    Framing: no chrome around the field. While the user types, only the
+    bright-blue caret marks the turn; on submit prompt_toolkit erases its region
+    (erase_when_done) and the live driver reprints the entered line with the
+    subtle "entered input" background. The gray bracketing rules are gone — the
+    background is the marker now.
 
     Shared by the run and resume paths so the slash/skills logic exists once."""
-    from imp.cli import palette as pal
-
     while True:
         # Keep the whole turn inside status.suspend(): /help, /skills, and
         # not-found messages print via handle_slash_line, and the live status
         # display must stay suspended while they do, or it interleaves/clobbers
         # them before the loop re-prompts.
         with status.suspend():
-            print()                                    # breathing room above the rule
-            print(pal.rule(width, enabled=color))      # §3: rule ABOVE the field
             line: str = await prompt.ask_async()
             if line.strip().lower() in ("exit", "quit"):
                 # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the run
                 # loop's existing EOFError handler (cli/main.py) pauses and exits.
                 raise EOFError
             if not is_slash_command(line):
-                print(pal.rule(width, enabled=color))  # rule BELOW closes the turn
                 return line
             result = handle_slash_line(line, change=change, output_fn=print)
             if result is REPROMPT:
                 continue
             assert isinstance(result, str)  # handle_slash_line returns str for skill body
-            print(pal.rule(width, enabled=color))      # rule BELOW closes the turn
             return result

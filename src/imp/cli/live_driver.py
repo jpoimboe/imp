@@ -69,10 +69,6 @@ class LiveDriver:
         # so the live view and `imp log` look identical (design §5.4). Any non-prose
         # output resets it; an empty emission leaves it untouched.
         self._prev_prose = False
-        # True once the root header (#slug  title) has been printed. Guards
-        # against double-printing when change_renamed fires after a named
-        # change_created, or when _emit_header is called from both events.
-        self._header_emitted = False
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
             _Cursor(container=self._builder.tree.root, depth=0)]
@@ -80,9 +76,6 @@ class LiveDriver:
     # -- engine callbacks -----------------------------------------------------
     def on_event(self, event: Any) -> None:
         self._builder.add(event)
-        if isinstance(event, dict) and event.get("type") in (
-                "change_created", "change_renamed"):
-            self._emit_header()
         if isinstance(event, dict) and event.get("type") in (
                 "step_started", "user_message"):
             # §7: time-the-agent-working-since-the-last-user-reply. Reset on
@@ -123,21 +116,6 @@ class LiveDriver:
         return f"{spin} {activity} {tail}"
 
     # -- emission -------------------------------------------------------------
-    def _emit_header(self) -> None:
-        if self._header_emitted:
-            return
-        root = self._builder.tree.root
-        # Option B: a title-less change defers its header rather than opening with
-        # a degenerate `#<date>` (no name yet). This is the normal case for `imp
-        # new` without --title; the header appears once the change is named (the
-        # agent's rename_change step, or a user-supplied --title).
-        if not (root.title and root.title.strip()):
-            return
-        head = (f"#{root.slug or '?'}  "
-                f"{root.title}").rstrip()
-        self._print_lines([pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=self._color)])
-        self._header_emitted = True
-
     def _walk(self, *, force: bool = False) -> None:
         while self._frontier:
             cur = self._frontier[-1]
@@ -254,15 +232,13 @@ class LiveDriver:
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
         if isinstance(node, nv.UserMessageNode):
-            # §4: on a real terminal prompt_toolkit already echoed the typed line,
-            # so re-emitting the node would duplicate it — suppress there. But a
-            # non-TTY sink (offline capture / `imp run | tee` / the snap-ui mockup)
-            # has no echo, so the interactive turn would otherwise vanish. Render
-            # it there as a user turn (caret + blue), spaced like a chat message,
-            # so the transcript shows the prompts that drove the run (point 3).
-            stream_isatty = getattr(self._stream, "isatty", lambda: False)()
-            if stream_isatty:
-                return
+            # The interactive prompt uses erase_when_done, so prompt_toolkit leaves
+            # NO echo in scroll-back on a real terminal — we reprint the turn here
+            # (no longer suppressed on a TTY). Rendered as a user turn: flush-left,
+            # bright-blue caret, subtle "entered input" background (render_text),
+            # spaced like a chat message. The same path serves a non-TTY sink
+            # (offline capture / `imp run | tee` / the snap-ui mockup), so live and
+            # `imp log` show the user's turn identically.
             lines = rt._render(node, depth=depth, full=False, color=self._color,
                                width=self._width, gutters=gutters)
             self._print_lines(
@@ -312,21 +288,17 @@ class LiveDriver:
         self._prev_prose = prose
 
     def _refresh_status(self) -> None:
+        # The status line is TRANSIENT: it draws on the line just below the last
+        # permanent output (a bare \r-rewritten line, no newline) and is erased in
+        # place by the next _print_lines (status.hide) before that block prints,
+        # so the block overwrites it. We deliberately do NOT inject a "\n" to
+        # "float" it below a blank — that newline committed the spinner line into
+        # scroll-back (a stray `name · working` above each breadcrumb) AND stacked
+        # with _print_lines' own separator to make double blanks. Permanent inter-
+        # block spacing is owned entirely by _print_lines; the status never adds to
+        # it. `_prev_prose` is left untouched so the next block still gets its one
+        # separator blank (which lands on the row the status was using).
         if self._builder.current_activity() is not None:
-            # Honour the unified prose-adjacency rule for the LIVE status line,
-            # which bypasses `_print_lines`. Gated on the stream being a TTY
-            # (where the status actually draws) so a non-TTY capture doesn't
-            # collect a phantom blank in scroll-back. Inspect the stream
-            # directly — `LiveStatus`'s public API stays untouched, matching
-            # the spec's "Out" note.
-            stream_isatty = getattr(self._stream, "isatty", lambda: False)
-            if self._prev_prose and stream_isatty():
-                # Clearing `_prev_prose` here prevents the next
-                # `_status.hide()` (from a following _print_lines) from
-                # re-introducing a blank when the next permanent block emits.
-                self._stream.write("\n")
-                self._stream.flush()
-                self._prev_prose = False
             self._status.update(self.compose_status)
         else:
             self._status.reset()

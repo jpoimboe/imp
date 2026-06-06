@@ -76,3 +76,9 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "pyte.*"
 ignore_missing_imports = true
+
+# fontTools ships no py.typed marker; impty.render uses it only to read a font's
+# cmap for the glyph-fallback chain. Treat it as a missing import.
+[[tool.mypy.overrides]]
+module = "fontTools.*"
+ignore_missing_imports = true

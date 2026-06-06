@@ -173,16 +173,14 @@ def test_exit_and_quit_words_request_save_and_exit(tmp_path: Path) -> None:
             anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
 
 
-def test_rules_bracket_the_submitted_prompt(tmp_path: Path,
-                                            capsys: pytest.CaptureFixture[str]) -> None:
-    """ask_line_with_slash frames the input field: a blank line + a rule ABOVE
-    before prompting, then a matching rule BELOW once the user submits — the
-    pair brackets the user's turn (replacing the old bright-blue background).
-    The dashes are structural, so they appear even with color off (default)."""
-    from imp.cli import palette as pal
+def test_no_chrome_printed_around_the_submitted_prompt(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """ask_line_with_slash prints NO chrome around the field: no rule, no blank
+    line. The bright-blue caret marks the turn while typing; on submit
+    prompt_toolkit erases its region and the live driver reprints the entered line
+    with the subtle background. So a plain submit produces no stdout here."""
     from imp.cli.slash import ask_line_with_slash
     prompt = _FakePrompt(["hello"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeChange(tmp_path))
     assert line == "hello"
-    rule = pal.rule(80, enabled=False)
-    assert capsys.readouterr().out == f"\n{rule}\n{rule}\n"
+    assert capsys.readouterr().out == ""

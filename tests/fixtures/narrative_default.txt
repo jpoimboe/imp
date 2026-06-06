@@ -1,4 +1,3 @@
-#add-auth  add auth  (paused)
 
 design
   
@@ -8,7 +7,7 @@ design
   
     read_file · bash · 2 calls
   
-  · reviewer · claude-sonnet-4-6
+    reviewer · claude-sonnet-4-6
   
   > Please add a section on token expiry.
   
@@ -33,4 +32,4 @@ implement
   
   phase_exhausted  phase=implement
   
-  error: [ctrl-c] paused: ctrl-c
+  ⏸ paused (ctrl-c)
