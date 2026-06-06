@@ -172,3 +172,28 @@ def test_run_to_completion_raises_when_child_never_exits() -> None:
         with pytest.raises(subprocess.TimeoutExpired):
             s.run_to_completion(hard=0.3)
         assert s.is_alive() is True  # left running for close()
+
+
+def test_wait_hangs_then_run_to_completion_drains_same_session() -> None:
+    # AC5: the OLD wait()-only path hangs on a flooding child (blocked in
+    # write() because nobody drains the master). The SAME still-blocked child is
+    # then driven by run_to_completion() on the SAME session, draining it.
+    prog = (
+        "import sys\n"
+        "sys.stdin.readline()\n"  # wait for the send() below
+        "sys.stdout.write('A' * 300000)\n"  # ≥ 256 KiB ≫ kernel tty buffer
+        "sys.stdout.write('\\nDONE-5\\n')\n"
+        "sys.stdout.flush()\n"
+    )
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        s.send("go\r")  # triggers the flood; NO wait_idle/drain before the foil
+        # `short` is deterministically safe: the child cannot have exited within
+        # 0.5 s — it is either still in readline() or blocked in write() (nobody
+        # drains the master, so the flood fills the tty buffer well before
+        # 300 KB). Either way the process is alive, so wait()'s proc.wait(0.5)
+        # raises TimeoutExpired (the old hang). The raise leaves it untouched.
+        with pytest.raises(subprocess.TimeoutExpired):
+            s.wait(timeout=0.5)
+        rc = s.run_to_completion(hard=5.0)  # same blocked child, now drained
+        assert rc == 0
+        assert "DONE-5" in s.transcript()
