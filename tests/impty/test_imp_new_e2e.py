@@ -43,17 +43,21 @@ def test_drive_imp_new_to_completion(tmp_path: Path) -> None:
                 break
         assert answered, f"never saw the human gate; transcript=\n{session.transcript()}"
 
-        rc = session.wait(timeout=30)
+        # Drain post-gate output into pyte AND reap. Now that the harness reads
+        # the master to completion, the verdict can come from transcript().
+        rc = session.run_to_completion(hard=30.0)
         assert rc == 0, f"expected exit 0, got {rc}; transcript=\n{session.transcript()}"
 
-    # Completion is proven via state.json (below), NOT via transcript: nothing
-    # reads the master after send("1\r"), so post-gate output is never fed to
-    # pyte and transcript() is truncated at the gate. (Additionally, if
-    # prompt_toolkit ever ran the gate on the alternate screen, history wouldn't
-    # capture it either — buffer-swap fidelity is out of scope.) The end-to-end
-    # *capture* this test proves is therefore viewport-based up to the gate; a
-    # full-run drain + verdict is a later slice.
+        # The human gate renders inline (no alternate screen), so post-gate
+        # output lands in pyte history — guard that assumption explicitly.
+        assert session.is_alt_screen() is False
+        # Primary verdict: the completion banner `Change <id>: completed`
+        # (src/imp/cli/main.py:172).
+        assert ": completed" in session.transcript(), (
+            f"no completion banner in transcript=\n{session.transcript()}"
+        )
 
+    # Backstop: state.json still records completion authoritatively.
     worktree = _await_worktree(tmp_path, timeout=5.0)
     state_path = worktree / ".imp" / "change" / "state" / "state.json"
     state = json.loads(state_path.read_text())
