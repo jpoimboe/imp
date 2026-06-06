@@ -97,7 +97,7 @@ def test_collapsed_subagent_renders_single_status_row() -> None:
     assert "▸ context" not in joined
     assert "s · m" in joined          # model on the step header
     # Subagent: single status row, complete. No recursed prose, no outcome.
-    assert any(ln.strip() == "↳ subagent → reviewer" for ln in out)
+    assert any(ln.strip() == "· reviewer" for ln in out)
     assert "looks good" not in joined
     assert "status=Success" not in joined
     # The old one-liner / events shape is gone.
@@ -122,7 +122,7 @@ def test_subagent_lean_suppresses_all_nested_io() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success"}', error=False),
     ]))
-    assert "↳ subagent → reviewer" in out   # the single status row
+    assert "· reviewer" in out   # the single status row
     assert "nested prose" not in out       # subagent prose NOT recursed in lean
     assert "nested musings" not in out     # nested thinking suppressed
     assert "status=Success" not in out     # outcome NOT shown in lean
@@ -142,7 +142,7 @@ def test_subagent_outcome_suppressed_in_lean() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success","summary":"done"}', error=False),
     ]))
-    assert "↳ subagent → reviewer" in out
+    assert "· reviewer" in out
     assert "the prose" not in out
     assert "status=Success" not in out
 
@@ -159,7 +159,7 @@ def test_subagent_outcome_suppressed_in_lean() -> None:
 
 
 def test_subagent_error_renders_failed_status_row() -> None:
-    # Part D: a failed subagent surfaces as ⟨✗ failed⟩ in lean — NOT the raw
+    # Part D: a failed subagent surfaces as (failed) in lean — NOT the raw
     # error outcome prose (which could leak the SDK sentinel).
     out = list(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
@@ -169,7 +169,7 @@ def test_subagent_error_renders_failed_status_row() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ], width=80))
-    assert any("↳ subagent → reviewer ⟨✗ failed⟩" in ln for ln in out)
+    assert any("· reviewer (failed)" in ln for ln in out)
     assert not any("dispatch failed: boom" in ln for ln in out)   # outcome suppressed
     # The status row carries the subagent (magenta) color when color is on.
     color_out = list(render_tree(nv.build_tree([
@@ -180,7 +180,7 @@ def test_subagent_error_renders_failed_status_row() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content="dispatch failed: boom", error=True),
     ]), full=False, color=True, width=80))
-    assert any("✗ failed" in ln and "\x1b[35m" in ln for ln in color_out)
+    assert any("(failed)" in ln and "\x1b[35m" in ln for ln in color_out)
 
 
 def test_full_mode_also_emits_subagent_outcome() -> None:
@@ -198,7 +198,7 @@ def test_full_mode_also_emits_subagent_outcome() -> None:
         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
             content='{"status":"Success","summary":"ok"}', error=False),
     ], full=True))
-    assert "▾ subagent → reviewer" in out      # expanded fold header (full shape)
+    assert "▾ reviewer" in out      # expanded fold header (full shape)
     assert "verdict: approve" in out        # recursed prose
     assert "→ status=Success · summary=ok" in out   # outcome now present in full too
 
@@ -235,7 +235,7 @@ def test_full_mode_expands_tools_thinking_and_subagent() -> None:
     assert "▾ thinking" in out and "deep thoughts here" in out
     assert "▾ tools" in out
     assert "· bash" in out and "command=ls -la" in out and "total 0" in out
-    assert "▾ subagent → reviewer" in out
+    assert "▾ reviewer" in out
     # nested subagent prose appears, indented under the fold
     assert "subagent verdict: approve" in out
 
@@ -325,8 +325,9 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
 
 
 def test_chrome_step_collapses_to_single_breadcrumb() -> None:
-    # point 5: a no-op gate/script step renders ONLY its `<name> complete` breadcrumb —
-    # the redundant name-only header line above it is dropped.
+    # A no-op gate/script step renders ONLY its breadcrumb — the redundant
+    # name-only header line above it is dropped. Because that start line is never
+    # printed, the breadcrumb omits the word "complete" (the `· 0s` says it).
     out = _lines([
         _ev("1", "change_created", slug="s", title="t"),
         _ev("2", "step_started", step="spec-verify-commit", kind="script", phase="spec"),
@@ -335,7 +336,8 @@ def test_chrome_step_collapses_to_single_breadcrumb() -> None:
     ])
     hits = [ln for ln in out if "spec-verify-commit" in ln]
     assert len(hits) == 1                       # one line, not header + breadcrumb
-    assert hits[0].strip().startswith("spec-verify-commit complete")
+    assert hits[0].strip().startswith("spec-verify-commit")
+    assert "complete" not in hits[0]            # no start line → no "complete"
 
 
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:
@@ -538,7 +540,7 @@ def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
                             action={"verb": "goto", "target": "implement"},
                             extras=["status=Success"])
     line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert line2 == "  code-reviewer complete · status=Success · → goto(implement) · 41s"
+    assert line2 == "  code-reviewer complete · goto(implement) · 41s"
     # No elapsed (elapsed_s is None) → no trailing seconds field at all.
     bc3 = nv.BreadcrumbLine(step_name="quick", elapsed_s=None,
                             action={"verb": "continue"}, extras=[])
@@ -556,7 +558,7 @@ def _sub(outcome=None, *, is_error=False, name="reviewer"):
 def test_header_line_renders_subagent_boundary() -> None:
     sub = _sub(name="reviewer")
     # Subagent color, no fold glyph, no (running)/(error) suffix.
-    assert rt.header_line(sub, depth=2, color=False) == "    ↳ subagent → reviewer"
+    assert rt.header_line(sub, depth=2, color=False) == "    · reviewer"
 
 
 def test_subagent_outcome_empty_yields_nothing() -> None:
@@ -651,9 +653,9 @@ def test_full_subagent_content_carries_magenta_gutter() -> None:
 
 def test_subagent_header_excludes_own_gutter() -> None:
     sub = _sub(name="reviewer")
-    assert rt.header_line(sub, depth=0, color=False) == "↳ subagent → reviewer"
+    assert rt.header_line(sub, depth=0, color=False) == "· reviewer"
     # ancestor gutters show; the header's own column does not.
-    assert rt.header_line(sub, depth=1, color=False, gutters=(0,)) == "│ ↳ subagent → reviewer"
+    assert rt.header_line(sub, depth=1, color=False, gutters=(0,)) == "│ · reviewer"
 
 
 def test_nested_subagent_emits_two_gutter_levels() -> None:
@@ -667,8 +669,8 @@ def test_nested_subagent_emits_two_gutter_levels() -> None:
                             nested=nv.NarrativeBuilder(), running=False)
     outer.nested.tree.root.children.append(inner)
     out = list(rt._render(outer, depth=0, full=True, color=False, width=80))
-    assert out[0] == "▾ subagent → outer"                       # depth 0, no gutter
-    assert any(ln == "│ ▾ subagent → inner" for ln in out)      # depth 1, one gutter
+    assert out[0] == "▾ outer"                       # depth 0, no gutter
+    assert any(ln == "│ ▾ inner" for ln in out)      # depth 1, one gutter
     assert any(ln == "│ │ deep finding" for ln in out)      # depth 2, two gutters
 
 
@@ -835,7 +837,7 @@ def test_prose_then_subagent_header_separated_by_blank() -> None:
             content='{"status":"Success"}'),
     ])
     prose_i = next(i for i, ln in enumerate(out) if "Drafting." in ln)
-    hdr_i = next(i for i, ln in enumerate(out) if "↳ subagent → reviewer" in ln)
+    hdr_i = next(i for i, ln in enumerate(out) if "· reviewer" in ln)
     assert hdr_i > prose_i
     assert out[hdr_i - 1].strip() == ""
 
@@ -875,7 +877,7 @@ def test_lean_subagent_is_single_status_row() -> None:
                     "The tool use was rejected...")  # the sentinel
     lines = list(_render(fold, depth=0, full=False, color=False, width=80))
     text = "\n".join(lines)
-    assert "↳ subagent → reviewer" in text         # one clean row, no status suffix
+    assert "· reviewer" in text         # one clean row, no status suffix
     assert "doesn't want to proceed" not in text   # sentinel never surfaces
     assert len(lines) == 1                # exactly one status row
 
@@ -892,13 +894,13 @@ def test_lean_subagent_status_glyphs() -> None:
         return subagent_status_row(f, depth=0, color=False, gutters=())
 
     # Success carries NO status suffix (point 6 — it read as noise); only the
-    # abnormal terminal states keep a ⟨…⟩ tag so a broken subagent still stands out.
-    assert row(running=False) == "↳ subagent → s"
-    assert "⟨" not in row(running=False)
-    assert "⏳ running" in row(running=True)
-    assert "✗ failed" in row(running=False, is_error=True)
-    assert "⊘ stalled" in row(running=False, is_error=True, terminal_state="stalled")
-    assert "⊘ interrupted" in row(running=False, is_error=True,
+    # abnormal terminal states keep a (state) tag so a broken subagent still stands out.
+    assert row(running=False) == "· s"
+    assert "(" not in row(running=False)
+    assert "(running)" in row(running=True)
+    assert "(failed)" in row(running=False, is_error=True)
+    assert "(stalled)" in row(running=False, is_error=True, terminal_state="stalled")
+    assert "(interrupted)" in row(running=False, is_error=True,
                                   terminal_state="interrupted")
 
 
@@ -917,7 +919,7 @@ def test_full_subagent_unchanged_shows_children() -> None:
 def test_stalled_subagent_renders_stalled_glyph_through_builder() -> None:
     # END-TO-END (no hand-built {"kind": ...}): feed the REAL task tool_result the
     # provider builds from dispatch_task's stalled RuntimeError, through the
-    # NarrativeBuilder, then render lean — assert ⊘ stalled.
+    # NarrativeBuilder, then render lean — assert (stalled).
     from imp.cli import narrative as nv
     from imp.cli.render_text import _render
 
@@ -936,4 +938,4 @@ def test_stalled_subagent_renders_stalled_glyph_through_builder() -> None:
     fold = folds[0]
     assert fold.terminal_state == "stalled"
     lines = list(_render(fold, depth=0, full=False, color=False, width=80))
-    assert any("⊘ stalled" in ln for ln in lines)
+    assert any("(stalled)" in ln for ln in lines)

@@ -26,6 +26,18 @@ _INDENT_W = len(_INDENT)  # logical indent width per level; the gutter SUBSTITUT
 _DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
 
 
+def fmt_seconds(seconds: float | int | None) -> str:
+    """Format an elapsed-second count for a completion/recap line. Under a minute
+    reads as `Ns`; a minute or more as `Mm Ss` (e.g. 336 → `5m 36s`) so a long
+    step reads in human time instead of a wall of seconds. None → empty string."""
+    if seconds is None:
+        return ""
+    total = int(seconds)
+    if total < 60:
+        return f"{total}s"
+    return f"{total // 60}m {total % 60}s"
+
+
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80) -> Iterator[str]:
     root = tree.root
@@ -126,42 +138,65 @@ def spaces_after(node: Any, *, full: bool) -> bool:
     trails another spaced block). Prose leaves and user turns always qualify; a
     collapsed tool-burst summary qualifies in the lean view, where it sits as a
     single line between two prose turns and wants air on both sides (so the run
-    reads `…prose / ⏺ burst / prose…` rather than bunching). The batch walk and
-    the live driver both key spacing off this, so they stay identical."""
+    reads `…prose / · burst / prose…` rather than bunching). Structural chrome —
+    a phase header/complete line, a step (which ends on its completion
+    breadcrumb), and errors — is surrounded by blank lines so each stands clear of
+    the prose around it. The batch walk and the live driver both key spacing off
+    this, so they stay identical (StepNode/PhaseNode matter only to the batch
+    walk, which treats a container as one child; live keys off the last leaf —
+    the breadcrumb — instead, and they agree)."""
     return bool(
         is_prose_leaf(node)
-        or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold))
+        or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
+                             nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
+                             nv.ErrorNode, nv.GateNode))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
 
 def spaces_before(node: Any) -> bool:
     """A node that wants a blank line ABOVE it regardless of what preceded it.
-    Only an interactive step qualifies: the human's turn is a conversational beat,
-    so it gets air above the `name · model` header to set it apart from the prior
-    step's completion line. The batch walk and the live driver both key off this so
-    the lead-in blank lands identically in `imp log` and the live view."""
-    return isinstance(node, nv.StepNode) and node.interactive
+    An interactive step (the human's turn is a conversational beat), a phase
+    header (a new phase starts on its own), an error (it must stand clear of the
+    line before it), and a chrome step (a bare completion breadcrumb — it's
+    surrounded like a leaf, since nothing else inside it carries spacing) all
+    qualify. A regular step-completion breadcrumb is NOT here: it already trails a
+    spaced block (the step's final prose / the header gap), so it gets its
+    blank-above for free without risking a doubled separator. The batch walk and
+    the live driver both key off this so the lead-in blank lands identically in
+    `imp log` and the live view."""
+    return bool(
+        (isinstance(node, nv.StepNode) and node.interactive)
+        or is_chrome_step(node)
+        or isinstance(node, (nv.PhaseNode, nv.ErrorNode))
+    )
+
+
+_CHROME_KINDS = ("script", "branch")
 
 
 def is_chrome_step(node: Any) -> bool:
     """True for a no-op structural step (a script gate / branch) whose whole
-    contribution is a 0s completion breadcrumb. These collapse to that single
-    dark-gray line — the redundant `name` header above the `✓ name · 0s` line is
-    pure noise. Agent (and human) steps carry real content and keep their header."""
-    return isinstance(node, nv.StepNode) and node.kind in ("script", "branch")
+    contribution is a completion breadcrumb. These collapse to that single
+    dark-gray line — the redundant `name` header above the `name complete · 0s`
+    line is pure noise. Agent (and human) steps carry real content and keep their
+    header."""
+    return isinstance(node, nv.StepNode) and node.kind in _CHROME_KINDS
 
 
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
-                     width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
+                     width: int, gutters: tuple[int, ...] = (),
+                     prime: bool = False) -> Iterator[str]:
     """Render a container's children in order, inserting ONE blank line between
     a prose block and ANY following emission. A child that renders nothing
     (lean-mode thinking / empty tool burst) leaves the prose-adjacency state
     untouched, so prose→thinking→prose still separates; any non-empty emission
     resets it. The blank separator is the gutter-bearing indent at the child
     depth (reusing `_wrap`'s blank-paragraph carrier) so the magenta │ stays
-    continuous inside a SubagentFold."""
-    prev_prose = False
+    continuous inside a SubagentFold. `prime=True` seeds the prose-adjacency
+    state so the FIRST child gets a blank above it — used to put air below a
+    phase's start line before its first step."""
+    prev_prose = prime
     for child in children:
         lines = list(_render(child, depth=depth, full=full, color=color, width=width,
                              gutters=gutters))
@@ -182,11 +217,12 @@ def phase_breadcrumb_line(node: nv.PhaseNode, *, depth: int, color: bool,
     children of the root (single-level invariant) and would break if phases
     ever nested inside SubagentFolds."""
     elapsed = nv.phase_elapsed(node)
-    secs = "" if elapsed is None else f" · {int(elapsed)}s"
-    # No checkmark — same as the step breadcrumb (`<name> complete · …`), so the
-    # whole family of completion lines reads consistently as quiet gray chrome.
-    return _line(f"{node.name} complete{secs}", depth, color, *pal.NODE_COLORS["phase"],
-                 gutters=gutters)
+    secs = "" if elapsed is None else f" · {fmt_seconds(elapsed)}"
+    # No checkmark, and dark gray (the breadcrumb color) — identical treatment to
+    # the step-completion line, so the whole family of `<name> complete · …` lines
+    # reads consistently as quiet chrome rather than the cyan of a phase header.
+    return _line(f"{node.name} complete{secs}", depth, color,
+                 *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
 
 
 def header_line(node: Any, *, depth: int, color: bool,
@@ -194,15 +230,14 @@ def header_line(node: Any, *, depth: int, color: bool,
     """The single header line for a container node (PhaseNode / StepNode /
     SubagentFold), with no children. Shared by `_render` and the live driver so
     indentation/label/color stay identical in both paths. For a SubagentFold this
-    is the `↳ subagent → {name}` boundary: subagent color, ↳ descent marker (not a
-    fold/expand glyph), and no (running)/(error) suffix. Note: the lean/live views
-    no longer use this for subagents — they emit `subagent_status_row` (a single
-    `↳ subagent → {name}` row). This bare header survives only for the --full
-    expanded fold and PhaseNode/StepNode."""
+    is the `· {name}` boundary: subagent color, a small dot (no "subagent" word,
+    no arrow), and no status suffix. Note: the lean/live views no longer use this
+    for subagents — they emit `subagent_status_row`. This bare header survives only
+    for the --full expanded fold and PhaseNode/StepNode."""
     if isinstance(node, nv.PhaseNode):
         return _line(node.name, depth, color, *pal.NODE_COLORS["phase"], gutters=gutters)
     if isinstance(node, nv.SubagentFold):
-        return _line(f"↳ subagent → {node.subagent_name}", depth, color,
+        return _line(f"· {node.subagent_name}", depth, color,
                      *pal.NODE_COLORS["subagent"], gutters=gutters)
     label = node.name
     if node.model:
@@ -219,21 +254,25 @@ def header_line(node: Any, *, depth: int, color: bool,
 
 def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
                         gutters: tuple[int, ...] = ()) -> str:
-    """The single lean/live row for a subagent: `↳ subagent → {name}` — and
-    NOTHING else (no prompt, no streamed output, no outcome prose). This is what
-    structurally eliminates the SDK cancellation-sentinel leak from the default
-    views. The ordinary success case carries NO status suffix (it reads as noise);
-    only an abnormal terminal state (running-at-pause, failed, stalled) appends a
-    `⟨…⟩` tag so a subagent that didn't cleanly finish still stands out."""
-    label = f"↳ subagent → {sub.subagent_name}"
+    """The single lean/live row for a subagent: `· {name}` — and NOTHING else (no
+    prompt, no streamed output, no outcome prose). This is what structurally
+    eliminates the SDK cancellation-sentinel leak from the default views. The dot
+    matches the tool-burst lead-in; the magenta color marks it as subagent
+    identity. A finished subagent appends `· {elapsed}` (how long it ran); an
+    abnormal terminal state (running-at-pause, failed, stalled) appends a plain
+    `(state)` tag so a subagent that didn't cleanly finish still stands out."""
+    label = f"· {sub.subagent_name}"
     if sub.running:
-        label += " ⟨⏳ running⟩"
+        label += " (running)"
     elif sub.terminal_state == "stalled":
-        label += " ⟨⊘ stalled⟩"
+        label += " (stalled)"
     elif sub.terminal_state == "interrupted":
-        label += " ⟨⊘ interrupted⟩"
+        label += " (interrupted)"
     elif sub.is_error:
-        label += " ⟨✗ failed⟩"
+        label += " (failed)"
+    elapsed = nv._elapsed_seconds(sub.start_ts, sub.end_ts)
+    if not sub.running and elapsed is not None:
+        label += f" · {fmt_seconds(elapsed)}"
     return _line(label, depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
 
 
@@ -278,10 +317,17 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
 def _render(node: Any, *, depth: int, full: bool, color: bool,
             width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     if isinstance(node, nv.PhaseNode):
+        # The phase start line is surrounded by blank lines: the blank ABOVE comes
+        # from the root walk (spaces_before(PhaseNode)); the blank BELOW comes from
+        # priming the children walk so the first step gets a lead-in blank.
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth + 1, full=full,
-                                    color=color, width=width, gutters=gutters)
+                                    color=color, width=width, gutters=gutters,
+                                    prime=True)
         if node.closed and nv.phase_elapsed(node) is not None:
+            # Blank ABOVE the phase-complete line (it's surrounded too); the blank
+            # BELOW comes from the root walk (spaces_after(PhaseNode)).
+            yield _gutter_indent(depth, gutters, color)
             yield phase_breadcrumb_line(node, depth=depth, color=color, gutters=gutters)
         return
 
@@ -298,13 +344,14 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                                         color=color, width=width, gutters=gutters)
             return
         yield header_line(node, depth=depth, color=color, gutters=gutters)
-        body = list(_render_children(node.children, depth=depth, full=full,
-                                     color=color, width=width, gutters=gutters))
-        if body:
-            # One blank line between the step header and the agent's first words,
-            # so the speaker label and the speech don't bunch (design: §5.4 air).
-            yield _gutter_indent(depth, gutters, color)
-            yield from body
+        # One blank line between the step header and the agent's first words, so the
+        # speaker label and the speech don't bunch (design: §5.4 air). Priming the
+        # children walk (rather than emitting the blank here) means a first child
+        # that ALSO wants a blank above — an error — gets a single separator, not a
+        # doubled one.
+        yield from _render_children(node.children, depth=depth, full=full,
+                                    color=color, width=width, gutters=gutters,
+                                    prime=True)
         return
 
     if isinstance(node, nv.AgentTextNode):
@@ -365,14 +412,18 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
     if isinstance(node, nv.BreadcrumbLine):
         # No checkmark: a completed step reads as `<name> complete · …` — the word
         # carries the meaning, and dropping the glyph keeps the gray line quiet
-        # (the `✓` drew the eye to navigational chrome it shouldn't).
-        parts = [f"{node.step_name} complete"]
-        parts.extend(node.extras)
+        # (the `✓` drew the eye to navigational chrome it shouldn't). The output
+        # args (status=…, *_path=…, plan counts) are detail the lean view doesn't
+        # need beside every step — they survive in --full only; the routing verb
+        # and elapsed time stay in both (they're outcome, not args).
+        parts = [f"{node.step_name} complete" if node.show_complete else node.step_name]
+        if full:
+            parts.extend(node.extras)
         verb_text = pal.action_text(node.action) if node.action is not None else None
         if verb_text and verb_text != "continue":
-            parts.append(f"→ {verb_text}")
+            parts.append(verb_text)
         if node.elapsed_s is not None:
-            parts.append(f"{int(node.elapsed_s)}s")
+            parts.append(fmt_seconds(node.elapsed_s))
         # The per-step completion line is navigational chrome, not a result the
         # eye should land on — dark gray, almost invisible, regardless of the
         # routing verb. Real outcomes (errors, pauses) carry their own red lines.
@@ -447,7 +498,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
     n = len(calls)
     elapsed = nv._elapsed_seconds(burst.start_ts, burst.end_ts)
-    secs = "" if elapsed is None else f" · {int(elapsed)}s"
+    secs = "" if elapsed is None else f" · {fmt_seconds(elapsed)}"
     # Lead with the same small `·` the line uses as a separator (not the heavy
     # `⏺`, which over-weighted routine tool work); one space around every dot.
     return f"· {shown}{more} · {n} call{'s' if n != 1 else ''}{secs}"
@@ -483,13 +534,13 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
     if not full:
         # Lean: ONE status row, no children, no outcome (Part D). Structurally
         # eliminates the SDK cancellation-sentinel leak — lean renders no subagent
-        # I/O at all, only `↳ task → {name}  ⟨{status}⟩`.
+        # I/O at all, only `· {name}` (plus elapsed / abnormal-state tag).
         yield subagent_status_row(sub, depth=depth, color=color, gutters=gutters)
         return
-    # --full: expanded `▾ subagent → {name}` fold header, full recursion of
-    # the subagent's narrative (nested thinking/tools expanded), then the structured
-    # return value. --full stays a superset of the lean view.
-    yield _line(f"{pal.fold_glyph(expanded=True)} subagent → {sub.subagent_name}",
+    # --full: expanded `▾ {name}` fold header, full recursion of the subagent's
+    # narrative (nested thinking/tools expanded), then the structured return value.
+    # --full stays a superset of the lean view.
+    yield _line(f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}",
                 depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
                                 color=color, width=width, gutters=(*gutters, depth))

@@ -119,7 +119,7 @@ class LiveDriver:
         # cyan spinner draws the eye; the elapsed tail dims so it doesn't compete
         # with the activity text. Plain when color is off (byte-identical to before).
         spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=self._color)
-        tail = pal.ansi(f"· {int(elapsed)}s", "dim", enabled=self._color)
+        tail = pal.ansi(f"· {rt.fmt_seconds(elapsed)}", "dim", enabled=self._color)
         return f"{spin} {activity} {tail}"
 
     # -- emission -------------------------------------------------------------
@@ -149,10 +149,18 @@ class LiveDriver:
                     if (isinstance(cur.container, nv.PhaseNode)
                           and _container_closed(cur.container)
                           and nv.phase_elapsed(cur.container) is not None):
-                        self._prev_prose = False  # structural emission: no blank-sep
-                        self._print_lines([rt.phase_breadcrumb_line(
-                            cur.container, depth=cur.depth - 1, color=self._color,
-                            gutters=self._gutters())])
+                        # The phase-complete line is surrounded by blanks: arm
+                        # prev_prose for the blank ABOVE, and pass prose=True so the
+                        # next phase header gets the blank BELOW (matching the batch
+                        # walk's spaces_before/after(PhaseNode)).
+                        self._prev_prose = True
+                        self._print_lines(
+                            [rt.phase_breadcrumb_line(
+                                cur.container, depth=cur.depth - 1, color=self._color,
+                                gutters=self._gutters())],
+                            prose=True,
+                            separator_indent=rt._gutter_indent(
+                                cur.depth - 1, self._gutters(), self._color))
                     self._frontier.pop()        # container drained + closed
                     continue
                 return                          # open container, no new children yet
@@ -170,25 +178,30 @@ class LiveDriver:
                 if rt.is_chrome_step(child):
                     # A no-op gate/script step has no header — it collapses to the
                     # single dark-gray breadcrumb its step_completed appends. Skip
-                    # the header line; descend so that breadcrumb still streams.
-                    pass
+                    # the header line; descend so that breadcrumb still streams. It's
+                    # surrounded like a leaf, so arm the blank-above here (its
+                    # breadcrumb provides the blank-below via spaces_after).
+                    if rt.spaces_before(child):
+                        self._prev_prose = True
                 else:
                     if rt.spaces_before(child):
-                        # An interactive step gets a blank line above its header
-                        # (matching render_text._render_children). Arming the
-                        # prose-adjacency flag makes the next emission — the header
-                        # — carry the leading separator.
+                        # A phase header and an interactive step header get a blank
+                        # line above them (matching render_text._render_children).
+                        # Arming the prose-adjacency flag makes the next emission —
+                        # the header — carry the leading separator.
                         self._prev_prose = True
                     self._stream_or_hold(
                         rt.header_line(child, depth=cur.depth, color=self._color,
                                        gutters=gutters),
                         depth=cur.depth, gutters=gutters)
-                    if isinstance(child, nv.StepNode):
-                        # One blank line between an agent step's header and its
-                        # first words (point 2). Arm the prose-adjacency flag so
-                        # the next real emission carries a leading separator;
-                        # the dropped lean context line is an empty emission that
-                        # leaves this untouched, so the blank lands before prose.
+                    if isinstance(child, (nv.StepNode, nv.PhaseNode)):
+                        # One blank line below the header: between an agent step's
+                        # header and its first words, and between a phase's start
+                        # line and its first step (surrounding the phase start).
+                        # Arm the prose-adjacency flag so the next real emission
+                        # carries a leading separator; the dropped lean context
+                        # line is an empty emission that leaves this untouched, so
+                        # the blank lands before the real content.
                         self._prev_prose = True
                 child_depth = cur.depth + 1 if isinstance(child, nv.PhaseNode) else cur.depth
                 self._frontier.append(_Cursor(container=child, depth=child_depth))
@@ -225,6 +238,11 @@ class LiveDriver:
 
     def _emit_leaf(self, node: Any, depth: int,
                    gutters: tuple[int, ...] = ()) -> None:
+        if rt.spaces_before(node):
+            # A leaf that wants a blank line above it (an error) gets one even when
+            # its predecessor wasn't a spaced block — mirrors render_text's
+            # spaces_before check in _render_children.
+            self._prev_prose = True
         if isinstance(node, nv.SubagentFold):
             # Part D: a subagent collapses to a single resolved status row — no
             # streamed children, no outcome. Shares render_text.subagent_status_row
@@ -256,7 +274,9 @@ class LiveDriver:
             # the prompt/options as chrome (design "Human gates").
             lines = rt._render_gate(node, depth=depth, color=self._color,
                                     width=self._width, recap=False, gutters=gutters)
-            prose = False
+            # Spaced like the batch walk (blank after the gate block) so the
+            # step-completion breadcrumb that follows stands clear of it.
+            prose = rt.spaces_after(node, full=False)
         else:
             lines = rt._render(node, depth=depth, full=False, color=self._color,
                                width=self._width, gutters=gutters)

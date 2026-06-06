@@ -161,6 +161,8 @@ class SubagentFold:
     is_error: bool = False
     terminal_state: str | None = None  # 'stalled' (live via B.2); 'interrupted'
                                        # is forward-compat scaffolding; else None
+    start_ts: str | None = None        # parent `task` tool_call.timestamp
+    end_ts: str | None = None          # parent `task` tool_result.timestamp
     collapsible = True
 
     @property
@@ -221,6 +223,11 @@ class BreadcrumbLine:
     elapsed_s: float | None
     action: Any                        # dict {verb, target?} from step_completed
     extras: list[str] = field(default_factory=list)
+    show_complete: bool = True         # False for a chrome step (script/branch),
+                                       # whose start line is never printed — the
+                                       # `· 0s` alone reads as "done", so the word
+                                       # "complete" (which pairs with a start) is
+                                       # dropped to avoid a dangling half-bookend.
     collapsible = False
 
 
@@ -515,7 +522,10 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
         node.children.append(BreadcrumbLine(
             step_name=node.name, elapsed_s=elapsed, action=action,
-            extras=_breadcrumb_extras(node.agent_output)))
+            extras=_breadcrumb_extras(node.agent_output),
+            # A chrome step (script/branch gate) prints no start line, so its
+            # breadcrumb omits the word "complete" (see BreadcrumbLine).
+            show_complete=node.kind not in ("script", "branch")))
         node.closed = True
 
 
@@ -714,8 +724,10 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         input=p.get("input") or {}))
 
 
-def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any]) -> None:
+def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
+                         end_ts: str | None = None) -> None:
     fold.running = False
+    fold.end_ts = end_ts
     fold.is_error = bool(p.get("error", False))
     fold.outcome = _summarize_result(p.get("content"))
     # Terminal state for Part D's glyph. Prefer an explicit payload kind (forward
@@ -742,7 +754,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # Closing a subagent? (parent `task` tool_result carries the block id.)
     fold = self._open_sub_by_block.pop(rid, None)
     if fold is not None:
-        _close_subagent_fold(fold, p)
+        _close_subagent_fold(fold, p, event.get("timestamp"))
         return
     # Normal burst result: pair with the matching open call.
     footer = _format_citations_footer(p.get("citations"))
@@ -765,7 +777,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     )
     if self._open_sub_by_block and not burst_has_open_call:
         _, fold = self._open_sub_by_block.popitem()   # LIFO; dicts preserve order
-        _close_subagent_fold(fold, p)
+        _close_subagent_fold(fold, p, event.get("timestamp"))
         return
     # Orphan result (malformed log): start/extend a burst with a "tool" entry.
     burst = _ensure_burst(self)
@@ -931,7 +943,8 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     inp = p.get("input") or {}
     fold = SubagentFold(
         subagent_name=str(inp.get("subagent_name", "?")),
-        event_id=event_id, block_id=block_id, nested=NarrativeBuilder())
+        event_id=event_id, block_id=block_id, nested=NarrativeBuilder(),
+        start_ts=event.get("timestamp"))
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold
     self._open_sub_by_block[block_id] = fold

@@ -97,7 +97,7 @@ def test_live_subagent_only_status_rows() -> None:
         drv.on_event(e)
     drv.finish()
     out_text = out.getvalue()
-    assert "↳ subagent → reviewer" in out_text
+    assert "· reviewer" in out_text
     assert "some internal chatter" not in out_text
     assert "doesn't want to proceed" not in out_text
 
@@ -118,7 +118,7 @@ def test_subagent_descends_but_nested_burst_does_not_leak() -> None:
         drv.on_event(e)
     body = _body(out)
     # Part D: the subagent collapses to one resolved status row.
-    assert any(ln.strip() == "↳ subagent → coder" for ln in body)
+    assert any(ln.strip() == "· coder" for ln in body)
     assert not any("▸ task" in ln for ln in body)
     # The nested tool burst must still NOT leak into the stream.
     assert not any("secret.py" in ln for ln in body)
@@ -303,12 +303,12 @@ def test_subagent_row_resolves_only_on_close() -> None:
     # While running: internal prose hidden and no row yet (it resolves on close).
     body_before = _body(out)
     assert not any("interim finding" in ln for ln in body_before)
-    assert not any("↳ subagent → reviewer" in ln for ln in body_before)
+    assert not any("· reviewer" in ln for ln in body_before)
     # Close the subagent; the single resolved row lands now, with no outcome.
     drv.on_event(ev("6", "tool_result", agent_id="a", id="t1",
                     content='{"status":"Success"}'))
     body_after = _body(out)
-    assert any(ln.strip() == "↳ subagent → reviewer" for ln in body_after)
+    assert any(ln.strip() == "· reviewer" for ln in body_after)
     assert not any("status=Success" in ln for ln in body_after)
 
 
@@ -330,8 +330,8 @@ def test_subagent_status_row_column_matches_render_tree() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    live_row = next(ln for ln in body if "↳ subagent → reviewer" in ln)
-    log_row = next(ln for ln in _render_body(events) if "↳ subagent → reviewer" in ln)
+    live_row = next(ln for ln in body if "· reviewer" in ln)
+    log_row = next(ln for ln in _render_body(events) if "· reviewer" in ln)
     assert live_row == log_row
 
 
@@ -351,7 +351,7 @@ def test_finish_force_pops_running_subagent_without_outcome() -> None:
     # row shows the (still-running) status; internal prose and outcome stay hidden.
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "↳ subagent → reviewer ⟨⏳ running⟩" for ln in body)
+    assert any(ln.strip() == "· reviewer (running)" for ln in body)
     assert not any("partial work" in ln for ln in body)
     assert not any("→ status" in ln for ln in body)   # no outcome ever
 
@@ -409,7 +409,7 @@ def test_nested_subagent_io_never_leaks() -> None:
     body = _body(out)
     assert not any("tools" in ln for ln in body)        # nested burst hidden
     assert not any("after burst" in ln for ln in body)  # internal prose hidden
-    assert any("↳ subagent → reviewer" in ln for ln in body)  # only the status row
+    assert any("· reviewer" in ln for ln in body)  # only the status row
 
 
 def test_subagent_closing_with_open_nested_burst_emits_only_status_row() -> None:
@@ -431,7 +431,7 @@ def test_subagent_closing_with_open_nested_burst_emits_only_status_row() -> None
     ]:
         drv.on_event(e)
     body = _body(out)
-    assert any(ln.strip() == "↳ subagent → reviewer" for ln in body)
+    assert any(ln.strip() == "· reviewer" for ln in body)
     assert not any("tools" in ln for ln in body)        # nested burst hidden
     assert not any("status=Success" in ln for ln in body)  # outcome hidden
 
@@ -487,7 +487,7 @@ def test_live_subagent_collapses_to_status_row_byte_identical_to_log() -> None:
     drv.finish()
     body = _body(out)
     # The single resolved status row — no streamed prose, no gutter, no outcome.
-    assert any(ln.strip() == "↳ subagent → reviewer" for ln in body)
+    assert any(ln.strip() == "· reviewer" for ln in body)
     assert not any("the finding" in ln for ln in body)
     assert not any("│" in ln for ln in body)
     assert body == _render_body(events)
@@ -635,7 +635,7 @@ def test_live_subagent_emits_no_internal_io_or_outcome() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "↳ subagent → reviewer" for ln in body)
+    assert any(ln.strip() == "· reviewer" for ln in body)
     assert not any("the finding" in ln for ln in body)        # internal prose hidden
     assert not any("status=Success" in ln for ln in body)     # outcome hidden
     assert body == _render_body(events)
@@ -658,7 +658,7 @@ def test_live_prose_then_subagent_header_blank_separated() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    hdr_i = next(i for i, ln in enumerate(body) if "↳ subagent → reviewer" in ln)
+    hdr_i = next(i for i, ln in enumerate(body) if "· reviewer" in ln)
     assert body[hdr_i - 1].strip() == ""
     assert body == _render_body(events)
 
