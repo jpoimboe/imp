@@ -48,8 +48,10 @@ def test_drive_imp_new_to_completion(tmp_path: Path) -> None:
         rc = session.run_to_completion(hard=30.0)
         assert rc == 0, f"expected exit 0, got {rc}; transcript=\n{session.transcript()}"
 
-        # The human gate renders inline (no alternate screen), so post-gate
-        # output lands in pyte history — guard that assumption explicitly.
+        # The gate renders inline today (no alternate screen), so post-gate
+        # output lands in pyte history. This assert is a tripwire: if a future
+        # step entered alt-screen and never restored it, the orphaned mode bit
+        # would make transcript() unreliable.
         assert session.is_alt_screen() is False
         # Primary verdict: the completion banner `Change <id>: completed`
         # (src/imp/cli/main.py:172).
