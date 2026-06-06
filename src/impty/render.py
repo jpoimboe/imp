@@ -11,6 +11,7 @@ file write, so it's drivable from a script or a future `snapshot` MCP tool."""
 from __future__ import annotations
 
 import contextlib
+import re
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
@@ -55,6 +56,22 @@ def _load_font(path: str, size: int, bold: bool) -> ImageFont.FreeTypeFont:
     with contextlib.suppress(OSError, ValueError, AttributeError):
         font.set_variation_by_name(b"Bold" if bold else b"Regular")
     return font
+
+
+# pyte models bold/italics/underscore/reverse but NOT faint (SGR 2 isn't in its
+# graphics table), so dim text would otherwise render at full intensity. We can't
+# recover it from the screen — it has to be rewritten in the byte stream BEFORE
+# pyte parses it. imp only ever emits `dim` (CSI 2 m) on default-fg chrome
+# (metadata / thinking / tiers), so substituting a flat dim-gray foreground is
+# faithful; the trailing reset (CSI 0 m) clears it like any other attribute.
+_FAINT_RE = re.compile("\x1b\\[2m")
+_FAINT_GRAY = "\x1b[38;2;133;133;133m"
+
+
+def show_faint(ansi: str) -> str:
+    """Rewrite the faint SGR (CSI 2 m) into an explicit dim-gray fg so the
+    renderer shows dimmed text. Apply to a byte/str stream before feeding pyte."""
+    return _FAINT_RE.sub(_FAINT_GRAY, ansi)
 
 
 def _rgb(name: str, default: tuple[int, int, int]) -> tuple[int, int, int]:

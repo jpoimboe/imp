@@ -34,16 +34,17 @@ sys.path.insert(0, str(_HERE))  # import the sibling scene module by name
 
 import pyte  # noqa: E402  (after sys.path tweak)
 
-from impty.render import render_screen  # noqa: E402
+from impty.render import render_screen, show_faint  # noqa: E402
 
 _OUT_DIR = Path("/tmp/imp_ui")
 
 
 def _feed_screen(ansi: str, *, cols: int, rows: int) -> pyte.Screen:
     """A pyte screen with `ansi` drawn into it. LiveDriver emits bare '\\n';
-    a real pty maps that to CRLF (ONLCR), so we do the same before feeding."""
+    a real pty maps that to CRLF (ONLCR), so we do the same before feeding.
+    show_faint() rewrites dim text into a color pyte preserves (it drops SGR 2)."""
     screen = pyte.Screen(cols, rows)
-    pyte.Stream(screen).feed(ansi.replace("\n", "\r\n"))
+    pyte.Stream(screen).feed(show_faint(ansi).replace("\n", "\r\n"))
     return screen
 
 
