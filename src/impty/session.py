@@ -51,7 +51,7 @@ def _set_winsize(fd: int, rows: int, cols: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
-class _ReplyScreen(pyte.HistoryScreen):  # type: ignore[misc]  # pyte is untyped
+class _ReplyScreen(pyte.HistoryScreen):
     """A pyte screen that writes terminal replies back to the program.
 
     pyte computes answers to query sequences — cursor-position reports (CPR /
