@@ -21,7 +21,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from imp.agents.runner import AgentInvocation, Event
+from imp.agents.runner import (
+    AgentInvocation,
+    Event,
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
@@ -609,7 +616,6 @@ class CodexAgentRunner:
                                 f"after {nudges_used + 1} nudge(s)"),
                     "detail": {"last_agent_text": last_text[:500]}}}
                 return
-            from imp.agents.runner import Message, TextBlock
             elog.append_user_message(
                 agent_id=aid,
                 message=Message(role="user",
@@ -716,6 +722,28 @@ def _serialize_mcp_result(result: Any) -> str:
     return str(result)
 
 
+def _parse_codex_message(raw: dict[str, Any]) -> Message:
+    """raw → assistant Message for codex. codex's live `llm_response.raw` is
+    text-only; the reassembled full-turn raw (`reassemble_codex_turn`) also
+    carries `tool_use` blocks (a web_search appears as a query-only tool_use).
+    Unknown blocks are dropped (surfaced via `_extract_codex_diagnostics`).
+
+    Lives here (not in replay.py) per the provider-exports-its-parser convention:
+    replay.py imports + registers it, runner can reuse it, no replay-import cycle.
+    """
+    content: list[Any] = []
+    for block in raw.get("content", []):
+        kind = block.get("type")
+        if kind == "text":
+            content.append(TextBlock(text=block.get("text", "")))
+        elif kind == "tool_use":
+            content.append(ToolUseBlock(
+                id=block["id"], name=block["name"],
+                input=block.get("input", {})))
+        # unknown: skipped (see _extract_codex_diagnostics)
+    return Message(role="assistant", content=tuple(content))
+
+
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
     provider: str, model: str,
@@ -756,7 +784,6 @@ def process_event(
             )
             return
         if itype == "mcp_tool_call":
-            from imp.agents.runner import ToolResultBlock, ToolUseBlock
             # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
             # `name` silently recorded "" for every call (and made the
             # complete_step capture below dead). Fall back to `name` only for
@@ -793,7 +820,6 @@ def process_event(
                 # model-hosted search. Surface it as a tool_call so it shows in
                 # the narrative/`imp log`. codex's WebSearchItem exposes only the
                 # query (no results/citations), so the result is informational.
-                from imp.agents.runner import ToolResultBlock, ToolUseBlock
                 call_id = getattr(item, "id", "") or ""
                 elog.append_tool_call(
                     agent_id=agent_id,
