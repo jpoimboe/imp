@@ -71,6 +71,37 @@ class RunResult(Enum):
     ERRORED = "errored"
 
 
+def _latest_step_context_system_prompt(log: EventLog, agent_id: str) -> str | None:
+    """The verbatim system_prompt from the LATEST step_context for this agent_id,
+    or None if none exists. 'Latest' matters: a goto re-entry renders afresh and
+    emits a newer step_context; resume must replay the newest, not an earlier row.
+    Resume is not a hot path and the log is per-Change, so a linear scan is fine."""
+    found: str | None = None
+    for e in log.read():
+        if e.get("type") == "step_context" and e.get("agent_id") == agent_id:
+            found = (e.get("payload") or {}).get("system_prompt")
+    return found
+
+
+def _resume_system_prompt(
+    log: EventLog, agent_id: str, transcript_dir: Any,
+) -> str | None:
+    """Resume-replay source. Returns the stored prompt to replay verbatim, or
+    None when the caller should re-render. Aborts on the invariant violation:
+    a non-empty transcript with no stored step_context means messages were
+    rendered against a now-lost prompt — re-rendering would silently diverge."""
+    from imp.agents.transcript import Transcript
+    stored = _latest_step_context_system_prompt(log, agent_id)
+    if stored is not None:
+        return stored
+    if Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
+        raise RuntimeError(
+            f"resume invariant violated: step {agent_id!r} has a non-empty "
+            "transcript but no stored step_context system prompt; refusing to "
+            "re-render against a lost prompt")
+    return None       # empty transcript (pre-emit crash, or no-transcript provider)
+
+
 def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, ...]:
     """Fresh-entry seed. `<imp:begin/>` (or the wrapper text on a fresh goto),
     plus a name line when the Change is named — so a named Change conveys its
@@ -432,7 +463,8 @@ async def _route_agent(
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
-            initial_messages=initial, lint_command=lint_command,
+            initial_messages=initial, is_resume=is_resume,
+            lint_command=lint_command,
             test_command=test_command, non_interactive=non_interactive)
         if result.delay is None:
             break
@@ -535,6 +567,7 @@ async def _run_agent_invocation(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
     initial_messages: tuple[Message, ...],
+    is_resume: bool = False,
     prior_backoff_attempts: int = 0,
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
@@ -560,12 +593,18 @@ async def _run_agent_invocation(
         provider_model = state.resolved_tiers[tier]
     provider = provider_from_model(provider_model)
 
-    rendered = render_prompt(
-        agent_def.prompt_template_source, build_context(
-            change_id=change.id, change_slug=change.slug, change_title=change.title,
-            event_log=log, vars=state.vars,
-        ),
-    )
+    stored = _resume_system_prompt(log, agent_id, transcript_dir) if is_resume else None
+    if stored is not None:
+        rendered = stored
+        system_prompt_override: str | None = stored
+    else:
+        rendered = render_prompt(
+            agent_def.prompt_template_source, build_context(
+                change_id=change.id, change_slug=change.slug, change_title=change.title,
+                event_log=log, vars=state.vars,
+            ),
+        )
+        system_prompt_override = None
 
     subagent_defs = {
         name: workflow.agents[name]
@@ -596,6 +635,7 @@ async def _run_agent_invocation(
         provider_name=provider.name,
         model_name=provider.model,
         rendered_system_prompt=rendered,
+        system_prompt_override=system_prompt_override,
         initial_messages=initial_messages,
         change_context=ChangeContext(
             id=change.id, slug=change.slug, title=change.title,
