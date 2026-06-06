@@ -125,9 +125,9 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     from rich.markdown import Markdown
     from rich.theme import Theme
 
-    # An agent turn is marked with a leading bold "● " bullet and hang-indented:
+    # An agent turn is marked with a leading bold "• " bullet and hang-indented:
     # the bullet sits at the base column and every wrapped/continuation line aligns
-    # 2 cols in, under the first word. (A medium bold dot — heavier than the small
+    # 2 cols in, under the first word. (A bold dot — heavier than the small
     # "·" chrome separators — so the turn marker clearly leads.) Render markdown 2
     # cols narrower to leave room for the hang, then place the bullet on the first
     # non-blank line and the hang on the rest.
@@ -139,7 +139,7 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
                       theme=Theme({"markdown.code": "cyan"}))
     console.print(Markdown(text))
     indent = _gutter_indent(depth, gutters, color)
-    bullet = pal.ansi("● ", "bold", enabled=color)   # bold medium dot marks the turn
+    bullet = pal.ansi("• ", "bold", enabled=color)   # bold dot marks the turn
     out: list[str] = []
     first = True
     for raw in buf.getvalue().splitlines():

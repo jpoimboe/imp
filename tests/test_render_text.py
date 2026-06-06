@@ -369,7 +369,7 @@ def test_agent_text_is_plain_when_color_enabled() -> None:
     node._cache = _FakeRendered(["hello world"])
     out = list(rt._render(node, depth=0, full=False, color=True, width=80))
     # calm baseline: the prose text carries no ANSI; only the turn bullet is bold.
-    assert out == ["\x1b[1m● \x1b[0mhello world"]
+    assert out == ["\x1b[1m• \x1b[0mhello world"]
 
 
 def test_empty_thinking_is_suppressed_both_modes() -> None:
@@ -646,7 +646,7 @@ def test_full_subagent_content_carries_magenta_gutter() -> None:
     ], full=True)
     # prose + outcome at depth 2 (aligned indent: the step no longer adds a
     # level): col 0 plain + col 1 gutter.
-    assert any("│ \x1b[1m● \x1b[0mlooks good" in ln or ln == "  │ ● looks good" for ln in out)
+    assert any(ln == "  │ • looks good" for ln in out)
     assert any(ln == "  │ → status=Success" for ln in out)
 
 
@@ -670,7 +670,7 @@ def test_nested_subagent_emits_two_gutter_levels() -> None:
     out = list(rt._render(outer, depth=0, full=True, color=False, width=80))
     assert out[0] == "▾ outer"                       # depth 0, no gutter
     assert any(ln == "│ ▾ inner" for ln in out)      # depth 1, one gutter
-    assert any("│ \x1b[1m● \x1b[0mdeep finding" in ln or ln == "│ │ ● deep finding" for ln in out)      # depth 2, two gutters
+    assert any(ln == "│ │ • deep finding" for ln in out)      # depth 2, two gutters
 
 
 def test_errored_subagent_gutter_stays_magenta_with_red_outcome() -> None:
