@@ -95,6 +95,12 @@ def _rgb(name: str, default: tuple[int, int, int]) -> tuple[int, int, int]:
     return default
 
 
+# A light-terminal surface, for previewing the `light` theme (dark text on a
+# near-white background, mirroring what a light terminal paints).
+_LIGHT_BG = (0xFA, 0xFA, 0xF8)
+_LIGHT_FG = (0x2A, 0x2A, 0x2A)
+
+
 def render_screen(
     screen: Any,
     path: str,
@@ -103,17 +109,24 @@ def render_screen(
     cell_h: int = 19,
     font_size: int = 16,
     pad: int = 12,
+    bg: tuple[int, int, int] | None = None,
+    fg: tuple[int, int, int] | None = None,
 ) -> str:
     """Paint the current viewport of `screen` to a PNG at `path`. Returns path.
 
     Walks the cell grid, resolving each cell's fg/bg/bold/reverse to pixels.
     Cell size is fixed (monospace), so columns stay aligned and box-drawing
-    characters meet — the thing that makes a TUI look crisp or broken."""
+    characters meet — the thing that makes a TUI look crisp or broken.
+
+    `bg`/`fg` override the default dark surface — pass `_LIGHT_BG`/`_LIGHT_FG`
+    to preview the `light` theme on a near-white background."""
+    surface_bg = bg if bg is not None else _BG
+    surface_fg = fg if fg is not None else _FG
     rows = screen.lines
     cols = screen.columns
     w = cols * cell_w + 2 * pad
     h = rows * cell_h + 2 * pad
-    img = Image.new("RGB", (w, h), _BG)
+    img = Image.new("RGB", (w, h), surface_bg)
     draw = ImageDraw.Draw(img)
     font = _load_font(_MONO, font_size, bold=False)
     font_bold = _load_font(_MONO_BOLD, font_size, bold=True)
@@ -123,20 +136,20 @@ def render_screen(
         for x in range(cols):
             ch = row[x]
             data = ch.data or " "
-            fg = _rgb(ch.fg, _FG)
-            bg = _rgb(ch.bg, _BG)
+            fg_px = _rgb(ch.fg, surface_fg)
+            bg_px = _rgb(ch.bg, surface_bg)
             if ch.reverse:
-                fg, bg = bg, fg
+                fg_px, bg_px = bg_px, fg_px
             px = pad + x * cell_w
             py = pad + y * cell_h
-            if bg != _BG:
-                draw.rectangle([px, py, px + cell_w, py + cell_h], fill=bg)
+            if bg_px != surface_bg:
+                draw.rectangle([px, py, px + cell_w, py + cell_h], fill=bg_px)
             if data != " ":
                 draw.text(
                     (px, py),
                     data,
                     font=font_bold if ch.bold else font,
-                    fill=fg,
+                    fill=fg_px,
                 )
     img.save(path)
     return path

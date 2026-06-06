@@ -45,7 +45,8 @@ class _Pipe(io.StringIO):
         return False
 
 
-def stream_text(*, color: bool, width: int, limit: int | None) -> str:
+def stream_text(*, color: bool, width: int, limit: int | None,
+                theme: str = "dark") -> str:
     """The live body the recorded journal produces, as a string — replayed
     through the real LiveDriver. `limit` truncates to the first N events so a
     slice ends on the visual state you want (header, prose, gate, completion).
@@ -54,10 +55,9 @@ def stream_text(*, color: bool, width: int, limit: int | None) -> str:
     from imp.cli.live_driver import LiveDriver
     from imp.cli.live_status import LiveStatus
 
-    # The mockup showcases the `dark` truecolor theme (what a dark terminal sees
-    # live). render_screen renders the truecolor hexes imp emits, so the PNG and a
-    # real dark terminal match. Plain (color=False) output is unaffected.
-    pal.set_theme("dark")
+    # The mockup renders the truecolor hexes imp emits for `theme`, so the PNG
+    # matches a real terminal on that theme. Plain (color=False) is unaffected.
+    pal.set_theme(theme)
     events = _events()
     if limit is not None:
         events = events[:limit]

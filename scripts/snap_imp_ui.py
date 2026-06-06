@@ -48,10 +48,13 @@ def _feed_screen(ansi: str, *, cols: int, rows: int) -> pyte.Screen:
     return screen
 
 
-def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None) -> None:
+def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None,
+                theme: str = "dark") -> None:
     import capture_imp_ui as cap
 
-    ansi = cap.stream_text(color=True, width=cols, limit=limit)
+    from impty.render import _LIGHT_BG, _LIGHT_FG
+
+    ansi = cap.stream_text(color=True, width=cols, limit=limit, theme=theme)
     n = len(ansi.rstrip("\n").split("\n"))
     # Auto-fit the whole slice (the point of a mockup); cap only as a sane
     # backstop against a pathologically long run. Use --limit to focus.
@@ -59,7 +62,9 @@ def snap_stream(out: Path, *, limit: int | None, cols: int, rows: int | None) ->
     if n > height:
         print(f"note: {n} lines of output; image shows the last {height} "
               f"(use --limit to focus, or --rows to grow)")
-    render_screen(_feed_screen(ansi, cols=cols, rows=height), str(out))
+    # `light` previews on a near-white surface; dark/ansi on the default dark one.
+    surface = {"bg": _LIGHT_BG, "fg": _LIGHT_FG} if theme == "light" else {}
+    render_screen(_feed_screen(ansi, cols=cols, rows=height), str(out), **surface)
 
 
 def snap_prompt(out: Path, *, type_text: str, cols: int, rows: int) -> None:
@@ -85,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=None, help="PNG path")
     ap.add_argument("--cols", type=int, default=100)
     ap.add_argument("--rows", type=int, default=None, help="stream auto-fits; prompt default 16")
+    ap.add_argument("--theme", choices=("dark", "light", "ansi"), default="dark",
+                    help="color theme to emit (light previews on a near-white surface)")
     ap.add_argument("--open", dest="open_it", action="store_true", help="xdg-open the PNG")
     a = ap.parse_args(argv)
 
@@ -92,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     if a.scene == "stream":
-        snap_stream(out, limit=a.limit, cols=a.cols, rows=a.rows)
+        snap_stream(out, limit=a.limit, cols=a.cols, rows=a.rows, theme=a.theme)
     else:
         snap_prompt(out, type_text=a.type_text, cols=a.cols, rows=a.rows or 16)
 

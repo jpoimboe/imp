@@ -8,6 +8,11 @@ tiers:
 provider_envs:
   openai: {env: OPENAI_API_KEY}
 
+# Color theme: dark | light | ansi. Normally written by `imp init` from
+# terminal detection; set here so this dogfood checkout emits the dark
+# truecolor palette live. Override per-run with IMP_THEME=...
+theme: dark
+
 # Optional lint-clean gate: a command the implementer runs before each
 # commit (separate from the test suite). Absent => no lint gate.
 # lint_command: "make lint"
