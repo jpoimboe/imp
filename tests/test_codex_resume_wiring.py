@@ -118,3 +118,37 @@ async def test_resume_calls_resume_thread_not_start_thread(tmp_path: Path) -> No
     assert fake.resume_thread_calls, "resume must call client.resume_thread()"
     assert fake.resume_thread_calls[0][0] == "thr-resume-1"
     assert fake.start_thread_calls == [], "resume must NOT call start_thread()"
+
+
+@pytest.mark.anyio
+async def test_fresh_run_persists_rollout_to_transcript_dir(tmp_path: Path) -> None:
+    """The persist call wired into run()'s finally must not break a normal
+    (non-resumed) codex step. The fake client writes no real CODEX_HOME rollout,
+    so persist_rollout no-ops here — this only guards that the wiring is harmless
+    and teardown still runs. The real persist->restore round-trip is covered by
+    tests/test_codex_rollout.py and the live dogfood (Task 9)."""
+    _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+
+    scripted = [[
+        thread_started("thr-persist-1"),
+        agent_message("done"),
+        mcp_call(name="complete_step", args={"answer": "x"},
+                 result="ok", item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+    inv = _build_invocation(tmp_path, event_log=elog, balance_on_resume=False)
+
+    evs = [ev async for ev in runner.run(inv)]
+
+    # thread_id was captured from thread.started and (when a rollout exists)
+    # persisted. With the fake client no real rollout is written, so persist is a
+    # no-op — assert it did NOT crash the run and teardown still completed.
+    # `agent_output` is a YIELDED event (codex_runner.py:516), never written to
+    # the event log, so assert on the yielded stream, not elog.read().
+    assert any(e.get("type") == "agent_output" for e in evs), \
+        "run completed cleanly with persist wired into finally"

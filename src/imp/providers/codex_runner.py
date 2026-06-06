@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -34,6 +35,8 @@ from imp.providers.codex_config import (
     teardown_codex_home,
 )
 from imp.providers.codex_mcp import RunState, start_server
+
+_logger = logging.getLogger(__name__)
 
 # ── PreflightError ────────────────────────────────────────────────────────────
 
@@ -303,6 +306,22 @@ class CodexAgentRunner:
             #    a codex_home was actually provisioned.
             await server_handle.shutdown()
             if codex_home is not None:
+                # Own codex's native rollout across the pause BEFORE teardown
+                # deletes CODEX_HOME (Fix 1). Best-effort: a persist failure must
+                # not skip the auth-shredding teardown below. A later resume that
+                # finds no persisted rollout fails loudly in restore_rollout.
+                tid = proc_state.get("thread_id")
+                if tid:
+                    from imp.providers.codex_rollout import persist_rollout
+                    try:
+                        persist_rollout(
+                            codex_home=codex_home, thread_id=tid,
+                            transcript_dir=invocation.transcript_dir,
+                        )
+                    except Exception as exc:  # pragma: no cover - defensive
+                        _logger.warning(
+                            "codex: rollout persist failed (resume may be "
+                            "unavailable): %s", exc)
                 teardown_codex_home(
                     codex_home=codex_home, mode=auth_mode,
                     canonical_path=canonical_auth,
