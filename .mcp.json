@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "impty": {
+      "command": "/home/jpoimboe/imp/.venv/bin/python",
+      "args": ["-m", "impty.mcp"]
+    }
+  }
+}
