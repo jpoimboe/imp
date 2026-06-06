@@ -396,6 +396,10 @@ class CodexAgentRunner:
             thread_id = restore_rollout(
                 codex_home=codex_home,
                 transcript_dir=invocation.transcript_dir)
+            # Seed thread_id now so a subsequent pause persists the resumed
+            # thread even if the SDK does not re-emit thread.started on resume
+            # (process_event overwrites this with the same id if it does).
+            proc_state["thread_id"] = thread_id
             if thread_options is None:
                 thread = client.resume_thread(thread_id)
             else:
