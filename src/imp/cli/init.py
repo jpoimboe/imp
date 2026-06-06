@@ -44,11 +44,19 @@ _PROVIDER_MODELS: dict[str, dict[str, str]] = {
         "medium": "gpt-5.3-codex",
         "high":   "gpt-5.5",
     },
+    # codex refuses *-codex models (runner preflight M1), so it cannot reuse
+    # openai's gpt-5.3-codex tier. gpt-5.5 is the sanctioned non-codex model.
+    "codex": {
+        "low":    "gpt-5.5",
+        "medium": "gpt-5.5",
+        "high":   "gpt-5.5",
+    },
 }
 
 # Providers driven by a local CLI rather than an HTTP API — no env-var prompt
-# at init time, and omitted from the informational `providers:` block.
-_PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code"})
+# at init time, and omitted from the informational `providers:` block. codex
+# authenticates via its own ~/.codex/auth.json (codex login), like claude_code.
+_PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code", "codex"})
 
 _TIERS: tuple[str, ...] = ("low", "medium", "high")
 

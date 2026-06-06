@@ -104,7 +104,7 @@ def test_supports_claude_code_no_env_prompt(tmp_path: Path) -> None:
     assert "provider_envs" not in data
 
 
-def test_picker_sees_all_three_providers(tmp_path: Path) -> None:
+def test_picker_sees_all_providers(tmp_path: Path) -> None:
     seen: list[list[str]] = []
 
     def _picker(available: list[str]) -> list[str]:
@@ -116,7 +116,7 @@ def test_picker_sees_all_three_providers(tmp_path: Path) -> None:
         input_fn=_inputs("ANTHROPIC_API_KEY"),
         output_fn=lambda _msg: None,
     )
-    assert seen == [["claude_code", "anthropic", "openai"]]
+    assert seen == [["claude_code", "anthropic", "openai", "codex"]]
 
 
 def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
