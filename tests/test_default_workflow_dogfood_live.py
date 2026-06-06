@@ -80,6 +80,9 @@ def _provider_model(provider: str) -> str:
         "anthropic": "claude-sonnet-4-6",
         "openai": "gpt-4o-mini",
         "claude_code": "claude-sonnet-4-5",
+        # codex refuses *-codex models (preflight M1); gpt-5.5 is the sanctioned
+        # non-codex model. Auth is via the `codex` CLI's own ~/.codex/auth.json.
+        "codex": "gpt-5.5",
     }[provider]
 
 
@@ -140,6 +143,22 @@ def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
         output_fn=lambda _line: None,
         picker_fn=lambda _available: [provider],
     )
+
+    # run_init MATERIALIZES imp/workflows/default as a real directory (the right
+    # thing for a pip-installed user: src/imp/assets/ lives in site-packages).
+    # But THIS repo — which the seed is a copy of — commits it as a symlink to
+    # the live bundled assets, and ships tests/test_assets_workflow.py::
+    # test_dogfood_workflow_install_is_symlink_to_assets pinning exactly that.
+    # Left as a directory, that bundled test FAILS inside the coder's `make test`
+    # (run-tests gate), which is unrelated to the coder's change and was poisoning
+    # the gate -> a deterministic run-tests rework + minutes of the agent flailing
+    # over a "pre-existing failure". The seed already copied the symlink target
+    # (only the top-level imp/ is excluded, not src/), so restore the symlink form
+    # to match the source repo this dogfood claims to run against.
+    wf_install = tmp_path / "imp" / "workflows" / "default"
+    if wf_install.is_dir() and not wf_install.is_symlink():
+        shutil.rmtree(wf_install)
+        wf_install.symlink_to(Path("../../src/imp/assets/workflows/default"))
 
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(
@@ -209,7 +228,9 @@ pytestmark = [
 # ── Test ───────────────────────────────────────────────────────────────────
 
 
-def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
+def test_dogfood_imp_on_imp_default_workflow(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
     """Run the shipped default workflow against imp's own source.
 
     Dogfoods imp by asking the workflow to add a unique sentinel print to
@@ -234,6 +255,16 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     elif provider == "claude_code":
         assert shutil.which("claude") is not None, (
             "claude_code opted in but `claude` CLI not on PATH"
+        )
+    elif provider == "codex":
+        # Like claude_code: the codex CLI handles auth via its own
+        # ~/.codex/auth.json (codex login) — no env key. Require both the CLI
+        # and an auth file (the runner's preflight asserts auth too).
+        assert shutil.which("codex") is not None, (
+            "codex opted in but `codex` CLI not on PATH"
+        )
+        assert (Path.home() / ".codex" / "auth.json").exists(), (
+            "codex opted in but ~/.codex/auth.json missing (run `codex login`)"
         )
 
     # Seed the project: copy imp source, git init, run_init, isolated venv.
@@ -335,6 +366,33 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
     env["IMP_PYTHON"] = str(venv_python)
 
+    # Opt-in capture (diagnostics): set IMP_DOGFOOD_CAPTURE=<dir> to persist the
+    # workflow subprocess output AND a copy of the journal (.imp/) OUTSIDE
+    # tmp_path, so they survive both pytest's tmp-dir GC and an assertion
+    # failure. Without it the run is silent (stdout DEVNULL) as before. The
+    # finalizer runs even when a later assertion (rc/status/sentinel/rework)
+    # fails — that is where the real run-tests failure detail lives.
+    capture_dir = os.environ.get("IMP_DOGFOOD_CAPTURE")
+    capture_path = Path(capture_dir) if capture_dir else None
+    cap_out = None
+    if capture_path is not None:
+        capture_path.mkdir(parents=True, exist_ok=True)
+        cap_out = (capture_path / "workflow.out").open("wb")
+
+        def _dump_capture() -> None:
+            if cap_out is not None and not cap_out.closed:
+                cap_out.flush()
+                cap_out.close()
+            journal_src = tmp_path / ".imp"
+            if journal_src.exists():
+                with contextlib.suppress(OSError, shutil.Error):
+                    shutil.copytree(
+                        journal_src, capture_path / "imp_journal",
+                        dirs_exist_ok=True,
+                    )
+
+        request.addfinalizer(_dump_capture)
+
     # Launch imp new via --non-interactive with stdin=PIPE (no PTY needed).
     # Deliver the feature intent as the FIRST scripted reply (the spec-writer's
     # opening ask), then close stdin so every later ask falls to the EOF default.
@@ -342,8 +400,8 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
         [str(venv_python), "-m", "imp", "new", title, "--non-interactive"],
         cwd=tmp_path,
         stdin=subprocess.PIPE,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=(cap_out if cap_out is not None else subprocess.DEVNULL),
+        stderr=(subprocess.STDOUT if cap_out is not None else subprocess.DEVNULL),
         env=env,
         start_new_session=True,
         text=False,
@@ -657,10 +715,24 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     # Artifacts present: the default workflow writes spec/plan INTO the worktree
     # and commits them; merge-in-place lands them on the base branch at tmp_path.
     # New layout (spec §12): docs/ layer dropped; plans are numbered.
-    spec_path = tmp_path / "imp" / "specs" / f"{slug}.md"
+    #
+    # Artifact filenames use the change's DERIVED slug, NOT its journal id. The
+    # id is the immutable canonical key (`<date>-<random>`, e.g. 2026-06-05-mlysrp)
+    # that journal_ids() returns; the slug is `dated_slug(title)` and changes with
+    # the spec-writer's mandated rename (change.py: "immutable id identity, derived
+    # slug"). They diverge on every real run, so resolve the slug from the journaled
+    # title the same way the engine's Change.slug does.
+    from imp.engine.slug import dated_slug
+    change_meta = json.loads(
+        journal.journal_show(tmp_path, slug, "change.json") or b"{}"
+    )
+    artifact_slug = dated_slug(change_meta["title"], date=slug[:10])
+    spec_path = tmp_path / "imp" / "specs" / f"{artifact_slug}.md"
     assert spec_path.exists(), f"expected spec artifact {spec_path} after run"
-    plans = sorted((tmp_path / "imp" / "plans").glob(f"{slug}-plan-*.md"))
-    assert plans, f"expected at least one imp/plans/{slug}-plan-N.md after run"
+    plans = sorted((tmp_path / "imp" / "plans").glob(f"{artifact_slug}-plan-*.md"))
+    assert plans, (
+        f"expected at least one imp/plans/{artifact_slug}-plan-N.md after run"
+    )
 
     # ── imp log smoke (journal-read path: worktree is gone) ────────────
     log_out = subprocess.run(
