@@ -25,9 +25,31 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 - `viewport() -> str` — current visible screen (act on this each turn).
 - `transcript(limit=None) -> str` — full run in order, bounded by `limit`.
 - `cell(x, y) -> Cell` — glyph + style (`fg/bg/bold/...`) for appearance assertions.
+- `screen` (property) — the live pyte screen, for renderers that need the cell grid (see below).
 - `cursor() -> (x, y)`, `is_alt_screen() -> bool`, `is_alive()`, `wait(timeout)`, `close()`.
 
 By default the child inherits your environment with `TERM=xterm-256color` so a real
 program's color emission (and thus `cell().fg`) is deterministic; pass `env=` to override.
+
+## Seeing the UI (color images, not just text)
+
+`view()`/`transcript()` return the grid as text. To actually *see* a TUI —
+color, bold, box-drawing — render the pyte screen to a PNG and open it:
+
+```python
+from impty.render import render_screen
+render_screen(session.screen, "out.png")   # true color/bold; faint via show_faint()
+```
+
+Two ready-made entry points:
+
+- **Replay imp's recorded run journal → image** (no live program, no cost):
+  `make snap-ui` writes `/tmp/imp_ui/stream.png` from the stored journal through
+  imp's real renderer. `make snap-ui SNAP_ARGS="--limit 40"` for a slice, or
+  `scripts/snap_imp_ui.py {stream,prompt} [--out PATH] [--open]` directly.
+- **Drive a live program over MCP and screenshot it:** run the stdio MCP server
+  (`python -m impty.mcp`, registered in `.mcp.json`). Tools: `start`, `send`,
+  `wait`, `view`, `transcript`, `snapshot` (renders the live screen to a PNG and
+  returns its path), `stop`. Adding/removing a tool needs a server restart.
 
 Design + rationale: `_bmad-output/brainstorming/brainstorming-session-2026-06-05-1351.md`.
