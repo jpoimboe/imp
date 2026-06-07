@@ -6,7 +6,8 @@ viewport/transcript/cell snapshots. No semantic translation.
 
 from __future__ import annotations
 
+from impty.screen import Regime
 from impty.session import TerminalSession
 from impty.view import Cell
 
-__all__ = ["Cell", "TerminalSession"]
+__all__ = ["Cell", "Regime", "TerminalSession"]
