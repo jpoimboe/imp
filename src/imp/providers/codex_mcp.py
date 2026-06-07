@@ -107,11 +107,11 @@ async def dispatch_tool(
         # unaffected; clean pause-unwind across the codex MCP boundary is a
         # follow-up.
         #
-        # AUDIT GAP: peer providers pass tool_call_event_id=tc_ev["id"] to link
-        # the subagent's events to the parent tool-call event. The codex SDK
-        # emits the mcp_tool_call item only AFTER this MCP call returns, so no
-        # durable event id exists here yet; dispatch_task falls back to "" (a
-        # weaker parent-link for codex subagent events). Also a follow-up.
+        # The codex SDK emits the mcp_tool_call item only AFTER this MCP call
+        # returns, so no SDK-supplied event id is available yet. We mint a
+        # synthetic tool_call event synchronously here and pass its id to
+        # dispatch_task. process_event later re-keys the result to that id when
+        # it sees the real SDK item arrive (via state.minted_task_ids).
         from imp.agents.runner import ToolUseBlock
         from imp.agents.subagents import dispatch_task, raise_if_suspended
         tc_ev = ctx.event_log.append_tool_call(
