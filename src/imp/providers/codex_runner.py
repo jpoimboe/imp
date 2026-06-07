@@ -473,7 +473,7 @@ class CodexAgentRunner:
                 etype = getattr(event, "type", None)
                 process_event(event, elog=elog, agent_id=aid, state=proc_state,
                               provider=invocation.provider_name,
-                              model=self.model)
+                              model=self.model, run_state=state)
 
                 # Cap trip from inside the MCP wrapper → abort the SDK + bail.
                 if state.abort_requested:
@@ -844,7 +844,7 @@ def _extract_codex_diagnostics(raw: dict[str, Any]) -> Diagnostics:
 
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
-    provider: str, model: str,
+    provider: str, model: str, run_state: Any = None,
 ) -> None:
     """Translate one codex ThreadEvent into imp EventLog records.
 
@@ -888,11 +888,17 @@ def process_event(
             # older/duck-typed shapes.
             name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
             args = getattr(item, "arguments", None) or {}
-            call_id = getattr(item, "id", "") or ""
-            elog.append_tool_call(
-                agent_id=agent_id,
-                block=ToolUseBlock(id=call_id, name=name, input=args),
-            )
+            sdk_id = getattr(item, "id", "") or ""
+            if name == "task" and run_state is not None and run_state.minted_task_ids:
+                # dispatch_tool already minted the parent tool_call; FIFO-pop the
+                # id (dispatch order == completion order) and key the result to it.
+                call_id = run_state.minted_task_ids.pop(0)
+            else:
+                call_id = sdk_id
+                elog.append_tool_call(
+                    agent_id=agent_id,
+                    block=ToolUseBlock(id=call_id, name=name, input=args),
+                )
             err = getattr(item, "error", None)
             status = getattr(item, "status", "completed")
             is_error = err is not None or status not in ("completed", "succeeded")
