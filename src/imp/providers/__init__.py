@@ -9,13 +9,12 @@ resolve.reset_providers_for_tests()).
 
 from imp.providers import anthropic as _anthropic
 from imp.providers import claude_code as _claude_code  # Task 24 lands this
-from imp.providers import codex as _codex
 from imp.providers import openai as _openai
 from imp.providers.resolve import register_provider
 
 
 def register_builtin_providers() -> None:
-    """Register the built-in providers (anthropic, claude_code, codex, openai).
+    """Register the built-in providers (anthropic, openai, claude_code).
 
     Run at import time; also called by tests that rely on the global registry
     to restore it after another test cleared it via reset_providers_for_tests.
@@ -26,11 +25,6 @@ def register_builtin_providers() -> None:
         "claude_code",
         env_check=_claude_code._env_check,
         factory=_claude_code._factory,
-    )
-    register_provider(
-        "codex",
-        env_check=_codex._env_check,
-        factory=_codex._factory,
     )
 
 

@@ -103,6 +103,26 @@ def test_remove_worktree_keeps_branch(tmp_path: Path) -> None:
     assert "imp/gone" in _git(tmp_path, "branch", "--list", "imp/gone").stdout
 
 
+def test_rename_moves_branch_and_worktree(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "old", "main")
+    new_path = wt.rename(tmp_path, "old", "new")
+    assert new_path == tmp_path / ".imp" / "worktrees" / "new"
+    assert new_path.is_dir()
+    assert not (tmp_path / ".imp" / "worktrees" / "old").exists()
+    assert "imp/new" in _git(tmp_path, "branch", "--list", "imp/new").stdout
+    assert "imp/old" not in _git(tmp_path, "branch", "--list", "imp/old").stdout
+
+
+def test_rename_collision_returns_none(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "a", "main")
+    wt.create_worktree(tmp_path, "b", "main")
+    # imp/b already exists -> change nothing, return None (spec §4).
+    assert wt.rename(tmp_path, "a", "b") is None
+    assert (tmp_path / ".imp" / "worktrees" / "a").is_dir()
+
+
 def _commit_on_branch(root: Path, branch: str, name: str, body: str) -> None:
     """Add+commit one file directly in the change worktree the test already
     created for <branch>, so the control root's checkout stays untouched."""
@@ -117,17 +137,13 @@ def test_merge_base_checked_out_clean(tmp_path: Path) -> None:
     wt.create_worktree(tmp_path, "feat", "main")
     _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
 
-    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature")
+    result = wt.merge_to_base(tmp_path, "feat", "main")
     assert result.status == "MERGED"
     assert result.merge_commit == _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
     # main's working tree advanced together with the ref (no desync).
     assert (tmp_path / "feature.txt").read_text() == "hi"
     # REGRESSION (spec §11): control-root status is NOT a staged reversal.
     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
-    # Merge subject uses the human title; id appears in the body (AC 9).
-    subject = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout
-    assert "Merge My Feature" in subject
-    assert "(imp/feat)" in subject
 
 
 def test_merge_base_dirty_backs_off(tmp_path: Path) -> None:
@@ -136,7 +152,7 @@ def test_merge_base_dirty_backs_off(tmp_path: Path) -> None:
     _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
     (tmp_path / "README.md").write_text("dirty edit")  # uncommitted on main
 
-    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+    result = wt.merge_to_base(tmp_path, "feat", "main")
     assert result.status == "BASE_DIRTY"
     assert not (tmp_path / "feature.txt").exists()  # nothing advanced
 
@@ -149,7 +165,7 @@ def test_merge_base_checked_out_nowhere(tmp_path: Path) -> None:
     _git(tmp_path, "checkout", "-q", "-b", "parking")
 
     base_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
-    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+    result = wt.merge_to_base(tmp_path, "feat", "main")
     assert result.status == "MERGED"
     assert _git(tmp_path, "rev-parse", "main").stdout.strip() != base_before  # ref moved
     assert result.merge_commit == _git(tmp_path, "rev-parse", "main").stdout.strip()
@@ -168,7 +184,7 @@ def test_merge_detached_conflict_cleans_scratch(tmp_path: Path) -> None:
     _git(tmp_path, "commit", "-qam", "base edit")
     _git(tmp_path, "checkout", "-q", "-b", "parking")  # main now checked out nowhere
 
-    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+    result = wt.merge_to_base(tmp_path, "feat", "main")
     assert result.status == "CONFLICT"
     assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()  # scratch cleaned
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()             # branch worktree intact
@@ -183,7 +199,7 @@ def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("base version")
     _git(tmp_path, "commit", "-qam", "base edit")
 
-    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+    result = wt.merge_to_base(tmp_path, "feat", "main")
     assert result.status == "CONFLICT"
     # branch + change worktree untouched, no merge state lingering
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
@@ -264,16 +280,6 @@ def test_ensure_imp_ignored_repairs_mis_set_committed_rule(tmp_path: Path) -> No
 
     wt.ensure_imp_ignored(tmp_path)
     assert _make_worktree_and_check(tmp_path)
-
-
-def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    path = wt.create_worktree(tmp_path, "gone", "main")
-    assert path.exists()
-    assert wt.branch_exists(tmp_path, "imp/gone")
-    wt.destroy_worktree(tmp_path, "gone")
-    assert not path.exists()
-    assert not wt.branch_exists(tmp_path, "imp/gone")
 
 
 def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:

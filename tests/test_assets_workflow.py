@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -61,30 +60,28 @@ def test_default_workflow_has_code_review_constraint():
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
-    # code-reviewer must differ from task-lead (the implementer step tier) for
-    # cross-provider review; the reviewer is constrained to differ from task-lead.
-    by = {s.name: s for s in wf.flat_steps()}
-    assert by["code-reviewer"].differ_from == "task-lead"
+    # code_review must differ from fast (the implementer subagent tier) for
+    # cross-provider review; in the feature workflow the coder runs at the
+    # `fast` tier, so the reviewer is constrained against `fast` not `code`.
+    assert wf.model_rules["code_review"].differ_provider_from == "fast"
 
 
-def test_default_code_reviewer_step_declares_tier():
-    # In the feature workflow tier is assigned at the step level in
+def test_default_code_reviewer_step_declares_model_role():
+    # In the feature workflow model_role is assigned at the step level in
     # workflow.yaml, not in the agent frontmatter.  Verify the step-level
     # declaration is present and correct so code_review diversity wiring works.
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["code-reviewer"].tier == "high"
+    assert by["code-reviewer"].model_role == "code_review"
 
 
-def test_default_workflow_loads() -> None:
-    # Verify the default workflow loads without errors.
+def test_default_workflow_declares_tier_menu() -> None:
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
-    assert wf.name == "feature"
-    assert len(wf.flat_steps()) > 0
+    assert wf.model_tiers == ("fast", "balanced", "powerful")
 
 
 def test_spec_writer_declares_complexity_output() -> None:
@@ -174,6 +171,15 @@ def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
     m2 = evaluate_rules(rules, vars=_BASE_VARS,
                         output={"phase": "written", "complexity": "standard", "status": "Success"})
     assert m2.var_mutations["fast_path"] is False
+
+
+def test_spec_writer_drafting_turn_never_evaluates_set() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-writer"].rules
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={"phase": "drafting", "complexity": "trivial", "status": "Success"})
+    assert m.var_mutations == {}
 
 
 def test_commit_tool_is_removed_from_registry() -> None:
@@ -321,17 +327,18 @@ def test_spec_writer_prompt_mandates_opening_question() -> None:
 def test_spec_writer_prompt_mandates_proactive_rename() -> None:
     # Acceptance #4: the agent renames proactively via rename_change as soon
     # as intent is clear, ANNOUNCING the name in prose WITHOUT asking the
-    # user. The new guidance (name-on-intent) instructs rename+commit same turn.
+    # user. The iron-rule sentence is preserved verbatim.
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
     assert "without asking the user" in lowered
-    assert "announce" in lowered  # "Announce the name in prose"
-    # Name-on-intent: rename_change applies immediately and rename+commit happen
-    # this same turn (the old iron-rule forbidding same-turn is now inverted).
-    assert "this same turn" in body
-    assert "immediately" in body
+    assert "announce" in lowered  # "Announce the new name in prose"
+    # Iron-rule sentence preserved verbatim (acceptance #4):
+    assert (
+        "**Iron rule: never call `rename_change` and write/commit the spec "
+        "in the same turn.**"
+    ) in body
 
 
 def test_spec_writer_prompt_drops_skip_reflexive_paragraph() -> None:
@@ -356,41 +363,3 @@ def test_spec_writer_prompt_has_trivial_carveout() -> None:
     assert "opening question" in lowered
     # The carve-out must explicitly say the opening question does not count.
     assert "does not count" in lowered or "does NOT count" in body
-
-
-def test_spec_writer_prompt_has_no_slug_interpolation() -> None:
-    from pathlib import Path
-    src = Path("src/imp/assets/workflows/default/agents/spec-writer.md")
-    text = src.read_text()
-    assert "{{ change.slug }}" not in text
-    assert "{{change.slug}}" not in text
-    # And no leftover "provisional slug" framing.
-    assert "provisional" not in text.lower()
-
-
-def test_no_goto_spec_writer_edge() -> None:
-    from pathlib import Path
-    wf = Path("src/imp/assets/workflows/default/workflow.yaml").read_text()
-    # Every edge back into spec-writer must be a `resume:` (transcript kept), so a
-    # resumed spec-writer always has its rename_change result in history and never
-    # needs the slug from the system prompt. A fresh `goto: spec-writer` would
-    # drop the transcript and reintroduce the dependency Part A removes.
-    assert "goto: spec-writer" not in wf
-    assert "goto: spec_writer" not in wf
-
-
-def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
-    # Acceptance #1/#2/#6: in this repo, imp/workflows/default must be a
-    # symlink whose resolved target equals src/imp/assets/workflows/default.
-    # This pins the dogfood install against silent drift from the bundled
-    # assets — if someone re-materializes the directory, this test fails.
-    repo_root = Path(__file__).resolve().parents[1]
-    link = repo_root / "imp" / "workflows" / "default"
-    target = repo_root / "src" / "imp" / "assets" / "workflows" / "default"
-    assert link.is_symlink(), f"{link} is not a symlink"
-    assert os.readlink(link) == "../../src/imp/assets/workflows/default", (
-        f"unexpected symlink literal target: {os.readlink(link)!r}"
-    )
-    assert link.resolve() == target.resolve(), (
-        f"{link} resolves to {link.resolve()}, expected {target.resolve()}"
-    )

@@ -15,7 +15,7 @@ def _ready(ch) -> tuple:
 
 def test_complete_merges_journals_and_removes(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
     (ch.project_root / "feature.txt").write_text("hi")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "feat")
@@ -38,7 +38,7 @@ def test_complete_merges_journals_and_removes(tmp_path: Path) -> None:
 
 def test_complete_merge_blocked_on_conflict(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
     (ch.project_root / "README.md").write_text("branch")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "b")
@@ -55,7 +55,7 @@ def test_complete_merge_blocked_on_conflict(tmp_path: Path) -> None:
 def test_complete_refuses_dirty_worktree(tmp_path: Path) -> None:
     # H1: uncommitted work must NOT be silently dropped at merge.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
     (ch.project_root / "uncommitted.txt").write_text("not committed")  # left dirty
     state, log = _ready(ch)
 
@@ -70,7 +70,7 @@ def test_merge_blocked_resumes_and_completes(tmp_path: Path) -> None:
     # V8: after the user commits the leftover work, a resume re-enters _complete
     # (ready_to_merge persisted in state.vars) and the merge succeeds.
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
     (ch.project_root / "f.txt").write_text("v")  # dirty -> first attempt blocks
     state, log = _ready(ch)
     assert _complete(ch, state, log).value == "paused"

@@ -10,7 +10,7 @@
 # IMP_TEST_COMMAND is surfaced from the `test_command` project config key by
 # overlay_engine_env and injected into script-gate env by the engine.
 #
-# Script gates run with cwd set to the Change's tracked workflow dir; cd into the
+# Script gates run with cwd set to the workflow snapshot dir; cd into the
 # project tree (IMP_PROJECT_ROOT, set by the engine) before running tests.
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"

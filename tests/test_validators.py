@@ -290,11 +290,11 @@ def test_v11_dotted_filename_allowed(tmp_path: Path) -> None:
     load_workflow(wf)  # must not raise
 
 
-# ── _v_step_tier_configured ──────────────────────────────────────────────────
+# ── _v_model_role_configured ──────────────────────────────────────────────────
 
 
-def test_v12_step_tier_unconfigured(tmp_path: Path) -> None:
-    """When configured_tiers is supplied, an unconfigured tier is an error."""
+def test_v12_model_role_unconfigured(tmp_path: Path) -> None:
+    """When configured_roles is supplied, an unconfigured role is an error."""
     wf = _wf(tmp_path, """\
         name: t
         description: t
@@ -303,10 +303,10 @@ def test_v12_step_tier_unconfigured(tmp_path: Path) -> None:
             steps:
               - name: s
                 file: agents/stub.md
-                tier: missing-role
+                model_role: missing-role
         """, agents={"stub": _OK_AGENT})
     with pytest.raises((LoadError, LoadErrors)) as ei:
-        load_workflow(wf, configured_tiers=frozenset({"default"}))
+        load_workflow(wf, configured_roles=frozenset({"default"}))
     assert any("'missing-role'" in str(e) for e in ei.value.errors)
 
 
@@ -494,7 +494,43 @@ def test_resume_to_unknown_target_is_clean_load_error_not_keyerror(tmp_path: Pat
     assert any("ghost" in str(e) for e in ei.value.errors)
 
 
-def test_v_step_tier_configured_flags_subagent_role() -> None:
+def test_v_model_role_configured_flags_constraint_target() -> None:
+    from imp.engine.types import (
+        AgentDef,
+        OutputField,
+        OutputSchema,
+        Pause,
+        Phase,
+        RoleConstraint,
+        SourceLoc,
+        Step,
+        Vars,
+        Workflow,
+        WorkflowDefaults,
+    )
+    from imp.engine.validators import validate
+    src = SourceLoc(file=Path("w.yaml"), line=1)
+    agent = AgentDef(
+        name="coder", description="", tools=frozenset(), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error")),), source=src),
+        prompt_template_source="", source_path=Path("agents/coder.md"), source=src)
+    step = Step(name="coder", phase="p", kind="agent", rules=(), options=(),
+                on_max_retries=Pause(), max_loops=6, source=src,
+                file=Path("agents/coder.md"), model_role="code")
+    wf = Workflow(
+        name="w", description="", phases=(Phase(name="p", steps=(step,),
+                                                source=src),),
+        vars=Vars(decls=()),
+        defaults=WorkflowDefaults(max_retries=0, on_max_retries=Pause()),
+        agents={"coder": agent}, workflow_dir=Path("."), source=src,
+        model_rules={"code": RoleConstraint(differ_provider_from="ghost")})
+    errors, _ = validate(wf, configured_roles=frozenset({"code"}))
+    assert any("ghost" in e.message for e in errors)
+
+
+def test_v_model_role_configured_flags_subagent_role() -> None:
     from imp.engine.types import (
         AgentDef,
         OutputField,
@@ -511,7 +547,7 @@ def test_v_step_tier_configured_flags_subagent_role() -> None:
     src = SourceLoc(file=Path("w.yaml"), line=1)
 
     def _agent(
-        name: str, tier: str | None = None, subagents: tuple[str, ...] = ()
+        name: str, model_role: str | None = None, subagents: tuple[str, ...] = ()
     ) -> AgentDef:
         return AgentDef(
             name=name, description="", tools=frozenset(),
@@ -520,21 +556,50 @@ def test_v_step_tier_configured_flags_subagent_role() -> None:
                 fields=(OutputField(name="status", type="enum",
                                     values=("Success", "Error")),), source=src),
             prompt_template_source="", source_path=Path(f"agents/{name}.md"),
-            source=src, tier=tier)
+            source=src, model_role=model_role)
 
     agents = {"coder": _agent("coder", subagents=("rev",)),
-              "rev": _agent("rev", tier="ghost")}
+              "rev": _agent("rev", model_role="ghost")}
     step = Step(name="coder", phase="p", kind="agent", rules=(), options=(),
                 on_max_retries=Pause(), max_loops=6, source=src,
-                file=Path("agents/coder.md"), tier="medium")
+                file=Path("agents/coder.md"), model_role="default")
     wf = Workflow(
         name="w", description="", phases=(Phase(name="p", steps=(step,),
                                                 source=src),),
         vars=Vars(decls=()),
         defaults=WorkflowDefaults(max_retries=0, on_max_retries=Pause()),
         agents=agents, workflow_dir=Path("."), source=src)
-    errors, _ = validate(wf, configured_tiers=frozenset({"default"}))
+    errors, _ = validate(wf, configured_roles=frozenset({"default"}))
     assert any("ghost" in e.message for e in errors)
+
+
+def test_model_tiers_entry_not_configured_is_error() -> None:
+    from pathlib import Path
+
+    from imp.engine.types import (
+        Pause,
+        Phase,
+        SourceLoc,
+        Step,
+        Vars,
+        Workflow,
+        WorkflowDefaults,
+    )
+    from imp.engine.validators import validate
+
+    src = SourceLoc(file=Path("w.yaml"), line=1)
+    step = Step(name="s", phase="p", kind="script", rules=(
+        ), options=(), on_max_retries=Pause(), max_loops=6, source=src,
+        command="./x.sh")
+    wf = Workflow(
+        name="w", description="", phases=(Phase(name="p", steps=(step,), source=src),),
+        vars=Vars(decls=()),
+        defaults=WorkflowDefaults(max_retries=0, on_max_retries=Pause()),
+        agents={}, workflow_dir=Path("."), source=src,
+        model_tiers=("fast", "powerful"))
+    errors, _warnings = validate(wf, configured_roles=frozenset({"fast"}))
+    assert any("powerful" in e.message for e in errors)   # unconfigured -> flagged
+    assert not any("fast" in e.message for e in errors)   # configured -> not flagged
 
 
 def test_resume_in_defaults_on_max_retries_to_non_agent_is_rejected(tmp_path: Path) -> None:

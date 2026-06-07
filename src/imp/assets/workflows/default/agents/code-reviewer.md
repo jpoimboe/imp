@@ -48,11 +48,6 @@ Read all of these before forming a verdict.
 
 **Testing:**
 - Tests verify real behavior, not implementation details?
-- **Falsifiability** — could each key test be green if the feature were broken? A
-  test whose expected value merely echoes the implementation (plan-echo) verifies
-  transcription, not behavior. A genuine plan-echo on a key test is a **`task_gap`**:
-  name the test in `findings` so the task-lead re-opens it. Uncertain or lesser
-  instances are **Important** open items under `approve`.
 - Edge cases covered?
 - Integration tests where they matter?
 - The `run-tests` gate has already confirmed the suite passes — you may re-run

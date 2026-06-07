@@ -52,13 +52,10 @@ def run_script(
 ) -> dict[str, Any]:
     """Run a script step; return {exit, stdout, stderr} for rule evaluation.
 
-    `shell=True` is intentional and not a security issue: `command:` strings are
-    explicit shell expressions the engine reads live from the Change's own
-    worktree working tree (an uncommitted edit is honored on resume). The trust
-    is principal-based, not snapshot-based: the Change author and the workflow
-    author are the same trust principal in V0, so executing the worktree's
-    (possibly uncommitted) command bytes grants no privilege the Change author
-    doesn't already have.
+    `shell=True` is intentional and not a security issue: workflow YAML is part
+    of the trusted code base (snapshotted at imp new, gitted, peer-reviewed)
+    and `command:` strings are explicit shell expressions. The Change author
+    and the workflow author are the same trust principal in V0.
 
     `env_extra` (an `engine_env` result) is overlaid authoritatively on the current
     process environment so engine-level variables (e.g. IMP_CHANGE_SLUG) are visible

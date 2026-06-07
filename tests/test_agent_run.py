@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import anyio
 import pytest
 
 from imp.agents.runner import ChangeContext
@@ -69,10 +68,10 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         initial_messages=(), change_context=_cc(tmp_path),
         interactive=False, user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
         max_tool_calls=7, agent_id="sub:abc", event_log=None,
         change_state=None, first_event_parent_id="tc-1",
-        resolved_tiers=None, coordinator=None, subagent_depth=2)
+        resolved_roles=None, coordinator=None, subagent_depth=2)
 
     # System prompt = rendered body + the complete_step contract.
     assert inv.system_prompt.startswith("RENDERED BODY")
@@ -103,10 +102,10 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         initial_messages=(), change_context=_cc(tmp_path),
         interactive=False, user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
-        resolved_tiers=None, coordinator=None)
+        resolved_roles=None, coordinator=None)
 
     assert inv.system_prompt.startswith("RENDERED BODY")
     assert "IMP_PROJECT_ROOT" in inv.system_prompt
@@ -129,10 +128,10 @@ def test_build_agent_invocation_omits_bash_paths_note_without_bash(
         initial_messages=(), change_context=_cc(tmp_path),
         interactive=False, user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
-        resolved_tiers=None, coordinator=None)
+        resolved_roles=None, coordinator=None)
 
     assert "IMP_PROJECT_ROOT" not in inv.system_prompt
 
@@ -146,10 +145,10 @@ def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) -> 
         change_context=_cc(tmp_path), interactive=True,
         user_chat_input_fn=lambda _p: "hi",
         transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
         change_state=None, first_event_parent_id=None,
-        resolved_tiers=None, coordinator=None)
+        resolved_roles=None, coordinator=None)
 
     assert inv.interactive is True
     assert inv.continuation_fn is not None
@@ -165,9 +164,9 @@ def test_build_agent_invocation_threads_lint_command(tmp_path: Path) -> None:
         change_context=_cc(tmp_path), interactive=False,
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
-        subagent_defs={}, tiers=(), max_tool_calls=None,
+        subagent_defs={}, model_tiers=(), max_tool_calls=None,
         agent_id="step:p/s", event_log=None, change_state=None,
-        first_event_parent_id=None, resolved_tiers=None, coordinator=None,
+        first_event_parent_id=None, resolved_roles=None, coordinator=None,
         lint_command="make lint")
     assert inv.lint_command == "make lint"
 
@@ -181,9 +180,9 @@ def test_build_agent_invocation_threads_test_command(tmp_path: Path) -> None:
         change_context=_cc(tmp_path), interactive=False,
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
-        subagent_defs={}, tiers=(), max_tool_calls=None,
+        subagent_defs={}, model_tiers=(), max_tool_calls=None,
         agent_id="step:p/s", event_log=None, change_state=None,
-        first_event_parent_id=None, resolved_tiers=None, coordinator=None,
+        first_event_parent_id=None, resolved_roles=None, coordinator=None,
         test_command="make test")
     assert inv.test_command == "make test"
 
@@ -196,9 +195,9 @@ def _inv(tmp_path: Path):
         change_context=_cc(tmp_path), interactive=False,
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
-        subagent_defs={}, tiers=(), max_tool_calls=None,
+        subagent_defs={}, model_tiers=(), max_tool_calls=None,
         agent_id="step:p/s", event_log=None, change_state=None,
-        first_event_parent_id=None, resolved_tiers=None, coordinator=None)
+        first_event_parent_id=None, resolved_roles=None, coordinator=None)
 
 
 class _Runner:
@@ -344,139 +343,3 @@ async def test_drive_invocation_output_validation_failure(tmp_path: Path) -> Non
     error_events = [c for c in log.calls if c["type"] == "error" and c["agent_id"] is None]
     assert error_events, f"no synthesized error event found in log.calls: {log.calls}"
     assert error_events[0]["payload"]["category"] == "agent_output_missing"
-
-
-@pytest.mark.anyio
-async def test_drive_invocation_stalls_on_inactivity(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    """B.2: a runner that emits NOTHING past the inactivity window is killed; the
-    runner's own interrupt() runs and the result is errored with kind 'stalled'."""
-    import imp.engine.agent_run as ar
-
-    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
-
-    interrupted = {"called": False}
-
-    class _StallRunner:
-        async def interrupt(self) -> None:
-            interrupted["called"] = True
-
-        async def run(self, _invocation):
-            await anyio.sleep(3600)   # emit nothing, ever
-            yield {"type": "agent_output", "payload": {}}  # never reached
-
-    with anyio.fail_after(5):
-        result = await ar.drive_invocation(
-            _inv(tmp_path), _StallRunner(), coordinator=None, log=None,
-            emit_events=False)
-    assert result.errored is True
-    assert result.error is not None and result.error.kind == "stalled"
-    assert interrupted["called"] is True
-
-
-def _build_inv(tmp_path: Path, **kw):
-    from imp.engine.agent_run import build_agent_invocation
-    return build_agent_invocation(
-        agent_def=_agent(tools=frozenset({"bash", "complete_step"})),
-        provider_name="anthropic", model_name="m",
-        rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), interactive=False, user_chat_input_fn=None,
-        transcript_dir=tmp_path, fs_permissions=(), events_path=tmp_path / "e",
-        subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
-        event_log=None, change_state=None, first_event_parent_id=None,
-        resolved_tiers=None, coordinator=None, **kw,
-    )
-
-
-def test_build_invocation_override_is_used_verbatim(tmp_path: Path) -> None:
-    inv = _build_inv(tmp_path, system_prompt_override="EXACT STORED PROMPT")
-    assert inv.system_prompt == "EXACT STORED PROMPT"        # no notes appended
-
-
-def test_build_invocation_no_override_assembles_with_notes(tmp_path: Path) -> None:
-    inv = _build_inv(tmp_path)
-    assert inv.system_prompt.startswith("BODY")
-    assert "Session start: `<imp:begin/>`" in inv.system_prompt   # seed note appended
-
-
-@pytest.mark.anyio
-async def test_drive_invocation_stalls_mid_stream(
-    tmp_path: Path, monkeypatch,
-) -> None:
-    """F6: the runner emits SOME events, then goes silent past the window. The
-    watchdog must still fire (exercises the wrapper after the loop body has run a
-    few times)."""
-    import imp.engine.agent_run as ar
-
-    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
-    interrupted = {"called": False}
-
-    class _MidStallRunner:
-        async def interrupt(self) -> None:
-            interrupted["called"] = True
-
-        async def run(self, _invocation):
-            yield {"type": "thinking", "payload": {"content": "warming up"}}
-            yield {"type": "thinking", "payload": {"content": "still going"}}
-            await anyio.sleep(3600)        # now go silent forever
-            yield {"type": "agent_output", "payload": {}}  # never reached
-
-    with anyio.fail_after(5):
-        result = await ar.drive_invocation(
-            _inv(tmp_path), _MidStallRunner(), coordinator=None, log=None,
-            emit_events=False)
-    assert result.errored is True
-    assert result.error is not None and result.error.kind == "stalled"
-    assert interrupted["called"] is True
-
-
-def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
-    tmp_path: Path,
-) -> None:
-    """Every agent's system prompt carries the `<imp:begin/>` engine-seed note,
-    regardless of whether it has the `bash` tool. The note sits between any
-    body addenda and the completion contract."""
-    from imp.engine.agent_run import build_agent_invocation
-
-    # Without bash: still gets the engine-seed note.
-    inv = build_agent_invocation(
-        agent_def=_agent(),  # tools = {complete_step} — no bash
-        provider_name="anthropic", model_name="m",
-        rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
-        interactive=False, user_chat_input_fn=None,
-        transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
-        max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
-        resolved_tiers=None, coordinator=None)
-
-    assert "<imp:begin/>" in inv.system_prompt
-    # The note explains the tag is engine-emitted, not user input.
-    assert "engine" in inv.system_prompt.lower()
-    # Order: rendered body first, engine-seed note before completion contract.
-    assert inv.system_prompt.startswith("RENDERED BODY")
-    assert inv.system_prompt.index("<imp:begin/>") < inv.system_prompt.index(
-        "complete_step")
-
-    # With bash too: both notes appear; bash note precedes engine-seed note,
-    # which in turn precedes the completion instruction.
-    inv2 = build_agent_invocation(
-        agent_def=_agent(tools={"complete_step", "bash"}),
-        provider_name="anthropic", model_name="m",
-        rendered_system_prompt="RENDERED BODY",
-        initial_messages=(), change_context=_cc(tmp_path),
-        interactive=False, user_chat_input_fn=None,
-        transcript_dir=tmp_path / "td", fs_permissions=(),
-        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
-        max_tool_calls=None, agent_id="step:p/s", event_log=None,
-        change_state=None, first_event_parent_id=None,
-        resolved_tiers=None, coordinator=None)
-
-    assert "IMP_PROJECT_ROOT" in inv2.system_prompt
-    assert "<imp:begin/>" in inv2.system_prompt
-    assert inv2.system_prompt.index("IMP_PROJECT_ROOT") < inv2.system_prompt.index(
-        "<imp:begin/>")
-    assert inv2.system_prompt.index("<imp:begin/>") < inv2.system_prompt.index(
-        "complete_step")

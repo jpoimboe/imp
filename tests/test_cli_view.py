@@ -24,21 +24,21 @@ def test_replay_current_step_removed() -> None:
     )
 
 
-def _make_change_worktree(control: Path, change_id: str, title: str,
+def _make_change_worktree(control: Path, slug: str, title: str,
                            status: str = "paused") -> Path:
     """Create a minimal on-disk worktree for a Change (no real git worktree
     needed — Change.load only reads the .imp/change/ directory)."""
     from imp.engine.state import State
 
-    wt = control / ".imp" / "worktrees" / change_id
+    wt = control / ".imp" / "worktrees" / slug
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "state").mkdir()
     (change_dir / "change.json").write_text(
-        json.dumps({"id": change_id, "title": title, "base_branch": "main"})
+        json.dumps({"slug": slug, "title": title, "base_branch": "main"})
     )
     (change_dir / "events.jsonl").write_text("")
-    state = State(id=change_id, status=status, step="spec", step_attempt=0)
+    state = State(slug=slug, status=status, step="spec", step_attempt=0)
     state.save(change_dir / "state")
     return wt
 
@@ -69,15 +69,15 @@ def test_resume_renders_through_live_driver_without_replay(tmp_path, monkeypatch
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
     buf = io.StringIO()
-    args = argparse.Namespace(token="resume-test")
+    args = argparse.Namespace(slug="resume-test")
     with redirect_stdout(buf):
         rc = anyio.run(m._async_cmd_resume, args)
     out = buf.getvalue()
     assert rc == 0
-    # The step header is rendered exactly once — no replay duplicate. The header
-    # now carries the model on the same line ("  spec · m"); match its start,
-    # NOT the "Phase: design, step: spec" banner (which begins with "Phase:").
-    step_lines = [ln for ln in out.splitlines() if ln.strip().startswith("spec ·")]
+    # The step header is rendered exactly once — no replay duplicate. Match the
+    # rendered header ("  spec" -> strip == "spec"), NOT the "Phase: design,
+    # step: spec" banner (whose strip ends with "spec" but isn't equal to it).
+    step_lines = [ln for ln in out.splitlines() if ln.strip() == "spec"]
     assert len(step_lines) == 1
 
     # Side-effect assertions: workflow_resumed was appended to events.jsonl.
@@ -128,7 +128,7 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
     buf = io.StringIO()
-    args = argparse.Namespace(token="mb-test")
+    args = argparse.Namespace(slug="mb-test")
     with redirect_stdout(buf):
         rc = anyio.run(m._async_cmd_resume, args)
 
@@ -160,7 +160,7 @@ def test_cli_log_pipes_through_narrative(
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
+        json.dumps({"slug": slug, "title": "smoke", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -184,8 +184,8 @@ def test_cli_log_pipes_through_narrative(
     rc = main(["log", slug])
     assert rc == 0
     out = capsys.readouterr().out
-    # No slug/title banner — the transcript opens on the first phase.
-    assert "smoke" not in out
+    # Narrative header contains the title
+    assert "smoke" in out
     # Phase rendered by name (derived from step_started.payload.phase)
     assert "onboard" in out
     # No raw JSON braces in narrative rendering
@@ -204,7 +204,7 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"id": slug, "title": "smoke", "base_branch": "main"}),
+        json.dumps({"slug": slug, "title": "smoke", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -231,8 +231,8 @@ def test_imp_log_skips_malformed_lines_in_events_jsonl(
         rc = main(["log", slug])
     assert rc == 0
     out = buf.getvalue()
-    # Good events still rendered (no title banner; the phase carries the proof)
-    assert "smoke" not in out
+    # Good events still rendered
+    assert "smoke" in out
     assert "onboard" in out
     # Malformed line rendered as an error line (narrative ErrorNode)
     assert "malformed event" in out
@@ -253,7 +253,7 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     change_dir = wt / ".imp" / "change"
     change_dir.mkdir(parents=True)
     (change_dir / "change.json").write_text(
-        json.dumps({"id": slug, "title": "sub", "base_branch": "main"}),
+        json.dumps({"slug": slug, "title": "sub", "base_branch": "main"}),
     )
     (change_dir / "events.jsonl").write_text(
         json.dumps({
@@ -278,58 +278,11 @@ def test_cli_log_subprocess_no_color_on_pipe(tmp_path: Path) -> None:
     assert result.returncode == 0, (
         f"stderr: {result.stderr!r}\nstdout: {result.stdout!r}"
     )
-    # No title banner; the phase name is the proof the narrative rendered.
+    # Narrative header: title "sub", phase: "spec"
+    assert "sub" in result.stdout
     assert "spec" in result.stdout
     # Pipe → not a tty → no ANSI codes regardless of NO_COLOR.
     assert "\x1b[" not in result.stdout
-
-
-def test_main_swallows_broken_pipe(monkeypatch) -> None:
-    """A reader closing the pipe early (e.g. `imp log | less` quit) must not
-    surface a BrokenPipeError traceback: main() catches it and returns the
-    conventional 128+SIGPIPE status. os.dup2/os.open are stubbed so the real
-    handler's stdout-fd redirect can't clobber pytest's own stdout."""
-    import signal
-
-    import imp.cli.main as m
-
-    def boom(_ns: object) -> int:
-        raise BrokenPipeError(32, "Broken pipe")
-
-    monkeypatch.setattr(m, "_cmd_status", boom)
-    monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
-    monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
-
-    rc = m.main(["status"])
-    assert rc == 128 + signal.SIGPIPE
-
-
-def test_main_swallows_broken_pipe_on_buffered_flush(monkeypatch) -> None:
-    """The command can return cleanly while output sits in stdout's buffer; the
-    broken pipe then surfaces only on flush. main() flushes inside its guard so
-    that case is caught too, instead of escaping to interpreter shutdown as an
-    uncatchable 'Exception ignored' traceback."""
-    import signal
-
-    import imp.cli.main as m
-
-    def quiet(_ns: object) -> int:
-        return 0  # returns normally; nothing written yet
-
-    class FakeStdout:
-        def flush(self) -> None:
-            raise BrokenPipeError(32, "Broken pipe")
-
-        def fileno(self) -> int:
-            return 1
-
-    monkeypatch.setattr(m, "_cmd_status", quiet)
-    monkeypatch.setattr(m.sys, "stdout", FakeStdout())
-    monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
-    monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
-
-    rc = m.main(["status"])
-    assert rc == 128 + signal.SIGPIPE
 
 
 def test_cmd_log_auto_picks_latest_by_mtime(
@@ -345,7 +298,7 @@ def test_cmd_log_auto_picks_latest_by_mtime(
         change_dir = wt / ".imp" / "change"
         change_dir.mkdir(parents=True)
         (change_dir / "change.json").write_text(
-            json.dumps({"id": slug, "title": title, "base_branch": "main"}),
+            json.dumps({"slug": slug, "title": title, "base_branch": "main"}),
         )
         events_path = change_dir / "events.jsonl"
         events_path.write_text(
@@ -354,15 +307,6 @@ def test_cmd_log_auto_picks_latest_by_mtime(
                 "timestamp": "2026-05-27T10:00:00+00:00",
                 "type": "change_created",
                 "payload": {"slug": slug, "title": title},
-            }) + "\n"
-            # A step renders the phase name (the title banner is gone), so use a
-            # per-change phase name to prove WHICH change's log was picked.
-            + json.dumps({
-                "id": "e2", "agent_id": None,
-                "timestamp": "2026-05-27T10:00:01+00:00",
-                "type": "step_started",
-                "payload": {"step": "s", "kind": "agent", "phase": title,
-                            "model": "m", "provider": "anthropic"},
             }) + "\n",
         )
         # Stagger mtimes so the last one is clearly newest
@@ -376,7 +320,7 @@ def test_cmd_log_auto_picks_latest_by_mtime(
         rc = main(["log"])
     assert rc == 0
     out = buf.getvalue()
-    # tenth-change was written last, so its phase should render.
+    # tenth-change was written last, so its title should render.
     assert "tenth" in out
     assert "first" not in out
     assert "second" not in out
@@ -431,8 +375,7 @@ def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
         rc = anyio.run(m._async_cmd_new, args)
     out = buf.getvalue()
     assert rc == 0
-    assert "#" not in out          # no slug/title banner
-    assert "design" in out         # the phase renders through the folded renderer
+    assert "#" in out and "design" in out
     assert "{" not in out          # narrative, not raw json
 
 

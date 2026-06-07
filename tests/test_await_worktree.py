@@ -19,7 +19,7 @@ from tests.conftest import _seed_control
 
 def test_await_worktree_returns_the_change_dir(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Hello There", change_id="hello-there", base_branch="main")
+    Change.create(tmp_path, title="Hello There", slug="hello-there", base_branch="main")
     wt = _await_worktree(tmp_path, timeout=5.0)
     assert wt.name == "hello-there"
     assert (wt / ".imp" / "change" / "change.json").exists()
@@ -27,7 +27,7 @@ def test_await_worktree_returns_the_change_dir(tmp_path: Path) -> None:
 
 def test_await_worktree_ignores_merge_scratch(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Real One", change_id="real-one", base_branch="main")
+    Change.create(tmp_path, title="Real One", slug="real-one", base_branch="main")
     # A scratch dir without change.json must be ignored even if it sorts first.
     scratch = tmp_path / ".imp" / "worktrees" / ".merge-aaa"
     scratch.mkdir(parents=True)

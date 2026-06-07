@@ -29,10 +29,6 @@ import pytest
 from tests._live import _await_worktree, opted_in
 from tests.conftest import _init_repo
 
-# Ensure subprocesses use this worktree's imp, not the editable install
-# pointing to master (which has different code).
-_WORKTREE_SRC = str(Path(__file__).parent.parent / "src")
-
 
 def _anthropic_key() -> str | None:
     key = os.environ.get("ANTHROPIC_API_KEY")
@@ -76,14 +72,12 @@ def _seed_project(tmp_path: Path) -> None:
         phases:
           - name: only
             steps:
-              - {name: w, file: agents/writer.md, tier: medium}
+              - {name: w, file: agents/writer.md, model_role: default}
     """))
     (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
-        providers: [anthropic]
-        tiers:
-          low: {anthropic: claude-haiku-4-5-20251001}
-          medium: {anthropic: claude-sonnet-4-6}
-          high: {anthropic: claude-opus-4-7}
+        roles:
+          default:
+            prefer: [{provider: anthropic, model: claude-sonnet-4-6}]
     """))
     subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
     subprocess.run(
@@ -141,8 +135,6 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
     assert key is not None
     env["ANTHROPIC_API_KEY"] = key
     env.pop("CLAUDECODE", None)  # avoid stub-api-key clamp from conftest
-    _pypath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = _WORKTREE_SRC + (os.pathsep + _pypath if _pypath else "")
 
     # cwd=tmp_path is what makes imp find the project root — find_project_root
     # walks up from cwd looking for .imp/. No IMP_PROJECT_ROOT env var needed
@@ -220,19 +212,15 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     )
     _seed_project(tmp_path)
     (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
-        providers: [openai]
-        tiers:
-          low: {openai: gpt-4o-mini}
-          medium: {openai: gpt-4o-mini}
-          high: {openai: gpt-4o-mini}
+        roles:
+          default:
+            prefer: [{provider: openai, model: gpt-4o-mini}]
     """))
     env = os.environ.copy()
     key = _openai_key()
     assert key is not None
     env["OPENAI_API_KEY"] = key
     env.pop("CLAUDECODE", None)
-    _pypath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = _WORKTREE_SRC + (os.pathsep + _pypath if _pypath else "")
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "imp", "new", "mid-step-resume-oa"],
@@ -284,16 +272,12 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     )
     _seed_project(tmp_path)
     (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
-        providers: [claude_code]
-        tiers:
-          low: {claude_code: claude-haiku-4-5-20251001}
-          medium: {claude_code: claude-sonnet-4-5}
-          high: {claude_code: claude-opus-4-5}
+        roles:
+          default:
+            prefer: [{provider: claude_code, model: claude-sonnet-4-5}]
     """))
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
-    _pypath = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = _WORKTREE_SRC + (os.pathsep + _pypath if _pypath else "")
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "imp", "new", "mid-step-resume-cc"],

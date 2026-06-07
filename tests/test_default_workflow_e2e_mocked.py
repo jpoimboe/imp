@@ -58,32 +58,36 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    src_wf = root / "imp" / "workflows" / "default"
+    src_wf = root / ".imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
+    dest_wf = change_dir / "workflow"
+    if dest_wf.exists():
+        shutil.rmtree(dest_wf)
+    shutil.copytree(src_wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps({
-        "id": slug, "title": title, "base_branch": "main",
+        "slug": slug, "title": title, "base_branch": "main",
     }, indent=2, sort_keys=True))
 
-    configured_tiers: list[str] = []
+    configured_roles: list[str] = []
     with contextlib.suppress(Exception):
-        configured_tiers = load_config(root).tier_names()
+        configured_roles = load_config(root).role_names()
 
-    workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
+    workflow = load_workflow(dest_wf, configured_roles=configured_roles)
     flat = workflow.flat_steps()
     State(
-        id=slug, step=flat[0].name if flat else None, step_attempt=0,
+        slug=slug, step=flat[0].name if flat else None, step_attempt=0,
         status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
     ).save(change_dir / "state")
 
     change = Change(
-        id=slug, title=title, base_branch="main",
+        slug=slug, title=title, base_branch="main",
         control_root=root, project_root=root, change_dir=change_dir,
     )
     change.event_log().append(
         agent_id=None, type="change_created",
-        payload={"id": slug, "slug": change.slug, "title": title},
+        payload={"slug": slug, "title": title},
     )
     return change
 
@@ -107,22 +111,28 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     can run `git status --porcelain` without failing.
     """
     src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default"
-    dst = tmp_path / "imp" / "workflows" / "default"
+    dst = tmp_path / ".imp" / "workflows" / "default"
     shutil.copytree(src, dst)
     # Replace script gates with always-pass stubs.
     for shell in (dst / "scripts").glob("*.sh"):
         shell.write_text("#!/bin/sh\nexit 0\n")
         shell.chmod(0o755)
 
-    # config.yaml: a single role for every tier used by the workflow.
+    # config.yaml: a single role for every model_role used by the workflow.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     cfg = tmp_path / "imp" / "config.yaml"
     cfg_content = (
-        "providers: [anthropic]\n"
-        "tiers:\n"
-        "  low:    {anthropic: claude-sonnet-4-6}\n"
-        "  medium: {anthropic: claude-sonnet-4-6}\n"
-        "  high:   {anthropic: claude-sonnet-4-6}\n"
+        "roles:\n"
+        "  default:       {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  spec:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  spec_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  plan:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  plan_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  task_lead:     {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  code_review:   {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  fast:          {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  balanced:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
+        "  powerful:      {prefer: [{provider: anthropic, model: claude-sonnet-4-6}]}\n"
     )
     cfg.write_text(cfg_content)
 
@@ -258,8 +268,10 @@ async def test_full_default_workflow_completes_with_canned_openai(
     change = _seed_default_workflow(tmp_path)
     # Rewrite config to OpenAI provider for every role.
     cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(cfg.read_text().replace("anthropic", "openai")
-        .replace("claude-sonnet-4-6", "gpt-4o-mini"))
+    cfg.write_text(cfg.read_text().replace(
+        "{provider: anthropic, model: claude-sonnet-4-6}",
+        "{provider: openai, model: gpt-4o-mini}",
+    ))
 
     default_completion = resp_response(
         resp_function_call("c0", "complete_step", json.dumps({
@@ -318,8 +330,10 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
 
     change = _seed_default_workflow(tmp_path)
     cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(cfg.read_text().replace("anthropic", "claude_code")
-        .replace("claude-sonnet-4-6", "claude-sonnet-4-5"))
+    cfg.write_text(cfg.read_text().replace(
+        "{provider: anthropic, model: claude-sonnet-4-6}",
+        "{provider: claude_code, model: claude-sonnet-4-5}",
+    ))
 
     # The CC fake is per-step; each runner spawns a fresh client. Use a
     # factory that returns the same scripted reply for every new client.
@@ -450,69 +464,3 @@ async def test_fast_path_skips_both_reviewers_but_not_code_reviewer(
     assert "spec-reviewer" not in started, started
     assert "plan-review" not in started, started
     assert "code-reviewer" in started, started
-
-
-@pytest.mark.anyio
-async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
-    from imp.engine import recovery
-    from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
-
-    change = _seed_default_workflow(tmp_path)
-
-    # Position the Change as if paused at a maxed-out code-reviewer: its loop
-    # budget (max_loops 5) is exhausted at 6. apply_rewind must clear that count
-    # so a re-entry that loops back (a reject verdict) gets a fresh budget rather
-    # than tripping the max_loops re-pause again. (On the approve path below the
-    # gate advances via Continue, which pops the count regardless — so the reset
-    # is guarded by the explicit assert on st.loop_counts, not by the COMPLETED
-    # outcome; the runtime reset semantics are unit-tested in test_recovery.py.)
-    st = State.load(change.state_dir)
-    st.step = "code-reviewer"
-    st.status = "paused"
-    st.loop_counts = {"code-reviewer": 6}
-    st.save(change.state_dir)
-
-    wf = load_workflow(change.workflow_dir,
-                       configured_tiers=load_config(tmp_path).tier_names())
-    plan = recovery.plan_rewind(wf, st, "code-reviewer", force=False)
-    recovery.apply_rewind(plan, wf, st, change.event_log())
-    st.status = "running"
-    st.save(change.state_dir)
-    assert "code-reviewer" not in st.loop_counts          # the load-bearing reset guard
-
-    default = response(
-        tool_use("c0", "complete_step", {
-            "status": "Success",
-            "verdict": "approve", "findings": "none",
-            "decision": "merge", "comments": "",
-            "phase": "written", "spec_path": "stub-spec.md",
-            "complexity": "standard",
-            "plan_path": "stub-plan.md", "plan_number": 1,
-            "done": True, "deviation": False, "summary": "ok",
-            "more_plans": False, "rationale": "ok",
-            "blocking": False,
-            "built": "stub", "test_status": "ok",
-            "open_items": "", "next_steps": "",
-            "result": "DONE", "report": "ok",
-        }),
-        stop_reason="tool_use",
-    )
-    fake = FakeAsyncAnthropic([], default_response=default)
-    resolve.reset_providers_for_tests()
-    resolve.register_provider(
-        "anthropic", env_check=lambda: True,
-        factory=lambda model: AnthropicProvider(
-            model_name=model, client_factory=lambda: fake),
-    )
-
-    result = await run_change(
-        change, on_event=lambda _e: None,
-        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
-    )
-
-    assert result is RunResult.COMPLETED
-    events = list(change.event_log().read())
-    assert any(e["type"] == "step_rewound" for e in events)
-    # Merged: worktree removed by the terminal merge gate.
-    assert not (tmp_path / ".imp" / "worktrees" / "test-change").exists()

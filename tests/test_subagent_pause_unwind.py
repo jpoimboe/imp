@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import json
+import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -118,7 +119,7 @@ def _seed_single_step(root: Path) -> Change:
     from imp.engine.loader import load_workflow
     from imp.providers.config import load_config
 
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / ".imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -127,27 +128,31 @@ def _seed_single_step(root: Path) -> Change:
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 3, max_loops: 6, on_max_retries: {pause: true}}\n"
         "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n")
+        "      - {name: w, file: agents/writer.md, model_role: default}\n")
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
+        "roles:\n  default:\n    prefer: [{provider: fake, model: m}]\n")
 
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
+    dest_wf = change_dir / "workflow"
+    if dest_wf.exists():
+        shutil.rmtree(dest_wf)
+    shutil.copytree(wf, dest_wf)
     (change_dir / "state").mkdir(exist_ok=True)
     (change_dir / "change.json").write_text(json.dumps(
-        {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
+        {"slug": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
-        configured = load_config(root).tier_names()
-    workflow = load_workflow(wf, configured_tiers=configured)
+        configured = load_config(root).role_names()
+    workflow = load_workflow(dest_wf, configured_roles=configured)
     flat = workflow.flat_steps()
-    State(id="s", step=flat[0].name, step_attempt=0, status="running",
+    State(slug="s", step=flat[0].name, step_attempt=0, status="running",
           vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")
-    change = Change(id="s", title="t", base_branch="main", control_root=root,
+    change = Change(slug="s", title="t", base_branch="main", control_root=root,
                     project_root=root, change_dir=change_dir)
     change.event_log().append(agent_id=None, type="change_created",
-                              payload={"id": "s", "slug": change.slug, "title": "t"})
+                              payload={"slug": "s", "title": "t"})
     return change
 
 

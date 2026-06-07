@@ -75,19 +75,15 @@ async def test_one_step_walk_against_openai(
         "phases:\n"
         "  - name: a\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
     (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [openai]\n"
-        "tiers:\n"
-        "  low:    {openai: gpt-4o-mini}\n"
-        "  medium: {openai: gpt-4o-mini}\n"
-        "  high:   {openai: gpt-4o-mini}\n"
+        "roles:\n  default:\n    prefer: [{provider: openai, model: gpt-4o-mini}]\n"
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
     change = Change.create(
-        tmp_path, title="live-openai", change_id="live-openai", base_branch="main")
+        tmp_path, title="live-openai", slug="live-openai", base_branch="main")
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED

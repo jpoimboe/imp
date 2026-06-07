@@ -586,81 +586,104 @@ def test_resume_and_goto_are_mutually_exclusive(tmp_path: Path) -> None:
     assert "resume" in str(ei.value)
 
 
-def test_parse_agent_file_tier_absent_is_none(tmp_path):
+def test_parse_agent_file_model_role_absent_is_none(tmp_path):
     from imp.engine.loader import parse_agent_file
     p = tmp_path / "x.md"
     p.write_text(
         "---\nname: x\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nbody\n")
     agent = parse_agent_file(p)
-    assert agent.tier is None
+    assert agent.model_role is None
 
 
-def test_parse_agent_file_tier_present(tmp_path):
+def test_parse_agent_file_model_role_present(tmp_path):
     from imp.engine.loader import parse_agent_file
     p = tmp_path / "x.md"
     p.write_text(
-        "---\nname: x\ntier: high\n"
+        "---\nname: x\nmodel_role: code_review\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nbody\n")
     agent = parse_agent_file(p)
-    assert agent.tier == "high"
+    assert agent.model_role == "code_review"
 
 
-def test_load_workflow_parses_step_differ_from(tmp_path):
+def test_load_workflow_parses_model_rules(tmp_path):
     from imp.engine.loader import load_workflow
     wf_dir = tmp_path / "wf"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / "a.md").write_text(
         "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nbody\n")
-    (wf_dir / "agents" / "b.md").write_text(
-        "---\nname: b\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
-        "---\nbody\n")
     (wf_dir / "workflow.yaml").write_text(
         "name: w\n"
+        "model_rules:\n  code_review:\n    differ_provider_from: code\n"
         "phases:\n  - name: p\n    steps:\n"
-        "      - {name: s1, file: agents/a.md, tier: high}\n"
-        "      - {name: s2, file: agents/b.md, tier: high, differ_from: s1}\n")
+        "      - {name: s, file: agents/a.md, model_role: code}\n")
     wf = load_workflow(wf_dir)
-    by = {s.name: s for s in wf.flat_steps()}
-    assert by["s2"].differ_from == "s1"
-    assert by["s1"].differ_from is None
+    assert wf.model_rules["code_review"].differ_provider_from == "code"
 
 
-def test_load_workflow_rejects_differ_from_cycle(tmp_path):
+def test_load_workflow_rejects_constraint_cycle(tmp_path):
     from imp.engine.errors import LoadError, LoadErrors
     from imp.engine.loader import load_workflow
     wf_dir = tmp_path / "wf"
     (wf_dir / "agents").mkdir(parents=True)
-    for stem in ("a", "b"):
-        (wf_dir / "agents" / f"{stem}.md").write_text(
-            f"---\nname: {stem}\noutput:\n"
-            "  status: {type: enum, values: [Success, Error]}\n---\nbody\n")
-    (wf_dir / "workflow.yaml").write_text(
-        "name: w\n"
-        "phases:\n  - name: p\n    steps:\n"
-        "      - {name: s1, file: agents/a.md, tier: high, differ_from: s2}\n"
-        "      - {name: s2, file: agents/b.md, tier: high, differ_from: s1}\n")
-    with pytest.raises((LoadError, LoadErrors), match="cycle"):
-        load_workflow(wf_dir)
-
-
-def test_load_workflow_step_tier_defaults_to_medium(tmp_path):
-    from imp.engine.loader import load_workflow
-    wf_dir = tmp_path / "wf"
-    (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / "a.md").write_text(
         "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nbody\n")
     (wf_dir / "workflow.yaml").write_text(
         "name: w\n"
+        "model_rules:\n"
+        "  x:\n    differ_provider_from: y\n"
+        "  y:\n    differ_provider_from: x\n"
         "phases:\n  - name: p\n    steps:\n"
-        "      - {name: s, file: agents/a.md}\n")    # no tier:
+        "      - {name: s, file: agents/a.md}\n")
+    with pytest.raises((LoadError, LoadErrors), match="cycle"):
+        load_workflow(wf_dir)
+
+
+def test_load_workflow_parses_model_tiers(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    wf_dir.mkdir()
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "model_tiers: [fast, balanced, powerful]\n"
+        "phases:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
+    )
     wf = load_workflow(wf_dir)
-    assert wf.flat_steps()[0].tier == "medium"
+    assert wf.model_tiers == ("fast", "balanced", "powerful")
 
 
+def test_load_workflow_model_tiers_absent_is_empty(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    wf_dir.mkdir()
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "phases:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
+    )
+    wf = load_workflow(wf_dir)
+    assert wf.model_tiers == ()
+
+
+def test_load_workflow_model_tiers_duplicate_raises(tmp_path: Path) -> None:
+    wf_dir = tmp_path / "wf"
+    wf_dir.mkdir()
+    (wf_dir / "workflow.yaml").write_text(
+        "name: w\n"
+        "model_tiers: [fast, fast]\n"
+        "phases:\n"
+        "  - name: p\n"
+        "    steps:\n"
+        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
+    )
+    with pytest.raises((LoadError, LoadErrors), match="duplicate"):
+        load_workflow(wf_dir)
 
 
 def test_feedback_string_parsed_and_bool_rejected(tmp_path: Path) -> None:

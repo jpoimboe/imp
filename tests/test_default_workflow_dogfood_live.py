@@ -21,6 +21,7 @@ What this proves:
 Skip predicates (all must pass):
   - first_opted_in() is not None  (IMP_LIVE_PROVIDERS opt-in)
   - IMP_RUN_DOGFOOD=1             (cost guard; set by `make test-dogfood`)
+  - _can_pty()                    (Windows / sandboxed CI without /dev/pty*)
 
 Recursion guard: the coder runs `make test` -> `pytest -q` in the copied
 tree, which would re-collect this file. Scrubbing IMP_LIVE_PROVIDERS from
@@ -30,12 +31,16 @@ the subprocess env causes all live tests to skip via opted_in().
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
+import select
 import shutil
 import signal
+import struct
 import subprocess
 import sys
+import termios
 import time
 import uuid
 from pathlib import Path
@@ -80,10 +85,18 @@ def _provider_model(provider: str) -> str:
         "anthropic": "claude-sonnet-4-6",
         "openai": "gpt-4o-mini",
         "claude_code": "claude-sonnet-4-5",
-        # codex refuses *-codex models (preflight M1); gpt-5.5 is the sanctioned
-        # non-codex model. Auth is via the `codex` CLI's own ~/.codex/auth.json.
-        "codex": "gpt-5.5",
     }[provider]
+
+
+def _can_pty() -> bool:
+    try:
+        import pty
+        m, s = pty.openpty()
+        os.close(m)
+        os.close(s)
+        return True
+    except Exception:
+        return False
 
 
 def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, str]]:
@@ -103,18 +116,11 @@ def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, str]]:
 
 
 def _ignore_for_copy(_dir: str, names: list[str]) -> set[str]:
-    ignored = {n for n in names
-               if n in {".venv", ".git", ".imp", ".pytest_cache",
-                        ".mypy_cache", ".ruff_cache", ".coverage",
-                        "htmlcov", ".tox", "__pycache__", "dist", "build"}
-               or n.endswith(".egg-info")}
-    # The repo carries its own top-level imp/ dogfood control dir (config.yaml,
-    # specs/, plans/, workflows/). Copying it into the seed collides with
-    # run_init's fresh scaffold ("imp/ already exists; refusing to re-init").
-    # Exclude it ONLY at the project root — never src/imp (matched by basename).
-    if Path(_dir).resolve() == PROJECT_ROOT:
-        ignored.add("imp")
-    return ignored
+    return {n for n in names
+            if n in {".venv", ".git", ".imp", ".pytest_cache",
+                     ".mypy_cache", ".ruff_cache", ".coverage",
+                     "htmlcov", ".tox", "__pycache__", "dist", "build"}
+            or n.endswith(".egg-info")}
 
 
 def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
@@ -143,22 +149,6 @@ def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
         output_fn=lambda _line: None,
         picker_fn=lambda _available: [provider],
     )
-
-    # run_init MATERIALIZES imp/workflows/default as a real directory (the right
-    # thing for a pip-installed user: src/imp/assets/ lives in site-packages).
-    # But THIS repo — which the seed is a copy of — commits it as a symlink to
-    # the live bundled assets, and ships tests/test_assets_workflow.py::
-    # test_dogfood_workflow_install_is_symlink_to_assets pinning exactly that.
-    # Left as a directory, that bundled test FAILS inside the coder's `make test`
-    # (run-tests gate), which is unrelated to the coder's change and was poisoning
-    # the gate -> a deterministic run-tests rework + minutes of the agent flailing
-    # over a "pre-existing failure". The seed already copied the symlink target
-    # (only the top-level imp/ is excluded, not src/), so restore the symlink form
-    # to match the source repo this dogfood claims to run against.
-    wf_install = tmp_path / "imp" / "workflows" / "default"
-    if wf_install.is_dir() and not wf_install.is_symlink():
-        shutil.rmtree(wf_install)
-        wf_install.symlink_to(Path("../../src/imp/assets/workflows/default"))
 
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(
@@ -189,17 +179,10 @@ def _seed_dogfood_project(tmp_path: Path, provider: str) -> Path:
     # run-tests uses, so the guard checks the invocation that actually bites.
     # IMP_PROJECT_ROOT == tmp_path for the dogfood, so "under the edit root"
     # means under tmp_path/src/imp.
-    # Scrub PYTHONPATH: `make test-dogfood` prepends PYTHONPATH=<checkout>/src
-    # (the worktree-safety pin in the Makefile). That host path would shadow the
-    # isolated venv's editable `imp`, defeating the very isolation this probe
-    # asserts. Isolation must not depend on the caller's env, so drop it here
-    # (and for the engine launch below).
-    probe_env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
     probe = subprocess.run(
         [str(venv_python), "-c", "import imp, sys; sys.stdout.write(imp.__file__)"],
         cwd=tmp_path,
         capture_output=True, text=True, check=True,
-        env=probe_env,
     )
     resolved = Path(probe.stdout.strip()).resolve()
     edit_root_pkg = (tmp_path / "src" / "imp").resolve()
@@ -222,23 +205,26 @@ pytestmark = [
         os.environ.get("IMP_RUN_DOGFOOD") != "1",
         reason="dogfood run on real LLM; set IMP_RUN_DOGFOOD=1 to opt in",
     ),
+    pytest.mark.skipif(
+        not _can_pty(),
+        reason="pty not available (Windows or sandboxed CI)",
+    ),
 ]
 
 
 # ── Test ───────────────────────────────────────────────────────────────────
 
 
-def test_dogfood_imp_on_imp_default_workflow(
-    tmp_path: Path, request: pytest.FixtureRequest
-) -> None:
+def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
     """Run the shipped default workflow against imp's own source.
 
     Dogfoods imp by asking the workflow to add a unique sentinel print to
-    src/imp/agents/tools/bash.py. Launched via --non-interactive with stdin=PIPE:
-    the feature intent is written to stdin then stdin is closed so all subsequent
-    asks use the EOF default. After completion, verifies the sentinel landed in
-    the right file plus all the events.jsonl/imp-log invariants.
+    src/imp/agents/tools/bash.py. After completion, verifies the sentinel
+    landed in the right file plus all the events.jsonl/imp-log invariants
+    the prior PTY test had.
     """
+    import pty
+
     provider = first_opted_in()
     assert provider is not None  # guaranteed by skipif
     model = _provider_model(provider)
@@ -256,16 +242,6 @@ def test_dogfood_imp_on_imp_default_workflow(
         assert shutil.which("claude") is not None, (
             "claude_code opted in but `claude` CLI not on PATH"
         )
-    elif provider == "codex":
-        # Like claude_code: the codex CLI handles auth via its own
-        # ~/.codex/auth.json (codex login) — no env key. Require both the CLI
-        # and an auth file (the runner's preflight asserts auth too).
-        assert shutil.which("codex") is not None, (
-            "codex opted in but `codex` CLI not on PATH"
-        )
-        assert (Path.home() / ".codex" / "auth.json").exists(), (
-            "codex opted in but ~/.codex/auth.json missing (run `codex login`)"
-        )
 
     # Seed the project: copy imp source, git init, run_init, isolated venv.
     venv_python = _seed_dogfood_project(tmp_path, provider)
@@ -281,12 +257,20 @@ def test_dogfood_imp_on_imp_default_workflow(
 
     # Override config.yaml to pin the exact model string. run_init wrote
     # provider-default models; we want determinism across run_init updates.
+    role_line = "{prefer: [{provider: " + provider + ", model: " + model + "}]}"
     (tmp_path / "imp" / "config.yaml").write_text(
-        f"providers: [{provider}]\n"
-        "tiers:\n"
-        f"  low:    {{{provider}: {model}}}\n"
-        f"  medium: {{{provider}: {model}}}\n"
-        f"  high:   {{{provider}: {model}}}\n"
+        "roles:\n"
+        f"  default:     {role_line}\n"
+        f"  spec:        {role_line}\n"
+        f"  spec_review: {role_line}\n"
+        f"  plan:        {role_line}\n"
+        f"  plan_review: {role_line}\n"
+        f"  task_lead:   {role_line}\n"
+        f"  code:        {role_line}\n"
+        f"  code_review: {role_line}\n"
+        f"  fast:        {role_line}\n"
+        f"  balanced:    {role_line}\n"
+        f"  powerful:    {role_line}\n"
         # Opt this run into the lint gate (off by default): exercises the
         # IMP_LINT_COMMAND pre-commit gate so the exemplar's deliberate F401
         # unused import is caught (Acceptance #3/#6). Top-level keys, parsed into
@@ -315,8 +299,7 @@ def test_dogfood_imp_on_imp_default_workflow(
     # mandates a turn-1 ask, no tools, no exploration). The system prompt no
     # longer surfaces the title, so the agent learns the task from the FIRST
     # awaiting_user_input reply — that is where the driver delivers the title
-    # text below. With --non-interactive, the intent is written to stdin and
-    # stdin is closed; all subsequent asks use the EOF default (first option).
+    # text below. Subsequent asks (if any) get the generic "use defaults" reply.
 
     # Title carries the feature intent. Unique sentinel per run prevents
     # stale state from faking a pass.
@@ -343,10 +326,6 @@ def test_dogfood_imp_on_imp_default_workflow(
     # subprocess pytest run.
     env.pop("IMP_LIVE_PROVIDERS", None)
     env.pop("IMP_RUN_LIVE_TESTS", None)
-    # Drop the host PYTHONPATH (`make test-dogfood` pins it to <checkout>/src):
-    # the engine and every descendant must resolve `imp` from the isolated venv
-    # copy, not the host source tree. Same isolation rationale as the seed probe.
-    env.pop("PYTHONPATH", None)
     # NOTE: keep this list in sync with any future opt-in/cost-guard env
     # vars added to tests/. Named list (not prefix sweep) is intentional:
     # explicit > clever, and a misnamed future guard wouldn't be caught
@@ -366,52 +345,34 @@ def test_dogfood_imp_on_imp_default_workflow(
     env["PATH"] = venv_bin + os.pathsep + env.get("PATH", "")
     env["IMP_PYTHON"] = str(venv_python)
 
-    # Opt-in capture (diagnostics): set IMP_DOGFOOD_CAPTURE=<dir> to persist the
-    # workflow subprocess output AND a copy of the journal (.imp/) OUTSIDE
-    # tmp_path, so they survive both pytest's tmp-dir GC and an assertion
-    # failure. Without it the run is silent (stdout DEVNULL) as before. The
-    # finalizer runs even when a later assertion (rc/status/sentinel/rework)
-    # fails — that is where the real run-tests failure detail lives.
-    capture_dir = os.environ.get("IMP_DOGFOOD_CAPTURE")
-    capture_path = Path(capture_dir) if capture_dir else None
-    cap_out = None
-    if capture_path is not None:
-        capture_path.mkdir(parents=True, exist_ok=True)
-        cap_out = (capture_path / "workflow.out").open("wb")
-
-        def _dump_capture() -> None:
-            if cap_out is not None and not cap_out.closed:
-                cap_out.flush()
-                cap_out.close()
-            journal_src = tmp_path / ".imp"
-            if journal_src.exists():
-                with contextlib.suppress(OSError, shutil.Error):
-                    shutil.copytree(
-                        journal_src, capture_path / "imp_journal",
-                        dirs_exist_ok=True,
-                    )
-
-        request.addfinalizer(_dump_capture)
-
-    # Launch imp new via --non-interactive with stdin=PIPE (no PTY needed).
-    # Deliver the feature intent as the FIRST scripted reply (the spec-writer's
-    # opening ask), then close stdin so every later ask falls to the EOF default.
+    master, slave = pty.openpty()
+    # Propagate a real terminal size onto the slave so imp's renderer wraps to a
+    # sensible width instead of flooring to 8 chars under a winsize-0 PTY (issue
+    # 2). Query the controlling terminal; fall back to 100x30 when stdout is not
+    # a TTY (CI) for determinism.
+    try:
+        cols, rows = os.get_terminal_size(sys.stdout.fileno())
+    except (OSError, ValueError):
+        cols, rows = 100, 30
+    winsize = struct.pack("HHHH", rows, cols, 0, 0)
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, winsize)
+    # imp answers gates with line input ("1\n") — the only mode now that the
+    # TUI is gone. The PTY itself is still needed so the text path's
+    # prompt_toolkit prompt has a TTY. Mirrors test_human_gate_pty.
     proc = subprocess.Popen(
-        [str(venv_python), "-m", "imp", "new", title, "--non-interactive"],
+        [str(venv_python), "-m", "imp", "new", title],
         cwd=tmp_path,
-        stdin=subprocess.PIPE,
-        stdout=(cap_out if cap_out is not None else subprocess.DEVNULL),
-        stderr=(subprocess.STDOUT if cap_out is not None else subprocess.DEVNULL),
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
         env=env,
         start_new_session=True,
-        text=False,
     )
-    with contextlib.suppress(BrokenPipeError):
-        proc.stdin.write(title.encode("utf-8") + b"\n")
-        proc.stdin.close()
+    os.close(slave)
 
     TOTAL_TIMEOUT = 1800.0
     EVENTS_FIRST_APPEAR_TIMEOUT = 30.0
+    TRACE_PTY = os.environ.get("IMP_PTY_TRACE") == "1"
 
     # SIGINT handling: hard-kill the subprocess PG so Ctrl-C is
     # unambiguous (raising KeyboardInterrupt from a signal handler is
@@ -426,6 +387,8 @@ def test_dogfood_imp_on_imp_default_workflow(
 
     def _teardown_proc() -> None:
         signal.signal(signal.SIGINT, _prev_sigint)
+        with contextlib.suppress(OSError):
+            os.close(master)
         if proc.poll() is None:
             with contextlib.suppress(OSError, ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -434,7 +397,7 @@ def test_dogfood_imp_on_imp_default_workflow(
 
     # Discover the Change worktree (created at startup, before any LLM call).
     # Capture the slug NOW — the worktree is transient and is removed at merge.
-    # Guarded so a startup-crash timeout still tears down proc.
+    # Guarded so a startup-crash timeout still tears down proc + PTY fd.
     try:
         change_wt = _await_worktree(tmp_path, timeout=EVENTS_FIRST_APPEAR_TIMEOUT)
     except BaseException:
@@ -443,8 +406,11 @@ def test_dogfood_imp_on_imp_default_workflow(
     slug = change_wt.name
     events_file = change_wt / ".imp" / "change" / "events.jsonl"
 
+    buf = bytearray()
     gates_answered = 0
+    asks_answered = 0
     events_seen_bytes = 0
+    ask_questions: list[str] = []
     all_events_accum: list[dict[str, Any]] = []
     start_time = time.time()
     deadline = start_time + TOTAL_TIMEOUT
@@ -455,6 +421,20 @@ def test_dogfood_imp_on_imp_default_workflow(
         f"sentinel={sentinel} expected_gates={len(expected_gates)}",
         file=sys.stderr, flush=True,
     )
+
+    def _drain_pty() -> None:
+        nonlocal buf
+        ready, _, _ = select.select([master], [], [], 0.05)
+        if ready:
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:
+                return
+            if chunk:
+                buf.extend(chunk)
+                if TRACE_PTY:
+                    sys.stderr.buffer.write(chunk)
+                    sys.stderr.buffer.flush()
 
     def _tail_events() -> list[dict[str, Any]]:
         nonlocal events_seen_bytes, events_first_seen_at
@@ -494,6 +474,8 @@ def test_dogfood_imp_on_imp_default_workflow(
 
     try:
         while time.time() < deadline:
+            _drain_pty()
+
             # Startup guard: fail only if events were NEVER seen. We key off
             # events_first_seen_at (set by _tail_events on first sighting), not
             # events_file.exists() — at merge the worktree (and events.jsonl) is
@@ -508,7 +490,8 @@ def test_dogfood_imp_on_imp_default_workflow(
                 pytest.fail(
                     f"events.jsonl never appeared within "
                     f"{EVENTS_FIRST_APPEAR_TIMEOUT}s of process start; "
-                    f"engine did not initialize."
+                    f"engine did not initialize.\n"
+                    f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
                 )
 
             for ev in _tail_events():
@@ -525,7 +508,31 @@ def test_dogfood_imp_on_imp_default_workflow(
                             f"{phase!r} not in yaml-declared human gates "
                             f"{expected_gates}; workflow.yaml/parse drift?"
                         )
+                    os.write(master, b"1\n")
                     gates_answered += 1
+                elif etype == "awaiting_user_input":
+                    # Interactive agent ended its turn with a question (no tool
+                    # call). The engine emits this immediately before blocking on
+                    # user_chat_input_fn (executor.py _interactive), so writing
+                    # the answer now lands the bytes before prompt_async reads
+                    # them. This is provider-agnostic — unlike llm_response
+                    # stop_reason, which claude_code logs as None on every turn.
+                    question = payload.get("prompt") or ""
+                    if question:
+                        ask_questions.append(question)
+                    # The spec-writer's mandatory opening question carries no
+                    # task: the title is NOT in its system prompt. The FIRST
+                    # reply must deliver the feature intent; subsequent replies
+                    # (clarifications, design confirms) get the generic "use
+                    # defaults" answer.
+                    if asks_answered == 0:
+                        os.write(master, title.encode("utf-8") + b"\n")
+                    else:
+                        os.write(
+                            master,
+                            b"looks good, proceed with reasonable defaults\n",
+                        )
+                    asks_answered += 1
                 elif etype == "workflow_paused":
                     # Pause fail-fast: the engine emits workflow_paused at
                     # executor.py:100/106 whenever it halts (including
@@ -537,10 +544,14 @@ def test_dogfood_imp_on_imp_default_workflow(
                     pytest.fail(
                         f"engine emitted workflow_paused (reason={reason!r}); "
                         f"likely max_retries exhausted in a step or phase. "
-                        f"gates_answered={gates_answered}/{len(expected_gates)}"
+                        f"gates_answered={gates_answered}/{len(expected_gates)} "
+                        f"asks_answered={asks_answered}\n"
+                        f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
                     )
 
             if proc.poll() is not None:
+                for _ in range(20):
+                    _drain_pty()
                 break
 
             time.sleep(0.05)
@@ -551,7 +562,9 @@ def test_dogfood_imp_on_imp_default_workflow(
                 f"dogfood workflow exceeded {TOTAL_TIMEOUT}s wall clock "
                 f"(may be reviewer flake or coder iteration storm; "
                 f"rerun once before investigating).\n"
-                f"gates_answered={gates_answered}/{len(expected_gates)}"
+                f"gates_answered={gates_answered}/{len(expected_gates)} "
+                f"asks_answered={asks_answered}\n"
+                f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
             )
     finally:
         _teardown_proc()
@@ -559,18 +572,10 @@ def test_dogfood_imp_on_imp_default_workflow(
     rc = proc.wait(timeout=10)
     assert rc == 0, (
         f"expected exit 0, got {rc}; "
-        f"gates_answered={gates_answered}/{len(expected_gates)}"
+        f"gates_answered={gates_answered}/{len(expected_gates)} "
+        f"asks_answered={asks_answered}\n"
+        f"last 2000 bytes of PTY output:\n{bytes(buf[-2000:])!r}"
     )
-
-    # Resolve the change id from the journal. The id is immutable, so it equals
-    # the startup worktree name, but read it back from the journal anyway to
-    # assert exactly one change ran here. The journal is keyed under the id.
-    journaled_ids = journal.journal_ids(tmp_path)
-    assert len(journaled_ids) == 1, (
-        f"expected exactly one journaled change, got {journaled_ids} "
-        f"(startup id was {slug!r})"
-    )
-    slug = journaled_ids[0]
 
     # The worktree was removed at merge; completion status lives in the journal.
     state_raw = journal.journal_show(tmp_path, slug, "state.json")
@@ -585,6 +590,16 @@ def test_dogfood_imp_on_imp_default_workflow(
     assert gates_answered == 0, (
         f"superpowers workflow has no ask/options gates; saw {gates_answered} "
         f"human_prompt_pending events"
+    )
+    # The spec-writer now opens every change with a mandatory question; the
+    # driver delivers the task in its first reply. Therefore at least one
+    # awaiting_user_input event must have fired and been answered — anything
+    # less means the always-ask discipline regressed.
+    assert asks_answered >= 1, (
+        "spec-writer must open every change with a clarifying question "
+        "(its prompt mandates a turn-1 ask); the driver saw 0 "
+        "awaiting_user_input events. Did the open-by-asking discipline "
+        "regress?"
     )
 
     # ── Dogfood-specific verification ──────────────────────────────────
@@ -636,30 +651,9 @@ def test_dogfood_imp_on_imp_default_workflow(
         if step in {"fast-path-spec-gate", "fast-path-plan-gate",
                     "fast-path-cycle-gate"}:
             return False  # fast-path forward skips (Task 9), not rework
-        # Deterministic spec-phase RENAME flow (fires on every clean run where the
-        # spec-writer renames the change, which the spec-writer prompt mandates):
-        #   spec-writer -> spec-writer        the rename self-resume (rename_change)
-        #   spec-verify-commit -> spec-writer the spec was committed under the OLD
-        #     slug, then renamed; spec-commit-verify.sh checks HEAD touches
-        #     imp/specs/<NEW slug>.md, fails once, and resumes spec-writer to
-        #     re-commit under the new name. Benign, not change-quality rework.
-        if (step, target) in {("spec-writer", "spec-writer"),
-                              ("spec-verify-commit", "spec-writer")}:
-            return False
         return target in {"implement", "task-lead", "plan-writer", "spec-writer"}
 
-    # Use the COMPLETE journaled event stream (authoritative): the live
-    # all_events_accum may miss late edges (the rename is content-only — title
-    # change + spec git mv — and the worktree path stays stable across it, but
-    # accumulation can still lag behind the journaled record).
-    events_raw = journal.journal_show(tmp_path, slug, "events.jsonl")
-    assert events_raw is not None, f"no journaled events.jsonl for {slug!r}"
-    full_events = [
-        json.loads(ln)
-        for ln in events_raw.decode("utf-8").splitlines()
-        if ln.strip()
-    ]
-    rework_edges = [e for e in full_events if _is_rework(e)]
+    rework_edges = [e for e in all_events_accum if _is_rework(e)]
     rework_pairs = [
         (
             (e.get("payload") or {}).get("step"),
@@ -715,24 +709,10 @@ def test_dogfood_imp_on_imp_default_workflow(
     # Artifacts present: the default workflow writes spec/plan INTO the worktree
     # and commits them; merge-in-place lands them on the base branch at tmp_path.
     # New layout (spec §12): docs/ layer dropped; plans are numbered.
-    #
-    # Artifact filenames use the change's DERIVED slug, NOT its journal id. The
-    # id is the immutable canonical key (`<date>-<random>`, e.g. 2026-06-05-mlysrp)
-    # that journal_ids() returns; the slug is `dated_slug(title)` and changes with
-    # the spec-writer's mandated rename (change.py: "immutable id identity, derived
-    # slug"). They diverge on every real run, so resolve the slug from the journaled
-    # title the same way the engine's Change.slug does.
-    from imp.engine.slug import dated_slug
-    change_meta = json.loads(
-        journal.journal_show(tmp_path, slug, "change.json") or b"{}"
-    )
-    artifact_slug = dated_slug(change_meta["title"], date=slug[:10])
-    spec_path = tmp_path / "imp" / "specs" / f"{artifact_slug}.md"
+    spec_path = tmp_path / "imp" / "specs" / f"{slug}.md"
     assert spec_path.exists(), f"expected spec artifact {spec_path} after run"
-    plans = sorted((tmp_path / "imp" / "plans").glob(f"{artifact_slug}-plan-*.md"))
-    assert plans, (
-        f"expected at least one imp/plans/{artifact_slug}-plan-N.md after run"
-    )
+    plans = sorted((tmp_path / "imp" / "plans").glob(f"{slug}-plan-*.md"))
+    assert plans, f"expected at least one imp/plans/{slug}-plan-N.md after run"
 
     # ── imp log smoke (journal-read path: worktree is gone) ────────────
     log_out = subprocess.run(
@@ -765,5 +745,5 @@ def test_dogfood_imp_on_imp_default_workflow(
     assert status_out.returncode == 0, (
         f"imp status rc={status_out.returncode}\nstderr: {status_out.stderr!r}"
     )
-    assert "completed" in status_out.stdout, status_out.stdout
+    assert "Completed Changes" in status_out.stdout, status_out.stdout
     assert slug in status_out.stdout, status_out.stdout

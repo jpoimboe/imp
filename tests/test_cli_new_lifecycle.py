@@ -1,34 +1,34 @@
-"""`imp new` mints an immutable dated id; two consecutive creates yield two
-distinct ids with no retry loop (spec §5, AC 7)."""
-
-import re
 from pathlib import Path
 
-from imp.engine.change import Change
-from imp.engine.slug import new_change_id
+import pytest
+
+from imp.cli.main import _select_slug
+from imp.engine import worktree as wt
 from tests.conftest import _seed_control
 
-_ID_RE = re.compile(r"\d{4}-\d{2}-\d{2}-[a-z0-9]{6}")
 
-
-def test_new_mints_dated_id(tmp_path: Path) -> None:
+def test_select_slug_from_title(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    change_id = new_change_id(date="2026-06-04")
-    change = Change.create(tmp_path, title="Add OAuth", change_id=change_id,
-                           base_branch="main")
-    assert change.id == change_id
-    assert _ID_RE.fullmatch(change.id)
-    worktrees = sorted((tmp_path / ".imp" / "worktrees").iterdir())
-    assert len(worktrees) == 1
-    assert worktrees[0].name == change_id
+    slug, title, auto = _select_slug(tmp_path, title="Add OAuth Support",
+                                     today="2026-06-01")
+    assert slug == "2026-06-01-add-oauth-support"
+    assert title == "Add OAuth Support"
+    assert auto is False
 
 
-def test_two_new_calls_make_distinct_ids(tmp_path: Path) -> None:
+def test_select_slug_title_collision_errors(tmp_path: Path) -> None:
     _seed_control(tmp_path)
-    id1 = new_change_id(date="2026-06-04")
-    Change.create(tmp_path, title="One", change_id=id1, base_branch="main")
-    id2 = new_change_id(date="2026-06-04")
-    Change.create(tmp_path, title="Two", change_id=id2, base_branch="main")
-    ids = [p.name for p in (tmp_path / ".imp" / "worktrees").iterdir() if p.is_dir()]
-    assert len(ids) == 2 and len(set(ids)) == 2
-    assert all(_ID_RE.fullmatch(i) for i in ids)
+    # Collision is on the *dated* slug now, so pre-create that exact branch.
+    wt.create_worktree(tmp_path, "2026-06-01-add-oauth", "main")
+    with pytest.raises(SystemExit):
+        _select_slug(tmp_path, title="Add OAuth", today="2026-06-01")
+
+
+def test_select_slug_random_when_no_title(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    slug, title, auto = _select_slug(tmp_path, title=None, today="2026-06-01")
+    assert slug.startswith("2026-06-01-")
+    name = slug[len("2026-06-01-"):]
+    assert name.count("-") == 2  # three words
+    assert title.count(" ") == 2
+    assert auto is True

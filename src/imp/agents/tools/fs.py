@@ -6,41 +6,25 @@ ToolContext.resolve_path; /scratch/* values live in ctx.scratch.
 
 from __future__ import annotations
 
-import anyio
-
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.limits import (
-    OUTPUT_TRUNCATION_MARKER,
-    TOOL_OUTPUT_CAP_BYTES,
-    TOOL_WALLCLOCK_TIMEOUT_S,
-    read_text_capped,
-)
 
 
 @imp_tool(
     name="read_file",
     description=(
-        "Read a file's contents (bounded — output is capped at 50 KB). "
+        "Read a file's contents. "
         "Paths use /project/ or /scratch/ prefixes."
     ),
 )
-async def read_file(ctx: ToolContext, path: str) -> str:
+def read_file(ctx: ToolContext, path: str) -> str:
     ctx.check_fs_permission("read", path)
     resolved = ctx.resolve_path(path)
     if resolved is None:
         if path not in ctx.scratch:
             raise FileNotFoundError(f"{path!r} not in scratch")
         return ctx.scratch[path]
-    text, truncated = await read_text_capped(
-        resolved,
-        coordinator=getattr(ctx, "coordinator", None),
-        deadline=anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S,
-        cap_bytes=TOOL_OUTPUT_CAP_BYTES,   # 50 KB — same cap bash/grep apply
-    )
-    if truncated:
-        text += OUTPUT_TRUNCATION_MARKER
-    return text
+    return resolved.read_text()
 
 
 @imp_tool(name="write_file", description="Write (overwrite) a file. Creates parent dirs as needed.")

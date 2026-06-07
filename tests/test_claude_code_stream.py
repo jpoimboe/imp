@@ -9,11 +9,10 @@ replay path.
 from __future__ import annotations
 
 import asyncio
-import itertools
 from typing import Any
 
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from imp.providers.claude_code import _merge_assistant_fragments, _stream_history
+from imp.providers.claude_code import _stream_history
 
 
 async def _drain(async_iter: Any) -> list[dict[str, Any]]:
@@ -69,52 +68,3 @@ def test_user_text_envelope_inline() -> None:
     assert inner["content"] == "hi" or inner["content"] == [
         {"type": "text", "text": "hi"},
     ]
-
-
-def test_merge_collapses_consecutive_user_messages() -> None:
-    """An interrupted ToolSearch turn left three consecutive user-role messages
-    (tool_result + "[Request interrupted]" + complete_step nudge). The Anthropic
-    API requires strict role alternation; replaying three user turns in a row is
-    rejected with a 400 ("tool use concurrency issues"). The replay builder must
-    fold consecutive same-role messages so the replayed history alternates.
-
-    Mirrors the exact on-disk transcript shape from change 2026-06-06-06x3ml.
-    """
-    messages = [
-        Message(role="user", content=(TextBlock(text="go"),)),
-        Message(role="assistant", content=()),  # empty thinking-only fragment
-        Message(role="assistant",
-                content=(ToolUseBlock(id="t1", name="ToolSearch", input={}),)),
-        Message(role="user",
-                content=(ToolResultBlock(tool_use_id="t1", content="schemas"),)),
-        Message(role="user",
-                content=(TextBlock(text="[Request interrupted by user]"),)),
-        Message(role="user",
-                content=(TextBlock(text="You ended your turn without complete_step"),)),
-    ]
-    out = _merge_assistant_fragments(messages)
-    roles = [m.role for m in out]
-    assert all(a != b for a, b in itertools.pairwise(roles)), (
-        f"replayed history has consecutive same-role messages: {roles}")
-    # The three folded user blocks survive in order, tool_result first (the API
-    # requires the tool_result to lead the user turn that answers a tool_use).
-    last = out[-1]
-    assert last.role == "user"
-    kinds = [type(b).__name__ for b in last.content]
-    assert kinds == ["ToolResultBlock", "TextBlock", "TextBlock"], kinds
-
-
-def test_merge_still_drops_empty_assistant_and_folds_assistant_fragments() -> None:
-    """Existing behavior: empty assistant fragments are dropped and consecutive
-    assistant fragments fold into one turn."""
-    messages = [
-        Message(role="user", content=(TextBlock(text="go"),)),
-        Message(role="assistant", content=()),  # dropped
-        Message(role="assistant", content=(TextBlock(text="think"),)),
-        Message(role="assistant",
-                content=(ToolUseBlock(id="t1", name="read_file", input={}),)),
-    ]
-    out = _merge_assistant_fragments(messages)
-    assert [m.role for m in out] == ["user", "assistant"]
-    kinds = [type(b).__name__ for b in out[1].content]
-    assert kinds == ["TextBlock", "ToolUseBlock"], kinds

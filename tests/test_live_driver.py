@@ -26,14 +26,18 @@ def _body(out: _Pipe) -> list[str]:
 
 
 def _render_body(events) -> list[str]:
-    """Full render_tree output. Neither renderer emits a slug/title header any
-    more (the transcript opens on the first turn), so the live body and the
-    render_tree body are directly comparable line-for-line."""
+    """Full render_tree output, INCLUDING the root header. The live driver emits
+    its own `#N title` header on change_created (LiveDriver._emit_header), so
+    `_body(out)` already carries that line as element [0] — the correct comparison
+    is full-vs-full, not body-vs-body. The two headers are byte-identical here
+    because these sequences feed no status-changing event, so render_tree's
+    root.status stays "running" and its header gets no `(status)` suffix (the only
+    part the design excludes from parity)."""
     tree = nv.build_tree(events)
     return list(render_tree(tree, full=False, color=False, width=80))
 
 
-def test_burst_recap_streams_then_prose_in_live_path() -> None:
+def test_burst_renders_nothing_in_live_path() -> None:
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -46,17 +50,16 @@ def test_burst_recap_streams_then_prose_in_live_path() -> None:
     ]
     for e in events:
         drv.on_event(e)
-    assert not any("call" in ln for ln in _body(out))  # burst open — held
+    assert not any("tools" in ln for ln in _body(out))
     drv.on_event(ev("8", "llm_response", agent_id="a",
                     raw={"content": [{"type": "text", "text": "done"}]},
                     usage={}))
     body = _body(out)
-    # point 8: the closed burst leaves a single dark-gray recap line, then prose.
-    assert any("read_file · glob · 2 calls" in ln for ln in body)
-    assert any("done" in ln for ln in body)        # prose still streams after it
+    assert not any("tools" in ln for ln in body)   # burst dropped (A2)
+    assert any("done" in ln for ln in body)        # prose still streams
 
 
-def test_burst_recap_then_prose_kept_in_order() -> None:
+def test_burst_dropped_prose_kept_in_order() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -69,34 +72,8 @@ def test_burst_recap_then_prose_kept_in_order() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    recap_i = next(i for i, ln in enumerate(body) if "grep · 1 call" in ln)
-    answer_i = next(i for i, ln in enumerate(body) if "the answer" in ln)
-    assert recap_i < answer_i          # recap precedes the prose it preceded live
-
-
-def test_live_subagent_only_status_rows() -> None:
-    # Feed a subagent burst: live must show only the status row, never the
-    # subagent's streamed children or the SDK sentinel outcome.
-    drv, out = _driver()
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="spec", kind="agent", phase="design",
-           model="m", provider="anthropic"),
-        ev("4", "tool_call", agent_id="a", id="t1", name="task",
-           input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
-           raw={"content": [{"type": "text", "text": "some internal chatter"}]},
-           usage={}),
-        ev("6", "tool_result", agent_id="a", id="t1",
-           content="The user doesn't want to proceed with this tool use..."),
-    ]:
-        drv.on_event(e)
-    drv.finish()
-    out_text = out.getvalue()
-    assert "reviewer" in out_text
-    assert "· reviewer" not in out_text
-    assert "some internal chatter" not in out_text
-    assert "doesn't want to proceed" not in out_text
+    assert not any("tools" in ln for ln in body)
+    assert any("the answer" in ln for ln in body)
 
 
 def test_subagent_descends_but_nested_burst_does_not_leak() -> None:
@@ -114,10 +91,10 @@ def test_subagent_descends_but_nested_burst_does_not_leak() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    # Part D: the subagent collapses to one resolved status row (no leading bullet).
-    assert any(ln.strip() == "coder" for ln in body)
+    # New boundary-header shape: ↳ glyph, no `· N events` suffix.
+    assert any(ln.strip() == "↳ task → coder" for ln in body)
     assert not any("▸ task" in ln for ln in body)
-    # The nested tool burst must still NOT leak into the stream.
+    # The nested tool burst must still NOT leak into the stream (A2 filters it).
     assert not any("secret.py" in ln for ln in body)
 
 
@@ -205,16 +182,10 @@ def test_empty_thinking_dropped_in_live_path() -> None:
     assert _body(out) == _render_body(events)
 
 
-def test_no_slug_title_header_emitted() -> None:
-    # The slug/title banner is gone: change_created (and a later change_renamed)
-    # emit no `#slug  title` line — the transcript opens on the first turn.
+def test_header_emitted_on_change_created() -> None:
     drv, out = _driver()
     drv.on_event(ev("1", "change_created", slug="add-auth-7", title="add auth"))
-    drv.on_event(ev("2", "change_renamed", id="ch1", old_title="add auth",
-                    new_title="Add OAuth", new_slug="2026-06-05-add-oauth"))
-    body = _body(out)
-    assert not any(ln.startswith("#") for ln in body)
-    assert not any("add auth" in ln or "Add OAuth" in ln for ln in body)
+    assert _body(out)[0] == "#add-auth-7  add auth"
 
 
 from imp.cli.render_text import render_tree as _rt_full  # noqa: E402
@@ -260,11 +231,11 @@ def test_human_gate_blocks_following_nodes_until_resolved() -> None:
                     action={"verb": "continue"}, var_mutations={}))
     body = _body(out)
     gate_i = next(i for i, ln in enumerate(body) if "human gate → continue" in ln)
-    outcome_i = next(i for i, ln in enumerate(body) if ln.strip() == "approve complete")
+    outcome_i = next(i for i, ln in enumerate(body) if ln.strip() == "✓ approve")
     assert gate_i < outcome_i                      # tree order preserved
 
 
-def test_open_burst_recap_emitted_at_finish() -> None:
+def test_open_burst_flushes_to_nothing_at_pause() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -274,16 +245,12 @@ def test_open_burst_recap_emitted_at_finish() -> None:
         ev("5", "tool_result", agent_id="a", id="b1", content="ok"),
     ]:
         drv.on_event(e)
-    assert not any("call" in ln for ln in _body(out))   # still open — held
+    assert not any("tools" in ln for ln in _body(out))
     drv.finish()
-    # finish() force-flushes the open burst, leaving its recap (point 8).
-    assert any("read_file · 1 call" in ln for ln in _body(out))
+    assert not any("tools" in ln for ln in _body(out))   # nothing to emit (A2)
 
 
-def test_subagent_row_resolves_only_on_close() -> None:
-    # Part D: a running subagent is a blocking leaf — NOTHING (not even its row)
-    # emits until it closes; its internal prose never appears. On close the single
-    # resolved status row emits.
+def test_subagent_prose_streams_before_close() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -295,21 +262,20 @@ def test_subagent_row_resolves_only_on_close() -> None:
            raw={"content": [{"type": "text", "text": "interim finding"}]}, usage={}),
     ]:
         drv.on_event(e)
-    # While running: internal prose hidden and no row yet (it resolves on close).
+    # Prose appears WHILE the subagent is still running (before the close event).
     body_before = _body(out)
-    assert not any("interim finding" in ln for ln in body_before)
-    assert not any(ln.strip() == "reviewer" for ln in body_before)
-    # Close the subagent; the single resolved row lands now, with no outcome.
+    assert any("interim finding" in ln for ln in body_before)
+    assert not any("→ status" in ln for ln in body_before)   # no outcome yet
+    # Close the subagent; the outcome lands now.
     drv.on_event(ev("6", "tool_result", agent_id="a", id="t1",
                     content='{"status":"Success"}'))
     body_after = _body(out)
-    assert any(ln.strip() == "reviewer" for ln in body_after)
-    assert not any("status=Success" in ln for ln in body_after)
+    assert any("→ status=Success" in ln for ln in body_after)
 
 
-def test_subagent_status_row_column_matches_render_tree() -> None:
-    # The collapsed status row sits at the same column in live and imp log.
-    events = [
+def test_subagent_outcome_column_matches_prose_column() -> None:
+    drv, out = _driver()
+    for e in [
         ev("1", "change_created", change_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
            model="m", provider="anthropic"),
@@ -319,15 +285,16 @@ def test_subagent_status_row_column_matches_render_tree() -> None:
            raw={"content": [{"type": "text", "text": "finding"}]}, usage={}),
         ev("6", "tool_result", agent_id="a", id="t1",
            content='{"status":"Success"}'),
-    ]
-    drv, out = _driver()
-    for e in events:
+    ]:
         drv.on_event(e)
-    drv.finish()
     body = _body(out)
-    live_row = next(ln for ln in body if ln.strip().startswith("reviewer"))
-    log_row = next(ln for ln in _render_body(events) if ln.strip().startswith("reviewer"))
-    assert live_row == log_row
+    prose_line = next(ln for ln in body if "finding" in ln)
+    outcome_line = next(ln for ln in body if "→ status=Success" in ln)
+
+    def indent(s: str) -> int:
+        return len(s) - len(s.lstrip())
+
+    assert indent(prose_line) == indent(outcome_line)
 
 
 def test_finish_force_pops_running_subagent_without_outcome() -> None:
@@ -342,20 +309,20 @@ def test_finish_force_pops_running_subagent_without_outcome() -> None:
            raw={"content": [{"type": "text", "text": "partial work"}]}, usage={}),
     ]:
         drv.on_event(e)
-    # Subagent never closes; finish() force-emits its leaf without crashing. The
-    # row shows the (still-running) status; internal prose and outcome stay hidden.
+    # Subagent never closes; finish() must force-pop it without crashing.
     drv.finish()
     body = _body(out)
-    assert any(ln.strip() == "reviewer (running)" for ln in body)
-    assert not any("partial work" in ln for ln in body)
-    assert not any("→ status" in ln for ln in body)   # no outcome ever
+    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
+    assert any("partial work" in ln for ln in body)
+    assert not any("→ status" in ln for ln in body)   # empty outcome → nothing
 
 
 def test_subagent_body_parity_with_render_tree() -> None:
     # The stated invariant: snapshot (imp log) and live stay BYTE-IDENTICAL via the
-    # shared subagent_status_row helper. Both now collapse the subagent to one
-    # resolved status row, so assert full-body parity for a subagent that had
-    # internal prose AND a structured outcome (neither of which must render).
+    # shared header/outcome helpers. The subagent path is where the two renderers
+    # diverge most (descended-container + outcome-on-pop vs. a single
+    # _render_subagent call), so assert full-line parity for a subagent with prose
+    # AND a structured outcome.
     events = [
         ev("1", "change_created", change_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
@@ -383,9 +350,7 @@ def test_subagent_body_parity_with_render_tree() -> None:
 # matching note in tests/test_render_text.py.
 
 
-def test_nested_subagent_io_never_leaks() -> None:
-    # Part D: a subagent is a leaf — none of its internal I/O (nested tool bursts
-    # or prose) ever reaches the live view, regardless of whether it closed.
+def test_nested_open_burst_emits_nothing_and_does_not_reorder() -> None:
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -400,17 +365,19 @@ def test_nested_subagent_io_never_leaks() -> None:
            raw={"content": [{"type": "text", "text": "after burst"}]}, usage={}),
     ]:
         drv.on_event(e)
-    drv.finish()
     body = _body(out)
-    assert not any("tools" in ln for ln in body)        # nested burst hidden
-    assert not any("after burst" in ln for ln in body)  # internal prose hidden
-    assert any(ln.strip().startswith("reviewer") for ln in body)  # only the status row
+    assert not any("tools" in ln for ln in body)       # nested open burst emits nothing
+    assert any("after burst" in ln for ln in body)     # prose still streams, in order
+    # No duplicate prose line (guards against double-emit).
+    assert sum("after burst" in ln for ln in body) == 1
 
 
-def test_subagent_closing_with_open_nested_burst_emits_only_status_row() -> None:
+def test_subagent_closing_with_open_nested_burst_still_emits_outcome() -> None:
     # A subagent can close (parent task tool_result) while a nested burst is still
-    # open. Part D: the close resolves the single status row on the normal (non-
-    # force) walk; no nested I/O and no outcome render.
+    # the nested builder's current_burst (no trailing prose flushed it). The
+    # builder-aware _is_final must NOT block the cursor on that burst once the
+    # subagent has closed — the outcome must still emit on the normal (non-force)
+    # walk. Regression guard for the _is_final builder-awareness fix.
     drv, out = _driver()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -426,9 +393,9 @@ def test_subagent_closing_with_open_nested_burst_emits_only_status_row() -> None
     ]:
         drv.on_event(e)
     body = _body(out)
-    assert any(ln.strip() == "reviewer" for ln in body)
-    assert not any("tools" in ln for ln in body)        # nested burst hidden
-    assert not any("status=Success" in ln for ln in body)  # outcome hidden
+    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
+    assert not any("tools" in ln for ln in body)        # nested burst dropped (A2)
+    assert any("→ status=Success" in ln for ln in body)  # outcome emitted on close, non-force
 
 
 def test_phase_b_streams_live_without_finish() -> None:
@@ -462,10 +429,7 @@ def _driver_color():
     return drv, out
 
 
-def test_live_subagent_collapses_to_status_row_byte_identical_to_log() -> None:
-    # Part D: a subagent is a LEAF — it collapses to one resolved status row, with
-    # no streamed children, no gutter, and no outcome. The whole body is byte-
-    # identical to the imp log replay (shared subagent_status_row layer).
+def test_live_subagent_prose_carries_gutter_byte_identical_to_log() -> None:
     events = [
         ev("1", "change_created", change_id=1, title="x"),
         ev("3", "step_started", step="spec", kind="agent", phase="design",
@@ -481,10 +445,10 @@ def test_live_subagent_collapses_to_status_row_byte_identical_to_log() -> None:
         drv.on_event(e)
     drv.finish()
     body = _body(out)
-    # The single resolved status row — no streamed prose, no gutter, no outcome.
-    assert any(ln.strip() == "reviewer" for ln in body)
-    assert not any("the finding" in ln for ln in body)
-    assert not any("│" in ln for ln in body)
+    # The streamed `↳` header and the `│ ` gutter on prose + outcome…
+    assert any(ln.strip() == "↳ task → reviewer" for ln in body)
+    assert any(ln.endswith("│ the finding") for ln in body)
+    # …and the whole body is byte-identical to the imp log replay (shared layer).
     assert body == _render_body(events)
 
 
@@ -496,39 +460,29 @@ def test_print_chrome_renders_plain_and_carries_no_gutter() -> None:
     assert "\x1b[" not in body   # agent = () → no codes; main-agent sink → no gutter
 
 
-def test_user_message_shown_in_live_on_tty_and_nontty() -> None:
-    # The interactive prompt uses erase_when_done, so prompt_toolkit leaves no
-    # echo on a real terminal — the live driver reprints the turn in BOTH the
-    # TTY and non-TTY cases (and imp log always renders it). One shared path, so
-    # the user's turn looks identical everywhere.
+def test_user_message_suppressed_in_live_present_in_log() -> None:
+    # §4: prompt_toolkit already echoed the user's input in live mode; re-rendering
+    # the UserMessageNode would duplicate it. imp log has no terminal echo so it
+    # must still render the node as the sole record.
     events = [
         ev("1", "change_created", change_id=1, title="t"),
         ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),
-        ev("2b", "awaiting_user_input", agent_id="step:spec/spec-writer"),
         ev("3", "user_message", content=[{"type": "text", "text": "do the thing"}]),
     ]
-    # non-TTY live (the _Pipe sink reports isatty() == False)
     drv, out = _driver()
     for e in events:
         drv.on_event(e)
     drv.finish()
-    assert "> do the thing" in out.getvalue()
+    live = out.getvalue()
+    log = "\n".join(_render_body(events))
 
-    # TTY live: prompt_toolkit erased its echo, so the driver reprints the turn.
-    tout = _TTYPipe()
-    tdrv = LiveDriver(stream=tout, color=False, width=80, status=LiveStatus(tout))
-    for e in events:
-        tdrv.on_event(e)
-    tdrv.finish()
-    assert "> do the thing" in tout.getvalue()
-
-    # imp log (no terminal echo) always renders the user turn.
-    assert "> do the thing" in "\n".join(_render_body(events))
+    assert "> do the thing" not in live   # suppressed in live (prompt_toolkit echoed)
+    assert "> do the thing" in log        # the only record in imp log
 
 
 def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:
-    """The final (never-closed) phase must NOT emit a <phase> complete breadcrumb in
+    """The final (never-closed) phase must NOT emit a ✓ <phase> breadcrumb in
     either the live path (finish()/force-pop) or the log (render_tree gated on
     node.closed). Uses distinct names for phase ("finalize") and step ("deploy")
     so a phase-level assert cannot accidentally match a step-level breadcrumb."""
@@ -552,11 +506,11 @@ def test_final_open_phase_has_no_breadcrumb_in_live_or_log() -> None:
     log_lines = list(render_tree(nv.build_tree(events), full=False, color=False, width=80))
 
     # The phase-level breadcrumb must be absent in BOTH renderers.
-    assert not any("finalize complete ·" in ln for ln in live_lines), (
+    assert not any("✓ finalize ·" in ln for ln in live_lines), (
         f"phase breadcrumb leaked into live: {live_lines}")
-    assert not any("finalize complete ·" in ln for ln in log_lines), (
+    assert not any("✓ finalize ·" in ln for ln in log_lines), (
         f"phase breadcrumb leaked into log: {log_lines}")
-    # The step-level breadcrumb (deploy complete) may still appear — we don't assert on it.
+    # The step-level breadcrumb (✓ deploy) may still appear — we don't assert on it.
 
 
 def test_phase_breadcrumb_identical_in_live_and_log() -> None:
@@ -581,192 +535,7 @@ def test_phase_breadcrumb_identical_in_live_and_log() -> None:
     for e in events:
         drv.on_event(e)
     drv.finish()
-    live_line = next(ln for ln in out.getvalue().splitlines() if "spec complete" in ln)
+    live_line = next(ln for ln in out.getvalue().splitlines() if "✓ spec" in ln)
     log_lines = render_tree(nv.build_tree(events), full=False, color=False, width=80)
-    log_line = next(ln for ln in log_lines if "spec complete" in ln)
+    log_line = next(ln for ln in log_lines if "✓ spec" in ln)
     assert live_line == log_line   # byte-identical indent + content across both paths
-
-
-def test_live_prose_then_breadcrumb_blank_separated_and_parity() -> None:
-    """Live path inserts a blank between prose and the step's BreadcrumbLine,
-    mirroring render_text. Parity with the imp-log replay is preserved."""
-    events = [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="spec", kind="agent", phase="design",
-           model="m", provider="anthropic"),
-        ev("4", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "the prose"}]}, usage={}),
-        ev("5", "step_completed", step="spec", kind="agent",
-           action={"verb": "continue"}, var_mutations={}),
-    ]
-    drv, out = _driver()
-    for e in events:
-        drv.on_event(e)
-    drv.finish()
-    body = _body(out)
-    bc_i = next(i for i, ln in enumerate(body) if "spec complete" in ln)
-    assert body[bc_i - 1].strip() == ""
-    assert body == _render_body(events)
-
-
-def test_live_subagent_emits_no_internal_io_or_outcome() -> None:
-    """Part D: a subagent collapses to one status row — its internal prose and the
-    structured return value (the SDK cancellation-sentinel carrier) never reach the
-    live view. The body stays byte-identical to the imp log replay."""
-    events = [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="spec", kind="agent", phase="design",
-           model="m", provider="anthropic"),
-        ev("4", "tool_call", agent_id="a", id="t1", name="task",
-           input={"subagent_name": "reviewer"}),
-        ev("5", "llm_response", agent_id="sub:4",
-           raw={"content": [{"type": "text", "text": "the finding"}]}, usage={}),
-        ev("6", "tool_result", agent_id="a", id="t1",
-           content='{"status":"Success"}'),
-    ]
-    drv, out = _driver()
-    for e in events:
-        drv.on_event(e)
-    drv.finish()
-    body = _body(out)
-    assert any(ln.strip() == "reviewer" for ln in body)
-    assert not any("the finding" in ln for ln in body)        # internal prose hidden
-    assert not any("status=Success" in ln for ln in body)     # outcome hidden
-    assert body == _render_body(events)
-
-
-def test_live_prose_then_subagent_header_blank_separated() -> None:
-    events = [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="spec", kind="agent", phase="design",
-           model="m", provider="anthropic"),
-        ev("4", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "Pre-task prose."}]}, usage={}),
-        ev("tk", "tool_call", agent_id="a", id="t1", name="task",
-           input={"subagent_name": "reviewer"}),
-        ev("r", "tool_result", agent_id="a", id="t1",
-           content='{"status":"Success"}'),
-    ]
-    drv, out = _driver()
-    for e in events:
-        drv.on_event(e)
-    drv.finish()
-    body = _body(out)
-    hdr_i = next(i for i, ln in enumerate(body) if ln.strip().startswith("reviewer"))
-    assert body[hdr_i - 1].strip() == ""
-    assert body == _render_body(events)
-
-
-class _TTYPipe(io.StringIO):
-    def isatty(self) -> bool:
-        return True
-
-
-def test_tty_chrome_steps_no_committed_status_no_double_blanks() -> None:
-    """Regression (live-TTY): a chrome step's transient `· working` status line
-    must NOT survive into scroll-back above its breadcrumb, and no two blank lines
-    ever stack. Feed the byte stream through pyte (a faithful terminal) and assert
-    the final screen: no `working` line committed, and no adjacent blank rows."""
-    import pyte
-    out = _TTYPipe()
-    drv = LiveDriver(stream=out, color=False, width=60, status=LiveStatus(out))
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
-           model="m", provider="anthropic"),
-        ev("3", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "Spec written."}]}, usage={}),
-        ev("4", "step_completed", step="spec-writer", kind="agent",
-           action={"verb": "continue"}, var_mutations={}),
-        ev("5", "step_started", step="spec-verify-commit", kind="script", phase="spec"),
-        ev("6", "step_completed", step="spec-verify-commit", kind="script",
-           action={"verb": "continue"}),
-        ev("7", "step_started", step="fast-path-gate", kind="branch", phase="spec"),
-        ev("8", "step_completed", step="fast-path-gate", kind="branch",
-           action={"verb": "goto", "target": "plan-writer"}),
-    ]:
-        drv.on_event(e)
-    drv.finish()
-    screen = pyte.Screen(60, 30)
-    pyte.Stream(screen).feed(out.getvalue().replace("\n", "\r\n"))
-    rows = [ln.rstrip() for ln in screen.display]
-    # The transient spinner line never gets committed to scroll-back.
-    assert not any("working" in r for r in rows), f"committed status line: {rows}"
-    # Each chrome breadcrumb is present exactly once.
-    assert sum("spec-verify-commit" in r for r in rows) == 1
-    assert sum("fast-path-gate" in r for r in rows) == 1
-    # No two blank content rows in a row (trailing screen padding excluded).
-    content = rows[:max(i for i, r in enumerate(rows) if r.strip()) + 1]
-    assert not any(not content[i].strip() and not content[i + 1].strip()
-                   for i in range(len(content) - 1)), f"double blank: {content}"
-
-
-def test_refresh_status_injects_no_newline_and_preserves_prev_prose() -> None:
-    """The status line is transient: _refresh_status draws it (a \\r-rewritten
-    line, no newline) and must NOT inject a separating "\\n". That injected
-    newline used to (a) commit the visible spinner line into scroll-back — a stray
-    `name · working` above each breadcrumb — and (b) stack with _print_lines' own
-    separator into double blanks. Permanent spacing is _print_lines' job alone, so
-    `_prev_prose` is left untouched and the status writes no bare newline."""
-    out = _TTYPipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
-    # Set up a builder activity so current_activity() returns non-None.
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
-    drv.on_event(ev("2", "step_started", step="spec", kind="agent", phase="p",
-                    model="m", provider="anthropic"))
-    out.truncate(0)
-    out.seek(0)
-    drv._prev_prose = True
-    drv._refresh_status()
-    written = out.getvalue()
-    assert "\n" not in written, f"status must not inject a newline; got {written!r}"
-    assert drv._prev_prose is True   # preserved → the NEXT block still gets one blank
-
-
-def test_refresh_status_no_output_on_non_tty() -> None:
-    """On a non-TTY pipe the status line never draws at all (it's TTY-only), so
-    _refresh_status produces no output and leaves `_prev_prose` untouched."""
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
-    drv.on_event(ev("2", "step_started", step="spec", kind="agent", phase="p",
-                    model="m", provider="anthropic"))
-    out.truncate(0)
-    out.seek(0)
-    drv._prev_prose = True
-    drv._refresh_status()
-    assert out.getvalue() == ""
-    assert drv._prev_prose is True   # untouched
-
-
-def test_user_message_resets_status_span() -> None:
-    """The status-line elapsed timer measures 'time the agent has been working
-    since the last user reply' — across tools, thinks, and multiple
-    llm_responses within one interactive turn. So `restart_span()` fires on
-    `step_started` AND on `user_message`."""
-    calls: list[str] = []
-
-    class _CountingStatus(LiveStatus):
-        def restart_span(self) -> None:
-            calls.append("restart")
-            super().restart_span()
-
-    out = _Pipe()
-    status = _CountingStatus(out)
-    drv = LiveDriver(stream=out, color=False, width=80, status=status)
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("2", "step_started", step="spec", kind="agent", phase="p",
-           model="m", provider="anthropic"),
-        ev("3", "tool_call", agent_id="a", id="b1", name="bash", input={}),
-        ev("4", "tool_result", agent_id="a", id="b1", content="ok"),
-        ev("5", "thinking", agent_id="a", content="hmm"),
-        ev("6", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ask"}]}, usage={}),
-        ev("7", "user_message", content=[{"type": "text", "text": "reply"}]),
-        ev("8", "llm_response", agent_id="a",
-           raw={"content": [{"type": "text", "text": "ack"}]}, usage={}),
-    ]:
-        drv.on_event(e)
-    # restart_span fired exactly at step_started (e2) and user_message (e7).
-    assert calls == ["restart", "restart"]

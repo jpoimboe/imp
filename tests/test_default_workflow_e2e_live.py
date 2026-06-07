@@ -68,19 +68,15 @@ async def test_live_minimal_change_completes_one_step(
         "phases:\n"
         "  - name: only\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+        "      - {name: w, file: agents/writer.md, model_role: default}\n"
     )
     (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [anthropic]\n"
-        "tiers:\n"
-        "  low:    {anthropic: claude-sonnet-4-6}\n"
-        "  medium: {anthropic: claude-sonnet-4-6}\n"
-        "  high:   {anthropic: claude-sonnet-4-6}\n"
+        "roles:\n  default:\n    prefer: [{provider: anthropic, model: claude-sonnet-4-6}]\n"
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
     change = Change.create(
-        tmp_path, title="live-smoke", change_id="live-smoke", base_branch="main")
+        tmp_path, title="live-smoke", slug="live-smoke", base_branch="main")
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED

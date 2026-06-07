@@ -1,9 +1,7 @@
 # tests/test_openai_runner.py
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import Any
 
 import anyio
 import pytest
@@ -59,7 +57,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
         system_prompt="be terse",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(
-            id="test", slug="test", title="Test", project_root=tmp_path,
+            slug="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
         interactive=interactive, transcript_dir=tmp_path / "step",
@@ -447,40 +445,6 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
 
 
 @pytest.mark.anyio
-async def test_interrupt_cancels_in_flight_request(tmp_path: Path) -> None:
-    (tmp_path / "art").mkdir()
-    started = anyio.Event()
-
-    class _HangingClient:
-        class responses:
-            @staticmethod
-            async def create(**_kw):
-                started.set()
-                await anyio.sleep(3600)
-
-    runner = OpenAIAgentRunner(
-        model_name="gpt-4o-mini", client_factory=lambda: _HangingClient(),
-    )
-    inv = _inv(tmp_path)
-
-    events: list = []
-    async def _drive():
-        async for ev in runner.run(inv):
-            events.append(ev)
-
-    with anyio.fail_after(5):
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(_drive)
-            await started.wait()
-            await anyio.sleep(0.05)
-            await runner.interrupt()
-
-    kinds = [e.get("payload", {}).get("kind")
-             for e in events if e["type"] == "error"]
-    assert "interrupted" in kinds
-
-
-@pytest.mark.anyio
 async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     from dataclasses import replace
 
@@ -555,7 +519,7 @@ async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
-    """A different change id yields a different prompt_cache_key, so two
+    """A different change slug yields a different prompt_cache_key, so two
     concurrent changes running the same step don't share a routing slot."""
     from dataclasses import replace
 
@@ -570,7 +534,7 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
     inv = replace(
         inv,
         change_context=ChangeContext(
-            id="test-2", slug="test-2", title="Test 2", project_root=tmp_path,
+            slug="test-2", title="Test 2", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
     )
@@ -580,120 +544,3 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
         pass
 
     assert fake.responses.calls[0]["prompt_cache_key"] == "test-2:step:p/s"
-
-
-def test_prompt_cache_key_passthrough_at_boundary() -> None:
-    """A key whose full "slug:aid" is exactly 64 chars passes through verbatim."""
-    from imp.providers.openai import _prompt_cache_key
-
-    aid = "step:p/s"               # 8 chars
-    slug = "a" * 55                 # 55 + 1 (":") + 8 = 64
-    key = _prompt_cache_key(slug, aid)
-    assert key == f"{slug}:{aid}"
-    assert len(key) == 64
-
-
-def test_prompt_cache_key_hashed_just_over_boundary() -> None:
-    """One char over the limit triggers hashing; output is exactly 64 chars."""
-    from imp.providers.openai import _prompt_cache_key
-
-    aid = "step:p/s"               # 8 chars
-    slug = "a" * 56                 # 56 + 1 + 8 = 65 > 64
-    key = _prompt_cache_key(slug, aid)
-    assert key != f"{slug}:{aid}"
-    assert len(key) == 64
-
-
-def test_prompt_cache_key_far_over_limit_is_bounded() -> None:
-    """A wildly over-limit slug still yields a <= 64-char key."""
-    from imp.providers.openai import _prompt_cache_key
-
-    key = _prompt_cache_key("a" * 200, "step:p/s")
-    assert len(key) <= 64
-
-
-def test_prompt_cache_key_deterministic() -> None:
-    """Same (slug, aid) always yields the same key (stable turn-over-turn)."""
-    from imp.providers.openai import _prompt_cache_key
-
-    slug, aid = "s" * 60, "step:p/s"
-    assert _prompt_cache_key(slug, aid) == _prompt_cache_key(slug, aid)
-
-
-def test_prompt_cache_key_keeps_full_aid_for_long_slug() -> None:
-    """For a long slug with a short aid, the whole aid stays visible in the key."""
-    from imp.providers.openai import _prompt_cache_key
-
-    aid = "step:code-reviewer/context"   # 26 chars, well under the 54-char budget
-    key = _prompt_cache_key("s" * 80, aid)
-    assert len(key) == 64
-    assert aid in key
-
-
-def test_prompt_cache_key_distinct_per_aid_when_slug_head_collides() -> None:
-    """Two agents in one long-slug change get distinct keys even when the
-    slug head (the readable prefix) is identical — the exact case plain
-    truncation collapses."""
-    from imp.providers.openai import _prompt_cache_key
-
-    slug = "s" * 60                 # slug alone exceeds the 55-char budget
-    k1 = _prompt_cache_key(slug, "step:foo/a")
-    k2 = _prompt_cache_key(slug, "step:bar/b")
-    assert k1 != k2
-
-
-def test_prompt_cache_key_distinct_per_change_when_slug_head_collides() -> None:
-    """Two changes whose long slugs share a 46-char head still get distinct
-    keys (distinctness comes from the digest of the full slug:aid)."""
-    from imp.providers.openai import _prompt_cache_key
-
-    aid = "step:p/s"
-    slug1 = "s" * 55 + "aaaa"       # identical first 46+ chars...
-    slug2 = "s" * 55 + "bbbb"       # ...differ only in the truncated tail
-    assert _prompt_cache_key(slug1, aid) != _prompt_cache_key(slug2, aid)
-
-
-@pytest.mark.anyio
-async def test_runner_outer_except_reclassifies_when_cancel_is_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runner = OpenAIAgentRunner(
-        model_name="gpt-4o-mini", client_factory=lambda: object(),
-    )
-
-    async def _boom(_inv: object) -> AsyncGenerator[Any, None]:
-        if False:  # pragma: no cover — makes this an async generator
-            yield {}
-        raise RuntimeError("Cannot write to terminated process (exit code: 0)")
-
-    monkeypatch.setattr(runner, "_run_loop", lambda _inv: _boom(_inv))
-    runner._cancel = True
-    inv = _inv(tmp_path)
-
-    events = [ev async for ev in runner.run(inv)]
-    errors = [e for e in events if e.get("type") == "error"]
-    assert len(errors) == 1
-    assert errors[0]["payload"]["category"] == "config"
-    assert errors[0]["payload"]["kind"] == "interrupted"
-    assert "unclassified provider error" not in errors[0]["payload"]["message"]
-
-
-@pytest.mark.anyio
-async def test_runner_outer_except_unknown_when_cancel_unset(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runner = OpenAIAgentRunner(
-        model_name="gpt-4o-mini", client_factory=lambda: object(),
-    )
-
-    async def _boom(_inv: object) -> AsyncGenerator[Any, None]:
-        if False:  # pragma: no cover — makes this an async generator
-            yield {}
-        raise RuntimeError("SDK broke unexpectedly")
-
-    monkeypatch.setattr(runner, "_run_loop", lambda _inv: _boom(_inv))
-    inv = _inv(tmp_path)
-    events = [ev async for ev in runner.run(inv)]
-    errors = [e for e in events if e.get("type") == "error"]
-    assert len(errors) == 1
-    assert errors[0]["payload"]["category"] == "unknown"

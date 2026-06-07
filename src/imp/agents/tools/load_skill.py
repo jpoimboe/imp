@@ -1,8 +1,8 @@
 """load_skill (spec §3) — auto-injected built-in, like complete_step. NOT a
 registry @imp_tool: built per-step by a factory and injected unconditionally in
 each provider's _build_tools, so any agent can call it. It advertises no skill
-names (the agent's own prompt names the skill). Reads from the Change's tracked
-workflow dir at <change.workflow_dir>/skills/<name>.md and emits a skill_load event."""
+names (the agent's own prompt names the skill). Reads from the Change snapshot
+at <change.workflow_dir>/skills/<name>.md and emits a skill_load event."""
 
 from __future__ import annotations
 

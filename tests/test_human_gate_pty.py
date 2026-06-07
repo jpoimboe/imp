@@ -60,12 +60,10 @@ def _seed_human_gate_workflow(root: Path) -> None:
                   - {label: yes, continue: true}
                   - {label: no, pause: true}
     """))
-    # No LLM calls happen (no agent steps), but the loader requires a valid config.
+    # No LLM calls happen (no agent steps), but the loader requires a default role.
     (root / "imp" / "config.yaml").write_text(
-        "providers: [anthropic]\n"
-        "tiers:\n  low: {anthropic: claude-3-5-haiku-20241022}\n"
-        "  medium: {anthropic: claude-3-5-haiku-20241022}\n"
-        "  high: {anthropic: claude-3-5-haiku-20241022}\n"
+        "roles:\n"
+        "  default: {prefer: [{provider: anthropic, model: claude-3-5-haiku-20241022}]}\n"
     )
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")

@@ -26,9 +26,7 @@ if TYPE_CHECKING:
 
 import filelock
 
-Status = Literal[
-    "running", "paused", "completed", "errored", "merge_blocked", "abandoned"
-]
+Status = Literal["running", "paused", "completed", "errored", "merge_blocked"]
 
 
 @dataclass
@@ -45,7 +43,7 @@ class CurrentStep:
 
 @dataclass
 class State:
-    id: str
+    slug: str
     step: str | None
     step_attempt: int
     status: Status
@@ -54,32 +52,30 @@ class State:
     current_step: CurrentStep | None = None
     retry_feedback: dict[str, Any] | None = None
     resume_pending: str | None = None
-    resolved_tiers: dict[str, ProviderModel] | None = None
-    resolved_steps: dict[str, ProviderModel] | None = None
+    pending_rename: str | None = None
+    resolved_roles: dict[str, ProviderModel] | None = None
+    model_tiers: tuple[str, ...] | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
         from imp.providers.config import ProviderModel  # local: avoid import cycle
         data = json.loads((state_dir / "state.json").read_text())
         cur = data.pop("current_step", None)
-        raw_rt = data.pop("resolved_tiers", None)
+        raw_rr = data.pop("resolved_roles", None)
         # Preserve None (not yet resolved) vs a dict (resolved). A `... or {}`
         # would map null→{}, defeating the executor's `is None` compute-if-absent
         # check. None still avoids the `.items()`-on-None crash because we guard.
-        resolved_tiers = (
-            {tier: ProviderModel(**pm) for tier, pm in raw_rt.items()}
-            if raw_rt is not None else None
+        resolved_roles = (
+            {role: ProviderModel(**pm) for role, pm in raw_rr.items()}
+            if raw_rr is not None else None
         )
-        raw_rs = data.pop("resolved_steps", None)
-        resolved_steps = (
-            {step: ProviderModel(**pm) for step, pm in raw_rs.items()}
-            if raw_rs is not None else None
-        )
+        raw_mt = data.pop("model_tiers", None)
+        model_tiers = tuple(raw_mt) if raw_mt is not None else None
         return cls(
             **data,
             current_step=CurrentStep.from_dict(cur) if cur else None,
-            resolved_tiers=resolved_tiers,
-            resolved_steps=resolved_steps,
+            resolved_roles=resolved_roles,
+            model_tiers=model_tiers,
         )
 
     def save(self, state_dir: Path) -> None:
@@ -87,7 +83,7 @@ class State:
         state_dir.mkdir(parents=True, exist_ok=True)
         target = state_dir / "state.json"
         payload = {
-            "id": self.id,
+            "slug": self.slug,
             "step": self.step,
             "step_attempt": self.step_attempt,
             "status": self.status,
@@ -96,15 +92,14 @@ class State:
             "current_step": self.current_step.to_dict() if self.current_step else None,
             "retry_feedback": self.retry_feedback,
             "resume_pending": self.resume_pending,
-            "resolved_tiers": (
-                {t: {"provider": pm.provider, "model": pm.model}
-                 for t, pm in self.resolved_tiers.items()}
-                if self.resolved_tiers is not None else None
+            "pending_rename": self.pending_rename,
+            "resolved_roles": (
+                {r: {"provider": pm.provider, "model": pm.model}
+                 for r, pm in self.resolved_roles.items()}
+                if self.resolved_roles is not None else None
             ),
-            "resolved_steps": (
-                {s: {"provider": pm.provider, "model": pm.model}
-                 for s, pm in self.resolved_steps.items()}
-                if self.resolved_steps is not None else None
+            "model_tiers": (
+                list(self.model_tiers) if self.model_tiers is not None else None
             ),
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
@@ -162,8 +157,7 @@ class EventLog(Protocol):
                             message: Message) -> dict[str, Any]: ...
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],
-                            stop_reason: Any,
-                            auth_mode: str | None = None) -> dict[str, Any]: ...
+                            stop_reason: Any) -> dict[str, Any]: ...
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any) -> dict[str, Any]: ...
     def append_tool_result(self, *, agent_id: str | None,
@@ -173,9 +167,6 @@ class EventLog(Protocol):
     def append(self, *, agent_id: str | None, type: str,
                payload: dict[str, Any]) -> dict[str, Any]: ...
     def read(self) -> Iterator[dict[str, Any]]: ...
-    def update_last_llm_response_usage(
-        self, *, agent_id: str, usage: dict[str, Any],
-    ) -> None: ...
 
 
 class _BaseEventLog:
@@ -272,16 +263,11 @@ class _BaseEventLog:
 
     def append_llm_response(self, *, agent_id: str | None, provider: str,
                             model: str, raw: Any, usage: dict[str, Any],
-                            stop_reason: Any,
-                            auth_mode: str | None = None) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "provider": provider, "model": model, "raw": raw,
-            "usage": usage, "stop_reason": stop_reason,
-        }
-        if auth_mode is not None:
-            payload["auth_mode"] = auth_mode
+                            stop_reason: Any) -> dict[str, Any]:
         return self._emit(
-            agent_id=agent_id, type="llm_response", payload=payload)
+            agent_id=agent_id, type="llm_response",
+            payload={"provider": provider, "model": model, "raw": raw,
+                     "usage": usage, "stop_reason": stop_reason})
 
     def append_tool_call(self, *, agent_id: str | None,
                          block: Any) -> dict[str, Any]:
@@ -345,19 +331,6 @@ class JsonlEventLog(_BaseEventLog):
                 except json.JSONDecodeError:
                     yield {"_malformed": True, "raw": line}
 
-    def update_last_llm_response_usage(
-        self, *, agent_id: str, usage: dict[str, Any],
-    ) -> None:
-        # JsonlEventLog is append-only on disk. Write a usage-patch row so
-        # read_telemetry can fold it into the preceding llm_response totals.
-        # NOT a second llm_response — that would double-count under telemetry's
-        # one-response-per-turn invariant.
-        self._persist({
-            "type": "llm_response_usage_patch",
-            "agent_id": agent_id,
-            "payload": {"usage": usage},
-        })
-
     def events_for_current_step(self, step_name: str) -> Iterable[dict[str, Any]]:
         """Replay-helper for `imp resume`: yield events from the last
         `step_started` for `step_name` until the next different step starts.
@@ -392,21 +365,6 @@ class InMemoryEventLog(_BaseEventLog):
 
     def read(self) -> Iterator[dict[str, Any]]:
         yield from list(self._events)
-
-    def update_last_llm_response_usage(
-        self, *, agent_id: str, usage: dict[str, Any],
-    ) -> None:
-        for ev in reversed(self._events):
-            if ev.get("type") == "llm_response" and ev.get("agent_id") == agent_id:
-                payload = ev.setdefault("payload", {})
-                existing = payload.get("usage") or {}
-                # Merge: codex emits full usage at turn.completed; the prior
-                # llm_response (from item:agent_message) carries no usage.
-                payload["usage"] = {**existing, **usage}
-                return
-        raise RuntimeError(
-            f"no prior llm_response for agent_id={agent_id!r} to attach usage to"
-        )
 
 
 class LockHeld(Exception):

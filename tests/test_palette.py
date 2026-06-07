@@ -8,47 +8,6 @@ import pytest
 from imp.cli import palette as pal
 
 
-@pytest.fixture(autouse=True)
-def _reset_theme():
-    """Every test starts from the default `ansi` theme; restore it after, so a
-    test that flips to dark/light can't leak truecolor codes into the next."""
-    pal.set_theme("ansi")
-    yield
-    pal.set_theme("ansi")
-
-
-def test_default_theme_is_ansi_named_codes() -> None:
-    assert pal.active_theme() == "ansi"
-    assert pal._ANSI["magenta"] == "\x1b[35m"
-    assert pal._ANSI["gray"] == "\x1b[90m"
-
-
-def test_dark_theme_emits_truecolor() -> None:
-    pal.set_theme("dark")
-    assert pal.active_theme() == "dark"
-    # magenta becomes the custom muted-mauve truecolor sequence (#a884b5), not the
-    # named code.
-    assert pal._ANSI["magenta"] == "\x1b[38;2;168;132;181m"
-    assert pal.ansi("hi", "magenta", enabled=True) == "\x1b[38;2;168;132;181mhi\x1b[0m"
-    # attributes are theme-independent.
-    assert pal._ANSI["bold"] == "\x1b[1m"
-
-
-def test_light_theme_differs_from_dark() -> None:
-    pal.set_theme("dark")
-    dark = pal._ANSI["green"]
-    pal.set_theme("light")
-    light = pal._ANSI["green"]
-    assert dark != light
-    assert light.startswith("\x1b[38;2;")    # still truecolor, different RGB
-
-
-def test_unknown_theme_falls_back_to_ansi() -> None:
-    pal.set_theme("rainbow")
-    assert pal.active_theme() == "ansi"
-    assert pal._ANSI["cyan"] == "\x1b[36m"
-
-
 def test_ansi_disabled_returns_plain() -> None:
     assert pal.ansi("hi", "red", enabled=False) == "hi"
 
@@ -124,9 +83,9 @@ def test_fold_glyphs_default_unicode() -> None:
 def test_node_colors_calm_scheme() -> None:
     # The most frequent content is calmest; weight/color go to identity + structure.
     assert pal.NODE_COLORS["agent"] == ()                  # plain default fg (was bold)
-    assert pal.NODE_COLORS["user"] == ("bright_blue",)     # bright-blue caret marks user turn
-    assert pal.NODE_COLORS["phase"] == ("bold", "blue")    # structure stands out: bold blue
-    assert pal.NODE_COLORS["step"] == ("bold", "step")     # bold darker-blue "mini-phase" label
+    assert pal.NODE_COLORS["user"] == ("green",)           # readable human (was blue)
+    assert pal.NODE_COLORS["phase"] == ("cyan",)           # recedes (was bold blue)
+    assert pal.NODE_COLORS["step"] == ("gray",)            # navigational chrome (was cyan)
     assert pal.NODE_COLORS["subagent"] == ("magenta",)     # unchanged
     assert pal.NODE_COLORS["workflow"] == ("bold", "magenta")  # lone bold anchor, unchanged
     # Semantic colors untouched.
@@ -138,19 +97,3 @@ def test_node_colors_calm_scheme() -> None:
 def test_agent_color_is_empty_so_ansi_is_passthrough() -> None:
     # agent = () means pal.ansi returns prose unwrapped even when color is on.
     assert pal.ansi("prose", *pal.NODE_COLORS["agent"], enabled=True) == "prose"
-
-
-def test_user_color_is_bright_blue_foreground() -> None:
-    # User-turn identity is now a bright-blue FOREGROUND caret (not a bg fill):
-    # the live prompt (slash/prompt) and the imp-log replay both reference this.
-    assert pal.NODE_COLORS["user"] == ("bright_blue",)
-    assert pal._ANSI["bright_blue"] == "\x1b[94m"
-
-
-def test_caret_and_rule_helpers() -> None:
-    # The input-field chrome: a bright-blue caret and a gray rule, both plain
-    # when color is disabled (the rule's dashes are structural, kept regardless).
-    assert pal.caret(enabled=True) == "\x1b[94m> \x1b[0m"
-    assert pal.caret(enabled=False) == "> "
-    assert pal.rule(4, enabled=True) == "\x1b[90m────\x1b[0m"
-    assert pal.rule(4, enabled=False) == "────"

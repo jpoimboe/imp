@@ -32,9 +32,6 @@ Review the task's diff for code quality. Evaluate:
 - Do tests verify behavior (not just mock behavior)?
 - Are tests comprehensive and meaningful?
 - Do tests cover edge cases?
-- **Falsifiability** — could each test be green if the feature were broken? A test
-  whose expected value merely echoes the implementation (plan-echo) verifies
-  transcription, not behavior. Flag it as **Major** — a test gap.
 
 **Design:**
 - No magic numbers — constants should be named

@@ -218,7 +218,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
     if "task" in invocation.agent_def.tools:
-        out["task"] = make_task_tool(invocation.tiers)
+        out["task"] = make_task_tool(invocation.model_tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     return out
@@ -311,8 +311,8 @@ def _wrap_one(
                         "subagent_name": args["subagent_name"],
                         "task_description": args["task_description"],
                     }
-                    if args.get("tier"):
-                        task_input["tier"] = args["tier"]
+                    if args.get("model_tier"):
+                        task_input["model_tier"] = args["model_tier"]
                     tc_ev = ctx.event_log.append_tool_call(
                         agent_id=state.agent_id,
                         block=ToolUseBlock(id=tu_id, name="task", input=task_input))
@@ -320,7 +320,7 @@ def _wrap_one(
                 result = await dispatch_task(
                     ctx, args["subagent_name"], args["task_description"],
                     tool_call_event_id=tc_event_id,
-                    tier=args.get("tier"),
+                    model_tier=args.get("model_tier"),
                 )
                 return _tool_response(result, is_error=False)
             if name == "complete_step":
@@ -390,13 +390,8 @@ def _stream_history(messages: list[Message]) -> Any:
     Streaming chunks from claude-p (thinking, then text, then tool_use) land
     in transcript.jsonl as separate assistant messages — the persistence path
     runs once per yielded SDK message. The Anthropic API rejects consecutive
-    same-role turns ("tool use concurrency issues"), so we fold streamed
-    fragments back into one message per logical turn before replay. This applies
-    to BOTH roles: an interrupted turn can leave consecutive *user* messages too
-    (a tool_result, then claude-p's "[Request interrupted by user]" marker, then
-    imp's complete_step nudge — see change 2026-06-06-06x3ml), and replaying
-    three user turns in a row trips the same 400.
-
+    assistant turns ("tool use concurrency issues"), so we fold streamed
+    fragments back into one assistant message per logical turn before replay.
     Drop empty assistant content (thinking-only fragments after we extracted
     the thinking blocks) since "assistant with no content" is also invalid.
     """
@@ -408,9 +403,9 @@ def _merge_assistant_fragments(messages: list[Message]) -> list[Message]:
     for m in messages:
         if m.role == "assistant" and not m.content:
             continue
-        if out and out[-1].role == m.role and m.role in ("assistant", "user"):
+        if m.role == "assistant" and out and out[-1].role == "assistant":
             out[-1] = Message(
-                role=m.role,
+                role="assistant",
                 content=out[-1].content + m.content,
             )
         else:
@@ -699,19 +694,6 @@ class ClaudeCodeAgentRunner:
         disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t not in exempt]
         return ClaudeAgentOptions(
             model=self.model,
-            # The claude_code provider drives the `claude` CLI, which
-            # authenticates via its OWN backend (OAuth/subscription, Vertex, or
-            # Bedrock). ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN are the
-            # *external-key* auth path used by the direct-SDK `anthropic`
-            # provider — never by claude_code. If either is present in the
-            # parent env, claude switches to it as an external key; a bogus or
-            # mismatched value then fails with "Invalid API key · Fix external
-            # API key" (exit 0, surfaced as assistant text → AuthError → empty
-            # review). The SDK merges options.env OVER the inherited env, and an
-            # empty string makes claude fall back to its backend auth (verified
-            # live), so blank both here to make the nested claude immune to
-            # whatever ANTHROPIC_* the parent process happens to export.
-            env={"ANTHROPIC_API_KEY": "", "ANTHROPIC_AUTH_TOKEN": ""},
             # Pin the `claude` subprocess to the change's project_root. Without
             # this the SDK launches claude with cwd=None and leaves $PWD as
             # inherited, so claude keys off a stale $PWD and edits/commits the
@@ -744,15 +726,6 @@ class ClaudeCodeAgentRunner:
             return
         except Exception as exc:
             raise_if_suspended(exc)
-            if self._cancel:
-                # Interrupt fired before the SDK transport raised. Reclassify to
-                # the same `interrupted` event the in-loop _cancel check emits.
-                yield {"type": "error", "payload": {
-                    "category": "config",
-                    "kind": "interrupted",
-                    "message": "runner cancelled by interrupt",
-                }}
-                return
             yield perr.make_unknown_error_event(exc)
             return
 
@@ -775,12 +748,11 @@ class ClaudeCodeAgentRunner:
         )
         ctx.change_context = invocation.change_context
         ctx.change_state = invocation.change_state
-        ctx.change = invocation.change          # live Change for rename_change
         ctx.spawn_subagent = spawn_subagent_via_registry
-        ctx.resolved_tiers = invocation.resolved_tiers
+        ctx.resolved_roles = invocation.resolved_roles
         ctx.subagent_depth = invocation.subagent_depth
         ctx.coordinator = invocation.coordinator
-        ctx.tiers = invocation.tiers
+        ctx.model_tiers = invocation.model_tiers
         ctx.lint_command = invocation.lint_command
         ctx.test_command = invocation.test_command
         ctx.non_interactive = invocation.non_interactive
@@ -1071,20 +1043,11 @@ class ClaudeCodeAgentRunner:
                         # handling so a detected loop wins over a nudge.
                         flushed = _flush_pending()
                         if flushed is not None:
-                            if invocation.interactive and not flushed.tools:
-                                # Human handoff: a pure-text turn awaiting fresh
-                                # human input is not an autonomous loop iteration,
-                                # so reset rather than observe — normal multi-turn
-                                # conversation must not trip no_progress. A
-                                # tool-bearing interactive turn still observes, so
-                                # an interactive re-read loop is still caught.
-                                guard.note_external_input()
-                            else:
-                                loop_err = guard.observe(flushed)
-                                if loop_err is not None:
-                                    yield perr.make_error_event(
-                                        loop_err, kind=getattr(loop_err, "kind", ""))
-                                    return
+                            loop_err = guard.observe(flushed)
+                            if loop_err is not None:
+                                yield perr.make_error_event(
+                                    loop_err, kind=getattr(loop_err, "kind", ""))
+                                return
 
                         # End-of-turn:
                         #   a) complete_step captured → emit agent_output, return
@@ -1146,20 +1109,6 @@ class ClaudeCodeAgentRunner:
                             next_text = cont(last_text)
                             if inspect.isawaitable(next_text):
                                 next_text = await next_text
-                            if self._interrupted():
-                                # The interrupt landed while we were resolving the
-                                # continuation. Don't nudge the model to keep going
-                                # after a Ctrl-C — pause at the turn boundary.
-                                # Without this the nudge + re-query proceeds and the
-                                # cancel is only caught later at the no-result
-                                # fallthrough, after a wasted round-trip that
-                                # surfaces a spurious `network` warning.
-                                yield {"type": "error", "payload": {
-                                    "category": "config",
-                                    "kind": "interrupted",
-                                    "message": "runner cancelled by interrupt",
-                                }}
-                                return
                             if next_text is None:
                                 yield {"type": "error", "payload": {
                                     "category": "agent_incomplete",
@@ -1225,23 +1174,8 @@ class ClaudeCodeAgentRunner:
                 break
 
         # Fell out of the async-with block without yielding a ResultMessage.
-        # If we were cancelled (Ctrl-C), the subprocess was torn down mid-turn
-        # and the re-query's receive_response yields nothing — so the per-message
-        # cancel check above never runs. Report the cancellation here too, as
-        # `config`/interrupted (a Pause), NOT `network` (a retry): auto-retrying
-        # an interrupted turn replays a transcript the API rejects with a 400
-        # ("tool use concurrency issues"). See change 2026-06-06-06x3ml.
-        if self._cancel:
-            yield {"type": "error", "payload": {
-                "category": "config",
-                "kind": "interrupted",
-                "message": "runner cancelled by interrupt",
-            }}
-            return
-
-        # Otherwise this is a genuine early close. Use the diagnostics captured
-        # inside the block (transport was live). Classification stays `network`
-        # (retryable).
+        # Use the diagnostics captured inside the block (transport was live).
+        # Classification stays `network` (retryable).
         diag = self._last_no_result_diag
         message = "SDK closed without yielding a ResultMessage"
         if diag:
@@ -1253,18 +1187,11 @@ class ClaudeCodeAgentRunner:
             "detail": diag,
         }}
 
-    def _interrupted(self) -> bool:
-        """Read the cancel flag through a call so mypy doesn't narrow it to a
-        constant after the per-message guard. interrupt() flips `_cancel` from
-        another task, which mypy's flow analysis can't model — without this
-        indirection the mid-turn cancel check reads as unreachable."""
-        return self._cancel
-
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
         if self._ctx is not None:
-            await terminate_running_processes(self._ctx)
+            await terminate_running_processes(self._ctx, timeout=2.0)
 
 
 class ClaudeCodeProvider:

@@ -1,7 +1,7 @@
 """Prompt template rendering for agent .md bodies.
 
 Three namespaces (spec §7.5):
-  change.id — stable identity; change.slug / change.title — derived display name
+  change.slug / change.title — change identity
   events.<step-name>.<field> — validated agent_output of prior step;
       missing steps render as empty (lenient-within)
   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
@@ -68,9 +68,9 @@ class _EventsNamespace:
 
 @dataclass(frozen=True, slots=True)
 class _ChangeNamespace:
-    id: str
     slug: str
     title: str
+    auto_titled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,11 +81,15 @@ class PromptContext:
 
 
 def build_context(
-    change_slug: str, change_title: str, event_log: EventLog,
-    *, change_id: str = "", vars: dict[str, Any] | None = None,
+    change_slug: str, change_title: str,
+    event_log: EventLog,
+    *, change_auto_titled: bool = False,
+    vars: dict[str, Any] | None = None,
 ) -> PromptContext:
     return PromptContext(
-        change=_ChangeNamespace(id=change_id, slug=change_slug, title=change_title),
+        change=_ChangeNamespace(
+            slug=change_slug, title=change_title, auto_titled=change_auto_titled,
+        ),
         events=_EventsNamespace(event_log),
         vars=dict(vars or {}),
     )

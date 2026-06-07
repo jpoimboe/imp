@@ -123,89 +123,6 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_cancelled_no_result_yields_interrupted_not_network(
-    tmp_path: Path,
-) -> None:
-    """Ctrl-C tears down the claude subprocess; the re-query's receive_response
-    then yields zero messages and the runner falls through the no-result path.
-    When the runner was cancelled, that fallthrough MUST report the cancellation
-    (config/interrupted -> Pause), not a retryable `network`/no_result_message
-    error. A `network` classification auto-retries and replays the interrupted
-    transcript, which the API rejects with a 400 ("tool use concurrency issues").
-
-    Regression for change 2026-06-06-06x3ml: Ctrl-C surfaced as a network error
-    + retry + 400 pause instead of a clean interrupt pause.
-    """
-    (tmp_path / "art").mkdir()
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        # Dead subprocess: receive_response yields nothing, no ResultMessage.
-        return FakeClaudeSDKClient(opts, scripted_messages=[])
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory,
-    )
-    await runner.interrupt()  # the SIGINT-driven cancel that already fired
-
-    inv = _inv(tmp_path)
-    events = [ev async for ev in runner.run(inv)]
-
-    errs = [e for e in events if e["type"] == "error"]
-    assert len(errs) == 1, errs
-    assert errs[0]["payload"]["category"] == "config", errs[0]["payload"]
-    assert errs[0]["payload"]["kind"] == "interrupted", errs[0]["payload"]
-
-
-@pytest.mark.anyio
-async def test_cancel_during_continuation_skips_nudge_and_requery(
-    tmp_path: Path,
-) -> None:
-    """If the interrupt lands while imp is resolving the end-of-turn
-    continuation (the complete_step nudge), the runner must pause at the turn
-    boundary instead of appending the nudge and re-querying. Skipping the doomed
-    re-query is what suppresses the spurious `[network] SDK closed` warning a
-    user sees after Ctrl-C.
-
-    Distinguishing signal: exactly ONE query reached the client (the initial
-    history replay, no nudge re-query).
-    """
-    from dataclasses import replace
-
-    (tmp_path / "art").mkdir()
-
-    scripted = [
-        assistant(text("thinking about the plan")),  # no complete_step
-        result(),
-    ]
-    created: list[FakeClaudeSDKClient] = []
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
-        created.append(c)
-        return c
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory,
-    )
-
-    def cancelling_cont(_last_text: str) -> str:
-        # The Ctrl-C lands here, mid-continuation.
-        runner._cancel = True
-        return "You ended your turn without calling complete_step"
-
-    inv = replace(_inv(tmp_path), continuation_fn=cancelling_cont)
-    events = [ev async for ev in runner.run(inv)]
-
-    errs = [e for e in events if e["type"] == "error"]
-    assert len(errs) == 1, errs
-    assert errs[0]["payload"]["category"] == "config", errs[0]["payload"]
-    assert errs[0]["payload"]["kind"] == "interrupted", errs[0]["payload"]
-    # The nudge re-query must NOT have fired: only the initial history replay.
-    assert len(created[0].queries) == 1, (
-        f"expected no re-query after cancel, got {created[0].queries}")
-
-
-@pytest.mark.anyio
 async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
     """Pre-populate transcript with a user/assistant/user(tool_result) sequence;
     runner skips initial_messages and replays history via client.query."""
@@ -678,67 +595,33 @@ async def test_interactive_requery_across_two_receive_rounds_no_error(tmp_path: 
 
 
 def test_claude_code_provider_registered_and_resolves() -> None:
-    """The claude_code provider is registered eagerly; resolve_run picks it up
+    """The claude_code provider is registered eagerly; resolve_role picks it up
     when claude is on PATH."""
     import importlib
     import shutil
-    from pathlib import Path
 
     import imp.providers
-    from imp.engine.types import (
-        AgentDef,
-        OutputField,
-        OutputSchema,
-        Pause,
-        Phase,
-        SourceLoc,
-        Step,
-        Vars,
-        Workflow,
-        WorkflowDefaults,
-    )
     from imp.providers import resolve
     from imp.providers.claude_code import ClaudeCodeProvider
-    from imp.providers.config import Config
+    from imp.providers.config import ProviderModel, RoleConfig
 
+    # importlib.reload re-runs the package's top-level register_provider
+    # calls. import_module would be a no-op since the module is already
+    # cached in sys.modules.
     resolve.reset_providers_for_tests()
     importlib.reload(imp.providers)
 
-    src = SourceLoc(file=Path("w.yaml"), line=1)
-    cfg = Config(
-        providers=("claude_code",),
-        tiers={
-            "low":    {"claude_code": "claude-haiku-4-5"},
-            "medium": {"claude_code": "claude-sonnet-4-5"},
-            "high":   {"claude_code": "claude-opus-4"},
-        },
+    role = RoleConfig(
+        name="r", prefer=(ProviderModel(provider="claude_code", model="claude-sonnet-4-5"),),
     )
-    agent = AgentDef(
-        name="a", description="", tools=frozenset(), subagents=(),
-        output_schema=OutputSchema(
-            fields=(OutputField(name="status", type="enum",
-                                values=("Success", "Error")),), source=src),
-        prompt_template_source="", source_path=Path("a.md"), source=src)
-    step = Step(name="s", phase="p", kind="agent", rules=(), options=(),
-                on_max_retries=Pause(), max_loops=6, source=src,
-                file=Path("agents/a.md"), tier="medium")
-    wf = Workflow(
-        name="w", description="",
-        phases=(Phase(name="p", steps=(step,), source=src),),
-        vars=Vars(decls=()),
-        defaults=WorkflowDefaults(max_retries=0, on_max_retries=Pause()),
-        agents={"a": agent}, workflow_dir=Path("."), source=src)
-
     if shutil.which("claude") is None:
         # Not on PATH — resolve should fail with ProviderUnavailable.
         with pytest.raises(resolve.ProviderUnavailable):
-            resolve.resolve_run(wf, cfg)
+            resolve.resolve_role(role)
         return
 
-    resolved_tiers, _, _ = resolve.resolve_run(wf, cfg)
-    pm = resolved_tiers["medium"]
-    assert pm.provider == "claude_code"
-    provider = resolve.provider_from_model(pm)
+    provider = resolve.resolve_role(role)
+    assert provider.name == "claude_code"
     assert isinstance(provider, ClaudeCodeProvider)
 
 
@@ -769,55 +652,4 @@ async def test_runner_translates_unknown_sdk_exception_to_unknown_event(
     assert len(error_events) == 1, (
         f"expected 1 error event, got {[e.get('payload', {}) for e in error_events]}"
     )
-    assert error_events[0]["payload"]["category"] == "unknown"
-
-
-@pytest.mark.anyio
-async def test_runner_outer_except_reclassifies_when_cancel_is_set(
-    tmp_path: Path,
-) -> None:
-    """When `_cancel` is True (interrupt fired before the SDK exception
-    bubbled), the outer `except Exception` must emit the same `interrupted`
-    error event the in-loop check emits — NOT `unclassified provider error`."""
-    class _ExplodingClient:
-        async def __aenter__(self) -> None:
-            raise RuntimeError("Cannot write to terminated process (exit code: 0)")
-        async def __aexit__(self, *args: object) -> None:
-            return None
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-6",
-        client_factory=lambda _opts: _ExplodingClient(),
-    )
-    runner._cancel = True
-    inv = _inv(tmp_path)
-
-    events = [ev async for ev in runner.run(inv)]
-    error_events = [e for e in events if e.get("type") == "error"]
-    assert len(error_events) == 1
-    payload = error_events[0]["payload"]
-    assert payload["category"] == "config"
-    assert payload["kind"] == "interrupted"
-    assert "unclassified provider error" not in payload["message"]
-
-
-@pytest.mark.anyio
-async def test_runner_outer_except_unknown_when_cancel_unset(
-    tmp_path: Path,
-) -> None:
-    """Regression guard: with `_cancel` False the unknown-classifier path runs."""
-    class _ExplodingClient:
-        async def __aenter__(self) -> None:
-            raise RuntimeError("SDK broke unexpectedly")
-        async def __aexit__(self, *args: object) -> None:
-            return None
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-6",
-        client_factory=lambda _opts: _ExplodingClient(),
-    )
-    inv = _inv(tmp_path)
-    events = [ev async for ev in runner.run(inv)]
-    error_events = [e for e in events if e.get("type") == "error"]
-    assert len(error_events) == 1
     assert error_events[0]["payload"]["category"] == "unknown"

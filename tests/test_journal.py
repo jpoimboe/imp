@@ -29,17 +29,17 @@ def _init_repo(root: Path) -> None:
     _git(root, "commit", "-qm", "seed")
 
 
-def test_journal_ids_empty_when_ref_absent(tmp_path: Path) -> None:
+def test_journal_slugs_empty_when_ref_absent(tmp_path: Path) -> None:
     _init_repo(tmp_path)
-    assert journal.journal_ids(tmp_path) == []
+    assert journal.journal_slugs(tmp_path) == []
 
 
-def test_journal_ids_not_a_repo_returns_empty(tmp_path: Path) -> None:
+def test_journal_slugs_not_a_repo_returns_empty(tmp_path: Path) -> None:
     # No git repo at all: must degrade to [] rather than raising.
-    assert journal.journal_ids(tmp_path) == []
+    assert journal.journal_slugs(tmp_path) == []
 
 
-def test_journal_ids_and_show_roundtrip(tmp_path: Path) -> None:
+def test_journal_slugs_and_show_roundtrip(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     stage = tmp_path / ".imp"
     stage.mkdir(exist_ok=True)
@@ -49,7 +49,7 @@ def test_journal_ids_and_show_roundtrip(tmp_path: Path) -> None:
     cj.write_text('{"slug":"alpha","title":"Alpha"}')
     wt.journal_commit(tmp_path, "alpha", {"events.jsonl": ev, "change.json": cj})
 
-    assert journal.journal_ids(tmp_path) == ["alpha"]
+    assert journal.journal_slugs(tmp_path) == ["alpha"]
     assert journal.journal_show(tmp_path, "alpha", "events.jsonl") == b'{"type":"change_created"}\n'
     assert (
         journal.journal_show(tmp_path, "alpha", "change.json")

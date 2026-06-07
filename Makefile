@@ -14,14 +14,6 @@ PYTEST   ?= $(PYTHON) -m pytest
 RUFF     ?= $(PYTHON) -m ruff
 MYPY     ?= $(PYTHON) -m mypy
 
-# Subprocess tests (`python -m imp ...`, cold-import checks) resolve `imp` via
-# the editable install — which inside a git worktree points at the MAIN checkout,
-# not this tree, so they'd run stale code. Pin spawned subprocesses to THIS
-# checkout's src. Absolute ($(CURDIR)) because a relative path breaks tests that
-# chdir to a tmpdir; prepended so an ambient PYTHONPATH is preserved after it. A
-# no-op in the main checkout (same dir the editable install already resolves).
-PYTEST_PYTHONPATH := PYTHONPATH=$(CURDIR)/src$${PYTHONPATH:+:$$PYTHONPATH}
-
 # Where to source ANTHROPIC_API_KEY from for live tests, when it's not
 # already exported in the shell. Override with KEY_FILE=... if you keep
 # your key somewhere else.
@@ -42,11 +34,11 @@ install: ## Editable install of imp + dev deps (pytest, ruff, mypy).
 
 .PHONY: test
 test: ## Fast test suite (skips live-API tests). What CI runs.
-	IMP_LIVE_PROVIDERS= $(PYTEST_PYTHONPATH) $(PYTEST) -q
+	IMP_LIVE_PROVIDERS= $(PYTEST) -q
 
 .PHONY: test-verbose
 test-verbose: ## Same as `test` but with -v.
-	IMP_LIVE_PROVIDERS= $(PYTEST_PYTHONPATH) $(PYTEST) -v
+	IMP_LIVE_PROVIDERS= $(PYTEST) -v
 
 _LIVE_TEST_FILES := \
   tests/test_default_workflow_e2e_live.py \
@@ -57,35 +49,32 @@ _LIVE_TEST_FILES := \
 .PHONY: test-live
 test-live: ## Run live-API tests for providers opted in via IMP_LIVE_PROVIDERS.
 	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
+	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
 	    timeout --foreground 1800 $(PYTEST) -v $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-verbose
 test-live-verbose: ## test-live but with live progress + raw PTY output streamed to your terminal.
 	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
+	  IMP_RUN_LIVE_TESTS=1 IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
+	  IMP_PTY_TRACE=1 \
 	    timeout --foreground 1800 $(PYTEST) -s -v $(_LIVE_TEST_FILES)
 
 .PHONY: test-live-quick
 test-live-quick: ## One-step live test for the first opted-in provider only.
 	@$(_REQUIRE_PROVIDERS) && \
-	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" $(PYTEST_PYTHONPATH) \
+	  IMP_LIVE_PROVIDERS="$$IMP_LIVE_PROVIDERS" \
 	    $(PYTEST) -v \
 	      tests/test_default_workflow_e2e_live.py \
 	      tests/test_default_workflow_e2e_live_openai.py \
 	      tests/test_default_workflow_e2e_live_claude_code.py
 
 .PHONY: test-dogfood
-test-dogfood: ## Dogfood imp on imp via --non-interactive against the first opted-in provider (costs real tokens).
-	IMP_RUN_DOGFOOD=1 $(PYTEST_PYTHONPATH) $(PYTEST) -q tests/test_default_workflow_dogfood_live.py
+test-dogfood: ## Dogfood imp on imp via PTY against the first opted-in provider (costs real tokens).
+	IMP_RUN_DOGFOOD=1 $(PYTEST) -q tests/test_default_workflow_dogfood_live.py
 
 .PHONY: test-dogfood-verbose
-test-dogfood-verbose: ## test-dogfood with -v and verbose output.
-	IMP_RUN_DOGFOOD=1 $(PYTEST_PYTHONPATH) $(PYTEST) -v -s tests/test_default_workflow_dogfood_live.py
-
-.PHONY: test-eval
-test-eval: ## Run the eval harness live (costs real tokens; set IMP_RUN_EVALS=1).
-	IMP_RUN_EVALS=1 $(PYTEST) -q tests/evals/test_harness_live.py tests/evals/test_e2e_live.py
+test-dogfood-verbose: ## test-dogfood with -v + raw PTY trace.
+	IMP_RUN_DOGFOOD=1 IMP_PTY_TRACE=1 $(PYTEST) -v -s tests/test_default_workflow_dogfood_live.py
 
 .PHONY: test-all
 test-all: test test-live ## Full suite including live tests.
@@ -119,14 +108,6 @@ clean: ## Remove build artifacts and caches.
 	rm -rf .pytest_cache/ .mypy_cache/ .ruff_cache/
 	find . -type d -name __pycache__ -not -path './.git/*' -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name '*.pyc' -not -path './.git/*' -delete
-
-.PHONY: snap-ui
-snap-ui: ## Render the full run-journal fixture to a PNG and open it. Extra: SNAP_ARGS="--limit 40".
-	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --open $(SNAP_ARGS)
-
-.PHONY: snap-ui-light
-snap-ui-light: ## Same as snap-ui but the light theme on a near-white surface.
-	$(PYTEST_PYTHONPATH) $(PYTHON) scripts/snap_imp_ui.py stream --theme light --out /tmp/imp_ui/stream-light.png --open $(SNAP_ARGS)
 
 
 # ── private helpers ─────────────────────────────────────────────────────────
@@ -168,7 +149,7 @@ define _REQUIRE_PROVIDERS
     echo "  IMP_LIVE_PROVIDERS=anthropic,openai,claude_code  (combine as desired)" >&2; \
     echo "" >&2; \
     echo "Note: per-provider one-step tests run for every provider listed." >&2; \
-    echo "      The full dogfood test uses only the FIRST provider in the list." >&2; \
+    echo "      The full PTY workflow test uses only the FIRST provider in the list." >&2; \
     exit 1; \
   fi; \
   IFS=',' read -r -a _provs <<< "$${IMP_LIVE_PROVIDERS}"; \

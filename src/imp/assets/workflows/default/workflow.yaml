@@ -2,13 +2,23 @@ name: feature
 description: |
   spec -> (plan -> implement*)* -> review -> merge
 
+model_rules:
+  # The whole-change author is the `implementer` subagent, dispatched at the
+  # `fast` tier (not a `model_role: code` step). So the final code-reviewer must
+  # differ from `fast` to see the change through a different provider (spec §11).
+  # NOTE: per-task reviewers (spec-task-reviewer/quality-reviewer at the `balanced`
+  # tier) get NO provider-diversity guarantee — model_rules govern step
+  # model_roles, not `task`-tier subagent dispatch. Accepted limitation of the C1
+  # design; the final code-reviewer carries the diversity guarantee for code.
+  code_review:  {differ_provider_from: fast}
 
-# The tier menu is config.tiers.keys() (always low/medium/high in this design).
-# `code-reviewer` carries the cross-vendor diversity guarantee via
-# `differ_from: task-lead` — the implementer subagent is dispatched by
-# `task-lead`, so the final code reviewer differs from the task-lead's
-# resolved (provider, model). Subagent dispatch (`task` tool) has no
-# diversity guarantee — accepted limitation (spec §11).
+# Tiers ARE roles (resolve.py:160): `fast`/`balanced`/`powerful` must be defined
+# in config.yaml `roles:` or resolution LoadErrors — `imp init` scaffolds all three
+# (cli/init.py). Note the indirection: the role NAMED `fast` maps to each provider's
+# `quick` MODEL tier (init `_ROLE_TIERS["fast"]="quick"`); `task_lead`/implementer
+# talk in `fast`/`balanced`. `code_review differ_provider_from: fast` (above) relies
+# on `fast` being one of these configured roles.
+model_tiers: [fast, balanced, powerful]
 
 vars:
   ready_to_merge:         {type: bool, default: false}
@@ -27,13 +37,14 @@ phases:
     steps:
       - name: spec-writer
         file: agents/spec-writer.md
-        tier: high
+        model_role: spec
         interactive: true
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/imp/specs/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
         rules:
+          - {if: {phase: drafting}, resume: spec-writer}    # used for rename at step boundary
           - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
       - name: spec-verify-commit
@@ -54,7 +65,7 @@ phases:
 
       - name: spec-reviewer
         file: agents/spec-reviewer.md
-        tier: high
+        model_role: spec_review
         rules:
           - {if: {blocking: true}, resume: spec-writer, feedback: "Here's review feedback to address:"}                            # rework loop
           - {else: true, set: {spec_final_review_done: true}, resume: spec-writer, feedback: "The spec was approved. Notes for a final polish pass:"} # clean -> one final polish pass
@@ -63,7 +74,7 @@ phases:
     steps:
       - name: plan-writer
         file: agents/plan-writer.md
-        tier: high
+        model_role: plan
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/imp/plans/**"], mode: allow}
@@ -87,7 +98,7 @@ phases:
 
       - name: plan-review
         file: agents/plan-reviewer.md
-        tier: high
+        model_role: plan_review
         rules:
           - {if: {blocking: true}, resume: plan-writer, feedback: "Here's review feedback to address:"}                            # rework loop
           - {else: true, set: {plan_final_review_done: true}, resume: plan-writer, feedback: "The plan was approved. Notes for a final polish pass:"} # clean -> one final polish pass
@@ -96,7 +107,7 @@ phases:
     steps:
       - name: task-lead
         file: agents/task-lead.md
-        tier: medium
+        model_role: task_lead
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           # implementer subagent inherits these. /project/** covers both code and
@@ -127,7 +138,7 @@ phases:
 
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
-        tier: medium        # Sonnet coverage judgment
+        model_role: task_lead        # balanced/Sonnet coverage judgment
         max_loops: 10                # plans-per-spec bound
         rules:
           - {if: {more_plans: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}     # supercycle
@@ -149,8 +160,7 @@ phases:
 
       - name: code-reviewer
         file: agents/code-reviewer.md
-        tier: high
-        differ_from: task-lead
+        model_role: code_review
         max_loops: 5                 # combined task_gap + plan_gap budget
         rules:
           - {if: {verdict: task_gap}, goto: implement, feedback: "The code reviewer found gaps to fix. Findings:"}      # carries findings
@@ -159,7 +169,7 @@ phases:
 
       - name: summarizer
         file: agents/summarizer.md
-        tier: high
+        model_role: code_review
 
       - name: final-review-gate
         rules:
@@ -168,7 +178,7 @@ phases:
 
       - name: final-review
         file: agents/final-review.md
-        tier: medium
+        model_role: task_lead
         interactive: true
         max_loops: 20                # interactive back-to-implement edge
         rules:

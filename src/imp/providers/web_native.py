@@ -31,12 +31,6 @@ _PROVIDER_WEB_SUPPORT: dict[str, frozenset[str]] = {
     "anthropic": frozenset({"web_search", "web_fetch"}),
     "claude_code": frozenset({"web_search", "web_fetch"}),
     "openai": frozenset({"web_search"}),
-    # codex supports web_search via its model-hosted tool (ThreadOptions
-    # webSearchEnabled). It is enabled only when an agent declares `web_search`,
-    # and runs server-side, so the command sandbox stays networkAccessEnabled=
-    # False. Caveat: codex's WebSearchItem exposes only the query — imp sees that
-    # a search happened but not its results/citations (no web_fetch either).
-    "codex": frozenset({"web_search"}),
 }
 
 # Anthropic native server-tool type identifiers. VERIFY against the pinned SDK

@@ -161,26 +161,11 @@ def test_skill_args_event_still_records_name_only(tmp_path: Path) -> None:
     assert loads[0]["payload"] == {"name": "refactor", "source": "human"}
 
 
-def test_exit_and_quit_words_request_save_and_exit(tmp_path: Path) -> None:
-    # `exit` / `quit` typed at the prompt are the save-and-exit verbs (equivalent
-    # to Ctrl-D), surfaced as EOFError to the run loop's existing EOFError handler.
-    from imp.cli.slash import ask_line_with_slash
-
-    for i, word in enumerate(("exit", "quit", "  EXIT  ")):   # case/space-insensitive
-        change = _FakeChange(tmp_path / str(i))
-        prompt = _FakePrompt([word])
-        with pytest.raises(EOFError):
-            anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
-
-
-def test_no_chrome_printed_around_the_submitted_prompt(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """ask_line_with_slash prints NO chrome around the field: no rule, no blank
-    line. The bright-blue caret marks the turn while typing; on submit
-    prompt_toolkit erases its region and the live driver reprints the entered line
-    with the subtle background. So a plain submit produces no stdout here."""
+def test_blank_lines_bracket_the_prompt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     from imp.cli.slash import ask_line_with_slash
     prompt = _FakePrompt(["hello"])
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeChange(tmp_path))
     assert line == "hello"
-    assert capsys.readouterr().out == ""
+    out = capsys.readouterr().out
+    # exactly one blank line before the prompt and one after: print() + print()
+    assert out == "\n\n"
