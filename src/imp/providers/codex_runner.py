@@ -515,6 +515,14 @@ class CodexAgentRunner:
                         "tool": tool_name, "message": msg}}
                     return
 
+                # Drain any bash kills detected by the MCP wrapper (non-terminal).
+                # tool_killed is an AUDIT event — persisted once via elog.append,
+                # NOT yielded. drive_invocation re-appends every yielded event to
+                # the same log, so yielding would cause a double-write.
+                while state.killed_tool_uses:
+                    info = state.killed_tool_uses.pop(0)
+                    elog.append(agent_id=aid, type="tool_killed", payload=info)
+
                 # Native-tool violation → fail-closed. AC #18:
                 #   - autonomous: unconditional revert + bail.
                 #   - interactive: prompt user (default revert); a "keep"

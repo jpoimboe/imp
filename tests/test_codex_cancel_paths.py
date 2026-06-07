@@ -215,3 +215,39 @@ async def test_fatal_tool_error_yields_terminal_event_and_bails(tmp_path: Path) 
     assert len(fake_client.thread.run_calls) == 1, (
         f"fatal_tool_error bail failed: run_streamed was called "
         f"{len(fake_client.thread.run_calls)} times (expected 1); events={events}")
+
+
+@pytest.mark.anyio
+async def test_killed_tools_drained_to_tool_killed_events(tmp_path: Path) -> None:
+    auth = _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    from tests.codex_fakes import agent_message, thread_started, turn_completed
+    scripted = [[thread_started("t"), agent_message("ran bash"),
+                 turn_completed(output_tokens=1)]]
+
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = auth
+
+    import imp.providers.codex_runner as cr
+    orig = cr.process_event
+    def _patched(*a: Any, **k: Any) -> None:
+        rs = k.get("run_state")
+        if rs is not None and getattr(a[0], "type", None) == "item.completed":
+            rs.killed_tool_uses.append({"id": "", "name": "bash", "signal": 9})
+        return orig(*a, **k)
+    cr.process_event = _patched
+    try:
+        events = [ev async for ev in runner.run(_invocation(tmp_path, event_log=elog))]
+    finally:
+        cr.process_event = orig
+
+    # tool_killed is an audit event: persisted to the log exactly once
+    # (NOT yielded — drive_invocation would otherwise re-append it).
+    killed = [e for e in list(elog.read()) if e.get("type") == "tool_killed"]
+    assert len(killed) == 1, killed
+    assert killed[0]["payload"].get("name") == "bash"
+    assert killed[0]["payload"].get("signal") == 9
+    # And it must NOT appear in the yielded control-signal stream.
+    assert not any(e.get("type") == "tool_killed" for e in events)
