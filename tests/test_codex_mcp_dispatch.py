@@ -339,6 +339,22 @@ def test_task_subagent_suspended_captured_on_state(
     assert isinstance(out, str)
 
 
+def test_fatal_tool_error_captured_on_state(tmp_path: Path) -> None:
+    from imp.agents.tools.errors import FatalToolError
+
+    def _fn(ctx: Any, **k: Any) -> str:
+        raise FatalToolError("config missing: IMP_LINT_COMMAND")
+    bad = Tool(name="lint", description="",
+               input_schema={"type": "object", "properties": {}}, fn=_fn)
+
+    ctx = _ctx(tmp_path)
+    state = RunState(cap=10)
+    out = asyncio.run(dispatch_tool(tool=bad, args={}, ctx=ctx, state=state))
+
+    assert state.fatal_tool_error == ("lint", "config missing: IMP_LINT_COMMAND")
+    assert "config missing" in out  # is_error-ish body, not silently dropped
+
+
 def test_cap_rmw_literal_has_no_await_between_read_and_decision() -> None:
     """AC #19 source-inspection guard: between the `dispatch_count += 1`
     increment and the `> state.cap` comparison there must be no `await`

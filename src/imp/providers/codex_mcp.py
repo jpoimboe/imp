@@ -27,6 +27,7 @@ from typing import Any
 
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.tools.errors import FatalToolError
 from imp.engine.agent_run import SubagentSuspended
 
 
@@ -51,6 +52,7 @@ class RunState:
     complete_step_args: dict[str, Any] = field(default_factory=dict)
     abort_requested: bool = False
     runtime_errors: list[str] = field(default_factory=list)
+    fatal_tool_error: tuple[str, str] | None = None
     agent_id: str = "step:unnamed"
     minted_task_ids: list[str] = field(default_factory=list)
     subagent_suspended: Any = None
@@ -135,6 +137,9 @@ async def dispatch_tool(
             return text
     try:
         raw = await tool.async_invoke(ctx, args)
+    except FatalToolError as fte:
+        state.fatal_tool_error = (tool.name, str(fte))
+        return f"fatal tool error: {fte}"
     except Exception as exc:
         text = f"{type(exc).__name__}: {exc}"
         state.runtime_errors.append(text)
