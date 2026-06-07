@@ -23,6 +23,7 @@ from collections.abc import Callable, Mapping, Sequence
 import pyte
 
 from impty import view
+from impty.screen import TerminalScreen
 from impty.view import Cell
 
 _READ_CHUNK = 65536
@@ -69,24 +70,6 @@ def _make_controlling_tty(
     _ioctl(0, _tiocsctty, 0)
 
 
-class _ReplyScreen(pyte.HistoryScreen):
-    """A pyte screen that writes terminal replies back to the program.
-
-    pyte computes answers to query sequences — cursor-position reports (CPR /
-    DSR 6: ESC[6n) and device-attribute requests — and emits them via
-    write_process_input(), which is a no-op by default. A real terminal feeds
-    those replies into the program's stdin. prompt_toolkit and curses apps
-    BLOCK on the CPR reply before enabling normal key bindings, so without it
-    line input degrades (Enter stops submitting). We forward the reply to the
-    pty master so the program reads it, just like a real terminal."""
-
-    reply: Callable[[str], None] | None = None  # set after the pty opens
-
-    def write_process_input(self, data: str) -> None:
-        if self.reply is not None:
-            self.reply(data)
-
-
 class TerminalSession:
     """Drive one interactive program over a pty, rendered by pyte.
 
@@ -106,7 +89,7 @@ class TerminalSession:
     ) -> None:
         self._cols = cols
         self._rows = rows
-        self._screen = _ReplyScreen(cols, rows, history=history, ratio=0.5)
+        self._screen = TerminalScreen(cols, rows, history=history, ratio=0.5)
         self._stream = pyte.ByteStream(self._screen)
         self._master, slave = pty.openpty()
         # Forward pyte's terminal-query replies (CPR, device attributes) to the
@@ -136,7 +119,7 @@ class TerminalSession:
         return self._proc.pid
 
     @property
-    def screen(self) -> _ReplyScreen:
+    def screen(self) -> TerminalScreen:
         """The live pyte screen — for renderers (impty.render) that need the cell
         grid + attributes, not just the text viewport()/transcript() return."""
         return self._screen
