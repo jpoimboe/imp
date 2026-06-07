@@ -894,6 +894,11 @@ def process_event(
                 # id (dispatch order == completion order) and key the result to it.
                 call_id = run_state.minted_task_ids.pop(0)
             else:
+                # Fallback: either a non-`task` tool call, or a `task` item that
+                # arrived with no prior mint (a protocol-ordering violation that
+                # shouldn't happen — `dispatch_tool` always mints before the SDK
+                # emits the item). In either case, emit a tool_call/result pair
+                # keyed to the SDK item id directly.
                 call_id = sdk_id
                 elog.append_tool_call(
                     agent_id=agent_id,

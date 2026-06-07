@@ -20,8 +20,9 @@ def test_task_completion_dedupes_and_rekeys_to_minted_id() -> None:
     process_event(ev, elog=elog, agent_id="step:t", state=state,
                   provider="codex", model="gpt-5.5", run_state=run_state)
 
-    calls = [e for e in list(elog.read()) if e.get("type") == "tool_call"]
-    results = [e for e in list(elog.read()) if e.get("type") == "tool_result"]
+    events = list(elog.read())
+    calls = [e for e in events if e.get("type") == "tool_call"]
+    results = [e for e in events if e.get("type") == "tool_result"]
     # No duplicate tool_call for task (dispatch_tool already minted it).
     assert calls == []
     # tool_result is keyed to the MINTED id, not the SDK item id.
