@@ -612,7 +612,7 @@ class CodexAgentRunner:
                     return
             # Stream ended (possibly silently) after a cancel without the
             # in-loop check firing — classify it as a clean interrupt.
-            if self._cancel:
+            if self._is_cancelled():
                 yield {"type": "error", "payload": {
                     "category": "config", "kind": "interrupted",
                     "message": "runner cancelled by interrupt"}}
@@ -631,7 +631,7 @@ class CodexAgentRunner:
                     nxt = await nxt
             except Exception as exc:
                 raise_if_suspended(exc)  # a subagent-origin pause must unwind
-                if self._cancel:
+                if self._is_cancelled():
                     yield {"type": "error", "payload": {
                         "category": "config", "kind": "interrupted",
                         "message": "runner cancelled by interrupt"}}
@@ -639,7 +639,7 @@ class CodexAgentRunner:
                 nxt = None
             # A Ctrl-C that landed while the nudge was computed pauses cleanly
             # instead of re-running a turn.
-            if self._cancel:
+            if self._is_cancelled():
                 yield {"type": "error", "payload": {
                     "category": "config", "kind": "interrupted",
                     "message": "runner cancelled by interrupt"}}
@@ -715,6 +715,17 @@ class CodexAgentRunner:
         if self._abort_controller is not None:
             with contextlib.suppress(Exception):
                 self._abort_controller.abort()
+
+    def _is_cancelled(self) -> bool:
+        """Read the interrupt flag opaquely.
+
+        continuation_fn (and the async transport) can flip ``self._cancel``
+        between checks within a single ``_drive_turns`` pass; routing these
+        re-checks through a method call keeps mypy from narrowing the attribute
+        to a stale ``Literal[False]`` and wrongly flagging the later guards as
+        unreachable.
+        """
+        return self._cancel
 
 
 # ── Event mapping ─────────────────────────────────────────────────────────────
