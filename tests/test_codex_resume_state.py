@@ -33,6 +33,25 @@ def test_missing_complete_step_when_not_interactive(tmp_path: Path) -> None:
     assert state is ResumeState.MISSING_COMPLETE_STEP
 
 
+def test_fresh_when_events_file_missing(tmp_path: Path) -> None:
+    state, last_text = derive_codex_resume_state(
+        tmp_path / "nope.jsonl", "step:t", interactive=True
+    )
+    assert state is ResumeState.FRESH
+    assert last_text == ""
+
+
+def test_fresh_when_no_records_for_agent(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:other", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "irrelevant"}]}}},
+    ])
+    state, last_text = derive_codex_resume_state(ev, "step:t", interactive=True)
+    assert state is ResumeState.FRESH
+    assert last_text == ""
+
+
 def test_normal_resume_when_complete_step_present(tmp_path: Path) -> None:
     # Post-F1 emit order: the in-turn tool_call/tool_result come FIRST, then the
     # reassembled llm_response is the tail. Classification is presence-based, so

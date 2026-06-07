@@ -6,7 +6,8 @@ parsed message list and cannot run agents.classify.classify_resume. But imp owns
 events.jsonl, which carries the same signal: a turn ended awaiting the user iff
 the agent emitted an llm_response but NO complete_step tool_call (presence-based,
 position-independent — see the Unit F/G coupling note). Mirrors classify_resume's
-PROMPT_USER/MISSING split.
+PROMPT_USER/MISSING split. DANGLING_TOOL_USE is omitted: codex always emits paired
+tool_call/tool_result events, so a dangling tool_call cannot appear in events.jsonl.
 """
 from __future__ import annotations
 
@@ -42,6 +43,9 @@ def derive_codex_resume_state(
     # Presence-based (position-independent): complete_step fires at most once per
     # step (it terminates the turn). If it's anywhere in this agent's records the
     # step completed → resume normally; F1's emit-order change can't break this.
+    # Scanning the full agent_id history is safe: this helper is called once at
+    # resume time over a SINGLE prior run's events; complete_step terminates that
+    # run, so an early complete_step can't mask a later awaiting-user turn.
     has_complete_step = any(
         rec.get("type") == "tool_call"
         and rec.get("payload", {}).get("name") == "complete_step"
