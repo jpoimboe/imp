@@ -195,8 +195,10 @@ def test_dispatch_task_happy_path_returns_subagent_output(
 
     monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
 
+    from imp.engine.state import InMemoryEventLog
     task_tool = make_task_tool()
     ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
     state = RunState(cap=50)
 
     result = asyncio.run(dispatch_tool(
@@ -224,8 +226,10 @@ def test_dispatch_task_subagent_suspended_reraises(
 
     monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
 
+    from imp.engine.state import InMemoryEventLog
     task_tool = make_task_tool()
     ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
     state = RunState(cap=50)
 
     with pytest.raises(SubagentSuspended):
@@ -251,8 +255,10 @@ def test_dispatch_task_generic_error_becomes_is_error_text(
 
     monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
 
+    from imp.engine.state import InMemoryEventLog
     task_tool = make_task_tool()
     ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
     state = RunState(cap=50)
 
     result = asyncio.run(dispatch_tool(
@@ -264,6 +270,43 @@ def test_dispatch_task_generic_error_becomes_is_error_text(
     assert "ValueError" in result
     assert "boom" in result
     assert any("ValueError" in e and "boom" in e for e in state.runtime_errors)
+
+
+def test_task_dispatch_mints_parent_tool_call_and_passes_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dispatch_tool's task branch mints the parent tool_call event up front,
+    pushes its id onto state.minted_task_ids (FIFO), and passes it to
+    dispatch_task as tool_call_event_id."""
+    from imp.engine.state import InMemoryEventLog
+
+    seen: dict[str, Any] = {}
+
+    async def _stub_dispatch_task(
+        ctx: Any, subagent_name: str, task_description: str,
+        *, tool_call_event_id: str = "", tier: Any = None,
+    ) -> str:
+        seen["tool_call_event_id"] = tool_call_event_id
+        return '{"answer": "ok"}'
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
+
+    elog = InMemoryEventLog()
+    ctx = _ctx(tmp_path)
+    ctx.event_log = elog  # type: ignore[attr-defined]
+    state = RunState(cap=50, agent_id="step:t")
+
+    asyncio.run(dispatch_tool(
+        tool=make_task_tool(),
+        args={"subagent_name": "impl", "task_description": "do it"},
+        ctx=ctx, state=state))
+
+    # A tool_call event was minted, and its id was both queued and passed down.
+    calls = [e for e in list(elog.read()) if e.get("type") == "tool_call"]
+    assert len(calls) == 1
+    minted_id = calls[0]["id"]
+    assert seen["tool_call_event_id"] == minted_id
+    assert state.minted_task_ids == [minted_id]
 
 
 def test_cap_rmw_literal_has_no_await_between_read_and_decision() -> None:

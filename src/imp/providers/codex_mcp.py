@@ -50,6 +50,8 @@ class RunState:
     complete_step_args: dict[str, Any] = field(default_factory=dict)
     abort_requested: bool = False
     runtime_errors: list[str] = field(default_factory=list)
+    agent_id: str = "step:unnamed"
+    minted_task_ids: list[str] = field(default_factory=list)
 
 
 def _cap_error_text(cap: int) -> str:
@@ -110,12 +112,19 @@ async def dispatch_tool(
         # emits the mcp_tool_call item only AFTER this MCP call returns, so no
         # durable event id exists here yet; dispatch_task falls back to "" (a
         # weaker parent-link for codex subagent events). Also a follow-up.
+        from imp.agents.runner import ToolUseBlock
         from imp.agents.subagents import dispatch_task, raise_if_suspended
+        tc_ev = ctx.event_log.append_tool_call(
+            agent_id=state.agent_id,
+            block=ToolUseBlock(id="", name="task", input=dict(args)),
+        )
+        state.minted_task_ids.append(tc_ev["id"])
         try:
             return await dispatch_task(
                 ctx,
                 args["subagent_name"],
                 args["task_description"],
+                tool_call_event_id=tc_ev["id"],
                 tier=args.get("tier"),
             )
         except Exception as exc:

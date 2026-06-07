@@ -244,7 +244,7 @@ class CodexAgentRunner:
             ctx.user_input_fn = self._user_input_fn
         self._ctx = ctx
 
-        state = RunState(cap=invocation.max_tool_calls or 1000)
+        state = RunState(cap=invocation.max_tool_calls or 1000, agent_id=aid)
         # Shared event-processing state (process_event keys).
         proc_state: dict[str, Any] = {
             "thread_id": None, "complete_step_args": None,
