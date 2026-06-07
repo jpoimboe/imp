@@ -52,6 +52,7 @@ class RunState:
     runtime_errors: list[str] = field(default_factory=list)
     agent_id: str = "step:unnamed"
     minted_task_ids: list[str] = field(default_factory=list)
+    subagent_suspended: Any = None
 
 
 def _cap_error_text(cap: int) -> str:
@@ -99,13 +100,10 @@ async def dispatch_tool(
         # its structured output JSON as the tool result. A task dispatch counts
         # against the cap (RMW above), same as any tool call.
         #
-        # KNOWN LIMITATION: a subagent-origin pause (SubagentSuspended) re-raised
-        # here propagates out through the in-process MCP request handler rather
-        # than cleanly unwinding the parent codex run (anthropic re-raises inside
-        # its own Python tool loop). The default workflow's subagents are
-        # autonomous and complete without suspending, so the happy path is
-        # unaffected; clean pause-unwind across the codex MCP boundary is a
-        # follow-up.
+        # SubagentSuspended is captured onto `state` (not re-raised) so the
+        # in-process MCP request handler returns cleanly to the SDK. The runner
+        # detects `state.subagent_suspended` after process_event and re-raises
+        # it to unwind the whole codex run (D4).
         #
         # The codex SDK emits the mcp_tool_call item only AFTER this MCP call
         # returns, so no SDK-supplied event id is available yet. We mint a
@@ -113,7 +111,7 @@ async def dispatch_tool(
         # dispatch_task. process_event later re-keys the result to that id when
         # it sees the real SDK item arrive (via state.minted_task_ids).
         from imp.agents.runner import ToolUseBlock
-        from imp.agents.subagents import dispatch_task, raise_if_suspended
+        from imp.agents.subagents import dispatch_task
         tc_ev = ctx.event_log.append_tool_call(
             agent_id=state.agent_id,
             block=ToolUseBlock(id="", name="task", input=dict(args)),
@@ -128,7 +126,10 @@ async def dispatch_tool(
                 tier=args.get("tier"),
             )
         except Exception as exc:
-            raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
+            from imp.engine.agent_run import SubagentSuspended
+            if isinstance(exc, SubagentSuspended):
+                state.subagent_suspended = exc  # runner re-raises to unwind cleanly
+                return "subagent paused; run will pause"
             text = f"{type(exc).__name__}: {exc}"
             state.runtime_errors.append(text)
             return text

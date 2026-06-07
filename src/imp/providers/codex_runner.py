@@ -490,6 +490,14 @@ class CodexAgentRunner:
                             f"exceeded"}}
                     return
 
+                # A subagent-origin pause captured in the MCP handler must
+                # unwind the whole codex run cleanly (not classify as an error).
+                if state.subagent_suspended is not None:
+                    if self._abort_controller is not None:
+                        with contextlib.suppress(Exception):
+                            self._abort_controller.abort()
+                    raise state.subagent_suspended
+
                 # Native-tool violation → fail-closed. AC #18:
                 #   - autonomous: unconditional revert + bail.
                 #   - interactive: prompt user (default revert); a "keep"

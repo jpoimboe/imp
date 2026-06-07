@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -139,3 +140,39 @@ async def test_cancel_raised_inside_continuation_yields_interrupted(tmp_path: Pa
     events = [ev async for ev in runner.run(inv)]
 
     assert events[-1]["payload"]["kind"] == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_subagent_suspended_unwinds_out_of_run(tmp_path: Path) -> None:
+    from imp.engine.agent_run import SubagentSuspended
+    auth = _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    from tests.codex_fakes import agent_message, mcp_call, thread_started, turn_completed
+
+    scripted = [[thread_started("t"), agent_message("dispatching"),
+                 mcp_call(name="task", args={"subagent_name": "impl",
+                                             "task_description": "x"},
+                          result="ignored", item_id="sdk-1"),
+                 turn_completed(output_tokens=1)]]
+
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = auth
+
+    # Inject the captured suspend by patching process_event to set it on the
+    # RunState the runner creates; assert run() re-raises it.
+    import imp.providers.codex_runner as cr
+    orig = cr.process_event
+    def _patched(*a: Any, **k: Any) -> None:
+        rs = k.get("run_state")
+        if rs is not None and getattr(a[0], "type", None) == "turn.completed":
+            rs.subagent_suspended = SubagentSuspended("paused")
+        return orig(*a, **k)
+    cr.process_event = _patched
+    try:
+        with pytest.raises(SubagentSuspended):
+            async for _ev in runner.run(_invocation(tmp_path, event_log=elog)):
+                pass
+    finally:
+        cr.process_event = orig

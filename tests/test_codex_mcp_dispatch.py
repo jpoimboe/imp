@@ -211,12 +211,13 @@ def test_dispatch_task_happy_path_returns_subagent_output(
     assert state.dispatch_count == 1
 
 
-def test_dispatch_task_subagent_suspended_reraises(
+def test_dispatch_task_subagent_suspended_captured_not_reraised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SubagentSuspended must unwind out of dispatch_tool, not be swallowed
-    into an is_error string — it signals a coordinator-requested pause that
-    must propagate up the call stack."""
+    """SubagentSuspended must be captured onto RunState (for the runner to
+    re-raise cleanly), NOT re-raised directly out of dispatch_tool — doing so
+    would propagate through the in-process MCP boundary instead of letting the
+    runner unwind the whole codex run in a controlled way."""
 
     async def _stub_dispatch_task(
         ctx: Any, subagent_name: str, task_description: str,
@@ -232,13 +233,16 @@ def test_dispatch_task_subagent_suspended_reraises(
     ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
     state = RunState(cap=50)
 
-    with pytest.raises(SubagentSuspended):
-        asyncio.run(dispatch_tool(
-            tool=task_tool,
-            args={"subagent_name": "coder", "task_description": "write code"},
-            ctx=ctx,
-            state=state,
-        ))
+    # Must NOT raise — must capture onto state and return benign text.
+    out = asyncio.run(dispatch_tool(
+        tool=task_tool,
+        args={"subagent_name": "coder", "task_description": "write code"},
+        ctx=ctx,
+        state=state,
+    ))
+    assert isinstance(out, str)
+    assert state.subagent_suspended is not None
+    assert isinstance(state.subagent_suspended, SubagentSuspended)
 
 
 def test_dispatch_task_generic_error_becomes_is_error_text(
@@ -307,6 +311,32 @@ def test_task_dispatch_mints_parent_tool_call_and_passes_id(
     minted_id = calls[0]["id"]
     assert seen["tool_call_event_id"] == minted_id
     assert state.minted_task_ids == [minted_id]
+
+
+def test_task_subagent_suspended_captured_on_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A SubagentSuspended from dispatch_task is captured onto RunState (so the
+    runner can re-raise it) rather than swallowed into is_error text."""
+    from imp.engine.state import InMemoryEventLog
+
+    async def _stub(*a: Any, **k: Any) -> str:
+        raise SubagentSuspended("paused by coordinator")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    state = RunState(cap=50, agent_id="step:t")
+
+    out = asyncio.run(dispatch_tool(
+        tool=make_task_tool(),
+        args={"subagent_name": "impl", "task_description": "x"},
+        ctx=ctx, state=state))
+
+    assert state.subagent_suspended is not None
+    assert isinstance(state.subagent_suspended, SubagentSuspended)
+    # Returns benign text to the SDK; the real signal is on state.
+    assert isinstance(out, str)
 
 
 def test_cap_rmw_literal_has_no_await_between_read_and_decision() -> None:
