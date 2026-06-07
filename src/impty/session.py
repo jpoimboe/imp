@@ -87,8 +87,6 @@ class TerminalSession:
         env: Mapping[str, str] | None = None,
         history: int = 2000,
     ) -> None:
-        self._cols = cols
-        self._rows = rows
         self._screen = TerminalScreen(cols, rows, history=history, ratio=0.5)
         self._stream = pyte.ByteStream(self._screen)
         self._master, slave = pty.openpty()

@@ -20,6 +20,8 @@ from typing import Any, cast
 
 from PIL import Image, ImageDraw, ImageFont
 
+from impty.screen import Regime
+
 # impty is a GENERIC pty/pyte harness — it knows nothing about imp. The defaults
 # below are a neutral dark terminal so a standalone render (e.g. the live MCP
 # snapshot) just works. An app-aware caller that wants its OWN theme in the PNG
@@ -281,7 +283,12 @@ def render_screen(
     # screen (a potentially very tall strip — up to history rows — hence opt-in).
     # Default (and alt shape) renders just the live rows x cols frame.
     live_rows = [screen.buffer[y] for y in range(screen.lines)]
-    grid = (list(screen.history.top) + live_rows) if full else live_rows
+    # full=True prepends scrolled-off history.top — but ONLY in scroll shape.
+    # In SCREEN (alt) regime there is no scrollback (history.top may still hold
+    # PRE-alt rows, which must NOT leak above the alt frame), matching view.lines().
+    in_scroll = getattr(screen, "regime", None) is not Regime.SCREEN
+    history = list(screen.history.top) if (full and in_scroll) else []
+    grid = history + live_rows
     rows = len(grid)
     w = cols * cell_w + 2 * pad
     h = rows * cell_h + 2 * pad
