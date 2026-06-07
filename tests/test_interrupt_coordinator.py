@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import AsyncIterator
 
 import pytest
-
-from collections.abc import AsyncIterator
 
 from imp.cli import signals as _signals
 from imp.cli.signals import InterruptCoordinator
