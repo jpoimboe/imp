@@ -6,6 +6,7 @@ no provider tokens are spent. pty-gated like the original."""
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -22,9 +23,20 @@ pytestmark = pytest.mark.skipif(not _can_pty(), reason="pty not available")
 def test_drive_imp_new_to_completion(tmp_path: Path) -> None:
     _seed_human_gate_workflow(tmp_path)
 
+    # The subprocess (`python -m imp`) runs in tmp_path and only inherits env,
+    # not pytest's in-process sys.path. Make it self-sufficient by prepending
+    # this checkout's src/ to PYTHONPATH so `imp` resolves to src/imp regardless
+    # of how pytest was invoked (bare `pytest` vs `make test`) and despite the
+    # repo-root `imp/` dogfood dir that otherwise shadows it as a namespace pkg.
+    src_dir = Path(__file__).resolve().parents[2] / "src"
+    ambient = os.environ.get("PYTHONPATH", "")
+    pythonpath = f"{src_dir}{os.pathsep}{ambient}" if ambient else str(src_dir)
+    env = {**os.environ, "PYTHONPATH": pythonpath}
+
     with TerminalSession(
         [sys.executable, "-m", "imp", "new", "pty-test"],
         cwd=str(tmp_path),
+        env=env,
         cols=80,
         rows=24,
     ) as session:
