@@ -251,3 +251,43 @@ async def test_killed_tools_drained_to_tool_killed_events(tmp_path: Path) -> Non
     assert killed[0]["payload"].get("signal") == 9
     # And it must NOT appear in the yielded control-signal stream.
     assert not any(e.get("type") == "tool_killed" for e in events)
+
+
+@pytest.mark.anyio
+async def test_prompt_user_resume_injects_reply_not_system_prompt(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+    auth = _seed_git_and_auth(tmp_path)
+    # restore_rollout runs unconditionally on balance_on_resume and needs a real
+    # persisted rollout; stub it so the test exercises the prompt-selection branch.
+    monkeypatch.setattr(
+        "imp.providers.codex_rollout.restore_rollout", lambda **k: "thr-1")
+    # Pre-seed events.jsonl with a tail llm_response (agent asked a question).
+    (tmp_path / "events.jsonl").write_text(json.dumps({
+        "agent_id": "step:t", "type": "llm_response",
+        "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}}) + "\n")
+    elog = InMemoryEventLog()
+    from tests.codex_fakes import agent_message, mcp_call, thread_started, turn_completed
+    scripted = [[thread_started("t"), agent_message("ok"),
+                 mcp_call(name="complete_step", args={"answer": "done"},
+                          result="step complete", item_id="cs"),
+                 turn_completed(output_tokens=1)]]
+
+    captured = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(model_name="gpt-5.5",
+                              client_factory=lambda options=None: captured)
+    runner._canonical_auth_override = auth
+
+    def _cont(last_text: str) -> str:
+        assert last_text == "which file?"
+        return "the README"
+
+    inv = _invocation(tmp_path, event_log=elog, interactive=True, continuation_fn=_cont)
+    # Mark this as a resume.
+    object.__setattr__(inv, "balance_on_resume", True)
+    [ev async for ev in runner.run(inv)]
+
+    # The first resumed turn's prompt is the user's reply, not the system prompt.
+    first_prompt = captured.thread.run_calls[0][0]
+    assert "the README" in str(first_prompt)
+    assert "you are a test agent" not in str(first_prompt)

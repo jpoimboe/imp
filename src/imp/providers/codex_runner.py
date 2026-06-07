@@ -430,6 +430,39 @@ class CodexAgentRunner:
                 thread = client.start_thread()
         # Build initial prompt with anti-native-tool instruction prepended.
         next_prompt = self._build_prompt(invocation.system_prompt)
+        # Resume seam (Unit G): on a balance_on_resume re-entry, codex holds no
+        # parsed message list, so derive the resume state from imp's own
+        # events.jsonl. A PROMPT_USER turn (interactive, agent ended awaiting the
+        # user) injects the user's reply as the FIRST resumed prompt instead of
+        # the system prompt; MISSING_COMPLETE_STEP (autonomous, no complete_step)
+        # is a terminal error.
+        if invocation.balance_on_resume:
+            from imp.agents.classify import ResumeState
+            from imp.providers.codex_resume import derive_codex_resume_state
+            rstate, last_text = derive_codex_resume_state(
+                invocation.events_path, aid, interactive=invocation.interactive)
+            if rstate is ResumeState.PROMPT_USER:
+                if invocation.continuation_fn is None:
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "no_user_input_fn",
+                        "message": "PROMPT_USER resume requires an interactive "
+                                   "continuation_fn; none installed"}}
+                    return
+                import inspect as _inspect
+                reply = invocation.continuation_fn(last_text)
+                if _inspect.isawaitable(reply):
+                    reply = await reply
+                user_msg = Message(
+                    role="user", content=(TextBlock(text=str(reply)),))
+                elog.append_user_message(agent_id=aid, message=user_msg)
+                next_prompt = str(reply)
+            elif rstate is ResumeState.MISSING_COMPLETE_STEP:
+                yield {"type": "error", "payload": {
+                    "category": "agent_output_missing",
+                    "kind": "missing_complete_step",
+                    "message": "codex resume: turn ended without complete_step",
+                    "detail": {"last_agent_text": last_text[:500]}}}
+                return
         # Whole-run nudge budget (across-turn). `continuation_fn` is the gate;
         # this cap is the floor.
         max_nudges = 3
