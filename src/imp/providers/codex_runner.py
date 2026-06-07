@@ -590,6 +590,14 @@ class CodexAgentRunner:
                         tools=list(proc_state.get("turn_tool_outcomes", [])),
                         has_complete_step=bool(proc_state.get("complete_step_called")),
                     )
+                    # Unlike sibling providers (claude_code) which call
+                    # guard.note_external_input() on genuine human-input turns
+                    # to reset the guard, codex does NOT call it here: the
+                    # continuation_fn nudge is automated (not human-driven),
+                    # so repeated no-progress nudge turns should accumulate
+                    # toward a trip. Genuine human-interactive continuation
+                    # semantics are revisited in the nudge-unification work
+                    # (Unit G / G3).
                     loop_err = guard.observe(record)
                     if loop_err is not None:
                         yield perr.make_error_event(

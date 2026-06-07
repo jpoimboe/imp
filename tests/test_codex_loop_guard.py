@@ -62,6 +62,7 @@ async def test_no_progress_loop_trips_loop_error(tmp_path: Path) -> None:
     # Repeated identical no-progress turns (text only, no complete_step, no
     # write-class tool) — more than the loop-guard's no-progress threshold.
     turn = [agent_message("still thinking"), turn_completed(output_tokens=1)]
+    # repeat_k=3 identical turns are enough to trip; the extra turns are margin.
     scripted = [[thread_started("t"), *turn]] + [list(turn) for _ in range(8)]
 
     runner = CodexAgentRunner(
@@ -73,3 +74,4 @@ async def test_no_progress_loop_trips_loop_error(tmp_path: Path) -> None:
 
     loop = [e for e in events if e.get("payload", {}).get("category") == "loop"]
     assert loop, events
+    assert loop[0]["payload"]["kind"] == "repeated_failure"
