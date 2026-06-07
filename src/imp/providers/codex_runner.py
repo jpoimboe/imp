@@ -629,8 +629,21 @@ class CodexAgentRunner:
                 nxt = cont(last_text)
                 if _inspect.isawaitable(nxt):
                     nxt = await nxt
-            except Exception:
+            except Exception as exc:
+                raise_if_suspended(exc)  # a subagent-origin pause must unwind
+                if self._cancel:
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "interrupted",
+                        "message": "runner cancelled by interrupt"}}
+                    return
                 nxt = None
+            # A Ctrl-C that landed while the nudge was computed pauses cleanly
+            # instead of re-running a turn.
+            if self._cancel:
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "interrupted",
+                    "message": "runner cancelled by interrupt"}}
+                return
             if nxt is None:
                 yield {"type": "error", "payload": {
                     "category": "agent_incomplete",
