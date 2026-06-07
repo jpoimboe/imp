@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping, Sequence
 import pyte
 
 from impty import view
-from impty.screen import TerminalScreen
+from impty.screen import Regime, TerminalScreen
 from impty.view import Cell
 
 _READ_CHUNK = 65536
@@ -121,8 +121,18 @@ class TerminalSession:
     @property
     def screen(self) -> TerminalScreen:
         """The live pyte screen — for renderers (impty.render) that need the cell
-        grid + attributes, not just the text viewport()/transcript() return."""
+        grid + attributes, not just the text lines() returns."""
         return self._screen
+
+    @property
+    def rows(self) -> int:
+        """Live screen height (authoritative; tracks resize())."""
+        return self._screen.lines
+
+    @property
+    def cols(self) -> int:
+        """Live screen width (authoritative; tracks resize())."""
+        return self._screen.columns
 
     def _write_reply(self, data: str) -> None:
         """Feed a pyte-generated terminal reply (CPR / device-attribute answer)
@@ -264,11 +274,12 @@ class TerminalSession:
         return self._proc.wait(timeout=reap)
 
     # --- read snapshots (delegate to pure view helpers) ------------------
-    def viewport(self) -> str:
-        return view.viewport_text(self._screen)
-
-    def transcript(self, limit: int | None = None) -> str:
-        return view.transcript_text(self._screen, limit)
+    def lines(self, limit: int | None = None) -> list[str]:
+        """Rendered text rows over scrollback + the live screen. With a `limit`
+        (e.g. limit=rows) returns exactly the last N rows, aligned row-for-row
+        with cell()/cursor(); with no limit returns the whole strip (trailing
+        blanks trimmed). See view.lines."""
+        return view.lines(self._screen, limit)
 
     def cell(self, x: int, y: int) -> Cell:
         return view.cell_at(self._screen, x, y)
@@ -276,8 +287,28 @@ class TerminalSession:
     def cursor(self) -> tuple[int, int]:
         return view.cursor_pos(self._screen)
 
+    def regime(self) -> Regime:
+        return view.regime(self._screen)
+
     def is_alt_screen(self) -> bool:
         return view.is_alt_screen(self._screen)
+
+    # TODO(task-6): viewport()/transcript() are temporary shims kept only until
+    # mcp.py and the remaining tests migrate to lines(). Remove them then.
+    def viewport(self) -> str:
+        return view.viewport_text(self._screen)
+
+    def transcript(self, limit: int | None = None) -> str:
+        return view.transcript_text(self._screen, limit)
+
+    def resize(self, rows: int, cols: int) -> None:
+        """Resize the terminal. ioctl(TIOCSWINSZ) on the pty MASTER (the slave is
+        closed at spawn); the kernel then auto-sends SIGWINCH to the child's
+        foreground pgrp. Also resizes the live pyte screen (and, if alt is active,
+        the saved pre-alt buffer — see TerminalScreen.resize). This is pyte's
+        pad/clip/delete, NOT true reflow/rewrap."""
+        _set_winsize(self._master, rows, cols)
+        self._screen.resize(lines=rows, columns=cols)
 
     # --- lifecycle -------------------------------------------------------
     def is_alive(self) -> bool:

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from impty import TerminalSession
+from impty import Regime, TerminalSession
 
 
 def _can_pty() -> bool:
@@ -393,3 +393,63 @@ def test_run_to_completion_fast_on_streaming_slave_pinning_grandchild(
         if gc_pid is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(gc_pid, signal.SIGKILL)
+
+
+_ALT_FIXTURE = (
+    "import sys, time\n"
+    "sys.stdout.write('before-alt\\n'); sys.stdout.flush()\n"
+    "sys.stdout.write('\\x1b[?1049h\\x1b[2J\\x1b[HINSIDE-ALT'); sys.stdout.flush()\n"
+    "time.sleep(0.3)\n"                       # quiet window: settles while in alt
+    "sys.stdout.write('\\x1b[?1049l'); sys.stdout.flush()\n"
+)
+
+
+def test_alt_screen_buffer_swap_end_to_end() -> None:
+    # Prove the buffer swap over a real pty: in alt only the alt frame shows and
+    # regime is SCREEN; after exit the pre-alt screen is restored and regime is
+    # SCROLL.
+    with TerminalSession([sys.executable, "-c", _ALT_FIXTURE]) as s:
+        s.wait_idle(idle=0.2, hard=5.0)          # settles mid-alt (0.3s sleep)
+        assert s.regime() is Regime.SCREEN
+        body = "\n".join(s.lines())
+        assert "INSIDE-ALT" in body
+        assert "before-alt" not in body          # no scrollback while in alt
+        s.run_to_completion(hard=5.0)            # drives past the 1049l exit
+        assert s.regime() is Regime.SCROLL
+        assert "before-alt" in "\n".join(s.lines())   # pre-alt restored
+
+
+_INLINE_FIXTURE = (
+    "import sys, time\n"
+    "for i in range(8):\n"
+    "    sys.stdout.write(f'scroll line {i}\\n')\n"   # real scrollback (8 > rows)
+    "sys.stdout.write('PROMPT> ')\n"                  # live bottom region
+    "sys.stdout.flush()\n"
+    "time.sleep(0.5)\n"
+)
+
+
+def test_inline_redraw_scroll_shape_history_plus_live_bottom() -> None:
+    with TerminalSession([sys.executable, "-c", _INLINE_FIXTURE], cols=40, rows=6) as s:
+        s.wait_idle(idle=0.2, hard=5.0)
+        assert s.regime() is Regime.SCROLL
+        full = s.lines()
+        win = s.lines(limit=s.rows)
+        assert "scroll line 0" in full           # scrolled into history
+        assert "scroll line 0" not in win        # not in the live window
+        assert len(win) == s.rows
+        assert win[-1].rstrip().endswith("PROMPT>")
+        x, _ = s.cursor()
+        assert x == len("PROMPT> ")              # cursor parked past the prompt
+
+
+def test_resize_pads_and_clips_live_screen() -> None:
+    with TerminalSession([sys.executable, "-c", "import time; time.sleep(2)"],
+                         cols=40, rows=10) as s:
+        s.wait_idle(idle=0.1, hard=2.0)
+        s.resize(rows=5, cols=20)
+        assert s.rows == 5 and s.cols == 20
+        assert len(s.lines(limit=s.rows)) == 5
+        cx, cy = s.cursor()
+        assert 0 <= cx <= 19 and 0 <= cy <= 4    # cursor in bounds after shrink
+        s.cell(19, 4)                            # bottom-right corner addressable
