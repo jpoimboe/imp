@@ -206,7 +206,11 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 if not non_interactive:
                     tg.start_soon(status.tick)
                     assert esc_reader is not None
-                    tg.start_soon(esc_reader.run)
+                    # Block until the reader has armed (or given up): a workflow
+                    # whose first step is interactive must not start its prompt
+                    # before the ESC reader holds /dev/tty, or the prompt and the
+                    # reader race for the terminal's termios.
+                    await tg.start(esc_reader.run)
                 try:
                     result = await run_change(
                         change,
@@ -394,7 +398,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 if not non_interactive:
                     tg.start_soon(status.tick)
                     assert esc_reader is not None
-                    tg.start_soon(esc_reader.run)
+                    # Block until the reader has armed (or given up): a workflow
+                    # whose first step is interactive must not start its prompt
+                    # before the ESC reader holds /dev/tty, or the prompt and the
+                    # reader race for the terminal's termios.
+                    await tg.start(esc_reader.run)
                 try:
                     result = await run_change(
                         change,

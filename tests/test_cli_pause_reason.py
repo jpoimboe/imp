@@ -68,8 +68,11 @@ def test_new_spawns_esc_reader_as_taskgroup_sibling(
     real = cli_main.EscKeyReader  # type: ignore[attr-defined]
 
     class _RecordingReader(real):              # type: ignore[misc, valid-type]
-        async def run(self) -> None:
+        async def run(
+            self, *, task_status: object = anyio.TASK_STATUS_IGNORED,
+        ) -> None:
             seen.append("esc_reader.run")
+            task_status.started()  # type: ignore[attr-defined]
             return
 
     monkeypatch.setattr(cli_main, "EscKeyReader", _RecordingReader)
@@ -125,8 +128,11 @@ def test_resume_spawns_esc_reader_as_taskgroup_sibling(
     real = cli_main.EscKeyReader  # type: ignore[attr-defined]
 
     class _RecordingReader(real):              # type: ignore[misc, valid-type]
-        async def run(self) -> None:
+        async def run(
+            self, *, task_status: object = anyio.TASK_STATUS_IGNORED,
+        ) -> None:
             seen.append("esc_reader.run")
+            task_status.started()  # type: ignore[attr-defined]
             return
 
     monkeypatch.setattr(cli_main, "EscKeyReader", _RecordingReader)

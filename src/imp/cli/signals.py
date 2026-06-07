@@ -28,6 +28,9 @@ import signal
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
+from anyio import TASK_STATUS_IGNORED
+from anyio.abc import TaskStatus
+
 from imp.engine.change import Change
 from imp.engine.state import State
 
@@ -210,27 +213,37 @@ class EscKeyReader:
         self._unquiesce_evt: Any = None        # anyio.Event | None — wakes parked reader
         self._parked_evt: Any = None           # anyio.Event — reader → quiescer ack
 
-    async def run(self) -> None:
+    async def run(self, *, task_status: TaskStatus[None] = TASK_STATUS_IGNORED) -> None:
+        # `task_status.started()` is signalled once the reader has either armed or
+        # conclusively given up, so `await tg.start(reader.run)` lets the caller
+        # block until then. This closes the startup race: a workflow whose first
+        # step is an interactive prompt would otherwise quiesce against an
+        # unattached reader (a no-op), let prompt_toolkit set up the terminal, and
+        # then arm mid-prompt — clobbering the prompt's input mode with cbreak.
         try:
             import termios
             import tty
         except ImportError:
+            task_status.started()
             return                              # Windows / no termios
         try:
             self._fd = os.open(
                 "/dev/tty", os.O_RDONLY | getattr(os, "O_NOCTTY", 0))
         except OSError:
+            task_status.started()
             return                              # no controlling tty
         try:
             try:
                 self._orig_attrs = termios.tcgetattr(self._fd)
                 tty.setcbreak(self._fd)
             except termios.error:
+                task_status.started()
                 return                          # not a tty after all
             import anyio
             self._parked_evt = anyio.Event()
             self._armed = True
             self._coord.attach_esc_reader(self)
+            task_status.started()               # armed: prompts may now start
 
             while True:
                 if self._quiesce_depth > 0:
@@ -279,6 +292,13 @@ class EscKeyReader:
         except (OSError, ValueError):
             return b""
         if not ready:
+            return b""
+        if self._quiesce_depth > 0:
+            # A prompt began quiescing while this read was in flight. The pending
+            # byte belongs to prompt_toolkit, not us — leave it in the tty buffer
+            # so the prompt reads it after termios is restored. Consuming it here
+            # is the `ESC_READER_ATE: b'1'` race: the prompt would then see only
+            # the trailing `\r`, read empty input, and re-prompt forever.
             return b""
         try:
             return os.read(fd, 1)

@@ -139,6 +139,92 @@ async def test_run_returns_cleanly_when_dev_tty_unavailable(
 
 
 @pytest.mark.anyio
+async def test_run_arms_before_task_start_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`await tg.start(reader.run)` must not return until the reader has armed
+    (attached + cbreak). Otherwise a workflow whose FIRST step is an interactive
+    prompt quiesces against an unattached reader (a no-op), prompt_toolkit
+    configures the terminal, and the reader then arms mid-prompt — its
+    `tty.setcbreak` clobbers prompt_toolkit's input mode and the prompt can never
+    read a key. (The human-gate e2e hang.)"""
+    import pty
+
+    master, slave = pty.openpty()
+    try:
+        _patch_dev_tty(monkeypatch, slave)
+        coord = InterruptCoordinator()
+        reader = EscKeyReader(coord)
+        async with anyio.create_task_group() as tg:
+            await tg.start(reader.run)
+            # Returned only because the reader signalled ready — and it is armed.
+            assert coord._esc_reader is reader
+            tg.cancel_scope.cancel()
+    finally:
+        os.close(master)
+        with contextlib.suppress(OSError):
+            os.close(slave)
+
+
+@pytest.mark.anyio
+async def test_run_task_start_returns_even_without_dev_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When there is no controlling tty (CI / piped stdin) the reader can't arm,
+    but `tg.start` must still return — signalling ready on the unarmed path —
+    rather than hang the run loop forever."""
+    def _fail_open(path: str, flags: int, mode: int = 0o777) -> int:
+        if path == "/dev/tty":
+            raise OSError("no tty")
+        return os.open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", _fail_open)
+    coord = InterruptCoordinator()
+    reader = EscKeyReader(coord)
+    async with anyio.create_task_group() as tg:
+        await tg.start(reader.run)          # must not hang
+        assert coord._esc_reader is None    # unarmed: no controlling tty
+        tg.cancel_scope.cancel()
+
+
+def test_read_one_byte_leaves_pending_byte_when_quiescing() -> None:
+    """Regression: the prompt's first keystroke must not be stolen.
+
+    When a prompt is quiescing (`_quiesce_depth > 0`) the reader may still have
+    an in-flight read. A byte that lands in /dev/tty's buffer in that pre-park
+    window belongs to prompt_toolkit, not the ESC reader. Consuming it here is
+    the `ESC_READER_ATE: b'1'` race: prompt_toolkit then sees only the trailing
+    `\\r`, reads empty input, and re-prompts forever (the e2e human-gate hang).
+    """
+    import pty
+    import select
+    import tty as ttymod
+
+    master, slave = pty.openpty()
+    try:
+        ttymod.setcbreak(slave)              # the armed reader holds the tty in cbreak
+        coord = InterruptCoordinator()
+        reader = EscKeyReader(coord)
+        reader._fd = slave
+        reader._quiesce_depth = 1            # a prompt is quiescing
+        os.write(master, b"1")               # the prompt's keystroke arrives
+        for _ in range(50):                  # let the byte propagate to the slave
+            r, _w, _e = select.select([slave], [], [], 0.02)
+            if r:
+                break
+        got = reader._read_one_byte()
+        assert got == b"", f"reader stole {got!r} destined for the prompt"
+        # The byte survives in the tty buffer for prompt_toolkit to read.
+        ready, _, _ = select.select([slave], [], [], 1.0)
+        assert ready, "pending byte vanished from the tty buffer"
+        assert os.read(slave, 1) == b"1"
+    finally:
+        os.close(master)
+        with contextlib.suppress(OSError):
+            os.close(slave)
+
+
+@pytest.mark.anyio
 async def test_esc_during_quiesce_does_not_pause(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
