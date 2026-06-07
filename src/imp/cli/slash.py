@@ -7,7 +7,8 @@ sanitized by agents.skills."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import contextlib
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from imp.agents.skills import (
@@ -86,6 +87,7 @@ def _help(out: Callable[[str], None]) -> None:
 
 async def ask_line_with_slash(
     prompt: Any, status: Any, change: Any, *, color: bool = False, width: int = 80,
+    coord: Any = None,
 ) -> str:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> returns the
@@ -97,22 +99,39 @@ async def ask_line_with_slash(
     subtle "entered input" background. The gray bracketing rules are gone — the
     background is the marker now.
 
+    `coord` (the run's InterruptCoordinator) wraps the prompt turn in
+    `coord.tty_quiesced()` so the ESC reader releases /dev/tty for
+    prompt_toolkit; None (tests / non-interactive) = no-op.
+
     Shared by the run and resume paths so the slash/skills logic exists once."""
-    while True:
-        # Keep the whole turn inside status.suspend(): /help, /skills, and
-        # not-found messages print via handle_slash_line, and the live status
-        # display must stay suspended while they do, or it interleaves/clobbers
-        # them before the loop re-prompts.
-        with status.suspend():
-            line: str = await prompt.ask_async()
-            if line.strip().lower() in ("exit", "quit"):
-                # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the run
-                # loop's existing EOFError handler (cli/main.py) pauses and exits.
-                raise EOFError
-            if not is_slash_command(line):
-                return line
-            result = handle_slash_line(line, change=change, output_fn=print)
-            if result is REPROMPT:
-                continue
-            assert isinstance(result, str)  # handle_slash_line returns str for skill body
-            return result
+
+    @contextlib.asynccontextmanager
+    async def _quiesce() -> AsyncGenerator[None, None]:
+        if coord is None:
+            yield
+            return
+        async with coord.tty_quiesced():
+            yield
+
+    # Quiesce for the WHOLE turn (every reprompt), not just one ask_async — so a
+    # slash-command reprompt keeps the reader parked instead of briefly re-arming
+    # cbreak mid-interaction (AC #3). Normal input returns immediately anyway.
+    async with _quiesce():
+        while True:
+            # Keep the whole turn inside status.suspend(): /help, /skills, and
+            # not-found messages print via handle_slash_line, and the live status
+            # display must stay suspended while they do, or it interleaves/clobbers
+            # them before the loop re-prompts.
+            with status.suspend():
+                line: str = await prompt.ask_async()
+                if line.strip().lower() in ("exit", "quit"):
+                    # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the run
+                    # loop's existing EOFError handler (cli/main.py) pauses and exits.
+                    raise EOFError
+                if not is_slash_command(line):
+                    return line
+                result = handle_slash_line(line, change=change, output_fn=print)
+                if result is REPROMPT:
+                    continue
+                assert isinstance(result, str)  # handle_slash_line returns str for skill body
+                return result

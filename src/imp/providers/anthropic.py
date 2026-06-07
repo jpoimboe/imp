@@ -400,6 +400,13 @@ class AnthropicAgentRunner:
                 return
             except Exception as exc:
                 raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
+                if self._cancel:
+                    yield {"type": "error", "payload": {
+                        "category": "config",
+                        "kind": "interrupted",
+                        "message": "runner cancelled by interrupt",
+                    }}
+                    return
                 try:
                     classified = _classify_anthropic_exception(exc)
                 except Exception:

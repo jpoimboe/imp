@@ -770,3 +770,54 @@ async def test_runner_translates_unknown_sdk_exception_to_unknown_event(
         f"expected 1 error event, got {[e.get('payload', {}) for e in error_events]}"
     )
     assert error_events[0]["payload"]["category"] == "unknown"
+
+
+@pytest.mark.anyio
+async def test_runner_outer_except_reclassifies_when_cancel_is_set(
+    tmp_path: Path,
+) -> None:
+    """When `_cancel` is True (interrupt fired before the SDK exception
+    bubbled), the outer `except Exception` must emit the same `interrupted`
+    error event the in-loop check emits — NOT `unclassified provider error`."""
+    class _ExplodingClient:
+        async def __aenter__(self) -> None:
+            raise RuntimeError("Cannot write to terminated process (exit code: 0)")
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-6",
+        client_factory=lambda _opts: _ExplodingClient(),
+    )
+    runner._cancel = True
+    inv = _inv(tmp_path)
+
+    events = [ev async for ev in runner.run(inv)]
+    error_events = [e for e in events if e.get("type") == "error"]
+    assert len(error_events) == 1
+    payload = error_events[0]["payload"]
+    assert payload["category"] == "config"
+    assert payload["kind"] == "interrupted"
+    assert "unclassified provider error" not in payload["message"]
+
+
+@pytest.mark.anyio
+async def test_runner_outer_except_unknown_when_cancel_unset(
+    tmp_path: Path,
+) -> None:
+    """Regression guard: with `_cancel` False the unknown-classifier path runs."""
+    class _ExplodingClient:
+        async def __aenter__(self) -> None:
+            raise RuntimeError("SDK broke unexpectedly")
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-6",
+        client_factory=lambda _opts: _ExplodingClient(),
+    )
+    inv = _inv(tmp_path)
+    events = [ev async for ev in runner.run(inv)]
+    error_events = [e for e in events if e.get("type") == "error"]
+    assert len(error_events) == 1
+    assert error_events[0]["payload"]["category"] == "unknown"

@@ -25,7 +25,7 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
-from imp.cli.signals import install_process_group, pause_and_exit
+from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
 from imp.engine import journal, recovery, worktree
 from imp.engine.change import Change
@@ -186,22 +186,27 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                                 width=_term_width(), status=status)
             coord = InterruptCoordinator()
             rc = 0
+            esc_reader: EscKeyReader | None = None
             if non_interactive:
                 _ask_line = make_stdin_reply_fn(args.default_reply)
             else:
                 prompt = Prompt(skills_dir=change.workflow_dir / "skills",
                                 editing_mode=_editing_mode(change.control_root),
                                 color=should_use_color(sys.stdout))
+                esc_reader = EscKeyReader(coord)
 
                 async def _ask_line() -> str:
                     return await ask_line_with_slash(
                         prompt, status, change,
-                        color=should_use_color(sys.stdout), width=_term_width())
+                        color=should_use_color(sys.stdout), width=_term_width(),
+                        coord=coord)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
                 if not non_interactive:
                     tg.start_soon(status.tick)
+                    assert esc_reader is not None
+                    tg.start_soon(esc_reader.run)
                 try:
                     result = await run_change(
                         change,
@@ -234,8 +239,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 else:
                     driver.finish()
                     if coord.should_pause:
-                        pause_and_exit(change, reason="ctrl-c")
-                        _emit_paused(change, "ctrl-c")
+                        reason = coord.pause_reason or "ctrl-c"
+                        pause_and_exit(change, reason=reason)
+                        _emit_paused(change, reason)
                         rc = 130
                     else:
                         if result is RunResult.COMPLETED:
@@ -368,22 +374,27 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     rewind_plan, workflow, state, change.event_log())
             state.save(change.state_dir)
 
+            esc_reader: EscKeyReader | None = None
             if non_interactive:
                 _ask_line = make_stdin_reply_fn(args.default_reply)
             else:
                 prompt = Prompt(skills_dir=change.workflow_dir / "skills",
                                 editing_mode=_editing_mode(change.control_root),
                                 color=should_use_color(sys.stdout))
+                esc_reader = EscKeyReader(coord)
 
                 async def _ask_line() -> str:
                     return await ask_line_with_slash(
                         prompt, status, change,
-                        color=should_use_color(sys.stdout), width=_term_width())
+                        color=should_use_color(sys.stdout), width=_term_width(),
+                        coord=coord)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
                 if not non_interactive:
                     tg.start_soon(status.tick)
+                    assert esc_reader is not None
+                    tg.start_soon(esc_reader.run)
                 try:
                     result = await run_change(
                         change,
@@ -416,8 +427,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 else:
                     driver.finish()
                     if coord.should_pause:
-                        pause_and_exit(change, reason="ctrl-c")
-                        _emit_paused(change, "ctrl-c")
+                        reason = coord.pause_reason or "ctrl-c"
+                        pause_and_exit(change, reason=reason)
+                        _emit_paused(change, reason)
                         rc = 130
                     else:
                         if result is RunResult.COMPLETED:
