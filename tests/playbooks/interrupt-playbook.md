@@ -9,12 +9,16 @@
 > defect to a bug report. Work in a throwaway git worktree and abandon everything at the
 > end.
 >
-> This is the manual acceptance test for the **esc-and-clean-interrupt** feature
-> (`imp/specs/2026-06-04-esc-and-clean-interrupt.md`). The "expected" behavior below is
-> that feature's target. Run it against a current build (the feature is on `master` once
-> it merges). If you run it against a build that predates the feature, the ESC,
-> pause-reason, and clean-classification checks are *expected* to fail — record them; they
-> are the feature's to-do list, not surprises.
+> This is the acceptance test for the **esc-and-clean-interrupt** feature
+> (`imp/specs/2026-06-04-esc-and-clean-interrupt.md`), which is **on `master`**. The
+> "expected" behavior below is that feature's target. If you somehow run an older build
+> that predates it, the ESC / pause-reason / clean-classification checks are *expected* to
+> fail — record them as to-dos, not surprises.
+>
+> **Scope: three providers.** The feature (and so the §0 "clean classification" bar)
+> covers `claude_code`, `anthropic`, `openai`. `codex` is exercised too, but its
+> interrupt-error reclassification is **not** part of this feature — see the codex
+> carve-out under §0's bar.
 >
 > Read the whole file before you touch a tool.
 
@@ -52,15 +56,31 @@ A correct imp does **all** of:
 - **No ugly internals leak.** The strings `unclassified provider error` and
   `Cannot write to terminated process` and a `paused: unknown (CLIConnectionError)`
   headline must **not** appear. The interrupt is a clean, expected stop — not an error.
-- **The event log records it as an interrupt, not an unknown error** — see §5 for how to
-  inspect: an `error` event with `payload.category == "config"` and
-  `payload.kind == "interrupted"`, never `category == "unknown"`.
+- **The event log records it as an interrupt, not an unknown error.** Two distinct records
+  are written on an agent-phase interrupt — don't confuse them:
+  - a **`workflow_paused`** event carrying `payload.reason` (`ctrl-c|esc|ctrl-d|sigterm`) —
+    written by the pause itself;
+  - an **`error`** event with `payload.category == "config"` and
+    `payload.kind == "interrupted"`, never `category == "unknown"` — written by the
+    provider runner when it was mid-flight.
+
+  §5's greps target the **`error`/`interrupted`** record (the classification check). It
+  only exists when a runner was actually running (so not at point A — see §6).
 - **No orphaned subprocesses** — after interrupting a running tool, no leftover
   `claude` / `codex` / `bash` / `make` / model-transport process keeps running.
-- **Is resumable** — `imp resume <id>` continues the Change (same id/slug), reaching a
+- **Is resumable** — `imp resume <id>` continues the Change (same id), reaching a
   prompt or running forward; never `nothing to resume`, never a from-scratch restart.
 - **Speaks clearly to the user.** Judge the human-visible text with fresh eyes; an
   unclear, missing, or misleading message **is a bug** even when the exit code is right.
+
+> **codex carve-out.** The "no unclassified error" / `kind:interrupted` classification
+> checks above apply to **claude_code / anthropic / openai** only. codex's outer
+> error-handling is **not** part of this feature, so a Ctrl-C/ESC that tears codex's
+> transport down before its in-loop cancel check fires can still surface
+> `unclassified provider error` or a `category:"unknown"` event. For codex, **record that
+> as a known scoped-out gap (a codex to-do), not a feature bug.** codex's *other*
+> guarantees still hold and are in scope: clean `paused (...)` line, exit 130,
+> orphan-free, resumable.
 
 > The interrupt **decision is Pause, not Cancel** (per the spec's "Out of scope"). imp
 > does *not* cancel just the current turn and drop you back at its live prompt — it pauses
@@ -71,14 +91,13 @@ A correct imp does **all** of:
 
 ## 1. Assumptions (correct me before running if any are wrong)
 
-- **Which `imp`:** the installed `imp` on PATH. It should be a current build that includes
-  esc-and-clean-interrupt (present on `master` once that feature merges). If you are
-  validating before the merge, run an `imp` built from the feature branch instead. State
-  which build you tested in the report.
+- **Which `imp`:** the installed `imp` on PATH (a current build off `master`, which carries
+  the feature). State the commit you tested in the report.
 - **Where:** a fresh `git worktree` of this repo (created in §3). Every `imp new` /
   `imp resume` runs with cwd inside it, so all Changes (branches, nested worktrees,
   journals) are contained and discardable.
-- **Providers:** `claude_code`, `anthropic`, `openai`, `codex`.
+- **Providers:** `claude_code`, `anthropic`, `openai` (in scope for the classification
+  bar), plus `codex` (exercised, but classification is scoped out — see §0's carve-out).
 - **Credentials:** `~/.anthropic-key` → `ANTHROPIC_API_KEY`, `~/.openai-key` →
   `OPENAI_API_KEY`. `claude_code` / `codex` use their own local auth.
 - **impty MCP server** is running from `.mcp.json` with controlling-terminal support.
@@ -125,7 +144,7 @@ cd /home/jpoimboe/imp
 WT=/tmp/imp-interrupt-$(date +%Y%m%d-%H%M%S)
 git worktree add -b imp-interrupt-test "$WT" HEAD
 echo "$WT"                              # your cwd for every imp run
-sed -n '1,12p' "$WT"/imp/config.yaml    # confirm it carries an imp project
+sed -n '1,12p' "$WT"/imp/config.yaml    # confirm this is the live project config (providers/tiers/theme)
 ```
 
 You rewrite `"$WT"/imp/config.yaml` per provider (§4).
@@ -162,6 +181,10 @@ tiers: {low: {codex: gpt-5.5}, medium: {codex: gpt-5.5}, high: {codex: gpt-5.5}}
 theme: ansi
 ```
 
+> Model names drift. If a tier model 404s / "unknown model"s at launch, the available
+> models changed — adjust the tier to a current one and **note the substitution**; it's
+> not an interrupt bug.
+
 ---
 
 ## 5. Driving primitives (reusable procedures)
@@ -197,8 +220,10 @@ would not reach imp.
 3. Assert the bar from §0: `alive=False`; final line `paused (<expected_reason>)`; no
    `unclassified provider error` / `Cannot write to terminated process` /
    `paused: unknown`; one interrupt sufficed.
-4. **Orphan check:** `bash: pgrep -af 'claude|codex|make|imp ' | grep -v <self>` — nothing
-   from this run should remain.
+4. **Orphan check:** look for leftover *tool* subprocesses from this run —
+   `bash: pgrep -af 'claude|codex|make' | grep "$WT"` — scope to `$WT` so you don't match
+   the long-lived impty server, your own driver shells, or unrelated `imp`/`claude`
+   sessions. Nothing tied to `$WT` should remain after the pause.
 5. **Event-log check:** the Change's event log is at a deterministic path —
 
    ```bash
@@ -211,7 +236,12 @@ would not reach imp.
    `<worktree>` is `$WT/.imp/worktrees/<id>` because cwd is `$WT`. If you still can't
    locate it, fall back to `bash: cd "$WT" && imp log <id>` and judge from what it
    surfaces; note the limitation.)
-6. Record the change id (from the `paused` line) for resume + abandon.
+6. **Record the change id** for resume + abandon. The authoritative source is
+   `bash: cd "$WT" && imp status` — its first column is the change **id** (the
+   `.imp/worktrees/<id>` dir name), which is what the event path and `imp resume`/`imp
+   abandon` key on. The `paused` headline should print that same id; if it ever shows a
+   slug or other display name instead, that's itself a bug (a slug is never a ref) — record
+   it and rely on `imp status` for the id.
 
 ### **`RESUME-AND-VERIFY(id)`**
 
