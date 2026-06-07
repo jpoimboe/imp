@@ -463,10 +463,6 @@ class CodexAgentRunner:
                     "message": "codex resume: turn ended without complete_step",
                     "detail": {"last_agent_text": last_text[:500]}}}
                 return
-        # Whole-run nudge budget (across-turn). `continuation_fn` is the gate;
-        # this cap is the floor.
-        max_nudges = 3
-        nudges_used = 0
         # AbortController for interrupt() — tolerate a fake/SDK without one.
         try:
             from openai_codex_sdk import (
@@ -631,19 +627,24 @@ class CodexAgentRunner:
                         tools=list(proc_state.get("turn_tool_outcomes", [])),
                         has_complete_step=bool(proc_state.get("complete_step_called")),
                     )
-                    # Unlike sibling providers (claude_code) which call
-                    # guard.note_external_input() on genuine human-input turns
-                    # to reset the guard, codex does NOT call it here: the
-                    # continuation_fn nudge is automated (not human-driven),
-                    # so repeated no-progress nudge turns should accumulate
-                    # toward a trip. Genuine human-interactive continuation
-                    # semantics are revisited in the nudge-unification work
-                    # (Unit G / G3).
-                    loop_err = guard.observe(record)
-                    if loop_err is not None:
-                        yield perr.make_error_event(
-                            loop_err, kind=getattr(loop_err, "kind", ""))
-                        return
+                    # Mirror claude_code's guard gating now that G3 drives BOTH
+                    # modes off continuation_fn. An interactive pure-text turn
+                    # awaiting fresh human input is a human handoff, not an
+                    # autonomous loop iteration: reset the guard so normal
+                    # multi-turn conversation never trips no_progress. A
+                    # tool-bearing interactive turn still observes (an
+                    # interactive re-read loop is still caught), and autonomous
+                    # nudge turns always observe — so repeated no-progress
+                    # automated nudges still accumulate toward a trip (the C1
+                    # loop-guard backstop the unification work was waiting on).
+                    if invocation.interactive and not record.tools:
+                        guard.note_external_input()
+                    else:
+                        loop_err = guard.observe(record)
+                        if loop_err is not None:
+                            yield perr.make_error_event(
+                                loop_err, kind=getattr(loop_err, "kind", ""))
+                            return
                     if proc_state.get("complete_step_called"):
                         args = proc_state.get("complete_step_args") or {}
                         try:
@@ -668,30 +669,20 @@ class CodexAgentRunner:
                         yield perr.make_error_event(
                             classified, kind=getattr(classified, "kind", ""))
                         return
-                    # Interactive + continuation_fn → cross to outer loop.
-                    if (invocation.interactive
-                            and invocation.continuation_fn is not None
-                            and nudges_used < max_nudges):
+                    # Turn ended without complete_step. If a continuation_fn is
+                    # wired, cross to the outer loop (interactive wrap OR
+                    # autonomous nudge); the closure itself decides when to stop
+                    # (returning None -> terminate via no_complete_step_after_
+                    # nudges). Without a continuation_fn there is no way to
+                    # continue, so emit the immediate `no_complete_step`.
+                    if invocation.continuation_fn is not None:
                         need_nudge = True
                         break  # exit inner for; outer while handles nudge
-                    # Autonomous OR no continuation_fn OR nudges exhausted:
-                    # autonomous emits `no_complete_step`; interactive with a
-                    # wired continuation_fn that exhausted the budget emits the
-                    # distinct `no_complete_step_after_nudges`.
-                    if (invocation.interactive
-                            and invocation.continuation_fn is not None
-                            and nudges_used >= max_nudges):
-                        kind = "no_complete_step_after_nudges"
-                        category = "agent_incomplete"
-                        msg = ("codex did not call complete_step after "
-                               f"{max_nudges} nudges")
-                    else:
-                        kind = "no_complete_step"
-                        category = "agent_output_missing"
-                        msg = ("codex completed turn without calling "
-                               "complete_step")
                     yield {"type": "error", "payload": {
-                        "category": category, "kind": kind, "message": msg,
+                        "category": "agent_output_missing",
+                        "kind": "no_complete_step",
+                        "message": ("codex completed turn without calling "
+                                    "complete_step"),
                         "detail": {"last_agent_text": last_text[:500]}}}
                     return
             # Stream ended (possibly silently) after a cancel without the
@@ -732,8 +723,8 @@ class CodexAgentRunner:
                 yield {"type": "error", "payload": {
                     "category": "agent_incomplete",
                     "kind": "no_complete_step_after_nudges",
-                    "message": ("codex did not call complete_step "
-                                f"after {nudges_used + 1} nudge(s)"),
+                    "message": ("codex did not call complete_step before the "
+                                "continuation hook stopped nudging"),
                     "detail": {"last_agent_text": last_text[:500]}}}
                 return
             elog.append_user_message(
@@ -741,7 +732,6 @@ class CodexAgentRunner:
                 message=Message(role="user",
                                 content=(TextBlock(text=str(nxt)),)))
             next_prompt = str(nxt)
-            nudges_used += 1
 
     def _build_thread_options(self) -> Any:
         """ThreadOptions with the design's exact production flags. Lives in its

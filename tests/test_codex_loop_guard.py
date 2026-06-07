@@ -45,10 +45,12 @@ def _inv(tmp_path: Path, elog: object) -> AgentInvocation:
         system_prompt="sp", initial_messages=(),
         change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
-        # interactive=True + continuation_fn: the codex runner re-enters the turn
-        # loop on each no-complete-step turn (autonomous exits immediately on
-        # turn 1, so the guard never accumulates enough turns to trip).
-        interactive=True, transcript_dir=tmp_path / "tx",
+        # autonomous=interactive=False + a non-self-limiting continuation_fn:
+        # after G3 BOTH modes drive off continuation_fn, so autonomous runs
+        # re-enter the turn loop on each no-complete-step turn and the guard
+        # accumulates toward a trip. (Interactive pure-text turns now reset the
+        # guard as genuine human handoffs, so the loop scenario is autonomous.)
+        interactive=False, transcript_dir=tmp_path / "tx",
         fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),
                                mode="allow", source=_SRC),),
         events_path=tmp_path / "events.jsonl", agent_id="step:t", event_log=elog,
