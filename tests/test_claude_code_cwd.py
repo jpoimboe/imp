@@ -81,3 +81,26 @@ def test_build_options_pins_cwd_to_project_root(tmp_path: Path) -> None:
         f"got {opts.cwd!r}; claude would inherit a stale $PWD and edit/commit "
         f"the wrong working tree (see dogfood pollution regression)."
     )
+
+
+def test_build_options_blanks_external_anthropic_keys(tmp_path: Path) -> None:
+    """The nested `claude` authenticates via its own backend (OAuth/Vertex/
+    Bedrock), never via ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN (those are the
+    direct-SDK `anthropic` provider's external-key path). If the parent env
+    exports either, claude switches to it as an external key and a bogus/
+    mismatched value fails with "Invalid API key" (exit 0 → AuthError → empty
+    review). The SDK merges options.env OVER the inherited env, so _build_options
+    must blank both to make the subprocess immune to whatever the parent exports.
+    """
+    runner = ClaudeCodeAgentRunner("claude-sonnet-4-5")
+    opts = runner._build_options(
+        _invocation(tmp_path), mcp_server=object(), tool_names=["bash"]
+    )
+    assert opts.env.get("ANTHROPIC_API_KEY") == "", (
+        f"expected options.env['ANTHROPIC_API_KEY']=='' to override any inherited "
+        f"external key, got {opts.env.get('ANTHROPIC_API_KEY')!r}"
+    )
+    assert opts.env.get("ANTHROPIC_AUTH_TOKEN") == "", (
+        f"expected options.env['ANTHROPIC_AUTH_TOKEN']=='' to override any inherited "
+        f"external token, got {opts.env.get('ANTHROPIC_AUTH_TOKEN')!r}"
+    )

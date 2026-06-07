@@ -6,7 +6,7 @@ imp/workflows/default/; append .imp/ to project .gitignore.
 Committed config+workflows live under imp/ (tracked by git).
 Runtime state (changes, locks, etc.) lives under .imp/ (gitignored wholesale).
 
-The default role taxonomy (spec §8.2) is auto-populated based on enabled
+The default tier taxonomy is auto-populated based on enabled
 providers — no model selection question, just sensible defaults.
 """
 
@@ -21,7 +21,7 @@ import yaml
 
 from imp.assets import default_workflow_dir
 
-# Per spec §8.2 role taxonomy. Order: thinking-heavy → coding → quick.
+# Per spec: low/medium/high tiers. Order: low (cheapest) → medium → high.
 # Bare aliases (opus/sonnet/haiku) track "latest" automatically so the
 # scaffold never goes stale. Verified accepted by the claude_code provider.
 # The anthropic block uses the same aliases by analogy; they were NOT verified
@@ -30,72 +30,61 @@ from imp.assets import default_workflow_dir
 # dated/"-latest" alias form here.
 _PROVIDER_MODELS: dict[str, dict[str, str]] = {
     "claude_code": {
-        "thinking":  "opus",
-        "coding":    "sonnet",
-        "quick":     "haiku",
+        "low":    "haiku",
+        "medium": "sonnet",
+        "high":   "opus",
     },
     "anthropic": {
-        "thinking":  "opus",
-        "coding":    "sonnet",
-        "quick":     "haiku",
+        "low":    "haiku",
+        "medium": "sonnet",
+        "high":   "opus",
     },
     "openai": {
-        "thinking": "gpt-5.2",
-        "coding":   "gpt-5",
-        "quick":    "gpt-5-mini",
+        "low":    "gpt-5.4-mini",
+        "medium": "gpt-5.3-codex",
+        "high":   "gpt-5.5",
+    },
+    # codex refuses *-codex models (runner preflight M1), so it cannot reuse
+    # openai's gpt-5.3-codex tier. gpt-5.5 is the sanctioned non-codex model.
+    "codex": {
+        "low":    "gpt-5.5",
+        "medium": "gpt-5.5",
+        "high":   "gpt-5.5",
     },
 }
 
 # Providers driven by a local CLI rather than an HTTP API — no env-var prompt
-# at init time, and omitted from the informational `providers:` block.
-_PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code"})
+# at init time, and omitted from the informational `providers:` block. codex
+# authenticates via its own ~/.codex/auth.json (codex login), like claude_code.
+_PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code", "codex"})
 
-_ROLE_TIERS: dict[str, str | dict[str, str]] = {
-    "default":       "coding",
-    "spec":          "thinking",
-    "spec_review":   "thinking",
-    "plan":          "thinking",
-    "plan_review":   "thinking",
-    "task_lead":     "coding",
-    "design":        "thinking",
-    "design_review": "thinking",
-    "code":          "quick",
-    "code_review":   {"default": "coding", "openai": "thinking"},
-    "test":          "coding",
-    "review":        "thinking",
-    "quick":         "quick",
-    "fast":          "quick",
-    "balanced":      "coding",
-    "powerful":      "thinking",
-}
+_TIERS: tuple[str, ...] = ("low", "medium", "high")
 
 
-def _build_role_map(
-    providers: list[str], env_vars: dict[str, str],
+def _default_detect_theme() -> str:
+    """Real terminal-theme detection (dark | light | ansi). Wrapped so a failure
+    in the OSC-11 path can never abort init — any error degrades to 'ansi'."""
+    try:
+        from imp.cli.term_theme import detect_theme
+        return detect_theme()
+    except Exception:
+        return "ansi"
+
+
+def _build_config(
+    providers: list[str], env_vars: dict[str, str], theme: str = "ansi",
 ) -> dict[str, Any]:
-    """Build the `roles:` block — each role lists providers in order;
-    first available env-var wins at runtime."""
-    roles: dict[str, Any] = {}
-    for role, tier in _ROLE_TIERS.items():
-        prefer = []
-        for prov in providers:
-            # tier is either a plain tier string (uniform across providers) or a
-            # {provider: tier} mapping that MUST carry a 'default' for any
-            # enabled provider not named explicitly (e.g. claude_code).
-            if isinstance(tier, dict):
-                prov_tier = tier[prov] if prov in tier else tier["default"]
-            else:
-                prov_tier = tier
-            model = _PROVIDER_MODELS[prov][prov_tier]
-            prefer.append({"provider": prov, "model": model})
-        roles[role] = {"prefer": prefer}
-    return {
-        # TODO: load_config() doesn't yet consume the `providers:` block —
-        # the env-var info is informational only; per-role `prefer` entries
-        # are what runtime resolution reads.
-        "providers": {p: {"env": env_vars[p]} for p in providers if p in env_vars},
-        "roles": roles,
+    """Build the new `providers:` / `tiers:` / `provider_envs:` config block."""
+    tiers_block = {
+        tier: {prov: _PROVIDER_MODELS[prov][tier] for prov in providers}
+        for tier in _TIERS
     }
+    out: dict[str, Any] = {"providers": list(providers), "tiers": tiers_block}
+    provider_envs = {p: {"env": env_vars[p]} for p in providers if p in env_vars}
+    if provider_envs:
+        out["provider_envs"] = provider_envs
+    out["theme"] = theme   # detected once here; runtime reads it, never re-queries
+    return out
 
 
 def _interactive_provider_picker(available: list[str]) -> list[str]:
@@ -130,7 +119,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
             ("bold", "Which providers do you want to enable?\n"),
         ]
         for i, name in enumerate(available):
-            arrow = "❯ " if i == cursor else "  "  # noqa: RUF001
+            arrow = "❯ " if i == cursor else "  "
             box = "[x] " if i in selected else "[ ] "
             style = "ansicyan bold" if i == cursor else ""
             out.append((style, f"{arrow}{box}{name}\n"))
@@ -190,6 +179,7 @@ def run_init(
     input_fn: Callable[[str], str],
     output_fn: Callable[[str], None],
     picker_fn: Callable[[list[str]], list[str]] | None = None,
+    detect_theme_fn: Callable[[], str] | None = None,
 ) -> None:
     imp_dir = project_root / "imp"
     if imp_dir.exists():
@@ -215,11 +205,18 @@ def run_init(
         ans = input_fn(f"For {prov!r}: API key env var [{default_env}]: ")
         env_vars[prov] = (ans.strip() or default_env)
 
+    # Detect the terminal theme now (interactive, TTY available) and persist it,
+    # so the runtime never has to re-query the terminal. Falls back to 'ansi'.
+    detect = detect_theme_fn or _default_detect_theme
+    theme = detect()
+    if theme != "ansi":
+        output_fn(f"Detected a {theme} terminal — colors tuned to match.")
+
     imp_dir.mkdir()
     (imp_dir / "workflows").mkdir()
     shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
 
-    cfg = _build_role_map(providers, env_vars)
+    cfg = _build_config(providers, env_vars, theme)
     body = yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False)
     lint_hint = (
         "\n# Optional lint-clean gate: a command the implementer runs before each\n"

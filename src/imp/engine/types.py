@@ -140,18 +140,6 @@ class FsRule:
     source: SourceLoc
 
 
-# ── Cross-role model constraints (model_rules:) ───────────────────────────────
-
-@dataclass(frozen=True, slots=True)
-class RoleConstraint:
-    """One role's cross-role model constraint. `differ_provider_from` names
-    another role whose resolved *provider* this role should differ from (a soft
-    preference; see providers/resolve.resolve_roles). `None` means no constraint.
-    """
-    differ_provider_from: str | None = None
-    source: SourceLoc | None = None
-
-
 # ── Agent definition (parsed from .md) ────────────────────────────────────────
 
 @dataclass(frozen=True, slots=True)
@@ -165,11 +153,10 @@ class AgentDef:
     source_path: Path
     source: SourceLoc
     max_tool_calls: int | None = None
-    # The role this agent wants WHEN RUN AS A SUBAGENT (and a default a
-    # top-level step may override via its own model_role:). MUST default to None
-    # — not the string "default" that Step.model_role uses — so dispatch_task
-    # can tell "inherit parent" (None) from "use the 'default' role".
-    model_role: str | None = None
+    # Capability tier this agent wants WHEN RUN AS A SUBAGENT. MUST default to
+    # None so dispatch_task can tell "inherit parent" (None) from "use the
+    # 'medium' tier". Top-level steps override at the step level via Step.tier.
+    tier: str | None = None
 
 
 # ── Steps & phases ────────────────────────────────────────────────────────────
@@ -190,7 +177,10 @@ class Step:
     # agent-only
     file: Path | None = None
     prompt: str | None = None
-    model_role: str = "default"
+    tier: str = "medium"
+    differ_from: str | None = None      # name of another step in this workflow;
+                                        # this step's resolved (provider, model)
+                                        # is scored to differ from that step's.
     fs_permissions: tuple[FsRule, ...] = ()
     interactive: bool = False
     max_tool_calls: int | None = None
@@ -231,8 +221,6 @@ class Workflow:
     agents: dict[str, AgentDef] = field(hash=False)
     workflow_dir: Path
     source: SourceLoc
-    model_rules: dict[str, RoleConstraint] = field(hash=False, default_factory=dict)
-    model_tiers: tuple[str, ...] = ()
 
     def flat_steps(self) -> tuple[Step, ...]:
         return tuple(s for p in self.phases for s in p.steps)

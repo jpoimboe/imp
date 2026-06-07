@@ -66,7 +66,7 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
             "type": "object",
             "properties": {
                 **TASK_TOOL_SCHEMA["properties"],
-                "model_tier": {
+                "tier": {
                     "type": "string",
                     "enum": list(tiers),
                     "description": (
@@ -76,7 +76,7 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
                     ),
                 },
             },
-            # model_tier stays OPTIONAL: not added to required.
+            # tier stays OPTIONAL: not added to required.
             "required": list(TASK_TOOL_SCHEMA["required"]),
         }
 
@@ -93,7 +93,7 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
 
 async def dispatch_task(
     ctx: ToolContext, subagent_name: str, task_description: str,
-    *, tool_call_event_id: str = "", model_tier: str | None = None,
+    *, tool_call_event_id: str = "", tier: str | None = None,
 ) -> str:
     if subagent_name not in ctx.subagent_defs:
         raise ValueError(
@@ -117,38 +117,40 @@ async def dispatch_task(
     invocation_id = ctx.next_subagent_invocation_id()
 
     cc = ctx.change_context or ChangeContext(
-        slug="", title="", project_root=ctx.project_root,
-        workflow_dir=ctx.project_root / ".imp" / "change" / "workflow",
+        id="", slug="", title="", project_root=ctx.project_root,
+        # The branch's own tracked workflow dir — mirrors Change.workflow_dir
+        # (no create-time snapshot copy exists anymore).
+        workflow_dir=ctx.project_root / "imp" / "workflows" / "default",
     )
 
-    # Render the subagent's Jinja template (subagents don't see the parent
-    # title). A SEPARATE read-only JsonlEventLog for {{ events.* }} — NOT
-    # ctx.event_log, which is the shared WRITE instance.
+    # Render the subagent's Jinja template. A SEPARATE read-only JsonlEventLog
+    # for {{ events.* }} — NOT ctx.event_log, which is the shared WRITE instance.
     prompt_ctx = build_context(
+        change_id=cc.id,
         change_slug=cc.slug,
-        change_title=f"Change {cc.slug}",
+        change_title=cc.title,   # dispatch label is the title now [item 11]
         event_log=JsonlEventLog(ctx.events_path),
         vars=ctx.change_state.vars if ctx.change_state is not None else {},
     )
     rendered_prompt = render_prompt(subagent_def.prompt_template_source, prompt_ctx)
 
-    # Resolve (provider, model). Precedence (design §5):
-    #   1. runtime model_tier (truthy AND in the resolved map) — OVERRIDES static.
-    #   2. the subagent's static model_role frontmatter.
+    # Resolve (provider, model). Precedence (design §4):
+    #   1. runtime tier (truthy AND in the resolved map) — OVERRIDES static.
+    #   2. the subagent's static tier frontmatter.
     #   3. inherit the parent's provider + model.
-    resolved = ctx.resolved_roles or {}
-    tier = model_tier or None
-    if tier is not None and tier not in resolved:
-        valid = ", ".join(ctx.model_tiers) or "(no tiers configured)"
+    resolved = ctx.resolved_tiers or {}
+    runtime_tier = tier or None
+    if runtime_tier is not None and runtime_tier not in resolved:
+        valid = ", ".join(ctx.tiers) or "(no tiers configured)"
         raise ValueError(
-            f"model_tier {tier!r} is not a configured tier; valid tiers: {valid}"
+            f"tier {runtime_tier!r} is not a configured tier; valid tiers: {valid}"
         )
-    mr = subagent_def.model_role
-    if tier is not None:
-        pm = resolved[tier]
+    subagent_tier = subagent_def.tier
+    if runtime_tier is not None:
+        pm = resolved[runtime_tier]
         sub_provider, sub_model = pm.provider, pm.model
-    elif mr is not None and mr in resolved:
-        pm = resolved[mr]
+    elif subagent_tier is not None and subagent_tier in resolved:
+        pm = resolved[subagent_tier]
         sub_provider, sub_model = pm.provider, pm.model
     else:
         sub_provider, sub_model = ctx.provider_name, ctx.model_name
@@ -177,7 +179,7 @@ async def dispatch_task(
         fs_permissions=ctx.fs_permissions,
         events_path=ctx.events_path,
         subagent_defs=child_subagent_defs,
-        model_tiers=ctx.model_tiers,
+        tiers=ctx.tiers,
         # Decision #4: agent-level ceiling (workflow-default fallback not
         # reachable here; deferred YAGNI). Closes "uncapped" for any subagent
         # that declares a ceiling.
@@ -186,7 +188,7 @@ async def dispatch_task(
         event_log=ctx.event_log,
         change_state=None,
         first_event_parent_id=tool_call_event_id or None,
-        resolved_roles=ctx.resolved_roles,
+        resolved_tiers=ctx.resolved_tiers,
         coordinator=ctx.coordinator,
         subagent_depth=child_depth,
         # Same object as event_log= above, but a distinct role: log= is the
@@ -238,5 +240,14 @@ async def dispatch_task(
         # must not kill the task-lead. error_policy backoff has already been
         # applied above, so transient errors retried before reaching here.
         cat = result.error.category if result.error else "unknown"
-        raise RuntimeError(f"subagent {subagent_name!r} failed ({cat})")
+        kind = result.error.kind if result.error else None
+        # Embed the kind (e.g. "stalled" from the B.2 watchdog) so the parent's
+        # is_error tool_result content carries it — Part D derives the subagent's
+        # terminal glyph from this marker. Without it, a stalled subagent reads
+        # as a generic ✗ failed and the operator can't tell it timed out.
+        # CONSUMER CONTRACT: narrative._close_subagent_fold scans this error
+        # content for the literal "[<kind>]" marker (only on is_error closes).
+        # Keep the bracketed format and kind vocabulary in sync with that scan.
+        suffix = f" [{kind}]" if kind else ""
+        raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
     return json.dumps(result.output)

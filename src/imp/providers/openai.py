@@ -15,11 +15,14 @@ tool_result, runner_warning, tool_killed) are written via EventLog.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
 from collections.abc import AsyncGenerator
 from typing import Any, cast
+
+import anyio
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
@@ -136,7 +139,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
     if "task" in invocation.agent_def.tools:
-        out["task"] = make_task_tool(invocation.model_tiers)
+        out["task"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     return out
@@ -335,6 +338,29 @@ def _openai_stop_reason(raw: dict[str, Any]) -> str | None:
     return raw.get("status")
 
 
+_CACHE_KEY_MAX = 64        # OpenAI's hard limit on prompt_cache_key
+_CACHE_KEY_HASH_LEN = 8    # hex chars of disambiguating digest
+
+
+def _prompt_cache_key(change_id: str, aid: str) -> str:
+    """OpenAI routing/affinity hint, bounded to the 64-char API limit.
+
+    Stable per (change, agent) invocation; distinct per change and per
+    agent. Keys that fit are passed through verbatim. Over-long keys keep
+    the whole aid (the within-change discriminator one greps for) and the
+    change_id head (the cross-change discriminator), then append a hash of the
+    *full* change_id:aid so distinctness on both survives truncation.
+    """
+    full = f"{change_id}:{aid}"
+    if len(full) <= _CACHE_KEY_MAX:
+        return full
+    digest = hashlib.sha256(full.encode()).hexdigest()[:_CACHE_KEY_HASH_LEN]
+    budget = _CACHE_KEY_MAX - _CACHE_KEY_HASH_LEN - 1   # 55: readable, before "-{digest}"
+    aid_keep = min(len(aid), budget - 1)                # keep >=1 char for id + ":"
+    id_keep = budget - aid_keep - 1                     # -1 for the ":" separator
+    return f"{change_id[:id_keep]}:{aid[-aid_keep:]}-{digest}"
+
+
 class OpenAIAgentRunner:
     """Mirrors AnthropicAgentRunner.run; differences live in the translation
     helpers above and in the API call below."""
@@ -350,6 +376,7 @@ class OpenAIAgentRunner:
         self._user_input_fn = user_input_fn
         self._client: Any = None
         self._cancel = False
+        self._cancel_scope: Any = None
         self._ctx: ToolContext | None = None
 
     def _get_client(self) -> Any:
@@ -388,6 +415,13 @@ class OpenAIAgentRunner:
                 return
             except Exception as exc:
                 raise_if_suspended(exc)
+                if self._cancel:
+                    yield {"type": "error", "payload": {
+                        "category": "config",
+                        "kind": "interrupted",
+                        "message": "runner cancelled by interrupt",
+                    }}
+                    return
                 try:
                     classified = _classify_openai_exception(exc)
                 except Exception:
@@ -420,11 +454,12 @@ class OpenAIAgentRunner:
         )
         ctx.change_context = invocation.change_context
         ctx.change_state = invocation.change_state
+        ctx.change = invocation.change          # live Change for rename_change
         ctx.spawn_subagent = spawn_subagent_via_registry
-        ctx.resolved_roles = invocation.resolved_roles
+        ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
         ctx.coordinator = invocation.coordinator
-        ctx.model_tiers = invocation.model_tiers
+        ctx.tiers = invocation.tiers
         ctx.lint_command = invocation.lint_command
         ctx.test_command = invocation.test_command
         ctx.non_interactive = invocation.non_interactive
@@ -519,22 +554,40 @@ class OpenAIAgentRunner:
         openai_tools.extend(openai_web_tool_specs(invocation.agent_def))
         # Stable routing/affinity hint for OpenAI's automatic prompt cache.
         # Keyed to one growing conversation (one agent invocation within one
-        # change) so the prefix stays cache-resident turn-over-turn. slug
+        # change) so the prefix stays cache-resident turn-over-turn. id
         # is required: agent_id alone is change-agnostic, so concurrent changes
         # running the same step would collide on one routing slot.
-        prompt_cache_key = f"{invocation.change_context.slug}:{aid}"
+        # Keyed to the IMMUTABLE id, not the slug: a slug rotates at the
+        # spec->plan title rename and would bust the cache mid-conversation
+        # (spec §9). [AC 10]
+        prompt_cache_key = _prompt_cache_key(invocation.change_context.id, aid)
         guard = LoopGuard()
 
         while not self._cancel:
             client = self._get_client()
-            response = await client.responses.create(
-                model=self.model,
-                instructions=invocation.system_prompt,
-                input=_imp_to_responses_input(messages),
-                tools=openai_tools,
-                store=False,
-                prompt_cache_key=prompt_cache_key,
-            )
+            # N4 race note: an interrupt() between the loop-head _cancel check and
+            # this assignment leaves this one request uncancelled (loop exits next
+            # iteration via _cancel). One extra in-flight request, worst case.
+            self._cancel_scope = anyio.CancelScope()
+            response = None
+            try:
+                with self._cancel_scope:
+                    response = await client.responses.create(
+                        model=self.model,
+                        instructions=invocation.system_prompt,
+                        input=_imp_to_responses_input(messages),
+                        tools=openai_tools,
+                        store=False,
+                        prompt_cache_key=prompt_cache_key,
+                    )
+            finally:
+                # N3: reset even on a genuine API error so a later interrupt()
+                # never cancels a stale exited scope.
+                self._cancel_scope = None
+            if response is None:
+                # interrupt() cancelled the in-flight request — exit the loop and
+                # fall through to the "cancelled (interrupt)" yield below.
+                break
 
             raw = _serialize_responses_response(response)
             assistant_msg = _parse_responses_message(raw)
@@ -573,12 +626,20 @@ class OpenAIAgentRunner:
                     messages.append(user_msg)
                     transcript.append(user_msg)
                     elog.append_user_message(agent_id=aid, message=user_msg)
-                    loop_err = guard.observe(TurnRecord(
-                        assistant_text=last_text, tools=[], has_complete_step=False))
-                    if loop_err is not None:
-                        yield perr.make_error_event(
-                            loop_err, kind=getattr(loop_err, "kind", ""))
-                        return
+                    if invocation.interactive:
+                        # Human handoff: this text-only turn awaits fresh human
+                        # input, so it is not an autonomous loop iteration —
+                        # reset so normal multi-turn conversation never trips
+                        # no_progress. (The nudge path below still observes.)
+                        guard.note_external_input()
+                    else:
+                        loop_err = guard.observe(TurnRecord(
+                            assistant_text=last_text, tools=[],
+                            has_complete_step=False))
+                        if loop_err is not None:
+                            yield perr.make_error_event(
+                                loop_err, kind=getattr(loop_err, "kind", ""))
+                            return
                     continue
                 # Legacy/test fallback: no continuation_fn wired by the executor.
                 if invocation.interactive and ctx.user_input_fn is not None:
@@ -621,7 +682,7 @@ class OpenAIAgentRunner:
                         result_str = await dispatch_task(
                             ctx, tu.input["subagent_name"], tu.input["task_description"],
                             tool_call_event_id=tc_ev["id"],
-                            model_tier=tu.input.get("model_tier"),
+                            tier=tu.input.get("tier"),
                         )
                     except Exception as e:
                         raise_if_suspended(e)
@@ -728,8 +789,14 @@ class OpenAIAgentRunner:
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
+        # M5: the run loop's `finally` may have just set _cancel_scope to None and
+        # exited the scope. Calling .cancel() on an already-exited anyio CancelScope
+        # is a no-op (safe on the pinned anyio >=4,<5), and `_cancel` still stops
+        # the loop on its next iteration — so the inverse race is benign.
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
         if self._ctx is not None:
-            await terminate_running_processes(self._ctx, timeout=2.0)
+            await terminate_running_processes(self._ctx)
 
 
 class OpenAIProvider:

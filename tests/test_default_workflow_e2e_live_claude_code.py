@@ -61,15 +61,19 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
         "phases:\n"
         "  - name: a\n"
         "    steps:\n"
-        "      - {name: w, file: agents/writer.md, model_role: default}\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
     (tmp_path / "imp" / "config.yaml").write_text(
-        "roles:\n  default:\n    prefer: [{provider: claude_code, model: claude-sonnet-4-5}]\n"
+        "providers: [claude_code]\n"
+        "tiers:\n"
+        "  low:    {claude_code: claude-sonnet-4-5}\n"
+        "  medium: {claude_code: claude-sonnet-4-5}\n"
+        "  high:   {claude_code: claude-sonnet-4-5}\n"
     )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "seed")
     change = Change.create(
-        tmp_path, title="live-cc", slug="live-cc", base_branch="main")
+        tmp_path, title="live-cc", change_id="live-cc", base_branch="main")
 
     result = await run_change(change)
     assert result is RunResult.COMPLETED

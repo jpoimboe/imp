@@ -41,6 +41,25 @@ def test_build_session_vi_mode() -> None:
     assert session.editing_mode == EditingMode.VI
 
 
+def test_build_session_applies_no_style_override() -> None:
+    """The input region keeps the terminal default — user-turn identity now
+    lives in the caret/rules, not a PromptSession bg fill. So no style override
+    is set (the field never paints its own background again)."""
+    from imp.cli.prompt import _build_session
+    assert _build_session(None).style is None
+
+
+def test_caret_is_bright_blue_under_color() -> None:
+    """With color on, the prompt message is a prompt_toolkit ANSI caret carrying
+    the bright-blue '>'; with color off it's the plain '> ' string."""
+    from prompt_toolkit.formatted_text import ANSI
+
+    on = Prompt(color=True)._message(None)
+    assert isinstance(on, ANSI)
+    assert "\x1b[94m" in on.value and ">" in on.value
+    assert Prompt(color=False)._message(None) == "> "
+
+
 class _FakeSession:
     def __init__(self, answers: list[str] | None = None, raises=None) -> None:
         self.answers = list(answers or [])

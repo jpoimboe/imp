@@ -15,15 +15,15 @@ tree with no live cursor, so it is unaffected.
 The fixture is a trimmed, real slice of the 2026-06-03-imp-new-open-by-asking
 run: the task-lead step spawns an `implementer` subagent (empty-id task call),
 the subagent reports, the non-matching close arrives, then task-lead completes
-and a `commit-check` step runs. The subagent's own prose streams (it is a
-descended container), but the parent step's completion breadcrumb and the
-entire following step are swallowed live.
+and a `commit-check` step runs. The subagent collapses to a single status row
+in lean/live (Part D); no internal prose is streamed. The parent step's
+completion breadcrumb and the entire following step were previously swallowed.
 
-This test FAILS today (live is missing the post-spawn parent content) and should
-PASS once a never-closing subagent fold can no longer wedge the live cursor. It is
-marked `xfail(strict=True)` so the suite stays green now and the marker must be
-removed when the §11 fix lands (the fix turns the xfail into an xpass → strict
-failure).
+This is a regression guard: it confirms the post-spawn parent content (the
+parent step's completion breadcrumb and the following step) is emitted live now
+that a never-closing subagent fold can no longer wedge the cursor (the §11 fix
+closes an unmatched fold on an id mismatch). It would fail again if that fix
+regressed.
 """
 from __future__ import annotations
 
@@ -67,12 +67,12 @@ def test_live_emits_content_after_a_subagent_spawn() -> None:
     log = _log_body(events)
 
     # Sanity: imp log shows the post-spawn parent content (the run did progress).
-    assert "✓ task-lead" in log
+    assert "task-lead complete" in log
     assert "commit-check" in log
 
     # The bug: live emission stalls on the never-closing subagent fold, so the
     # parent step's completion and the entire following step never appear live.
-    assert "✓ task-lead" in live, (
+    assert "task-lead complete" in live, (
         "task-lead completion breadcrumb missing from live output — the live "
         "cursor is wedged behind a never-closing SubagentFold"
     )

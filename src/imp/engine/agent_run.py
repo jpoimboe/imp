@@ -21,12 +21,15 @@ import it.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import anyio
+
 from imp.agents.runner import AgentInvocation, ChangeContext, Message
+from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S
 from imp.engine.completion import build_continuation_fn, completion_instruction
 from imp.engine.types import AgentDef
 
@@ -48,6 +51,23 @@ with "No such file or directory".
 In `bash`, use **relative paths** from the project root, or `$IMP_PROJECT_ROOT`
 (the real root path). A leading `cd /project` is auto-rewritten to the real root,
 so it works — but prefer relative paths."""
+
+
+# Injected into the system prompt of EVERY agent (top-level or subagent),
+# unconditional on tool set. Documents the `<imp:begin/>` opener as an
+# engine-emitted signal — the executor seeds the first user-role message
+# with this literal tag (see executor._route_agent) rather than a fake
+# user "begin" prompt. Without this note the model sees an unfamiliar token
+# and has to infer intent; with it, the contract is documented where the
+# model reads.
+_ENGINE_SEED_NOTE = """\
+## Session start: `<imp:begin/>`
+
+Your first user-role message in this conversation is the literal token
+`<imp:begin/>`. It is emitted by the engine to open the turn — it is not
+a message a human user typed. Treat it as a signal to begin the work
+described in the rest of this system prompt; do not reply to it as if a
+user had addressed you, and do not quote it back."""
 
 
 @dataclass(frozen=True)
@@ -81,12 +101,37 @@ class SubagentSuspended(Exception):
     Resume re-enters the step fresh and re-dispatches the subagent subtree."""
 
 
+async def _pull_with_inactivity_watchdog(
+    gen: Any, *, runner: Any, stall: dict[str, bool],
+) -> AsyncIterator[Any]:
+    """Yield events from `gen`, racing each pull against AGENT_INACTIVITY_TIMEOUT_S
+    (B.2). On a stall, drive the agent's OWN teardown (its runner interrupt +
+    generator aclose) so the in-flight work actually dies — not just this await —
+    set stall['hit'], and end iteration. The caller observes the early end +
+    stall['hit'] and returns the stalled result."""
+    while True:
+        try:
+            with anyio.fail_after(AGENT_INACTIVITY_TIMEOUT_S):
+                ev = await gen.__anext__()
+        except StopAsyncIteration:
+            return
+        except TimeoutError:
+            stall["hit"] = True
+            with contextlib.suppress(Exception):
+                await runner.interrupt()
+            with contextlib.suppress(Exception):
+                await gen.aclose()
+            return
+        yield ev
+
+
 def build_agent_invocation(
     *,
     agent_def: AgentDef,
     provider_name: str,
     model_name: str,
     rendered_system_prompt: str,
+    system_prompt_override: str | None = None,
     initial_messages: tuple[Message, ...],
     change_context: ChangeContext,
     interactive: bool,
@@ -95,13 +140,14 @@ def build_agent_invocation(
     fs_permissions: Any,
     events_path: Path,
     subagent_defs: dict[str, AgentDef],
-    model_tiers: tuple[str, ...],
+    tiers: tuple[str, ...],
     max_tool_calls: int | None,
     agent_id: str,
     event_log: Any,
     change_state: Any,
+    change: Any = None,
     first_event_parent_id: str | None,
-    resolved_roles: dict[str, Any] | None,
+    resolved_tiers: dict[str, Any] | None,
     coordinator: Any,
     subagent_depth: int = 0,
     retry_feedback: str | None = None,
@@ -121,10 +167,17 @@ def build_agent_invocation(
     is a value, not a policy, here.
     """
     instruction = completion_instruction(agent_def.output_schema)
-    body = rendered_system_prompt
-    if "bash" in agent_def.tools:
-        body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
-    system_prompt = f"{body}\n\n{instruction}"
+    if system_prompt_override is not None:
+        # Resume-replay (Part B): the override IS the previously-assembled,
+        # stored step_context.system_prompt — use it verbatim, never re-append
+        # the bash/seed/instruction notes (that would double them).
+        system_prompt = system_prompt_override
+    else:
+        body = rendered_system_prompt
+        if "bash" in agent_def.tools:
+            body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
+        body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
+        system_prompt = f"{body}\n\n{instruction}"
     continuation_fn = build_continuation_fn(
         interactive=interactive,
         user_chat_input_fn=user_chat_input_fn,
@@ -150,11 +203,12 @@ def build_agent_invocation(
         agent_id=agent_id,
         event_log=event_log,
         change_state=change_state,
+        change=change,
         first_event_parent_id=first_event_parent_id,
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
-        resolved_roles=resolved_roles,
-        model_tiers=model_tiers,
+        resolved_tiers=resolved_tiers,
+        tiers=tiers,
         subagent_depth=subagent_depth,
         coordinator=coordinator,
         lint_command=lint_command,
@@ -200,11 +254,14 @@ async def drive_invocation(
     from imp.engine.schema import validate_agent_output
 
     agent_output: dict[str, Any] | None = None
+    stall = {"hit": False}
     attach = (coordinator.runner_attached(runner.interrupt)
               if coordinator is not None else contextlib.nullcontext())
     try:
         with attach:
-            async for event in runner.run(invocation):
+            gen = runner.run(invocation)
+            async for event in _pull_with_inactivity_watchdog(
+                    gen, runner=runner, stall=stall):
                 if emit_events and log is not None:
                     log.append(agent_id=invocation.agent_id,
                                type=event["type"], payload=event.get("payload", {}))
@@ -233,6 +290,15 @@ async def drive_invocation(
     except SubagentSuspended:
         # A nested subagent paused; unwind this drive as paused too.
         return AgentRunResult(None, False, True, False, None)
+
+    if stall["hit"]:
+        # B.2: the watchdog tore the agent down. Surface as errored/'stalled'.
+        if emit_events and log is not None:
+            log.append(agent_id=invocation.agent_id, type="error",
+                       payload={"category": "config", "kind": "stalled",
+                                "message": f"no events for {AGENT_INACTIVITY_TIMEOUT_S:.0f}s"})
+        return AgentRunResult(None, True, False, False, None,
+                              ErrorInfo("config", "stalled"))
 
     if agent_output is None:
         return AgentRunResult(None, True, False, False, None)

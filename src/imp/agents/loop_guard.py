@@ -8,9 +8,21 @@ loop. Two detectors:
   - no_progress:      N consecutive turns making no observable progress.
 
 Progress is defined ONLY in terms of per-turn signals a provider loop can see
-(NOT filesystem/commit state, which the loop cannot observe): a complete_step,
-a new write-class tool_use, or a write-class tool_result with is_error=False.
-The write-class set is the registry tool names {write_file, edit_file, bash}.
+(NOT filesystem/commit state, which the loop cannot observe):
+
+  - a complete_step;
+  - a write-class tool_use that is new or whose result is_error=False
+    (registry names {write_file, edit_file, bash});
+  - a read-class tool_use against a NOT-yet-seen target with is_error=False
+    (registry names {read_file, grep, glob}). Acquiring new information is
+    forward motion, so a read-heavy agent (a code reviewer reading dozens of
+    distinct files) does not trip. RE-reading an already-seen target is not
+    progress: a stuck agent rotating among the same files still accumulates
+    no_progress, and reading the identical target every turn trips
+    repeated_failure (constant signature). This read-novelty rule is what keeps
+    review/research/plan agents — whose real output is invisible to a write-only
+    progress signal — from being falsely paused.
+
 The claude_code adapter MUST canonicalize MCP-prefixed names before building a
 TurnRecord (mcp__imp__write_file -> write_file).
 """
@@ -25,6 +37,7 @@ if TYPE_CHECKING:
     from imp.providers.errors import LoopError
 
 WRITE_CLASS_TOOLS = frozenset({"write_file", "edit_file", "bash"})
+READ_CLASS_TOOLS = frozenset({"read_file", "grep", "glob"})
 DEFAULT_REPEAT_K = 3
 DEFAULT_NOPROGRESS_N = 6
 
@@ -64,6 +77,7 @@ class LoopGuard:
     _noprogress_count: int = 0
     _last_sig: str | None = None
     _seen_write_ids: set[str] = field(default_factory=set)
+    _seen_read_keys: set[str] = field(default_factory=set)
 
     def observe(self, record: TurnRecord) -> LoopError | None:
         """Feed one turn. Returns a LoopError when a detector trips, else None.
@@ -104,20 +118,49 @@ class LoopGuard:
             return exc
         return None
 
+    def note_external_input(self) -> None:
+        """Reset loop-detection counters after a human-gated (interactive) turn.
+
+        A turn that hands off to a human and receives fresh input is not an
+        autonomous loop iteration — an external entropy source has broken any
+        cycle, so normal multi-turn conversation must not accumulate
+        no_progress. Only the loop counters reset; novelty memory (seen
+        reads/writes) is kept, since a human reply does not make
+        previously-read files new again.
+        """
+        self._repeat_count = 0
+        self._noprogress_count = 0
+        self._last_sig = None
+
     def _is_progress(self, record: TurnRecord) -> bool:
         if record.has_complete_step:
             return True
+        progressed = False
         for t in record.tools:
-            if t.name not in WRITE_CLASS_TOOLS:
-                continue
-            if not t.is_error:
-                return True
-            if t.tool_use_id and t.tool_use_id not in self._seen_write_ids:
-                # A *new* write-class tool_use is progress even before its
-                # result lands; record the id so it isn't recounted.
-                self._seen_write_ids.add(t.tool_use_id)
-                return True
-        return False
+            if t.name in WRITE_CLASS_TOOLS:
+                if not t.is_error:
+                    return True
+                if t.tool_use_id and t.tool_use_id not in self._seen_write_ids:
+                    # A *new* write-class tool_use is progress even before its
+                    # result lands; record the id so it isn't recounted.
+                    self._seen_write_ids.add(t.tool_use_id)
+                    return True
+            elif t.name in READ_CLASS_TOOLS and not t.is_error:
+                # A successful read of a NOT-yet-seen target acquires new
+                # information = progress. Key by the read target (input), not the
+                # tool_use_id: re-reading the same file via a fresh id yields no
+                # new information and must not count. Record every novel key this
+                # turn (don't early-return) so each is "seen" next turn; a stuck
+                # agent re-reading seen targets then accumulates no_progress.
+                # ASSUMES read_file is whole-file (path-only input). If it ever
+                # gains offset/limit, keying on the full input becomes a
+                # sliding-window evasion (1-50, 2-51, ...) — drop range fields
+                # from the key, or normalize to path, before adding them.
+                key = f"{t.name}|{json.dumps(t.input, sort_keys=True, default=str)}"
+                if key not in self._seen_read_keys:
+                    self._seen_read_keys.add(key)
+                    progressed = True
+        return progressed
 
     def _signature(self, record: TurnRecord) -> str:
         # Priority: provider/API error > failed tool call > stuck text+tools.
@@ -129,14 +172,16 @@ class LoopGuard:
             t = failed[0]
             args = json.dumps(t.input, sort_keys=True, default=str)
             return f"tool|{t.name}|{args}"
-        # Benign no-progress turn (no error, no failed tool — e.g. a read-only
-        # exploration turn or text-only prose). CRITICAL: fold the tool activity
-        # into the signature, not just assistant_text. Otherwise N distinct
-        # read_file turns (each with empty assistant_text) all hash to the
-        # constant "text|" and falsely trip repeated_failure at K — when they
-        # should only accumulate no_progress. Distinct reads -> distinct sigs ->
-        # repeat counter resets each turn; identical stuck prose with no tools ->
-        # identical sigs -> repeated_failure (the intended catch).
+        # Benign no-progress turn (no error, no failed tool). Reaching here with
+        # a read-class tool means the read targets were all already-seen (a novel
+        # read is progress and never reaches _signature). CRITICAL: fold the tool
+        # activity into the signature, not just assistant_text. Otherwise turns
+        # re-reading DIFFERENT seen files (each with empty assistant_text) all
+        # hash to the constant "text|" and falsely trip repeated_failure at K —
+        # when rotating among seen files should accumulate no_progress instead.
+        # Distinct (seen) reads -> distinct sigs -> repeat counter resets each
+        # turn -> no_progress; re-reading the IDENTICAL seen file, or identical
+        # stuck prose with no tools -> identical sigs -> repeated_failure.
         tool_sig = ";".join(
             f"{t.name}:{json.dumps(t.input, sort_keys=True, default=str)}"
             for t in record.tools)

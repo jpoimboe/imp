@@ -16,9 +16,13 @@ dependencies = [
   "anthropic>=0.40,<1.0",
   "openai>=1.50,<3.0",
   "claude-agent-sdk>=0.2.87,<1.0",
+  "openai-codex-sdk==0.1.11",
   "httpx>=0.27",
   "prompt_toolkit>=3.0,<4.0",
   "rich>=13.0,<15.0",
+  "pyte>=0.8,<0.9",
+  "pillow>=10.0",
+  "mcp>=1.27,<2.0",
 ]
 
 [project.optional-dependencies]
@@ -34,7 +38,7 @@ dev = [
 imp = "imp.cli.main:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/imp"]
+packages = ["src/imp", "src/impty"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -44,12 +48,19 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# Throwaway de-risking spikes are preserved as reference artifacts, not
+# maintained code — don't hold them to lint standards (keeps `make lint` and the
+# workflow's pre-commit lint gate green; mypy already only checks `src/`).
+extend-exclude = ["spikes", "docs/superpowers/spikes"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# ❯ (U+276F) is the intentional prompt caret (palette.CARET); it reads as a
+# confusable for '>' but is a deliberate UI glyph, so don't flag it (RUF001-003).
+allowed-confusables = ["❯"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["imp"]
+known-first-party = ["imp", "impty"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/test_types.py" = ["F401"]  # imports verify public API surface, not all are used inline
@@ -58,3 +69,20 @@ known-first-party = ["imp"]
 python_version = "3.11"
 strict = true
 warn_unreachable = true
+
+# The codex provider SDK is an optional runtime dependency (guarded by
+# try/except ImportError); it is not installed in the dev/test env, so mypy
+# can't resolve it. Treat it as a missing import rather than a hard error.
+[[tool.mypy.overrides]]
+module = ["openai_codex_sdk", "openai_codex_sdk.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pyte.*"
+ignore_missing_imports = true
+
+# fontTools ships no py.typed marker; impty.render uses it only to read a font's
+# cmap for the glyph-fallback chain. Treat it as a missing import.
+[[tool.mypy.overrides]]
+module = "fontTools.*"
+ignore_missing_imports = true

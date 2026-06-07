@@ -1,4 +1,4 @@
-"""Provider protocol (spec §6.2). Resolved from a model_role's prefer: list."""
+"""Provider protocol. Resolved from config.providers: list and config.tiers: table."""
 
 from __future__ import annotations
 

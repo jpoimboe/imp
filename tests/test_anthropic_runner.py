@@ -1,7 +1,9 @@
 # tests/test_anthropic_runner.py
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
@@ -574,6 +576,44 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
 
 
 @pytest.mark.anyio
+async def test_interrupt_cancels_in_flight_request(tmp_path: Path) -> None:
+    """C-iii: a stalled messages.create() is cancelled by interrupt() — the run
+    returns the 'interrupted' error promptly, not after the request completes."""
+    started = anyio.Event()
+
+    class _HangingClient:
+        class messages:
+            @staticmethod
+            async def create(**_kw):
+                started.set()
+                await anyio.sleep(3600)  # never returns on its own
+
+    runner = AnthropicAgentRunner(
+        model_name="claude-x", client_factory=lambda: _HangingClient(),
+    )
+    inv = _inv(tmp_path)
+
+    events: list = []
+    with anyio.fail_after(5):
+        async with anyio.create_task_group() as tg:
+            async def _drive():
+                async for ev in runner.run(inv):
+                    events.append(ev)
+
+            tg.start_soon(_drive)
+            await started.wait()
+            await anyio.sleep(0.05)
+            await runner.interrupt()
+
+    kinds = [
+        e.get("payload", {}).get("kind")
+        for e in events
+        if e["type"] == "error"
+    ]
+    assert "interrupted" in kinds
+
+
+@pytest.mark.anyio
 async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     """Prose once → continuation injects a nudge → agent then calls
     complete_step → agent_output, no error. The nudge user-message is recorded."""
@@ -631,8 +671,8 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
 @pytest.mark.anyio
 async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
     """Full provider path: the model emits a `task` call carrying
-    model_tier='powerful'; the runner must forward it so the subagent spawns on
-    the powerful tier's resolved (cross-vendor) model. A dropped forward would
+    tier='high'; the runner must forward it so the subagent spawns on
+    the high tier's resolved (cross-vendor) model. A dropped forward would
     inherit the parent's anthropic model and fail the assertion."""
     import dataclasses
     import json as _json
@@ -669,7 +709,7 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
                                 values=("Success", "Error"), required=True),),
             source=SourceLoc(file=Path("r.md"), line=1)),
         prompt_template_source="review", source_path=Path("r.md"),
-        source=SourceLoc(file=Path("r.md"), line=1))   # no model_role
+        source=SourceLoc(file=Path("r.md"), line=1))
     parent_def = dataclasses.replace(
         _agent_def(tools=frozenset({"complete_step", "task"})),
         subagents=("reviewer",))
@@ -679,13 +719,13 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
         _inv(tmp_path, event_log=log),
         agent_def=parent_def,
         subagent_defs={"reviewer": reviewer_def},
-        model_tiers=("powerful",),
-        resolved_roles={"powerful": ProviderModel("openai", "gpt-5.2")})
+        tiers=("high",),
+        resolved_tiers={"high": ProviderModel("openai", "gpt-5.5")})
 
     parent_fake = FakeAsyncAnthropic([
         response(tool_use("t1", "task", {
             "subagent_name": "reviewer", "task_description": "hard one",
-            "model_tier": "powerful"})),
+            "tier": "high"})),
         response(tool_use("pc", "complete_step", {"status": "Success"})),
     ])
 
@@ -707,6 +747,52 @@ async def test_runner_forwards_model_tier_to_subagent(tmp_path: Path) -> None:
             if e["type"] == "tool_result" and e["payload"].get("id") == "t1")
         child = _json.loads(task_result["payload"]["content"])
         assert child["ran_on"] == "openai"      # forwarded → tier vendor
-        assert child["model"] == "gpt-5.2"      # forwarded → tier model
+        assert child["model"] == "gpt-5.5"      # forwarded → tier model
     finally:
         _resolve.reset_providers_for_tests()
+
+
+@pytest.mark.anyio
+async def test_runner_outer_except_reclassifies_when_cancel_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: object(),
+    )
+
+    async def _boom(_inv: object) -> AsyncGenerator[Any, None]:
+        if False:  # pragma: no cover — makes this an async generator
+            yield {}
+        raise RuntimeError("Cannot write to terminated process (exit code: 0)")
+
+    monkeypatch.setattr(runner, "_run_loop", lambda _inv: _boom(_inv))
+    runner._cancel = True
+    inv = _inv(tmp_path)
+
+    events = [ev async for ev in runner.run(inv)]
+    errors = [e for e in events if e.get("type") == "error"]
+    assert len(errors) == 1
+    assert errors[0]["payload"]["category"] == "config"
+    assert errors[0]["payload"]["kind"] == "interrupted"
+    assert "unclassified provider error" not in errors[0]["payload"]["message"]
+
+
+@pytest.mark.anyio
+async def test_runner_outer_except_unknown_when_cancel_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: object(),
+    )
+
+    async def _boom(_inv: object) -> AsyncGenerator[Any, None]:
+        if False:  # pragma: no cover — makes this an async generator
+            yield {}
+        raise RuntimeError("SDK broke unexpectedly")
+
+    monkeypatch.setattr(runner, "_run_loop", lambda _inv: _boom(_inv))
+    inv = _inv(tmp_path)
+    events = [ev async for ev in runner.run(inv)]
+    errors = [e for e in events if e.get("type") == "error"]
+    assert len(errors) == 1
+    assert errors[0]["payload"]["category"] == "unknown"

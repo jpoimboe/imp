@@ -12,7 +12,6 @@ build/
 .imp/
 
 # Plan 2 additions
-spikes/
 **/checkpoint.db
 
 # Editor / tool cruft

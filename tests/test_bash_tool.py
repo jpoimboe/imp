@@ -153,6 +153,53 @@ def test_bash_terminates_on_runner_interrupt(tmp_path: Path) -> None:
     anyio.run(_scenario)
 
 
+def test_bash_caps_runaway_output(tmp_path: Path) -> None:
+    # A command that floods stdout far past 50 KB is killed AT the cap; the
+    # result is the head + marker, and it is NOT surfaced as an interrupt.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {
+        "command": "yes ABCDEFGHIJ | head -c 5000000"}))
+    assert "[output truncated at 50 KB]" in out["stdout"]
+    assert len(out["stdout"]) < 60_000          # bounded: 50 KB + slop + marker
+    assert out["returncode"] == 0               # cap is a NORMAL result, not a kill
+    assert ctx.running_processes == []
+
+
+def test_bash_caps_runaway_stderr(tmp_path: Path) -> None:
+    # S2: a stderr-dominant flood must mark stderr (the stream that crossed the
+    # cap), NOT leave a truncation marker on an empty stdout.
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {
+        "command": "yes ABCDEFGHIJ | head -c 5000000 1>&2"}))
+    assert "[output truncated at 50 KB]" in out["stderr"]
+    assert "[output truncated" not in out["stdout"]
+    assert len(out["stderr"]) < 60_000          # bounded: 50 KB + slop + marker
+    assert out["returncode"] == 0               # cap is a NORMAL result, not a kill
+    assert ctx.running_processes == []
+
+
+def test_bash_wall_clock_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # B.1: a command sleeping past the wall-clock is killed and raises ToolAborted
+    # ('timed-out'), asserted at the TOOL layer. Inject a short timeout.
+    import imp.agents.tools.bash as bash_mod
+    from imp.agents.tools.limits import ToolAborted
+
+    monkeypatch.setattr(bash_mod, "TOOL_WALLCLOCK_TIMEOUT_S", 0.3)
+    ctx = _ctx(tmp_path)
+    with pytest.raises(ToolAborted) as ei:
+        _run_bash(ctx, {"command": "sleep 30"})
+    assert ei.value.reason == "timed-out"
+    assert ctx.running_processes == []
+
+
+def test_bash_normal_output_uncapped(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    out = json.loads(_run_bash(ctx, {"command": "echo hello"}))
+    assert out["stdout"].strip() == "hello"
+    assert "[output truncated" not in out["stdout"]
+    assert out["returncode"] == 0
+
+
 @pytest.mark.parametrize("cmd,expected", [
     ("cd /project && pwd",        "cd {root} && pwd"),
     ("cd /project/src && pwd",    "cd {root}/src && pwd"),

@@ -21,6 +21,8 @@ import os
 from collections.abc import AsyncGenerator
 from typing import Any, cast
 
+import anyio
+
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
 from imp.agents.runner import (
@@ -142,7 +144,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         # empty, dispatch_task raises a clear "subagent X not declared" error
         # the first time the LLM invokes `task` — much better than silently
         # advertising no tool at all and letting the LLM fumble.
-        out["task"] = make_task_tool(invocation.model_tiers)
+        out["task"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     return out
@@ -359,6 +361,7 @@ class AnthropicAgentRunner:
         self._user_input_fn = user_input_fn
         self._client: Any = None
         self._cancel = False
+        self._cancel_scope: Any = None
         self._ctx: ToolContext | None = None
 
     def _get_client(self) -> Any:
@@ -397,6 +400,13 @@ class AnthropicAgentRunner:
                 return
             except Exception as exc:
                 raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
+                if self._cancel:
+                    yield {"type": "error", "payload": {
+                        "category": "config",
+                        "kind": "interrupted",
+                        "message": "runner cancelled by interrupt",
+                    }}
+                    return
                 try:
                     classified = _classify_anthropic_exception(exc)
                 except Exception:
@@ -428,11 +438,12 @@ class AnthropicAgentRunner:
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
         ctx.change_state = invocation.change_state
+        ctx.change = invocation.change          # live Change for rename_change
         ctx.spawn_subagent = spawn_subagent_via_registry
-        ctx.resolved_roles = invocation.resolved_roles
+        ctx.resolved_tiers = invocation.resolved_tiers
         ctx.subagent_depth = invocation.subagent_depth
         ctx.coordinator = invocation.coordinator
-        ctx.model_tiers = invocation.model_tiers
+        ctx.tiers = invocation.tiers
         ctx.lint_command = invocation.lint_command
         ctx.test_command = invocation.test_command
         ctx.non_interactive = invocation.non_interactive
@@ -545,7 +556,24 @@ class AnthropicAgentRunner:
             )
             if web_headers:
                 create_kwargs["extra_headers"] = web_headers
-            response = await client.messages.create(**create_kwargs)
+            # N4 race note: if interrupt() lands AFTER `while not self._cancel`
+            # passes but BEFORE this assignment, this one turn's request isn't
+            # cancelled — the loop simply exits on the next iteration via _cancel.
+            # Worst case is one extra in-flight request; cancellation is not
+            # instantaneous, by design.
+            self._cancel_scope = anyio.CancelScope()
+            response = None
+            try:
+                with self._cancel_scope:
+                    response = await client.messages.create(**create_kwargs)
+            finally:
+                # N3: reset even when create() raises a genuine API error, so a
+                # later interrupt() never calls .cancel() on a stale exited scope.
+                self._cancel_scope = None
+            if response is None:
+                # interrupt() cancelled the in-flight request — exit the loop and
+                # fall through to the "cancelled (interrupt)" yield below.
+                break
 
             raw = _serialize_anthropic_response(response)
             assistant_msg = _parse_anthropic_message(raw)
@@ -587,12 +615,20 @@ class AnthropicAgentRunner:
                     messages.append(user_msg)
                     transcript.append(user_msg)
                     elog.append_user_message(agent_id=aid, message=user_msg)
-                    loop_err = guard.observe(TurnRecord(
-                        assistant_text=last_text, tools=[], has_complete_step=False))
-                    if loop_err is not None:
-                        yield perr.make_error_event(
-                            loop_err, kind=getattr(loop_err, "kind", ""))
-                        return
+                    if invocation.interactive:
+                        # Human handoff: this text-only turn awaits fresh human
+                        # input, so it is not an autonomous loop iteration —
+                        # reset so normal multi-turn conversation never trips
+                        # no_progress. (The nudge path below still observes.)
+                        guard.note_external_input()
+                    else:
+                        loop_err = guard.observe(TurnRecord(
+                            assistant_text=last_text, tools=[],
+                            has_complete_step=False))
+                        if loop_err is not None:
+                            yield perr.make_error_event(
+                                loop_err, kind=getattr(loop_err, "kind", ""))
+                            return
                     continue
                 # Legacy/test fallback: no continuation_fn wired by the executor.
                 if invocation.interactive and ctx.user_input_fn is not None:
@@ -635,7 +671,7 @@ class AnthropicAgentRunner:
                         result_str = await dispatch_task(
                             ctx, tu.input["subagent_name"], tu.input["task_description"],
                             tool_call_event_id=tc_ev["id"],
-                            model_tier=tu.input.get("model_tier"),
+                            tier=tu.input.get("tier"),
                         )
                     except Exception as e:
                         raise_if_suspended(e)  # unwind a subagent-origin pause
@@ -742,8 +778,14 @@ class AnthropicAgentRunner:
     async def interrupt(self) -> None:
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
+        # M5: the run loop's `finally` may have just set _cancel_scope to None and
+        # exited the scope. Calling .cancel() on an already-exited anyio CancelScope
+        # is a no-op (safe on the pinned anyio >=4,<5), and `_cancel` still stops
+        # the loop on its next iteration — so the inverse race is benign.
+        if self._cancel_scope is not None:
+            self._cancel_scope.cancel()
         if self._ctx is not None:
-            await terminate_running_processes(self._ctx, timeout=2.0)
+            await terminate_running_processes(self._ctx)
 
 
 class AnthropicProvider:

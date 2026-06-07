@@ -107,6 +107,10 @@ class AgentTextNode:
 @dataclass
 class UserMessageNode:
     text: str
+    interactive: bool = False           # True only for a genuine human reply (one
+                                        # the engine blocked for via awaiting_user_input).
+                                        # Synthetic prompts — the "begin" kickoff, a
+                                        # resume nudge — are False and never rendered.
     collapsible = False
 
 
@@ -129,7 +133,19 @@ class ToolCall:
 @dataclass
 class ToolBurstFold:
     calls: list[ToolCall] = field(default_factory=list)
+    start_ts: str | None = None        # first tool_call.timestamp (burst timing)
+    end_ts: str | None = None          # last tool_result.timestamp
     collapsible = True
+
+
+@dataclass
+class SkillLoadNode:
+    """A skill the agent pulled in mid-run (the skill_load event). Rendered as a
+    quiet `load skill {name}` line — distinct from the redundant `load_skill`
+    tool call, which the lean burst recap drops so the skill shows exactly once."""
+    name: str
+    source: str | None = None
+    collapsible = False
 
 
 @dataclass
@@ -143,6 +159,10 @@ class SubagentFold:
     running: bool = True
     outcome: str | None = None         # result summary when task tool_result lands
     is_error: bool = False
+    terminal_state: str | None = None  # 'stalled' (live via B.2); 'interrupted'
+                                       # is forward-compat scaffolding; else None
+    start_ts: str | None = None        # parent `task` tool_call.timestamp
+    end_ts: str | None = None          # parent `task` tool_result.timestamp
     collapsible = True
 
     @property
@@ -170,6 +190,18 @@ class ErrorNode:
     message: str
     category: str | None = None
     is_warning: bool = False
+    collapsible = False
+
+
+@dataclass
+class PauseNode:
+    """A workflow pause — a resumable stop, NOT an error, whatever drove it
+    (ctrl-c / ctrl-d / interrupt, or an error category like api / max_loops /
+    retry_ceiling). Renders as a quiet dim `⏸ paused (reason)` line, mirroring the
+    live `_emit_paused` / `_emit_paused_summary` chrome, so `imp log` and the live
+    view agree. For an error-driven pause the underlying failure already appears as
+    its own `error:` event just above this line."""
+    reason: str
     collapsible = False
 
 
@@ -203,6 +235,11 @@ class BreadcrumbLine:
     elapsed_s: float | None
     action: Any                        # dict {verb, target?} from step_completed
     extras: list[str] = field(default_factory=list)
+    show_complete: bool = True         # False for a chrome step (script/branch),
+                                       # whose start line is never printed — the
+                                       # `· 0s` alone reads as "done", so the word
+                                       # "complete" (which pairs with a start) is
+                                       # dropped to avoid a dangling half-bookend.
     collapsible = False
 
 
@@ -214,10 +251,10 @@ class FallbackLine:
 
 
 @dataclass
-class RolesResolvedNode:
-    """Run-level summary of once-per-run role resolution (the roles_resolved
-    event). Each row: {role, provider, model, differ_tier, differ_from}.
-    differ_tier/differ_from are None for unconstrained roles."""
+class TiersResolvedNode:
+    """Run-level summary of once-per-run tier resolution (the tiers_resolved
+    event). Each row: {tier, provider, model, differ_tier, differ_from}.
+    differ_tier/differ_from are None for unconstrained tiers."""
     rows: list[dict[str, Any]] = field(default_factory=list)
     collapsible = False
 
@@ -261,6 +298,10 @@ class NarrativeBuilder:
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
         self._resuming = False
+        # True between an awaiting_user_input event and the user_message that
+        # answers it, so the next user_message is tagged as a genuine human turn
+        # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
+        self._awaiting_reply = False
 
     # -- public API -----------------------------------------------------------
     @property
@@ -385,6 +426,21 @@ def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 
+def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # A rename carries the new title + slug as a unit (current schema). Apply them
+    # together; ignore a legacy/partial event missing either, rather than leaving
+    # the header half-updated (e.g. new slug beside a stale title).
+    new_title = p.get("new_title")
+    new_slug = p.get("new_slug")
+    if new_title is None or new_slug is None:
+        return
+    self._root.title = new_title
+    self._root.slug = new_slug
+
+
+NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
+
+
 def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it
@@ -406,6 +462,28 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
+    # Retry re-entry: the executor's transient-error retry loop re-emits
+    # step_started on every iteration WITHOUT a prior step_completed for that
+    # step, so the same StepNode is still on the stack. Reuse it in place —
+    # do NOT clear children (unlike resume re-entry below), because every
+    # attempt's error/warning lines must stay visible as direct children of
+    # the one step. Do not reset start_ts/model/provider/kind/interactive:
+    # elapsed time should reflect the operator's wait, and the other fields
+    # are identical by construction (same agent, same step). The `not
+    # self._resuming` guard makes this disjoint from resume re-entry below
+    # (spec: "the two paths are disjoint"): on a resume the step from before
+    # the pause is also on the stack with matching (name, phase), so without
+    # this guard the retry branch would fire first and swallow the resume —
+    # never clearing the stale partial transcript the resume logic exists to
+    # clear.
+    if (not self._resuming
+            and self._step_stack
+            and self._current_phase is not None
+            and not self._current_phase.closed
+            and self._current_phase.name == phase):
+        top = self._step_stack[-1]
+        if not top.closed and top.name == name:
+            return
     # Resume re-entry: the first step_started after a resume re-enters the
     # interrupted step in the still-open phase. The executor re-runs it from
     # scratch, so reuse the open StepNode and RESET its content (the fresh re-run
@@ -456,7 +534,10 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
         node.children.append(BreadcrumbLine(
             step_name=node.name, elapsed_s=elapsed, action=action,
-            extras=_breadcrumb_extras(node.agent_output)))
+            extras=_breadcrumb_extras(node.agent_output),
+            # A chrome step (script/branch gate) prints no start line, so its
+            # breadcrumb omits the word "complete" (see BreadcrumbLine).
+            show_complete=node.kind not in ("script", "branch")))
         node.closed = True
 
 
@@ -465,14 +546,18 @@ NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 
 
 def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # EVERY pause is a pause, not an error — a resumable stop. Live frames them all
+    # the same way (_emit_paused / _emit_paused_summary print a dim `⏸ … paused`),
+    # so `imp log` renders a matching PauseNode rather than an `error:` line. The
+    # reason that drove it (ctrl-c, api, max_loops, retry_ceiling, …) rides the ⏸
+    # line; for an error-driven pause the underlying failure was already shown as
+    # its own `error:` event just above, so re-stating it as an error here would
+    # both double up and mismatch the live view (the bug this fixes).
     self._flush_burst()
     self._root.status = "paused"
     reason = p.get("reason")
     if reason:
-        kind = p.get("kind")
-        suffix = f" ({kind})" if kind else ""
-        self._append(ErrorNode(
-            message=f"paused: {reason}{suffix}", category=reason, is_warning=False))
+        self._append(PauseNode(reason=reason))
 
 
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -505,8 +590,9 @@ def _h_awaiting_user_input(
 ) -> None:
     # Programmatic marker that the engine is blocking for an interactive
     # end-of-turn reply. The question already rendered as agent text and the
-    # reply renders as the next user_message, so render nothing here — this
-    # exists for out-of-process drivers, not the human narrative.
+    # reply renders as the next user_message, so render nothing here — but arm
+    # the flag so that next user_message is tagged as a genuine human turn.
+    self._awaiting_reply = True
     return None
 
 
@@ -581,7 +667,8 @@ def _elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
 
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
-    self._append(UserMessageNode(text=_user_message_text(p)))
+    interactive, self._awaiting_reply = self._awaiting_reply, False
+    self._append(UserMessageNode(text=_user_message_text(p), interactive=interactive))
 
 
 def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -646,15 +733,36 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         _open_subagent_fold(self, event, p)     # defined in Task 6
         return
     burst = _ensure_burst(self)
+    if burst.start_ts is None:
+        burst.start_ts = event.get("timestamp")  # burst clock starts at first call
     burst.calls.append(ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
         input=p.get("input") or {}))
 
 
-def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any]) -> None:
+def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
+                         end_ts: str | None = None) -> None:
     fold.running = False
+    fold.end_ts = end_ts
     fold.is_error = bool(p.get("error", False))
     fold.outcome = _summarize_result(p.get("content"))
+    # Terminal state for Part D's glyph. Prefer an explicit payload kind (forward
+    # compatible); else detect the bracketed marker dispatch_task embeds in the
+    # failure message ("... failed (config) [stalled]"). The brackets keep the
+    # match precise (low false-positive). 'interrupted' is matched too for
+    # forward compatibility, though no subagent path emits it today.
+    kind = p.get("kind")
+    if kind not in ("stalled", "interrupted"):
+        # The bracketed marker only originates from the failure path; a
+        # SUCCESSFUL subagent's content is agent-controlled JSON that may
+        # legitimately contain "[stalled]". Gate the scan on is_error so such
+        # text can't false-positive into a terminal state.
+        text = fold.outcome if fold.is_error else ""
+        kind = next(
+            (s for s in ("stalled", "interrupted") if f"[{s}]" in (text or "")),
+            None)
+    if kind in ("stalled", "interrupted"):
+        fold.terminal_state = kind
 
 
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -662,12 +770,13 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # Closing a subagent? (parent `task` tool_result carries the block id.)
     fold = self._open_sub_by_block.pop(rid, None)
     if fold is not None:
-        _close_subagent_fold(fold, p)
+        _close_subagent_fold(fold, p, event.get("timestamp"))
         return
     # Normal burst result: pair with the matching open call.
     footer = _format_citations_footer(p.get("citations"))
     burst = self._current_burst
     if burst is not None:
+        burst.end_ts = event.get("timestamp")    # advance the burst clock
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
                 call.result = _summarize_result(p.get("content")) + footer
@@ -684,7 +793,7 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     )
     if self._open_sub_by_block and not burst_has_open_call:
         _, fold = self._open_sub_by_block.popitem()   # LIFO; dicts preserve order
-        _close_subagent_fold(fold, p)
+        _close_subagent_fold(fold, p, event.get("timestamp"))
         return
     # Orphan result (malformed log): start/extend a burst with a "tool" entry.
     burst = _ensure_burst(self)
@@ -764,6 +873,19 @@ NarrativeBuilder._HANDLERS["tool_result"] = _h_tool_result
 NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
 
 
+def _h_skill_load(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # The agent pulled in a skill. Render it once, as its own `load skill …`
+    # line; the matching `load_skill` tool call is dropped from the burst recap
+    # (render_text) so the same action doesn't show up twice. Do NOT flush the
+    # open burst: this event fires BETWEEN a tool_call and its tool_result (the
+    # load_skill round-trip), so flushing would orphan that pending result into a
+    # stray `tool` burst.
+    self._append(SkillLoadNode(name=str(p.get("name", "?")), source=p.get("source")))
+
+
+NarrativeBuilder._HANDLERS["skill_load"] = _h_skill_load
+
+
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._append(ErrorNode(
@@ -792,19 +914,29 @@ NarrativeBuilder._HANDLERS["runner_warning"] = _h_runner_warning
 NarrativeBuilder._HANDLERS["agent_retry"] = _h_agent_retry
 
 
-def _h_roles_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+def _h_tiers_resolved(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # Fires once at run start with agent_id=None, BEFORE any step_started, so the
     # step stack is empty and _append lands this at the workflow root.
-    roles = p.get("roles") or {}
+    # Payload: {"tiers": {tier: {provider, model, ...}}, "steps": {step: {...}}}
+    tiers = p.get("tiers") or {}
     rows = [
-        {"role": role, "provider": d.get("provider"), "model": d.get("model"),
-         "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from")}
-        for role, d in roles.items()
+        {"tier": tier, "provider": d.get("provider"), "model": d.get("model"),
+         "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from"),
+         "warning": d.get("warning")}
+        for tier, d in tiers.items()
     ]
-    self._append(RolesResolvedNode(rows=rows))
+    # Also add step overrides (steps with differ_from resolution)
+    steps = p.get("steps") or {}
+    for step_name, d in steps.items():
+        rows.append({
+            "tier": step_name, "provider": d.get("provider"), "model": d.get("model"),
+            "differ_tier": d.get("differ_tier"), "differ_from": d.get("differ_from"),
+            "warning": d.get("warning"),
+        })
+    self._append(TiersResolvedNode(rows=rows))
 
 
-NarrativeBuilder._HANDLERS["roles_resolved"] = _h_roles_resolved
+NarrativeBuilder._HANDLERS["tiers_resolved"] = _h_tiers_resolved
 
 
 def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -827,7 +959,8 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     inp = p.get("input") or {}
     fold = SubagentFold(
         subagent_name=str(inp.get("subagent_name", "?")),
-        event_id=event_id, block_id=block_id, nested=NarrativeBuilder())
+        event_id=event_id, block_id=block_id, nested=NarrativeBuilder(),
+        start_ts=event.get("timestamp"))
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold
     self._open_sub_by_block[block_id] = fold
@@ -855,13 +988,15 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, AgentTextNode):
         return {"t": t, "text": node.text}
     if isinstance(node, UserMessageNode):
-        return {"t": t, "text": node.text}
+        return {"t": t, "text": node.text, "interactive": node.interactive}
     if isinstance(node, ThinkingFold):
         return {"t": t, "content": node.content}
     if isinstance(node, ToolBurstFold):
         return {"t": t, "calls": [
             {"name": c.name, "call_id": c.call_id, "result": c.result,
              "is_error": c.is_error, "killed": c.killed} for c in node.calls]}
+    if isinstance(node, SkillLoadNode):
+        return {"t": t, "name": node.name, "source": node.source}
     if isinstance(node, SubagentFold):
         return {"t": t, "subagent_name": node.subagent_name, "event_id": node.event_id,
                 "block_id": node.block_id, "running": node.running,
@@ -874,6 +1009,8 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, ErrorNode):
         return {"t": t, "message": node.message, "category": node.category,
                 "is_warning": node.is_warning}
+    if isinstance(node, PauseNode):
+        return {"t": t, "reason": node.reason}
     if isinstance(node, StepContextNode):
         return {"t": t, "payload": node.payload}
     if isinstance(node, OutcomeLine):

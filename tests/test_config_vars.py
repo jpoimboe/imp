@@ -55,9 +55,15 @@ def test_apply_overrides_string_var() -> None:
 
 
 def _write_config(root: Path, body: str) -> None:
-    (root / "imp" / "config.yaml").write_text(
-        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n" + body
+    cfg_text = (
+        "providers: [anthropic]\n"
+        "tiers:\n"
+        "  low: {anthropic: x}\n"
+        "  medium: {anthropic: x}\n"
+        "  high: {anthropic: x}\n"
+        + body
     )
+    (root / "imp" / "config.yaml").write_text(cfg_text)
 
 
 def test_load_config_parses_vars_block(tmp_path: Path) -> None:
@@ -93,6 +99,6 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "vars")
 
-    ch = Change.create(tmp_path, title="X", slug="x", base_branch="main")
+    ch = Change.create(tmp_path, title="X", change_id="x", base_branch="main")
     st = State.load(ch.state_dir)
     assert st.vars["final_review"] is False

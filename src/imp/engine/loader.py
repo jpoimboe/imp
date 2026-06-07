@@ -17,6 +17,7 @@ import yaml
 
 from imp.engine._yaml import LineLoader, loc
 from imp.engine._yaml import items as _items
+from imp.engine.differ_graph import find_differ_from_cycle
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.expr import (
     Binary,
@@ -34,8 +35,6 @@ from imp.engine.expr import (
 from imp.engine.expr import (
     parse as parse_expr,
 )
-from imp.engine.model_rules import find_constraint_cycle, parse_role_constraints
-from imp.engine.model_tiers import parse_model_tiers
 from imp.engine.schema import parse_output_schema
 from imp.engine.types import (
     Action,
@@ -114,8 +113,8 @@ def parse_agent_file(path: Path) -> AgentDef:
             source,
         )
 
-    mr_raw = fm.get("model_role")
-    model_role = str(mr_raw) if mr_raw is not None else None
+    tier_raw = fm.get("tier")
+    tier = str(tier_raw) if tier_raw is not None else None
 
     return AgentDef(
         name=str(fm["name"]),
@@ -127,7 +126,7 @@ def parse_agent_file(path: Path) -> AgentDef:
         source_path=path,
         source=source,
         max_tool_calls=mtc_raw,
-        model_role=model_role,
+        tier=tier,
     )
 
 
@@ -571,7 +570,9 @@ def _parse_step(
             name=name, phase=phase_name, kind="agent", rules=rules, options=(),
             on_max_retries=on_max, max_loops=max_loops, source=source,
             file=file, prompt=(str(raw["prompt"]) if raw.get("prompt") else None),
-            model_role=str(raw.get("model_role") or "default"),
+            tier=str(raw.get("tier") or "medium"),
+            differ_from=(str(raw["differ_from"])
+                         if raw.get("differ_from") is not None else None),
             fs_permissions=tuple(
                 _parse_fs_rule(r, source, yaml_path)
                 for r in (raw.get("fs_permissions") or [])
@@ -604,7 +605,7 @@ def _parse_step(
 
 def load_workflow(
     workflow_dir: Path,
-    configured_roles: frozenset[str] | None = None,
+    configured_tiers: frozenset[str] | None = None,
 ) -> Workflow:
     """Parse <workflow_dir>/workflow.yaml + agents/*.md into a Workflow."""
     yaml_path = workflow_dir / "workflow.yaml"
@@ -668,15 +669,18 @@ def load_workflow(
         )
         phase_objs.append(Phase(name=pname, steps=steps, source=psrc))
 
-    model_rules = parse_role_constraints(raw.get("model_rules"), yaml_path)
-    model_tiers = parse_model_tiers(raw.get("model_tiers"), root_source)
-    # Best-effort workflow-only cycle pre-check for a fast authoring error. The
-    # authoritative check is in resolve_roles, on the workflow+config MERGED
-    # graph (config may add an edge this pre-check can't see).
-    wf_cycle = find_constraint_cycle(model_rules)
-    if wf_cycle is not None:
+    # Best-effort cycle pre-check on the workflow's per-step differ_from DAG.
+    # The authoritative validator is in providers.resolve.resolve_run; this
+    # gives a fast authoring error at load time.
+    edges = {
+        step.name: step.differ_from
+        for step in (s for p in phase_objs for s in p.steps)
+        if step.kind == "agent" and step.differ_from is not None
+    }
+    cyc = find_differ_from_cycle(edges)
+    if cyc is not None:
         raise LoadError(
-            "model_rules constraint cycle: " + " -> ".join(wf_cycle),
+            "differ_from cycle: " + " -> ".join(cyc),
             root_source,
         )
 
@@ -689,13 +693,11 @@ def load_workflow(
         agents=agents,
         workflow_dir=workflow_dir,
         source=root_source,
-        model_rules=model_rules,
-        model_tiers=model_tiers,
     )
 
     # Run validators and print warnings; raise on errors.
     from imp.engine.validators import validate
-    errors, warnings = validate(workflow, configured_roles=configured_roles)
+    errors, warnings = validate(workflow, configured_tiers=configured_tiers)
     if errors:
         raise LoadErrors(errors=errors, warnings=warnings)
     for w in warnings:

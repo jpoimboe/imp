@@ -904,3 +904,77 @@ def test_phase_elapsed_from_first_start_to_last_end() -> None:
     phase = b.tree.root.children[0]
     assert isinstance(phase, nv.PhaseNode)
     assert nv.phase_elapsed(phase) == 10.0
+
+
+def test_subagent_fold_terminal_state_defaults_none():
+    fold = nv.SubagentFold(subagent_name="x", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder())
+    assert fold.terminal_state is None
+
+
+def test_close_subagent_derives_stalled_from_real_failure_message():
+    # SEAM: feed the EXACT content the provider builds from dispatch_task's
+    # RuntimeError. The provider formats a raised exception as
+    # f"{type(e).__name__}: {e}", so the content is the string below.
+    exc = RuntimeError("subagent 'reviewer' failed (config) [stalled]")
+    content = f"{type(exc).__name__}: {exc}"   # the real provider formatting
+    fold = nv.SubagentFold(subagent_name="reviewer", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder())
+    nv._close_subagent_fold(fold, {"content": content, "error": True})
+    assert fold.terminal_state == "stalled"
+    assert fold.is_error is True
+
+
+def test_close_subagent_prefers_explicit_kind():
+    fold = nv.SubagentFold(subagent_name="x", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder())
+    nv._close_subagent_fold(fold, {"content": "whatever", "error": True,
+                                   "kind": "stalled"})
+    assert fold.terminal_state == "stalled"
+
+
+def test_close_subagent_plain_failure_has_no_terminal_state():
+    fold = nv.SubagentFold(subagent_name="x", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder())
+    nv._close_subagent_fold(
+        fold,
+        {"content": "RuntimeError: subagent 'x' failed (config)", "error": True})
+    assert fold.terminal_state is None
+
+
+def test_close_subagent_success_with_marker_text_is_not_terminal_state():
+    # A SUCCESSFUL subagent whose output text happens to contain "[stalled]"
+    # must NOT be mislabeled — the marker scan is gated on is_error.
+    fold = nv.SubagentFold(subagent_name="x", event_id="e", block_id="b",
+                           nested=nv.NarrativeBuilder())
+    nv._close_subagent_fold(
+        fold,
+        {"content": "finding: the build looked [stalled] for a while",
+         "error": False})
+    assert fold.terminal_state is None
+    assert fold.is_error is False
+
+
+def test_change_renamed_updates_root_title_and_slug() -> None:
+    # The narrative builder must reflect the settled name after change_renamed.
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", slug="", title=""))
+    b.add(ev("2", "change_renamed", id="2026-06-05-aaa111",
+             old_title="", new_title="Add OAuth",
+             new_slug="2026-06-05-add-oauth"))
+    assert b.tree.root.title == "Add OAuth"
+    assert b.tree.root.slug == "2026-06-05-add-oauth"
+
+
+def test_change_renamed_ignores_legacy_partial_event() -> None:
+    # The handler applies new_title + new_slug atomically. A legacy/partial event
+    # missing new_title (old schema: old_slug/new_slug/title) must be IGNORED, not
+    # half-applied — otherwise the header would show a new slug beside a stale title.
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "change_created", slug="2026-06-05-orig", title="orig"))
+    b.add(ev("2", "change_renamed",
+             old_slug="2026-06-05-orig",
+             new_slug="2026-06-05-renamed",
+             title="renamed"))   # NO new_title — legacy/partial schema
+    assert b.tree.root.title == "orig"          # unchanged (event ignored)
+    assert b.tree.root.slug == "2026-06-05-orig"  # unchanged (no half-update)

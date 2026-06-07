@@ -2,8 +2,14 @@
 
 One Prompt per CLI invocation. Ctrl+C raises KeyboardInterrupt, Ctrl+D raises
 EOFError — the CLI's signal handler catches both and triggers save-and-exit.
-ESC is left to prompt_toolkit's built-in handling (meta-prefix in emacs mode;
-leaves insert mode in vi mode — see editing_mode plumbing).
+
+ESC during the prompt is owned by prompt_toolkit's built-in handling
+(meta-prefix in emacs mode; leaves insert mode in vi mode — see editing_mode
+plumbing). ESC during the agent-thinking phase (no prompt active) is read by
+`EscKeyReader` in `signals.py` and pauses the run. The CLI wraps the
+`prompt.ask_async()` call in `coord.tty_quiesced()` so the keystroke reader
+releases /dev/tty for the duration of the prompt and re-arms cbreak on exit —
+the two never hold the tty in raw/cbreak mode at once.
 
 History is per-session in-memory; persisted history is a post-V0 feature.
 """
@@ -26,8 +32,16 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     mode = EditingMode.VI if editing_mode == "vi" else EditingMode.EMACS
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
+    # No style override: while the user types, the input region keeps the
+    # terminal's default fg/bg (a bright-blue caret is the only marker). On
+    # submit, erase_when_done wipes prompt_toolkit's whole rendered region —
+    # prompt + input + the menu-reservation row that caused the old stray bottom
+    # bar — so NOTHING it drew survives in scroll-back. The live driver then
+    # reprints the entered turn as a UserMessageNode with the subtle "entered
+    # input" background (render_text), giving the after-not-during highlight and
+    # one shared rendering for the user turn in live and `imp log`.
     return PromptSession(history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
-                         editing_mode=mode)
+                         editing_mode=mode, erase_when_done=True)
 
 
 class SlashCompleter:
@@ -73,23 +87,37 @@ class Prompt:
         *,
         skills_dir: Any | None = None,
         editing_mode: str = "emacs",
+        color: bool = False,
         _session_factory: Callable[[], Any] | None = None,
     ) -> None:
+        self._color = color
         self._session_factory = _session_factory or (
             lambda: _build_session(skills_dir, editing_mode=editing_mode))
         self._session = self._session_factory()
 
-    def ask(self, prompt_text: str = "> ") -> str:
+    def _message(self, prompt_text: str | None) -> Any:
+        """The prompt caret as prompt_toolkit formatted text: a bright-blue
+        ``❯ `` under color, plain otherwise. `None` selects the default caret."""
+        from imp.cli import palette as pal
+
+        text = pal.CARET if prompt_text is None else prompt_text
+        if self._color:
+            from prompt_toolkit.formatted_text import ANSI
+
+            return ANSI(pal.ansi(text, "bright_blue", enabled=True))
+        return text
+
+    def ask(self, prompt_text: str | None = None) -> str:
         """Read a single line. Returns the user's text.
         Raises KeyboardInterrupt (Ctrl+C) or EOFError (Ctrl+D) up to caller."""
-        result = self._session.prompt(prompt_text)
+        result = self._session.prompt(self._message(prompt_text))
         return str(result) if result is not None else ""
 
-    async def ask_async(self, prompt_text: str = "> ") -> str:
+    async def ask_async(self, prompt_text: str | None = None) -> str:
         """Async version of ask() — uses prompt_toolkit's native prompt_async()
         so it shares the outer event loop instead of calling asyncio.run()
         internally (which would crash inside anyio.run())."""
-        result = await self._session.prompt_async(prompt_text)
+        result = await self._session.prompt_async(self._message(prompt_text))
         return str(result) if result is not None else ""
 
     def history_strings(self) -> list[str]:

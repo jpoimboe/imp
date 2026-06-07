@@ -47,7 +47,6 @@ from imp.engine.gates import (
     run_script,
 )
 from imp.engine.loader import load_workflow
-from imp.engine.model_tiers import effective_model_tiers
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
@@ -59,7 +58,7 @@ from imp.engine.types import (
     Workflow,
 )
 from imp.providers.config import load_config
-from imp.providers.resolve import provider_from_model, resolve_roles
+from imp.providers.resolve import provider_from_model, resolve_run
 
 EventCallback = Callable[[dict[str, Any]], None]
 HumanInputFn = Callable[[], str | Awaitable[str]]
@@ -70,6 +69,50 @@ class RunResult(Enum):
     COMPLETED = "completed"
     PAUSED = "paused"
     ERRORED = "errored"
+
+
+def _latest_step_context_system_prompt(log: EventLog, agent_id: str) -> str | None:
+    """The verbatim system_prompt from the LATEST step_context for this agent_id,
+    or None if none exists. 'Latest' matters: a goto re-entry renders afresh and
+    emits a newer step_context; resume must replay the newest, not an earlier row.
+    Resume is not a hot path and the log is per-Change, so a linear scan is fine."""
+    found: str | None = None
+    for e in log.read():
+        if e.get("type") == "step_context" and e.get("agent_id") == agent_id:
+            found = (e.get("payload") or {}).get("system_prompt")
+    return found
+
+
+def _resume_system_prompt(
+    log: EventLog, agent_id: str, transcript_dir: Any,
+) -> str | None:
+    """Resume-replay source. Returns the stored prompt to replay verbatim, or
+    None when the caller should re-render. Aborts on the invariant violation:
+    a non-empty transcript with no stored step_context means messages were
+    rendered against a now-lost prompt — re-rendering would silently diverge."""
+    from imp.agents.transcript import Transcript
+    stored = _latest_step_context_system_prompt(log, agent_id)
+    if stored is not None:
+        return stored
+    if Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
+        raise RuntimeError(
+            f"resume invariant violated: step {agent_id!r} has a non-empty "
+            "transcript but no stored step_context system prompt; refusing to "
+            "re-render against a lost prompt")
+    return None       # empty transcript (pre-emit crash, or no-transcript provider)
+
+
+def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, ...]:
+    """Fresh-entry seed. `<imp:begin/>` (or the wrapper text on a fresh goto),
+    plus a name line when the Change is named — so a named Change conveys its
+    slug through the immutable conversation record, never the cached prefix.
+    Unnamed Changes get the begin token alone (no leaked provisional name). One
+    TextBlock with a blank-line separator, so every provider's text join keeps
+    the token and the name line apart on the wire."""
+    opening = wrapper_text or "<imp:begin/>"
+    text = (f"{opening}\n\nThis Change is named `{change.slug}`."
+            if change.slug else opening)
+    return (Message(role="user", content=(TextBlock(text=text),)),)
 
 
 async def run_change(
@@ -100,15 +143,17 @@ async def run_change(
         log: EventLog = JsonlEventLog(change.events_path, on_event=on_event)
         state = State.load(change.state_dir)
 
-        # Resolve roles once per run and persist, so resume never re-snapshots the
+        # Resolve tiers once per run and persist, so resume never re-snapshots the
         # environment (design "When it runs"). run_change re-executes on every
         # resume, so guard on the persisted map.
-        if state.resolved_roles is None:
-            resolved, details = resolve_roles(workflow, config)
-            state.resolved_roles = resolved
-            state.model_tiers = effective_model_tiers(workflow, config)
+        if state.resolved_tiers is None:
+            resolved_tiers, resolved_steps, details = resolve_run(workflow, config)
+            state.resolved_tiers = resolved_tiers
+            state.resolved_steps = resolved_steps
             state.save(change.state_dir)
-            _emit(log, "roles_resolved", {"roles": details}, agent_id=None)
+            _emit(log, "tiers_resolved",
+                  {"tiers": details["tiers"], "steps": details["steps"]},
+                  agent_id=None)
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
@@ -190,9 +235,6 @@ async def run_change(
                 state.retry_feedback = {
                     "target_step": flat[target_idx].name, "text": feedback_text}
             state.save(change.state_dir)
-
-            if state.pending_rename:
-                log = apply_pending_rename(change, state, log, on_event=on_event)
     finally:
         # prev_cwd may have been removed (e.g. resume from inside a worktree this
         # run merged + tore down). Don't let the restore mask the result/exception.
@@ -204,7 +246,7 @@ async def run_change(
 
 def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     """Terminal handler: marks the Change completed and, when ready_to_merge is
-    set in state.vars, performs the full merge phase: merge imp/<slug> into
+    set in state.vars, performs the full merge phase: merge imp/<id> into
     base, journal the final artifacts, then remove the worktree (branch kept).
 
     Contract change from the original stub:
@@ -219,11 +261,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
       status=completed and worktree gone on success, or re-tries from state on
       block — never data loss, never a double-merge (resume rejects completed).
     """
-    # M4: a rename requested on the very last step never reached the boundary
-    # hook. Don't let it vanish silently — record why.
-    if state.pending_rename:
-        _emit(log, "rename_dropped", {"requested": state.pending_rename})
-        state.pending_rename = None
     state.step = None  # terminal cursor (safe to persist early; status is NOT yet)
 
     # CRITICAL ordering: never write status="completed" until the run has truly
@@ -247,7 +284,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
               {"reason": "worktree_dirty", "base": change.base_branch})
         return RunResult.PAUSED
 
-    result = worktree.merge_to_base(change.control_root, change.slug, change.base_branch)
+    result = worktree.merge_to_base(
+        change.control_root, change.id, change.base_branch, title=change.title)
     if result.status in ("CONFLICT", "BASE_DIRTY"):
         state.status = "merge_blocked"
         state.save(change.state_dir)
@@ -262,64 +300,13 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.save(change.state_dir)
     _emit(log, "change_merged",
           {"base": change.base_branch, "commit": result.merge_commit})
-    worktree.journal_commit(change.control_root, change.slug, {
+    worktree.journal_commit(change.control_root, change.id, {
         "events.jsonl": change.events_path,
         "change.json": change.change_dir / "change.json",
         "state.json": change.state_dir / "state.json",
     })
-    worktree.remove_worktree(change.control_root, change.slug)  # steps/ goes with it
+    worktree.remove_worktree(change.control_root, change.id)  # steps/ goes with it
     return RunResult.COMPLETED
-
-
-def apply_pending_rename(
-    change: Change, state: State, log: EventLog, *, on_event: EventCallback | None,
-) -> EventLog:
-    """Apply state.pending_rename at a step boundary (spec §5.3). The worktree
-    move is safe here: steps are sequential (no live tool subprocess), and the
-    engine's cwd is the control root (set in run_change). Returns the event log
-    to use going forward (re-opened at the possibly-new path)."""
-    import json as _json
-
-    from imp.engine import worktree
-    from imp.engine.slug import dated_slug, slugify, split_date_prefix
-
-    name = state.pending_rename
-    assert name is not None
-    old = change.slug
-    # Preserve the YYYY-MM-DD- creation-date prefix: it is part of the Change's
-    # identity and must not be dropped when the slug is re-derived from the new
-    # name (spec §12). A date-less slug (legacy/test) falls back to plain slugify.
-    date, _ = split_date_prefix(old)
-    new = dated_slug(name, date=date) if date else slugify(name)
-    if new == old:
-        state.pending_rename = None
-        state.save(change.state_dir)
-        return log
-
-    new_path = worktree.rename(change.control_root, old, new)
-    if new_path is None:
-        state.pending_rename = None
-        state.save(change.state_dir)
-        _emit(log, "rename_blocked", {"requested": new})
-        return log
-
-    # Repoint in-memory paths onto the moved worktree.
-    change.slug = new
-    change.title = name
-    change.auto_titled = False   # renamed → the slug is now intentional (spec §12)
-    change.project_root = new_path
-    change.change_dir = new_path / ".imp" / "change"
-    meta_path = change.change_dir / "change.json"
-    meta = _json.loads(meta_path.read_text())          # preserves created_at
-    meta["slug"], meta["title"] = new, name
-    meta["auto_titled"] = False
-    meta_path.write_text(_json.dumps(meta, indent=2, sort_keys=True))
-    state.slug = new
-    state.pending_rename = None
-    state.save(change.state_dir)
-    new_log = JsonlEventLog(change.events_path, on_event=on_event)
-    _emit(new_log, "change_renamed", {"old_slug": old, "new_slug": new, "title": name})
-    return new_log
 
 
 async def _dispatch_step(
@@ -387,6 +374,7 @@ def _route_script(
     _emit_started(log, step)
     out = run_script(step, cwd=change.workflow_dir,
                      env_extra=engine_env(project_root=change.project_root,
+                                          change_id=change.id,
                                           change_slug=change.slug,
                                           change_title=change.title,
                                           lint_command=lint_command,
@@ -428,7 +416,7 @@ async def _route_agent(
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
     lint_command: str | None = None,
     test_command: str | None = None,
-    non_interactive: bool = False,  # Task 12: §10/§12 wall-clock retry ceiling (not yet active)
+    non_interactive: bool = False,  # §10/§12: consumed by the headless wall-clock retry ceiling
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
@@ -443,24 +431,26 @@ async def _route_agent(
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = False
-        opening = wrapper_text or "begin"                  # fresh-seed via initial_messages
         retry_wrapper: str | None = None
+        initial: tuple[Message, ...] = _seed_messages(change, wrapper_text)
     else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = True
-        opening = "begin"
+        # No opener on resume: providers replay the on-disk transcript and
+        # never iterate initial_messages. retry_wrapper rides on
+        # retry_feedback (balance_success_on_resume), a separate channel.
         retry_wrapper = wrapper_text
+        initial = ()
 
     state.current_step = CurrentStep(transcript_dir=transcript_dir)
     state.save(change.state_dir)
-    initial = (Message(role="user", content=(TextBlock(text=opening),)),)
 
     backoff = 0
     cumulative_backoff = 0.0
     while True:
         result = await _run_agent_invocation(
             agent_id=f"step:{step.phase}/{step.name}", agent_def=agent_def,
-            fs_permissions=step.fs_permissions, model_role=step.model_role,
+            fs_permissions=step.fs_permissions, tier=step.tier, step_name=step.name,
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
             # MUST include "step" — _run_agent_invocation builds step_started as
@@ -473,7 +463,8 @@ async def _route_agent(
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
-            initial_messages=initial, lint_command=lint_command,
+            initial_messages=initial, is_resume=is_resume,
+            lint_command=lint_command,
             test_command=test_command, non_interactive=non_interactive)
         if result.delay is None:
             break
@@ -564,7 +555,8 @@ async def _run_agent_invocation(
     agent_id: str,
     agent_def: Any,
     fs_permissions: Any,
-    model_role: str,
+    tier: str,
+    step_name: str,
     workflow: Workflow,
     change: Change,
     state: State,
@@ -575,6 +567,7 @@ async def _run_agent_invocation(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
     initial_messages: tuple[Message, ...],
+    is_resume: bool = False,
     prior_backoff_attempts: int = 0,
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
@@ -585,22 +578,33 @@ async def _run_agent_invocation(
     """Run one top-level agent step to a terminal AgentRunResult.
 
     Computes the executor's caller-specific inputs (model resolution from the
-    persisted role map, prompt rendering against the shared write-log,
+    persisted tier map, prompt rendering against the shared write-log,
     subagent_defs + max_tool_calls resolution), emits step_started, then defers
     construction and the drain loop to the shared builder + driver. The backoff
     sleep loop lives in _route_agent (it owns agent_retry events + transcript
     re-entry). See drive_invocation for the field semantics of the result.
     """
-    assert state.resolved_roles is not None  # set by run_change before dispatch
-    provider = provider_from_model(state.resolved_roles[model_role])
+    assert state.resolved_tiers is not None  # set by run_change before dispatch
+    # Per-step override if differ_from was used, else the tier default
+    resolved_steps = state.resolved_steps or {}
+    if step_name in resolved_steps:
+        provider_model = resolved_steps[step_name]
+    else:
+        provider_model = state.resolved_tiers[tier]
+    provider = provider_from_model(provider_model)
 
-    rendered = render_prompt(
-        agent_def.prompt_template_source, build_context(
-            change_slug=change.slug, change_title=change.title,
-            change_auto_titled=change.auto_titled, event_log=log,
-            vars=state.vars,
-        ),
-    )
+    stored = _resume_system_prompt(log, agent_id, transcript_dir) if is_resume else None
+    if stored is not None:
+        rendered = stored
+        system_prompt_override: str | None = stored
+    else:
+        rendered = render_prompt(
+            agent_def.prompt_template_source, build_context(
+                change_id=change.id, change_slug=change.slug, change_title=change.title,
+                event_log=log, vars=state.vars,
+            ),
+        )
+        system_prompt_override = None
 
     subagent_defs = {
         name: workflow.agents[name]
@@ -631,9 +635,10 @@ async def _run_agent_invocation(
         provider_name=provider.name,
         model_name=provider.model,
         rendered_system_prompt=rendered,
+        system_prompt_override=system_prompt_override,
         initial_messages=initial_messages,
         change_context=ChangeContext(
-            slug=change.slug, title=change.title,
+            id=change.id, slug=change.slug, title=change.title,
             project_root=change.project_root, workflow_dir=change.workflow_dir,
         ),
         interactive=interactive,
@@ -642,13 +647,14 @@ async def _run_agent_invocation(
         fs_permissions=fs_permissions,
         events_path=change.events_path,
         subagent_defs=subagent_defs,
-        model_tiers=state.model_tiers or (),
+        tiers=tuple(state.resolved_tiers.keys()) if state.resolved_tiers else (),
         max_tool_calls=resolved_max_tool_calls,
         agent_id=agent_id,
         event_log=log,
         change_state=state,
+        change=change,
         first_event_parent_id=started["id"],
-        resolved_roles=state.resolved_roles,
+        resolved_tiers=state.resolved_tiers,
         coordinator=coordinator,
         subagent_depth=0,
         retry_feedback=retry_feedback,

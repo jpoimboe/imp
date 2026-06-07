@@ -8,15 +8,12 @@ from imp.agents.skills import list_skill_names
 from imp.assets import default_workflow_dir
 from imp.engine.loader import load_workflow
 
-# The roles the workflow.yaml references; all are scaffolded by cli/init.py.
-_ROLES = frozenset({
-    "default", "spec", "spec_review", "plan", "plan_review", "task_lead",
-    "code", "code_review", "fast", "balanced", "powerful",
-})
+# The tiers the workflow.yaml references; all are scaffolded by cli/init.py.
+_TIERS_SET = frozenset({"low", "medium", "high"})
 
 
 def _wf():
-    return load_workflow(default_workflow_dir(), configured_roles=_ROLES)
+    return load_workflow(default_workflow_dir(), configured_tiers=_TIERS_SET)
 
 
 def test_workflow_loads_with_scaffolded_roles() -> None:
@@ -27,12 +24,12 @@ def test_workflow_loads_with_scaffolded_roles() -> None:
 
 
 def test_referenced_roles_are_a_subset_of_init_scaffold() -> None:
-    # Every model_role used must be one imp init writes (else change creation
+    # Every tier used must be one imp init writes (else change creation
     # would LoadError). Reuse cli/init's tier map as the source of truth.
-    from imp.cli.init import _ROLE_TIERS
-    scaffolded = set(_ROLE_TIERS)
-    used = {s.model_role for p in _wf().phases for s in p.steps
-            if s.kind == "agent" and s.model_role}
+    from imp.cli.init import _TIERS
+    scaffolded = set(_TIERS)
+    used = {s.tier for p in _wf().phases for s in p.steps
+            if s.kind == "agent" and s.tier}
     assert used <= scaffolded, f"roles not scaffolded by init: {used - scaffolded}"
 
 

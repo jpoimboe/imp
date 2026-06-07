@@ -7,6 +7,7 @@ the CLI. No live providers needed.
 from __future__ import annotations
 
 import io
+import json
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -17,6 +18,28 @@ from imp.engine import worktree
 from imp.engine.change import Change
 from imp.engine.state import State
 from tests.conftest import _seed_control
+
+# A phase that renders through the narrative — the proof the journal was read.
+# (change_created emits no line now that the slug/title banner is gone, so we
+# need a real rendered node to assert on.)
+_JOURNAL_MARKER_PHASE = "summary"
+
+
+def _seed_marker_phase(control: Path, slug: str) -> None:
+    """Append a step_started event so the change has a node that renders through
+    the narrative — change_created emits no line now that the slug/title banner
+    is gone, so a log test needs a real rendered marker to assert on. Reuses the
+    change's own first-event timestamp so it never perturbs last-activity sorting.
+    Call BEFORE _complete_and_journal."""
+    ch = Change.load(control, slug)
+    with ch.events_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "id": "marker", "agent_id": None,
+            "timestamp": "2026-05-27T10:00:01+00:00",
+            "type": "step_started",
+            "payload": {"step": "s", "kind": "agent", "phase": _JOURNAL_MARKER_PHASE,
+                        "model": "m", "provider": "anthropic"},
+        }) + "\n")
 
 
 def _complete_and_journal(control: Path, slug: str) -> None:
@@ -40,7 +63,8 @@ def test_log_falls_back_to_journal_after_merge(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Done Thing", slug="done-thing", base_branch="main")
+    Change.create(tmp_path, title="Done Thing", change_id="done-thing", base_branch="main")
+    _seed_marker_phase(tmp_path, "done-thing")
     _complete_and_journal(tmp_path, "done-thing")
     # Worktree is gone: Change.load now raises; log must use the journal.
     assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
@@ -53,7 +77,7 @@ def test_log_falls_back_to_journal_after_merge(
     with redirect_stdout(buf):
         rc = main(["log", "done-thing"])
     assert rc == 0
-    assert "Done Thing" in buf.getvalue()
+    assert _JOURNAL_MARKER_PHASE in buf.getvalue()
 
 
 def test_log_unknown_slug_returns_rc_2(
@@ -77,7 +101,8 @@ def test_log_no_slug_falls_through_to_journal(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Only One", slug="only-one", base_branch="main")
+    Change.create(tmp_path, title="Only One", change_id="only-one", base_branch="main")
+    _seed_marker_phase(tmp_path, "only-one")
     _complete_and_journal(tmp_path, "only-one")
 
     monkeypatch.chdir(tmp_path)
@@ -88,7 +113,7 @@ def test_log_no_slug_falls_through_to_journal(
     with redirect_stdout(buf):
         rc = main(["log"])  # no slug, no in-flight worktrees
     assert rc == 0
-    assert "Only One" in buf.getvalue()
+    assert _JOURNAL_MARKER_PHASE in buf.getvalue()
 
 
 def test_status_shows_completed_section_from_journal(
@@ -99,8 +124,8 @@ def test_status_shows_completed_section_from_journal(
 
     _seed_control(tmp_path)
     # One in-flight, one merged-and-journaled.
-    Change.create(tmp_path, title="Live One", slug="live-one", base_branch="main")
-    Change.create(tmp_path, title="Gone One", slug="gone-one", base_branch="main")
+    Change.create(tmp_path, title="Live One", change_id="live-one", base_branch="main")
+    Change.create(tmp_path, title="Gone One", change_id="gone-one", base_branch="main")
     _complete_and_journal(tmp_path, "gone-one")
 
     monkeypatch.chdir(tmp_path)
@@ -109,8 +134,6 @@ def test_status_shows_completed_section_from_journal(
     rc = m._cmd_status(type("NS", (), {})())
     assert rc == 0
     out = capsys.readouterr().out
-    assert "In-flight Changes" in out
-    assert "Completed Changes" in out
     # in-flight slug appears under in-flight; merged slug under completed.
     assert "live-one" in out
     assert "gone-one" in out
@@ -128,7 +151,7 @@ def test_status_inflight_takes_precedence_over_journal(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="Both", slug="both", base_branch="main")
+    ch = Change.create(tmp_path, title="Both", change_id="both", base_branch="main")
     # Journal it but DON'T remove the worktree (simulates the crash window).
     worktree.journal_commit(tmp_path, "both", {
         "events.jsonl": ch.events_path,
@@ -156,7 +179,7 @@ def test_status_skips_malformed_journal_entry(
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Good", slug="good", base_branch="main")
+    Change.create(tmp_path, title="Good", change_id="good", base_branch="main")
     _complete_and_journal(tmp_path, "good")
     # A second journaled slug whose state.json is not valid JSON.
     bad = tmp_path / ".imp" / "bad-state.json"
@@ -178,3 +201,161 @@ def test_status_skips_malformed_journal_entry(
     out = capsys.readouterr().out
     assert "good" in out
     assert "broken" not in out
+
+
+def test_status_sorts_rows_by_last_activity_descending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Two journaled Changes with different last_activity stamps sort DESC;
+    a third with no events ('-') lands after both timestamped rows."""
+    import json as _json
+
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Older", change_id="older", base_branch="main")
+    Change.create(tmp_path, title="Newer", change_id="newer", base_branch="main")
+    Change.create(tmp_path, title="Bare",  change_id="bare",  base_branch="main")
+
+    def _ev(slug: str) -> Path:
+        return (tmp_path / ".imp" / "worktrees" / slug
+                / ".imp" / "change" / "events.jsonl")
+
+    _ev("older").write_text(_json.dumps({
+        "timestamp": "2025-01-01T00:00:00+00:00",
+        "type": "change_created", "payload": {},
+    }) + "\n")
+    _ev("newer").write_text(_json.dumps({
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "type": "change_created", "payload": {},
+    }) + "\n")
+    _ev("bare").write_text("")  # no events → last_activity = '-'
+
+    _complete_and_journal(tmp_path, "older")
+    _complete_and_journal(tmp_path, "newer")
+    _complete_and_journal(tmp_path, "bare")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    lines = capsys.readouterr().out.splitlines()
+    # Header is lines[0]; data rows follow. First whitespace-delimited token
+    # of each data row is the slug.
+    slugs_in_order = [line.split()[0] for line in lines[1:]]
+    assert slugs_in_order == ["newer", "older", "bare"]
+
+
+def test_status_empty_prints_no_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No in-flight worktrees + empty journal → exactly `No Changes.\\n`."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    assert capsys.readouterr().out == "No Changes.\n"
+
+
+def test_status_precondition_error_prints_no_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When _control_root() raises PreconditionError (outside a git repo),
+    `imp status` still prints the single-line empty message and exits 0."""
+    import imp.cli.main as m
+    from imp.engine import worktree as _wt
+
+    def _raise() -> Path:
+        raise _wt.PreconditionError("not a repo")
+
+    monkeypatch.setattr(m, "_control_root", _raise)
+
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    assert capsys.readouterr().out == "No Changes.\n"
+
+
+def test_status_column_alignment_under_long_slug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A 28-char slug widens SLUG without shifting STATUS off the header's
+    STATUS column position in any data row."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    long_slug = "2026-06-04-kelp-hazel-heath0"  # 28 chars
+    assert len(long_slug) == 28
+    Change.create(tmp_path, title="Long Slug", change_id=long_slug, base_branch="main")
+    Change.create(tmp_path, title="Short",     change_id="short",   base_branch="main")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    lines = capsys.readouterr().out.splitlines()
+    status_col = lines[0].index("STATUS")
+    for data_line in lines[1:]:
+        # Slice the STATUS column range and confirm it starts with "running".
+        assert data_line[status_col:status_col + len("running")] == "running", (
+            f"STATUS column misaligned at offset {status_col}: {data_line!r}"
+        )
+
+
+def test_status_no_ansi_when_NO_COLOR_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With NO_COLOR set, stdout contains no ESC byte."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Gone", change_id="gone", base_branch="main")
+    _complete_and_journal(tmp_path, "gone")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.delenv("CLICOLOR_FORCE", raising=False)
+
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "\x1b[" not in out
+    assert "completed" in out
+
+
+def test_status_colors_completed_with_gray_when_FORCE_COLOR(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With FORCE_COLOR set, a completed row's STATUS cell is wrapped in the
+    gray SGR sequence around the literal text 'completed'."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Gone", change_id="gone", base_branch="main")
+    _complete_and_journal(tmp_path, "gone")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    rc = m._cmd_status(type("NS", (), {})())
+    assert rc == 0
+    out = capsys.readouterr().out
+    # palette._ANSI["gray"] is "\x1b[90m"; reset is "\x1b[0m".
+    assert "\x1b[90mcompleted\x1b[0m" in out
