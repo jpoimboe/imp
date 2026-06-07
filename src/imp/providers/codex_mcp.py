@@ -27,6 +27,7 @@ from typing import Any
 
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
+from imp.engine.agent_run import SubagentSuspended
 
 
 @dataclass
@@ -126,7 +127,6 @@ async def dispatch_tool(
                 tier=args.get("tier"),
             )
         except Exception as exc:
-            from imp.engine.agent_run import SubagentSuspended
             if isinstance(exc, SubagentSuspended):
                 state.subagent_suspended = exc  # runner re-raises to unwind cleanly
                 return "subagent paused; run will pause"
