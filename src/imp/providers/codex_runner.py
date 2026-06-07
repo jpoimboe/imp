@@ -610,6 +610,13 @@ class CodexAgentRunner:
                         "category": category, "kind": kind, "message": msg,
                         "detail": {"last_agent_text": last_text[:500]}}}
                     return
+            # Stream ended (possibly silently) after a cancel without the
+            # in-loop check firing — classify it as a clean interrupt.
+            if self._cancel:
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "interrupted",
+                    "message": "runner cancelled by interrupt"}}
+                return
             # Inner loop exited. If we set need_nudge, invoke continuation_fn
             # and either run another turn or yield the after-nudges error.
             if not need_nudge:
