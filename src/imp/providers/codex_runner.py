@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
 from imp.agents.runner import (
     AgentInvocation,
     Diagnostics,
@@ -442,12 +443,15 @@ class CodexAgentRunner:
         except ImportError:
             self._abort_controller = None
 
+        guard = LoopGuard()
+
         while True:
             # Reset per-turn completion-capture state before each turn so a
             # stale flag from a missed-completion turn cannot satisfy the
             # check on the next.
             proc_state["complete_step_called"] = False
             proc_state["complete_step_args"] = {}
+            proc_state["turn_tool_outcomes"] = []
             # Mirror onto the shared MCP RunState (which the dispatcher writes).
             state.complete_step_called = False
             state.complete_step_args = {}
@@ -581,6 +585,16 @@ class CodexAgentRunner:
                     return
 
                 if etype == "turn.completed":
+                    record = TurnRecord(
+                        assistant_text=proc_state.get("last_agent_text", "") or "",
+                        tools=list(proc_state.get("turn_tool_outcomes", [])),
+                        has_complete_step=bool(proc_state.get("complete_step_called")),
+                    )
+                    loop_err = guard.observe(record)
+                    if loop_err is not None:
+                        yield perr.make_error_event(
+                            loop_err, kind=getattr(loop_err, "kind", ""))
+                        return
                     if proc_state.get("complete_step_called"):
                         args = proc_state.get("complete_step_args") or {}
                         try:
@@ -947,6 +961,12 @@ def process_event(
                 # fallback for when that path didn't run.
                 state["complete_step_args"] = dict(args)
                 state["complete_step_called"] = True
+            # Accumulate tool outcome for the per-turn LoopGuard record.
+            # codex item tool names are already bare (no mcp__imp__ prefix),
+            # so no stripping is needed.
+            state.setdefault("turn_tool_outcomes", []).append(
+                ToolOutcome(name=name, tool_use_id=call_id, input=dict(args),
+                            is_error=is_error))
             return
         if itype == "web_search":
             query = getattr(item, "query", "") or ""
