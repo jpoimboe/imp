@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
 from imp.agents.runner import (
     AgentInvocation,
     Diagnostics,
@@ -30,6 +31,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
@@ -190,6 +192,12 @@ class CodexAgentRunner:
             yield perr.make_error_event(exc)
             return
         except Exception as exc:
+            raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
+            if self._cancel:
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "interrupted",
+                    "message": "runner cancelled by interrupt"}}
+                return
             yield perr.make_unknown_error_event(exc)
             return
 
@@ -237,7 +245,7 @@ class CodexAgentRunner:
             ctx.user_input_fn = self._user_input_fn
         self._ctx = ctx
 
-        state = RunState(cap=invocation.max_tool_calls or 1000)
+        state = RunState(cap=invocation.max_tool_calls or 1000, agent_id=aid)
         # Shared event-processing state (process_event keys).
         proc_state: dict[str, Any] = {
             "thread_id": None, "complete_step_args": None,
@@ -422,10 +430,39 @@ class CodexAgentRunner:
                 thread = client.start_thread()
         # Build initial prompt with anti-native-tool instruction prepended.
         next_prompt = self._build_prompt(invocation.system_prompt)
-        # Whole-run nudge budget (across-turn). `continuation_fn` is the gate;
-        # this cap is the floor.
-        max_nudges = 3
-        nudges_used = 0
+        # Resume seam (Unit G): on a balance_on_resume re-entry, codex holds no
+        # parsed message list, so derive the resume state from imp's own
+        # events.jsonl. A PROMPT_USER turn (interactive, agent ended awaiting the
+        # user) injects the user's reply as the FIRST resumed prompt instead of
+        # the system prompt; MISSING_COMPLETE_STEP (autonomous, no complete_step)
+        # is a terminal error.
+        if invocation.balance_on_resume:
+            from imp.agents.classify import ResumeState
+            from imp.providers.codex_resume import derive_codex_resume_state
+            rstate, last_text = derive_codex_resume_state(
+                invocation.events_path, aid, interactive=invocation.interactive)
+            if rstate is ResumeState.PROMPT_USER:
+                if invocation.continuation_fn is None:
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "no_user_input_fn",
+                        "message": "PROMPT_USER resume requires an interactive "
+                                   "continuation_fn; none installed"}}
+                    return
+                import inspect as _inspect
+                reply = invocation.continuation_fn(last_text)
+                if _inspect.isawaitable(reply):
+                    reply = await reply
+                user_msg = Message(
+                    role="user", content=(TextBlock(text=str(reply)),))
+                elog.append_user_message(agent_id=aid, message=user_msg)
+                next_prompt = str(reply)
+            elif rstate is ResumeState.MISSING_COMPLETE_STEP:
+                yield {"type": "error", "payload": {
+                    "category": "agent_output_missing",
+                    "kind": "missing_complete_step",
+                    "message": "codex resume: turn ended without complete_step",
+                    "detail": {"last_agent_text": last_text[:500]}}}
+                return
         # AbortController for interrupt() — tolerate a fake/SDK without one.
         try:
             from openai_codex_sdk import (
@@ -435,12 +472,15 @@ class CodexAgentRunner:
         except ImportError:
             self._abort_controller = None
 
+        guard = LoopGuard()
+
         while True:
             # Reset per-turn completion-capture state before each turn so a
             # stale flag from a missed-completion turn cannot satisfy the
             # check on the next.
             proc_state["complete_step_called"] = False
             proc_state["complete_step_args"] = {}
+            proc_state["turn_tool_outcomes"] = []
             # Mirror onto the shared MCP RunState (which the dispatcher writes).
             state.complete_step_called = False
             state.complete_step_args = {}
@@ -466,7 +506,7 @@ class CodexAgentRunner:
                 etype = getattr(event, "type", None)
                 process_event(event, elog=elog, agent_id=aid, state=proc_state,
                               provider=invocation.provider_name,
-                              model=self.model)
+                              model=self.model, run_state=state)
 
                 # Cap trip from inside the MCP wrapper → abort the SDK + bail.
                 if state.abort_requested:
@@ -482,6 +522,35 @@ class CodexAgentRunner:
                             f"codex tool dispatch cap ({state.cap}) "
                             f"exceeded"}}
                     return
+
+                # A subagent-origin pause captured in the MCP handler must
+                # unwind the whole codex run cleanly (not classify as an error).
+                if state.subagent_suspended is not None:
+                    if self._abort_controller is not None:
+                        with contextlib.suppress(Exception):
+                            self._abort_controller.abort()
+                    raise state.subagent_suspended
+
+                if state.fatal_tool_error is not None:
+                    if self._abort_controller is not None:
+                        with contextlib.suppress(Exception):
+                            self._abort_controller.abort()
+                    tool_name, msg = state.fatal_tool_error
+                    # Same payload shape as claude_code.py fatal_tool_error:
+                    # `tool` at the top level, `message` is the raw fatal-tool
+                    # message.
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "fatal_tool_error",
+                        "tool": tool_name, "message": msg}}
+                    return
+
+                # Drain any bash kills detected by the MCP wrapper (non-terminal).
+                # tool_killed is an AUDIT event — persisted once via elog.append,
+                # NOT yielded. drive_invocation re-appends every yielded event to
+                # the same log, so yielding would cause a double-write.
+                while state.killed_tool_uses:
+                    info = state.killed_tool_uses.pop(0)
+                    elog.append(agent_id=aid, type="tool_killed", payload=info)
 
                 # Native-tool violation → fail-closed. AC #18:
                 #   - autonomous: unconditional revert + bail.
@@ -553,6 +622,29 @@ class CodexAgentRunner:
                     return
 
                 if etype == "turn.completed":
+                    record = TurnRecord(
+                        assistant_text=proc_state.get("last_agent_text", "") or "",
+                        tools=list(proc_state.get("turn_tool_outcomes", [])),
+                        has_complete_step=bool(proc_state.get("complete_step_called")),
+                    )
+                    # Mirror claude_code's guard gating now that G3 drives BOTH
+                    # modes off continuation_fn. An interactive pure-text turn
+                    # awaiting fresh human input is a human handoff, not an
+                    # autonomous loop iteration: reset the guard so normal
+                    # multi-turn conversation never trips no_progress. A
+                    # tool-bearing interactive turn still observes (an
+                    # interactive re-read loop is still caught), and autonomous
+                    # nudge turns always observe — so repeated no-progress
+                    # automated nudges still accumulate toward a trip (the C1
+                    # loop-guard backstop the unification work was waiting on).
+                    if invocation.interactive and not record.tools:
+                        guard.note_external_input()
+                    else:
+                        loop_err = guard.observe(record)
+                        if loop_err is not None:
+                            yield perr.make_error_event(
+                                loop_err, kind=getattr(loop_err, "kind", ""))
+                            return
                     if proc_state.get("complete_step_called"):
                         args = proc_state.get("complete_step_args") or {}
                         try:
@@ -577,32 +669,29 @@ class CodexAgentRunner:
                         yield perr.make_error_event(
                             classified, kind=getattr(classified, "kind", ""))
                         return
-                    # Interactive + continuation_fn → cross to outer loop.
-                    if (invocation.interactive
-                            and invocation.continuation_fn is not None
-                            and nudges_used < max_nudges):
+                    # Turn ended without complete_step. If a continuation_fn is
+                    # wired, cross to the outer loop (interactive wrap OR
+                    # autonomous nudge); the closure itself decides when to stop
+                    # (returning None -> terminate via no_complete_step_after_
+                    # nudges). Without a continuation_fn there is no way to
+                    # continue, so emit the immediate `no_complete_step`.
+                    if invocation.continuation_fn is not None:
                         need_nudge = True
                         break  # exit inner for; outer while handles nudge
-                    # Autonomous OR no continuation_fn OR nudges exhausted:
-                    # autonomous emits `no_complete_step`; interactive with a
-                    # wired continuation_fn that exhausted the budget emits the
-                    # distinct `no_complete_step_after_nudges`.
-                    if (invocation.interactive
-                            and invocation.continuation_fn is not None
-                            and nudges_used >= max_nudges):
-                        kind = "no_complete_step_after_nudges"
-                        category = "agent_incomplete"
-                        msg = ("codex did not call complete_step after "
-                               f"{max_nudges} nudges")
-                    else:
-                        kind = "no_complete_step"
-                        category = "agent_output_missing"
-                        msg = ("codex completed turn without calling "
-                               "complete_step")
                     yield {"type": "error", "payload": {
-                        "category": category, "kind": kind, "message": msg,
+                        "category": "agent_output_missing",
+                        "kind": "no_complete_step",
+                        "message": ("codex completed turn without calling "
+                                    "complete_step"),
                         "detail": {"last_agent_text": last_text[:500]}}}
                     return
+            # Stream ended (possibly silently) after a cancel without the
+            # in-loop check firing — classify it as a clean interrupt.
+            if self._is_cancelled():
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "interrupted",
+                    "message": "runner cancelled by interrupt"}}
+                return
             # Inner loop exited. If we set need_nudge, invoke continuation_fn
             # and either run another turn or yield the after-nudges error.
             if not need_nudge:
@@ -615,14 +704,27 @@ class CodexAgentRunner:
                 nxt = cont(last_text)
                 if _inspect.isawaitable(nxt):
                     nxt = await nxt
-            except Exception:
+            except Exception as exc:
+                raise_if_suspended(exc)  # a subagent-origin pause must unwind
+                if self._is_cancelled():
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "interrupted",
+                        "message": "runner cancelled by interrupt"}}
+                    return
                 nxt = None
+            # A Ctrl-C that landed while the nudge was computed pauses cleanly
+            # instead of re-running a turn.
+            if self._is_cancelled():
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "interrupted",
+                    "message": "runner cancelled by interrupt"}}
+                return
             if nxt is None:
                 yield {"type": "error", "payload": {
                     "category": "agent_incomplete",
                     "kind": "no_complete_step_after_nudges",
-                    "message": ("codex did not call complete_step "
-                                f"after {nudges_used + 1} nudge(s)"),
+                    "message": ("codex did not call complete_step before the "
+                                "continuation hook stopped nudging"),
                     "detail": {"last_agent_text": last_text[:500]}}}
                 return
             elog.append_user_message(
@@ -630,7 +732,6 @@ class CodexAgentRunner:
                 message=Message(role="user",
                                 content=(TextBlock(text=str(nxt)),)))
             next_prompt = str(nxt)
-            nudges_used += 1
 
     def _build_thread_options(self) -> Any:
         """ThreadOptions with the design's exact production flags. Lives in its
@@ -689,6 +790,17 @@ class CodexAgentRunner:
             with contextlib.suppress(Exception):
                 self._abort_controller.abort()
 
+    def _is_cancelled(self) -> bool:
+        """Read the interrupt flag opaquely.
+
+        continuation_fn (and the async transport) can flip ``self._cancel``
+        between checks within a single ``_drive_turns`` pass; routing these
+        re-checks through a method call keeps mypy from narrowing the attribute
+        to a stale ``Literal[False]`` and wrongly flagging the later guards as
+        unreachable.
+        """
+        return self._cancel
+
 
 # ── Event mapping ─────────────────────────────────────────────────────────────
 
@@ -734,12 +846,17 @@ def _serialize_mcp_result(result: Any) -> str:
 def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
     """Reassemble one codex turn's ``item.completed`` items into a full-turn
     ``llm_response.raw`` (``{"content": [...]}``) carrying text + tool_use
-    blocks, so the audit reconstruction (``build_messages_from_events``) can
-    pair tool_use/tool_result correctly.
+    blocks.  This raw IS emitted live as the turn's single ``llm_response`` at
+    ``turn.completed`` (Unit F), and is also consumed by audit reconstruction
+    (``build_messages_from_events``) for tool_use/tool_result pairing.
+    A web_search item becomes a query-only tool_use (codex exposes no
+    results/citations).
 
-    LATENT/AUDIT-ONLY: not wired into the live emit path (live raw stays
-    text-only — see the Fix 2 part-2 scope decision). A web_search item becomes
-    a query-only tool_use (codex exposes no results/citations).
+    Latent caveat: for ``task`` tool calls the reassembled tool_use block
+    carries the SDK item id, whereas the live ``tool_result`` is keyed to the
+    pre-minted id (from ``minted_task_ids``).  Harmless today because
+    ``build_messages_from_events`` pairs tool_use→tool_result positionally,
+    not by id; any future strict id-pairing consumer will need to reconcile.
     """
     content: list[dict[str, Any]] = []
     for item in items:
@@ -769,9 +886,10 @@ def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
 
 
 def _parse_codex_message(raw: dict[str, Any]) -> Message:
-    """raw → assistant Message for codex. codex's live `llm_response.raw` is
-    text-only; the reassembled full-turn raw (`reassemble_codex_turn`) also
-    carries `tool_use` blocks (a web_search appears as a query-only tool_use).
+    """raw → assistant Message for codex.  Post-F1, the live `llm_response.raw`
+    (emitted at `turn.completed` via `reassemble_codex_turn`) carries both
+    text and tool_use blocks; this parser handles both.  A web_search appears
+    as a query-only tool_use block.
     Unknown blocks are dropped (surfaced via `_extract_codex_diagnostics`).
 
     Lives here (not in replay.py) per the provider-exports-its-parser convention:
@@ -806,7 +924,7 @@ def _extract_codex_diagnostics(raw: dict[str, Any]) -> Diagnostics:
 
 def process_event(
     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
-    provider: str, model: str,
+    provider: str, model: str, run_state: Any = None,
 ) -> None:
     """Translate one codex ThreadEvent into imp EventLog records.
 
@@ -835,13 +953,12 @@ def process_event(
             return
         if itype == "agent_message":
             text = getattr(item, "text", "") or ""
-            state["last_agent_text"] = text
-            elog.append_llm_response(
-                agent_id=agent_id, provider=provider, model=model,
-                raw={"content": [{"type": "text", "text": text}]},
-                usage={}, stop_reason=None,
-                auth_mode=state.get("auth_mode"),
-            )
+            state["last_agent_text"] = text  # still needed by nudge/classify
+            # Buffer the item; the full-turn llm_response (text + tool_use) is
+            # reassembled and emitted once at turn.completed (Unit F). Emitting
+            # a per-message text-only response here would lose the tool_use
+            # blocks the audit pairing needs.
+            state.setdefault("turn_items", []).append(item)
             return
         if itype == "mcp_tool_call":
             # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
@@ -850,11 +967,22 @@ def process_event(
             # older/duck-typed shapes.
             name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
             args = getattr(item, "arguments", None) or {}
-            call_id = getattr(item, "id", "") or ""
-            elog.append_tool_call(
-                agent_id=agent_id,
-                block=ToolUseBlock(id=call_id, name=name, input=args),
-            )
+            sdk_id = getattr(item, "id", "") or ""
+            if name == "task" and run_state is not None and run_state.minted_task_ids:
+                # dispatch_tool already minted the parent tool_call; FIFO-pop the
+                # id (dispatch order == completion order) and key the result to it.
+                call_id = run_state.minted_task_ids.pop(0)
+            else:
+                # Fallback: either a non-`task` tool call, or a `task` item that
+                # arrived with no prior mint (a protocol-ordering violation that
+                # shouldn't happen — `dispatch_tool` always mints before the SDK
+                # emits the item). In either case, emit a tool_call/result pair
+                # keyed to the SDK item id directly.
+                call_id = sdk_id
+                elog.append_tool_call(
+                    agent_id=agent_id,
+                    block=ToolUseBlock(id=call_id, name=name, input=args),
+                )
             err = getattr(item, "error", None)
             status = getattr(item, "status", "completed")
             is_error = err is not None or status not in ("completed", "succeeded")
@@ -877,6 +1005,14 @@ def process_event(
                 # fallback for when that path didn't run.
                 state["complete_step_args"] = dict(args)
                 state["complete_step_called"] = True
+            # Accumulate tool outcome for the per-turn LoopGuard record.
+            # codex item tool names are already bare (no mcp__imp__ prefix),
+            # so no stripping is needed.
+            state.setdefault("turn_tool_outcomes", []).append(
+                ToolOutcome(name=name, tool_use_id=call_id, input=dict(args),
+                            is_error=is_error))
+            # Buffer for the full-turn llm_response reassembly (Unit F).
+            state.setdefault("turn_items", []).append(item)
             return
         if itype == "web_search":
             query = getattr(item, "query", "") or ""
@@ -897,6 +1033,9 @@ def process_event(
                     block=ToolResultBlock(
                         tool_use_id=call_id, content="", is_error=False),
                 )
+                # Buffer for the full-turn llm_response reassembly (Unit F);
+                # the reassembler maps it to a query-only tool_use block.
+                state.setdefault("turn_items", []).append(item)
                 return
             # Disabled (`webSearchEnabled=False`): the tool should be gone.
             # Seeing one is a soft tripwire (not fail-closed by itself; the
@@ -947,6 +1086,19 @@ def process_event(
         return
 
     if etype == "turn.completed":
+        # Flush the turn's buffered items into ONE full-turn llm_response
+        # (text + tool_use) BEFORE usage attaches, so the usage patch below
+        # lands on this reassembled response (Unit F). Emitting it here — not
+        # per agent_message — gives the audit reconstruction a single response
+        # carrying the tool_use blocks paired with their tool_results.
+        items = state.pop("turn_items", [])
+        if items:
+            raw = reassemble_codex_turn(items)
+            elog.append_llm_response(
+                agent_id=agent_id, provider=provider, model=model,
+                raw=raw, usage={}, stop_reason=None,
+                auth_mode=state.get("auth_mode"),
+            )
         usage = getattr(event, "usage", None)
         if usage is None:
             return

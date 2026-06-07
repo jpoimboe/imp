@@ -15,10 +15,8 @@
 > that predates it, the ESC / pause-reason / clean-classification checks are *expected* to
 > fail — record them as to-dos, not surprises.
 >
-> **Scope: three providers.** The feature (and so the §0 "clean classification" bar)
-> covers `claude_code`, `anthropic`, `openai`. `codex` is exercised too, but its
-> interrupt-error reclassification is **not** part of this feature — see the codex
-> carve-out under §0's bar.
+> **Scope: four providers.** The feature (and so the §0 "clean classification" bar)
+> covers `claude_code`, `anthropic`, `openai`, and `codex`.
 >
 > Read the whole file before you touch a tool.
 
@@ -73,15 +71,6 @@ A correct imp does **all** of:
 - **Speaks clearly to the user.** Judge the human-visible text with fresh eyes; an
   unclear, missing, or misleading message **is a bug** even when the exit code is right.
 
-> **codex carve-out.** The "no unclassified error" / `kind:interrupted` classification
-> checks above apply to **claude_code / anthropic / openai** only. codex's outer
-> error-handling is **not** part of this feature, so a Ctrl-C/ESC that tears codex's
-> transport down before its in-loop cancel check fires can still surface
-> `unclassified provider error` or a `category:"unknown"` event. For codex, **record that
-> as a known scoped-out gap (a codex to-do), not a feature bug.** codex's *other*
-> guarantees still hold and are in scope: clean `paused (...)` line, exit 130,
-> orphan-free, resumable.
-
 > The interrupt **decision is Pause, not Cancel** (per the spec's "Out of scope"). imp
 > does *not* cancel just the current turn and drop you back at its live prompt — it pauses
 > the whole run and exits, resumable. If any provider/point does something else, record
@@ -96,8 +85,8 @@ A correct imp does **all** of:
 - **Where:** a fresh `git worktree` of this repo (created in §3). Every `imp new` /
   `imp resume` runs with cwd inside it, so all Changes (branches, nested worktrees,
   journals) are contained and discardable.
-- **Providers:** `claude_code`, `anthropic`, `openai` (in scope for the classification
-  bar), plus `codex` (exercised, but classification is scoped out — see §0's carve-out).
+- **Providers:** `claude_code`, `anthropic`, `openai`, `codex` — all four are in scope
+  for the full §0 classification bar.
 - **Credentials:** `~/.anthropic-key` → `ANTHROPIC_API_KEY`, `~/.openai-key` →
   `OPENAI_API_KEY`. `claude_code` / `codex` use their own local auth.
 - **impty MCP server** is running from `.mcp.json` with controlling-terminal support.

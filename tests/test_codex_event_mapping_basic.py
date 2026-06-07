@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from imp.engine.state import InMemoryEventLog
 from imp.providers.codex_runner import process_event
-from tests.codex_fakes import agent_message, reasoning, thread_started
+from tests.codex_fakes import (
+    agent_message,
+    reasoning,
+    thread_started,
+    turn_completed,
+)
 
 
 def test_thread_started_records_thread_id() -> None:
@@ -23,10 +28,15 @@ def test_reasoning_appends_thinking_event() -> None:
 
 
 def test_agent_message_appends_llm_response() -> None:
+    # F1: the agent_message is buffered; the full-turn llm_response is emitted
+    # once at turn.completed (carrying text + any tool_use blocks).
     elog = InMemoryEventLog()
+    state = {"pending_usage": None, "auth_mode": "chatgpt"}
     process_event(agent_message("here is my plan"), elog=elog,
-                  agent_id="step:a", state={"pending_usage": None,
-                                            "auth_mode": "chatgpt"},
+                  agent_id="step:a", state=state,
+                  provider="codex", model="gpt-5.5")
+    process_event(turn_completed(input_tokens=1, output_tokens=1), elog=elog,
+                  agent_id="step:a", state=state,
                   provider="codex", model="gpt-5.5")
     events = [e for e in elog.read() if e["type"] == "llm_response"]
     assert len(events) == 1
@@ -40,8 +50,12 @@ def test_agent_message_appends_llm_response() -> None:
 
 def test_agent_message_omits_auth_mode_when_none() -> None:
     elog = InMemoryEventLog()
+    state = {"auth_mode": None}
     process_event(agent_message("hello"), elog=elog,
-                  agent_id="step:a", state={"auth_mode": None},
+                  agent_id="step:a", state=state,
+                  provider="codex", model="gpt-5.5")
+    process_event(turn_completed(input_tokens=1, output_tokens=1), elog=elog,
+                  agent_id="step:a", state=state,
                   provider="codex", model="gpt-5.5")
     events = [e for e in elog.read() if e["type"] == "llm_response"]
     assert len(events) == 1
