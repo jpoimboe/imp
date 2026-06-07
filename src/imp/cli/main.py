@@ -234,8 +234,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 else:
                     driver.finish()
                     if coord.should_pause:
-                        pause_and_exit(change, reason="ctrl-c")
-                        _emit_paused(change, "ctrl-c")
+                        reason = coord.pause_reason or "ctrl-c"
+                        pause_and_exit(change, reason=reason)
+                        _emit_paused(change, reason)
                         rc = 130
                     else:
                         if result is RunResult.COMPLETED:
@@ -416,8 +417,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 else:
                     driver.finish()
                     if coord.should_pause:
-                        pause_and_exit(change, reason="ctrl-c")
-                        _emit_paused(change, "ctrl-c")
+                        reason = coord.pause_reason or "ctrl-c"
+                        pause_and_exit(change, reason=reason)
+                        _emit_paused(change, reason)
                         rc = 130
                     else:
                         if result is RunResult.COMPLETED:
