@@ -30,6 +30,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
+from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
@@ -190,6 +191,12 @@ class CodexAgentRunner:
             yield perr.make_error_event(exc)
             return
         except Exception as exc:
+            raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
+            if self._cancel:
+                yield {"type": "error", "payload": {
+                    "category": "config", "kind": "interrupted",
+                    "message": "runner cancelled by interrupt"}}
+                return
             yield perr.make_unknown_error_event(exc)
             return
 
