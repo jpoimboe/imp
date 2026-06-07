@@ -22,20 +22,15 @@ class Cell:
     reverse: bool
 
 
-def viewport_text(screen: Any) -> str:
-    """The current visible grid as text — what a human sees right now.
-    Each row is right-trimmed; internal blank rows are preserved (layout)."""
-    return "\n".join(line.rstrip() for line in screen.display)
-
-
 def cursor_pos(screen: Any) -> tuple[int, int]:
-    """(x, y) cursor position in the viewport. Parked just after a prompt
-    string is the cheap 'waiting for input' tell."""
+    """(x, y) cursor position on the live screen, x in 0..cols-1, y in
+    0..rows-1. Parked just after a prompt string is the cheap 'waiting for
+    input' tell."""
     return (screen.cursor.x, screen.cursor.y)
 
 
 def cell_at(screen: Any, x: int, y: int) -> Cell:
-    """The Cell at viewport column x, row y — glyph + style attributes."""
+    """The Cell at live-screen column x, row y — glyph + style attributes."""
     ch = screen.buffer[y][x]
     return Cell(
         data=ch.data,
@@ -64,27 +59,11 @@ def _row_text(row: Any, cols: int) -> str:
     return "".join(row[x].data if x in row else " " for x in range(cols)).rstrip()
 
 
-def transcript_text(screen: Any, limit: int | None = None) -> str:
-    """The whole run in order: scrolled-off history + the current viewport.
-    For an append-only CLI this is the full scroll. `limit` keeps only the
-    last N non-trailing-blank lines (bounded by construction — never an
-    unbounded dump)."""
-    cols = screen.columns
-    history = [_row_text(row, cols) for row in screen.history.top]
-    viewport = [line.rstrip() for line in screen.display]
-    ls = history + viewport
-    while ls and not ls[-1]:        # drop viewport bottom padding
-        ls.pop()
-    if limit is not None:
-        ls = ls[-limit:]
-    return "\n".join(ls)
-
-
 def lines(screen: Any, limit: int | None = None) -> list[str]:
     """Rendered text rows, top->bottom, over `scrollback_rows + screen_rows`.
 
     The screen part is ALWAYS exactly `rows` entries (blank rows preserved,
-    each rstripped internally) — today's viewport_text semantics. In SCREEN
+    each rstripped internally) — the live-screen rows. In SCREEN
     regime (alt) there is no scrollback; the strip is just the screen.
 
     With a `limit` (the windowed read): the last N entries with NO trailing-

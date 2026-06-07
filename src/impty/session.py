@@ -293,14 +293,6 @@ class TerminalSession:
     def is_alt_screen(self) -> bool:
         return view.is_alt_screen(self._screen)
 
-    # TODO(task-6): viewport()/transcript() are temporary shims kept only until
-    # mcp.py and the remaining tests migrate to lines(). Remove them then.
-    def viewport(self) -> str:
-        return view.viewport_text(self._screen)
-
-    def transcript(self, limit: int | None = None) -> str:
-        return view.transcript_text(self._screen, limit)
-
     def resize(self, rows: int, cols: int) -> None:
         """Resize the terminal. ioctl(TIOCSWINSZ) on the pty MASTER (the slave is
         closed at spawn); the kernel then auto-sends SIGWINCH to the child's

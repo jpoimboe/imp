@@ -26,13 +26,13 @@ def main() -> int:
     with TerminalSession([sys.executable, "-c", CHILD]) as s:
         s.wait_idle()
         print("cursor at prompt #1:", s.cursor())
-        print("viewport:\n" + s.viewport())
+        print("screen:\n" + "\n".join(s.lines(limit=s.rows)))
         s.send("todo-api\r")
         s.wait_idle()
         s.send("fastapi\r")
         s.wait_idle()
         print("--- final transcript ---")
-        print(s.transcript())
+        print("\n".join(s.lines()))
     return 0
 
 
