@@ -33,6 +33,8 @@ from openai_codex_sdk.types import (  # noqa: E402
     ItemCompletedEvent,
     McpToolCallItem,
     McpToolCallResult,
+    TurnCompletedEvent,
+    Usage,
 )
 
 
@@ -123,8 +125,18 @@ def test_real_error_item_is_diagnostic_not_unhandled() -> None:
 
 
 def test_real_agent_message_records_llm_response() -> None:
+    # F1: agent_message is buffered + last_agent_text captured immediately; the
+    # full-turn llm_response is emitted once at turn.completed.
     item = AgentMessageItem(id="a1", type="agent_message", text="the answer is 42")
     elog, st = _feed(item)
+    assert st["last_agent_text"] == "the answer is 42"
+    process_event(
+        TurnCompletedEvent(
+            type="turn.completed",
+            usage=Usage(input_tokens=1, cached_input_tokens=0, output_tokens=1),
+        ),
+        elog=elog, agent_id="step:t", state=st, provider="codex", model="gpt-5.5",
+    )
     resp = [e for e in elog.read() if e["type"] == "llm_response"]
     assert len(resp) == 1
-    assert st["last_agent_text"] == "the answer is 42"
+    assert resp[0]["payload"]["raw"]["content"][0]["text"] == "the answer is 42"

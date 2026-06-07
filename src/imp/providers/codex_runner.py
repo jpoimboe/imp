@@ -924,13 +924,12 @@ def process_event(
             return
         if itype == "agent_message":
             text = getattr(item, "text", "") or ""
-            state["last_agent_text"] = text
-            elog.append_llm_response(
-                agent_id=agent_id, provider=provider, model=model,
-                raw={"content": [{"type": "text", "text": text}]},
-                usage={}, stop_reason=None,
-                auth_mode=state.get("auth_mode"),
-            )
+            state["last_agent_text"] = text  # still needed by nudge/classify
+            # Buffer the item; the full-turn llm_response (text + tool_use) is
+            # reassembled and emitted once at turn.completed (Unit F). Emitting
+            # a per-message text-only response here would lose the tool_use
+            # blocks the audit pairing needs.
+            state.setdefault("turn_items", []).append(item)
             return
         if itype == "mcp_tool_call":
             # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
@@ -983,6 +982,8 @@ def process_event(
             state.setdefault("turn_tool_outcomes", []).append(
                 ToolOutcome(name=name, tool_use_id=call_id, input=dict(args),
                             is_error=is_error))
+            # Buffer for the full-turn llm_response reassembly (Unit F).
+            state.setdefault("turn_items", []).append(item)
             return
         if itype == "web_search":
             query = getattr(item, "query", "") or ""
@@ -1003,6 +1004,9 @@ def process_event(
                     block=ToolResultBlock(
                         tool_use_id=call_id, content="", is_error=False),
                 )
+                # Buffer for the full-turn llm_response reassembly (Unit F);
+                # the reassembler maps it to a query-only tool_use block.
+                state.setdefault("turn_items", []).append(item)
                 return
             # Disabled (`webSearchEnabled=False`): the tool should be gone.
             # Seeing one is a soft tripwire (not fail-closed by itself; the
@@ -1053,6 +1057,19 @@ def process_event(
         return
 
     if etype == "turn.completed":
+        # Flush the turn's buffered items into ONE full-turn llm_response
+        # (text + tool_use) BEFORE usage attaches, so the usage patch below
+        # lands on this reassembled response (Unit F). Emitting it here — not
+        # per agent_message — gives the audit reconstruction a single response
+        # carrying the tool_use blocks paired with their tool_results.
+        items = state.pop("turn_items", [])
+        if items:
+            raw = reassemble_codex_turn(items)
+            elog.append_llm_response(
+                agent_id=agent_id, provider=provider, model=model,
+                raw=raw, usage={}, stop_reason=None,
+                auth_mode=state.get("auth_mode"),
+            )
         usage = getattr(event, "usage", None)
         if usage is None:
             return
