@@ -415,6 +415,13 @@ class OpenAIAgentRunner:
                 return
             except Exception as exc:
                 raise_if_suspended(exc)
+                if self._cancel:
+                    yield {"type": "error", "payload": {
+                        "category": "config",
+                        "kind": "interrupted",
+                        "message": "runner cancelled by interrupt",
+                    }}
+                    return
                 try:
                     classified = _classify_openai_exception(exc)
                 except Exception:

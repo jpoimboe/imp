@@ -744,6 +744,15 @@ class ClaudeCodeAgentRunner:
             return
         except Exception as exc:
             raise_if_suspended(exc)
+            if self._cancel:
+                # Interrupt fired before the SDK transport raised. Reclassify to
+                # the same `interrupted` event the in-loop _cancel check emits.
+                yield {"type": "error", "payload": {
+                    "category": "config",
+                    "kind": "interrupted",
+                    "message": "runner cancelled by interrupt",
+                }}
+                return
             yield perr.make_unknown_error_event(exc)
             return
 

@@ -1,7 +1,9 @@
 # tests/test_openai_runner.py
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
@@ -649,3 +651,49 @@ def test_prompt_cache_key_distinct_per_change_when_slug_head_collides() -> None:
     slug1 = "s" * 55 + "aaaa"       # identical first 46+ chars...
     slug2 = "s" * 55 + "bbbb"       # ...differ only in the truncated tail
     assert _prompt_cache_key(slug1, aid) != _prompt_cache_key(slug2, aid)
+
+
+@pytest.mark.anyio
+async def test_runner_outer_except_reclassifies_when_cancel_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini", client_factory=lambda: object(),
+    )
+
+    async def _boom(_inv: object) -> AsyncGenerator[Any, None]:
+        if False:  # pragma: no cover — makes this an async generator
+            yield {}
+        raise RuntimeError("Cannot write to terminated process (exit code: 0)")
+
+    monkeypatch.setattr(runner, "_run_loop", lambda _inv: _boom(_inv))
+    runner._cancel = True
+    inv = _inv(tmp_path)
+
+    events = [ev async for ev in runner.run(inv)]
+    errors = [e for e in events if e.get("type") == "error"]
+    assert len(errors) == 1
+    assert errors[0]["payload"]["category"] == "config"
+    assert errors[0]["payload"]["kind"] == "interrupted"
+    assert "unclassified provider error" not in errors[0]["payload"]["message"]
+
+
+@pytest.mark.anyio
+async def test_runner_outer_except_unknown_when_cancel_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini", client_factory=lambda: object(),
+    )
+
+    async def _boom(_inv: object) -> AsyncGenerator[Any, None]:
+        if False:  # pragma: no cover — makes this an async generator
+            yield {}
+        raise RuntimeError("SDK broke unexpectedly")
+
+    monkeypatch.setattr(runner, "_run_loop", lambda _inv: _boom(_inv))
+    inv = _inv(tmp_path)
+    events = [ev async for ev in runner.run(inv)]
+    errors = [e for e in events if e.get("type") == "error"]
+    assert len(errors) == 1
+    assert errors[0]["payload"]["category"] == "unknown"
