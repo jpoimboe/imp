@@ -15,19 +15,19 @@ def test_gate_steps_in_span_review_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [17..20] = code-reviewer, summarizer, final-review-gate, final-review.
+    # Span [15..18] = code-reviewer, summarizer, final-review-gate, final-review.
     # Gates: code-reviewer (goto implement/plan-writer backward) + final-review
     # (goto implement backward / pause). summarizer (no rules) and
     # final-review-gate (goto merge forward only) are NOT gates.
-    assert gate_steps_in_span(wf, 17, 20) == ("code-reviewer", "final-review")
+    assert gate_steps_in_span(wf, 15, 18) == ("code-reviewer", "final-review")
 
 
 def test_gate_steps_in_span_detects_pause_only_gates() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
-    # autosquash(15)/stamp-trailers(16) gate via `pause: true` (no goto) — the
+    # autosquash(13)/stamp-trailers(14) gate via `pause: true` (no goto) — the
     # spec's headline reason _is_gate must check Pause, not just backward goto.
-    assert gate_steps_in_span(_wf(), 15, 16) == ("autosquash", "stamp-trailers")
+    assert gate_steps_in_span(_wf(), 13, 14) == ("autosquash", "stamp-trailers")
 
 
 def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:
@@ -61,7 +61,7 @@ def test_plan_rewind_backward_to_step() -> None:
 
     plan = plan_rewind(_wf(), _state("code-reviewer"), "code-reviewer", force=False)
     assert plan.to_step == "code-reviewer"
-    assert plan.target_idx == 17
+    assert plan.target_idx == 15
     assert plan.bypass_gates == ()
     assert plan.set_ready_to_merge is False
     assert plan.from_step == "code-reviewer"
@@ -82,7 +82,7 @@ def test_plan_rewind_forward_to_merge_with_force() -> None:
 
     plan = plan_rewind(_wf(), _state("code-reviewer"), "merge", force=True)
     assert plan.to_step is None                      # terminal
-    assert plan.target_idx == 21
+    assert plan.target_idx == 19
     assert plan.set_ready_to_merge is True
     assert plan.bypass_gates == ("code-reviewer", "final-review")
 

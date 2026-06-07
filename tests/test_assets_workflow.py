@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
-from imp.engine.types import Continue, Goto
+from imp.engine.types import Goto
 
 
 def _steps(wf):
@@ -15,7 +16,7 @@ def _steps(wf):
 # All declared workflow vars at their defaults — a realistic evaluate_rules fixture.
 _BASE_VARS = {
     "fast_path": False, "ready_to_merge": False, "final_review": True,
-    "spec_final_review_done": False, "plan_final_review_done": False,
+    "spec_minors_integrated": False, "plan_minors_integrated": False,
 }
 
 
@@ -60,28 +61,30 @@ def test_default_workflow_has_code_review_constraint():
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
-    # code_review must differ from fast (the implementer subagent tier) for
-    # cross-provider review; in the feature workflow the coder runs at the
-    # `fast` tier, so the reviewer is constrained against `fast` not `code`.
-    assert wf.model_rules["code_review"].differ_provider_from == "fast"
+    # code-reviewer must differ from task-lead (the implementer step tier) for
+    # cross-provider review; the reviewer is constrained to differ from task-lead.
+    by = {s.name: s for s in wf.flat_steps()}
+    assert by["code-reviewer"].differ_from == "task-lead"
 
 
-def test_default_code_reviewer_step_declares_model_role():
-    # In the feature workflow model_role is assigned at the step level in
+def test_default_code_reviewer_step_declares_tier():
+    # In the feature workflow tier is assigned at the step level in
     # workflow.yaml, not in the agent frontmatter.  Verify the step-level
     # declaration is present and correct so code_review diversity wiring works.
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["code-reviewer"].model_role == "code_review"
+    assert by["code-reviewer"].tier == "high"
 
 
-def test_default_workflow_declares_tier_menu() -> None:
+def test_default_workflow_loads() -> None:
+    # Verify the default workflow loads without errors.
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
-    assert wf.model_tiers == ("fast", "balanced", "powerful")
+    assert wf.name == "feature"
+    assert len(wf.flat_steps()) > 0
 
 
 def test_spec_writer_declares_complexity_output() -> None:
@@ -103,21 +106,22 @@ def test_fast_path_var_declared_default_false() -> None:
     assert wf.vars.defaults()["fast_path"] is False
 
 
-def test_final_review_done_vars_declared_default_false() -> None:
+def test_minors_integrated_vars_declared_default_false() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     defaults = wf.vars.defaults()
-    assert defaults["spec_final_review_done"] is False
-    assert defaults["plan_final_review_done"] is False
+    assert defaults["spec_minors_integrated"] is False
+    assert defaults["plan_minors_integrated"] is False
 
 
-def test_spec_gates_precede_reviewer_in_order() -> None:
+def test_spec_fast_path_gate_precedes_reviewer_in_order() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     spec = next(p for p in wf.phases if p.name == "spec")
     names = [s.name for s in spec.steps]
-    # final-review gate first, then fast-path gate, then the reviewer
-    assert names.index("spec-final-review-gate") < names.index("fast-path-spec-gate")
+    # the separate final-review gate is gone (the reviewer now owns termination);
+    # the fast-path gate still precedes the reviewer
+    assert "spec-final-review-gate" not in names
     assert names.index("fast-path-spec-gate") < names.index("spec-reviewer")
 
 
@@ -128,36 +132,67 @@ def test_fast_path_spec_gate_skips_to_plan_writer() -> None:
     assert isinstance(gate.action, Goto) and gate.action.target == "plan-writer"
 
 
-def test_spec_final_review_gate_consumes_and_resets_flag() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    rules = _steps(wf)["spec-final-review-gate"].rules
-    # flag set -> reset to false and goto plan-writer (skipping the reviewer)
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "spec_final_review_done": True}, output=None)
-    assert m.var_mutations["spec_final_review_done"] is False
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer"
-    assert m.action.resume is False
-    # flag clear -> continue, no mutation
-    m2 = evaluate_rules(rules, vars=_BASE_VARS, output=None)
-    assert isinstance(m2.action, Continue)
-    assert m2.var_mutations == {}
-
-
-def test_spec_reviewer_clean_sets_flag_and_resumes_writer() -> None:
+def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     rules = _steps(wf)["spec-reviewer"].rules
-    # rework branch unchanged: blocking true -> resume spec-writer, no mutation
-    rework = evaluate_rules(rules, vars=_BASE_VARS, output={"blocking": True})
-    assert isinstance(rework.action, Goto) and rework.action.resume is True
-    assert rework.var_mutations == {}
-    # clean branch (the change): blocking false -> set flag + resume spec-writer
-    clean = evaluate_rules(rules, vars=_BASE_VARS, output={"blocking": False})
-    assert clean.var_mutations["spec_final_review_done"] is True
-    assert isinstance(clean.action, Goto)
-    assert clean.action.target == "spec-writer"
-    assert clean.action.resume is True
+    # Critical/Major -> rework to spec-writer; clear the minors-integrated flag so a
+    # real fix re-opens the one minors pass.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": True},
+        output={"blocking": True, "has_minor_findings": False},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "spec-writer" and m.action.resume is True
+    assert m.var_mutations["spec_minors_integrated"] is False
+
+
+def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-reviewer"].rules
+    # Clean + actionable minors, not yet integrated -> resume writer to integrate and
+    # set the flag, so the next (clean) review terminates.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": False},
+        output={"blocking": False, "has_minor_findings": True},
+    )
+    assert m.var_mutations["spec_minors_integrated"] is True
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "spec-writer" and m.action.resume is True
+
+
+def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-reviewer"].rules
+    # The owed verification review (minors already integrated): a clean review stops
+    # and advances to plan-writer even if it surfaced fresh minors (those are dropped).
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": True},
+        output={"blocking": False, "has_minor_findings": True},
+    )
+    assert m.var_mutations["spec_minors_integrated"] is False
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer" and m.action.resume is False
+
+
+def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-reviewer"].rules
+    # Clean with nothing actionable -> advance to plan-writer, no minors pass.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": False},
+        output={"blocking": False, "has_minor_findings": False},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.var_mutations == {}
 
 
 def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
@@ -171,15 +206,6 @@ def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
     m2 = evaluate_rules(rules, vars=_BASE_VARS,
                         output={"phase": "written", "complexity": "standard", "status": "Success"})
     assert m2.var_mutations["fast_path"] is False
-
-
-def test_spec_writer_drafting_turn_never_evaluates_set() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    rules = _steps(wf)["spec-writer"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"phase": "drafting", "complexity": "trivial", "status": "Success"})
-    assert m.var_mutations == {}
 
 
 def test_commit_tool_is_removed_from_registry() -> None:
@@ -226,64 +252,88 @@ def test_fast_path_gates_skip_depth_keep_safety() -> None:
     assert wf.phases[-1].name == "merge"
 
 
-def test_plan_gates_precede_reviewer_in_order() -> None:
+def test_plan_fast_path_gate_precedes_reviewer_in_order() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     plan = next(p for p in wf.phases if p.name == "plan")
     names = [s.name for s in plan.steps]
-    # final-review gate first, then fast-path gate, then the reviewer
-    assert names.index("plan-final-review-gate") < names.index("fast-path-plan-gate")
+    # the separate final-review gate is gone; fast-path gate precedes the reviewer
+    assert "plan-final-review-gate" not in names
     assert names.index("fast-path-plan-gate") < names.index("plan-review")
 
 
-def test_plan_final_review_gate_consumes_and_resets_flag() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    rules = _steps(wf)["plan-final-review-gate"].rules
-    # flag set -> reset to false and goto task-lead (skipping the reviewer)
-    m = evaluate_rules(rules, vars={**_BASE_VARS, "plan_final_review_done": True}, output=None)
-    assert m.var_mutations["plan_final_review_done"] is False
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "task-lead"
-    assert m.action.resume is False
-    # flag clear -> continue, no mutation
-    m2 = evaluate_rules(rules, vars=_BASE_VARS, output=None)
-    assert isinstance(m2.action, Continue)
-    assert m2.var_mutations == {}
-
-
-def test_plan_reviewer_clean_sets_flag_and_resumes_writer() -> None:
+def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     rules = _steps(wf)["plan-review"].rules
-    # rework branch unchanged: blocking true -> resume plan-writer, no mutation
-    rework = evaluate_rules(rules, vars=_BASE_VARS, output={"blocking": True})
-    assert isinstance(rework.action, Goto) and rework.action.resume is True
-    assert rework.var_mutations == {}
-    # clean branch (the change): blocking false -> set flag + resume plan-writer
-    clean = evaluate_rules(rules, vars=_BASE_VARS, output={"blocking": False})
-    assert clean.var_mutations["plan_final_review_done"] is True
-    assert isinstance(clean.action, Goto)
-    assert clean.action.target == "plan-writer"
-    assert clean.action.resume is True
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "plan_minors_integrated": True},
+        output={"blocking": True, "has_minor_findings": False},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer" and m.action.resume is True
+    assert m.var_mutations["plan_minors_integrated"] is False
 
 
-def test_spec_writer_prompt_has_polish_pass_branch() -> None:
+def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["plan-review"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "plan_minors_integrated": False},
+        output={"blocking": False, "has_minor_findings": True},
+    )
+    assert m.var_mutations["plan_minors_integrated"] is True
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer" and m.action.resume is True
+
+
+def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["plan-review"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "plan_minors_integrated": True},
+        output={"blocking": False, "has_minor_findings": True},
+    )
+    assert m.var_mutations["plan_minors_integrated"] is False
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "task-lead" and m.action.resume is False
+
+
+def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["plan-review"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "plan_minors_integrated": False},
+        output={"blocking": False, "has_minor_findings": False},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "task-lead" and m.action.resume is False
+    assert m.var_mutations == {}
+
+
+def test_spec_writer_prompt_has_minors_integration_branch() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     body = wf.agents["spec-writer"].prompt_template_source
-    # The polish branch keys on the injected `blocking:` line and pins phase/complexity.
+    # The clean-review branch keys on the injected `blocking:` line and integrates minors.
     assert "blocking: false" in body
-    assert "polish" in body.lower()
+    assert "minors" in body.lower()
     assert "without committing" in body.lower()
 
 
-def test_plan_writer_prompt_has_polish_pass_branch() -> None:
+def test_plan_writer_prompt_has_minors_integration_branch() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     body = wf.agents["plan-writer"].prompt_template_source
     assert "blocking: false" in body
-    assert "polish" in body.lower()
+    assert "minors" in body.lower()
     assert "without committing" in body.lower()
 
 
@@ -327,18 +377,17 @@ def test_spec_writer_prompt_mandates_opening_question() -> None:
 def test_spec_writer_prompt_mandates_proactive_rename() -> None:
     # Acceptance #4: the agent renames proactively via rename_change as soon
     # as intent is clear, ANNOUNCING the name in prose WITHOUT asking the
-    # user. The iron-rule sentence is preserved verbatim.
+    # user. The new guidance (name-on-intent) instructs rename+commit same turn.
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
     assert "without asking the user" in lowered
-    assert "announce" in lowered  # "Announce the new name in prose"
-    # Iron-rule sentence preserved verbatim (acceptance #4):
-    assert (
-        "**Iron rule: never call `rename_change` and write/commit the spec "
-        "in the same turn.**"
-    ) in body
+    assert "announce" in lowered  # "Announce the name in prose"
+    # Name-on-intent: rename_change applies immediately and rename+commit happen
+    # this same turn (the old iron-rule forbidding same-turn is now inverted).
+    assert "this same turn" in body
+    assert "immediately" in body
 
 
 def test_spec_writer_prompt_drops_skip_reflexive_paragraph() -> None:
@@ -363,3 +412,41 @@ def test_spec_writer_prompt_has_trivial_carveout() -> None:
     assert "opening question" in lowered
     # The carve-out must explicitly say the opening question does not count.
     assert "does not count" in lowered or "does NOT count" in body
+
+
+def test_spec_writer_prompt_has_no_slug_interpolation() -> None:
+    from pathlib import Path
+    src = Path("src/imp/assets/workflows/default/agents/spec-writer.md")
+    text = src.read_text()
+    assert "{{ change.slug }}" not in text
+    assert "{{change.slug}}" not in text
+    # And no leftover "provisional slug" framing.
+    assert "provisional" not in text.lower()
+
+
+def test_no_goto_spec_writer_edge() -> None:
+    from pathlib import Path
+    wf = Path("src/imp/assets/workflows/default/workflow.yaml").read_text()
+    # Every edge back into spec-writer must be a `resume:` (transcript kept), so a
+    # resumed spec-writer always has its rename_change result in history and never
+    # needs the slug from the system prompt. A fresh `goto: spec-writer` would
+    # drop the transcript and reintroduce the dependency Part A removes.
+    assert "goto: spec-writer" not in wf
+    assert "goto: spec_writer" not in wf
+
+
+def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
+    # Acceptance #1/#2/#6: in this repo, imp/workflows/default must be a
+    # symlink whose resolved target equals src/imp/assets/workflows/default.
+    # This pins the dogfood install against silent drift from the bundled
+    # assets — if someone re-materializes the directory, this test fails.
+    repo_root = Path(__file__).resolve().parents[1]
+    link = repo_root / "imp" / "workflows" / "default"
+    target = repo_root / "src" / "imp" / "assets" / "workflows" / "default"
+    assert link.is_symlink(), f"{link} is not a symlink"
+    assert os.readlink(link) == "../../src/imp/assets/workflows/default", (
+        f"unexpected symlink literal target: {os.readlink(link)!r}"
+    )
+    assert link.resolve() == target.resolve(), (
+        f"{link} resolves to {link.resolve()}, expected {target.resolve()}"
+    )

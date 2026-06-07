@@ -2,30 +2,20 @@ name: feature
 description: |
   spec -> (plan -> implement*)* -> review -> merge
 
-model_rules:
-  # The whole-change author is the `implementer` subagent, dispatched at the
-  # `fast` tier (not a `model_role: code` step). So the final code-reviewer must
-  # differ from `fast` to see the change through a different provider (spec §11).
-  # NOTE: per-task reviewers (spec-task-reviewer/quality-reviewer at the `balanced`
-  # tier) get NO provider-diversity guarantee — model_rules govern step
-  # model_roles, not `task`-tier subagent dispatch. Accepted limitation of the C1
-  # design; the final code-reviewer carries the diversity guarantee for code.
-  code_review:  {differ_provider_from: fast}
 
-# Tiers ARE roles (resolve.py:160): `fast`/`balanced`/`powerful` must be defined
-# in config.yaml `roles:` or resolution LoadErrors — `imp init` scaffolds all three
-# (cli/init.py). Note the indirection: the role NAMED `fast` maps to each provider's
-# `quick` MODEL tier (init `_ROLE_TIERS["fast"]="quick"`); `task_lead`/implementer
-# talk in `fast`/`balanced`. `code_review differ_provider_from: fast` (above) relies
-# on `fast` being one of these configured roles.
-model_tiers: [fast, balanced, powerful]
+# The tier menu is config.tiers.keys() (always low/medium/high in this design).
+# `code-reviewer` carries the cross-vendor diversity guarantee via
+# `differ_from: task-lead` — the implementer subagent is dispatched by
+# `task-lead`, so the final code reviewer differs from the task-lead's
+# resolved (provider, model). Subagent dispatch (`task` tool) has no
+# diversity guarantee — accepted limitation (spec §11).
 
 vars:
   ready_to_merge:         {type: bool, default: false}
   final_review:           {type: bool, default: true}
   fast_path:              {type: bool, default: false}
-  spec_final_review_done: {type: bool, default: false}
-  plan_final_review_done: {type: bool, default: false}
+  spec_minors_integrated: {type: bool, default: false}
+  plan_minors_integrated: {type: bool, default: false}
 
 defaults:
   max_retries: 3
@@ -37,14 +27,13 @@ phases:
     steps:
       - name: spec-writer
         file: agents/spec-writer.md
-        model_role: spec
+        tier: high
         interactive: true
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/imp/specs/**"], mode: allow}
           - {operations: [write], paths: ["/**"], mode: deny}
         rules:
-          - {if: {phase: drafting}, resume: spec-writer}    # used for rename at step boundary
           - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
       - name: spec-verify-commit
@@ -53,11 +42,6 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 
-      - name: spec-final-review-gate   # self-consuming flag; ordered FIRST
-        rules:
-          - {if: {spec_final_review_done: true}, set: {spec_final_review_done: false}, goto: plan-writer}
-          - {else: true, continue: true}
-
       - name: fast-path-spec-gate      # trivial change -> skip spec review entirely
         rules:
           - {if: {fast_path: true}, goto: plan-writer}
@@ -65,16 +49,26 @@ phases:
 
       - name: spec-reviewer
         file: agents/spec-reviewer.md
-        model_role: spec_review
+        tier: high
+        # The reviewer gets the last word: the loop ends only on a clean review with
+        # nothing left to integrate. spec_minors_integrated tracks whether the writer
+        # has already spent its one minors-integration pass for the current settled
+        # state — so a clean *verification* review stops and drops its own minors.
         rules:
-          - {if: {blocking: true}, resume: spec-writer, feedback: "Here's review feedback to address:"}                            # rework loop
-          - {else: true, set: {spec_final_review_done: true}, resume: spec-writer, feedback: "The spec was approved. Notes for a final polish pass:"} # clean -> one final polish pass
+          # Critical/Major -> rework, then re-review. Clear the flag: a real fix re-opens the one minors pass.
+          - {if: {blocking: true}, set: {spec_minors_integrated: false}, resume: spec-writer, feedback: "Here's review feedback to address:"}
+          # Clean, and the writer already did its minors-integration pass -> stop; drop this review's minors.
+          - {if: {spec_minors_integrated: true}, set: {spec_minors_integrated: false}, goto: plan-writer}
+          # Clean with actionable minors -> integrate them, then owe one more (verification) review.
+          - {if: {has_minor_findings: true}, set: {spec_minors_integrated: true}, resume: spec-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+          # Clean, nothing to integrate -> stop.
+          - {else: true, goto: plan-writer}
 
   - name: plan
     steps:
       - name: plan-writer
         file: agents/plan-writer.md
-        model_role: plan
+        tier: high
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/imp/plans/**"], mode: allow}
@@ -86,28 +80,31 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
-      - name: plan-final-review-gate   # self-consuming flag; ordered FIRST (mirrors spec phase)
-        rules:
-          - {if: {plan_final_review_done: true}, set: {plan_final_review_done: false}, goto: task-lead}
-          - {else: true, continue: true}
-
-      - name: fast-path-plan-gate      # moved after the final-review gate
+      - name: fast-path-plan-gate      # trivial change -> skip plan review entirely
         rules:
           - {if: {fast_path: true}, goto: task-lead}   # skip plan-review on fast-path
           - {else: true, continue: true}
 
       - name: plan-review
         file: agents/plan-reviewer.md
-        model_role: plan_review
+        tier: high
+        # Mirrors spec-reviewer: the reviewer gets the last word. plan_minors_integrated
+        # tracks whether the writer has already spent its one minors-integration pass.
         rules:
-          - {if: {blocking: true}, resume: plan-writer, feedback: "Here's review feedback to address:"}                            # rework loop
-          - {else: true, set: {plan_final_review_done: true}, resume: plan-writer, feedback: "The plan was approved. Notes for a final polish pass:"} # clean -> one final polish pass
+          # Critical/Major -> rework, then re-review. Clear the flag: a real fix re-opens the one minors pass.
+          - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, feedback: "Here's review feedback to address:"}
+          # Clean, and the writer already did its minors-integration pass -> stop; drop this review's minors.
+          - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: task-lead}
+          # Clean with actionable minors -> integrate them, then owe one more (verification) review.
+          - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+          # Clean, nothing to integrate -> stop.
+          - {else: true, goto: task-lead}
 
   - name: implement
     steps:
       - name: task-lead
         file: agents/task-lead.md
-        model_role: task_lead
+        tier: medium
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           # implementer subagent inherits these. /project/** covers both code and
@@ -138,7 +135,7 @@ phases:
 
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
-        model_role: task_lead        # balanced/Sonnet coverage judgment
+        tier: medium        # Sonnet coverage judgment
         max_loops: 10                # plans-per-spec bound
         rules:
           - {if: {more_plans: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}     # supercycle
@@ -160,7 +157,8 @@ phases:
 
       - name: code-reviewer
         file: agents/code-reviewer.md
-        model_role: code_review
+        tier: high
+        differ_from: task-lead
         max_loops: 5                 # combined task_gap + plan_gap budget
         rules:
           - {if: {verdict: task_gap}, goto: implement, feedback: "The code reviewer found gaps to fix. Findings:"}      # carries findings
@@ -169,7 +167,7 @@ phases:
 
       - name: summarizer
         file: agents/summarizer.md
-        model_role: code_review
+        tier: high
 
       - name: final-review-gate
         rules:
@@ -178,7 +176,7 @@ phases:
 
       - name: final-review
         file: agents/final-review.md
-        model_role: task_lead
+        tier: medium
         interactive: true
         max_loops: 20                # interactive back-to-implement edge
         rules:

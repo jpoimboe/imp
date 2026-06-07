@@ -36,7 +36,19 @@ If `/project/.imp/change/progress.md` exists, read it.
 | Newest plan exists AND `progress.md` marks it COMPLETE | Author `…-plan-(N+1).md` (fresh write) |
 | Newest plan exists AND `progress.md` does NOT mark it complete (or file absent) | Revise `…-plan-N.md` in place |
 
-**Disambiguation note (resumed turns only):** This note applies **only if your turn opened with injected reviewer feedback** — a "did not accept" wrapper carrying `findings:` and `blocking:` lines. **If there was no injected feedback, ignore this note and use the table above** (you are authoring fresh). When there IS injected feedback, **first read the `blocking:` line.** If it reads `blocking: false` (rendered capitalized as `blocking: False` — match case-insensitively), this is **not** a rework — follow "Final advisory polish pass (clean review)" below, which may complete **without committing** (do NOT run an empty `git commit --fixup`). If it reads `blocking: true`, the "did not accept" framing is identical whether you are doing a reviewer rework (revise N) or starting the next plan after a `plan-cycle-check` `more_plans` signal. **`progress.md` completion state — not the wrapper text — is authoritative.** If the newest plan is marked COMPLETE in `progress.md`, you are writing N+1. If it is not, you are revising N.
+**Disambiguation note (resumed turns only):** This note applies **only if your turn opened with injected reviewer feedback** — a "did not accept" wrapper carrying `findings:` and `blocking:` lines. **If there was no injected feedback, ignore this note and use the table above** (you are authoring fresh). When there IS injected feedback, **first read the `blocking:` line.** If it reads `blocking: false` (rendered capitalized as `blocking: False` — match case-insensitively), this is **not** a rework — follow "Minors-integration pass (a review follows)" below, which may complete **without committing** (do NOT run an empty `git commit --fixup`). If it reads `blocking: true`, the "did not accept" framing is identical whether you are doing a reviewer rework (revise N) or starting the next plan after a `plan-cycle-check` `more_plans` signal. **`progress.md` completion state — not the wrapper text — is authoritative.** If the newest plan is marked COMPLETE in `progress.md`, you are writing N+1. If it is not, you are revising N.
+
+**Verify each finding before acting on it (reviewer rework).** A reviewer finding
+can rest on a false premise — a misread of the spec or plan, or a claim about the
+code that isn't true. Before changing anything, confirm the problem is real:
+re-read the cited passage and use `read_file`/`grep` to check any claim the finding
+makes about existing code. If it holds, fix it. If it rests on a false premise, do
+**not** make the change it asks for — editing a correct plan step to satisfy a
+phantom finding introduces the very bug the reviewer imagined. Instead resolve the
+misread: fix the real concern if there is one, or add a brief clarifying note so
+the next reviewer doesn't re-flag it. Never apply a finding you haven't verified,
+and never edit the plan into something you know to be wrong just to make a finding
+disappear.
 
 Keep the integer N in mind throughout — you will substitute the actual value wherever `N` appears below.
 
@@ -150,6 +162,11 @@ def function(input):
     return expected
 ```
 
+> **Note:** this skeleton shows step **structure** only. `expected` must be derived
+> from the spec's required behavior — never copied from Step 3's `return`. A test
+> whose `expected` is just the literal the implementation returns is a tautology
+> (plan-echo): it pins transcription, not behavior.
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/path/test_file.py::test_specific_behavior -v`
@@ -162,6 +179,14 @@ git add tests/path/test_file.py src/path/file.py
 git commit -m "feat: add specific feature"
 ```
 ````
+
+## Falsifiability of Tests
+
+Each task's test must assert an **externally observable consequence** — a return value
+that encodes real computation, emitted output, a raised error, or persisted state — not
+a value trivially echoed by the implementation written in the same task. Derive
+`expected` from the spec's required behavior, not from the sibling implementation. A
+test that cannot fail when the behavior is wrong pins transcription, not behavior.
 
 ## No Placeholders
 
@@ -195,6 +220,10 @@ After writing the complete plan, check it against the spec and prior plans with 
 **4. Bite-size check:** Could any task be split to give a natural commit boundary? Could any step be clarified without inflating the plan?
 
 **5. Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only. It never licenses a lint-dirty tree: if `$IMP_LINT_COMMAND` is configured, the implementer still runs it before committing.
+
+**6. Falsifiability:** For each test, would it fail if the implementation were wrong or
+absent? A test whose expected value is just the literal the implementation returns is a
+tautology (plan-echo) — pin an observable consequence instead.
 
 If you find issues, fix them inline. If you find a spec requirement with no task anywhere, add the task.
 
@@ -241,16 +270,20 @@ Substitute the actual integer for N in BOTH the `git commit -m` message and the
 for {{ change.slug }}"` for a revision. Keep the `--fixup=":/…"` value quoted.
 Never leave a literal `N` in a commit message or a fixup anchor.
 
-## Final advisory polish pass (clean review)
+## Minors-integration pass (a review follows)
 
 A resumed turn whose injected feedback carries `blocking: false` is **not** a
-rework — it is your one **final advisory polish pass**, and you get the last word
-(no reviewer runs after it). The engine's feedback wrapper still opens with "Your
-previous attempt completed but was not accepted" even on this clean resume —
-**ignore that framing and trust the `blocking:` line.** (The engine renders the bool
-capitalized — you will see `blocking: True` or `blocking: False`; match it
-case-insensitively.) `blocking: false` means the plan already passed review; the
-reviewer's Minor/Nit `findings:` are advisory, not a rejection.
+rework — the plan already passed review (no Critical/Major findings). This is your
+one pass to fold in the reviewer's **Minor** improvements. You do **not** get the
+last word: a fresh verification review runs after this pass to confirm the edit
+introduced nothing blocking. That follow-up will **not** ask you to integrate
+further minors, so this is your only minors pass — integrate what is worthwhile now.
+The engine's feedback wrapper still opens with "Your previous attempt completed but
+was not accepted" even on this clean resume — **ignore that framing and trust the
+`blocking:` line.** (The engine renders the bool capitalized — you will see
+`blocking: True` or `blocking: False`; match it case-insensitively.) `blocking:
+false` means the plan already passed; the reviewer's Minor/Nit `findings:` are
+advisory, not a rejection.
 
 You are revising the existing plan N (the same disambiguation as a rework: the
 newest plan exists and `progress.md` does not mark it complete, so you revise N in
@@ -266,11 +299,12 @@ place). On this pass:
    complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)
    ```
 
-2. **If there is nothing worth integrating** (no advisory findings worth acting
-   on), **complete WITHOUT committing** — just call
+2. **If there is nothing worth integrating** (none of the findings are worth
+   acting on), **complete WITHOUT committing** — just call
    `complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)`.
    Do NOT run an empty `git commit --fixup`: with no staged change it errors on a
-   clean index and fails the turn.
+   clean index and fails the turn. The verification review still runs on the
+   unchanged plan and will pass it through.
 
 End the turn tool-terminal with the `complete_step` call. Do not re-solicit the
 user and do not reopen planning — this pass exists only to incorporate the
@@ -285,8 +319,8 @@ complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)
 
 (Substitute the actual integer for N.)
 
-(On a **final advisory polish pass** — `blocking: false` — the `complete_step` call
-is already specified in the *Final advisory polish pass* section above; follow that
+(On a **minors-integration pass** — `blocking: false` — the `complete_step` call
+is already specified in the *Minors-integration pass* section above; follow that
 section and do not also run the steps here.)
 
 ---

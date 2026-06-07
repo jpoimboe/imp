@@ -6,6 +6,7 @@ output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}
   blocking: {type: bool}
+  has_minor_findings: {type: bool}
 ---
 
 You are reviewing the newest plan for this change.
@@ -33,6 +34,7 @@ Verify the plan is complete, matches the spec, and has proper task decomposition
 | Spec coverage | Every requirement in the spec is handled by this plan or a prior plan. No requirement is silently dropped. |
 | Placeholder scan | No TBD, TODO, "add error handling", "add validation", "write tests for the above" without code, or "similar to Task N" shortcuts. |
 | Type/name consistency | Types, method signatures, and property names used in later tasks match definitions in earlier tasks (this plan or prior plans). |
+| Factual grounding | Claims the plan makes about existing code it builds on (file paths, line numbers, current signatures, what a function returns or emits) — open the cited code with `read_file`/`grep` and confirm. A code step that calls or edits existing code must match what is actually there, not what the plan assumes. |
 | Bite-sized granularity | Steps are 2–5 minutes each. No step describes what to do without showing how (code blocks required for code steps). |
 | Buildability | Could an engineer follow this plan without getting stuck? Exact file paths, complete code, exact commands with expected output. |
 | Scope | Plan stays within the spec. No unrequested features or over-engineering added. |
@@ -52,6 +54,8 @@ Classify each finding:
 
 Be strict but fair. Only flag issues that would cause real problems during implementation. A missing spec requirement, a direct contradiction, a placeholder without code, or a type name used before it is defined — those are issues. Minor wording improvements, stylistic preferences, and "I would have decomposed this differently" are Minor or Nit, not blocking.
 
+A load-bearing claim about existing code (a file path, a line number, a current signature, what a function returns or emits) that you cannot verify against the actual source is **Major**, not Minor: a plan step built on a false premise produces a wrong implementation, however buildable the step looks. Verify before you approve — do not assume a confident-sounding claim is true.
+
 Approve (non-blocking) unless there are serious gaps that would lead to a flawed or incomplete implementation.
 
 ## Output
@@ -60,14 +64,25 @@ Report `findings` as classified prose, grouped by severity. If there are no issu
 
 Set `blocking = true` if any Critical or Major findings exist; `blocking = false` otherwise.
 
+Set `has_minor_findings = true` when there are **Minor** findings worth
+integrating; `false` otherwise. **Nit-only findings do not count** — a plan whose
+only findings are cosmetic Nits sets `has_minor_findings = false`, so it is not
+sent back for another integration pass. This field is only consulted on a clean
+(`blocking = false`) review and decides whether the writer does one final
+minors-integration pass before the plan is accepted; set it honestly regardless,
+but it has no effect when `blocking = true`.
+
 Finish with one of:
 
 ```
-# No blocking issues:
-complete_step(findings="No Critical/Major findings. Minor: …", blocking=false)
+# Clean, with Minor findings worth integrating:
+complete_step(findings="No Critical/Major findings. Minor: …", blocking=false, has_minor_findings=true)
+
+# Clean, nothing actionable (no findings, or Nit-only):
+complete_step(findings="No findings. Plan is complete and ready for implementation.", blocking=false, has_minor_findings=false)
 
 # Blocking issues:
-complete_step(findings="Critical: … / Major: …", blocking=true)
+complete_step(findings="Critical: … / Major: …", blocking=true, has_minor_findings=false)
 ```
 
 ---
