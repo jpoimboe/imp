@@ -8,6 +8,7 @@ under different models — is deferred; see STRUCTURES note in models.py.)"""
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 
 from imp.evals.matching import dedup_findings
@@ -41,7 +42,8 @@ def run_variant(
         return _run_variant_per_task(
             control_root, variant, fixture, repeat_index=repeat_index
         )
-    worktree = materialize_fixture_tree(control_root, fixture)
+    token = uuid.uuid4().hex[:8]  # isolate this worktree from concurrent same-fixture cells
+    worktree = materialize_fixture_tree(control_root, fixture, unique=token)
     all_findings: list[ReviewFinding] = []
     prose_parts: list[str] = []
     telem = Telemetry.zero()
@@ -63,7 +65,7 @@ def run_variant(
             total_dollars += member.dollars
             prose_parts.append(f"## {agent_name} ({provider}/{model})\n{member.raw_review}")
     finally:
-        teardown_fixture_tree(control_root, fixture)
+        teardown_fixture_tree(control_root, fixture, unique=token)
 
     # Members run SEQUENTIALLY in one shared worktree, so wall is the SUM (honest
     # for sequential execution — NOT max, which would pretend parallelism we don't
@@ -103,7 +105,8 @@ def _run_variant_per_task(
     telem = Telemetry.zero()
     total_dollars = 0.0
     for i, task in enumerate(fixture.tasks):
-        worktree = materialize_task_tree(control_root, fixture, i)
+        token = uuid.uuid4().hex[:8]  # isolate concurrent same-(fixture,task) cells
+        worktree = materialize_task_tree(control_root, fixture, i, unique=token)
         task_findings: list[ReviewFinding] = []
         try:
             for agent_name, (provider, model) in variant.role_to_model_map.items():
@@ -125,7 +128,7 @@ def _run_variant_per_task(
                     f"## task {i} - {agent_name} ({provider}/{model})\n{member.raw_review}"
                 )
         finally:
-            teardown_fixture_tree(control_root, fixture, task_index=i)
+            teardown_fixture_tree(control_root, fixture, task_index=i, unique=token)
         # Dedup WITHIN a task's panel (>1 member); union (concat) ACROSS tasks so a
         # cross-task locus flagged at each task survives once per task.
         if len(variant.role_to_model_map) > 1:

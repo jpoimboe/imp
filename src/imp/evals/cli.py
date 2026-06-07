@@ -344,11 +344,19 @@ def cmd_scorecard(args: argparse.Namespace) -> int:
         print("aborted: cached runs were produced at a different imp SHA than HEAD")
         return 2
 
-    grades = [
-        grade(fx, rr, project_root=control_root,
-              judge_provider=args.judge_provider, judge_model=args.judge_model)
-        for fx, rr in loaded
-    ]
+    # Grade concurrently — each grade() spawns an independent judge subprocess, so
+    # this is the same proven fan-out as run_sweep (same judge-call count/quota, just
+    # ~Nx less wall-clock than a serial re-grade of every cached cell).
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = max(1, getattr(args, "concurrency", 8) or 8)
+    with ThreadPoolExecutor(max_workers=workers) as _ex:
+        grades = list(_ex.map(
+            lambda fr: grade(fr[0], fr[1], project_root=control_root,
+                             judge_provider=args.judge_provider,
+                             judge_model=args.judge_model),
+            loaded,
+        ))
 
     # Full stamp (with HEAD SHA) for the provenance block ONLY; runs_shas records
     # where the cached cells actually came from. fixture_label_hash is omitted here
@@ -467,6 +475,8 @@ def add_eval_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     )
     ps.add_argument("--judge-provider", default="anthropic")
     ps.add_argument("--judge-model", default="claude-opus-4-8")
+    ps.add_argument("--concurrency", type=int, default=8,
+                    help="parallel judge calls when re-grading cached cells")
     ps.add_argument("--reuse-stale-sha", action="store_true",
                     help="grade cached cells even if produced at a different imp SHA")
     ps.add_argument("--yes", action="store_true",

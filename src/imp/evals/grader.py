@@ -6,6 +6,7 @@ drive_agent seam as the reviewers, so oracle-independence is just a different
 from __future__ import annotations
 
 import json
+import os
 from importlib.resources import files
 from pathlib import Path
 
@@ -43,6 +44,14 @@ def require_oracle_independence(
     forbid that reasonable setup, so the HARD rule is exact-model identity."""
     judge = (judge_provider, judge_model)
     if judge in reviewer_pairs:
+        # IMP_EVAL_ALLOW_SELF_JUDGE=1 downgrades the hard guard to a warning so a run
+        # can deliberately judge a model with itself (accepting the optimistic bias —
+        # symmetric across arms, so a RELATIVE comparison like Q2 stays robust).
+        if os.environ.get("IMP_EVAL_ALLOW_SELF_JUDGE") == "1":
+            return [
+                f"SELF-JUDGE: judge {judge} is also a reviewer under test "
+                "(IMP_EVAL_ALLOW_SELF_JUDGE=1) — its cells are biased-optimistic"
+            ]
         raise OracleIndependenceError(
             f"judge {judge} is also a reviewer under test; pick a different judge model"
         )

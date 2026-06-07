@@ -111,57 +111,87 @@ def run_q1_q4(
     *,
     judge_provider: str,
     judge_model: str,
+    cache_dir: Path | None = None,
+    provenance: str = "",
+    concurrency: int = 1,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Compute Q1 (overlap) and Q4 (fast-path) by running the THREE reviewers
     paired over each fixture and grading. On a small curated-only set both
     correctly return 'insufficient-diffs' (n_diffs << min_diff_count) — that is
-    the honest answer the spec asks for, not a skipped computation."""
+    the honest answer the spec asks for, not a skipped computation.
+
+    `cache_dir`/`provenance` are threaded into `run_paired` so each reviewer run
+    is cached as it completes: a crash mid-paired loses at most one in-flight call
+    (this is the dominant, otherwise-uncached Stage 2 cost), and a re-run resumes
+    from cache. `provenance` MUST be model-scoped by the caller so the paired pool's
+    models never collide on the (variant, fixture, repeat) key. `concurrency`>1
+    fans the per-fixture work (reviewers + judge grading) across a thread pool; each
+    fixture materializes its own uniquely-slugged worktree, so this is collision-safe.
+    A fixture whose processing raises is dropped (contributes nothing) rather than
+    failing the whole phase — its already-cached reviewers persist for the re-run."""
+    from concurrent.futures import ThreadPoolExecutor
+
     from imp.evals.grader import grade
     from imp.evals.matching import dedup_findings
     from imp.evals.models import RunResult, Telemetry
     from imp.evals.paired import run_paired
 
-    paired_by_fixture: dict[str, dict[str, RunResult]] = {}
-    fast_c = fast_t = union_c = union_t = 0
-    q4_n_diffs = 0
-    for fx in fixtures:
-        res = run_paired(control_root, fx, model_map)
-        # Each pool has its own self-grading exclusion; a fixture excluded from one
-        # pool may still contribute to the other.
-        # Q1 pool: exclude a mined fixture authored by spec-task-reviewer (the role
-        # Q1 evaluates dropping) — don't score it against a copy of its own output.
-        if not is_self_graded(fx, "spec-task-reviewer"):
-            paired_by_fixture[fx.id] = res
-        # Q4 pool: exclude a mined fixture authored by code-reviewer (Q4's fast-path
-        # role). Curated code-reviewer fixtures are NOT excluded (is_self_graded
-        # gates on source == "mined").
-        if not is_self_graded(fx, "code-reviewer"):
-            q4_n_diffs += 1
-            cr = res.get("code-reviewer")
-            if cr is not None:
+    def _process(fx: Fixture) -> dict[str, Any] | None:
+        try:
+            res = run_paired(
+                control_root, fx, model_map,
+                cache_dir=cache_dir, provenance=provenance,
+            )
+            rec: dict[str, Any] = {
+                "id": fx.id, "res": res,
+                # Q1 pool: exclude a mined fixture authored by spec-task-reviewer (the
+                # role Q1 evaluates dropping) — don't score it against its own output.
+                "in_q1": not is_self_graded(fx, "spec-task-reviewer"),
+                "in_q4": False, "fast_c": 0, "fast_t": 0, "union_c": 0, "union_t": 0,
+            }
+            # Q4 pool: exclude a mined fixture authored by code-reviewer (Q4's
+            # fast-path role). Curated code-reviewer fixtures are NOT excluded.
+            if not is_self_graded(fx, "code-reviewer"):
+                rec["in_q4"] = True
+                cr = res.get("code-reviewer")
+                if cr is not None:
+                    c, t = _blocking_counts(
+                        grade(fx, cr, project_root=control_root,
+                              judge_provider=judge_provider, judge_model=judge_model)
+                    )
+                    rec["fast_c"], rec["fast_t"] = c, t
+                union = dedup_findings(
+                    f
+                    for name in ("spec-task-reviewer", "quality-reviewer")
+                    if name in res
+                    for f in res[name].findings
+                )
+                union_rr = RunResult("union", fx.id, 0, "", union, Telemetry.zero())
                 c, t = _blocking_counts(
-                    grade(fx, cr, project_root=control_root,
+                    grade(fx, union_rr, project_root=control_root,
                           judge_provider=judge_provider, judge_model=judge_model)
                 )
-                fast_c += c
-                fast_t += t
-            union = dedup_findings(
-                f
-                for name in ("spec-task-reviewer", "quality-reviewer")
-                if name in res
-                for f in res[name].findings
-            )
-            union_rr = RunResult("union", fx.id, 0, "", union, Telemetry.zero())
-            c, t = _blocking_counts(
-                grade(fx, union_rr, project_root=control_root,
-                      judge_provider=judge_provider, judge_model=judge_model)
-            )
-            union_c += c
-            union_t += t
+                rec["union_c"], rec["union_t"] = c, t
+            return rec
+        except Exception:
+            return None
 
+    if concurrency > 1:
+        with ThreadPoolExecutor(max_workers=concurrency) as ex:
+            records = list(ex.map(_process, fixtures))
+    else:
+        records = [_process(fx) for fx in fixtures]
+    records = [r for r in records if r is not None]
+
+    paired_by_fixture: dict[str, dict[str, RunResult]] = {
+        r["id"]: r["res"] for r in records if r["in_q1"]
+    }
     q1 = compute_q1(paired_by_fixture)
     q4 = compute_q4(
-        fast_c=fast_c, fast_t=fast_t, union_c=union_c, union_t=union_t,
-        n_diffs=q4_n_diffs,
+        fast_c=sum(r["fast_c"] for r in records),
+        fast_t=sum(r["fast_t"] for r in records),
+        union_c=sum(r["union_c"] for r in records),
+        union_t=sum(r["union_t"] for r in records),
+        n_diffs=sum(1 for r in records if r["in_q4"]),
     )
     return q1, q4
