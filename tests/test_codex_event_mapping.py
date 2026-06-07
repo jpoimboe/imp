@@ -30,3 +30,20 @@ def test_task_completion_dedupes_and_rekeys_to_minted_id() -> None:
     assert len(results) == 1
     assert results[0]["payload"]["id"] == "MINTED-1"
     assert run_state.minted_task_ids == []  # FIFO popped
+
+
+def test_two_task_calls_one_turn_map_results_in_fifo_order() -> None:
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    run_state.minted_task_ids.extend(["MINT-A", "MINT-B"])  # dispatch order
+
+    for sdk_id, ans in (("sdk-1", "first"), ("sdk-2", "second")):
+        ev = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+            tool="task", arguments={}, result=ans, id=sdk_id))
+        process_event(ev, elog=elog, agent_id="step:t", state=state,
+                      provider="codex", model="gpt-5.5", run_state=run_state)
+
+    results = [e for e in list(elog.read()) if e.get("type") == "tool_result"]
+    assert [r["payload"]["id"] for r in results] == ["MINT-A", "MINT-B"]
+    assert run_state.minted_task_ids == []
