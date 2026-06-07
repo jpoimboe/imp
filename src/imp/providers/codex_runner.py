@@ -498,6 +498,19 @@ class CodexAgentRunner:
                             self._abort_controller.abort()
                     raise state.subagent_suspended
 
+                if state.fatal_tool_error is not None:
+                    if self._abort_controller is not None:
+                        with contextlib.suppress(Exception):
+                            self._abort_controller.abort()
+                    tool_name, msg = state.fatal_tool_error
+                    # Same payload shape as claude_code.py fatal_tool_error:
+                    # `tool` at the top level, `message` is the raw fatal-tool
+                    # message.
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "fatal_tool_error",
+                        "tool": tool_name, "message": msg}}
+                    return
+
                 # Native-tool violation → fail-closed. AC #18:
                 #   - autonomous: unconditional revert + bail.
                 #   - interactive: prompt user (default revert); a "keep"

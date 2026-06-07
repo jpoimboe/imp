@@ -176,3 +176,42 @@ async def test_subagent_suspended_unwinds_out_of_run(tmp_path: Path) -> None:
                 pass
     finally:
         cr.process_event = orig
+
+
+@pytest.mark.anyio
+async def test_fatal_tool_error_yields_terminal_event_and_bails(tmp_path: Path) -> None:
+    auth = _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    from tests.codex_fakes import agent_message, thread_started, turn_completed
+    scripted = [[thread_started("t"), agent_message("calling lint"),
+                 turn_completed(output_tokens=1)],
+                [agent_message("should never run"), turn_completed()]]
+
+    fake_client = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: fake_client)
+    runner._canonical_auth_override = auth
+
+    import imp.providers.codex_runner as cr
+    orig = cr.process_event
+    def _patched(*a: Any, **k: Any) -> None:
+        rs = k.get("run_state")
+        if rs is not None and getattr(a[0], "type", None) == "turn.completed":
+            rs.fatal_tool_error = ("lint", "config missing")
+        return orig(*a, **k)
+    cr.process_event = _patched
+    try:
+        events = [ev async for ev in runner.run(_invocation(tmp_path, event_log=elog))]
+    finally:
+        cr.process_event = orig
+
+    fatal = [e for e in events if e.get("payload", {}).get("kind") == "fatal_tool_error"]
+    assert fatal, events
+    # Prove the run bailed after turn 1: run_streamed must have been called
+    # exactly once (the fatal event fires at turn.completed, so turn 2 must
+    # never start).
+    assert fake_client.thread is not None
+    assert len(fake_client.thread.run_calls) == 1, (
+        f"fatal_tool_error bail failed: run_streamed was called "
+        f"{len(fake_client.thread.run_calls)} times (expected 1); events={events}")
