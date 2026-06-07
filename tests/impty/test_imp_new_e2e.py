@@ -46,29 +46,31 @@ def test_drive_imp_new_to_completion(tmp_path: Path) -> None:
         answered = False
         while time.time() < deadline:
             session.wait_idle(idle=0.3, hard=10.0)
-            screen = session.viewport()
+            screen = "\n".join(session.lines(limit=session.rows))
             if "1) yes" in screen:
                 session.send("1\r")
                 answered = True
                 break
             if not session.is_alive():
                 break
-        assert answered, f"never saw the human gate; transcript=\n{session.transcript()}"
+        assert answered, "never saw the human gate; lines=\n" + "\n".join(session.lines())
 
         # Drain post-gate output into pyte AND reap. Now that the harness reads
-        # the master to completion, the verdict can come from transcript().
+        # the master to completion, the verdict can come from lines().
         rc = session.run_to_completion(hard=30.0)
-        assert rc == 0, f"expected exit 0, got {rc}; transcript=\n{session.transcript()}"
+        assert rc == 0, (
+            f"expected exit 0, got {rc}; lines=\n" + "\n".join(session.lines())
+        )
 
         # The gate renders inline today (no alternate screen), so post-gate
-        # output lands in pyte history. This assert is a tripwire: if a future
-        # step entered alt-screen and never restored it, the orphaned mode bit
-        # would make transcript() unreliable.
+        # output lands in pyte history (scroll shape). This assert is a tripwire:
+        # if a future step entered alt-screen and never restored it, the regime
+        # would be SCREEN and the scrollback verdict below would be unreliable.
         assert session.is_alt_screen() is False
         # Primary verdict: the completion banner `Change <id>: completed`
         # (src/imp/cli/main.py:172).
-        assert ": completed" in session.transcript(), (
-            f"no completion banner in transcript=\n{session.transcript()}"
+        assert ": completed" in "\n".join(session.lines()), (
+            "no completion banner in lines=\n" + "\n".join(session.lines())
         )
 
     # Backstop: state.json still records completion authoritatively.

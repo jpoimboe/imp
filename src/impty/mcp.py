@@ -13,9 +13,9 @@ drew), `send` writes raw keystroke bytes. MCP is just the pipe.
 
 Run (stdio): `python -m impty.mcp`. Register it for Claude Code via `.mcp.json`.
 
-Caveat: the library only *detects* alt-screen today (buffer-swap fidelity is a
-later slice), so `view` is faithful for an append-only CLI like imp but degraded
-for a full alt-screen TUI like claude code.
+The library renders all three regimes (append-only, inline-redraw, alt-screen)
+faithfully: alt-screen apps get a real buffer swap and `view` shows the live
+frame; `regime` in the status header reports which shape the session is in.
 """
 
 from __future__ import annotations
@@ -59,14 +59,20 @@ def _require() -> TerminalSession:
     return _session
 
 
-def _render(session: TerminalSession) -> str:
-    """The current screen plus a one-line status header the agent can trust."""
+def _render(session: TerminalSession, *, full: bool = False) -> str:
+    """A one-line status header plus the screen text. Default body is the CURRENT
+    screen window (lines(limit=rows)) — NOT the whole strip — since these tools
+    are called constantly while driving and a multi-hundred-row dump is noise.
+    full=True returns the whole history+screen strip. The cursor is screen-local
+    and bounded, so a small y near the bottom is the cheap 'parked = waiting for
+    input' tell."""
     cx, cy = session.cursor()
     status = (
-        f"[alive={session.is_alive()} alt_screen={session.is_alt_screen()} "
+        f"[alive={session.is_alive()} regime={session.regime().value} "
         f"cursor=({cx},{cy})]"
     )
-    return f"{status}\n{session.viewport()}"
+    body = session.lines() if full else session.lines(limit=session.rows)
+    return f"{status}\n" + "\n".join(body)
 
 
 @mcp.tool()
@@ -94,14 +100,16 @@ def start(
 
 
 @mcp.tool()
-def view() -> str:
-    """Read the current screen (viewport) without sending anything.
+def view(full: bool = False) -> str:
+    """Read the screen without sending anything.
 
-    Use to re-read after `wait`, or to look again. Each row is what a human
-    would see right now; the status header reports liveness, alt-screen, and
-    cursor position (a cursor parked just after a prompt = waiting for input).
+    By default returns the CURRENT screen (what a human sees right now); the
+    status header reports liveness, regime (scroll|screen), and cursor position
+    (a cursor parked just after a prompt = waiting for input). Set full=True to
+    get the whole run so far (scrolled-off history + the current screen) — a
+    potentially long dump, so it is opt-in.
     """
-    return _render(_require())
+    return _render(_require(), full=full)
 
 
 @mcp.tool()
@@ -139,14 +147,15 @@ def wait(idle: float = 0.3, hard: float = 15.0) -> str:
 
 
 @mcp.tool()
-def snapshot(path: str | None = None) -> str:
-    """Render the CURRENT screen to a PNG (true color, bold weight, box-drawing
-    glyphs) and return its path — for SEEING the TUI, not just the grid text that
-    view()/transcript() return. The image reflects the live session's size.
+def snapshot(path: str | None = None, full: bool = False) -> str:
+    """Render the screen to a PNG (true color, bold weight, box-drawing glyphs)
+    and return its path — for SEEING the TUI, not just the grid text view()
+    returns. The image reflects the live session's size.
 
-    `path` defaults to a fresh temp file (read it back to view the image). Faint
-    (dim) text isn't shown — pyte discards SGR 2 at parse time — but color, bold,
-    and layout are faithful.
+    Renders the current frame by default; full=True (scroll shape) also paints
+    scrolled-off history above it — a tall image, so it is opt-in. `path`
+    defaults to a fresh temp file. Faint (dim) text isn't shown — pyte discards
+    SGR 2 at parse time — but color, bold, and layout are faithful.
     """
     import os
     import tempfile
@@ -157,21 +166,8 @@ def snapshot(path: str | None = None) -> str:
     if path is None:
         fd, path = tempfile.mkstemp(prefix="impty-", suffix=".png")
         os.close(fd)
-    render_screen(session.screen, path)
+    render_screen(session.screen, path, full=full)
     return f"[wrote {path}]"
-
-
-@mcp.tool()
-def transcript(limit: int | None = None) -> str:
-    """The whole run so far in order (scrolled-off history + current screen).
-
-    For reviewing everything that happened, not just the visible screen. `limit`
-    keeps only the last N lines (bounded — never an unbounded dump). Note: only
-    captures output the server has read; drive with `send`/`wait` to keep it
-    current. (For an append-only CLI this is the full scroll; in alt-screen mode
-    it is largely N/A.)
-    """
-    return _require().transcript(limit)
 
 
 @mcp.tool()

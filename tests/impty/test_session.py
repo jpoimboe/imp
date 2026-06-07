@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from impty import TerminalSession
+from impty import Regime, TerminalSession
 
 
 def _can_pty() -> bool:
@@ -31,7 +31,7 @@ pytestmark = pytest.mark.skipif(not _can_pty(), reason="pty not available")
 def test_spawn_and_read_startup_output() -> None:
     with TerminalSession([sys.executable, "-c", "print('hello world')"]) as s:
         s.wait_idle()
-        assert "hello world" in s.viewport()
+        assert "hello world" in "\n".join(s.lines())
 
 
 def test_send_is_received_by_child() -> None:
@@ -39,7 +39,7 @@ def test_send_is_received_by_child() -> None:
     with TerminalSession([sys.executable, "-c", prog]) as s:
         s.send("abc\r")
         s.wait_idle()
-        assert "ABC" in s.viewport()
+        assert "ABC" in "\n".join(s.lines())
 
 
 def test_wait_idle_returns_while_child_blocks_on_input() -> None:
@@ -49,7 +49,7 @@ def test_wait_idle_returns_while_child_blocks_on_input() -> None:
     with TerminalSession([sys.executable, "-c", prog]) as s:
         settled = s.wait_idle(idle=0.2, hard=5.0)
         assert settled is True
-        assert "Name?" in s.viewport()
+        assert "Name?" in "\n".join(s.lines())
 
 
 def test_wait_idle_hard_timeout_returns_false_on_chatty_child() -> None:
@@ -68,15 +68,14 @@ def test_default_term_is_set_for_color_fidelity() -> None:
     prog = "import os; print(os.environ.get('TERM', 'UNSET'))"
     with TerminalSession([sys.executable, "-c", prog]) as s:
         s.wait_idle()
-        assert "xterm-256color" in s.viewport()
+        assert "xterm-256color" in "\n".join(s.lines())
 
 
 def test_transcript_captures_scrolled_output() -> None:
     prog = "[print(f'line {i:02d}') for i in range(1, 41)]"
     with TerminalSession([sys.executable, "-c", prog], cols=80, rows=24) as s:
         s.wait_idle()
-        transcript = s.transcript()
-        lines = [ln for ln in transcript.split("\n") if ln.startswith("line ")]
+        lines = [ln for ln in s.lines() if ln.startswith("line ")]
         assert lines[0] == "line 01"
         assert lines[-1] == "line 40"
         assert len(lines) == 40
@@ -123,14 +122,14 @@ def test_cpr_query_is_answered_so_program_can_read_reply() -> None:
     with TerminalSession([sys.executable, "-c", prog]) as s:
         s.wait_idle(idle=0.3, hard=5.0)
         # Cursor starts at row 1, col 1 (1-based, as DSR reports it).
-        assert "CPR=1;1" in s.viewport()
+        assert "CPR=1;1" in "\n".join(s.lines())
 
 
 def test_cursor_parks_after_prompt_string() -> None:
     # "Waiting for input looks like": cursor sits immediately after the prompt
     # text, on the bottom non-blank row, with no further output. This is the
     # cheap signal an agent-arbiter uses to recognize a prompt — no /proc.
-    # NB: viewport_text right-trims, so the rendered row is "Project name?"
+    # NB: lines() right-trims each row, so the rendered row is "Project name?"
     # (no trailing space); the cursor x still sits PAST the space at col 14.
     # Assert the two facts separately — don't expect the trailing space in text.
     prog = (
@@ -140,8 +139,9 @@ def test_cursor_parks_after_prompt_string() -> None:
     with TerminalSession([sys.executable, "-c", prog]) as s:
         s.wait_idle(idle=0.2, hard=5.0)
         x, y = s.cursor()
-        assert s.viewport().split("\n")[y].rstrip() == "Project name?"  # text (trimmed)
-        assert x == len("Project name? ")                               # cursor past the space
+        win = s.lines(limit=s.rows)          # exactly rows, aligned with cell()/cursor()
+        assert win[y].rstrip() == "Project name?"         # row y of the window == cursor's row
+        assert x == len("Project name? ")                 # cursor past the trailing space
 
 
 # A child that installs a SIGINT handler emitting an async-signal-safe marker and
@@ -167,12 +167,12 @@ def test_ctrl_c_byte_delivers_sigint() -> None:
     # foreground process group, firing its handler.
     with TerminalSession([sys.executable, "-c", _SIGINT_CHILD]) as s:
         s.wait_idle(idle=0.2, hard=5.0)
-        assert "READY" in s.viewport()
+        assert "READY" in "\n".join(s.lines())
         try:
             s.send("\x03")
             rc = s.run_to_completion(hard=5.0)
             assert rc == 42
-            assert "GOT-SIGINT" in s.transcript()
+            assert "GOT-SIGINT" in "\n".join(s.lines())
         finally:
             if s.is_alive():
                 with contextlib.suppress(ProcessLookupError):
@@ -184,12 +184,12 @@ def test_send_signal_delivers_sigint() -> None:
     # regardless of tty mode, bypassing the line discipline.
     with TerminalSession([sys.executable, "-c", _SIGINT_CHILD]) as s:
         s.wait_idle(idle=0.2, hard=5.0)
-        assert "READY" in s.viewport()
+        assert "READY" in "\n".join(s.lines())
         try:
             s.send_signal(signal.SIGINT)
             rc = s.run_to_completion(hard=5.0)
             assert rc == 42
-            assert "GOT-SIGINT" in s.transcript()
+            assert "GOT-SIGINT" in "\n".join(s.lines())
         finally:
             if s.is_alive():
                 with contextlib.suppress(ProcessLookupError):
@@ -223,7 +223,7 @@ def test_run_to_completion_drains_flood_and_keeps_trailing_sentinel() -> None:
         # Assert on the pyte-RENDERED line: the pty line discipline maps \n→\r\n
         # (ONLCR), so the raw master tail isn't byte-exact. transcript() is
         # history-bounded (pyte history=2000), but the trailing line survives.
-        assert "DONE-1" in s.transcript()
+        assert "DONE-1" in "\n".join(s.lines())
 
 
 def test_run_to_completion_raises_when_child_never_exits() -> None:
@@ -258,7 +258,7 @@ def test_wait_hangs_then_run_to_completion_drains_same_session() -> None:
             s.wait(timeout=0.5)
         rc = s.run_to_completion(hard=5.0)  # same blocked child, now drained
         assert rc == 0
-        assert "DONE-5" in s.transcript()
+        assert "DONE-5" in "\n".join(s.lines())
 
 
 # A child that forks a grandchild which calls setsid() (so it survives the
@@ -393,3 +393,63 @@ def test_run_to_completion_fast_on_streaming_slave_pinning_grandchild(
         if gc_pid is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(gc_pid, signal.SIGKILL)
+
+
+_ALT_FIXTURE = (
+    "import sys, time\n"
+    "sys.stdout.write('before-alt\\n'); sys.stdout.flush()\n"
+    "sys.stdout.write('\\x1b[?1049h\\x1b[2J\\x1b[HINSIDE-ALT'); sys.stdout.flush()\n"
+    "time.sleep(0.3)\n"                       # quiet window: settles while in alt
+    "sys.stdout.write('\\x1b[?1049l'); sys.stdout.flush()\n"
+)
+
+
+def test_alt_screen_buffer_swap_end_to_end() -> None:
+    # Prove the buffer swap over a real pty: in alt only the alt frame shows and
+    # regime is SCREEN; after exit the pre-alt screen is restored and regime is
+    # SCROLL.
+    with TerminalSession([sys.executable, "-c", _ALT_FIXTURE]) as s:
+        s.wait_idle(idle=0.2, hard=5.0)          # settles mid-alt (0.3s sleep)
+        assert s.regime() is Regime.SCREEN
+        body = "\n".join(s.lines())
+        assert "INSIDE-ALT" in body
+        assert "before-alt" not in body          # no scrollback while in alt
+        s.run_to_completion(hard=5.0)            # drives past the 1049l exit
+        assert s.regime() is Regime.SCROLL
+        assert "before-alt" in "\n".join(s.lines())   # pre-alt restored
+
+
+_INLINE_FIXTURE = (
+    "import sys, time\n"
+    "for i in range(8):\n"
+    "    sys.stdout.write(f'scroll line {i}\\n')\n"   # real scrollback (8 > rows)
+    "sys.stdout.write('PROMPT> ')\n"                  # live bottom region
+    "sys.stdout.flush()\n"
+    "time.sleep(0.5)\n"
+)
+
+
+def test_inline_redraw_scroll_shape_history_plus_live_bottom() -> None:
+    with TerminalSession([sys.executable, "-c", _INLINE_FIXTURE], cols=40, rows=6) as s:
+        s.wait_idle(idle=0.2, hard=5.0)
+        assert s.regime() is Regime.SCROLL
+        full = s.lines()
+        win = s.lines(limit=s.rows)
+        assert "scroll line 0" in full           # scrolled into history
+        assert "scroll line 0" not in win        # not in the live window
+        assert len(win) == s.rows
+        assert win[-1].rstrip().endswith("PROMPT>")
+        x, _ = s.cursor()
+        assert x == len("PROMPT> ")              # cursor parked past the prompt
+
+
+def test_resize_pads_and_clips_live_screen() -> None:
+    with TerminalSession([sys.executable, "-c", "import time; time.sleep(2)"],
+                         cols=40, rows=10) as s:
+        s.wait_idle(idle=0.1, hard=2.0)
+        s.resize(rows=5, cols=20)
+        assert s.rows == 5 and s.cols == 20
+        assert len(s.lines(limit=s.rows)) == 5
+        cx, cy = s.cursor()
+        assert 0 <= cx <= 19 and 0 <= cy <= 4    # cursor in bounds after shrink
+        s.cell(19, 4)                            # bottom-right corner addressable
