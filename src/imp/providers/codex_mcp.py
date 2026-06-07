@@ -56,6 +56,7 @@ class RunState:
     agent_id: str = "step:unnamed"
     minted_task_ids: list[str] = field(default_factory=list)
     subagent_suspended: Any = None
+    killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _cap_error_text(cap: int) -> str:
@@ -144,6 +145,15 @@ async def dispatch_tool(
         text = f"{type(exc).__name__}: {exc}"
         state.runtime_errors.append(text)
         return text
+    if tool.name == "bash" and isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            rc = parsed.get("returncode") if isinstance(parsed, dict) else None
+            if isinstance(rc, int) and rc < 0:
+                state.killed_tool_uses.append(
+                    {"id": "", "name": "bash", "signal": -rc})
+        except (ValueError, TypeError):
+            pass
     if isinstance(raw, str):
         return raw
     try:

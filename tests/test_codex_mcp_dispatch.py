@@ -355,6 +355,24 @@ def test_fatal_tool_error_captured_on_state(tmp_path: Path) -> None:
     assert "config missing" in out  # is_error-ish body, not silently dropped
 
 
+def test_negative_rc_bash_records_killed_tool(tmp_path: Path) -> None:
+    import json as _json
+
+    def _fn(ctx: Any, command: str) -> str:
+        return _json.dumps({"returncode": -9, "stdout": "", "stderr": "killed"})
+    bash = Tool(name="bash", description="",
+                input_schema={"type": "object",
+                              "properties": {"command": {"type": "string"}},
+                              "required": ["command"]}, fn=_fn)
+    ctx = _ctx(tmp_path)
+    state = RunState(cap=10)
+    asyncio.run(dispatch_tool(tool=bash, args={"command": "sleep 100"},
+                              ctx=ctx, state=state))
+    # Sibling shape (claude_code.py): {id, name, signal}. codex args carry no
+    # __tool_use_id__, so id is "" (documented weak-id approximation).
+    assert state.killed_tool_uses == [{"id": "", "name": "bash", "signal": 9}]
+
+
 def test_cap_rmw_literal_has_no_await_between_read_and_decision() -> None:
     """AC #19 source-inspection guard: between the `dispatch_count += 1`
     increment and the `> state.cap` comparison there must be no `await`
