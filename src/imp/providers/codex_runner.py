@@ -846,12 +846,17 @@ def _serialize_mcp_result(result: Any) -> str:
 def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
     """Reassemble one codex turn's ``item.completed`` items into a full-turn
     ``llm_response.raw`` (``{"content": [...]}``) carrying text + tool_use
-    blocks, so the audit reconstruction (``build_messages_from_events``) can
-    pair tool_use/tool_result correctly.
+    blocks.  This raw IS emitted live as the turn's single ``llm_response`` at
+    ``turn.completed`` (Unit F), and is also consumed by audit reconstruction
+    (``build_messages_from_events``) for tool_use/tool_result pairing.
+    A web_search item becomes a query-only tool_use (codex exposes no
+    results/citations).
 
-    LATENT/AUDIT-ONLY: not wired into the live emit path (live raw stays
-    text-only — see the Fix 2 part-2 scope decision). A web_search item becomes
-    a query-only tool_use (codex exposes no results/citations).
+    Latent caveat: for ``task`` tool calls the reassembled tool_use block
+    carries the SDK item id, whereas the live ``tool_result`` is keyed to the
+    pre-minted id (from ``minted_task_ids``).  Harmless today because
+    ``build_messages_from_events`` pairs tool_use→tool_result positionally,
+    not by id; any future strict id-pairing consumer will need to reconcile.
     """
     content: list[dict[str, Any]] = []
     for item in items:
@@ -881,9 +886,10 @@ def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
 
 
 def _parse_codex_message(raw: dict[str, Any]) -> Message:
-    """raw → assistant Message for codex. codex's live `llm_response.raw` is
-    text-only; the reassembled full-turn raw (`reassemble_codex_turn`) also
-    carries `tool_use` blocks (a web_search appears as a query-only tool_use).
+    """raw → assistant Message for codex.  Post-F1, the live `llm_response.raw`
+    (emitted at `turn.completed` via `reassemble_codex_turn`) carries both
+    text and tool_use blocks; this parser handles both.  A web_search appears
+    as a query-only tool_use block.
     Unknown blocks are dropped (surfaced via `_extract_codex_diagnostics`).
 
     Lives here (not in replay.py) per the provider-exports-its-parser convention:
