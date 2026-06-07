@@ -2,8 +2,14 @@
 
 One Prompt per CLI invocation. Ctrl+C raises KeyboardInterrupt, Ctrl+D raises
 EOFError — the CLI's signal handler catches both and triggers save-and-exit.
-ESC is left to prompt_toolkit's built-in handling (meta-prefix in emacs mode;
-leaves insert mode in vi mode — see editing_mode plumbing).
+
+ESC during the prompt is owned by prompt_toolkit's built-in handling
+(meta-prefix in emacs mode; leaves insert mode in vi mode — see editing_mode
+plumbing). ESC during the agent-thinking phase (no prompt active) is read by
+`EscKeyReader` in `signals.py` and pauses the run. The CLI wraps the
+`prompt.ask_async()` call in `coord.tty_quiesced()` so the keystroke reader
+releases /dev/tty for the duration of the prompt and re-arms cbreak on exit —
+the two never hold the tty in raw/cbreak mode at once.
 
 History is per-session in-memory; persisted history is a post-V0 feature.
 """

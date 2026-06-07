@@ -56,3 +56,86 @@ def test_new_paused_headline_reflects_pause_reason(
     assert rc == 130
     assert expected_headline in out
     assert reasons == [pause_reason or "ctrl-c"]
+
+
+def test_new_spawns_esc_reader_as_taskgroup_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive `_async_cmd_new` starts an EscKeyReader.run task."""
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    seen: list[str] = []
+    real = cli_main.EscKeyReader  # type: ignore[attr-defined]
+
+    class _RecordingReader(real):              # type: ignore[misc, valid-type]
+        async def run(self) -> None:
+            seen.append("esc_reader.run")
+            return
+
+    monkeypatch.setattr(cli_main, "EscKeyReader", _RecordingReader)
+
+    async def _fake_run_change(_change: object, **_kw: object) -> RunResult:
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run_change)
+    rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(title="sib"))
+    assert rc == 0
+    assert seen == ["esc_reader.run"]
+
+
+def test_new_non_interactive_does_not_spawn_esc_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    seen: list[str] = []
+
+    class _RecordingReader:
+        def __init__(self, _coord: object) -> None: ...
+        async def run(self) -> None:
+            seen.append("esc_reader.run")
+
+    monkeypatch.setattr(cli_main, "EscKeyReader", _RecordingReader)
+
+    async def _fake_run_change(_change: object, **_kw: object) -> RunResult:
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run_change)
+    rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
+        title="ni", non_interactive=True, default_reply="ok"))
+    assert rc == 0
+    assert seen == []
+
+
+def test_resume_spawns_esc_reader_as_taskgroup_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interactive `_async_cmd_resume` also starts an EscKeyReader.run task —
+    parity with `_async_cmd_new` (the wiring is mirrored across both commands)."""
+    from imp.engine.state import State
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+    monkeypatch.setattr(cli_main, "_control_root", lambda: tmp_path)
+
+    seen: list[str] = []
+    real = cli_main.EscKeyReader  # type: ignore[attr-defined]
+
+    class _RecordingReader(real):              # type: ignore[misc, valid-type]
+        async def run(self) -> None:
+            seen.append("esc_reader.run")
+            return
+
+    monkeypatch.setattr(cli_main, "EscKeyReader", _RecordingReader)
+
+    async def _fake_run_change(_change: object, **_kw: object) -> RunResult:
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run_change)
+    rc = anyio.run(cli_main._async_cmd_resume, argparse.Namespace(
+        token="feat", from_target=None, force=False))
+    assert rc == 0
+    assert seen == ["esc_reader.run"]
