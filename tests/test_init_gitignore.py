@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from imp.cli.init import run_init
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_config(monkeypatch, tmp_path):
+    # init bootstraps the user config — pin XDG into the tmp tree so these
+    # gitignore tests never write the developer's real machine config.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
 
 
 def _init(tmp_path: Path) -> None:

@@ -1,13 +1,16 @@
 """`imp init`: scaffold imp/ in a project.
 
-Spec §8.2: ask for providers + env-var names; write imp/config.yaml,
-imp/workflows/default/; append .imp/ to project .gitignore.
+Spec §4: split output. A committed imp/project.yaml (workflow ref + empty
+vars — NO bindings, NO theme) and a bootstrapped ~/.config/imp/config.yaml
+(providers + theme + editing_mode). On a clone that already carries the
+committed imp/project.yaml, init is idempotent: it never overwrites the
+project file and only bootstraps the machine's user config if absent.
 
 Committed config+workflows live under imp/ (tracked by git).
 Runtime state (changes, locks, etc.) lives under .imp/ (gitignored wholesale).
 
-The default tier taxonomy is auto-populated based on enabled
-providers — no model selection question, just sensible defaults.
+Tier→model bindings come from the provider-code floor now, so init asks no
+model question — it just records the enabled providers + detected theme.
 """
 
 from __future__ import annotations
@@ -21,44 +24,16 @@ import yaml
 
 from imp.assets import default_workflow_dir
 
-# Per spec: low/medium/high tiers. Order: low (cheapest) → medium → high.
-# Bare aliases (opus/sonnet/haiku) track "latest" automatically so the
-# scaffold never goes stale. Verified accepted by the claude_code provider.
-# The anthropic block uses the same aliases by analogy; they were NOT verified
-# against the Anthropic HTTP API at scaffold time (no key available). If a
-# future HTTP call rejects them, swap to that provider's documented
-# dated/"-latest" alias form here.
-_PROVIDER_MODELS: dict[str, dict[str, str]] = {
-    "claude_code": {
-        "low":    "haiku",
-        "medium": "sonnet",
-        "high":   "opus",
-    },
-    "anthropic": {
-        "low":    "haiku",
-        "medium": "sonnet",
-        "high":   "opus",
-    },
-    "openai": {
-        "low":    "gpt-5.4-mini",
-        "medium": "gpt-5.3-codex",
-        "high":   "gpt-5.5",
-    },
-    # codex refuses *-codex models (runner preflight M1), so it cannot reuse
-    # openai's gpt-5.3-codex tier. gpt-5.5 is the sanctioned non-codex model.
-    "codex": {
-        "low":    "gpt-5.5",
-        "medium": "gpt-5.5",
-        "high":   "gpt-5.5",
-    },
-}
+# The order providers are presented in the picker. Bindings (tier→model) are
+# owned by the provider-code floor now, so init no longer carries a model table.
+_PROVIDER_DISPLAY_ORDER: tuple[str, ...] = (
+    "claude_code", "anthropic", "openai", "codex",
+)
 
 # Providers driven by a local CLI rather than an HTTP API — no env-var prompt
-# at init time, and omitted from the informational `providers:` block. codex
+# at init time, and omitted from the informational env hints. codex
 # authenticates via its own ~/.codex/auth.json (codex login), like claude_code.
 _PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code", "codex"})
-
-_TIERS: tuple[str, ...] = ("low", "medium", "high")
 
 
 def _default_detect_theme() -> str:
@@ -71,20 +46,22 @@ def _default_detect_theme() -> str:
         return "ansi"
 
 
-def _build_config(
-    providers: list[str], env_vars: dict[str, str], theme: str = "ansi",
+def _build_project_config() -> dict[str, Any]:
+    """The committed imp/project.yaml: workflow ref + empty vars. No bindings
+    (the provider-code floor supplies tiers); no theme (user-homed)."""
+    return {"workflow": "default", "vars": {}}
+
+
+def _build_user_config(
+    providers: list[str], theme: str, editing_mode: str = "emacs",
 ) -> dict[str, Any]:
-    """Build the new `providers:` / `tiers:` / `provider_envs:` config block."""
-    tiers_block = {
-        tier: {prov: _PROVIDER_MODELS[prov][tier] for prov in providers}
-        for tier in _TIERS
+    """The bootstrapped ~/.config/imp/config.yaml: providers (detected here),
+    theme (detected), editing_mode."""
+    return {
+        "providers": list(providers),
+        "theme": theme,
+        "editing_mode": editing_mode,
     }
-    out: dict[str, Any] = {"providers": list(providers), "tiers": tiers_block}
-    provider_envs = {p: {"env": env_vars[p]} for p in providers if p in env_vars}
-    if provider_envs:
-        out["provider_envs"] = provider_envs
-    out["theme"] = theme   # detected once here; runtime reads it, never re-queries
-    return out
 
 
 def _interactive_provider_picker(available: list[str]) -> list[str]:
@@ -181,15 +158,15 @@ def run_init(
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
 ) -> None:
+    from imp.providers.effective import user_config_path
+
     imp_dir = project_root / "imp"
-    if imp_dir.exists():
-        raise FileExistsError(
-            f"imp/ already exists at {imp_dir}; refusing to re-init"
-        )
+    project_file = imp_dir / "project.yaml"
+    already_initialized = project_file.is_file()
 
-    output_fn(f"Setting up imp/ in {project_root}")
+    output_fn(f"Setting up imp in {project_root}")
 
-    available = list(_PROVIDER_MODELS.keys())
+    available = list(_PROVIDER_DISPLAY_ORDER)
     pick = picker_fn or _interactive_provider_picker
     providers = pick(available)
     if not providers:
@@ -197,13 +174,14 @@ def run_init(
         raise ValueError("at least one provider must be selected")
     output_fn(f"Enabled: {', '.join(providers)}")
 
-    env_vars: dict[str, str] = {}
+    # Confirm the conventional env-var name per HTTP provider (names, never
+    # secrets). The floor owns env names now, so there is nothing to *collect* —
+    # just confirm, no input round-trip (finding M3). `input_fn` stays in the
+    # signature for callers/tests but is no longer used for key names.
     for prov in providers:
         if prov in _PROVIDERS_WITHOUT_ENV:
             continue
-        default_env = f"{prov.upper()}_API_KEY"
-        ans = input_fn(f"For {prov!r}: API key env var [{default_env}]: ")
-        env_vars[prov] = (ans.strip() or default_env)
+        output_fn(f"  {prov} → {prov.upper()}_API_KEY (set this env var)")
 
     # Detect the terminal theme now (interactive, TTY available) and persist it,
     # so the runtime never has to re-query the terminal. Falls back to 'ansi'.
@@ -212,36 +190,51 @@ def run_init(
     if theme != "ansi":
         output_fn(f"Detected a {theme} terminal — colors tuned to match.")
 
-    imp_dir.mkdir()
-    (imp_dir / "workflows").mkdir()
-    shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
+    # --- committed project file (idempotent: never overwrite an existing one) ---
+    if not already_initialized:
+        imp_dir.mkdir(parents=True, exist_ok=True)
+        (imp_dir / "workflows").mkdir(exist_ok=True)
+        shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
+        body = yaml.safe_dump(
+            _build_project_config(), sort_keys=False, default_flow_style=False)
+        lint_hint = (
+            "\n# Optional lint-clean gate: a command the implementer runs before each\n"
+            "# commit (separate from the test suite). Absent => no lint gate.\n"
+            '# lint_command: "make lint"\n'
+        )
+        project_file.write_text(body + lint_hint)
+    elif not (imp_dir / "workflows" / "default").is_dir():
+        # Belt-and-suspenders (finding L2): a real teammate clone has project.yaml
+        # AND workflows committed together, so the gate above is correct. But a
+        # *partially* initialized tree (project.yaml present, workflows missing)
+        # would otherwise silently skip workflow creation. Backfill them.
+        (imp_dir / "workflows").mkdir(parents=True, exist_ok=True)
+        shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
 
-    cfg = _build_config(providers, env_vars, theme)
-    body = yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False)
-    lint_hint = (
-        "\n# Optional lint-clean gate: a command the implementer runs before each\n"
-        "# commit (separate from the test suite). Absent => no lint gate.\n"
-        '# lint_command: "make lint"\n'
-    )
-    (imp_dir / "config.yaml").write_text(body + lint_hint)
+    # --- bootstrap user config (only if the machine has none) ---
+    user_path = user_config_path()
+    if not user_path.exists():
+        user_path.parent.mkdir(parents=True, exist_ok=True)
+        user_path.write_text(
+            yaml.safe_dump(
+                _build_user_config(providers, theme),
+                sort_keys=False, default_flow_style=False))
 
-    # Internal state lives under .imp/ (gitignored wholesale). No per-.imp
-    # .gitignore — the project .gitignore ignores .imp/ entirely (spec §8).
+    # --- ensure .imp/ is gitignored (control-root state lives there) ---
     project_gi = project_root / ".gitignore"
-    add_lines = [".imp/"]
     existing = project_gi.read_text() if project_gi.exists() else ""
     existing_lines = {ln.strip() for ln in existing.splitlines()}
-    needs_append = [line for line in add_lines if line.strip() not in existing_lines]
-    if needs_append:
+    if ".imp/" not in existing_lines:
         sep = "" if existing.endswith("\n") or not existing else "\n"
-        project_gi.write_text(
-            existing + sep + "\n# imp\n" + "\n".join(needs_append) + "\n"
-        )
+        project_gi.write_text(existing + sep + "\n# imp\n.imp/\n")
 
     output_fn("")
-    output_fn("Created:")
-    output_fn("  imp/config.yaml      (committed — env-var NAMES only, no secrets)")
-    output_fn("  imp/workflows/default/")
-    output_fn("  .gitignore (appended: .imp/)")
+    if already_initialized:
+        output_fn("Project already initialized — bootstrapped your machine's config.")
+    else:
+        output_fn("Created:")
+        output_fn("  imp/project.yaml     (committed — workflow + project settings)")
+        output_fn("  imp/workflows/default/")
+    output_fn(f"  {user_path}  (your machine: providers, theme)")
     output_fn("")
     output_fn("Try: imp new \"Your first change\"")
