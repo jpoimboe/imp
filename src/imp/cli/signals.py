@@ -22,6 +22,7 @@ there — handled in cli.main, separately from this coordinator.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import signal
@@ -89,6 +90,8 @@ class InterruptCoordinator:
         self._should_pause = False
         self.pause_reason: str | None = None
         self._esc_reader: Any = None
+        self._loop: Any = None          # event loop owning the signal handlers
+        self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """interrupt_fn is an `async def () -> None` callable. All three V1
@@ -155,15 +158,71 @@ class InterruptCoordinator:
         if fn is not None:
             await fn()
 
+    def _install_loop_signal_handlers(self) -> None:
+        """(Re)install SIGINT/SIGTERM handlers on the running loop. Idempotent —
+        `add_signal_handler` overwrites any existing entry.
+
+        This is also the RE-ARM primitive. prompt_toolkit's
+        `prompt_async(handle_sigint=True)` calls `loop.remove_signal_handler(
+        SIGINT)` when the prompt exits, which DELETES the loop's SIGINT dispatch
+        entry. (Its `_restore_sigint_from_ctypes` restores the C-level handler,
+        so the wakeup byte is still written — but with no Handle the loop reads
+        the byte and dispatches nothing.) Without re-arming, the FIRST interactive
+        prompt permanently and silently disables mid-run Ctrl-C — the runner's
+        `coord.signal_pause` is never called again, so `_cancel`/`should_pause`
+        never flip and a process-group Ctrl-C surfaces as a codex-exec error
+        classified `unknown`. See `rearm_signal_handlers`."""
+        loop = self._loop
+        if loop is None:
+            return
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with _suppress(NotImplementedError, RuntimeError, ValueError):
+                loop.add_signal_handler(sig, self._dispatch_signal, sig)
+
+    def _dispatch_signal(self, sig: int) -> None:
+        """Loop-thread signal callback: enqueue the signal for the receiver task
+        (which awaits `signal_pause`). Keeping the await in the task — rather than
+        firing `signal_pause` as a bare task from here — preserves structured
+        concurrency and the first-wins reason semantics."""
+        send = self._sig_send
+        if send is None:
+            return
+        with _suppress(Exception):  # WouldBlock (buffer full) / closed stream
+            send.send_nowait(sig)
+
+    def rearm_signal_handlers(self) -> None:
+        """Re-install the loop SIGINT/SIGTERM handlers after a prompt_toolkit
+        prompt deleted SIGINT's on exit. Safe no-op before the receiver starts or
+        after it stops (`_loop is None`). Called from the interactive-prompt choke
+        point (`ask_line_with_slash`) so mid-run Ctrl-C survives every prompt."""
+        self._install_loop_signal_handlers()
+
     async def run_signal_receiver(self) -> None:
-        """Long-running task: subscribe to SIGINT/SIGTERM and call
-        signal_pause for each, tagging with 'ctrl-c' or 'sigterm'.
-        Cancel this task to stop receiving."""
+        """Long-running task: install SIGINT/SIGTERM loop handlers and turn each
+        delivered signal into `signal_pause` (tagged 'ctrl-c'/'sigterm').
+
+        Replaces `anyio.open_signal_receiver` with directly-managed loop handlers
+        so they can be RE-ARMED (`rearm_signal_handlers`) after prompt_toolkit
+        prompts delete the SIGINT handler. Cancel this task to stop receiving."""
         import anyio
 
-        with anyio.open_signal_receiver(signal.SIGINT, signal.SIGTERM) as signals:
-            async for sig in signals:
-                await self.signal_pause(reason=_reason_for_signal(sig))
+        self._loop = asyncio.get_running_loop()
+        send, recv = anyio.create_memory_object_stream[int](8)
+        self._sig_send = send
+        self._install_loop_signal_handlers()
+        try:
+            async with recv:
+                async for sig in recv:
+                    await self.signal_pause(reason=_reason_for_signal(sig))
+        finally:
+            loop = self._loop
+            if loop is not None:
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    with _suppress(NotImplementedError, RuntimeError, ValueError):
+                        loop.remove_signal_handler(sig)
+            self._loop = None
+            self._sig_send = None
+            send.close()
 
 
 _READ_TIMEOUT_S = 0.05  # ESC-during-thinking latency + prompt-entry park-wait ceiling

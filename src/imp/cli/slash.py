@@ -116,22 +116,36 @@ async def ask_line_with_slash(
     # Quiesce for the WHOLE turn (every reprompt), not just one ask_async — so a
     # slash-command reprompt keeps the reader parked instead of briefly re-arming
     # cbreak mid-interaction (AC #3). Normal input returns immediately anyway.
-    async with _quiesce():
-        while True:
-            # Keep the whole turn inside status.suspend(): /help, /skills, and
-            # not-found messages print via handle_slash_line, and the live status
-            # display must stay suspended while they do, or it interleaves/clobbers
-            # them before the loop re-prompts.
-            with status.suspend():
-                line: str = await prompt.ask_async()
-                if line.strip().lower() in ("exit", "quit"):
-                    # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the run
-                    # loop's existing EOFError handler (cli/main.py) pauses and exits.
-                    raise EOFError
-                if not is_slash_command(line):
-                    return line
-                result = handle_slash_line(line, change=change, output_fn=print)
-                if result is REPROMPT:
-                    continue
-                assert isinstance(result, str)  # handle_slash_line returns str for skill body
-                return result
+    #
+    # RE-ARM the coordinator's SIGINT/SIGTERM handlers on exit: prompt_toolkit's
+    # prompt_async(handle_sigint=True) calls loop.remove_signal_handler(SIGINT)
+    # when the prompt finishes, silently deleting the loop's SIGINT dispatch
+    # entry. Without this re-arm the first prompt permanently disables mid-run
+    # Ctrl-C, so a later interrupt is never seen by InterruptCoordinator (a
+    # process-group Ctrl-C then surfaces as a codex `unknown` error). Runs on
+    # every return/exception path, including the at-prompt KeyboardInterrupt.
+    try:
+        async with _quiesce():
+            while True:
+                # Keep the whole turn inside status.suspend(): /help, /skills, and
+                # not-found messages print via handle_slash_line, and the live status
+                # display must stay suspended while they do, or it interleaves/clobbers
+                # them before the loop re-prompts.
+                with status.suspend():
+                    line: str = await prompt.ask_async()
+                    if line.strip().lower() in ("exit", "quit"):
+                        # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
+                        # run loop's existing EOFError handler (cli/main.py) pauses.
+                        raise EOFError
+                    if not is_slash_command(line):
+                        return line
+                    result = handle_slash_line(line, change=change, output_fn=print)
+                    if result is REPROMPT:
+                        continue
+                    assert isinstance(result, str)  # handle_slash_line returns str (skill body)
+                    return result
+    finally:
+        # prompt_toolkit deleted SIGINT on prompt exit — restore it so a later
+        # mid-run Ctrl-C is still delivered to the coordinator (see above).
+        if coord is not None:
+            coord.rearm_signal_handlers()
