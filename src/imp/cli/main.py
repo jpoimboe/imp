@@ -113,6 +113,29 @@ def _control_root() -> Path:
     return worktree.find_control_root(Path.cwd())
 
 
+def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None:
+    """Return a clean '✗ run imp init first' message when no provider is
+    env-available (e.g. a never-init'd machine with empty user `providers`),
+    else None. Relocates+dresses the failure that per-step resolution would
+    otherwise raise as a raw ProviderUnavailable deep in a step (spec §4)."""
+    from imp.providers.effective import load_effective_config
+    from imp.providers.resolve import UnknownProvider, _first_available_provider
+    try:
+        config = load_effective_config(
+            project_root=project_root, control_root=control_root,
+        ).config
+        no_provider = _first_available_provider(config) is None
+    except (LoadError, LoadErrors, UnknownProvider):
+        # A malformed config (bad YAML, or a `providers:` entry that names an
+        # unregistered provider — _first_available_provider raises UnknownProvider,
+        # resolve.py:124-136) is reported downstream with full context. Don't dress
+        # it as "run imp init first" — that would mislead. Let resolution surface it.
+        return None
+    if no_provider:
+        return "✗ no provider available — run `imp init` first"
+    return None
+
+
 def _config_divergence_notice(control: Path, launch_dir: Path) -> str | None:
     """If `imp` was launched inside a *linked* worktree (not the control root) that
     carries a committed `imp/config.yaml` differing from the control root's, return
@@ -190,6 +213,11 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         print(f"imp: {e}", file=sys.stderr)
         return 2
     _emit_config_divergence_notice(control)
+
+    block = _preflight_imp_init(control_root=control, project_root=control)
+    if block is not None:
+        print(f"imp: {block}", file=sys.stderr)
+        return 2
 
     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
