@@ -17,8 +17,9 @@ import signal
 import struct
 import subprocess
 import termios
+import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 
 import pyte
 
@@ -30,6 +31,8 @@ _READ_CHUNK = 65536
 _FLOOR = 0.01  # 10 ms — minimum strictly-positive select() slice (deadline safety)
 _POLL = 0.02  # 20 ms — nominal Phase-1 poll cadence cap
 _GRACE = 0.1  # 100 ms — Phase-2 best-effort sweep margin (latency/flake knob, not correctness)
+_DRAIN_YIELD = 0.002  # 2 ms — gap the background drainer leaves between reads so a
+# tool-call thread waiting on the io lock is never starved by the drainer.
 
 
 def _select_slice(remaining: float) -> float:
@@ -111,6 +114,46 @@ class TerminalSession:
         )
         os.close(slave)
         self._closed = False
+        # One reader of the master at a time. wait_idle/run_to_completion hold
+        # this for their whole duration; the background drainer (below) holds it
+        # only between tool calls. Reentrant so a `paused()` caller can use the
+        # locked accessors without self-deadlock. Guards pyte too (feed + reads).
+        self._io_lock = threading.RLock()
+        self._saw_any = False         # any output read yet (by anyone)?
+        self._last_data_t = 0.0       # monotonic time of the most recent DATA read
+        self._stop = False
+        self._drainer = threading.Thread(
+            target=self._drain_forever, name="impty-drainer", daemon=True,
+        )
+        self._drainer.start()
+
+    def _drain_forever(self) -> None:
+        """Continuously drain the master into pyte whenever no tool call holds
+        the io lock, so terminal queries (CPR/DSR-6, device attributes) are
+        answered within milliseconds regardless of MCP-call timing — exactly
+        like a real terminal. Without this, a CPR issued in an inter-call gap
+        goes unread past prompt_toolkit's 2 s timeout and it degrades ("terminal
+        doesn't support CPR"). wait_idle/run_to_completion take the SAME lock, so
+        there is only ever one reader of the master. Exits on EOF, a closed
+        master, or close() setting _stop."""
+        while not self._stop:
+            with self._io_lock:
+                try:
+                    result = self._read_step(_POLL)
+                except (OSError, ValueError):
+                    return  # master closed under us (close() races the read)
+                if result is _StepResult.EOF:
+                    return  # slave fully closed — nothing more will ever arrive
+            time.sleep(_DRAIN_YIELD)  # leave the lock free for a waiting tool call
+
+    @contextlib.contextmanager
+    def paused(self) -> Iterator[None]:
+        """Hold the io lock so a caller can read a CONSISTENT frame — several
+        accessors, or the raw `screen` for rendering — without the background
+        drainer mutating pyte mid-read. Reentrant: the locked accessors compose
+        inside it."""
+        with self._io_lock:
+            yield
 
     @property
     def pid(self) -> int:
@@ -198,6 +241,8 @@ class TerminalSession:
         if not chunk:
             return _StepResult.EOF
         self._stream.feed(chunk)
+        self._saw_any = True
+        self._last_data_t = time.monotonic()
         return _StepResult.DATA
 
     def wait_idle(self, idle: float = 0.2, hard: float = 10.0) -> bool:
@@ -206,24 +251,30 @@ class TerminalSession:
 
         Non-blocking via select(). A quiet window BEFORE any output has been
         read does NOT count as settled — that would race a slow fork/interpreter
-        startup and return an empty screen. So we settle only once we've seen at
-        least one byte (normal case), or the child has already exited (nothing
-        more is coming). Returns True when settled, False if `hard` elapsed while
-        output kept arriving. The final select() may block up to `idle`, so the
-        effective wall-clock cap is ~`hard + idle`."""
-        start = time.monotonic()
-        saw_output = False
-        while True:
-            result = self._read_step(idle)
-            if result is _StepResult.EOF:
-                return True  # child exited / pty closed
-            if result is _StepResult.DATA:
-                saw_output = True
-            elif saw_output or self._proc.poll() is not None:
-                return True  # quiet after output, or child already gone
-            # else: quiet but nothing yet and child still starting — keep waiting
-            if time.monotonic() - start > hard:
-                return False
+        startup and return an empty screen. So we settle only once at least one
+        byte has been read (normal case), or the child has already exited
+        (nothing more is coming). Returns True when settled, False if `hard`
+        elapsed while output kept arriving. The final select() may block up to
+        `idle`, so the effective wall-clock cap is ~`hard + idle`.
+
+        "Output seen" and "last data time" are shared state (`_saw_any` /
+        `_last_data_t`), updated by `_read_step` whoever calls it — so output the
+        background drainer already consumed during an inter-call gap still counts.
+        Otherwise the drainer would 'steal' the child's first bytes and wait_idle
+        would never observe DATA and spin to `hard`."""
+        with self._io_lock:
+            start = time.monotonic()
+            while True:
+                result = self._read_step(idle)
+                now = time.monotonic()
+                if result is _StepResult.EOF:
+                    return True  # child exited / pty closed
+                if self._saw_any and (now - self._last_data_t) >= idle:
+                    return True  # output seen (by us or the drainer), then quiet
+                if not self._saw_any and self._proc.poll() is not None:
+                    return True  # child exited having produced nothing
+                if now - start > hard:
+                    return False
 
     def run_to_completion(self, hard: float = 60.0) -> int:
         """Drive the child to exit, feeding ALL remaining output to pyte first.
@@ -249,27 +300,28 @@ class TerminalSession:
         final reap (child closed the slave but hasn't called _exit() yet) —
         in both cases `hard` elapsed with the child alive. `hard=60.0` is a
         fast-path/test default — streaming (LLM) callers pass a larger budget."""
-        deadline = time.monotonic() + hard
-        # Phase 1 — child running: drain, watching for exit every iteration.
-        while self._proc.poll() is None:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise subprocess.TimeoutExpired(self._proc.args, hard)
-            if self._read_step(_select_slice(remaining)) is _StepResult.EOF:
-                break
-        # Phase 2 — child exited: bounded sweep of buffered bytes.
-        grace_deadline = time.monotonic() + _GRACE
-        while True:
-            remaining = grace_deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            if self._read_step(_select_slice(remaining)) is not _StepResult.DATA:
-                break  # EOF (full capture) or QUIET (nothing more) — done
-        # Reap, bounded by the remaining hard budget (floored so a Phase-2 stop
-        # right at the deadline can't hand wait() a ~0 timeout and spuriously
-        # raise for an already-dead child).
-        reap = max(_FLOOR, deadline - time.monotonic())
-        return self._proc.wait(timeout=reap)
+        with self._io_lock:
+            deadline = time.monotonic() + hard
+            # Phase 1 — child running: drain, watching for exit every iteration.
+            while self._proc.poll() is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(self._proc.args, hard)
+                if self._read_step(_select_slice(remaining)) is _StepResult.EOF:
+                    break
+            # Phase 2 — child exited: bounded sweep of buffered bytes.
+            grace_deadline = time.monotonic() + _GRACE
+            while True:
+                remaining = grace_deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                if self._read_step(_select_slice(remaining)) is not _StepResult.DATA:
+                    break  # EOF (full capture) or QUIET (nothing more) — done
+            # Reap, bounded by the remaining hard budget (floored so a Phase-2 stop
+            # right at the deadline can't hand wait() a ~0 timeout and spuriously
+            # raise for an already-dead child).
+            reap = max(_FLOOR, deadline - time.monotonic())
+            return self._proc.wait(timeout=reap)
 
     # --- read snapshots (delegate to pure view helpers) ------------------
     def lines(self, limit: int | None = None) -> list[str]:
@@ -277,19 +329,24 @@ class TerminalSession:
         (e.g. limit=rows) returns exactly the last N rows, aligned row-for-row
         with cell()/cursor(); with no limit returns the whole strip (trailing
         blanks trimmed). See view.lines."""
-        return view.lines(self._screen, limit)
+        with self._io_lock:
+            return view.lines(self._screen, limit)
 
     def cell(self, x: int, y: int) -> Cell:
-        return view.cell_at(self._screen, x, y)
+        with self._io_lock:
+            return view.cell_at(self._screen, x, y)
 
     def cursor(self) -> tuple[int, int]:
-        return view.cursor_pos(self._screen)
+        with self._io_lock:
+            return view.cursor_pos(self._screen)
 
     def regime(self) -> Regime:
-        return view.regime(self._screen)
+        with self._io_lock:
+            return view.regime(self._screen)
 
     def is_alt_screen(self) -> bool:
-        return view.is_alt_screen(self._screen)
+        with self._io_lock:
+            return view.is_alt_screen(self._screen)
 
     def resize(self, rows: int, cols: int) -> None:
         """Resize the terminal. ioctl(TIOCSWINSZ) on the pty MASTER (the slave is
@@ -297,8 +354,9 @@ class TerminalSession:
         foreground pgrp. Also resizes the live pyte screen (and, if alt is active,
         the saved pre-alt buffer — see TerminalScreen.resize). This is pyte's
         pad/clip/delete, NOT true reflow/rewrap."""
-        _set_winsize(self._master, rows, cols)
-        self._screen.resize(lines=rows, columns=cols)
+        with self._io_lock:
+            _set_winsize(self._master, rows, cols)
+            self._screen.resize(lines=rows, columns=cols)
 
     # --- lifecycle -------------------------------------------------------
     def is_alive(self) -> bool:
@@ -311,6 +369,13 @@ class TerminalSession:
         if self._closed:
             return
         self._closed = True
+        # Stop the background drainer and let it exit its current read BEFORE we
+        # close the master out from under it (it catches the close, but joining
+        # first keeps teardown clean and race-free).
+        self._stop = True
+        drainer = getattr(self, "_drainer", None)
+        if drainer is not None:
+            drainer.join(timeout=2.0)
         with contextlib.suppress(OSError):
             os.close(self._master)
         if self._proc.poll() is None:

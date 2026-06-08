@@ -1,13 +1,28 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import signal
 import sys
 
 import pytest
 
 import impty.mcp as mcp_mod
 from impty.mcp import _decode_keys
+
+# A child that turns SIGINT into an async-signal-safe marker and exits via the
+# handler (mirrors tests/impty/test_session.py). Sleeps past the test deadline so
+# the only exit path is the handler firing.
+_SIGINT_CHILD = (
+    "import os, signal, sys, time\n"
+    "def _handler(signum, frame):\n"
+    "    os.write(1, b'GOT-SIGINT\\n')\n"
+    "    os._exit(42)\n"
+    "signal.signal(signal.SIGINT, _handler)\n"
+    "print('READY', flush=True)\n"
+    "time.sleep(30)\n"
+)
 
 
 def _can_pty() -> bool:
@@ -48,7 +63,25 @@ def test_leaves_unrecognized_backslash_literal() -> None:
 def test_transcript_tool_is_removed_view_remains() -> None:
     names = {t.name for t in asyncio.run(mcp_mod.mcp.list_tools())}
     assert "transcript" not in names
-    assert {"start", "view", "send", "wait", "snapshot", "stop"} <= names
+    assert {"start", "view", "send", "wait", "snapshot", "stop", "send_signal"} <= names
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+def test_send_signal_tool_delivers_sigint_regardless_of_tty_mode() -> None:
+    # The mode-independent escape hatch: send_signal() reaches the child's process
+    # group directly, so a driver doesn't have to scrape the pid and `kill -INT`
+    # when the tty happens to be in raw mode (ISIG off). It fires the child's
+    # SIGINT handler even though no \x03 byte was sent.
+    mcp_mod.start([sys.executable, "-c", _SIGINT_CHILD])
+    try:
+        mcp_mod.wait(idle=0.2, hard=5.0)
+        screen = mcp_mod.send_signal(signal.SIGINT)
+        assert "GOT-SIGINT" in screen
+        assert "alive=False" in screen.splitlines()[0]
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(mcp_mod._require().pid, signal.SIGKILL)
+        mcp_mod.stop()
 
 
 @pytest.mark.skipif(not _can_pty(), reason="pty not available")

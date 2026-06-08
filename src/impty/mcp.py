@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import codecs
 import re
+import signal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -66,12 +67,13 @@ def _render(session: TerminalSession, *, full: bool = False) -> str:
     full=True returns the whole history+screen strip. The cursor is screen-local
     and bounded, so a small y near the bottom is the cheap 'parked = waiting for
     input' tell."""
-    cx, cy = session.cursor()
-    status = (
-        f"[alive={session.is_alive()} regime={session.regime().value} "
-        f"cursor=({cx},{cy})]"
-    )
-    body = session.lines() if full else session.lines(limit=session.rows)
+    with session.paused():  # one consistent frame: header + body from the same pyte state
+        cx, cy = session.cursor()
+        status = (
+            f"[alive={session.is_alive()} regime={session.regime().value} "
+            f"cursor=({cx},{cy})]"
+        )
+        body = session.lines() if full else session.lines(limit=session.rows)
     return f"{status}\n" + "\n".join(body)
 
 
@@ -134,6 +136,26 @@ def send(data: str, wait: bool = True) -> str:
 
 
 @mcp.tool()
+def send_signal(sig: int = signal.SIGINT) -> str:
+    """Deliver a real signal to the program's process group, then return the new
+    screen. The mode-INDEPENDENT interrupt: unlike `send("\\x03")` — which only
+    becomes a SIGINT when the tty's line discipline has ISIG on (cooked/cbreak)
+    and is just a raw byte at a prompt_toolkit prompt — this bypasses the tty
+    entirely. Use it when you want a deterministic Ctrl-C regardless of tty mode,
+    instead of scraping the pid and shelling out to `kill`.
+
+    `sig` is the signal number: SIGINT=2 (Ctrl-C, default), SIGTERM=15. Reaches
+    only the child's process group — a grandchild that `setsid()`'d into its own
+    session is not signalled, exactly like a real Ctrl-C. A no-op once the child
+    has exited.
+    """
+    session = _require()
+    session.send_signal(sig)
+    session.wait_idle(idle=0.3, hard=15.0)
+    return _render(session)
+
+
+@mcp.tool()
 def wait(idle: float = 0.3, hard: float = 15.0) -> str:
     """Wait for the program to produce output and go quiet, then return the screen.
 
@@ -166,7 +188,8 @@ def snapshot(path: str | None = None, full: bool = False) -> str:
     if path is None:
         fd, path = tempfile.mkstemp(prefix="impty-", suffix=".png")
         os.close(fd)
-    render_screen(session.screen, path, full=full)
+    with session.paused():  # freeze pyte while render reads the raw screen buffer
+        render_screen(session.screen, path, full=full)
     return f"[wrote {path}]"
 
 

@@ -125,6 +125,47 @@ def test_cpr_query_is_answered_so_program_can_read_reply() -> None:
         assert "CPR=1;1" in "\n".join(s.lines())
 
 
+# A child that issues CPR and gives the terminal only a SHORT window to answer,
+# WITHOUT the test draining during that window. A real terminal answers within
+# milliseconds no matter what the controlling program is doing; impty must too —
+# so a CPR issued in an inter-call gap (no wait_idle in flight) is still answered.
+# This is the prompt_toolkit "doesn't support CPR" degradation reduced to its core:
+# prompt_toolkit waits 2s, but the mechanism is identical and this is fast.
+_CPR_SHORT_WINDOW_CHILD = (
+    "import sys, os, select, tty, termios, time\n"
+    "fd = sys.stdin.fileno()\n"
+    "old = termios.tcgetattr(fd); tty.setraw(fd)\n"
+    "buf = b''\n"
+    "try:\n"
+    "    os.write(1, b'\\x1b[6n')\n"
+    "    deadline = time.monotonic() + 0.4\n"   # short answer window
+    "    while time.monotonic() < deadline:\n"
+    "        r, _, _ = select.select([fd], [], [], deadline - time.monotonic())\n"
+    "        if not r: break\n"
+    "        c = os.read(fd, 1)\n"
+    "        if not c or c == b'R': break\n"
+    "        buf += c\n"
+    "finally:\n"
+    "    termios.tcsetattr(fd, termios.TCSADRAIN, old)\n"
+    "got = (b'CPR=' + buf.lstrip(b'\\x1b[')) if buf else b'NO-CPR'\n"
+    "os.write(1, b'\\n' + got + b'\\n')\n"
+    "time.sleep(5)\n"
+)
+
+
+def test_cpr_answered_without_a_concurrent_wait_idle() -> None:
+    with TerminalSession([sys.executable, "-c", _CPR_SHORT_WINDOW_CHILD]) as s:
+        # Deliberately do NOT drain while the child's 0.4s CPR window is open —
+        # mimics an MCP inter-call gap. Only a background drainer can answer in
+        # time; an on-demand-only reader would miss the window → child prints
+        # NO-CPR. Sleep past the child's window before the first wait_idle.
+        time.sleep(0.8)
+        s.wait_idle(idle=0.3, hard=3.0)
+        out = "\n".join(s.lines())
+        assert "CPR=1;1" in out
+        assert "NO-CPR" not in out
+
+
 def test_cursor_parks_after_prompt_string() -> None:
     # "Waiting for input looks like": cursor sits immediately after the prompt
     # text, on the bottom non-blank row, with no further output. This is the
