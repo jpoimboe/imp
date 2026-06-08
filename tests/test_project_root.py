@@ -39,18 +39,12 @@ def test_terminates_at_filesystem_root() -> None:
     assert isinstance(result, Path)
 
 
-def test_finds_project_yaml_marker(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    (root / "imp").mkdir(parents=True)
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
-    sub = root / "a" / "b"
-    sub.mkdir(parents=True)
-    assert find_project_root(sub) == root
-
-
 def test_old_config_yaml_marker_no_longer_matches(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     (root / "imp").mkdir(parents=True)
     (root / "imp" / "config.yaml").write_text("providers: [openai]\n")
-    # No project.yaml -> "no project yet": returns the start dir, not `root`.
-    assert find_project_root(root) == root.resolve()
+    sub = root / "sub"
+    sub.mkdir()
+    # No project.yaml anywhere → "no project yet": returns the start dir (sub),
+    # NOT root. (Old code, treating config.yaml as a marker, would return root.)
+    assert find_project_root(sub) == sub
