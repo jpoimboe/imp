@@ -136,39 +136,6 @@ def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None
     return None
 
 
-def _config_divergence_notice(control: Path, launch_dir: Path) -> str | None:
-    """If `imp` was launched inside a *linked* worktree (not the control root) that
-    carries a committed `imp/config.yaml` differing from the control root's, return
-    a one-line notice that the launch worktree's config is NOT what routes the run.
-
-    imp always reads config from the control root (per-change-worktrees design
-    §5.3/§5.4) — the right precedence (config tracks the operator's live setup, not
-    a per-branch snapshot), but silent: a codex-only config sitting in the launch
-    worktree otherwise runs on whatever the main checkout lists with no signal.
-    Only warns when the two configs actually differ; identical configs stay quiet."""
-    top = worktree.worktree_toplevel(launch_dir)
-    if top is None or top == control.resolve():
-        return None
-    launch_cfg = top / "imp" / "config.yaml"
-    control_cfg = control / "imp" / "config.yaml"
-    try:
-        if not launch_cfg.exists() or launch_cfg.read_text() == control_cfg.read_text():
-            return None
-    except OSError:
-        return None
-    return (f"note: routing config from {control_cfg} — this worktree's "
-            f"imp/config.yaml is not used (imp reads config from the main checkout)")
-
-
-def _emit_config_divergence_notice(control: Path) -> None:
-    """Surface the §5.4 config precedence at launch (cwd before any chdir) so a
-    differing worktree config isn't silently ignored. Best-effort; never fatal."""
-    notice = _config_divergence_notice(control, Path.cwd())
-    if notice:
-        print(ansi(notice, "yellow", enabled=should_use_color(sys.stderr)),
-              file=sys.stderr)
-
-
 def _apply_theme() -> None:
     """Pick the active color theme once, before any command renders. `IMP_THEME`
     overrides everything; otherwise the value detected and persisted at `imp init`
@@ -212,7 +179,6 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     except worktree.PreconditionError as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-    _emit_config_divergence_notice(control)
 
     block = _preflight_imp_init(control_root=control, project_root=control)
     if block is not None:
@@ -346,7 +312,6 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     control = _control_root()
-    _emit_config_divergence_notice(control)
     try:
         change_id = _resolve_id(control, args.token)
     except SystemExit:
