@@ -261,6 +261,9 @@ class RunResult:
     telemetry: Telemetry
     dollars: float = 0.0
     imp_commit_sha: str = ""  # the imp HEAD SHA the cell was produced at (P1)
+    failed: bool = False  # the run errored or came back empty (rate-limited / no
+    # tool calls); failed cells must NOT be cached or graded — they would poison the
+    # scorecard as spurious 0-finding results (the per-task-slice rate-limit case).
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -272,6 +275,7 @@ class RunResult:
             "telemetry": self.telemetry.to_dict(),
             "dollars": self.dollars,
             "imp_commit_sha": self.imp_commit_sha,
+            "failed": self.failed,
         }
 
     @classmethod
@@ -294,6 +298,7 @@ class RunResult:
             telemetry=Telemetry.from_dict(d["telemetry"]),
             dollars=float(d.get("dollars", 0.0)),
             imp_commit_sha=d.get("imp_commit_sha", ""),
+            failed=bool(d.get("failed", False)),
         )
 
 

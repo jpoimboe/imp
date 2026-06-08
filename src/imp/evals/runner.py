@@ -98,6 +98,14 @@ def drive_review(
     )
     prose = (output or {}).get("findings", "") if output else ""
     effective_telem = telem or Telemetry.zero()
+    # A rate-limited / empty response is the per-task-slice poisoning signature: the
+    # model NEVER ran — no tool calls (a real reviewer reads the diff first) AND no
+    # output tokens (it produced nothing). Require BOTH zero so a real review that
+    # happens to emit no findings (a clean approve still reads + writes) is not
+    # mistaken for empty. Mark failed so the caller doesn't cache a spurious 0-finding cell.
+    failed = output is None or (
+        effective_telem.tool_calls == 0 and effective_telem.output_tokens == 0
+    )
     return RunResult(
         variant_id=vid,
         fixture_id=fixture.id,
@@ -106,6 +114,7 @@ def drive_review(
         findings=parse_review_findings(prose),
         telemetry=effective_telem,
         dollars=price_run(effective_telem, provider_name, model_name),
+        failed=failed,
     )
 
 

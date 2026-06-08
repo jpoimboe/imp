@@ -162,6 +162,11 @@ def _run_fixture_cells(
             continue
         for repeat in range(v.n_repeats):
             rr = run_variant(control_root, v, fixture, repeat_index=repeat)
+            if rr.failed:
+                # An empty/errored run (e.g. rate-limited, no tool calls) is NOT cached
+                # or graded — caching it would serve a spurious 0-finding cell forever.
+                # Dropping it means a re-run recomputes it instead of inheriting poison.
+                continue
             store_run(cache_dir, rr, provenance, imp_commit_sha=sha)
             g = grade(
                 fixture,

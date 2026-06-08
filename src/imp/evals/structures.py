@@ -48,6 +48,7 @@ def run_variant(
     prose_parts: list[str] = []
     telem = Telemetry.zero()
     total_dollars = 0.0
+    any_failed = False
     try:
         for agent_name, (provider, model) in variant.role_to_model_map.items():
             member = drive_review(
@@ -60,6 +61,7 @@ def run_variant(
                 override_path=variant.prompt_overrides.get(agent_name),
                 variant_id=variant.id,
             )
+            any_failed = any_failed or member.failed
             all_findings.extend(member.findings)
             telem = telem + member.telemetry  # tokens/tool-calls/wall all SUM
             total_dollars += member.dollars
@@ -86,6 +88,7 @@ def run_variant(
         findings=findings,
         telemetry=telem,
         dollars=total_dollars,
+        failed=any_failed,
     )
 
 
@@ -104,6 +107,7 @@ def _run_variant_per_task(
     prose_parts: list[str] = []
     telem = Telemetry.zero()
     total_dollars = 0.0
+    any_failed = False
     for i, task in enumerate(fixture.tasks):
         token = uuid.uuid4().hex[:8]  # isolate concurrent same-(fixture,task) cells
         worktree = materialize_task_tree(control_root, fixture, i, unique=token)
@@ -121,6 +125,7 @@ def _run_variant_per_task(
                     variant_id=variant.id,
                     review_context=task.task_context,
                 )
+                any_failed = any_failed or member.failed
                 task_findings.extend(member.findings)
                 telem = telem + member.telemetry  # tokens/tool-calls/wall all SUM
                 total_dollars += member.dollars
@@ -143,4 +148,5 @@ def _run_variant_per_task(
         findings=tuple(all_findings),
         telemetry=telem,
         dollars=total_dollars,
+        failed=any_failed,
     )
