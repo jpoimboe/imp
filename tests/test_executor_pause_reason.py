@@ -102,12 +102,8 @@ def _seed_single_agent(root: Path) -> Change:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
+    # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
-    # Task 6 reader cutover: run_change reads via load_effective_config.
-    # Add the new-layout marker + local layer; KEEP the legacy write above.
     (root / "imp" / "project.yaml").write_text("workflow: default\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
@@ -188,12 +184,8 @@ async def test_max_loops_pause_reason_unchanged(tmp_path: Path) -> None:
         "          - {if: {verdict: rework}, goto: reviewer}\n"
         "          - {else: true, continue: true}\n"
     )
+    # run_change reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
-    # Task 6 reader cutover: run_change reads via load_effective_config.
-    # Add the new-layout marker + local layer; KEEP the legacy write above.
     (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(

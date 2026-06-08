@@ -129,10 +129,8 @@ def _seed_single_step(root: Path) -> Change:
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: medium}\n")
     _cfg = "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
+    # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(_cfg)
-    # Task 6 reader cutover: run_change reads via load_effective_config.
-    # Add the new-layout marker + local layer; KEEP the legacy write above.
     (root / "imp" / "project.yaml").write_text("workflow: default\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_cfg)

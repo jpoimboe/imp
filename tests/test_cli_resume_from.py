@@ -12,12 +12,14 @@ from tests.conftest import _git, _init_repo, _seed_control
 
 def _seed_control_default(root: Path) -> None:
     """Like conftest._seed_control, but commits the REAL shipped default
-    workflow at imp/workflows/default plus a config.yaml defining every tier it
+    workflow at imp/workflows/default plus a config defining every tier it
     uses — so Change.create copies the real workflow (with code-reviewer, gates,
     a merge phase) into the worktree."""
     _init_repo(root)
     shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
-    (root / "imp" / "config.yaml").write_text(
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n  low: {anthropic: m}\n  medium: {anthropic: m}\n  high: {anthropic: m}\n"
     )

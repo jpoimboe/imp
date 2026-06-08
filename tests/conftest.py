@@ -62,7 +62,8 @@ def _init_repo(root: Path) -> None:
 
 
 def _seed_control(root: Path) -> None:
-    """A git repo with committed imp/config.yaml + imp/workflows/default."""
+    """A git repo with committed imp/project.yaml marker + imp/workflows/default
+    and a gitignored .imp/config.yaml local layer (read by load_effective_config)."""
     _init_repo(root)
     src = root / "imp" / "workflows" / "default"
     (src / "agents").mkdir(parents=True)
@@ -75,16 +76,7 @@ def _seed_control(root: Path) -> None:
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
-    (root / "imp" / "config.yaml").write_text(
-        "providers: [anthropic]\n"
-        "tiers:\n"
-        "  low: {anthropic: x}\n"
-        "  medium: {anthropic: x}\n"
-        "  high: {anthropic: x}\n"
-    )
-    # New-layout layers (Task 6 reader cutover): committed marker + local layer.
-    # The existing imp/config.yaml write above is KEPT — load_config's direct
-    # callers still read it until Task 11. Additive on purpose.
+    # Config layers: committed marker + gitignored local layer.
     (root / "imp" / "project.yaml").write_text("workflow: default\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(

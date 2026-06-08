@@ -115,9 +115,10 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         shell.write_text("#!/bin/sh\nexit 0\n")
         shell.chmod(0o755)
 
-    # config.yaml: a single role for every tier used by the workflow.
+    # config: a single role for every tier used by the workflow. run_change reads
+    # via load_effective_config (project layer from imp/project.yaml + local layer
+    # from .imp/config.yaml). Tests 2/3 swap the provider via _rewrite_config.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    cfg = tmp_path / "imp" / "config.yaml"
     cfg_content = (
         "providers: [anthropic]\n"
         "tiers:\n"
@@ -125,12 +126,6 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  medium: {anthropic: claude-sonnet-4-6}\n"
         "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
-    cfg.write_text(cfg_content)
-    # Task 6 reader cutover: run_change reads via load_effective_config (project
-    # layer from imp/project.yaml + local layer from .imp/config.yaml), not the
-    # legacy imp/config.yaml above. Mirror the content into the local layer.
-    # Tests 2/3 rewrite the provider via _rewrite_config (both files) so the
-    # reader sees the swap. KEEP the legacy write above.
     (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
@@ -140,8 +135,8 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
-    # Ignore both .imp/ (runtime state) and imp/ (test-only config) so that
-    # rewrites of imp/config.yaml in tests 2 and 3 don't dirty the worktree.
+    # Ignore both .imp/ (runtime state + local config layer) and imp/ (test-only
+    # workflow/marker) so config rewrites in tests 2 and 3 don't dirty the worktree.
     (tmp_path / ".gitignore").write_text(".imp/\nimp/\n")
     (tmp_path / "README.md").write_text("seed\n")
     _git(tmp_path, "add", "-A")
@@ -156,16 +151,14 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
 
 
 def _rewrite_config(tmp_path: Path, *replacements: tuple[str, str]) -> None:
-    """Apply str replacements to BOTH config layers: the legacy imp/config.yaml
-    and the .imp/config.yaml local layer (the one the runtime reader uses after
-    the Task 6 cutover). Keeps the two in lockstep so a provider swap in a test
-    reaches load_effective_config."""
-    for rel in ("imp/config.yaml", ".imp/config.yaml"):
-        p = tmp_path / rel
-        text = p.read_text()
-        for old, new in replacements:
-            text = text.replace(old, new)
-        p.write_text(text)
+    """Apply str replacements to the .imp/config.yaml local layer (the one
+    load_effective_config reads), so a provider swap in a test reaches the
+    runtime."""
+    p = tmp_path / ".imp" / "config.yaml"
+    text = p.read_text()
+    for old, new in replacements:
+        text = text.replace(old, new)
+    p.write_text(text)
 
 
 @pytest.mark.anyio

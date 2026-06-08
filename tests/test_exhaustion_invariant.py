@@ -100,12 +100,8 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
         "    steps:\n"
         "      - {name: build, file: agents/worker.md, tier: medium}\n"
     )
+    # run_change reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
-    # Task 6 reader cutover: run_change reads via load_effective_config.
-    # Add the new-layout marker + local layer; KEEP the legacy write above.
     (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(

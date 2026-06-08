@@ -100,13 +100,10 @@ _FAKE_CONFIG = (
 
 
 def _write_fake_config(root: Path) -> None:
-    """Write the `fake`-provider config in BOTH the legacy single-file layout
-    (imp/config.yaml — still read by load_config's direct callers, e.g.
-    _make_change's tier-name probe) and the new layered layout (Task 6 reader
-    cutover): imp/project.yaml marker + .imp/config.yaml local layer, which
-    load_effective_config reads for run_change. Additive on purpose."""
+    """Write the `fake`-provider config in the layered layout that
+    load_effective_config reads: imp/project.yaml marker + .imp/config.yaml
+    local layer."""
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(_FAKE_CONFIG)
     (root / "imp" / "project.yaml").write_text("workflow: default\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)

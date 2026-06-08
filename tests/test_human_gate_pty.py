@@ -67,10 +67,8 @@ def _seed_human_gate_workflow(root: Path) -> None:
         "  medium: {anthropic: claude-3-5-haiku-20241022}\n"
         "  high: {anthropic: claude-3-5-haiku-20241022}\n"
     )
-    (root / "imp" / "config.yaml").write_text(_cfg)
-    # Task 6 reader cutover: the `imp new` subprocess reads via
-    # load_effective_config. Add the new-layout marker + local layer; KEEP the
-    # legacy write above.
+    # The `imp new` subprocess reads via load_effective_config: project marker +
+    # local layer.
     (root / "imp" / "project.yaml").write_text("workflow: default\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_cfg)
