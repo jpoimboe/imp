@@ -802,6 +802,13 @@ class AnthropicProvider:
         )
 
 
+# Tier→model floor (spec 2026-06-08-config-file-split §2). Bare aliases track
+# "latest" so the floor never goes stale; an operator can pin a dated model via
+# any config layer.
+TIER_DEFAULTS: dict[str, str] = {"low": "haiku", "medium": "sonnet", "high": "opus"}
+ENV_VAR: str | None = "ANTHROPIC_API_KEY"
+
+
 def _env_check() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
