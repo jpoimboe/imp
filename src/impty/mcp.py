@@ -23,12 +23,20 @@ from __future__ import annotations
 import codecs
 import re
 import signal
+import time
 
 from mcp.server.fastmcp import FastMCP
 
 from impty import TerminalSession
 
 mcp = FastMCP("impty")
+
+# The settle policy shared by start/send/send_signal/wait: how long the program
+# must be quiet to count as "done reacting" (idle) and the wall-clock ceiling
+# before we give up and return whatever's on screen (hard). One place, so the
+# four call sites can't drift apart.
+_SETTLE_IDLE = 0.3
+_SETTLE_HARD = 15.0
 
 # C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
 # Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
@@ -96,7 +104,7 @@ def start(
         _session.close()
         _session = None
     session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows)
-    session.wait_idle(idle=0.3, hard=15.0)
+    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD)
     _session = session
     return _render(session)
 
@@ -128,10 +136,14 @@ def send(data: str, wait: bool = True) -> str:
     without waiting (e.g. mid-stream input).
     """
     session = _require()
+    # Mark the type-then-look boundary just before the keystroke so wait_idle
+    # settles on the REACTION, not on a stale pre-send screen the drainer last
+    # touched seconds ago.
+    since = time.monotonic()
     session.send(_decode_keys(data))
     if not wait:
         return "[sent]"
-    session.wait_idle(idle=0.3, hard=15.0)
+    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD, since=since)
     return _render(session)
 
 
@@ -150,13 +162,16 @@ def send_signal(sig: int = signal.SIGINT) -> str:
     has exited.
     """
     session = _require()
+    # Same type-then-look boundary as send(): settle on the signal's reaction
+    # (handler output, exit), not on a stale pre-signal screen.
+    since = time.monotonic()
     session.send_signal(sig)
-    session.wait_idle(idle=0.3, hard=15.0)
+    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD, since=since)
     return _render(session)
 
 
 @mcp.tool()
-def wait(idle: float = 0.3, hard: float = 15.0) -> str:
+def wait(idle: float = _SETTLE_IDLE, hard: float = _SETTLE_HARD) -> str:
     """Wait for the program to produce output and go quiet, then return the screen.
 
     For watching a program that's still working (spinners, streaming) without

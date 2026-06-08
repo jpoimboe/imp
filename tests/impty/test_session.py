@@ -62,6 +62,40 @@ def test_wait_idle_hard_timeout_returns_false_on_chatty_child() -> None:
         assert s.wait_idle(idle=0.5, hard=1.0) is False
 
 
+# A child that parks quietly, then on one keystroke reacts AFTER a delay longer
+# than `idle`, in raw mode so there is no tty echo within the idle window. This
+# is the "type-then-look" failure shape: a key triggering a delayed reaction
+# (RPC/LLM) with no immediate redraw.
+_DELAYED_REACTION_CHILD = (
+    "import sys, os, tty, termios, time\n"
+    "fd = sys.stdin.fileno()\n"
+    "old = termios.tcgetattr(fd); tty.setraw(fd)\n"
+    "os.write(1, b'READY\\n')\n"
+    "os.read(fd, 1)\n"            # block until the keystroke
+    "time.sleep(0.6)\n"          # delayed reaction, > idle, no echo
+    "os.write(1, b'REACTION\\n')\n"
+    "termios.tcsetattr(fd, termios.TCSADRAIN, old)\n"
+    "time.sleep(5)\n"
+)
+
+
+def test_wait_idle_since_waits_for_delayed_reaction_not_stale_screen() -> None:
+    # Regression: with `since`, a wait must not settle on the pre-send screen
+    # just because the LAST output (the drainer's _last_data_t) is seconds old.
+    # It must wait for the reaction to THIS keystroke to actually arrive.
+    with TerminalSession([sys.executable, "-c", _DELAYED_REACTION_CHILD]) as s:
+        s.wait_idle(idle=0.2, hard=5.0)
+        assert "READY" in "\n".join(s.lines())
+        time.sleep(0.5)  # let _last_data_t go stale relative to the send
+        since = time.monotonic()
+        s.send("x")
+        settled = s.wait_idle(idle=0.2, hard=5.0, since=since)
+        assert settled is True
+        # Without the since boundary this returns at ~0.2s on the stale READY
+        # screen, before the +0.6s reaction lands.
+        assert "REACTION" in "\n".join(s.lines())
+
+
 def test_default_term_is_set_for_color_fidelity() -> None:
     # The child inherits TERM=xterm-256color by default, so a real program's
     # color emission (and thus cell().fg) is deterministic across machines/CI.

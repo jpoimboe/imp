@@ -119,8 +119,11 @@ class TerminalSession:
         # only between tool calls. Reentrant so a `paused()` caller can use the
         # locked accessors without self-deadlock. Guards pyte too (feed + reads).
         self._io_lock = threading.RLock()
-        self._saw_any = False         # any output read yet (by anyone)?
-        self._last_data_t = 0.0       # monotonic time of the most recent DATA read
+        # monotonic time of the most recent DATA read (by anyone), or None if no
+        # output has ever been read. One fact, one variable — "have we seen
+        # output?" is just `is not None`, so the settle test can't conflate
+        # "saw something, ever" with "saw something recently".
+        self._last_data_t: float | None = None
         self._stop = False
         self._drainer = threading.Thread(
             target=self._drain_forever, name="impty-drainer", daemon=True,
@@ -180,11 +183,17 @@ class TerminalSession:
         back into the program's stdin. Best-effort and non-blocking: only write
         when the master is immediately writable, else drop the reply — a drain
         loop must never block on a reply when the child has stopped reading its
-        stdin and the input buffer is full."""
-        _, writable, _ = select.select([], [self._master], [], 0)
-        if writable:
-            with contextlib.suppress(OSError):
-                os.write(self._master, data.encode("utf-8"))
+        stdin and the input buffer is full.
+
+        Serialized with send() under _io_lock so the two master-write paths never
+        interleave a reply mid-keystroke-sequence. Reentrant: this runs inside
+        pyte.feed(), which the drainer/wait_idle already call holding _io_lock, so
+        re-taking it here is a no-op recursion on the same thread."""
+        with self._io_lock:
+            _, writable, _ = select.select([], [self._master], [], 0)
+            if writable:
+                with contextlib.suppress(OSError):
+                    os.write(self._master, data.encode("utf-8"))
 
     def send(self, data: bytes | str) -> None:
         """Write raw keystrokes to the program. Strings are UTF-8 encoded.
@@ -198,7 +207,13 @@ class TerminalSession:
         signal, use send_signal()."""
         if isinstance(data, str):
             data = data.encode("utf-8")
-        os.write(self._master, data)
+        # Serialize with the drainer's reply writes (_write_reply runs under this
+        # same lock inside pyte.feed). Without it, a large send (>PIPE_BUF, split
+        # across write syscalls) could interleave with a CPR reply and deliver a
+        # corrupted escape sequence to the child. Brief contention with the
+        # drainer's read slice is fine.
+        with self._io_lock:
+            os.write(self._master, data)
 
     def send_signal(self, sig: int = signal.SIGINT) -> None:
         """Deliver a real signal to the child's foreground process group, bypassing
@@ -241,27 +256,37 @@ class TerminalSession:
         if not chunk:
             return _StepResult.EOF
         self._stream.feed(chunk)
-        self._saw_any = True
         self._last_data_t = time.monotonic()
         return _StepResult.DATA
 
-    def wait_idle(self, idle: float = 0.2, hard: float = 10.0) -> bool:
+    def wait_idle(
+        self, idle: float = 0.2, hard: float = 10.0, *, since: float = 0.0
+    ) -> bool:
         """Block until the child produces output and then goes quiet for `idle`
         seconds (or exits, or `hard` elapses), feeding everything to pyte.
 
-        Non-blocking via select(). A quiet window BEFORE any output has been
-        read does NOT count as settled — that would race a slow fork/interpreter
-        startup and return an empty screen. So we settle only once at least one
-        byte has been read (normal case), or the child has already exited
-        (nothing more is coming). Returns True when settled, False if `hard`
-        elapsed while output kept arriving. The final select() may block up to
-        `idle`, so the effective wall-clock cap is ~`hard + idle`.
+        Non-blocking via select(). A quiet window BEFORE any qualifying output
+        has been read does NOT count as settled — that would race a slow
+        fork/interpreter startup and return an empty screen. So we settle only
+        once qualifying output has been read (normal case), or the child has
+        already exited (nothing more is coming). Returns True when settled, False
+        if `hard` elapsed while output kept arriving. The final select() may
+        block up to `idle`, so the effective wall-clock cap is ~`hard + idle`.
 
-        "Output seen" and "last data time" are shared state (`_saw_any` /
-        `_last_data_t`), updated by `_read_step` whoever calls it — so output the
-        background drainer already consumed during an inter-call gap still counts.
-        Otherwise the drainer would 'steal' the child's first bytes and wait_idle
-        would never observe DATA and spin to `hard`."""
+        `since` is a monotonic timestamp: only output read at or after it
+        qualifies. Default 0.0 counts ANY output ever read — including what the
+        background drainer consumed during an inter-call gap — which is what a
+        bare `wait`/`start` wants (don't spin to `hard` re-waiting for output
+        that already landed). For type-then-look, callers pass `since` = a moment
+        just before their keystroke/signal, so a STALE pre-action screen (the
+        drainer's `_last_data_t` may be seconds old) can't masquerade as 'already
+        settled': we keep waiting for the reaction to actually arrive and go
+        quiet. The drainer can't 'steal' that reaction either — its `_last_data_t`
+        stamp is still `>= since`, so drainer-consumed reaction bytes qualify just
+        as if we'd read them ourselves.
+
+        `_last_data_t` is shared state updated by `_read_step` whoever calls it,
+        all under `_io_lock`."""
         with self._io_lock:
             start = time.monotonic()
             while True:
@@ -269,10 +294,12 @@ class TerminalSession:
                 now = time.monotonic()
                 if result is _StepResult.EOF:
                     return True  # child exited / pty closed
-                if self._saw_any and (now - self._last_data_t) >= idle:
-                    return True  # output seen (by us or the drainer), then quiet
-                if not self._saw_any and self._proc.poll() is not None:
-                    return True  # child exited having produced nothing
+                last = self._last_data_t
+                if last is not None and last >= since:  # qualifying output seen...
+                    if (now - last) >= idle:
+                        return True  # ...by us or the drainer, then quiet
+                elif self._proc.poll() is not None:
+                    return True  # child exited having produced nothing qualifying
                 if now - start > hard:
                     return False
 
