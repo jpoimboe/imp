@@ -131,7 +131,7 @@ def test_status_shows_completed_section_from_journal(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
     # in-flight slug appears under in-flight; merged slug under completed.
@@ -164,7 +164,7 @@ def test_status_inflight_takes_precedence_over_journal(
 
     completed = m._completed_rows(tmp_path)
     assert [r[0] for r in completed] == []  # in-flight worktree wins
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
     assert out.count("both") == 1  # only in the in-flight section
@@ -196,57 +196,57 @@ def test_status_skips_malformed_journal_entry(
 
     completed = m._completed_rows(tmp_path)
     assert [r[0] for r in completed] == ["good"]  # broken entry skipped
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
     assert "good" in out
     assert "broken" not in out
 
 
-def test_status_sorts_rows_by_last_activity_descending(
+def _set_created_at(control: Path, slug: str, created_at: str) -> None:
+    """Overwrite change.json's created_at before journaling so the row's sort
+    key is deterministic (Change.create stamps wall-clock now())."""
+    meta_path = (control / ".imp" / "worktrees" / slug
+                 / ".imp" / "change" / "change.json")
+    meta = json.loads(meta_path.read_text())
+    meta["created_at"] = created_at
+    meta_path.write_text(json.dumps(meta))
+
+
+def test_status_sorts_rows_by_creation_date_oldest_first(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Two journaled Changes with different last_activity stamps sort DESC;
-    a third with no events ('-') lands after both timestamped rows."""
-    import json as _json
-
+    """Rows sort by Change creation date, oldest first — independent of
+    last_activity (the 'middle' Change is journaled last but created in the
+    middle, so it must land between the others, not at an end)."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
-    Change.create(tmp_path, title="Older", change_id="older", base_branch="main")
-    Change.create(tmp_path, title="Newer", change_id="newer", base_branch="main")
-    Change.create(tmp_path, title="Bare",  change_id="bare",  base_branch="main")
+    Change.create(tmp_path, title="Oldest", change_id="oldest", base_branch="main")
+    Change.create(tmp_path, title="Middle", change_id="middle", base_branch="main")
+    Change.create(tmp_path, title="Newest", change_id="newest", base_branch="main")
+    _set_created_at(tmp_path, "oldest", "2024-01-01T00:00:00+00:00")
+    _set_created_at(tmp_path, "middle", "2025-01-01T00:00:00+00:00")
+    _set_created_at(tmp_path, "newest", "2026-01-01T00:00:00+00:00")
 
-    def _ev(slug: str) -> Path:
-        return (tmp_path / ".imp" / "worktrees" / slug
-                / ".imp" / "change" / "events.jsonl")
-
-    _ev("older").write_text(_json.dumps({
-        "timestamp": "2025-01-01T00:00:00+00:00",
-        "type": "change_created", "payload": {},
-    }) + "\n")
-    _ev("newer").write_text(_json.dumps({
-        "timestamp": "2026-01-01T00:00:00+00:00",
-        "type": "change_created", "payload": {},
-    }) + "\n")
-    _ev("bare").write_text("")  # no events → last_activity = '-'
-
-    _complete_and_journal(tmp_path, "older")
-    _complete_and_journal(tmp_path, "newer")
-    _complete_and_journal(tmp_path, "bare")
+    # Journal in an order unrelated to creation date to prove the sort key is
+    # created_at, not journaling/activity order.
+    _complete_and_journal(tmp_path, "newest")
+    _complete_and_journal(tmp_path, "oldest")
+    _complete_and_journal(tmp_path, "middle")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     lines = capsys.readouterr().out.splitlines()
     # Header is lines[0]; data rows follow. First whitespace-delimited token
     # of each data row is the slug.
     slugs_in_order = [line.split()[0] for line in lines[1:]]
-    assert slugs_in_order == ["newer", "older", "bare"]
+    assert slugs_in_order == ["oldest", "middle", "newest"]
 
 
 def test_status_empty_prints_no_changes(
@@ -260,7 +260,7 @@ def test_status_empty_prints_no_changes(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     assert capsys.readouterr().out == "No Changes.\n"
 
@@ -279,7 +279,7 @@ def test_status_precondition_error_prints_no_changes(
 
     monkeypatch.setattr(m, "_control_root", _raise)
 
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     assert capsys.readouterr().out == "No Changes.\n"
 
@@ -302,7 +302,7 @@ def test_status_column_alignment_under_long_slug(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setenv("NO_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     lines = capsys.readouterr().out.splitlines()
     status_col = lines[0].index("STATUS")
@@ -330,7 +330,7 @@ def test_status_no_ansi_when_NO_COLOR_set(
     monkeypatch.delenv("FORCE_COLOR", raising=False)
     monkeypatch.delenv("CLICOLOR_FORCE", raising=False)
 
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
     assert "\x1b[" not in out
@@ -354,8 +354,75 @@ def test_status_colors_completed_with_gray_when_FORCE_COLOR(
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("FORCE_COLOR", "1")
 
-    rc = m._cmd_status(type("NS", (), {})())
+    rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
     # palette._ANSI["gray"] is "\x1b[90m"; reset is "\x1b[0m".
     assert "\x1b[90mcompleted\x1b[0m" in out
+
+
+def _abandon_and_journal(control: Path, slug: str) -> None:
+    """Flip the Change to abandoned + journal it, the way _abandon does (minus
+    the worktree teardown, which we trigger via remove_worktree below)."""
+    ch = Change.load(control, slug)
+    st = State.load(ch.state_dir)
+    st.status = "abandoned"
+    st.save(ch.state_dir)
+    worktree.journal_commit(control, slug, {
+        "events.jsonl": ch.events_path,
+        "change.json": ch.change_dir / "change.json",
+        "state.json": ch.state_dir / "state.json",
+    })
+    worktree.remove_worktree(control, slug)
+
+
+def test_status_hides_completed_and_abandoned_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Without --all, only in-flight Changes list; completed/abandoned Changes
+    (journal-backed history) are suppressed."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Live", change_id="live", base_branch="main")
+    Change.create(tmp_path, title="Done", change_id="done", base_branch="main")
+    Change.create(tmp_path, title="Dead", change_id="dead", base_branch="main")
+    _complete_and_journal(tmp_path, "done")
+    _abandon_and_journal(tmp_path, "dead")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    rc = m._cmd_status(type("NS", (), {"all": False})())
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "live" in out
+    assert "done" not in out
+    assert "dead" not in out
+    assert "completed" not in out
+    assert "abandoned" not in out
+
+
+def test_status_all_shows_abandoned_in_gray(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With --all and color forced, an abandoned row's STATUS cell is wrapped in
+    the same gray SGR sequence as completed."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Dead", change_id="dead", base_branch="main")
+    _abandon_and_journal(tmp_path, "dead")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    rc = m._cmd_status(type("NS", (), {"all": True})())
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "\x1b[90mabandoned\x1b[0m" in out

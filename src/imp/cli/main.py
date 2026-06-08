@@ -777,24 +777,30 @@ def _journal_last_activity(control: Path, change_id: str) -> str:
 _INFLIGHT = ("running", "paused", "merge_blocked")
 
 
+# Row = (id, status, step, last_activity, title, created_at). created_at is the
+# trailing sort key only — the renderer never displays it (see _render_status_table).
+_Row = tuple[str, str, str, str, str, str]
+
+
 def _status_row(change_id: str, state_json: bytes, change_json: bytes,
-                last_activity: str) -> tuple[str, str, str, str, str] | None:
-    """Pure (id, status, step, last_activity, title) extractor, fed by either
-    worktree file bytes or journal_show bytes. The journaled state.json and
-    change.json are schema-identical to the in-flight ones (both written by
-    State.save / Change.create), so the two sections can't silently drift.
-    Returns None on malformed/incomplete JSON so a single corrupt entry can't
-    crash the whole `imp status` listing (callers skip None)."""
+                last_activity: str) -> _Row | None:
+    """Pure (id, status, step, last_activity, title, created_at) extractor, fed
+    by either worktree file bytes or journal_show bytes. The journaled
+    state.json and change.json are schema-identical to the in-flight ones (both
+    written by State.save / Change.create), so the two sections can't silently
+    drift. Returns None on malformed/incomplete JSON so a single corrupt entry
+    can't crash the whole `imp status` listing (callers skip None)."""
     try:
         st = json.loads(state_json)
         meta = json.loads(change_json)
-        return (change_id, st["status"], st.get("step") or "-", last_activity, meta["title"])
+        return (change_id, st["status"], st.get("step") or "-", last_activity,
+                meta["title"], meta["created_at"])
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
 
 
-def _status_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
-    rows: list[tuple[str, str, str, str, str]] = []
+def _status_rows(control: Path) -> list[_Row]:
+    rows: list[_Row] = []
     for change_id in _list_change_worktrees(control):
         cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
         state_json = (cdir / "state" / "state.json").read_bytes()
@@ -807,11 +813,11 @@ def _status_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
     return rows
 
 
-def _completed_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
+def _completed_rows(control: Path) -> list[_Row]:
     """Journal-backed completed Changes: every journaled id NOT present as a
     live worktree (in-flight takes precedence on the crash-window overlap)."""
     live = set(_list_change_worktrees(control))
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[_Row] = []
     for change_id in journal.journal_ids(control):
         if change_id in live:
             continue
@@ -836,11 +842,12 @@ _STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "merge_blocked": ("yellow",),
     "errored": ("bold", "red"),
     "completed": ("gray",),
+    "abandoned": ("gray",),
 }
 
 
 def _render_status_table(
-    rows: list[tuple[str, str, str, str, str]],
+    rows: list[_Row],
     *,
     color_enabled: bool,
 ) -> list[str]:
@@ -862,7 +869,7 @@ def _render_status_table(
         f"{headers[3]:<{widths[3]}} "
         f"{headers[4]}"
     ]
-    for slug, status, step, last, title in rows:
+    for slug, status, step, last, title, _created in rows:
         status_cell = f"{status:<{widths[1]}}"
         codes = _STATUS_COLORS.get(status, ())
         if color_enabled and codes:
@@ -949,15 +956,18 @@ def _cmd_status(args: argparse.Namespace) -> int:
     except worktree.PreconditionError:
         print("No Changes.")
         return 0
-    rows = _status_rows(control) + _completed_rows(control)
+    # In-flight Changes show by default; completed/abandoned ones are journaled
+    # history and only listed with --all (they'd otherwise pile up indefinitely).
+    rows = _status_rows(control)
+    if args.all:
+        rows = rows + _completed_rows(control)
     if not rows:
         print("No Changes.")
         return 0
-    # Sort rows by `last_activity` descending so the most-recently changed
-    # entry appears first. `last_activity` is YYYY-MM-DD HH:MM:SS or '-';
-    # lexicographic DESC puts real timestamps before '-' because '-' (0x2D)
-    # is less than '2' (0x32), so '-' entries fall to the bottom.
-    rows.sort(key=lambda r: r[3], reverse=True)
+    # Sort by Change creation date, oldest first. created_at (r[5]) is an
+    # ISO-8601 UTC timestamp from change.json; all entries share the +00:00
+    # offset, so lexicographic ascending == chronological oldest-first.
+    rows.sort(key=lambda r: r[5])
     color_enabled = should_use_color(sys.stdout)
     for line in _render_status_table(rows, color_enabled=color_enabled):
         print(line)
@@ -1013,6 +1023,10 @@ def main(argv: list[str] | None = None) -> int:
     p_log.set_defaults(func=_cmd_log)
 
     p_status = sub.add_parser("status")
+    p_status.add_argument(
+        "-a", "--all", action="store_true",
+        help="Also list completed and abandoned Changes (default: in-flight only).",
+    )
     p_status.set_defaults(func=_cmd_status)
 
     p_abandon = sub.add_parser(
