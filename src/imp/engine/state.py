@@ -15,7 +15,7 @@ import tempfile
 import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
@@ -75,6 +75,11 @@ class State:
             {step: ProviderModel(**pm) for step, pm in raw_rs.items()}
             if raw_rs is not None else None
         )
+        # Drop keys for fields removed since this state.json was written (e.g.
+        # pending_rename/drafting/random_title from the name-on-intent rework) so
+        # an old paused/running Change can still be loaded, abandoned, or resumed.
+        known = {f.name for f in fields(cls)}
+        data = {k: v for k, v in data.items() if k in known}
         return cls(
             **data,
             current_step=CurrentStep.from_dict(cur) if cur else None,
