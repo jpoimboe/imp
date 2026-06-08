@@ -93,6 +93,24 @@ def _register_fake(output: dict) -> None:
     )
 
 
+_FAKE_CONFIG = (
+    "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
+)
+
+
+def _write_fake_config(root: Path) -> None:
+    """Write the `fake`-provider config in BOTH the legacy single-file layout
+    (imp/config.yaml — still read by load_config's direct callers, e.g.
+    _make_change's tier-name probe) and the new layered layout (Task 6 reader
+    cutover): imp/project.yaml marker + .imp/config.yaml local layer, which
+    load_effective_config reads for run_change. Additive on purpose."""
+    (root / "imp").mkdir(parents=True, exist_ok=True)
+    (root / "imp" / "config.yaml").write_text(_FAKE_CONFIG)
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(parents=True, exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
+
+
 def _seed_minimal_workflow(
     root: Path,
     *,
@@ -117,11 +135,7 @@ def _seed_minimal_workflow(
         "    steps:\n"
         f"      - {{name: {step_name}, file: agents/{agent_stem}.md, tier: medium}}\n"
     )
-    config = root / "imp" / "config.yaml"
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
+    _write_fake_config(root)
     change = _make_change(root)
     return change, phase_name, step_name
 
@@ -180,10 +194,7 @@ async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
         "        rules:\n"
         "          - {else: true, continue: true, set: {review_done: true}}\n"
     )
-    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
+    _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
@@ -226,10 +237,7 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
         "  - name: done\n"
         "    steps: []\n"
     )
-    (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
+    _write_fake_config(root)
     return _make_change(root)
 
 
@@ -288,10 +296,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
         "          - {if: {verdict: rework}, goto: writer}\n"
         "          - {else: true, continue: true}\n"
     )
-    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
+    _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
 
     from imp.providers import resolve
@@ -357,10 +362,7 @@ async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
         "  - name: done\n"
         "    steps: []\n"
     )
-    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
+    _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
     _register_fake({"status": "Success"})
 
@@ -725,10 +727,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
-    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
+    _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
 
     captured: dict[str, AgentInvocation] = {}
@@ -792,10 +791,7 @@ async def test_interactive_end_of_turn_emits_awaiting_user_input(
         "    steps:\n"
         "      - {name: w, file: agents/asker.md, tier: medium, interactive: true}\n"
     )
-    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
+    _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
 
     events: list[dict] = []
@@ -874,10 +870,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
         "          - {if: {verdict: Reject}, resume: coder, feedback: \"reviewer findings:\"}\n"
         "          - {else: true, continue: true}\n"
     )
-    (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-    )
+    _write_fake_config(tmp_path)
     change = _make_change(tmp_path)
 
     from imp.providers import resolve
@@ -1056,9 +1049,7 @@ def _seed_back_edge_workflow(
         "        rules:\n"
         f"          - {{if: {{verdict: rework}}, {verb}: coder{feedback_fragment}}}\n"
         "          - {else: true, continue: true}\n")
-    (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
+    _write_fake_config(root)
     return _make_change(root)
 
 

@@ -155,13 +155,13 @@ def _apply_theme() -> None:
     if override in pal.THEMES:
         pal.set_theme(override)
         return
-    from imp.providers.config import load_config
-    for root_fn in (_control_root, _project_root):
-        try:
-            pal.set_theme(load_config(root_fn()).theme)
-            return
-        except Exception:
-            continue
+    from imp.providers.effective import load_effective_config
+    try:
+        root = _project_root()
+        theme = load_effective_config(project_root=root, control_root=root).config.theme
+        pal.set_theme(theme)
+    except Exception:
+        pass
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -369,9 +369,12 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             workflow = None
             if from_target is not None:
                 from imp.engine.loader import load_workflow
-                from imp.providers.config import load_config
+                from imp.providers.effective import load_effective_config
                 try:
-                    cfg = load_config(change.control_root)
+                    cfg = load_effective_config(
+                        project_root=change.project_root,
+                        control_root=change.control_root,
+                    ).config
                     workflow = load_workflow(
                         change.workflow_dir, configured_tiers=cfg.tier_names())
                 except (LoadError, LoadErrors) as e:
@@ -507,12 +510,14 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _editing_mode(control_root: Path) -> str:
-    """Read editing_mode from config; default to emacs if config is absent or
-    invalid (run_change reports a bad config with full context — don't double-fail
-    here just to pick a prompt mode)."""
-    from imp.providers.config import load_config
+    """Read editing_mode from the merged config; default to emacs if config is
+    absent or invalid (run_change reports a bad config with full context — don't
+    double-fail here just to pick a prompt mode)."""
+    from imp.providers.effective import load_effective_config
     try:
-        return load_config(control_root).editing_mode
+        return load_effective_config(
+            project_root=control_root, control_root=control_root,
+        ).config.editing_mode
     except (LoadError, LoadErrors):
         return "emacs"
 

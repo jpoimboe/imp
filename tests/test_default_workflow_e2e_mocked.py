@@ -125,6 +125,14 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
     cfg.write_text(cfg_content)
+    # Task 6 reader cutover: run_change reads via load_effective_config (project
+    # layer from imp/project.yaml + local layer from .imp/config.yaml), not the
+    # legacy imp/config.yaml above. Mirror the content into the local layer.
+    # Tests 2/3 rewrite the provider via _rewrite_config (both files) so the
+    # reader sees the swap. KEEP the legacy write above.
+    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
 
     # Initialize a minimal git repo so `git status --porcelain` and
     # merge_to_base work when the merge-gate sets ready_to_merge=true.
@@ -144,6 +152,19 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
          ".imp/worktrees/test-change", "main")
 
     return _make_change(tmp_path, title="e2e-default-workflow")
+
+
+def _rewrite_config(tmp_path: Path, *replacements: tuple[str, str]) -> None:
+    """Apply str replacements to BOTH config layers: the legacy imp/config.yaml
+    and the .imp/config.yaml local layer (the one the runtime reader uses after
+    the Task 6 cutover). Keeps the two in lockstep so a provider swap in a test
+    reaches load_effective_config."""
+    for rel in ("imp/config.yaml", ".imp/config.yaml"):
+        p = tmp_path / rel
+        text = p.read_text()
+        for old, new in replacements:
+            text = text.replace(old, new)
+        p.write_text(text)
 
 
 @pytest.mark.anyio
@@ -257,10 +278,10 @@ async def test_full_default_workflow_completes_with_canned_openai(
     )
 
     change = _seed_default_workflow(tmp_path)
-    # Rewrite config to OpenAI provider for every role.
-    cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(cfg.read_text().replace("anthropic", "openai")
-        .replace("claude-sonnet-4-6", "gpt-4o-mini"))
+    # Rewrite config to OpenAI provider for every role (both layers: the legacy
+    # imp/config.yaml and the .imp/config.yaml local layer the reader uses).
+    _rewrite_config(tmp_path, ("anthropic", "openai"),
+                    ("claude-sonnet-4-6", "gpt-4o-mini"))
 
     default_completion = resp_response(
         resp_function_call("c0", "complete_step", json.dumps({
@@ -318,9 +339,8 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     )
 
     change = _seed_default_workflow(tmp_path)
-    cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(cfg.read_text().replace("anthropic", "claude_code")
-        .replace("claude-sonnet-4-6", "claude-sonnet-4-5"))
+    _rewrite_config(tmp_path, ("anthropic", "claude_code"),
+                    ("claude-sonnet-4-6", "claude-sonnet-4-5"))
 
     # The CC fake is per-step; each runner spawns a fresh client. Use a
     # factory that returns the same scripted reply for every new client.

@@ -96,6 +96,19 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
     _write_config(tmp_path, "vars:\n  final_review: false\n")
+    # Task 6 reader cutover: Change.create reads the merged config via
+    # load_effective_config, not the legacy imp/config.yaml above. Put the vars
+    # override on the local layer (.imp/config.yaml, gitignored control-root) so
+    # the reader sees it. The legacy write is KEPT for this file's direct
+    # load_config tests.
+    (tmp_path / ".imp" / "config.yaml").write_text(
+        "providers: [anthropic]\n"
+        "tiers:\n"
+        "  low: {anthropic: x}\n"
+        "  medium: {anthropic: x}\n"
+        "  high: {anthropic: x}\n"
+        "vars:\n  final_review: false\n"
+    )
     _git(tmp_path, "add", "-A")
     _git(tmp_path, "commit", "-qm", "vars")
 

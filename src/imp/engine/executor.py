@@ -57,7 +57,7 @@ from imp.engine.types import (
     Step,
     Workflow,
 )
-from imp.providers.config import load_config
+from imp.providers.effective import load_effective_config
 from imp.providers.resolve import provider_from_model, resolve_run
 
 EventCallback = Callable[[dict[str, Any]], None]
@@ -139,7 +139,9 @@ async def run_change(
     # without revisiting (all git calls already pass explicit control_root).
     try:
         workflow = load_workflow(change.workflow_dir)
-        config = load_config(change.control_root)
+        config = load_effective_config(
+            project_root=change.project_root, control_root=change.control_root,
+        ).config
         log: EventLog = JsonlEventLog(change.events_path, on_event=on_event)
         state = State.load(change.state_dir)
 

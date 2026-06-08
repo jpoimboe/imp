@@ -84,14 +84,20 @@ def _seed_workflow_with_max_retries_3(root: Path) -> Change:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
-    (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(
+    _cfg = (
         "providers: [fake]\n"
         "tiers:\n"
         "  low: {fake: m}\n"
         "  medium: {fake: m}\n"
         "  high: {fake: m}\n"
     )
+    (root / "imp").mkdir(parents=True, exist_ok=True)
+    (root / "imp" / "config.yaml").write_text(_cfg)
+    # Task 6 reader cutover: run_change reads via load_effective_config.
+    # Add the new-layout marker + local layer; KEEP the legacy write above.
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(parents=True, exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(_cfg)
     return _make_change(root)
 
 

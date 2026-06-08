@@ -61,12 +61,19 @@ def _seed_human_gate_workflow(root: Path) -> None:
                   - {label: no, pause: true}
     """))
     # No LLM calls happen (no agent steps), but the loader requires a valid config.
-    (root / "imp" / "config.yaml").write_text(
+    _cfg = (
         "providers: [anthropic]\n"
         "tiers:\n  low: {anthropic: claude-3-5-haiku-20241022}\n"
         "  medium: {anthropic: claude-3-5-haiku-20241022}\n"
         "  high: {anthropic: claude-3-5-haiku-20241022}\n"
     )
+    (root / "imp" / "config.yaml").write_text(_cfg)
+    # Task 6 reader cutover: the `imp new` subprocess reads via
+    # load_effective_config. Add the new-layout marker + local layer; KEEP the
+    # legacy write above.
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(_cfg)
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
 

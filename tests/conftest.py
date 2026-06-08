@@ -82,6 +82,18 @@ def _seed_control(root: Path) -> None:
         "  medium: {anthropic: x}\n"
         "  high: {anthropic: x}\n"
     )
+    # New-layout layers (Task 6 reader cutover): committed marker + local layer.
+    # The existing imp/config.yaml write above is KEPT — load_config's direct
+    # callers still read it until Task 11. Additive on purpose.
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(
+        "providers: [anthropic]\n"
+        "tiers:\n"
+        "  low: {anthropic: x}\n"
+        "  medium: {anthropic: x}\n"
+        "  high: {anthropic: x}\n"
+    )
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
 

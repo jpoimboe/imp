@@ -141,6 +141,13 @@ def _seed_resume_loop_workflow(root: Path) -> Change:
     (root / "imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
+    # Task 6 reader cutover: run_change reads via load_effective_config.
+    # Add the new-layout marker + local layer; KEEP the legacy write above.
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(parents=True, exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
+    )
     return _make_change(root)
 
 
@@ -242,6 +249,13 @@ async def test_resumed_step_persistent_error_still_terminates(
     )
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / "imp" / "config.yaml").write_text(
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
+    )
+    # Task 6 reader cutover: run_change reads via load_effective_config.
+    # Add the new-layout marker + local layer; KEEP the legacy write above.
+    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)
