@@ -20,17 +20,21 @@ def register_builtin_providers() -> None:
     Run at import time; also called by tests that rely on the global registry
     to restore it after another test cleared it via reset_providers_for_tests.
     """
-    register_provider("anthropic",   env_check=_anthropic._env_check,  factory=_anthropic._factory)
-    register_provider("openai",      env_check=_openai._env_check,     factory=_openai._factory)
     register_provider(
-        "claude_code",
-        env_check=_claude_code._env_check,
-        factory=_claude_code._factory,
+        "anthropic", env_check=_anthropic._env_check, factory=_anthropic._factory,
+        tier_defaults=_anthropic.TIER_DEFAULTS, env_var=_anthropic.ENV_VAR,
     )
     register_provider(
-        "codex",
-        env_check=_codex._env_check,
-        factory=_codex._factory,
+        "openai", env_check=_openai._env_check, factory=_openai._factory,
+        tier_defaults=_openai.TIER_DEFAULTS, env_var=_openai.ENV_VAR,
+    )
+    register_provider(
+        "claude_code", env_check=_claude_code._env_check, factory=_claude_code._factory,
+        tier_defaults=_claude_code.TIER_DEFAULTS, env_var=_claude_code.ENV_VAR,
+    )
+    register_provider(
+        "codex", env_check=_codex._env_check, factory=_codex._factory,
+        tier_defaults=_codex.TIER_DEFAULTS, env_var=_codex.ENV_VAR,
     )
 
 

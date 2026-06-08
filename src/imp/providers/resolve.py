@@ -17,6 +17,7 @@ guarantees each target resolves before its dependents.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from imp.engine.differ_graph import find_differ_from_cycle, topo_order
@@ -29,6 +30,18 @@ if TYPE_CHECKING:
     from imp.providers.config import Config
 
 _PROVIDERS: dict[str, tuple[Callable[[], bool], Callable[[str], Provider]]] = {}
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDefaults:
+    """Registry-side floor metadata for one provider (spec §2). Stored apart
+    from `_PROVIDERS` so the `(env_check, factory)` unpacking sites stay
+    byte-identical."""
+    tier_defaults: dict[str, str] | None
+    env_var: str | None
+
+
+_PROVIDER_DEFAULTS: dict[str, ProviderDefaults] = {}
 
 # Codex governance warning surfaced at selection time. See design
 # docs/superpowers/specs/2026-06-04-codex-provider-design.md ("Containment of
@@ -60,12 +73,28 @@ def register_provider(
     name: str,
     env_check: Callable[[], bool],
     factory: Callable[[str], Provider],
+    tier_defaults: dict[str, str] | None = None,
+    env_var: str | None = None,
 ) -> None:
+    # Validate floor coverage when provided so a partial table fails loudly at
+    # import, not sparsely at resolve (§6's differ_from-backfill assumes full
+    # coverage). A None table means "no floor contribution" — used by test fakes
+    # that supply tiers via config.
+    if tier_defaults is not None:
+        from imp.providers.config import _REQUIRED_TIERS
+        missing = [t for t in _REQUIRED_TIERS if t not in tier_defaults]
+        if missing:
+            raise ValueError(
+                f"provider {name!r} tier_defaults must cover {list(_REQUIRED_TIERS)}; "
+                f"missing: {missing}"
+            )
     _PROVIDERS[name] = (env_check, factory)
+    _PROVIDER_DEFAULTS[name] = ProviderDefaults(tier_defaults=tier_defaults, env_var=env_var)
 
 
 def reset_providers_for_tests() -> None:
     _PROVIDERS.clear()
+    _PROVIDER_DEFAULTS.clear()
 
 
 def provider_from_model(pm: ProviderModel) -> Provider:
@@ -237,3 +266,9 @@ def resolve_run(
 
     details = {"tiers": tier_details, "steps": step_details}
     return resolved_tiers, resolved_steps, details
+
+
+def iter_provider_defaults() -> dict[str, ProviderDefaults]:
+    """Snapshot of registered floor metadata, keyed by provider name. Used by
+    effective.load_effective_config to build the floor layer."""
+    return dict(_PROVIDER_DEFAULTS)
