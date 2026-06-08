@@ -1,4 +1,5 @@
-"""Parse imp/config.yaml. Schema (post 2026-06-04-roles-to-tiers):
+"""Parse a single config layer (imp/project.yaml, user, or local config.yaml).
+Schema (post 2026-06-04-roles-to-tiers):
 
     providers: [claude_code, openai]      # ordered preference list
     tiers:
@@ -77,8 +78,8 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
     # Use `.get(...) is not None`, not `in raw`: a key written with no value
     # (`providers:` on its own line) parses to key-present/value-None. Treat that
     # as absent — the floor/merge fills it — instead of passing None down to
-    # _parse_providers, which would raise the misleading "config.yaml must define
-    # a 'providers:' list" message from a project.yaml/local-layer file (M1).
+    # _parse_providers, which would raise the misleading "must define a
+    # 'providers:' list" message from a project.yaml/local-layer file (M1).
     if raw.get("providers") is not None:
         out["providers"] = _parse_providers(raw["providers"], src)
     if raw.get("tiers") is not None:
@@ -112,10 +113,10 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
 
 def _parse_providers(raw: Any, src: SourceLoc) -> tuple[str, ...]:
     if raw is None:
-        raise LoadError("config.yaml must define a 'providers:' list", src)
+        raise LoadError(f"{src.file.name} must define a 'providers:' list", src)
     if not isinstance(raw, list) or not raw:
         raise LoadError(
-            "config.yaml 'providers:' must be a non-empty list of provider names",
+            f"{src.file.name} 'providers:' must be a non-empty list of provider names",
             src,
         )
     out: list[str] = []
@@ -136,7 +137,7 @@ def _parse_tiers(raw: Any, src: SourceLoc) -> dict[str, dict[str, str]]:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise LoadError("config 'tiers:' must be a mapping", src)
+        raise LoadError(f"{src.file.name} 'tiers:' must be a mapping", src)
     out: dict[str, dict[str, str]] = {}
     for tier_name, entry in items(raw):
         if tier_name not in _REQUIRED_TIERS:
@@ -167,7 +168,7 @@ def _parse_provider_envs(raw: Any, src: SourceLoc) -> dict[str, str]:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise LoadError("config.yaml 'provider_envs:' must be a mapping", src)
+        raise LoadError(f"{src.file.name} 'provider_envs:' must be a mapping", src)
     out: dict[str, str] = {}
     for prov, spec in items(raw):
         if not isinstance(spec, dict) or "env" not in spec or not isinstance(spec["env"], str):
@@ -186,12 +187,12 @@ def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise LoadError("config.yaml 'vars:' must be a mapping", src)
+        raise LoadError(f"{src.file.name} 'vars:' must be a mapping", src)
     out: dict[str, object] = {}
     for name, value in items(raw):
         if not isinstance(value, (bool, int, str)):
             raise LoadError(
-                f"config.yaml vars: {name!r} must be a bool, int, or string", src,
+                f"{src.file.name} vars: {name!r} must be a bool, int, or string", src,
             )
         out[str(name)] = value
     return out
@@ -217,12 +218,12 @@ def apply_var_overrides(
     for name, value in overrides.items():
         if name not in declared:
             raise LoadError(
-                f"config.yaml vars: {name!r} is not declared by the workflow",
+                f"vars override {name!r} is not declared by the workflow",
                 fallback,
             )
         if not _matches_type(value, declared[name]):
             raise LoadError(
-                f"config.yaml vars: {name!r} expects {declared[name]}, "
+                f"vars override {name!r} expects {declared[name]}, "
                 f"got {type(value).__name__}",
                 next(d.source for d in decls if d.name == name),
             )
