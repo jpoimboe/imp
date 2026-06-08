@@ -1,8 +1,8 @@
 # imp interrupt playbook — Ctrl-C / ESC / Ctrl-D acceptance test (impty MCP)
 
 > **You are the test driver.** This file is your full instruction set. You drive `imp`
-> *through the impty MCP server* (`mcp__impty__start` / `send` / `view` / `wait` /
-> `transcript` / `snapshot` / `stop`) — a real pty with a faithful pyte render — fire
+> *through the impty MCP server* (`mcp__impty__start` / `send` / `send_signal` / `view` /
+> `wait` / `snapshot` / `stop`) — a real pty with a faithful pyte render — fire
 > interrupts (Ctrl-C, **ESC**, Ctrl-D) at well-defined points across four providers and
 > several agent states (model thinking, **a tool running**, an in-turn prompt, a
 > subagent, resume), judge whether imp behaves and *speaks* correctly, and write every
@@ -25,9 +25,25 @@
 ## 0. The three interrupt triggers and how impty delivers them
 
 impty claims its pty slave as the child's controlling terminal, so keystrokes you `send`
-behave exactly as on a physical terminal. The MCP server exposes **no** out-of-band
-signal tool — every interrupt is a keystroke through `send`. Fire each with `wait=False`
-so it goes immediately, then read with `wait` / `view` / `transcript` / `snapshot`.
+are delivered to imp's controlling tty. **For Ctrl-C and ESC we send keystrokes on
+purpose** — to exercise imp's real tty paths (prompt_toolkit's `KeyboardInterrupt` at a
+prompt, the `EscKeyReader` on `/dev/tty`, the cooked-mode signal receiver). ESC has **no**
+signal equivalent, so the keystroke is the only faithful test there. There is also an
+out-of-band signal tool, `send_signal(sig=…)` (SIGINT=2, SIGTERM=15), which bypasses the
+tty and signals imp's process group directly — exactly like a real Ctrl-C. Fire keystroke
+interrupts with `wait=False` so they go immediately, then read with `wait` / `view` /
+`view(full=True)` / `snapshot`.
+
+> **impty mid-run fidelity caveat.** `send("\x03")` only becomes a SIGINT when the tty line
+> discipline has ISIG on (cooked/cbreak); at a prompt_toolkit prompt it is just a raw byte.
+> impty also degrades prompt_toolkit's CPR (cursor-position) handshake, so **mid-run**
+> keystroke Ctrl-C/ESC delivery is unreliable to validate through the harness. For the
+> cooked-mode points (B thinking, C tool-running, E subagent) deliver Ctrl-C
+> deterministically with `send_signal(2)` (or `bash: kill -INT -<pgid>`); keep **keystroke**
+> `send` for the prompt-state tests (A Ctrl-C/Ctrl-D, the A/D ESC negatives) and **all** ESC
+> tests, where it is correct and the only faithful path. If a mid-run keystroke gives a
+> messy result, suspect an impty delivery artifact and re-confirm with `send_signal` before
+> filing an imp defect.
 
 | Trigger | `send` data | Path through imp |
 |---------|-------------|------------------|
@@ -35,10 +51,9 @@ so it goes immediately, then read with `wait` / `view` / `transcript` / `snapsho
 | **ESC** | `"\x1b"` | A bare ESC byte. While an agent is *thinking* (no prompt active) the `EscKeyReader` on `/dev/tty` catches it → `InterruptCoordinator.signal_pause("esc")`. At a prompt_toolkit prompt it is **not** intercepted (emacs meta-prefix / vi exit) — see the negative test in §6. |
 | **Ctrl-D** | `"\x04"` | EOF at a prompt → `EOFError` → `pause_and_exit(reason="ctrl-d")`. (Only meaningful at a prompt.) |
 
-> `SIGTERM` → `paused (sigterm)` is also part of the feature but cannot be delivered as a
-> keystroke. Optionally test it out-of-band with `bash: kill -TERM <pid>`. The pid is not
-> exposed in the impty status header; get it with `pgrep -f 'imp (new|resume)'` in the
-> clone. If awkward, **skip it and note the skip** — it is not the focus here.
+> `SIGTERM` → `paused (sigterm)` is also part of the feature. Deliver it in one call with
+> `send_signal(sig=15)` — it signals imp's process group directly, no pid scraping. Run it
+> once per provider where convenient; it is no longer a skippable afterthought.
 
 ### The bar for "correct" (every interrupt point, unless stated otherwise)
 
@@ -83,13 +98,18 @@ A correct imp does **all** of:
 - **Which `imp`:** the installed `imp` on PATH (a current build off `master`, which carries
   the feature). State the commit you tested in the report.
 - **Where:** a fresh standalone `git clone` of this repo (created in §3) — **not** a
-  `git worktree`. A linked worktree shares the main checkout's git-common-dir, and imp's
-  `find_control_root` resolves any linked worktree back to the **main checkout** (`git
-  rev-parse --git-common-dir` → parent), so imp would read the *main* `imp/config.yaml`
-  and the per-provider rewrite in §4 would silently no-op. A standalone clone's control
-  root resolves to *itself*, so `$WT/imp/config.yaml` is honored. Every `imp new` / `imp
-  resume` runs with cwd inside the clone, so all Changes (branches, nested worktrees,
-  journals) are contained and discardable.
+  `git worktree`. Provider-forcing (§4) writes the **local** config layer `.imp/config.yaml`,
+  which imp reads from the **control root**; a linked worktree's `find_control_root` resolves
+  to the **main checkout** (`git rev-parse --git-common-dir` → parent), so the override would
+  land in — and pollute — the shared main tree. A standalone clone's control root is *itself*,
+  so `$WT/.imp/config.yaml` both wins and stays isolated. Every `imp new` / `imp resume` runs
+  with cwd inside the clone, so all Changes (branches, nested worktrees, journals) are
+  contained and discardable.
+- **Config layout:** the `config-file-split` layout — a provider **code floor** (tier→model
+  defaults) under three layers: committed `imp/project.yaml` (workflow/lint/test/vars, read
+  from the worktree), user `~/.config/imp/config.yaml` (`providers`/`theme`, global), and
+  gitignored `.imp/config.yaml` (local, control root, highest precedence). Precedence
+  (low→high): `floor < project < user < local` — operator-wins among the config layers.
 - **Providers:** `claude_code`, `anthropic`, `openai`, `codex` — all four are in scope
   for the full §0 classification bar.
 - **Credentials:** `~/.anthropic-key` → `ANTHROPIC_API_KEY`, `~/.openai-key` →
@@ -123,6 +143,15 @@ For any provider missing a prerequisite: **skip and note it** — not a bug. imp
 startup env_check is the source of truth: if imp skips or errors a provider at launch,
 treat that as the skip signal and note it.
 
+> **`imp init` / user config.** This machine already has user config
+> (`~/.config/imp/config.yaml`) with detected `providers`/`theme`; the clone inherits it and
+> §4's local override forces the one under test. You should **not** need `imp init` — the
+> local override supplies `providers`. If `imp new` prints `✗ no provider available — run
+> `imp init` first`, run `imp init` once (idempotent; only bootstraps user config). Note that
+> same preflight also fires when a *forced* provider's env-check fails (e.g. forcing
+> `anthropic` with no key exported) — there it's a missing-credential **skip** (§2's gating
+> table), not an init problem, so don't chase `imp init` for it.
+
 > **Cost & time.** `anthropic` / `openai` / `codex` make **real, billable** calls;
 > `claude_code` uses the local `claude` session. Each interrupt point needs only a few
 > seconds of real work before you interrupt — never let a step finish. If a run looks
@@ -133,58 +162,62 @@ treat that as the skip signal and note it.
 
 ## 3. Set up the clone
 
-Use a **standalone `git clone`**, not `git worktree add` — see §1 (a linked worktree's
-config is ignored because `find_control_root` resolves it to the main checkout). A clone's
-control root is itself, so the §4 config-forcing actually takes effect.
+Use a **standalone `git clone`**, not `git worktree add` — see §1. A clone's control root is
+*itself*, so the §4 local-layer provider override both wins (operator-precedence) and stays
+isolated; a linked worktree's local layer would resolve to the shared main checkout.
 
 ```bash
 cd /home/jpoimboe/imp
 WT=/tmp/imp-interrupt-$(date +%Y%m%d-%H%M%S)
 git clone . "$WT"                       # standalone clone of HEAD → control root resolves to $WT itself
 echo "$WT"                              # your cwd for every imp run
-sed -n '1,12p' "$WT"/imp/config.yaml    # confirm this is the live project config (providers/tiers/theme)
+ls "$WT"/imp/project.yaml               # the committed project marker → confirms $WT is an imp project
 ```
 
 (`git clone .` copies committed state at the current branch tip. If you need uncommitted
 local changes under test, commit them first or `rsync` them into `$WT` after cloning.)
 
-You rewrite `"$WT"/imp/config.yaml` per provider (§4).
+You force the provider via `"$WT"/.imp/config.yaml` (the gitignored local layer) in §4.
 
 ---
 
-## 4. Forcing a provider
+## 4. Forcing a provider (local layer beats the operator's user config)
 
-imp uses the **first** provider in `providers:` whose env_check passes. Overwrite
-`"$WT"/imp/config.yaml` with the single-provider block for the one under test:
+imp runs the **first** provider in the resolved `providers:` whose env_check passes. Since
+`providers` is **user**-config-homed and precedence is operator-wins (`project < user <
+local`), the layer that forces a provider is **local** — `$WT/.imp/config.yaml` (gitignored,
+read from the control root). Because `$WT` is a standalone clone, its control root is `$WT`
+itself, so this file both **wins** (highest precedence) and **stays isolated**.
 
-**claude_code**
-```yaml
-providers: [claude_code]
-tiers: {low: {claude_code: haiku}, medium: {claude_code: sonnet}, high: {claude_code: opus}}
-theme: ansi
-```
-**anthropic**
-```yaml
-providers: [anthropic]
-tiers: {low: {anthropic: haiku}, medium: {anthropic: sonnet}, high: {anthropic: opus}}
-theme: ansi
-```
-**openai**
-```yaml
-providers: [openai]
-tiers: {low: {openai: gpt-5.4-mini}, medium: {openai: gpt-5.3-codex}, high: {openai: gpt-5.5}}
-theme: ansi
-```
-**codex** (codex refuses `*-codex` models → all tiers `gpt-5.5`)
-```yaml
-providers: [codex]
-tiers: {low: {codex: gpt-5.5}, medium: {codex: gpt-5.5}, high: {codex: gpt-5.5}}
-theme: ansi
+Write the one-provider override (swap the provider name per run under test):
+```bash
+mkdir -p "$WT/.imp"
+cat > "$WT/.imp/config.yaml" <<'YAML'
+providers: [codex]      # one of: claude_code | anthropic | openai | codex
+theme: ansi             # fixed theme so snapshots render predictably
+YAML
 ```
 
-> Model names drift. If a tier model 404s / "unknown model"s at launch, the available
-> models changed — adjust the tier to a current one and **note the substitution**; it's
-> not an interrupt bug.
+You do **not** need a `tiers:` block — tier→model bindings come from the provider **code
+floor** (current models, shipped with imp). (§1 homes `theme` in user config, but any layer
+may set it and local wins, so the `theme: ansi` above gives a predictable snapshot theme.)
+Confirm the override won — and on which layer — before testing:
+```bash
+cd "$WT" && imp config                  # the `providers` row must resolve to the provider under test,
+                                        # its arrow ending in `…/.imp/config.yaml (local)` — NOT `(user)`
+cd "$WT" && imp config --explain high   # the high-tier model the forced provider will use
+```
+`imp config`'s arrow prints the leaf's **full source path** + a `(layer)` tag. If the
+`providers` arrow ends in `(user)`, your file landed at the wrong path (`$WT/imp/config.yaml`,
+not `$WT/.imp/config.yaml`) and the user layer silently won — fix it before recording anything.
+The `--explain` line shows the floor model **before** you spend a billable call, so a stale
+model gets a local `tiers:` override up front instead of a mid-test 404.
+
+> Model names drift, but they live in the **code floor**, not this file. If a floor model
+> 404s / "unknown model"s at launch, add a single overriding leaf to `$WT/.imp/config.yaml`
+> (e.g. `tiers: {high: {openai: <current>}}`) and **note the substitution** — it's not an
+> interrupt bug. codex refuses `*-codex` models, so any codex tier override must be a plain
+> model (e.g. `gpt-5.5`).
 
 ---
 
@@ -211,13 +244,16 @@ would not reach imp.
 
 - `view()` → header `[alive=… alt_screen=… cursor=(x,y)]` + grid. `alive=False` = imp
   exited. Cursor parked right after a prompt = waiting for input.
-- `transcript()` → full scroll; the `paused (…)` line and the change id live here.
+- `view(full=True)` → the whole run so far (scrolled-off history + current screen); the
+  `paused (…)` line and the change id live here.
 - `snapshot()` → PNG; use it to *see* the pause line's color/glyph when judging clarity.
 
 ### **`INTERRUPT-AND-VERIFY(trigger, expected_reason)`** — the core check
 
-1. `send(trigger, wait=False)` (one interrupt only).
-2. `wait()` then `view()` + `transcript()`.
+1. Deliver one interrupt only. Keystroke `send(trigger, wait=False)` for prompt-state and
+   ESC tests; for a **mid-run** Ctrl-C (points B/C/E) use `send_signal(2)` for deterministic
+   delivery (see the §0 fidelity caveat).
+2. `wait()` then `view()` + `view(full=True)`.
 3. Assert the bar from §0: `alive=False`; final line `paused (<expected_reason>)`; no
    `unclassified provider error` / `Cannot write to terminated process` /
    `paused: unknown`; one interrupt sufficed.
@@ -248,7 +284,9 @@ would not reach imp.
 
 1. `start` `imp resume <id>` (§5). 2. Confirm it continues the *same* Change (matching
 `#<slug>` / `· resuming` header), reaches a prompt or runs forward — not `nothing to
-resume`, not a restart. 3. Note message clarity.
+resume`, not a restart. 3. Note message clarity. (The resume *banner* legitimately shows the
+`#<slug>` display name; only the *pause* line in §5.6 must carry the change **id** — a slug
+there is a bug. Different lines, no contradiction.)
 
 ---
 
@@ -263,7 +301,7 @@ For **each** in-scope provider, run the points below. Use `INTERRUPT-AND-VERIFY`
 |---|-------------------|-----------------|-----------|----------|
 | **A** | Opening interactive prompt (raw mode) | `imp new`; `wait()` until parked at the first prompt; type nothing | **Ctrl-C**, then in a fresh run **Ctrl-D** | A1: `paused (ctrl-c)`. A2: `paused (ctrl-d)`. **No `interrupted` event is expected here** — nothing was running to classify; the event-log check does not apply at A. The bar that *does* apply: clean `paused` line, `alive=False`, exit 130, resumable. |
 | **B** | Model thinking / streaming (cooked mode) | At the prompt, send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until you *see* output streaming (`view` shows no prompt) | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. In-flight model request torn down (orphan check). |
-| **C** | **A tool is running** (subprocess executing) | Drive the agent until it runs a tool that takes a few seconds — e.g. a shell/`make`/test tool. If the default workflow reaches a build/test step, interrupt during it; otherwise steer the intent toward something that triggers a shell command, and watch `view`/`transcript` for tool activity | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. **The tool subprocess is killed** — orphan check must be clean (this is `runner.interrupt()` → `terminate_running_processes`). |
+| **C** | **A tool is running** (subprocess executing) | Drive the agent until it runs a tool that takes a few seconds — e.g. a shell/`make`/test tool. If the default workflow reaches a build/test step, interrupt during it; otherwise steer the intent toward something that triggers a shell command, and watch `view`/`view(full=True)` for tool activity | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. **The tool subprocess is killed** — orphan check must be clean (this is `runner.interrupt()` → `terminate_running_processes`). |
 | **D** | In-turn user-chat prompt (interactive agent asks *you* mid-turn) | Use an interactive step (e.g. the spec/open-by-asking turn) where the agent prompts you back; wait until parked at *that* prompt | **Ctrl-C**; separately **ESC** | Ctrl-C → `paused (ctrl-c)`. **ESC at this prompt is the negative test:** ESC must NOT pause — prompt_toolkit consumes it (emacs meta / no-op); imp stays at the prompt, `alive=True`. Verify by sending `\x1b` then `view()` — still at prompt — then a normal reply still submits. |
 | **E** | Subagent running (nested) | Drive until the workflow dispatches a subagent (a sub-step doing work); interrupt while the subagent is mid-flight | **Ctrl-C** or **ESC** | Pauses the whole run cleanly (`paused (…)`), unwinds the subagent (SubagentSuspended path), resumable. Orphan check clean. |
 | **F** | During resume | `RESUME-AND-VERIFY` a paused Change, then interrupt again at whichever of A/B/C you didn't already stress for this provider | **Ctrl-C** or **ESC** | Same bar; the *second* pause is still resumable (pause→resume is idempotent across cycles). |
@@ -301,7 +339,7 @@ Include:
    C-esc / D-ctrlc / D-esc(neg) / E / F / clean-resume; cells = ✅ / ⚠️ issue / ⏭️ skipped
    (one-line reason).
 3. **One section per bug** — title + severity (blocker/major/minor/cosmetic); provider &
-   point & trigger; **expected** (cite §0); **what happened** (paste `transcript()`
+   point & trigger; **expected** (cite §0); **what happened** (paste `view(full=True)`
    excerpt and/or a `snapshot()` PNG path; include `alive`/exit, whether one interrupt
    sufficed, orphan-check result, event-log classification); **repro** (exact `start`
    argv, keystrokes/timing, config); **notes**.
