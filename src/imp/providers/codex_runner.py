@@ -172,13 +172,6 @@ class CodexAgentRunner:
         self._client_factory = client_factory
         self._user_input_fn = user_input_fn
         self._cancel = False
-        # Grace window for the process-group Ctrl-C race: an interrupt may be
-        # *delivered* (asyncio's wakeup fd written) but not yet *propagated* to
-        # `self._cancel` when the dying `codex exec` subprocess raises into the
-        # outer except. `_await_pending_interrupt` yields the loop up to this
-        # long so the async signal chain can land before we classify the error.
-        # Tunable as a test seam.
-        self._interrupt_grace_s = 0.5
         self._ctx: ToolContext | None = None
         self._abort_controller: Any = None
         # Test seam: overrides the canonical ~/.codex/auth.json path. Read by
@@ -200,13 +193,7 @@ class CodexAgentRunner:
             return
         except Exception as exc:
             raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
-            # A process-group Ctrl-C kills the native `codex exec` subprocess,
-            # which raises a CodexExecError here *before* the async signal chain
-            # (run_signal_receiver -> signal_pause -> interrupt()) has flipped
-            # `self._cancel`. The interrupt is already pending; yield the loop
-            # briefly so it can land, then re-check — otherwise a clean Ctrl-C
-            # is misclassified as `category:"unknown"` (a §0-bar violation).
-            if await self._await_pending_interrupt():
+            if self._cancel:
                 yield {"type": "error", "payload": {
                     "category": "config", "kind": "interrupted",
                     "message": "runner cancelled by interrupt"}}
@@ -813,34 +800,6 @@ class CodexAgentRunner:
         unreachable.
         """
         return self._cancel
-
-    async def _await_pending_interrupt(self) -> bool:
-        """Resolve the process-group Ctrl-C race before classifying an error.
-
-        When a real terminal Ctrl-C fires, the kernel SIGINTs both imp and the
-        native ``codex exec`` subprocess. The subprocess dies and the SDK raises
-        a ``CodexExecError`` synchronously, but imp's own interrupt travels an
-        *async* path (``run_signal_receiver`` -> ``signal_pause`` ->
-        ``await interrupt()``) that needs several event-loop turns to set
-        ``self._cancel``. So at the instant the error is caught, the interrupt is
-        already *pending* (asyncio's wakeup fd is written) but ``self._cancel``
-        is still ``False``.
-
-        Yield the loop in short slices, up to ``self._interrupt_grace_s``, so
-        that chain can run; return ``True`` as soon as ``self._cancel`` flips.
-        This only ever upgrades a genuine interrupt to a clean pause — a real
-        unclassified error never flips the flag, so it falls through to
-        ``unknown`` after the (bounded) wait.
-        """
-        if self._is_cancelled():
-            return True
-        slice_s = 0.005
-        steps = max(1, int(self._interrupt_grace_s / slice_s))
-        for _ in range(steps):
-            await asyncio.sleep(slice_s)
-            if self._is_cancelled():
-                return True
-        return False
 
 
 # ── Event mapping ─────────────────────────────────────────────────────────────
