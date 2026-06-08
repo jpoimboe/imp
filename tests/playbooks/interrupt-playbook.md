@@ -6,8 +6,8 @@
 > interrupts (Ctrl-C, **ESC**, Ctrl-D) at well-defined points across four providers and
 > several agent states (model thinking, **a tool running**, an in-turn prompt, a
 > subagent, resume), judge whether imp behaves and *speaks* correctly, and write every
-> defect to a bug report. Work in a throwaway git worktree and abandon everything at the
-> end.
+> defect to a bug report. Work in a throwaway standalone `git clone` and abandon everything
+> at the end.
 >
 > This is the acceptance test for the **esc-and-clean-interrupt** feature
 > (`imp/specs/2026-06-04-esc-and-clean-interrupt.md`), which is **on `master`**. The
@@ -38,7 +38,7 @@ so it goes immediately, then read with `wait` / `view` / `transcript` / `snapsho
 > `SIGTERM` → `paused (sigterm)` is also part of the feature but cannot be delivered as a
 > keystroke. Optionally test it out-of-band with `bash: kill -TERM <pid>`. The pid is not
 > exposed in the impty status header; get it with `pgrep -f 'imp (new|resume)'` in the
-> worktree. If awkward, **skip it and note the skip** — it is not the focus here.
+> clone. If awkward, **skip it and note the skip** — it is not the focus here.
 
 ### The bar for "correct" (every interrupt point, unless stated otherwise)
 
@@ -82,15 +82,20 @@ A correct imp does **all** of:
 
 - **Which `imp`:** the installed `imp` on PATH (a current build off `master`, which carries
   the feature). State the commit you tested in the report.
-- **Where:** a fresh `git worktree` of this repo (created in §3). Every `imp new` /
-  `imp resume` runs with cwd inside it, so all Changes (branches, nested worktrees,
+- **Where:** a fresh standalone `git clone` of this repo (created in §3) — **not** a
+  `git worktree`. A linked worktree shares the main checkout's git-common-dir, and imp's
+  `find_control_root` resolves any linked worktree back to the **main checkout** (`git
+  rev-parse --git-common-dir` → parent), so imp would read the *main* `imp/config.yaml`
+  and the per-provider rewrite in §4 would silently no-op. A standalone clone's control
+  root resolves to *itself*, so `$WT/imp/config.yaml` is honored. Every `imp new` / `imp
+  resume` runs with cwd inside the clone, so all Changes (branches, nested worktrees,
   journals) are contained and discardable.
 - **Providers:** `claude_code`, `anthropic`, `openai`, `codex` — all four are in scope
   for the full §0 classification bar.
 - **Credentials:** `~/.anthropic-key` → `ANTHROPIC_API_KEY`, `~/.openai-key` →
   `OPENAI_API_KEY`. `claude_code` / `codex` use their own local auth.
 - **impty MCP server** is running from `.mcp.json` with controlling-terminal support.
-- **Bug report** goes to the **main checkout** (survives worktree deletion). Path in §7.
+- **Bug report** goes to the **main checkout** (survives clone deletion). Path in §7.
 
 If any of these is wrong, say so and stop.
 
@@ -126,15 +131,22 @@ treat that as the skip signal and note it.
 
 ---
 
-## 3. Set up the worktree
+## 3. Set up the clone
+
+Use a **standalone `git clone`**, not `git worktree add` — see §1 (a linked worktree's
+config is ignored because `find_control_root` resolves it to the main checkout). A clone's
+control root is itself, so the §4 config-forcing actually takes effect.
 
 ```bash
 cd /home/jpoimboe/imp
 WT=/tmp/imp-interrupt-$(date +%Y%m%d-%H%M%S)
-git worktree add -b imp-interrupt-test "$WT" HEAD
+git clone . "$WT"                       # standalone clone of HEAD → control root resolves to $WT itself
 echo "$WT"                              # your cwd for every imp run
 sed -n '1,12p' "$WT"/imp/config.yaml    # confirm this is the live project config (providers/tiers/theme)
 ```
+
+(`git clone .` copies committed state at the current branch tip. If you need uncommitted
+local changes under test, commit them first or `rsync` them into `$WT` after cloning.)
 
 You rewrite `"$WT"/imp/config.yaml` per provider (§4).
 
@@ -273,7 +285,7 @@ For **each** in-scope provider, run the points below. Use `INTERRUPT-AND-VERIFY`
 
 ## 7. Bug report
 
-Write to the **main checkout** (survives worktree deletion), in the bugs dir
+Write to the **main checkout** (survives clone deletion), in the bugs dir
 (`mkdir -p` it if absent):
 
 ```
@@ -307,19 +319,15 @@ per provider — a clean run is a recorded result.
 
 ```bash
 cd "$WT"
-imp log                      # or: imp status — enumerate change ids
-imp abandon <id>             # repeat for each id you created
+imp log                      # or: imp status — enumerate change ids (optional; the clone is discarded wholesale)
+imp abandon <id>             # optional: exercise abandon inside the clone; the rm below discards everything regardless
 
 cd /home/jpoimboe/imp
-git worktree remove --force "$WT"
-git worktree prune
-git branch -D imp-interrupt-test 2>/dev/null || true
-git worktree list                  # confirm none remain under "$WT/.imp/worktrees"
-git branch --list 'imp/*'          # delete stragglers: git branch -D imp/<id>
+rm -rf "$WT"                 # the standalone clone holds every branch / nested worktree / journal — deleting it removes all churn
 git -C /home/jpoimboe/imp status --short   # only the report file should be new
 ```
 
-If anything in the **main** checkout changed besides the report, flag it — the worktree
+If anything in the **main** checkout changed besides the report, flag it — the clone
 was supposed to contain all the churn.
 
 ---
@@ -328,5 +336,5 @@ was supposed to contain all the churn.
 
 Report a one-paragraph wrap-up: build tested (commit + whether the feature is present),
 which providers/points/triggers ran, the headline findings (especially anything failing
-the bar in §0), the report path, and confirmation the worktree and all test Changes were
+the bar in §0), the report path, and confirmation the clone and all test Changes were
 abandoned. Then stop.
