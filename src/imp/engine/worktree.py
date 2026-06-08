@@ -53,6 +53,19 @@ def find_control_root(start: Path) -> Path:
     return common.resolve().parent
 
 
+def worktree_toplevel(start: Path) -> Path | None:
+    """The top-level dir of the git worktree containing `start` (`git rev-parse
+    --show-toplevel`), or None if `start` is not inside a work tree. Unlike
+    `find_control_root`, this returns the *launch* worktree — for a linked
+    worktree it is that worktree, not the main checkout — so callers can tell
+    whether imp was launched somewhere other than its control root."""
+    proc = _git(start, "rev-parse", "--show-toplevel")
+    if proc.returncode != 0:
+        return None
+    top = proc.stdout.strip()
+    return Path(top).resolve() if top else None
+
+
 def check_preconditions(root: Path) -> None:
     """Hard requirements git worktree add + branch creation need (spec §5.1)."""
     if _git(root, "rev-parse", "--git-dir").returncode != 0:
