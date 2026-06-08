@@ -200,6 +200,40 @@ def test_cpr_answered_without_a_concurrent_wait_idle() -> None:
         assert "NO-CPR" not in out
 
 
+def test_drainer_survives_a_feed_error_and_keeps_draining(caplog) -> None:
+    # The drainer is a permanent reliability daemon (answer CPR in inter-call
+    # gaps). One bad feed — a pyte parse bug on a pathological sequence — must
+    # not kill it, else the degradation it exists to prevent silently returns.
+    # The child sleeps briefly so the flaky feed is installed before BOOM lands;
+    # BOOM raises (simulated parse failure) and is dropped, GOOD drains after.
+    prog = (
+        "import sys, time\n"
+        "time.sleep(0.3)\n"
+        "sys.stdout.write('BOOM\\n'); sys.stdout.flush()\n"
+        "time.sleep(0.4)\n"
+        "sys.stdout.write('GOOD\\n'); sys.stdout.flush()\n"
+        "time.sleep(5)\n"
+    )
+    with TerminalSession([sys.executable, "-c", prog]) as s:
+        real_feed = s._stream.feed
+
+        def flaky(data: bytes) -> None:
+            if b"BOOM" in data:
+                raise RuntimeError("simulated pyte parse failure")
+            real_feed(data)
+
+        s._stream.feed = flaky  # type: ignore[method-assign]
+        # Don't hold the lock: let the background drainer hit the error on the
+        # BOOM chunk and the real output on the GOOD chunk.
+        with caplog.at_level("ERROR", logger="impty.session"):
+            time.sleep(1.2)
+        out = "\n".join(s.lines())
+        assert s._drainer.is_alive()        # daemon survived the bad feed
+        assert "draining pty" in caplog.text  # and logged it (observable, not silent)
+        assert "BOOM" not in out            # the bad chunk was dropped
+        assert "GOOD" in out                # later output still drained
+
+
 def test_cursor_parks_after_prompt_string() -> None:
     # "Waiting for input looks like": cursor sits immediately after the prompt
     # text, on the bottom non-blank row, with no further output. This is the

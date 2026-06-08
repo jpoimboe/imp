@@ -10,6 +10,7 @@ import contextlib
 import enum
 import errno
 import fcntl
+import logging
 import os
 import pty
 import select
@@ -26,6 +27,8 @@ import pyte
 from impty import view
 from impty.screen import Regime, TerminalScreen
 from impty.view import Cell
+
+_log = logging.getLogger(__name__)
 
 _READ_CHUNK = 65536
 _FLOOR = 0.01  # 10 ms — minimum strictly-positive select() slice (deadline safety)
@@ -145,6 +148,13 @@ class TerminalSession:
                     result = self._read_step(_POLL)
                 except (OSError, ValueError):
                     return  # master closed under us (close() races the read)
+                except Exception:
+                    # A permanent reliability daemon must not be killable by one
+                    # bad feed (a pathological escape sequence, a pyte parse bug):
+                    # if it dies, the CPR-in-the-gap degradation this thread exists
+                    # to prevent silently returns. Drop the chunk, log, stay alive.
+                    _log.exception("impty drainer: error draining pty; continuing")
+                    result = _StepResult.QUIET
                 if result is _StepResult.EOF:
                     return  # slave fully closed — nothing more will ever arrive
             time.sleep(_DRAIN_YIELD)  # leave the lock free for a waiting tool call
@@ -242,9 +252,23 @@ class TerminalSession:
         DATA  — bytes were read and fed to pyte.
         EOF   — the slave is fully closed: os.read returned b'', or raised
                 OSError with errno == EIO (the Linux master-EOF surface; macOS
-                yields b''). Other OSErrors propagate as genuine errors.
-        QUIET — the select slice elapsed with nothing readable."""
-        readable, _, _ = select.select([self._master], [], [], timeout)
+                yields b''); or close() pulled the master out from under us
+                (see below). Other OSErrors propagate as genuine errors.
+        QUIET — the select slice elapsed with nothing readable.
+
+        A close() on another thread can shut the master while ANY caller (the
+        drainer or a wait_idle/run_to_completion parked here) is in select/read,
+        surfacing as OSError(EBADF)/ValueError. close() sets _stop before
+        closing the fd, so `_stop` distinguishes that deliberate teardown — in
+        which case nothing more will ever arrive, so report EOF rather than
+        raising. This gives the lock-holding waiters the same close-race
+        resilience the drainer's catch already has, at the one shared point."""
+        try:
+            readable, _, _ = select.select([self._master], [], [], timeout)
+        except (OSError, ValueError):
+            if self._stop:
+                return _StepResult.EOF  # close() shut the master mid-select
+            raise
         if not readable:
             return _StepResult.QUIET
         try:
@@ -252,6 +276,8 @@ class TerminalSession:
         except OSError as exc:
             if exc.errno == errno.EIO:
                 return _StepResult.EOF
+            if self._stop:
+                return _StepResult.EOF  # close() shut the master mid-read
             raise
         if not chunk:
             return _StepResult.EOF

@@ -172,11 +172,14 @@ def send_signal(sig: int = signal.SIGINT) -> str:
 
 @mcp.tool()
 def wait(idle: float = _SETTLE_IDLE, hard: float = _SETTLE_HARD) -> str:
-    """Wait for the program to produce output and go quiet, then return the screen.
+    """Wait for the program to settle, then return the screen.
 
     For watching a program that's still working (spinners, streaming) without
-    sending input. `idle` = quiet window that counts as settled; `hard` = max
-    wall-clock before giving up.
+    sending input: blocks until it goes quiet for `idle`, or `hard` elapses.
+    Counts output already on screen, so if the program is ALREADY quiet this
+    returns the current screen promptly rather than blocking for a next burst.
+    `idle` = quiet window that counts as settled; `hard` = max wall-clock before
+    giving up.
     """
     settled = _require().wait_idle(idle=idle, hard=hard)
     header = "[settled]" if settled else "[still busy after hard cap]"

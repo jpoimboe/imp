@@ -12,15 +12,21 @@ import impty.mcp as mcp_mod
 from impty.mcp import _decode_keys
 
 # A child that turns SIGINT into an async-signal-safe marker and exits via the
-# handler (mirrors tests/impty/test_session.py). Sleeps past the test deadline so
-# the only exit path is the handler firing.
+# handler (mirrors tests/impty/test_session.py). Runs in RAW mode (tty.setraw =>
+# ISIG off) so a bare \x03 byte would NOT become a signal — only send_signal's
+# direct killpg can fire the handler here. That is exactly send_signal's reason
+# to exist, so the "regardless of tty mode" test must drive the raw path, not
+# cooked mode where send("\x03") would also work. Raw mode disables ONLCR, so
+# the markers carry explicit \r\n. Sleeps past the test deadline so the only
+# exit path is the handler firing.
 _SIGINT_CHILD = (
-    "import os, signal, sys, time\n"
+    "import os, signal, sys, time, tty\n"
     "def _handler(signum, frame):\n"
-    "    os.write(1, b'GOT-SIGINT\\n')\n"
+    "    os.write(1, b'GOT-SIGINT\\r\\n')\n"
     "    os._exit(42)\n"
     "signal.signal(signal.SIGINT, _handler)\n"
-    "print('READY', flush=True)\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
     "time.sleep(30)\n"
 )
 
