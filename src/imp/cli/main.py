@@ -962,6 +962,26 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_config(args: argparse.Namespace) -> int:
+    from imp.cli.config_cmd import render_config, render_explain
+    from imp.providers.effective import load_effective_config
+    # _project_root() never raises (returns the resolved start dir when no marker
+    # is found); only _control_root()'s git resolution can fail (not in a work
+    # tree). Resolve project first, then guard only the control read.
+    root = _project_root()
+    try:
+        control = _control_root()
+    except Exception:
+        control = root  # no git work tree → local `.imp/config.yaml` layer is skipped
+    eff = load_effective_config(project_root=root, control_root=control)
+    explain = getattr(args, "explain", None)
+    if explain:
+        render_explain(eff, explain, sys.stdout, color=should_use_color(sys.stdout))
+    else:
+        render_config(eff, sys.stdout, color=should_use_color(sys.stdout))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(prog="imp")
@@ -1012,6 +1032,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_status = sub.add_parser("status")
     p_status.set_defaults(func=_cmd_status)
+
+    p_config = sub.add_parser("config")
+    p_config.add_argument("--explain", metavar="TIER", default=None,
+                          help="trace one tier's bindings through the layers")
+    p_config.set_defaults(func=_cmd_config)
 
     p_abandon = sub.add_parser(
         "abandon",
