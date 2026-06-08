@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.errors import LoadError
-from imp.providers.config import parse_config_layer
+from imp.providers.config import Config, parse_config_layer
 
 
 def _write(tmp_path: Path, body: str) -> Path:
@@ -137,6 +137,19 @@ def test_editing_mode_vi_accepted(tmp_path: Path) -> None:
 def test_editing_mode_rejects_unknown(tmp_path: Path) -> None:
     with pytest.raises(LoadError, match="editing_mode"):
         _layer(tmp_path, "editing_mode: nano\n" + _OK_BODY)
+
+
+def test_env_for_synthesizes_default_when_unset() -> None:
+    """env_for falls back to {VENDOR}_API_KEY when provider_envs has no override."""
+    cfg = Config()
+    assert cfg.env_for("anthropic") == "ANTHROPIC_API_KEY"
+    assert cfg.env_for("openai") == "OPENAI_API_KEY"
+
+
+def test_env_for_uses_explicit_override() -> None:
+    """An explicit provider_envs entry wins over the synthesized default."""
+    cfg = Config(provider_envs={"anthropic": "MY_CUSTOM_KEY"})
+    assert cfg.env_for("anthropic") == "MY_CUSTOM_KEY"
 
 
 def test_providers_duplicate_rejected(tmp_path: Path) -> None:
