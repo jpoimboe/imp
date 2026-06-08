@@ -28,7 +28,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     read from root/imp/workflows/default (the branch-dir model — workflow_dir =
     project_root/imp/workflows/default), so there is no snapshot copy to make."""
     from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     wf_dir = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
@@ -40,7 +40,8 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
 
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_tiers = load_config(root).tier_names()
+        configured_tiers = load_effective_config(
+            project_root=root, control_root=root).config.tier_names()
 
     workflow = load_workflow(wf_dir, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()

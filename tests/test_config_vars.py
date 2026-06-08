@@ -1,5 +1,5 @@
 """config.yaml `vars:` override layer (spec §10, §11, §14): parsed by
-load_config, validated + applied over the workflow's declared defaults at
+parse_config_layer, validated + applied over the workflow's declared defaults at
 Change creation."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.engine.state import State
 from imp.engine.types import SourceLoc, VarDecl, Vars
-from imp.providers.config import apply_var_overrides, load_config
+from imp.providers.config import apply_var_overrides, parse_config_layer
 from tests.conftest import _git, _seed_control
 
 _SRC = SourceLoc(file=Path("x"), line=1)
@@ -66,24 +66,25 @@ def _write_config(root: Path, body: str) -> None:
     (root / "imp" / "config.yaml").write_text(cfg_text)
 
 
-def test_load_config_parses_vars_block(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
+def test_parse_layer_parses_vars_block(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
     _write_config(tmp_path, "vars:\n  ready_to_merge: true\n")
-    cfg = load_config(tmp_path)
-    assert cfg.var_overrides == {"ready_to_merge": True}
+    layer, _src = parse_config_layer(tmp_path / "imp" / "config.yaml")  # type: ignore[misc]
+    assert layer["vars"] == {"ready_to_merge": True}
 
 
-def test_load_config_no_vars_block_is_empty(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    cfg = load_config(tmp_path)
-    assert cfg.var_overrides == {}
+def test_parse_layer_no_vars_block_omits_key(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
+    _write_config(tmp_path, "")
+    layer, _src = parse_config_layer(tmp_path / "imp" / "config.yaml")  # type: ignore[misc]
+    assert "vars" not in layer
 
 
-def test_load_config_vars_must_be_mapping(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
+def test_parse_layer_vars_must_be_mapping(tmp_path: Path) -> None:
+    (tmp_path / "imp").mkdir()
     _write_config(tmp_path, "vars:\n  - nope\n")
     with pytest.raises(LoadError, match="vars:"):
-        load_config(tmp_path)
+        parse_config_layer(tmp_path / "imp" / "config.yaml")
 
 
 def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
@@ -99,8 +100,7 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
     # Task 6 reader cutover: Change.create reads the merged config via
     # load_effective_config, not the legacy imp/config.yaml above. Put the vars
     # override on the local layer (.imp/config.yaml, gitignored control-root) so
-    # the reader sees it. The legacy write is KEPT for this file's direct
-    # load_config tests.
+    # the reader sees it.
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n"

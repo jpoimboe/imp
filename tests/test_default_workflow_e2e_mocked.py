@@ -56,7 +56,7 @@ def _canned_anthropic(**overrides):
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
@@ -68,7 +68,8 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
 
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_tiers = load_config(root).tier_names()
+        configured_tiers = load_effective_config(
+            project_root=root, control_root=root).config.tier_names()
 
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
@@ -483,7 +484,7 @@ async def test_fast_path_skips_both_reviewers_but_not_code_reviewer(
 async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     from imp.engine import recovery
     from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     change = _seed_default_workflow(tmp_path)
 
@@ -501,7 +502,9 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     st.save(change.state_dir)
 
     wf = load_workflow(change.workflow_dir,
-                       configured_tiers=load_config(tmp_path).tier_names())
+                       configured_tiers=load_effective_config(
+                           project_root=tmp_path,
+                           control_root=tmp_path).config.tier_names())
     plan = recovery.plan_rewind(wf, st, "code-reviewer", force=False)
     recovery.apply_rewind(plan, wf, st, change.event_log())
     st.status = "running"
