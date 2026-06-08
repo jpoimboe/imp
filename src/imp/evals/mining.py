@@ -415,7 +415,14 @@ def assemble_fixtures(
         if not diff:
             drops.append(MiningDrop(ep.tool_use_id, ep.session_file, "tree_unreconstructable"))
             continue
-        findings = normalize(ep.review_prose)
+        # `normalize` is a billable LLM call — a transient API error or a malformed
+        # response on ONE episode must drop that episode (logged), never crash the
+        # whole mine after the expensive episodes before it already succeeded.
+        try:
+            findings = normalize(ep.review_prose)
+        except Exception:
+            drops.append(MiningDrop(ep.tool_use_id, ep.session_file, "normalize_error"))
+            continue
         # blocking→fixed promotes findings to must_catch (high-confidence real bug);
         # otherwise keep the normalizer's per-finding blocking call.
         if ep.was_fixed:

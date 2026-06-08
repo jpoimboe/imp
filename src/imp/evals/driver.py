@@ -6,6 +6,7 @@ model_name), bypassing tier/role inheritance (spec Variant §)."""
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import tempfile
@@ -99,10 +100,19 @@ async def drive_agent(
     agent_id: str,
     workflow_dir: Path | None = None,
     vars: dict[str, Any] | None = None,
+    timeout_s: float = 600.0,
 ) -> tuple[dict[str, Any] | None, Telemetry]:
     """Drive one agent to a terminal outcome. Returns (output, telemetry).
     output is None if the agent errored/paused. Telemetry is read back from the
-    events.jsonl this run wrote, filtered to `agent_id`."""
+    events.jsonl this run wrote, filtered to `agent_id`.
+
+    `timeout_s` bounds the single attempt (`anyio.fail_after`): the SDK seam has no
+    timeout of its own, so a hung model call would otherwise deadlock a sweep worker
+    forever. On timeout the runner is asked to `force_terminate` IF it supports it —
+    to kill the spawned subprocess so it doesn't orphan and keep burning quota.
+    NOTE: the claude_code provider's `force_terminate` is currently NOT present (a
+    pending follow-up), so on timeout the subprocess may linger; `fail_after` still
+    abandons the call and the retry loop moves on."""
     safe_id = agent_id.replace(":", "_").replace("/", "_")  # loci contain '/' (M7)
     # Each eval-agent run is a stateless one-shot, but the provider reconstructs
     # its message transcript from the event log and `classify_resume`s on a
@@ -165,9 +175,21 @@ async def drive_agent(
     )
     try:
         runner = provider.create_runner(invocation)
-        result = await drive_invocation(
-            invocation, runner, coordinator=None, log=event_log, emit_events=True
-        )
+        try:
+            with anyio.fail_after(timeout_s):
+                result = await drive_invocation(
+                    invocation, runner, coordinator=None, log=event_log, emit_events=True
+                )
+        except TimeoutError:
+            # Best-effort: ask the runner to kill its spawned subprocess so a hung
+            # call doesn't orphan it (quota leak). force_terminate is provider-optional
+            # and currently absent on claude_code (pending follow-up) — absent it the
+            # subprocess may linger, but the call is still abandoned and retried.
+            ft = getattr(runner, "force_terminate", None)
+            if ft is not None:
+                with contextlib.suppress(Exception):
+                    ft()
+            raise
         telem = read_telemetry(events_path, agent_id)
         return result.output, telem
     finally:
@@ -175,5 +197,19 @@ async def drive_agent(
 
 
 def drive_agent_sync(**kwargs: Any) -> tuple[dict[str, Any] | None, Telemetry]:
-    """Blocking wrapper for callers outside an event loop (CLI, tests)."""
-    return anyio.run(lambda: drive_agent(**kwargs))
+    """Blocking wrapper (CLI / sweep threads) with a per-attempt timeout + bounded
+    retry. Each attempt runs in a FRESH `anyio.run` (a cancelled loop must not be
+    reused). On exhausting retries it returns `(None, zero)` rather than raising — so
+    the caller (drive_review) marks the cell failed and it is dropped, instead of
+    crashing the whole sweep. Env: IMP_EVAL_AGENT_TIMEOUT (s, default 600),
+    IMP_EVAL_AGENT_ATTEMPTS (default 2)."""
+    timeout_s = float(os.environ.get("IMP_EVAL_AGENT_TIMEOUT", "600"))
+    attempts = max(1, int(os.environ.get("IMP_EVAL_AGENT_ATTEMPTS", "2")))
+    kwargs.setdefault("timeout_s", timeout_s)
+    for attempt in range(attempts):
+        try:
+            return anyio.run(lambda: drive_agent(**kwargs))
+        except TimeoutError:
+            if attempt == attempts - 1:
+                return None, Telemetry.zero()
+    return None, Telemetry.zero()

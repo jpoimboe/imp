@@ -40,8 +40,15 @@ def normalize_findings(
         items = json.loads(output.get("findings_json", "[]"))
     except (json.JSONDecodeError, TypeError):
         return ()
+    # The normalizer is an LLM — it can return a non-list (a bare object, a string,
+    # null) or list elements that aren't dicts. Guard BOTH or `it.get(...)` raises
+    # AttributeError and crashes the whole mine on one malformed normalization.
+    if not isinstance(items, list):
+        return ()
     out: list[ExpectedFinding] = []
     for it in items:
+        if not isinstance(it, dict):
+            continue
         out.append(
             ExpectedFinding(
                 locus=str(it.get("locus", "")),
