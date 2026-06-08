@@ -34,3 +34,16 @@ def test_preflight_passes_when_provider_available(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     monkeypatch.setenv("OPENAI_API_KEY", "x")
     assert _preflight_imp_init(control_root=tmp_path, project_root=tmp_path) is None
+
+
+def test_preflight_defers_on_unknown_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A providers: entry naming an unregistered provider is a genuine config
+    error — preflight DEFERS (returns None) so downstream resolution surfaces
+    UnknownProvider with full context, instead of misleading 'run imp init first'."""
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    (xdg / "config.yaml").write_text("providers: [does_not_exist]\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    assert _preflight_imp_init(control_root=tmp_path, project_root=tmp_path) is None

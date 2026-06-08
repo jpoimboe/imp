@@ -114,7 +114,7 @@ def _control_root() -> Path:
 
 
 def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None:
-    """Return a clean '✗ run imp init first' message when no provider is
+    """Return a clean 'run imp init first' message when no provider is
     env-available (e.g. a never-init'd machine with empty user `providers`),
     else None. Relocates+dresses the failure that per-step resolution would
     otherwise raise as a raw ProviderUnavailable deep in a step (spec §4)."""
@@ -132,7 +132,7 @@ def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None
         # it as "run imp init first" — that would mislead. Let resolution surface it.
         return None
     if no_provider:
-        return "✗ no provider available — run `imp init` first"
+        return "no provider available — run `imp init` first"
     return None
 
 
