@@ -52,13 +52,16 @@ def test_load_config_missing_providers(tmp_path: Path) -> None:
             "  high: {claude_code: opus}\n"))
 
 
-def test_load_config_missing_tier_is_error(tmp_path: Path) -> None:
-    with pytest.raises(LoadError, match=r"tiers.*missing"):
-        load_config(_write(tmp_path,
-            "providers: [claude_code]\n"
-            "tiers:\n"
-            "  low: {claude_code: haiku}\n"
-            "  medium: {claude_code: sonnet}\n"))
+def test_load_config_partial_tiers_is_valid(tmp_path: Path) -> None:
+    # Missing tiers are now allowed — the provider-code floor fills them at
+    # merge time (spec §7 relaxed _parse_tiers). load_config itself no longer
+    # enforces all three tiers are present.
+    cfg = load_config(_write(tmp_path,
+        "providers: [claude_code]\n"
+        "tiers:\n"
+        "  low: {claude_code: haiku}\n"
+        "  medium: {claude_code: sonnet}\n"))
+    assert set(cfg.tiers) == {"low", "medium"}
 
 
 def test_load_config_no_file(tmp_path: Path) -> None:
