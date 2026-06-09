@@ -218,3 +218,16 @@ def test_resolve_path_no_scratch_or_project_prefix(tmp_path):
         ctx.resolve_path("/project/foo")
     with pytest.raises(PermissionDenied):
         ctx.resolve_path("/scratch/foo")
+
+
+def test_background_registry_and_bg_ids(tmp_path) -> None:
+    from imp.agents.tools.context import ToolContext
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    assert ctx.background_processes == {}
+    assert ctx.next_bg_id() == "bg1"
+    assert ctx.next_bg_id() == "bg2"
+    # distinct contexts do not share the counter
+    ctx2 = ToolContext(project_root=tmp_path, fs_permissions=(),
+                       events_path=tmp_path / "events.jsonl")
+    assert ctx2.next_bg_id() == "bg1"
