@@ -34,6 +34,11 @@ job: find inputs and states at the EXTREMES that the code mishandles.
 
 Use the same severity sections as a standard review. In `findings`, for each edge-case
 defect name the symbol, the triggering boundary input, the consequence, and
-`file:line`. Set `verdict` to `task_gap` if any boundary defect exists, else
-`approve`. Report ONLY edge-case / boundary / error-handling defects; do not pad with
-style, completeness, or common-case-correctness notes.
+`file:line`. Set `verdict` to `task_gap` ONLY for a **material** boundary defect — one
+whose triggering input is **reachable in the code's actual usage** and whose
+consequence genuinely breaks, hangs, or corrupts behavior. A speculative,
+defense-in-depth, or can't-happen-here edge (e.g. guarding against a value the call
+sites never produce) is a **Minor/Nit**: still name it in `findings`, but return
+`approve` — it is surfaced to the author, not gated on. Never bounce a change back to
+rework over a theoretical edge. Report ONLY edge-case / boundary / error-handling
+observations; do not pad with style, completeness, or common-case-correctness notes.

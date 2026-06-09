@@ -35,6 +35,10 @@ does something OTHER than what its task, spec, or own docstring/comment says it 
 
 Use the same severity sections as a standard review. In `findings`, for each mismatch
 name the symbol, quote the stated intent (docstring/task/name) and the contradicting
-line, and give `file:line`. Set `verdict` to `task_gap` if any compliance gap exists,
-else `approve`. Report ONLY spec/intent mismatches; do not pad with style or
-completeness notes.
+line, and give `file:line`. Set `verdict` to `task_gap` ONLY for a **material**
+spec/intent mismatch — the code does something the stated intent contradicts in a way
+that actually matters to behavior or to a reader relying on the contract. A cosmetic
+or hair-splitting mismatch is a **Minor/Nit**: still name it in `findings`, but return
+`approve` — it is surfaced to the author, not gated on. Never bounce a change back to
+rework over a wording nit. Report ONLY spec/intent mismatches; do not pad with style
+or completeness notes.

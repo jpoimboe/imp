@@ -65,6 +65,20 @@ def _build_user_config(
     }
 
 
+# claude_code (Anthropic) is the recommended single-provider default (review
+# architecture spec, M2). Pre-select it in the picker so the common path produces
+# a single-provider config; multi-select stays available for codex/openai.
+_RECOMMENDED_DEFAULT = "claude_code"
+
+
+def _initial_selection(available: list[str]) -> set[int]:
+    """Indices pre-selected when the picker opens: the recommended default if it
+    is offered, else nothing (the picker still requires >=1 before confirm)."""
+    if _RECOMMENDED_DEFAULT in available:
+        return {available.index(_RECOMMENDED_DEFAULT)}
+    return set()
+
+
 def _interactive_provider_picker(available: list[str]) -> list[str]:
     """Inline cursor picker rendered with prompt_toolkit.
 
@@ -90,7 +104,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     from prompt_toolkit.layout.dimension import Dimension
 
     cursor = 0
-    selected: set[int] = set()  # default: none selected
+    selected: set[int] = _initial_selection(available)  # pre-select the recommended default
 
     def _render() -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = [

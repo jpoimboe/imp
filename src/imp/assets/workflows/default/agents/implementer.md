@@ -14,10 +14,13 @@ You are implementing a task. The task-lead's dispatch message contains the full 
 
 {% if vars.fast_path %}
 This change was classified **trivial**: do **not** create or modify tests, and do
-**not** load the TDD skill. Make exactly the task's edits. Before you commit, run
-the test gate if `$IMP_TEST_COMMAND` is set (and the lint gate if `$IMP_LINT_COMMAND`
-is set) and confirm both pass — catching a slip yourself here avoids a wasted
-run-tests rebound. Then commit.
+**not** load the TDD skill. Make exactly the task's edits. Run the lint gate if
+`$IMP_LINT_COMMAND` is set and confirm it passes **before** you commit. Do **not**
+run the project's full test suite yourself — the `run-tests` gate runs it after
+this phase, and a full run here would only duplicate it. If your edit could
+plausibly affect behavior that a specific existing test covers, run just **that
+focused test** with the project's own test tooling; otherwise commit and let the
+gate verify.
 {% else %}
 Load the TDD discipline first:
 
@@ -47,7 +50,9 @@ sinking effort into a guess.
 Once you're clear on requirements:
 1. Implement exactly what the task specifies
 2. If the task calls for tests, write them test-first per TDD (write the failing test first, then make it pass); if the plan waives tests, do **not** add them
-3. Verify implementation works
+3. Verify your change works by running **its focused tests** (the ones you wrote or
+   the existing ones it touches) — not the project's full test suite, which the
+   `run-tests` gate owns
 4. Commit your work with `git` (see Committing below) — but FIRST run the lint-clean gate if `$IMP_LINT_COMMAND` is set (see Self-Review); lint must pass *before* the commit, not after
 5. Self-review (see below)
 6. Report your results **by calling `complete_step`** (see Report Format) — a turn that ends in prose instead of a tool call is a failure, not a report.

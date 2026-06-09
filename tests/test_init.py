@@ -196,3 +196,14 @@ def test_init_available_bwrap_is_quiet(tmp_path: Path, monkeypatch: pytest.Monke
         detect_theme_fn=lambda: "ansi",
     )
     assert "install bubblewrap" not in "\n".join(msgs).lower()
+
+
+def test_initial_selection_preselects_claude_code() -> None:
+    from imp.cli.init import _initial_selection
+    available = ["claude_code", "anthropic", "openai", "codex"]
+    assert _initial_selection(available) == {0}
+
+
+def test_initial_selection_empty_when_claude_code_absent() -> None:
+    from imp.cli.init import _initial_selection
+    assert _initial_selection(["anthropic", "openai"]) == set()

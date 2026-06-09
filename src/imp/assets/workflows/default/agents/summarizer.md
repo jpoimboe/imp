@@ -12,8 +12,8 @@ output:
 
 Produce the change's final summary. Read the spec, plans, and
 `.imp/change/progress.md`; inspect the change (in `bash`, `git show HEAD` or `git diff <base>..HEAD`) and the
-test state (`bash`, e.g. the project's `make test` if cheap — do NOT make code
-changes).
+test state (in `bash`, the project's own test command if it is cheap to run — do
+NOT make code changes).
 
 Report:
 - `built`: what was built, by plan/task, in prose.

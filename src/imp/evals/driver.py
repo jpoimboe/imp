@@ -46,9 +46,9 @@ def _evals_agents_root() -> Path:
 
 
 def baseline_agent_path(name: str) -> Path:
-    """Resolve an agent .md by name: the baseline reviewers live in the asset
-    workflow; the eval-only agents (completeness-slice, grader-judge,
-    label-normalizer) live under evals/data/agents."""
+    """Resolve an agent .md by name: the baseline reviewers (including the
+    review-panel slices) live in the asset workflow; the eval-only agents
+    (grader-judge, label-normalizer) live under evals/data/agents."""
     asset = _assets_root() / "agents" / f"{name}.md"
     if asset.exists():
         return asset

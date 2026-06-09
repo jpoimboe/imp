@@ -35,8 +35,8 @@ def test_referenced_roles_are_a_subset_of_init_scaffold() -> None:
 def test_supercycle_back_edges_present() -> None:
     # Spot-check the load-bearing loop edges survive parsing.
     steps = {s.name: s for p in _wf().phases for s in p.steps}
-    # plan-cycle-check loops to plan-writer; code-reviewer routes task_gap/plan_gap.
-    assert "plan-cycle-check" in steps and "code-reviewer" in steps
+    # plan-cycle-check loops to plan-writer; review-panel/recheck route task_gap/plan_gap.
+    assert "plan-cycle-check" in steps and "review-panel" in steps and "recheck" in steps
     assert "task-lead" in steps and "final-review" in steps
 
 

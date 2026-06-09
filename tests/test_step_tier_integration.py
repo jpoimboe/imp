@@ -44,29 +44,29 @@ def _config() -> Config:
     )
 
 
-def test_default_workflow_loads_and_resolves_two_vendor() -> None:
-    """spec acceptance #2: with both vendors env-available, the shipped
-    default workflow loads + resolves; code-reviewer's resolved provider
-    differs from task-lead's."""
+def test_default_workflow_loads_and_resolves_review_steps() -> None:
+    """Single provider by design: no review step declares differ_from, so the
+    review steps inherit the medium tier (sonnet) and do NOT appear in
+    resolved_steps (which holds only diverged steps)."""
     _OPENAI[0] = True
     wf = load_workflow(default_workflow_dir())
     resolved_tiers, resolved_steps, _details = resolve.resolve_run(wf, _config())
     assert resolved_tiers["medium"].provider == "claude_code"
     assert resolved_tiers["medium"].model == "sonnet"
     assert resolved_tiers["high"].provider == "claude_code"
-    # code-reviewer (differ_from: task-lead) jumps to openai.
-    assert resolved_steps["code-reviewer"].provider == "openai"
-    assert resolved_steps["code-reviewer"].model == "gpt-5.5"
+    # No differ_from -> not diverged -> absent from resolved_steps (it holds only
+    # steps that diverge from their tier via differ_from).
+    assert "review-panel" not in resolved_steps
+    assert "recheck" not in resolved_steps
 
 
-def test_default_workflow_one_vendor_falls_back_same_vendor() -> None:
-    """spec Decision §9: single-provider install, code-reviewer falls back
-    to same vendor as task-lead (no error)."""
+def test_review_steps_resolve_same_vendor_single_provider() -> None:
+    """With only claude_code env-available, the medium tier still resolves to
+    sonnet — no error, no cross-vendor requirement, no diverged review steps."""
     _OPENAI[0] = False
     wf = load_workflow(default_workflow_dir())
     resolved_tiers, resolved_steps, _details = resolve.resolve_run(wf, _config())
     assert resolved_tiers["medium"].provider == "claude_code"
-    # code-reviewer stays on claude_code; the high tier's model is opus, while
-    # task-lead resolved to sonnet (medium) — same vendor, different model.
-    assert resolved_steps["code-reviewer"].provider == "claude_code"
-    assert resolved_steps["code-reviewer"].model == "opus"
+    assert resolved_tiers["medium"].model == "sonnet"
+    assert "review-panel" not in resolved_steps
+    assert "recheck" not in resolved_steps
