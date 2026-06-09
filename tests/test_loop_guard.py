@@ -191,3 +191,26 @@ def test_new_errored_write_id_is_progress_then_same_id_is_not() -> None:
         last = g.observe(errored_write)
     assert last is not None
     assert getattr(last, "kind", "") == "repeated_failure"
+
+
+def test_read_file_window_slide_is_not_progress() -> None:
+    # read_file gained offset/limit: different windows of the SAME file must
+    # not each count as novel information (loop_guard.py's own comment pins
+    # this — the key normalizes to path).
+    def turn(offset: int) -> TurnRecord:
+        return TurnRecord(
+            assistant_text="", has_complete_step=False,
+            tools=[ToolOutcome(name="read_file", tool_use_id=f"r{offset}",
+                               input={"path": "big.txt", "offset": offset,
+                                      "limit": 50},
+                               is_error=False)])
+
+    g = LoopGuard()
+    assert g.observe(turn(1)) is None  # novel path -> progress
+    last = None
+    for i in range(2, DEFAULT_NOPROGRESS_N + 2):
+        last = g.observe(turn(i))      # sliding window; path already seen
+        if last is not None:
+            break
+    assert last is not None
+    assert getattr(last, "kind", "") == "no_progress"

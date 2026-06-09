@@ -138,11 +138,16 @@ class LoopGuard:
                 # new information and must not count. Record every novel key this
                 # turn (don't early-return) so each is "seen" next turn; a stuck
                 # agent re-reading seen targets then accumulates no_progress.
-                # ASSUMES read_file is whole-file (path-only input). If it ever
-                # gains offset/limit, keying on the full input becomes a
-                # sliding-window evasion (1-50, 2-51, ...) — drop range fields
-                # from the key, or normalize to path, before adding them.
-                key = f"{t.name}|{json.dumps(t.input, sort_keys=True, default=str)}"
+                # read_file has offset/limit (tool-ergonomics spec): different
+                # windows of the same file must not each count as novel
+                # information — a stuck agent could slide the window
+                # (offset 1, 2, 3, ...) forever. Key reads by path: drop the
+                # range fields before hashing.
+                inp = t.input
+                if t.name == "read_file":
+                    inp = {k: v for k, v in inp.items()
+                           if k not in ("offset", "limit")}
+                key = f"{t.name}|{json.dumps(inp, sort_keys=True, default=str)}"
                 if key not in self._seen_read_keys:
                     self._seen_read_keys.add(key)
                     progressed = True
