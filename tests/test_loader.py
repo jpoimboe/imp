@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from imp.engine.errors import LoadError, LoadErrors
+from imp.engine.expr import Binary, Name, StrLit
 from imp.engine.loader import load_workflow, parse_agent_file
 from imp.engine.types import Goto, Pause
 
@@ -700,3 +701,46 @@ def test_feedback_string_parsed_and_bool_rejected(tmp_path: Path) -> None:
         """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
     with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf3)
+
+
+# ── merge kind tests ──────────────────────────────────────────────────────────
+
+
+def test_merge_kind_parses_and_routes_on_merge_output(tmp_path: Path) -> None:
+    # A minimal workflow with a `kind: merge` step that routes on `merge:`.
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: m
+                kind: merge
+                rules:
+                  - {if: {merge: STALE}, goto: m}
+                  - {else: true, continue: true}
+        """)
+    workflow = load_workflow(wf)
+    step = workflow.flat_steps()[0]
+    assert step.kind == "merge"
+    assert len(step.rules) == 2
+    # Rule 0: `if: {merge: STALE}` → Binary("==", Name("merge"), StrLit("STALE"))
+    # Rule 1: `else: true` → condition is None (else-rule); action is Continue
+    stale_rule = step.rules[0]
+    assert stale_rule.condition == Binary("==", Name("merge"), StrLit("STALE"))
+    assert isinstance(stale_rule.action, Goto)
+    assert stale_rule.action.target == "m"   # STALE self-loop routes back to the merge step
+
+
+def test_merge_kind_requires_rules(tmp_path: Path) -> None:
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: m
+                kind: merge
+        """)
+    with pytest.raises((LoadError, LoadErrors), match="requires a rules"):
+        load_workflow(wf)

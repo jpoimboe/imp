@@ -203,7 +203,7 @@ def spaces_before(node: Any) -> bool:
     )
 
 
-_CHROME_KINDS = ("script", "branch")
+_CHROME_KINDS = ("script", "branch", "merge")
 
 
 def is_chrome_step(node: Any) -> bool:

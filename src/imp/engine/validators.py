@@ -169,7 +169,7 @@ def _v_rules_end_in_else(workflow: Workflow, errors: list[LoadError]) -> None:
 
 def _v_required_blocks_per_kind(workflow: Workflow, errors: list[LoadError]) -> None:
     for step in workflow.flat_steps():
-        if step.kind in ("script", "branch") and not step.rules:
+        if step.kind in ("script", "branch", "merge") and not step.rules:
             errors.append(LoadError(
                 f"{step.kind} step {step.name!r} requires a rules: block", step.source))
 

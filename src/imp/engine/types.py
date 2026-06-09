@@ -153,7 +153,7 @@ class AgentDef:
 
 # ── Steps & phases ────────────────────────────────────────────────────────────
 
-Kind = Literal["agent", "script", "branch"]
+Kind = Literal["agent", "script", "branch", "merge"]
 
 
 @dataclass(frozen=True, slots=True)

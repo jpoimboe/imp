@@ -151,7 +151,10 @@ _SCRIPT_OUTPUT_TYPES: dict[str, ExprType] = {
 def _output_types_for_step(
     step_kind: str, agent: AgentDef | None
 ) -> dict[str, ExprType] | None:
-    """The expr output-env types for one step. None means branch (no output)."""
+    """The expr output-env types for one step.
+
+    None means no typed output env (branch, or agent step with no resolved agent).
+    """
     if step_kind == "agent" and agent is not None:
         out: dict[str, ExprType] = {}
         for f in agent.output_schema.fields:
@@ -161,6 +164,8 @@ def _output_types_for_step(
         return out
     if step_kind == "script":
         return dict(_SCRIPT_OUTPUT_TYPES)
+    if step_kind == "merge":
+        return {"merge": "string"}   # engine produces merge: MERGED|STALE|CONFLICT|REFUSED|DIRTY
     return None  # branch
 
 
@@ -177,6 +182,14 @@ def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
         kind for kind, keys in _KIND_SIGNALS.items() if any(k in raw for k in keys)
     }
     has_rules = "rules" in raw
+    explicit = raw.get("kind")
+    if explicit == "merge":
+        # Engine-native step: no file/command key signals it, so it must be
+        # declared. It routes on an engine-produced `merge` output via rules.
+        if present:
+            raise LoadError(
+                "merge step carries no file/command (engine-native)", source)
+        return "merge"
     if len(present) > 1:
         raise LoadError(
             f"step has conflicting kind signals {sorted(present)}; "
@@ -189,7 +202,6 @@ def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
             "step has no kind signal (need one of file/prompt, command, or rules)",
             source,
         )
-    explicit = raw.get("kind")
     if explicit is not None and explicit != inferred:
         raise LoadError(
             f"declared kind {explicit!r} disagrees with the keys present "
@@ -511,7 +523,7 @@ def _parse_step(
 
     if "rules" in raw:
         rules = _parse_rules(raw["rules"], source, yaml_path)
-    elif kind in ("script", "branch"):
+    elif kind in ("script", "branch", "merge"):
         raise LoadError(f"{kind} step {name!r} requires a rules: block", source)
     # agent with no rules means continue-on-success (rules stays ())
 
@@ -538,6 +550,11 @@ def _parse_step(
             command=str(raw["command"]),
             cwd=str(raw["cwd"]) if raw.get("cwd") else None,
             timeout_seconds=raw.get("timeout"),
+        )
+    elif kind == "merge":
+        step = Step(
+            name=name, phase=phase_name, kind="merge", rules=rules,
+            on_max_retries=on_max, max_loops=max_loops, source=source,
         )
     else:  # branch
         step = Step(

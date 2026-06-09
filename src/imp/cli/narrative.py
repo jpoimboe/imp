@@ -66,7 +66,7 @@ class PhaseNode:
 @dataclass
 class StepNode:
     name: str                          # step name
-    kind: str | None = None            # agent | script | branch
+    kind: str | None = None            # agent | script | branch | merge
     interactive: bool = False
     model: str | None = None
     provider: str | None = None
@@ -533,9 +533,9 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         node.children.append(BreadcrumbLine(
             step_name=node.name, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),
-            # A chrome step (script/branch gate) prints no start line, so its
+            # A chrome step (script/branch/merge gate) prints no start line, so its
             # breadcrumb omits the word "complete" (see BreadcrumbLine).
-            show_complete=node.kind not in ("script", "branch")))
+            show_complete=node.kind not in ("script", "branch", "merge")))
         node.closed = True
 
 
