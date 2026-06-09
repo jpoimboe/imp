@@ -46,22 +46,52 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   exit 5
 fi
 
-# Branch already contains the base tip -> nothing to integrate.
+CHANGE_DIR=".imp/change"
+
+# Branch already contains the base tip -> nothing to integrate. Record the SHA
+# here (base IS integrated, so the current tip is the correct recorded value) so
+# base-fresh-check has a ref; do NOT bump the counter (no round happened).
 if git merge-base --is-ancestor "$BASE" HEAD; then
+  SHA=$(git rev-parse "${BASE}^{commit}") || exit 5
+  echo "$SHA" > "$CHANGE_DIR/integrated_base_sha"
   echo "base ($BASE) already integrated; nothing to do"
   exit 2
 fi
 
-# Start the merge, uncommitted. A non-zero result is NOT automatically "conflict":
-# classify on MERGE_HEAD (the same F6 rule worktree.py uses). A real conflict
-# starts a merge (MERGE_HEAD present) -> hand the conflicted tree to the
-# integrator. A refusal (e.g. would-overwrite) starts NOTHING -> there is no
-# integration to do and exit 0 would be a silent no-op; pause instead.
+# R2: a dedicated, persisted re-integration counter — NOT per-step max_loops. The
+# backward `goto integrate-merge` is issued from TWO steps (base-fresh-check and
+# merge-to-base), so per-step loop counters would split the true round count and
+# bound neither. Below --is-ancestor so only rounds that actually integrate count.
+# CHECK-BEFORE-BUMP (finding #8): if already AT the limit, pause WITHOUT bumping —
+# else every `imp resume` re-increments and raising the limit by one re-trips
+# immediately. The count parks at the limit; raising IMP_MAX_REINTEGRATIONS above
+# it (or resetting the file) lets exactly the intended number of rounds proceed.
+PREV=$(cat "$CHANGE_DIR/reintegration_count" 2>/dev/null || echo 0)
+LIMIT="${IMP_MAX_REINTEGRATIONS:-10}"
+if ! [[ "$LIMIT" =~ ^[0-9]+$ ]]; then
+  echo "IMP_MAX_REINTEGRATIONS must be a non-negative integer; got: '$LIMIT'" >&2
+  exit 4
+fi
+if [ "$PREV" -ge "$LIMIT" ]; then
+  echo "re-integration limit ($LIMIT) reached after $PREV rounds." >&2
+  echo "To continue: set IMP_MAX_REINTEGRATIONS above $PREV, or reset .imp/change/reintegration_count, then \`imp resume\`." >&2
+  exit 4
+fi
+echo "$((PREV + 1))" > "$CHANGE_DIR/reintegration_count"
+
+# Start the merge, uncommitted (F6 classification on MERGE_HEAD). Record the SHA
+# on either merge-started path (clean or conflicted) — that is the "we actually
+# integrated base X" signal the merge phase checks against. A refusal records
+# nothing and pauses.
 if git merge --no-ff --no-commit "$BASE"; then
+  SHA=$(git rev-parse "${BASE}^{commit}") || exit 5
+  echo "$SHA" > "$CHANGE_DIR/integrated_base_sha"
   echo "clean auto-merge staged (uncommitted); handing to integrator"
   exit 0
 fi
 if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+  SHA=$(git rev-parse "${BASE}^{commit}") || exit 5
+  echo "$SHA" > "$CHANGE_DIR/integrated_base_sha"
   echo "merge conflicts (uncommitted); handing to integrator to resolve"
   exit 0
 fi

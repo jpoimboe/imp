@@ -139,3 +139,73 @@ def test_stale_merge_head_at_entry_exits_5(tmp_path: Path) -> None:
     # Sanity: MERGE_HEAD is present now.
     assert _git(pr, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0
     assert _run(pr).returncode == 5
+
+
+def test_records_integrated_base_sha(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=True, conflict=False)
+    _run(pr)
+    recorded = (pr / ".imp" / "change" / "integrated_base_sha").read_text().strip()
+    expected = _git(pr, "rev-parse", "main^{commit}").stdout.strip()
+    assert recorded == expected
+
+
+def test_records_sha_even_when_nothing_to_integrate(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=False, conflict=False)
+    assert _run(pr).returncode == 2
+    # The fast-path check needs a recorded SHA even on the skip path — and it must
+    # be the current base tip.
+    recorded = (pr / ".imp" / "change" / "integrated_base_sha").read_text().strip()
+    assert recorded == _git(pr, "rev-parse", "main^{commit}").stdout.strip()
+
+
+def test_nonnumeric_reintegration_limit_exits_4(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=True, conflict=False)
+    env = {**os.environ, "IMP_PROJECT_ROOT": str(pr), "IMP_MAX_REINTEGRATIONS": "abc"}
+    rc = subprocess.run(["bash", str(SCRIPT)], cwd=pr.parent, env=env,
+                        capture_output=True, text=True, check=False).returncode
+    assert rc == 4
+
+
+def test_reintegration_counter_pauses_after_limit(tmp_path: Path) -> None:
+    # Each round models real re-integration: integrate-merge starts the merge, the
+    # integrator commits it (tree clean), THEN base advances -> next round actually
+    # integrates and bumps the counter. (The counter sits below --is-ancestor now,
+    # and entry must be clean, so we can't just re-run over a mid-merge tree.)
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=True, conflict=False)
+    env = {**os.environ, "IMP_PROJECT_ROOT": str(pr), "IMP_MAX_REINTEGRATIONS": "2"}
+
+    def run() -> int:
+        return subprocess.run(
+            ["bash", str(SCRIPT)], cwd=pr.parent, env=env,
+            capture_output=True, text=True, check=False,
+        ).returncode
+
+    advance_count = [0]
+
+    def commit_merge_then_advance_base() -> None:
+        advance_count[0] += 1
+        _git(pr, "commit", "--no-edit")  # integrator commits the merge -> clean tree
+        _git(pr, "checkout", "main")
+        # Use a unique filename each call so the commit is never empty.
+        fname = f"more_{advance_count[0]}.txt"
+        (pr / fname).write_text(f"more base {advance_count[0]}\n")
+        _git(pr, "add", fname)
+        _git(pr, "commit", "-m", "base advances")
+        _git(pr, "checkout", "imp/x")
+
+    r1 = run()                        # count -> 1, records base@v2
+    commit_merge_then_advance_base()  # integrator commits merge; base advances to v3
+    r2 = run()                        # count -> 2, records base@v3
+    commit_merge_then_advance_base()  # integrator commits merge; base advances to v4
+    r3 = run()                        # PREV=2 >= 2 -> exit 4 (no bump, no merge; count parks at 2)
+    assert (r1, r2, r3) == (0, 0, 4)
+    # Finding #5: the exit-4 pause must NOT record the un-integrated current base
+    # tip — the recorded SHA still points at the last base we actually integrated
+    # (v3), so a human skip-forward can't fool the freshness check into merging
+    # without the latest integration.
+    recorded = (pr / ".imp" / "change" / "integrated_base_sha").read_text().strip()
+    assert recorded != _git(pr, "rev-parse", "main^{commit}").stdout.strip()
