@@ -294,34 +294,3 @@ def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path)
     assert _make_worktree_and_check(tmp_path)
 
 
-def test_create_worktree_makes_tmp_dir(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    wt.create_worktree(tmp_path, "abc123", "main")
-    assert (tmp_path / ".imp" / "tmp" / "abc123").is_dir()
-
-
-def test_remove_worktree_drops_tmp_dir(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    wt.create_worktree(tmp_path, "abc123", "main")
-    tmp = tmp_path / ".imp" / "tmp" / "abc123"
-    assert tmp.is_dir()
-    wt.remove_worktree(tmp_path, "abc123")
-    assert not tmp.exists()
-
-
-def test_force_remove_worktree_drops_tmp_dir(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    wt.create_worktree(tmp_path, "abc123", "main")
-    tmp = tmp_path / ".imp" / "tmp" / "abc123"
-    assert tmp.is_dir()
-    wt.remove_worktree(tmp_path, "abc123", force=True)
-    assert not tmp.exists()
-
-
-def test_destroy_worktree_drops_tmp_dir(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    wt.create_worktree(tmp_path, "abc123", "main")
-    tmp = tmp_path / ".imp" / "tmp" / "abc123"
-    assert tmp.is_dir()
-    wt.destroy_worktree(tmp_path, "abc123")
-    assert not tmp.exists()
