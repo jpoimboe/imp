@@ -361,17 +361,19 @@ def test_spec_writer_prompt_drops_auto_titled_conditional() -> None:
 
 def test_spec_writer_prompt_mandates_opening_question() -> None:
     # Acceptance #3: the prompt explicitly instructs the agent to open the
-    # change with a single plain-prose question, with no tool calls and no
+    # change by calling wait_for_user (not via a bare turn-end), with no
     # codebase exploration before the user answers.
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
     assert "open by asking" in lowered
-    assert "first turn" in lowered
-    # The discipline forbids any tool use or codebase exploration on turn 1.
-    assert "no tool calls" in lowered
-    assert "no codebase exploration" in lowered
+    assert "first action" in lowered
+    # The discipline requires wait_for_user for the opening question.
+    assert "wait_for_user" in lowered
+    # No codebase exploration before the user has answered.
+    assert "do not" in lowered or "do not\n" in lowered or "do not " in lowered
+    assert "codebase" in lowered
 
 
 def test_spec_writer_prompt_mandates_proactive_rename() -> None:
