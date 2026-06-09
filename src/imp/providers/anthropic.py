@@ -16,7 +16,6 @@ tool_result, thinking, runner_warning, tool_killed) are written via EventLog.
 from __future__ import annotations
 
 import inspect
-import json
 import os
 from collections.abc import AsyncGenerator
 from typing import Any, cast
@@ -24,6 +23,7 @@ from typing import Any, cast
 import anyio
 
 from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.dispatch import TurnState, dispatch_one_tool_use
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
 from imp.agents.runner import (
     AgentInvocation,
@@ -35,11 +35,10 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import dispatch_task, make_task_tool, raise_if_suspended
+from imp.agents.subagents import make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
-from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
+from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
 from imp.agents.transcript import (
@@ -49,7 +48,6 @@ from imp.agents.transcript import (
     resolve_wait_for_user_on_resume,
 )
 from imp.engine.agent_run import deliver_interject
-from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers.base import Provider
 from imp.providers.resolve import spawn_subagent_via_registry
@@ -654,100 +652,17 @@ class AnthropicAgentRunner:
                 return
 
             tool_results: list[ToolResultBlock] = []
-            ceiling_tripped = False
+            turn = TurnState(tool_calls_used=tool_calls_used)
             for tu in tool_uses:
-                if ceiling is not None and tool_calls_used >= ceiling:
-                    # Backfill error tool_results to preserve transcript invariant.
-                    err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
-                    block = ToolResultBlock(tu.id, err_text, is_error=True)
-                    tool_results.append(block)
-                    elog.append_tool_result(agent_id=aid, block=block)
-                    ceiling_tripped = True
-                    continue
-                tool_calls_used += 1
-
-                tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
-
-                # task special-case: bypasses the sync Tool.invoke path
-                # entirely — go straight to the async dispatcher.
-                # Use the persisted tool_call event id for durable parent link.
-                if tu.name == "task":
-                    try:
-                        result_str = await dispatch_task(
-                            ctx, tu.input["subagent_name"], tu.input["task_description"],
-                            tool_call_event_id=tc_ev["id"],
-                            tier=tu.input.get("tier"),
-                        )
-                    except Exception as e:
-                        raise_if_suspended(e)  # unwind a subagent-origin pause
-                        err_text = f"{type(e).__name__}: {e}"
-                        block = ToolResultBlock(tu.id, err_text, is_error=True)
-                        tool_results.append(block)
-                        elog.append_tool_result(agent_id=aid, block=block)
-                        continue
-                    block = ToolResultBlock(tu.id, result_str)
-                    tool_results.append(block)
-                    elog.append_tool_result(agent_id=aid, block=block)
-                    continue
-
-                tool = tools.get(tu.name)
-                if tool is None:
-                    msg = f"unknown tool {tu.name!r}"
-                    block = ToolResultBlock(tu.id, msg, is_error=True)
-                    tool_results.append(block)
-                    elog.append_tool_result(agent_id=aid, block=block)
-                    continue
-                try:
-                    raw_result = await tool.async_invoke(ctx, tu.input)
-                except StepComplete as sc:
-                    try:
-                        validate_agent_output(sc.args_payload, invocation.agent_def.output_schema)
-                    except Exception as ve:
-                        yield {"type": "error", "payload": {
-                            "category": "agent_output_missing",
-                            "kind": "output_validation",
-                            "message": str(ve),
-                        }}
-                        return
-                    yield {"type": "agent_output", "payload": sc.args_payload}
+                terminal = await dispatch_one_tool_use(
+                    ctx=ctx, elog=elog, aid=aid, invocation=invocation,
+                    tools=tools, tu=tu, tool_results=tool_results,
+                    state=turn, ceiling=ceiling)
+                if terminal is not None:
+                    yield terminal
                     return
-                except FatalToolError as fte:
-                    yield {"type": "error", "payload": {
-                        "category": "config",
-                        "kind": "fatal_tool_error",
-                        "tool": tu.name,
-                        "message": str(fte),
-                    }}
-                    return
-                except AwaitingUserInput:
-                    # Headless wait_for_user pause: must unwind out of run() (like
-                    # SubagentSuspended), not become an is_error tool_result. The
-                    # assistant message bearing this tool_use was already appended,
-                    # so the transcript ends at the dangling wait_for_user tool_use.
-                    raise
-                except Exception as e:
-                    err_text = f"{type(e).__name__}: {e}"
-                    block = ToolResultBlock(tu.id, err_text, is_error=True)
-                    tool_results.append(block)
-                    elog.append_tool_result(agent_id=aid, block=block)
-                    continue
-
-                content_str = (raw_result if isinstance(raw_result, str)
-                               else json.dumps(raw_result, default=str))
-                if tu.name == "bash":
-                    # Detect a kill so the log carries a tool_killed event.
-                    try:
-                        parsed = json.loads(content_str)
-                    except (TypeError, ValueError):
-                        parsed = {}
-                    rc = parsed.get("returncode")
-                    if isinstance(rc, int) and rc < 0:
-                        elog.append(agent_id=aid, type="tool_killed",
-                                    payload={"id": tu.id, "name": "bash",
-                                             "signal": -rc})
-                block = ToolResultBlock(tu.id, content_str)
-                tool_results.append(block)
-                elog.append_tool_result(agent_id=aid, block=block)
+            tool_calls_used = turn.tool_calls_used
+            ceiling_tripped = turn.ceiling_tripped
 
             user_msg = Message(role="user", content=tuple(tool_results))
             messages.append(user_msg)
