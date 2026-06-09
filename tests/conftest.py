@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,25 @@ def _stub_provider_api_keys(
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     if not os.environ.get("OPENAI_API_KEY"):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+
+@pytest.fixture(autouse=True)
+def _reset_theme() -> Generator[None, None, None]:
+    """Pin the active color theme to `ansi` around every test. `palette` keeps
+    the active theme in module-global state, and any test that runs the CLI
+    in-process (e.g. `main(["status"])`) calls `_apply_theme` -> `set_theme(...)`,
+    which leaks the resolved theme into the next test. A test that asserts the
+    ansi-named SGR codes (e.g. gray `\\x1b[90m`) then fails under random ordering
+    if a prior test resolved a dark/light theme — most visibly when a non-ansi
+    `theme:` lives in the merged config (a real `~/.config/imp/config.yaml`, or
+    the dogfood's bootstrapped user config). Resetting on both sides makes the
+    SGR-literal tests order-independent. (test_palette.py defines an identically
+    named fixture; that local one overrides this for its own module — same
+    effect.)"""
+    from imp.cli import palette as pal
+    pal.set_theme("ansi")
+    yield
+    pal.set_theme("ansi")
 
 
 @pytest.fixture
