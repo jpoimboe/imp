@@ -51,6 +51,10 @@ class ToolContext:
     # the parent's on_event. Distinct from the read-only EventLog dispatch_task
     # builds for prompt-context rendering.
     event_log: Any = None
+    # The agent_id of THIS invocation (e.g. "step:review/final-review" or a
+    # subagent id). Set by each provider where it builds the ToolContext, so a
+    # tool that emits an event (wait_for_user) pairs it under the right node.
+    agent_id: str | None = None
     # Subagent dispatch hook (filled by runner; signature defined in subagents tool).
     spawn_subagent: Any = None
     # tier → ProviderModel; copied from invocation.resolved_tiers by the runner.

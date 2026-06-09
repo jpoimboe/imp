@@ -1,0 +1,69 @@
+"""wait_for_user (Part A): the agent's explicit "yield to the human" terminator.
+
+Attended (a human is reachable and the run is not headless): emit
+awaiting_user_input, solicit a reply, and RETURN it as this tool's result —
+a normal tool result, so the provider loop continues and the conversation is
+multi-turn for free. Headless or a subagent: emit awaiting_user_input, then
+raise AwaitingUserInput, which unwinds to a clean pause (later task). The paused
+wait_for_user tool_use is left DANGLING and resolved by the REAL human reply on
+an attended resume — never a synthetic placeholder (see transcript.py).
+"""
+
+from __future__ import annotations
+
+import inspect
+from typing import Any
+
+from imp.agents.tools import Tool
+
+
+class AwaitingUserInput(Exception):
+    """Raised by wait_for_user when no human is attached. Propagates out of the
+    provider run() (the provider re-raises it past the generic tool except,
+    mirroring SubagentSuspended) and is caught in drive_invocation as a pause."""
+
+    def __init__(self, prompt: str = "") -> None:
+        super().__init__("awaiting user input")
+        self.prompt = prompt
+
+
+_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "prompt": {
+            "type": "string",
+            "description": "The question or context to show the human.",
+        }
+    },
+    "required": [],
+    "additionalProperties": False,
+}
+
+
+def make_wait_for_user_tool() -> Tool:
+    async def _invoke(ctx: Any, prompt: str = "", **_ignore: Any) -> str:
+        if ctx.event_log is not None:
+            ctx.event_log.append(
+                agent_id=getattr(ctx, "agent_id", None),
+                type="awaiting_user_input",
+                payload={"prompt": prompt},
+            )
+        attended = ctx.user_input_fn is not None and not ctx.non_interactive
+        if not attended:
+            raise AwaitingUserInput(prompt)
+        reply = ctx.user_input_fn("")
+        if inspect.isawaitable(reply):
+            reply = await reply
+        return reply
+
+    return Tool(
+        name="wait_for_user",
+        description=(
+            "Yield to the human and wait for their reply. Call this as your ONLY "
+            "tool call in the turn. Pass `prompt` with your question. When a human "
+            "is attended you receive their reply as the tool result and continue; "
+            "in a headless run or a subagent this pauses the run for a human."
+        ),
+        input_schema=_SCHEMA,
+        fn=_invoke,
+    )
