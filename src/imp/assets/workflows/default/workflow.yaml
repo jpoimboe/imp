@@ -19,6 +19,7 @@ vars:
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   panel_done:             {type: bool, default: false}
+  integration_needs_review: {type: bool, default: false}
 
 defaults:
   max_retries: 3
