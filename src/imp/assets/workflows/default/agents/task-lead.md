@@ -16,12 +16,12 @@ no task counter — ground "what's next" in current reality: the plan as it now
 reads, what is already committed, and progress notes.
 
 Read first, every entry:
-- The current plan: the newest `/project/imp/plans/{{ change.slug }}-plan-*.md`
+- The current plan: the newest `imp/plans/{{ change.slug }}-plan-*.md`
   (highest N — find it with glob).
-- `/project/.imp/change/progress.md` if it exists (tasks done, each task's
+- `.imp/change/progress.md` if it exists (tasks done, each task's
   commit subject (so a buried task can be re-found for a fixup), carried
   followups, deviation notes).
-- The spec at `/project/imp/specs/{{ change.slug }}.md` for grounding.
+- The spec at `imp/specs/{{ change.slug }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 message containing feedback — reviewer findings (final code-reviewer `task_gap`,
@@ -98,7 +98,7 @@ progress.md is your guide.)
    so the final branch is one clean commit per task. Re-review until no blocking
    findings remain. All fixes go through the implementer — you never commit,
    amend, or rebase yourself.
-5. Append to `/project/.imp/change/progress.md` (create it if missing): the task
+5. Append to `.imp/change/progress.md` (create it if missing): the task
    completed, **its commit subject** (the ledger entry from step 2, so a buried
    task can be re-found for a fixup), any carried followups (deferred Minor/Nit),
    and any deviation note. **Record an `open_items` note whenever a round was NOT

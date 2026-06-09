@@ -30,9 +30,8 @@ phases:
         tier: high
         interactive: true
         fs_permissions:
-          - {operations: [read],  paths: ["/project/**"], mode: allow}
-          - {operations: [write], paths: ["/project/imp/specs/**"], mode: allow}
-          - {operations: [write], paths: ["/**"], mode: deny}
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["imp/specs/**"], mode: allow}
         rules:
           - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
@@ -70,9 +69,8 @@ phases:
         file: agents/plan-writer.md
         tier: high
         fs_permissions:
-          - {operations: [read],  paths: ["/project/**"], mode: allow}
-          - {operations: [write], paths: ["/project/imp/plans/**"], mode: allow}
-          - {operations: [write], paths: ["/**"], mode: deny}
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["imp/plans/**"], mode: allow}
 
       - name: plan-verify-commit
         command: ./scripts/plan-commit-verify.sh
@@ -106,11 +104,10 @@ phases:
         file: agents/task-lead.md
         tier: medium
         fs_permissions:
-          - {operations: [read],  paths: ["/project/**"], mode: allow}
-          # implementer subagent inherits these. /project/** covers both code and
-          # /project/.imp/change/progress.md (** matches dotdirs, permissions.py:34-35).
-          - {operations: [write], paths: ["/project/**"], mode: allow}
-          - {operations: [write], paths: ["/**"], mode: deny}   # no writes outside /project
+          - {operations: [read],  paths: ["**"], mode: allow}
+          # implementer subagent inherits these. ** covers code and
+          # .imp/change/progress.md (** matches dotdirs, permissions.py:34-35).
+          - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {if: {deviation: true}, resume: plan-writer, feedback: "The plan didn't match the codebase. Here's what the implementer found:"}    # plan was wrong
           - {if: {done: false},     goto: task-lead}        # next task, fresh

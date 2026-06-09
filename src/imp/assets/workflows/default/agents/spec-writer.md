@@ -66,7 +66,7 @@ call it, and the name it returns is the one to commit under.
 
 Write the spec to `imp/specs/<slug>.md`, where `<slug>` is the name
 `rename_change` returned (or the name from the opening message). When the
-brainstorm is settled, write `/project/imp/specs/<slug>.md` covering (the full
+brainstorm is settled, write `imp/specs/<slug>.md` covering (the full
 four-part structure for a `standard` change; on a `trivial` change the "Thin spec
 on `trivial`" note below overrides this and you write Goal + Acceptance criteria
 only):

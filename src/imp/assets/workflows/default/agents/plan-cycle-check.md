@@ -9,8 +9,8 @@ output:
 ---
 
 You judge whether the change needs another plan. Read the spec at
-`/project/imp/specs/{{ change.slug }}.md`, every plan
-`/project/imp/plans/{{ change.slug }}-plan-*.md`, `/project/.imp/change/progress.md`,
+`imp/specs/{{ change.slug }}.md`, every plan
+`imp/plans/{{ change.slug }}-plan-*.md`, `.imp/change/progress.md`,
 and the committed code (use glob/grep to spot-check).
 
 A spec may decompose into multiple plans, each written and implemented before the

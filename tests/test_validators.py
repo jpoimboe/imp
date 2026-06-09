@@ -285,7 +285,7 @@ def test_v11_dotted_filename_allowed(tmp_path: Path) -> None:
               - name: s
                 file: agents/stub.md
                 fs_permissions:
-                  - {operations: [read], paths: ['/var/log/app..log'], mode: allow}
+                  - {operations: [read], paths: ['var/log/app..log'], mode: allow}
         """, agents={"stub": _OK_AGENT})
     load_workflow(wf)  # must not raise
 
@@ -324,8 +324,8 @@ def test_v15_pass_write_file_with_write_permission(tmp_path: Path) -> None:
               - name: s
                 file: agents/writer.md
                 fs_permissions:
-                  - {operations: [read], paths: ['/artifacts/**'], mode: allow}
-                  - {operations: [write], paths: ['/artifacts/**'], mode: allow}
+                  - {operations: [read], paths: ['artifacts/**'], mode: allow}
+                  - {operations: [write], paths: ['artifacts/**'], mode: allow}
         """, agents={"writer": _WRITE_FILE_AGENT})
     load_workflow(wf)  # must not raise
 
@@ -360,7 +360,7 @@ def test_v15_fail_write_file_only_read_permission(tmp_path: Path) -> None:
               - name: s
                 file: agents/writer.md
                 fs_permissions:
-                  - {operations: [read], paths: ['/artifacts/**'], mode: allow}
+                  - {operations: [read], paths: ['artifacts/**'], mode: allow}
         """, agents={"writer": _WRITE_FILE_AGENT})
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)

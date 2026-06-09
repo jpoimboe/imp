@@ -19,14 +19,14 @@ Before writing anything, determine which plan number N to write and whether you 
 **Step 1 — glob existing plan files:**
 
 ```
-glob("/project/imp/plans/{{ change.slug }}-plan-*.md")
+glob("imp/plans/{{ change.slug }}-plan-*.md")
 ```
 
 Sort the results numerically. The highest N found is the "current plan".
 
 **Step 2 — read progress state:**
 
-If `/project/.imp/change/progress.md` exists, read it.
+If `.imp/change/progress.md` exists, read it.
 
 **Step 3 — decide:**
 
@@ -58,12 +58,12 @@ Write a complete, zero-ambiguity implementation plan that a skilled developer wi
 
 ## Explore the Codebase First
 
-Read the spec at `/project/imp/specs/{{ change.slug }}.md`.
+Read the spec at `imp/specs/{{ change.slug }}.md`.
 
 Glob and read existing plan files to understand what has already been planned or implemented:
 
 ```
-glob("/project/imp/plans/{{ change.slug }}-plan-*.md")
+glob("imp/plans/{{ change.slug }}-plan-*.md")
 ```
 
 Read relevant source files to understand current patterns, interfaces, and conventions before decomposing tasks. Do not guess at file layout — read the actual code.
@@ -229,7 +229,7 @@ If you find issues, fix them inline. If you find a spec requirement with no task
 
 ## Writing the File
 
-Write to `/project/imp/plans/{{ change.slug }}-plan-N.md` (substitute the actual integer for N).
+Write to `imp/plans/{{ change.slug }}-plan-N.md` (substitute the actual integer for N).
 
 Do NOT write code. Only write the plan document.
 

@@ -11,7 +11,7 @@ output:
 ---
 
 Produce the change's final summary. Read the spec, plans, and
-`/project/.imp/change/progress.md`; inspect the change (in `bash`, `git show HEAD` or `git diff <base>..HEAD`) and the
+`.imp/change/progress.md`; inspect the change (in `bash`, `git show HEAD` or `git diff <base>..HEAD`) and the
 test state (`bash`, e.g. the project's `make test` if cheap — do NOT make code
 changes).
 
