@@ -833,8 +833,11 @@ def test_dogfood_imp_on_imp_default_workflow(
     assert "    tools  " not in log_full.stdout
 
     # ── imp status smoke: the completed slug appears under Completed Changes ──
+    # `--all` is required: in-flight Changes show by default, but a completed +
+    # merged Change is journaled history that `imp status` hides unless --all is
+    # passed (main.py _cmd_status, since `fix(status): hide history by default`).
     status_out = subprocess.run(
-        [str(venv_python), "-m", "imp", "status"],
+        [str(venv_python), "-m", "imp", "status", "--all"],
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert status_out.returncode == 0, (
