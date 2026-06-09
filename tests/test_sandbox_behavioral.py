@@ -456,8 +456,13 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
 
         # ------------------------------------------------------------------
         # 4. git config --worktree core.hooksPath /tmp/evil FAILS
-        #    The worktree-specific config lives at .git/worktrees/esc1/config.worktree
-        #    which is in git_ro_remask → RO inside the namespace.
+        #    esc1's OWN config.worktree does not exist at resolve-time (git only
+        #    creates it on first --worktree write), so it is not in git_ro_remask.
+        #    The escape is still blocked transitively: `git config --worktree`
+        #    requires extensions.worktreeConfig in .git/config first, and .git/config
+        #    is remasked RO — so git refuses (rc=128, "worktreeConfig not enabled")
+        #    and never reaches a writable hooksPath. (Any EXISTING config.worktree,
+        #    incl. siblings, IS remasked RO — see vector 5.)
         # ------------------------------------------------------------------
         r4 = _bash(
             ctx,
