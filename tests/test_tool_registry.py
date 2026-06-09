@@ -107,3 +107,13 @@ def test_return_annotation_not_in_schema(isolated_registry) -> None:
 
     props = get_registry()["ret"].input_schema["properties"]
     assert set(props) == {"a"}
+
+
+def test_unresolvable_annotation_raises_at_decoration(isolated_registry) -> None:
+    # The resolver's loud-failure invariant: an annotation that names something
+    # undefined in the module (e.g. a TYPE_CHECKING-only import) must raise at
+    # @imp_tool decoration time — never fall back to a degenerate schema.
+    with pytest.raises(NameError):
+        @imp_tool(name="ghost", description="x")
+        def ghost(ctx: object, x: NoSuchType) -> str:  # noqa: F821
+            return ""
