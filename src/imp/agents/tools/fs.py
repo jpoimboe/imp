@@ -39,11 +39,13 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
         "src/foo.py). IMPORTANT: the line-number prefix is display-only — "
         "never copy it into any write path (edit_file's `old`, write_file's "
         "`content`, or a bash heredoc); doing so writes numbered garbage and "
-        "nothing errors. Three more display artifacts are not file content: "
-        "an invisible trailing carriage return on CRLF lines, the "
-        "`…[truncated]` suffix on lines over 2000 chars, and U+FFFD "
-        "replacement characters standing in for invalid bytes — pasting any "
-        "of them into edit_file/write_file corrupts or never matches."
+        "nothing errors. Two more display artifacts are not file content: "
+        "the `…[truncated]` suffix on lines over 2000 chars, and U+FFFD "
+        "replacement characters standing in for invalid bytes — pasting "
+        "either into edit_file/write_file corrupts or never matches. The "
+        "opposite trap on CRLF files: every line ends in an invisible "
+        "carriage return that IS file content — preserve it when copying "
+        "multi-line text into edit_file's `old`/`new` or write_file."
     ),
 )
 async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int = 2000) -> str:
