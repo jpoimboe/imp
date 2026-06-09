@@ -9,6 +9,7 @@ import pytest
 from imp.agents.tools.limits import (
     FILE_READ_CAP_BYTES,
     ToolAborted,
+    read_bytes_capped,
     read_text_capped,
     tool_checkpoint,
 )
@@ -118,3 +119,43 @@ def test_read_text_capped_aborts_mid_read_between_chunks(tmp_path: Path) -> None
         assert coord._checks >= 2
 
     anyio.run(go)
+
+
+def test_read_bytes_capped_returns_raw_bytes(tmp_path: Path) -> None:
+    # Bytes-faithful: no decode, no U+FFFD — this is the primitive edit_file's
+    # strict-decode path builds on.
+    f = tmp_path / "raw.bin"
+    f.write_bytes(b"abc\xff\x00def")
+
+    async def go():
+        return await read_bytes_capped(f)
+
+    data, truncated = anyio.run(go)
+    assert data == b"abc\xff\x00def"
+    assert truncated is False
+
+
+def test_read_bytes_capped_stops_at_cap(tmp_path: Path) -> None:
+    f = tmp_path / "big.bin"
+    f.write_bytes(b"x" * 500)
+
+    async def go():
+        return await read_bytes_capped(f, cap_bytes=100)
+
+    data, truncated = anyio.run(go)
+    assert data == b"x" * 100
+    assert truncated is True
+
+
+def test_read_bytes_capped_exactly_at_cap_reports_truncated(tmp_path: Path) -> None:
+    # Documented conservative behavior: a file of EXACTLY cap_bytes returns
+    # truncated=True though nothing was dropped. Callers st_size-disambiguate.
+    f = tmp_path / "exact.bin"
+    f.write_bytes(b"x" * 100)
+
+    async def go():
+        return await read_bytes_capped(f, cap_bytes=100)
+
+    data, truncated = anyio.run(go)
+    assert data == b"x" * 100
+    assert truncated is True

@@ -19,7 +19,11 @@ FILE_READ_CAP_BYTES = 5_000_000          # per-file ceiling for the bounded read
 MATCH_LINE_CAP_BYTES = 2_000             # byte-truncate each matched grep line
 READ_CHUNK_BYTES = 65_536                # cooperative read granularity
 # F4: the "50 KB" text is bound to TOOL_OUTPUT_CAP_BYTES above — if you change the
-# cap, change this label (and the tests that assert the literal) together.
+# cap, change this label (and the tests that assert the literal) together. The
+# same binding holds for the "5 MB"/"first 5 MB" literals in the read_file/grep/
+# edit_file notice skeletons (fs.py, nav.py): they are FILE_READ_CAP_BYTES in
+# prose, and tests assert them verbatim — change the constant => change those
+# skeletons and their tests in lockstep.
 OUTPUT_TRUNCATION_MARKER = "\n... [output truncated at 50 KB] ..."
 
 # --- Watchdog / teardown timing (distinct from HEADLESS_RETRY_CEILING_SECONDS,
@@ -60,19 +64,22 @@ async def tool_checkpoint(coordinator: object | None, deadline: float | None) ->
         raise ToolAborted("timed-out")
 
 
-async def read_text_capped(
+async def read_bytes_capped(
     path: Path,
     *,
     coordinator: object | None = None,
     deadline: float | None = None,
     cap_bytes: int = FILE_READ_CAP_BYTES,
-) -> tuple[str, bool]:
-    """Read up to `cap_bytes` from `path`, cooperatively. Returns (text, truncated).
+) -> tuple[bytes, bool]:
+    """Read up to `cap_bytes` RAW BYTES from `path`, cooperatively. Returns
+    (data, truncated). The byte ceiling is enforced DURING the read — never
+    buffer past it (the incident's 3 GB single-line shape). Checkpoints each
+    chunk so a pause / deadline preempts a huge file.
 
-    A BYTE ceiling enforced DURING the read — never `splitlines()` an unbounded
-    input. A single line longer than `cap_bytes` is truncated at the ceiling,
-    never accumulated until a newline appears (the incident's 3 GB single-line
-    shape). Checkpoints each chunk so a pause / deadline preempts a huge file.
+    NOTE: a file whose size is EXACTLY cap_bytes returns truncated=True even
+    though nothing was dropped — the loop fills before a final read sees EOF.
+    Conservative by design; callers disambiguate with st_size when it matters
+    (see lines.file_is_cap_truncated).
     """
     buf = bytearray()
     async with await anyio.open_file(path, "rb") as f:
@@ -80,9 +87,22 @@ async def read_text_capped(
             await tool_checkpoint(coordinator, deadline)
             chunk = await f.read(min(READ_CHUNK_BYTES, cap_bytes - len(buf)))
             if not chunk:
-                return bytes(buf).decode("utf-8", "replace"), False
+                return bytes(buf), False
             buf.extend(chunk)
-    # NOTE: a file whose size is EXACTLY cap_bytes returns truncated=True even
-    # though nothing was dropped — the loop fills before a final read sees EOF.
-    # Conservative by design (no data lost); callers must not treat it as exact.
-    return bytes(buf).decode("utf-8", "replace"), True
+    return bytes(buf), True
+
+
+async def read_text_capped(
+    path: Path,
+    *,
+    coordinator: object | None = None,
+    deadline: float | None = None,
+    cap_bytes: int = FILE_READ_CAP_BYTES,
+) -> tuple[str, bool]:
+    """`read_bytes_capped`, decoded UTF-8 with errors="replace" — for
+    DISPLAY-ONLY tools (read_file, grep). A read-modify-WRITE tool must use
+    read_bytes_capped + strict decode instead: errors="replace" would bake
+    U+FFFD into a write-back, permanently destroying non-UTF-8 bytes."""
+    data, truncated = await read_bytes_capped(
+        path, coordinator=coordinator, deadline=deadline, cap_bytes=cap_bytes)
+    return data.decode("utf-8", "replace"), truncated
