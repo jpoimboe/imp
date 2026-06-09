@@ -26,6 +26,7 @@ import re
 import signal
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import DEVNULL
 from typing import Any
 
 import anyio
@@ -130,3 +131,75 @@ def _split_incomplete_utf8_tail(buf: bytes) -> tuple[bytes, bytes]:
             return buf[: n - back], buf[n - back:]
         return buf, b""                   # complete (or overlong/garbage)
     return buf, b""                       # 3 bare continuations: corrupt — emit
+
+
+async def spawn_background(
+    ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
+    env: dict[str, str],
+) -> str:
+    """Spawn ordering (no orphan window): scratch dir + both write-side files
+    BEFORE the spawn; register the BgProc immediately AFTER open_process
+    returns; close the parent's fd copies LAST. No parent-side write handles
+    are retained — the child writes through its own inherited fds; a retained
+    parent handle would never be written through and its flush would flush
+    nothing. Truncating open ('wb') is belt-and-braces: counter seeding means
+    the same <id>.out is never legitimately reopened."""
+    _seed_counter(ctx)
+    # A pre-spawn/spawn failure CONSUMES this id (the next spawn is bg2 even
+    # if bg1 never existed). Harmless — seeding tolerates gaps — and must NOT
+    # be "fixed" with a decrement, which would re-open the aliasing window.
+    bg_id = ctx.next_bg_id()
+    d = _bg_dir(ctx)
+    d.mkdir(parents=True, exist_ok=True)
+    out_path = d / f"{bg_id}.out"
+    err_path = d / f"{bg_id}.err"
+    kwargs: dict[str, object] = {}
+    if hasattr(os, "setsid"):
+        # Same session-leader invariant as foreground bash: pgid == pid, so
+        # kill_process_group / os.killpg reaches the whole tree — including
+        # forked children that survive the leader.
+        kwargs["start_new_session"] = True
+    out_f = open(out_path, "wb")  # noqa: SIM115
+    try:
+        err_f = open(err_path, "wb")  # noqa: SIM115
+    except OSError:
+        out_f.close()
+        with contextlib.suppress(OSError):
+            out_path.unlink()
+        raise
+    try:
+        proc = await anyio.open_process(
+            argv,
+            # Pinned: an inherited stdin would let the child block on read,
+            # steal terminal input, or hold a pipe open. DEVNULL = instant EOF.
+            stdin=DEVNULL,
+            stdout=out_f,
+            stderr=err_f,
+            cwd=cwd,
+            env=env,
+            **kwargs,  # type: ignore[arg-type]
+        )
+    except BaseException:
+        out_f.close()
+        err_f.close()
+        with contextlib.suppress(OSError):
+            out_path.unlink()
+        with contextlib.suppress(OSError):
+            err_path.unlink()
+        raise
+    bp = BgProc(id=bg_id, proc=proc, out_path=out_path, err_path=err_path,
+                command=command)
+    ctx.background_processes[bg_id] = bp
+    out_f.close()
+    err_f.close()
+    root = ctx.project_root.resolve()
+    return json.dumps({
+        "id": bg_id,
+        "pid": proc.pid,
+        "command": command,
+        "status": "running",
+        # Worktree-root-relative: valid for bash's DEFAULT cwd (the worktree
+        # root); a caller passing a non-root cwd must resolve them itself.
+        "out_path": os.path.relpath(out_path.resolve(), root),
+        "err_path": os.path.relpath(err_path.resolve(), root),
+    }, ensure_ascii=False)
