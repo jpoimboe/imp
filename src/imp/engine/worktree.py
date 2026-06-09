@@ -94,6 +94,10 @@ def create_worktree(control_root: Path, change_id: str, base: str) -> Path:
             if "already exists" in proc.stderr:
                 raise BranchExists(branch)
             raise RuntimeError(f"git worktree add failed: {proc.stderr.strip()}")
+    # Persistent per-change /tmp (spec B.6): bound at /tmp inside the sandbox,
+    # survives across tool calls, isolated from host /tmp. Lives under .imp/
+    # (gitignored), so it never shows in `git status`.
+    (control_root / ".imp" / "tmp" / change_id).mkdir(parents=True, exist_ok=True)
     return (control_root / rel).resolve()
 
 
@@ -106,14 +110,17 @@ def remove_worktree(control_root: Path, change_id: str, *, force: bool = False) 
     --force, then prune git's bookkeeping and drop any leftover directory so a
     re-run after a crash converges."""
     rel = Path(".imp") / "worktrees" / change_id
+    tmp_dir = control_root / ".imp" / "tmp" / change_id
     with RepoGitLock(control_root).acquire():
         if not force:
             _git_ok(control_root, "worktree", "remove", str(rel))
+            shutil.rmtree(tmp_dir, ignore_errors=True)
             return
         proc = _git(control_root, "worktree", "remove", "--force", str(rel))
         if proc.returncode != 0:
             _git(control_root, "worktree", "prune")
             shutil.rmtree(control_root / rel, ignore_errors=True)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def delete_branch(control_root: Path, change_id: str) -> None:
@@ -147,6 +154,7 @@ def destroy_worktree(control_root: Path, change_id: str) -> None:
         # leaking the branch. Prune the stale entry first so the delete succeeds.
         _git(control_root, "worktree", "prune")
         _git(control_root, "branch", "-D", branch)
+        shutil.rmtree(control_root / ".imp" / "tmp" / change_id, ignore_errors=True)
 
 
 class RepoGitLock:
