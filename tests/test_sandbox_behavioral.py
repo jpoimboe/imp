@@ -35,7 +35,25 @@ from imp.engine.sandbox import (
     sandbox_available,
 )
 
-pytestmark = pytest.mark.skipif(not sandbox_available(), reason="bwrap unavailable")
+
+def _var_tmp_writable() -> bool:
+    """These tests place the sandbox worktree under /var/tmp (bwrap rebinds /tmp,
+    which would shadow a worktree under it). /var/tmp is writable on a normal host
+    but READ-ONLY when this suite itself runs INSIDE an imp sandbox (imp-on-imp /
+    dogfood: only the worktree + caches + /tmp are rw). Skip there rather than
+    erroring the gate — host CI still exercises these fully."""
+    try:
+        d = tempfile.mkdtemp(dir="/var/tmp", prefix="imp-sb-probe-")
+        os.rmdir(d)
+        return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not sandbox_available() or not _var_tmp_writable(),
+    reason="bwrap unavailable or /var/tmp not writable (e.g. running inside a sandbox)",
+)
 
 
 # ---------------------------------------------------------------------------

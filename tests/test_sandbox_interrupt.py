@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -17,7 +18,24 @@ from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine.sandbox import SandboxPolicy, sandbox_available
 
-pytestmark = pytest.mark.skipif(not sandbox_available(), reason="bwrap unavailable")
+
+def _var_tmp_writable() -> bool:
+    """The interrupt-grace worktree lives under /var/tmp (bwrap rebinds /tmp, which
+    would shadow a worktree under it). /var/tmp is read-only when this suite runs
+    INSIDE an imp sandbox (imp-on-imp / dogfood), so skip there rather than erroring
+    the gate — host CI still runs these fully."""
+    try:
+        d = tempfile.mkdtemp(dir="/var/tmp", prefix="imp-sb-probe-")
+        os.rmdir(d)
+        return True
+    except OSError:
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not sandbox_available() or not _var_tmp_writable(),
+    reason="bwrap unavailable or /var/tmp not writable (e.g. running inside a sandbox)",
+)
 
 
 def _sandbox_worktree() -> Path:
