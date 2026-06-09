@@ -85,8 +85,14 @@ def test_real_tmp_is_bound_rw_early():
     i_ro_floor = argv.index("/")          # first "/" after --ro-bind is the src
     i_tmp_bind = argv.index("/tmp")       # first "/tmp" after --bind is the src
     i_wt_bind = argv.index("/ctl/.imp/worktrees/abc")  # worktree src
+    # The load-bearing invariant: /tmp must be bound BEFORE the git RO-remask, so a
+    # repo whose .git lives under /tmp still has hooks/config remasked RO (the late
+    # remask wins over the early /tmp bind). Assert directly against the remask, not
+    # just transitively via the worktree bind.
+    i_first_remask = argv.index("/ctl/.git/hooks")
     assert i_tmp_bind > i_ro_floor, "/tmp bind must come after ro-floor"
     assert i_tmp_bind < i_wt_bind, "/tmp bind must come BEFORE worktree bind"
+    assert i_tmp_bind < i_first_remask, "/tmp bind must come BEFORE the git RO-remask"
 
 
 def test_clearenv_and_setenv_allowlist():
