@@ -353,3 +353,28 @@ def test_build_sandbox_policy_bare_when_allow_unsandboxed(tmp_path, monkeypatch)
     log = _CaptureLog()
     pol = ex._build_sandbox_policy(change, config, log)
     assert pol.active is False and pol.note == "unsandboxed_by_config"
+    # The inactive posture must be auditable: a sandbox_inactive event is emitted
+    # carrying the note (so an operator can see the run went unsandboxed).
+    inactive = [e for e in log.events if e["type"] == "sandbox_inactive"]
+    assert inactive and inactive[0]["payload"]["reason"] == "unsandboxed_by_config"
+
+
+def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monkeypatch):
+    """The active (happy) path: available+enabled → active policy, no posture
+    event (active is the silent common case), and the engine_env overlay reaches
+    setenv as IMP_PROJECT_ROOT."""
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: True)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+
+    change = _fake_change(tmp_path)
+    config = _fake_config(sandbox={})
+    log = _CaptureLog()
+    pol = ex._build_sandbox_policy(change, config, log)
+    assert pol.active is True and pol.note == ""
+    assert pol.worktree == str(change.project_root)
+    assert ("IMP_PROJECT_ROOT", str(change.project_root)) in pol.setenv
+    # active is the silent common case — no posture event is emitted.
+    assert not any(e["type"] in ("sandbox_inactive", "sandbox_unavailable")
+                   for e in log.events)
