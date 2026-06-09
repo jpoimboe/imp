@@ -39,7 +39,7 @@ def test_active_policy_wraps_with_bwrap():
                               policy=_policy())
     assert argv[0] == "bwrap"
     assert argv[-3:] == ["sh", "-c", "echo hi"]
-    assert ["--ro-bind", "/", "/"] == argv[1:4]   # ro-floor first
+    assert argv[1:4] == ["--ro-bind", "/", "/"]   # ro-floor first
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
