@@ -134,6 +134,7 @@ async def grep(
     before: int = 0,
     after: int = 0,
     context: int = 0,
+    head_limit: int | None = None,
 ) -> str:
     # No validation layer sits between the JSON schema and this call — every
     # constraint is enforced here in the body.
@@ -151,6 +152,8 @@ async def grep(
         if glob_pattern.count("**/") > 5:
             raise ValueError("glob pattern has too many **/ occurrences (max 5)")
         glob_rx = _compile_glob(glob_pattern)
+    if head_limit is not None and head_limit < 1:
+        raise ValueError("head_limit must be >= 1")
     if before < 0 or after < 0 or context < 0:
         raise ValueError("before/after/context must be >= 0")
     if (before or after or context) and output_mode != "content":
@@ -175,6 +178,7 @@ async def grep(
     out: list[str] = []
     out_bytes = 0
     capped = False      # the 50 KB backstop fired: stop scanning, marker appended
+    limit_hit = False   # head_limit reached: stop scanning, notice appended
     result_rows = 0     # what the sentinel (and head_limit, Task 12) key on
     notes: list[str] = []  # trailing-mode scan notes (files_with_matches/count)
     emitted_a_block = False  # tracks whether any context block was emitted (for -- separators)
@@ -193,7 +197,7 @@ async def grep(
         return capped
 
     for f in _iter_files(target):
-        if capped:
+        if capped or limit_hit:
             break
         await tool_checkpoint(coordinator, deadline)
         rel_str = f.relative_to(root).as_posix()
@@ -214,6 +218,8 @@ async def grep(
             if any(rgx.search(line) for line in lines):
                 capped = emit(rel_str)
                 result_rows += 1
+                if head_limit is not None and result_rows >= head_limit:
+                    limit_hit = True  # the row IS the block: stop scanning
             elif cap_truncated:
                 notes.append(f"[{rel_str}: scanned first 5 MB only]")
         elif output_mode == "count":
@@ -221,6 +227,8 @@ async def grep(
             if n:  # non-zero rows only (ripgrep -c, not GNU grep's path:0 flood)
                 capped = emit(f"{rel_str}:{n}")
                 result_rows += 1
+                if head_limit is not None and result_rows >= head_limit:
+                    limit_hit = True
             if cap_truncated:  # the count is a lower bound — always note
                 notes.append(f"[{rel_str}: scanned first 5 MB only]")
         else:  # content
@@ -231,6 +239,9 @@ async def grep(
                 # "block" but NO -- separators (GNU grep emits group
                 # separators only when context is active).
                 for m in match_idxs:
+                    if head_limit is not None and result_rows >= head_limit:
+                        limit_hit = True
+                        break
                     capped = emit(f"{rel_str}:{m}:{truncate_line(lines[m - 1])}")
                     result_rows += 1
                     if capped:
@@ -249,6 +260,9 @@ async def grep(
                     else:
                         blocks.append([lo, hi, 1])
                 for lo, hi, n_matches in blocks:
+                    if head_limit is not None and result_rows >= head_limit:
+                        limit_hit = True  # never cut a block — stop before it
+                        break
                     if emitted_a_block:
                         # Distinct blocks get a -- separator — including
                         # across file boundaries (blocks never merge across
@@ -263,6 +277,10 @@ async def grep(
                         capped = emit(f"{rel_str}{sep}{ln}{sep}{truncate_line(lines[ln - 1])}")
                         if capped:
                             break
+                    # result_rows counts matches whose block BEGAN emitting
+                    # (a mid-block byte-cap doesn't subtract) — deliberate:
+                    # only the ==0 sentinel and the between-blocks head_limit
+                    # consult it.
                     result_rows += n_matches
                     if capped:
                         break
@@ -284,6 +302,14 @@ async def grep(
         # dropped — acceptable only because this marker itself discloses
         # that output was physically cut.
         out.append(OUTPUT_TRUNCATION_MARKER.strip())
+    elif limit_hit:
+        # Distinct from the byte-cap marker (different agent recovery), and
+        # uncounted against the budget. Early exit means no omitted COUNT is
+        # known (the whole point is not scanning further) — and the notice
+        # may be vacuous when the limit lands exactly on the final result;
+        # computing that would require the very scan the cap avoids.
+        out.append(f"[further results omitted: head_limit={head_limit} reached "
+                   f"— raise head_limit or narrow the pattern]")
     return "\n".join(out)
 
 

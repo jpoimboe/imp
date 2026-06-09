@@ -449,3 +449,90 @@ def test_cap_cut_fragment_never_an_after_context_row(tmp_path: Path) -> None:
     out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", after=1)
     assert out == ("cut.txt:2499995:NEEDLE\n"
                    "[cut.txt: scanned first 5 MB only]")
+
+
+def test_exactly_adjacent_blocks_merge(tmp_path: Path) -> None:
+    # The exactly-adjacent boundary: ranges [1,3] and [4,6] touch via
+    # lo == prev_hi + 1 — ONE block, no -- (the most regression-prone
+    # character in the merge predicate is that + 1).
+    (tmp_path / "a.txt").write_text("NEEDLE\nb\nc\nNEEDLE\ne\nf\ng\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", after=2)
+    assert out == ("a.txt:1:NEEDLE\na.txt-2-b\na.txt-3-c\n"
+                   "a.txt:4:NEEDLE\na.txt-5-e\na.txt-6-f")
+    assert "--" not in out
+
+
+# --- head_limit ---------------------------------------------------------------
+
+_HEAD_NOTICE = ("[further results omitted: head_limit={n} reached "
+                "— raise head_limit or narrow the pattern]")
+
+
+def test_head_limit_fwm_stops_scanning_with_notice(tmp_path: Path) -> None:
+    for name in ("a.txt", "b.txt", "c.txt", "d.txt"):
+        (tmp_path / name).write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", head_limit=2)
+    # Sorted walk order makes WHICH two files deterministic.
+    assert out == f"a.txt\nb.txt\n{_HEAD_NOTICE.format(n=2)}"
+
+
+def test_head_limit_count_mode(tmp_path: Path) -> None:
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (tmp_path / name).write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", output_mode="count", head_limit=1)
+    assert out == f"a.txt:1\n{_HEAD_NOTICE.format(n=1)}"
+
+
+def test_head_limit_counts_match_rows_only_not_context_or_separators(
+        tmp_path: Path) -> None:
+    # Three DISTINCT blocks (matches at 2, 6, 10 with context=1 — ranges
+    # [1,3], [5,7], [9,11] don't touch, so no merging): head_limit=2 counts
+    # the 2 MATCH rows; the 4 context rows and the -- don't count against it.
+    (tmp_path / "a.txt").write_text("a\nNEEDLE\nc\nd\ne\nNEEDLE\ng\nh\ni\nNEEDLE\nk\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content",
+                context=1, head_limit=2)
+    assert out == ("a.txt-1-a\na.txt:2:NEEDLE\na.txt-3-c\n--\n"
+                   "a.txt-5-e\na.txt:6:NEEDLE\na.txt-7-g\n"
+                   + _HEAD_NOTICE.format(n=2))
+
+
+def test_head_limit_merged_block_emitted_whole_overshooting(tmp_path: Path) -> None:
+    # The cap is a stopping condition checked BETWEEN blocks; a merged block
+    # holding more matches than the remaining budget is emitted whole (the
+    # merge invariant wins — row count overshoots head_limit).
+    (tmp_path / "a.txt").write_text("NEEDLE\nb\nNEEDLE\nd\ne\nf\nNEEDLE\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content",
+                context=1, head_limit=1)
+    # Matches at 1 and 3 merge (ranges [1,2] and [2,4]) -> both emitted; the
+    # distinct block at 7 is cut.
+    assert out == ("a.txt:1:NEEDLE\na.txt-2-b\na.txt:3:NEEDLE\na.txt-4-d\n"
+                   + _HEAD_NOTICE.format(n=1))
+
+
+def test_byte_backstop_may_cut_mid_block_with_distinct_marker(tmp_path: Path) -> None:
+    # head_limit never cuts a block; the 50 KB byte backstop CAN and DOES (it
+    # yields to nothing). Its marker text is distinct from the head_limit
+    # notice — the agent's recovery differs.
+    line = "y" * 1_900
+    body = "".join(f"{line} NEEDLE\n" for _ in range(100))
+    (tmp_path / "big.txt").write_text(body)
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", context=2)
+    assert "[output truncated at 50 KB]" in out
+    assert "further results omitted" not in out
+
+
+def test_head_limit_exit_keeps_collected_notes(tmp_path: Path) -> None:
+    # head_limit early exit does NOT drop notes collected up to the stop.
+    # 'a_trunc.txt' sorts before the limit-hitting matches.
+    _write_cap_cut(tmp_path, "a_trunc.txt")  # no match in scanned window
+    (tmp_path / "m1.txt").write_text("needle\n")
+    (tmp_path / "m2.txt").write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", head_limit=1)
+    assert out == ("m1.txt\n[a_trunc.txt: scanned first 5 MB only]\n"
+                   + _HEAD_NOTICE.format(n=1))
+
+
+def test_head_limit_below_one_rejected(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("x\n")
+    with pytest.raises(ValueError, match="head_limit must be >= 1"):
+        _grep(_ctx(tmp_path), pattern="x", head_limit=0)
