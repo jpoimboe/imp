@@ -698,7 +698,7 @@ def _last_prose_text(self: NarrativeBuilder) -> str:
             return child.text.strip()
         if isinstance(child, (ThinkingFold, ToolBurstFold, SkillLoadNode)):
             continue  # interstitial chrome; keep scanning for the prose turn
-        break
+        break  # any other node type means no prose is adjacent — show the question (never wrong)
     return ""
 
 

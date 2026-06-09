@@ -376,10 +376,39 @@ def test_awaiting_user_input_prompt_rendered_as_pending_question() -> None:
     assert q_i < reply_i                     # question sits above the reply caret
 
 
+def test_pending_question_suppressed_when_duplicates_preceding_agent_prose() -> None:
+    # M3 suppression path: when the awaiting_user_input prompt text is identical
+    # to the agent's most recent prose turn (the usual attended case), the
+    # UserMessageNode.pending_question is set to "" to avoid duplicating it on
+    # screen.  The `_last_prose_text` helper in _h_user_message drives this.
+    question = "Should I proceed with the merge?"
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
+        # Agent speaks the question as its final prose turn.
+        _ev("2", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": question}]}),
+        # Engine then solicits with the same text as the prompt.
+        _ev("3", "awaiting_user_input", agent_id="step:p/s", prompt=question),
+        # Human replies.
+        _ev("4", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "yes, proceed"}]),
+    ])
+    step = tree.root.children[0].children[0]
+    assert isinstance(step, nv.StepNode)
+    # Find the UserMessageNode among the step's children.
+    um = next(c for c in step.children if isinstance(c, nv.UserMessageNode))
+    # The question matches the preceding agent prose → suppressed (not echoed).
+    assert um.pending_question == ""
+    # Sanity: the reply itself is captured correctly.
+    assert um.text == "yes, proceed"
+    assert um.interactive is True
+
+
 def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
     # L3: an attended resume re-emits awaiting_user_input with the stored prompt;
     # the reply that follows must still render with the human-reply caret.
-    out = "\n".join(_lines([
+    events = [
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
         _ev("2", "awaiting_user_input", agent_id="step:p/s", prompt="Continue?"),
         _ev("3", "workflow_paused", reason="ctrl-c"),
@@ -389,8 +418,16 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
         _ev("6", "awaiting_user_input", agent_id="step:p/s", prompt="Continue?"),
         _ev("7", "user_message", agent_id="step:p/s",
             content=[{"type": "text", "text": "go ahead"}]),
-    ]))
+    ]
+    tree = nv.build_tree(events)
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
     assert "> go ahead" in out
+    # The re-emitted awaiting_user_input uniquely sets interactive=True on the
+    # resumed step (resume re-entry resets it to False first, so only the
+    # re-emitted event could have set it back). Assert directly on the node.
+    step = tree.root.children[0].children[0]
+    assert isinstance(step, nv.StepNode)
+    assert step.interactive is True
 
 
 def test_chrome_step_collapses_to_single_breadcrumb() -> None:
