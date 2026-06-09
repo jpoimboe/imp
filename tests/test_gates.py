@@ -1,4 +1,5 @@
 # tests/test_gates.py — rewrite
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,68 @@ async def test_run_human_match_by_number() -> None:
     chosen = await run_human(step, input_fn=lambda: next(inputs), output_fn=out.append)
     assert isinstance(chosen.action, Continue)
     assert chosen.label == "Approve"
+
+
+def _script_step(command: str, timeout_seconds: int | None = None) -> "Step":
+    """Minimal Step for script-kind tests."""
+    from imp.engine.types import Pause, SourceLoc, Step
+    return Step(
+        name="g", phase="p", kind="script",
+        rules=(), options=(), on_max_retries=Pause(), max_loops=10,
+        source=SourceLoc(file=Path("x"), line=1),
+        command=command, timeout_seconds=timeout_seconds,
+    )
+
+
+def test_run_script_bare_when_no_policy(tmp_path) -> None:
+    from imp.engine.gates import run_script
+    step = _script_step("echo hi")
+    out = run_script(step, cwd=tmp_path)        # policy defaults to None → bare
+    assert out["exit"] == 0 and "hi" in out["stdout"]
+
+
+def test_run_script_wraps_with_active_policy(tmp_path, monkeypatch) -> None:
+    import imp.engine.gates as gatesmod
+    from imp.engine.sandbox import SandboxPolicy
+
+    captured: dict[str, object] = {}
+    real_popen = gatesmod.subprocess.Popen
+
+    class FakePopen:
+        def __init__(self, argv, **kw):
+            captured["argv"] = argv
+            self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
+                                                  if k in ("cwd", "env", "start_new_session",
+                                                           "stdout", "stderr", "text")})
+
+        def communicate(self, timeout=None):
+            return self._inner.communicate(timeout=timeout)
+
+        @property
+        def returncode(self):
+            return self._inner.returncode
+
+        @property
+        def pid(self):
+            return self._inner.pid
+
+    monkeypatch.setattr(gatesmod.subprocess, "Popen", FakePopen)
+    pol = SandboxPolicy(active=True, worktree=str(tmp_path),
+                        git_common_dir=str(tmp_path), git_ro_remask=(),
+                        writable_caches=(), extra_readable=(), extra_writable=(),
+                        tmp_host_dir=str(tmp_path), secret_dirs=(), secret_files=(),
+                        setenv=(), network=True, note="")
+    step = _script_step("echo hi")
+    run_script(step, cwd=tmp_path, policy=pol)
+    assert captured["argv"][0] == "bwrap"
+
+
+def test_run_script_timeout_kills_group(tmp_path) -> None:
+    # A gate exceeding its timeout is killed; no orphan. Bare path (no policy).
+    from imp.engine.gates import run_script
+    step = _script_step("sleep 30", timeout_seconds=1)
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_script(step, cwd=tmp_path)
 
 
 @pytest.mark.anyio
