@@ -134,6 +134,12 @@ Every plan MUST start with this header:
 
 Then a sequence of `## Task N` sections. Use this structure for each:
 
+> **This skeleton is illustrative — shown in Python for concreteness. Your
+> actual plan MUST be written in the repo's own language: real file paths, real
+> test syntax, and the project's own focused-test command (discover it from the
+> repo — it is NOT necessarily `pytest`). What's prescriptive here is the
+> *structure* (failing test → run → minimal impl → run → commit), not the syntax.**
+
 ````markdown
 ## Task N: [Component Name]
 
@@ -152,7 +158,8 @@ def test_specific_behavior():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/path/test_file.py::test_specific_behavior -v`
+Run: the project's focused-test command for this one test (shown here as
+`pytest …` — substitute the repo's real one)
 Expected: FAIL with "function not defined"
 
 - [ ] **Step 3: Write minimal implementation**
@@ -169,7 +176,8 @@ def function(input):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/path/test_file.py::test_specific_behavior -v`
+Run: the project's focused-test command for this one test (shown here as
+`pytest …` — substitute the repo's real one)
 Expected: PASS
 
 - [ ] **Step 5: Commit**
