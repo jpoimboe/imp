@@ -16,6 +16,18 @@ if ! git log --format='%s' "$FORK"..HEAD | grep -q '^fixup!'; then
   exit 0
 fi
 
+# A prior base integration leaves a real merge commit in FORK..HEAD. Plain
+# `rebase -i --autosquash` would linearize it, silently dropping the integrator's
+# in-merge conflict resolutions (review finding #3). Refuse — the engine pauses —
+# rather than destroy that work. (No-op path above already returned when there are
+# no fixups, so the merge survives the common rework-without-fixups case.)
+if git rev-list --merges "$FORK"..HEAD | grep -q .; then
+  echo "autosquash: a prior integration merge is in range; squashing would drop" >&2
+  echo "its conflict resolutions. Refusing — rework before integration, squash the" >&2
+  echo "fixups by hand, or re-run integration after this lands." >&2
+  exit 1
+fi
+
 # Non-interactive autosquash: GIT_SEQUENCE_EDITOR=true accepts the todo list that
 # --autosquash has already reordered (fixups placed under their targets).
 if GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash "$FORK"; then
