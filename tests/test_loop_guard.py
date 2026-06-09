@@ -160,32 +160,6 @@ def test_thresholds_are_constructor_overridable() -> None:
     assert g.observe(_err_turn("same")) is not None  # K=2
 
 
-def test_note_external_input_resets_counters() -> None:
-    # A human-gated turn (interactive handoff) resets loop counters: normal
-    # multi-turn conversation must not accumulate no_progress. After a reset it
-    # takes another full N non-progress turns to trip.
-    g = LoopGuard()
-    for i in range(DEFAULT_NOPROGRESS_N - 1):
-        assert g.observe(_text_turn(f"talking {i}")) is None
-    g.note_external_input()                                   # human replied
-    last = None
-    for i in range(DEFAULT_NOPROGRESS_N - 1):
-        last = g.observe(_text_turn(f"more talk {i}"))
-    assert last is None                                      # still below N
-    last = g.observe(_text_turn("final"))
-    assert last is not None                                  # Nth after reset trips
-
-
-def test_note_external_input_keeps_novelty_memory() -> None:
-    # A human reply does not make already-read files new again: seen-read memory
-    # survives the reset, so re-reading a seen file post-handoff is still not
-    # progress.
-    g = LoopGuard()
-    assert g.observe(_read_path("a.py", "r0")) is None        # novel -> seen
-    g.note_external_input()
-    assert g._is_progress(_read_path("a.py", "r1")) is False   # still seen
-
-
 def test_fresh_guard_does_not_trip_on_first_turn() -> None:
     # A resumed invocation (large prior transcript) must not trip on the first
     # NEW turn. The guard holds per-invocation state only and is constructed

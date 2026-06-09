@@ -118,20 +118,6 @@ class LoopGuard:
             return exc
         return None
 
-    def note_external_input(self) -> None:
-        """Reset loop-detection counters after a human-gated (interactive) turn.
-
-        A turn that hands off to a human and receives fresh input is not an
-        autonomous loop iteration — an external entropy source has broken any
-        cycle, so normal multi-turn conversation must not accumulate
-        no_progress. Only the loop counters reset; novelty memory (seen
-        reads/writes) is kept, since a human reply does not make
-        previously-read files new again.
-        """
-        self._repeat_count = 0
-        self._noprogress_count = 0
-        self._last_sig = None
-
     def _is_progress(self, record: TurnRecord) -> bool:
         if record.has_complete_step:
             return True

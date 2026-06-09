@@ -1010,10 +1010,8 @@ def process_event(
                                  f"(query={query!r})"})
             return
         if itype in ("file_change", "command_execution"):
-            # Fail-closed tripwire (design HIGH-3). The native edit ALREADY
-            # happened — recording it here triggers the runner's revert path
-            # at the next turn boundary. Autonomous: hard run failure.
-            # Interactive: user keep-or-revert prompt; default revert.
+            # Native-tool violation: recording it here triggers the runner's
+            # unconditional revert at the next turn boundary (hard run failure).
             if itype == "file_change":
                 # SDK `FileChangeItem` carries `changes: [{path, kind}, …]`, not a
                 # top-level `path`; reading `path` yielded "?" for real edits.
