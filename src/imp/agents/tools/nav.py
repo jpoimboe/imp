@@ -131,6 +131,9 @@ async def grep(
     output_mode: Literal["files_with_matches", "content", "count"] = "files_with_matches",
     case_insensitive: bool = False,
     glob: str | None = None,
+    before: int = 0,
+    after: int = 0,
+    context: int = 0,
 ) -> str:
     # No validation layer sits between the JSON schema and this call — every
     # constraint is enforced here in the body.
@@ -148,6 +151,16 @@ async def grep(
         if glob_pattern.count("**/") > 5:
             raise ValueError("glob pattern has too many **/ occurrences (max 5)")
         glob_rx = _compile_glob(glob_pattern)
+    if before < 0 or after < 0 or context < 0:
+        raise ValueError("before/after/context must be >= 0")
+    if (before or after or context) and output_mode != "content":
+        # Pinned to NONZERO: async_invoke calls fn(ctx, **args), so the body
+        # cannot distinguish an explicit before=0 from an omitted one.
+        raise ValueError("context/before/after require output_mode='content'")
+    # Order-free precedence (a JSON call has no flag order): per-side
+    # effective context is max(side, context).
+    eff_before = max(before, context)
+    eff_after = max(after, context)
     ctx.check_fs_permission("read", path)
     target = ctx.resolve_path(path)
     # A typo'd/stale path — or a fifo/socket/device — must not read as
@@ -164,6 +177,7 @@ async def grep(
     capped = False      # the 50 KB backstop fired: stop scanning, marker appended
     result_rows = 0     # what the sentinel (and head_limit, Task 12) key on
     notes: list[str] = []  # trailing-mode scan notes (files_with_matches/count)
+    emitted_a_block = False  # tracks whether any context block was emitted (for -- separators)
 
     def emit(row: str) -> bool:
         """Append a row, charging it to the 50 KB budget. Returns True once
@@ -210,10 +224,46 @@ async def grep(
             if cap_truncated:  # the count is a lower bound — always note
                 notes.append(f"[{rel_str}: scanned first 5 MB only]")
         else:  # content
-            for i, line in enumerate(lines, start=1):
-                if rgx.search(line):
-                    capped = emit(f"{rel_str}:{i}:{truncate_line(line)}")
+            match_idxs = [i for i, line in enumerate(lines, start=1)
+                          if rgx.search(line)]
+            if eff_before == 0 and eff_after == 0:
+                # Zero-context: the bare row stream. Every match is its own
+                # "block" but NO -- separators (GNU grep emits group
+                # separators only when context is active).
+                for m in match_idxs:
+                    capped = emit(f"{rel_str}:{m}:{truncate_line(lines[m - 1])}")
                     result_rows += 1
+                    if capped:
+                        break
+            else:
+                match_set = set(match_idxs)
+                # Merge overlapping/adjacent ranges into one block (grep
+                # behavior — no -- between them). Block = [start, end, n_matches].
+                blocks: list[list[int]] = []
+                for m in match_idxs:
+                    lo = max(1, m - eff_before)
+                    hi = min(len(lines), m + eff_after)
+                    if blocks and lo <= blocks[-1][1] + 1:
+                        blocks[-1][1] = max(blocks[-1][1], hi)
+                        blocks[-1][2] += 1
+                    else:
+                        blocks.append([lo, hi, 1])
+                for lo, hi, n_matches in blocks:
+                    if emitted_a_block:
+                        # Distinct blocks get a -- separator — including
+                        # across file boundaries (blocks never merge across
+                        # files; the row prefixes differ by construction).
+                        capped = emit("--")
+                    emitted_a_block = True
+                    for ln in range(lo, hi + 1):
+                        sep = ":" if ln in match_set else "-"
+                        # Context rows share the match rows' per-line cap —
+                        # an uncapped 2 MB neighbor would eat the whole
+                        # 50 KB budget as one row.
+                        capped = emit(f"{rel_str}{sep}{ln}{sep}{truncate_line(lines[ln - 1])}")
+                        if capped:
+                            break
+                    result_rows += n_matches
                     if capped:
                         break
             if cap_truncated and not capped:

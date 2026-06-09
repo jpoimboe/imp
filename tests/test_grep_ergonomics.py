@@ -341,3 +341,111 @@ def test_glob_filtered_truncated_file_gets_no_note_and_no_read(tmp_path: Path) -
     out = _grep(_ctx(tmp_path), pattern="needle", glob="*.py")
     assert out == "a.py"
     assert "scanned first 5 MB" not in out
+
+
+# --- context lines (content mode only) ---------------------------------------
+
+def test_context_row_formats_match_colon_context_dash(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("one\ntwo\nNEEDLE\nfour\nfive\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", context=1)
+    assert out == "a.txt-2-two\na.txt:3:NEEDLE\na.txt-4-four"
+
+
+def test_before_after_asymmetric(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("one\ntwo\nNEEDLE\nfour\nfive\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content",
+                before=2, after=1)
+    assert out == "a.txt-1-one\na.txt-2-two\na.txt:3:NEEDLE\na.txt-4-four"
+
+
+def test_context_combined_with_before_uses_max(tmp_path: Path) -> None:
+    # Order-free precedence (right for a JSON call, unlike GNU grep's
+    # last-flag-wins): effective per-side = max(before, context).
+    (tmp_path / "a.txt").write_text("a\nb\nc\nNEEDLE\ne\nf\ng\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content",
+                context=3, before=1)
+    assert out == ("a.txt-1-a\na.txt-2-b\na.txt-3-c\na.txt:4:NEEDLE\n"
+                   "a.txt-5-e\na.txt-6-f\na.txt-7-g")
+
+
+def test_context_clamps_at_file_edges(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("NEEDLE\nlast\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", before=3)
+    assert out == "a.txt:1:NEEDLE"
+
+
+def test_overlapping_and_adjacent_blocks_merge_without_separator(tmp_path: Path) -> None:
+    # Matches at 2 and 4 with context=1: ranges [1,3] and [3,5] overlap ->
+    # ONE block, no -- inside it.
+    (tmp_path / "a.txt").write_text("a\nNEEDLE\nc\nNEEDLE\ne\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", context=1)
+    assert out == "a.txt-1-a\na.txt:2:NEEDLE\na.txt-3-c\na.txt:4:NEEDLE\na.txt-5-e"
+    assert "--" not in out
+
+
+def test_distinct_blocks_separated_by_dashes(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("NEEDLE\nb\nc\nd\nNEEDLE\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", context=1)
+    assert out == ("a.txt:1:NEEDLE\na.txt-2-b\n--\n"
+                   "a.txt-4-d\na.txt:5:NEEDLE")
+
+
+def test_blocks_separated_across_file_boundaries(tmp_path: Path) -> None:
+    # GNU grep behavior: the last block of file A and the first of file B get
+    # a -- between them; blocks never merge across files.
+    (tmp_path / "a.txt").write_text("NEEDLE\n")
+    (tmp_path / "b.txt").write_text("NEEDLE\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", context=1)
+    assert out == "a.txt:1:NEEDLE\n--\nb.txt:1:NEEDLE"
+
+
+def test_zero_context_is_bare_row_stream_no_separators(tmp_path: Path) -> None:
+    # With effective context 0 every match is its own "block", but a literal
+    # reading would put -- between every pair of rows — zero-context content
+    # mode stays the bare stream, exactly as today.
+    (tmp_path / "a.txt").write_text("NEEDLE\nNEEDLE\nNEEDLE\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content")
+    assert out == "a.txt:1:NEEDLE\na.txt:2:NEEDLE\na.txt:3:NEEDLE"
+
+
+def test_context_rows_capped_at_line_cap(tmp_path: Path) -> None:
+    # Today's code caps only MATCHING lines; an uncapped 2 MB minified
+    # neighbor would eat the whole 50 KB budget as one context row.
+    from imp.agents.tools.limits import MATCH_LINE_CAP_BYTES
+    huge = "z" * (MATCH_LINE_CAP_BYTES + 100)
+    (tmp_path / "a.txt").write_text(f"{huge}\nNEEDLE\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", before=1)
+    row1, row2 = out.split("\n")
+    assert row1 == f"a.txt-1-{'z' * MATCH_LINE_CAP_BYTES}…[truncated]"
+    assert row2 == "a.txt:2:NEEDLE"
+
+
+def test_nonzero_context_requires_content_mode(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("x\n")
+    with pytest.raises(ValueError,
+                       match="context/before/after require output_mode='content'"):
+        _grep(_ctx(tmp_path), pattern="x", context=2)
+    # Pinned to NONZERO: the body can't distinguish an explicit before=0 from
+    # an omitted one (async_invoke calls fn(ctx, **args)) — harmless 0 accepted.
+    assert _grep(_ctx(tmp_path), pattern="x", before=0) == "a.txt"
+
+
+def test_negative_context_rejected(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("x\n")
+    with pytest.raises(ValueError, match="must be >= 0"):
+        _grep(_ctx(tmp_path), pattern="x", output_mode="content", before=-1)
+
+
+def test_cap_cut_fragment_never_an_after_context_row(tmp_path: Path) -> None:
+    # Match on the LAST complete line of a cap-truncated file with after=1:
+    # the dropped fragment must not be pulled in as a context row.
+    p = tmp_path / "cut.txt"
+    with p.open("wb") as f:
+        f.write(b"x\n" * 2_499_994)   # 4,999,988 bytes
+        f.write(b"NEEDLE\n")          # bytes 4,999,989..4,999,995
+        f.write(b"zfoo!")             # 5 bytes -> cap lands exactly at 5,000,000
+        f.write(b"rest\n" * 100)      # continues past the cap
+    assert p.stat().st_size > FILE_READ_CAP_BYTES
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content", after=1)
+    assert out == ("cut.txt:2499995:NEEDLE\n"
+                   "[cut.txt: scanned first 5 MB only]")
