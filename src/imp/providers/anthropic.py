@@ -48,6 +48,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
+from imp.engine.agent_run import deliver_interject
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers.base import Provider
@@ -769,6 +770,13 @@ class AnthropicAgentRunner:
             if loop_err is not None:
                 yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
                 return
+
+            # Turn boundary: this turn's tool_results are appended to
+            # messages/transcript; deliver any queued human interject as a user
+            # message before looping into the next model call. Reached only after
+            # every tool (including an awaited `task` dispatch) has resolved, so a
+            # subagent is never mid-dispatch here — guarantees S4.
+            deliver_interject(invocation.coordinator, messages, transcript, elog, aid)
 
         # cancelled (interrupt)
         yield {"type": "error", "payload": {

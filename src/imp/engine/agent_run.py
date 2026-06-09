@@ -131,6 +131,25 @@ async def _pull_with_inactivity_watchdog(
         yield ev
 
 
+def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
+                      elog: Any, agent_id: str) -> bool:
+    """If a human interject is queued, append it as a user message and emit
+    user_interjected. Returns True if one was delivered. Called at the agent's
+    turn boundary (not mid-turn, not while awaiting a subagent)."""
+    if coordinator is None:
+        return False
+    text = coordinator.drain_interject()
+    if text is None:
+        return False
+    from imp.agents.runner import Message, TextBlock
+    msg = Message(role="user", content=(TextBlock(text=text),))
+    messages.append(msg)
+    transcript.append(msg)
+    elog.append_user_message(agent_id=agent_id, message=msg)
+    elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
+    return True
+
+
 def build_agent_invocation(
     *,
     agent_def: AgentDef,

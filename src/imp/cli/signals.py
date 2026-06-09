@@ -92,6 +92,15 @@ class InterruptCoordinator:
         self._esc_reader: Any = None
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
+        self._interjects: list[str] = []
+
+    def enqueue_interject(self, text: str) -> None:
+        """Queue a human-typed line for delivery at the next agent turn boundary."""
+        self._interjects.append(text)
+
+    def drain_interject(self) -> str | None:
+        """Pop the oldest queued interject, or None. Called at the turn boundary."""
+        return self._interjects.pop(0) if self._interjects else None
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """interrupt_fn is an `async def () -> None` callable. All three V1
