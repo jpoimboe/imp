@@ -88,3 +88,31 @@ def test_config_exposes_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     # apply in SandboxConfig downstream).
     eff = load_effective_config(project_root=None, control_root=None)
     assert isinstance(eff.config.sandbox, dict)
+
+
+def test_sandbox_unknown_key_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("workflow: default\nsandbox:\n  bogus_key: 1\n")
+    with pytest.raises(LoadError, match="not a known sandbox setting"):
+        parse_config_layer(p)
+
+
+def test_sandbox_bad_bool_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("workflow: default\nsandbox:\n  enabled: yes-please\n")
+    with pytest.raises(LoadError, match="must be a boolean"):
+        parse_config_layer(p)
+
+
+def test_sandbox_bad_list_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("workflow: default\nsandbox:\n  secret_paths: /etc/shadow\n")
+    with pytest.raises(LoadError, match="must be a list of strings"):
+        parse_config_layer(p)
+
+
+def test_sandbox_non_mapping_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("workflow: default\nsandbox: flat-string\n")
+    with pytest.raises(LoadError, match="must be a mapping"):
+        parse_config_layer(p)

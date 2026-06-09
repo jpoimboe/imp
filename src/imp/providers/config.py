@@ -190,6 +190,8 @@ _SANDBOX_LIST_KEYS = (
 
 
 def _parse_sandbox(raw: Any, src: SourceLoc) -> dict[str, Any]:
+    if raw is None:
+        return {}
     if not isinstance(raw, dict):
         raise LoadError(f"{src.file.name} 'sandbox:' must be a mapping", src)
     out: dict[str, Any] = {}
