@@ -37,6 +37,7 @@ from imp.agents.runner import (
 )
 from imp.agents.subagents import make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
+from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.load_skill import make_load_skill_tool
@@ -604,11 +605,11 @@ class AnthropicAgentRunner:
                 raw=raw, usage=raw.get("usage") or {},
                 stop_reason=raw.get("stop_reason"))
             _emit_anthropic_web_events(raw, elog, aid)
-            # Heartbeat after each model-API response: decouples the watchdog
-            # margin from API latency (a long extended-thinking stream followed
-            # by a near-wall-clock tool must not be misclassified as stalled).
-            # Pause-inert by design — drive_invocation drops these before both
-            # consumers. Task 12 adds the post-API _sweep_bg at this site.
+            # Post-API sweep + heartbeat (Decision 10): the model-API call is
+            # the longest awaitable with no registry access — sweeping here
+            # narrows the cap's routine inter-sweep gap to API latency. The
+            # heartbeat decouples the watchdog margin from API latency.
+            await _bg._sweep_bg(ctx)
             yield {"type": "tool_heartbeat", "payload": {}}
 
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]

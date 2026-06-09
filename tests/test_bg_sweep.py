@@ -183,3 +183,72 @@ def test_breach_kill_proceeds_when_warning_emit_raises(
         assert bp.status == "killed"
         assert bp.kill_reason == "output-cap"
     anyio.run(main)
+
+
+def test_quiet_foreground_bash_still_sweeps_via_ticker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A background flooder + a silent long foreground bash (no chunks, then
+    proc.wait()): the per-call ticker must cap-kill the flooder within ~1 s —
+    a drain-site sweep could never fire across a quiet command."""
+    async def main() -> None:
+        from imp.agents.tools import limits
+        monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+        ctx = _ctx(tmp_path)
+        ctx.event_log = _RecLog()
+        out = await _spawn(ctx, FLOODER)
+        await get_registry()["bash"].async_invoke(ctx, {"command": "sleep 2.5"})
+        bp = ctx.background_processes[out["id"]]
+        assert bp.status == "killed"
+        assert bp.kill_reason == "output-cap"
+    anyio.run(main)
+
+
+def test_ticker_no_regression_baseline(tmp_path: Path) -> None:
+    """A normal, quick foreground bash returns promptly with complete output —
+    no hang to the wall clock (uncancelled ticker), no truncated drain tail
+    (whole-task-group cancel)."""
+    async def main() -> None:
+        ctx = _ctx(tmp_path)
+        t0 = anyio.current_time()
+        raw = await get_registry()["bash"].async_invoke(
+            ctx, {"command": "echo head; sleep 0.2; echo tail"})
+        out = json.loads(raw)
+        assert anyio.current_time() - t0 < 5.0
+        assert out["returncode"] == 0
+        assert "head" in out["stdout"] and "tail" in out["stdout"]
+    anyio.run(main)
+
+
+def test_sweep_fires_on_non_bash_tool_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An agent that backgrounds a flooder and then spends the invocation in
+    read_file must still be swept: the dispatch-site sweep lives in the shared
+    helper, so EVERY tool dispatch sweeps."""
+    async def main() -> None:
+        from imp.agents.dispatch import TurnState, dispatch_one_tool_use
+        from imp.agents.runner import ToolUseBlock
+        from imp.agents.tools import get_registry, limits
+        monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+        ctx = _ctx(tmp_path)
+        ctx.event_log = _RecLog()
+        (tmp_path / "f.txt").write_text("data")
+        out = await _spawn(ctx, FLOODER)
+
+        class _Inv:
+            class agent_def:
+                output_schema = None
+        bp = ctx.background_processes[out["id"]]
+        with anyio.fail_after(30):
+            while bp.status != "killed":
+                await dispatch_one_tool_use(
+                    ctx=ctx, elog=ctx.event_log, aid="step:t", invocation=_Inv(),
+                    tools=get_registry(),
+                    tu=ToolUseBlock(id="u1", name="read_file",
+                                    input={"path": "f.txt"}),
+                    tool_results=[], state=TurnState(tool_calls_used=0),
+                    ceiling=None)
+                await anyio.sleep(0.1)
+        assert bp.kill_reason == "output-cap"
+    anyio.run(main)

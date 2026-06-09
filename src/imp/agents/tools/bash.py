@@ -137,6 +137,25 @@ async def bash(
                 await kill_process_group(proc, signal.SIGKILL)
                 return
 
+    # Decision 10 ticker (pinned lifecycle): sweeps the background registry
+    # while THIS foreground call runs — the only coverage for a long QUIET
+    # command (no chunks => the drain bodies never run; chatty-then-silent
+    # EOFs both drains and sits in proc.wait()). It runs in its OWN
+    # CancelScope, cancelled right after proc.wait() returns: an uncancelled
+    # ticker would hold the task group open to the B.1 fail_after (every
+    # quick bash "times out"), while cancelling the whole group would also
+    # cancel the drains mid-flush (silent tail truncation). Not a long-lived-
+    # task violation: scoped inside one call's own task group, exactly like
+    # the drains.
+    ticker_scope = anyio.CancelScope()
+
+    async def _bg_ticker() -> None:
+        from imp.agents.tools.bg import _sweep_bg
+        with ticker_scope:
+            while True:
+                await anyio.sleep(1.0)
+                await _sweep_bg(ctx)
+
     try:
         try:
             with anyio.fail_after(TOOL_WALLCLOCK_TIMEOUT_S):
@@ -145,7 +164,9 @@ async def bash(
                     # they drive the S2 capped-stream marker (counter.which).
                     tg.start_soon(_drain, proc.stdout, stdout_chunks, "stdout")
                     tg.start_soon(_drain, proc.stderr, stderr_chunks, "stderr")
+                    tg.start_soon(_bg_ticker)
                     await proc.wait()
+                    ticker_scope.cancel()
         except TimeoutError:
             # B.1: the call outran the wall clock. Kill the group, reap, and
             # surface a timeout the agent can react to (NOT a normal result).

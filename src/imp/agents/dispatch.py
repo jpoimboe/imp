@@ -24,6 +24,7 @@ from typing import Any
 from imp.agents.runner import ToolResultBlock, ToolUseBlock
 from imp.agents.subagents import dispatch_task, raise_if_suspended
 from imp.agents.tools import Tool
+from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import StepComplete
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -58,6 +59,12 @@ async def dispatch_one_tool_use(
     subagent-suspension exceptions propagate (terminal — no heartbeat; the
     generator ends by raising).
     """
+    # Decision 10 sweep site: EVERY tool dispatch — all tools, not just the
+    # bash family. An agent that backgrounds a server and then spends the
+    # invocation in read_file/grep/edit_file must still be swept. Module-attr
+    # call so tests can monkeypatch bg._sweep_bg once for all sites.
+    await _bg._sweep_bg(ctx)
+
     if ceiling is not None and state.tool_calls_used >= ceiling:
         # Backfill error tool_results to preserve the transcript invariant.
         err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
