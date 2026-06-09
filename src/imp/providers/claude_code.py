@@ -140,6 +140,23 @@ def _text_of(message: Any) -> str:
     return "\n".join(parts)
 
 
+def _drain_interject_message(coordinator: Any, elog: Any,
+                             agent_id: str) -> Message | None:
+    """claude_code variant of agent_run.deliver_interject. The SDK is queried
+    with a STRING, not a messages list, so the caller folds the returned
+    message's text into the next query itself — here we only drain the queue and
+    emit `user_interjected`, returning a user Message (or None when empty).
+    The caller appends it to messages/transcript and emits the user_message
+    event so the persisted history matches the nudge re-query path exactly."""
+    if coordinator is None:
+        return None
+    text = coordinator.drain_interject()
+    if text is None:
+        return None
+    elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
+    return Message(role="user", content=(TextBlock(text=text),))
+
+
 def _subprocess_diag(client: Any) -> dict[str, Any]:
     """Best-effort extraction of subprocess exit/stderr from an SDK client for
     the no_result_message error detail. The SDK's transport surface is not a
@@ -1222,9 +1239,25 @@ class ClaudeCodeAgentRunner:
                             messages.append(user_msg)
                             transcript.append(user_msg)
                             elog.append_user_message(agent_id=aid, message=user_msg)
+                            # Turn boundary: this is the only point where THIS
+                            # runner sets up the next SDK query (the SDK owns the
+                            # in-query tool loop). Deliver any queued human
+                            # interject as a user message + user_interjected event,
+                            # and fold its text into the next query string so the
+                            # SDK actually sees it on this re-query. Reached only
+                            # after the turn's tool results are flushed, so no
+                            # subagent is mid-dispatch — S4 holds.
+                            next_query = next_text
+                            interject_msg = _drain_interject_message(
+                                invocation.coordinator, elog, aid)
+                            if interject_msg is not None:
+                                messages.append(interject_msg)
+                                transcript.append(interject_msg)
+                                elog.append_user_message(
+                                    agent_id=aid, message=interject_msg)
+                                next_query = f"{next_text}\n\n{_text_of(interject_msg)}"
                             # Re-query on a FRESH receive_response() (issue 7):
                             # break the inner loop so the outer while restarts.
-                            next_query = next_text
                             requery = True
                             break
 

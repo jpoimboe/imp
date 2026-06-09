@@ -230,3 +230,78 @@ async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> Non
     ]
     assert "please also check the tests" in texts
     assert coord.drain_interject() is None
+
+
+@pytest.mark.anyio
+async def test_claude_code_delivers_interject_at_requery_boundary(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from imp.agents.runner import ChangeContext as _CC
+    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from tests.cc_fakes import (
+        FakeClaudeSDKClient,
+        assistant,
+        result,
+        text,
+        tool_use,
+    )
+
+    (tmp_path / "art").mkdir()
+    # Turn 1 ends WITHOUT complete_step → continuation_fn nudges → re-query
+    # (the runner's only turn boundary). Turn 2 completes.
+    scripted = [
+        assistant(text("still thinking")),
+        result(),
+        assistant(text("done"),
+                  tool_use("c1", "complete_step", {"status": "Success", "note": "ok"})),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    log = InMemoryEventLog()
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("please also check the tests")
+
+    inv = AgentInvocation(
+        agent_def=_agent_def(tools=frozenset({"complete_step"})),
+        provider_name="claude_code", model_name="claude-sonnet-4-5",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=_CC(
+            slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+        transcript_dir=tmp_path / "step",
+        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
+                               mode="allow",
+                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s",
+        event_log=log,
+        coordinator=coord,
+    )
+    inv = replace(inv, continuation_fn=lambda _last: "call complete_step now")
+
+    # Capture the client so we can read what was re-queried.
+    captured: dict[str, Any] = {}
+
+    def capturing_factory(opts: Any) -> FakeClaudeSDKClient:
+        c = factory(opts)
+        captured["client"] = c
+        return c
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=capturing_factory)
+    events = [e async for e in runner.run(inv)]
+
+    assert "agent_output" in [e["type"] for e in events]
+    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert len(interjected) == 1
+    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    # The re-query (queries[1]) folded the interject text into the next prompt.
+    requery = captured["client"].queries[1]
+    assert "please also check the tests" in requery
+    assert coord.drain_interject() is None
