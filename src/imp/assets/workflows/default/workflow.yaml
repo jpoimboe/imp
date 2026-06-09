@@ -205,8 +205,8 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: integrator}       # post-merge failure (often IS the semantic conflict)
 
-      - name: integration-review     # B2/F2: review the integrator's resolutions (reuses code-reviewer)
-        file: agents/code-reviewer.md
+      - name: integration-review     # B2/F2: review the integrator's resolutions (purpose-written reviewer)
+        file: agents/integration-reviewer.md
         tier: high
         max_loops: 5
         rules:

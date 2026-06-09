@@ -82,6 +82,22 @@ def test_no_orphan_agent_files() -> None:
     )
 
 
+def test_integration_review_uses_dedicated_reviewer() -> None:
+    """The integration-review step must use a purpose-written prompt (not the
+    final whole-change code-reviewer), and that prompt must emit the verdict enum
+    the step's rules route on: task_gap / plan_gap -> resume integrator; else ->
+    continue. If the enum drifts, the routing rules silently fall through to the
+    approve branch — so pin both the wiring and the contract here."""
+    wf = _wf()
+    steps = {s.name: s for p in wf.phases for s in p.steps}
+    step = steps["integration-review"]
+    assert step.file is not None and step.file.stem == "integration-reviewer"
+    agent = wf.agents["integration-reviewer"]
+    verdict = next(f for f in agent.output_schema.fields if f.name == "verdict")
+    assert verdict.type == "enum"
+    assert set(verdict.values) == {"approve", "task_gap", "plan_gap"}
+
+
 def test_default_workflow_has_merge_var_and_no_artifacts_paths() -> None:
     wf = load_workflow(default_workflow_dir())
     assert any(v.name == "ready_to_merge" for v in wf.vars.decls)
