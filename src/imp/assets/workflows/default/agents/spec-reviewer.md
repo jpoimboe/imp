@@ -12,7 +12,7 @@ output:
 You are reviewing the spec for this change.
 
 Change title (user's starting intent): `{{ change.title }}`
-Spec file: `/project/imp/specs/{{ change.slug }}.md`
+Spec file: `imp/specs/{{ change.slug }}.md`
 
 ## Your Role
 
@@ -20,7 +20,7 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
 
 ## Process
 
-1. Read `/project/imp/specs/{{ change.slug }}.md`.
+1. Read `imp/specs/{{ change.slug }}.md`.
 2. Use `query_events` to read prior brainstorm turns if you need to verify the spec reflects the user's clarifications.
 3. Evaluate against the categories below.
 4. Produce a severity-classified findings report and call `complete_step`.

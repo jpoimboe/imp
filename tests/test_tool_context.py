@@ -19,39 +19,36 @@ def _allow(ops: tuple[str, ...], paths: tuple[str, ...]) -> FsRule:
 
 def test_resolve_project_path(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    assert ctx.resolve_path("/project/src/x.py") == tmp_path / "src" / "x.py"
+    # Paths are now worktree-relative; /project/ prefix is gone.
+    assert ctx.resolve_path("src/x.py") == (tmp_path / "src" / "x.py").resolve()
 
 
-def test_resolve_artifacts_path_rejected(tmp_path: Path) -> None:
+def test_resolve_absolute_outside_root_rejected(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    with pytest.raises(ValueError, match="/project/"):
+    with pytest.raises(PermissionDenied):
         ctx.resolve_path("/artifacts/spec.md")
 
 
-def test_resolve_scratch_returns_marker(tmp_path: Path) -> None:
+def test_resolve_scratch_denied(tmp_path: Path) -> None:
+    # /scratch is gone — absolute paths outside root are denied.
     ctx = _ctx(tmp_path)
-    out = ctx.resolve_path("/scratch/notes.md")
-    assert out is None  # marker: caller goes through ctx.scratch dict
-
-
-def test_scratch_read_write(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    ctx.scratch["/scratch/notes"] = "hello"
-    assert ctx.scratch["/scratch/notes"] == "hello"
+    with pytest.raises(PermissionDenied):
+        ctx.resolve_path("/scratch/notes.md")
 
 
 def test_unknown_prefix_raises(tmp_path: Path) -> None:
+    # Any absolute path outside the root raises PermissionDenied.
     ctx = _ctx(tmp_path)
-    with pytest.raises(ValueError, match="virtual path"):
+    with pytest.raises(PermissionDenied):
         ctx.resolve_path("/elsewhere/x")
 
 
 def test_check_fs_permission_passthrough(tmp_path: Path) -> None:
-    ctx_with_rule = _ctx(tmp_path, rules=(_allow(("write",), ("/project/**",)),))
-    ctx_with_rule.check_fs_permission("write", "/project/x.py")  # ok — rule matches
+    ctx_with_rule = _ctx(tmp_path, rules=(_allow(("write",), ("**",)),))
+    ctx_with_rule.check_fs_permission("write", "x.py")  # ok — rule matches
     ctx_no_rules = _ctx(tmp_path)
     with pytest.raises(PermissionDenied):
-        ctx_no_rules.check_fs_permission("write", "/project/x.py")  # denied — default-deny write
+        ctx_no_rules.check_fs_permission("write", "x.py")  # denied — default-deny write
 
 
 def test_change_context_field(tmp_path: Path) -> None:
@@ -184,3 +181,40 @@ def test_tool_context_tiers_defaults_empty(tmp_path) -> None:
     assert ctx.tiers == ()
     ctx.tiers = ("low", "high")
     assert ctx.tiers == ("low", "high")
+
+
+# --- New containment tests (Part A1) ---
+
+def test_resolve_path_relative_maps_under_root(tmp_path):
+    ctx = _ctx(tmp_path)
+    assert ctx.resolve_path("src/foo.py") == (tmp_path / "src" / "foo.py").resolve()
+
+
+def test_resolve_path_rejects_parent_escape(tmp_path):
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        ctx.resolve_path("../../etc/passwd")
+
+
+def test_resolve_path_rejects_absolute_outside_root(tmp_path):
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        ctx.resolve_path("/etc/passwd")
+
+
+def test_resolve_path_normalizes_embedded_traversal(tmp_path):
+    # A permission glob like imp/specs/** would *match* this string, so the
+    # ONLY thing blocking escape is normalize-then-contain (spec A.3.5).
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        ctx.resolve_path("imp/specs/../../../etc/passwd")
+
+
+def test_resolve_path_no_scratch_or_project_prefix(tmp_path):
+    # /scratch and /project are GONE — they resolve as ordinary relative paths,
+    # which (being absolute) escape the root and are denied.
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        ctx.resolve_path("/project/foo")
+    with pytest.raises(PermissionDenied):
+        ctx.resolve_path("/scratch/foo")

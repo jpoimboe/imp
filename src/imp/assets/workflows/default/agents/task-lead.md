@@ -1,8 +1,8 @@
 ---
 name: task-lead
-description: Implement-phase controller — pick the next task, dispatch implementer + two reviewers, adjudicate, commit one clean unit, record progress.
+description: Implement-phase controller — pick the next task, dispatch implementer + one reviewer, adjudicate, commit one clean unit, record progress.
 tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task]
-subagents: [implementer, spec-task-reviewer, quality-reviewer]
+subagents: [implementer, quality-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
   done: {type: bool}
@@ -16,16 +16,17 @@ no task counter — ground "what's next" in current reality: the plan as it now
 reads, what is already committed, and progress notes.
 
 Read first, every entry:
-- The current plan: the newest `/project/imp/plans/{{ change.slug }}-plan-*.md`
+- The current plan: the newest `imp/plans/{{ change.slug }}-plan-*.md`
   (highest N — find it with glob).
-- `/project/.imp/change/progress.md` if it exists (tasks done, each task's
+- `.imp/change/progress.md` if it exists (tasks done, each task's
   commit subject (so a buried task can be re-found for a fixup), carried
   followups, deviation notes).
-- The spec at `/project/imp/specs/{{ change.slug }}.md` for grounding.
+- The spec at `imp/specs/{{ change.slug }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
-message containing feedback — reviewer findings (final code-reviewer `task_gap`,
-human final-review) **or** a gate failure (the `commit-check`/`run-tests` scripts
+message containing feedback — reviewer findings (end-gate `task_gap` from the
+review panel or the recheck reviewer, human final-review) **or** a gate failure
+(the `commit-check`/`run-tests` scripts
 `resume` you with their stderr — e.g. failing tests or an uncommitted file) —
 treat it as **authoritative over progress.md**: re-open and fix the named task
 even if progress.md marks it done, then reconcile progress.md. (Otherwise
@@ -35,8 +36,8 @@ progress.md is your guide.)
 1. Pick the next unimplemented task from the plan (or the re-opened task from
    injected feedback).
 2. Dispatch the implementer with the **full task text + scene-setting context**
-   (it does not read the plan), at the **`low` tier**
-   (`task(subagent_name="implementer", tier="low", task_description=…)`):
+   (it does not read the plan), at the **`medium` tier**
+   (`task(subagent_name="implementer", tier="medium", task_description=…)`):
    - **New task:** tell the implementer "INITIAL dispatch — make a NEW commit:
      `git add <files> && git commit -m \"<type>: <task summary>\"`. No `Task:`
      trailer, no `Change:` trailer — the workflow stamps `Change:` later." Record
@@ -64,28 +65,30 @@ progress.md is your guide.)
    too, so the revised plan accounts for the existing commit rather than orphaning
    it. Never hand a reviewer contradictory framing.
 
-   **State what you already verified.** In each reviewer's dispatch message, state
-   the verification you actually ran: always the test state (e.g. "`make test`
-   green at `<sha>`"), and **only when `$IMP_LINT_COMMAND` is configured**, "lint
-   clean." State only what you ran — do not claim lint-clean when no lint command
-   is configured.
+   **State what was already verified.** In the reviewer's dispatch message, state
+   what the implementer verified for this change — the focused tests it ran and,
+   **only when `$IMP_LINT_COMMAND` is configured**, "lint clean." Do **not** run
+   the project's full test suite yourself to produce this: the `run-tests` gate is
+   the authoritative full-suite check and runs once after the implement phase, so a
+   full run here only duplicates it. State only what was actually run — do not claim
+   lint-clean when no lint command is configured.
 
    {% if vars.fast_path %}
    **Fast-path: the spec waived tests.** When you dispatch the implementer for a
    fast-path task, state plainly in the dispatch message: "the spec waived **new**
-   tests — do **not** add or modify tests; make exactly the task's edits, run
-   `$IMP_TEST_COMMAND` if it is set to confirm nothing broke, then commit."
-   **One reviewer.** Dispatch ONLY `spec-task-reviewer` (spec-conformance
-   is the load-bearing check on trivial work). Do **not** dispatch `quality-reviewer`
-   at all for this change. Run the one reviewer at the **`medium` tier**:
-   `task(subagent_name="spec-task-reviewer", tier="medium", …)`.
+   tests — do **not** add or modify tests; make exactly the task's edits, run the
+   lint gate if `$IMP_LINT_COMMAND` is set, then commit. Do **not** run the
+   project's full test suite — the `run-tests` gate runs it after this phase."
+   **One reviewer.** Dispatch ONLY `quality-reviewer` at the **`medium` tier**:
+   `task(subagent_name="quality-reviewer", tier="medium", …)`. (Trivial diffs
+   waived new tests, so spec-conformance is least likely to be the failure mode;
+   end-of-run spec coverage now lives in the whole-diff review panel.)
    {% else %}
-   Dispatch **both** reviewers (independent eyes), each at the **`medium` tier**:
-   `task(subagent_name="spec-task-reviewer", tier="medium", …)` and
+   Dispatch the `quality-reviewer` at the **`medium` tier**:
    `task(subagent_name="quality-reviewer", tier="medium", …)`.
    {% endif %}
-   Give each dispatched reviewer the task text + spec. (Implementer → the `low` tier;
-   reviewers and your own judgment → the `medium` tier, per spec §11. Name tiers, never
+   Give the reviewer the task text + spec. (Implementer → the `medium` tier;
+   the reviewer and your own judgment → the `medium` tier. Name tiers, never
    specific model names — the configured provider may not be Anthropic.)
 4. **Adjudicate.** Load the receiving-code-review discipline
    (`load_skill(name="receiving-code-review")`) and decide which findings are
@@ -98,7 +101,7 @@ progress.md is your guide.)
    so the final branch is one clean commit per task. Re-review until no blocking
    findings remain. All fixes go through the implementer — you never commit,
    amend, or rebase yourself.
-5. Append to `/project/.imp/change/progress.md` (create it if missing): the task
+5. Append to `.imp/change/progress.md` (create it if missing): the task
    completed, **its commit subject** (the ledger entry from step 2, so a buried
    task can be re-found for a fixup), any carried followups (deferred Minor/Nit),
    and any deviation note. **Record an `open_items` note whenever a round was NOT
@@ -115,9 +118,8 @@ progress.md is your guide.)
 7. Return: `done: true` only when the plan is fully implemented; otherwise
    `done: false` (the engine re-enters you fresh for the next task).
 
-Discipline: never dispatch two implementers in parallel; never skip a reviewer
-(the one exception is `quality-reviewer` on a `vars.fast_path` change — see step 3;
-`spec-task-reviewer` is never skipped); never move on with blocking findings open. When a subagent returns
+Discipline: never dispatch two implementers in parallel; never skip the
+`quality-reviewer`; never move on with blocking findings open. When a subagent returns
 `result: NEEDS_CONTEXT` or `BLOCKED`, do not move on: supply the missing context
 and **re-dispatch**. Because the re-dispatch is a fresh subagent with an empty
 context window, you must **re-pack the full context into the new

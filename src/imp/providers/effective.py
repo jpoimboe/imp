@@ -76,7 +76,7 @@ def merge_layers(
                     for vendor, model in vendors.items():
                         td[vendor] = model
                         prov[("tiers", tier, vendor)] = src
-            elif key in ("provider_envs", "vars"):
+            elif key in ("provider_envs", "vars", "sandbox"):
                 dst2: dict[str, Any] = out.setdefault(key, {})
                 for k, v in val.items():
                     dst2[k] = v
@@ -98,6 +98,7 @@ def _to_config(merged: dict[str, Any]) -> Config:
         test_command=merged.get("test_command"),
         editing_mode=merged.get("editing_mode", "emacs"),
         theme=merged.get("theme", "ansi"),
+        sandbox=merged.get("sandbox", {}),
     )
 
 

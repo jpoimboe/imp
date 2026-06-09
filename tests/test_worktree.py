@@ -292,3 +292,5 @@ def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path)
     exclude = wt.find_control_root(tmp_path) / ".git" / "info" / "exclude"
     assert ".imp/" in exclude.read_text()
     assert _make_worktree_and_check(tmp_path)
+
+

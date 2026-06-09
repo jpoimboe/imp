@@ -5,8 +5,8 @@ behalf of a Change — script gates (`run_script_gate`) and the agent `bash` too
 Centralizing them here keeps the two execution paths consistent and gives future
 engine vars a single home.
 
-All paths are host paths. There is no sandbox: the `/project/` prefix used in
-`fs_permissions` is a virtual namespace only, never a real mount point.
+All paths are host paths. `IMP_PROJECT_ROOT` is the absolute worktree path on the
+host; `fs_permissions` patterns are worktree-relative (no `/project` namespace).
 """
 
 from __future__ import annotations

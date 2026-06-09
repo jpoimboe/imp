@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from imp.engine.errors import LoadError
+from imp.engine.types import SourceLoc
 from imp.providers.config import parse_config_layer
+from imp.providers.effective import load_effective_config, merge_layers
 
 
 def test_absent_file_returns_none(tmp_path: Path) -> None:
@@ -52,3 +54,65 @@ def test_vars_key_normalized_to_present_dict(tmp_path: Path) -> None:
     p.write_text("vars:\n  fast: true\n")
     layer, _src = parse_config_layer(p)  # type: ignore[misc]
     assert layer["vars"] == {"fast": True}
+
+
+# --- sandbox block tests ---
+
+
+def test_parse_sandbox_block(tmp_path: Path) -> None:
+    p = tmp_path / "project.yaml"
+    p.write_text(
+        "workflow: default\n"
+        "sandbox:\n"
+        "  network: false\n"
+        "  secret_paths: ['.mykeys']\n"
+    )
+    out, _ = parse_config_layer(p)  # type: ignore[misc]
+    assert out["sandbox"]["network"] is False
+    assert out["sandbox"]["secret_paths"] == [".mykeys"]
+
+
+def test_sandbox_merges_one_level(tmp_path: Path) -> None:
+    # user layer sets allow_unsandboxed; project layer sets network — both survive.
+    src = SourceLoc(file=tmp_path / "x", line=1)
+    merged, _ = merge_layers([
+        ({"sandbox": {"network": False}}, src),
+        ({"sandbox": {"allow_unsandboxed": True}}, src),
+    ])
+    assert merged["sandbox"] == {"network": False, "allow_unsandboxed": True}
+
+
+def test_config_exposes_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    # With no config files, sandbox defaults to an empty mapping (code defaults
+    # apply in SandboxConfig downstream).
+    eff = load_effective_config(project_root=None, control_root=None)
+    assert isinstance(eff.config.sandbox, dict)
+
+
+def test_sandbox_unknown_key_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("workflow: default\nsandbox:\n  bogus_key: 1\n")
+    with pytest.raises(LoadError, match="not a known sandbox setting"):
+        parse_config_layer(p)
+
+
+def test_sandbox_bad_bool_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("workflow: default\nsandbox:\n  enabled: yes-please\n")
+    with pytest.raises(LoadError, match="must be a boolean"):
+        parse_config_layer(p)
+
+
+def test_sandbox_bad_list_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("workflow: default\nsandbox:\n  secret_paths: /etc/shadow\n")
+    with pytest.raises(LoadError, match="must be a list of strings"):
+        parse_config_layer(p)
+
+
+def test_sandbox_non_mapping_rejected(tmp_path: Path) -> None:
+    p = tmp_path / "c.yaml"
+    p.write_text("workflow: default\nsandbox: flat-string\n")
+    with pytest.raises(LoadError, match="must be a mapping"):
+        parse_config_layer(p)

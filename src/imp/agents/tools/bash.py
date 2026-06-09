@@ -14,7 +14,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import signal
 from dataclasses import dataclass
 from subprocess import PIPE
@@ -30,21 +29,7 @@ from imp.agents.tools.limits import (
     ToolAborted,
 )
 from imp.engine.env import engine_env, overlay_engine_env
-
-# Rewrite a LEADING `cd /project` (optionally `/subpath`, optionally single- or
-# double-quoted) to the real project root. `/project` is a virtual FS-tool
-# namespace; in bash the cwd already IS the root, so the reflexive `cd /project …`
-# would fail. Word-boundary match: `/project` followed by `/`, end, or a non-word
-# char — never `/projectfoo` or `/project_x`, and never a `/project` substring
-# later in the command. Group 1 includes the optional opening quote so the
-# substitution preserves it; the closing quote is never in the match (it lies
-# past `/project`), so it passes through untouched. Inside a regex char class,
-# `\'` is an escaped quote = literal `'`, so the class matches `"` or `'`.
-_LEADING_CD_PROJECT = re.compile(r'^(\s*cd\s+["\']?)/project(?![A-Za-z0-9_])')
-
-
-def _rewrite_leading_cd_project(command: str, project_root: str) -> str:
-    return _LEADING_CD_PROJECT.sub(lambda m: m.group(1) + project_root, command, count=1)
+from imp.engine.sandbox import build_sandbox_argv
 
 
 @dataclass
@@ -68,7 +53,6 @@ class _Counter:
     ),
 )
 async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
-    command = _rewrite_leading_cd_project(command, str(ctx.project_root))
     cwd_path = cwd or str(ctx.project_root)
     env = overlay_engine_env(
         os.environ,
@@ -88,8 +72,11 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
 
     # anyio.open_process accepts stdlib subprocess constants for stdin/stdout/
     # stderr; PIPE is the documented way to capture both streams.
+    policy = ctx.sandbox_policy
+    argv = (build_sandbox_argv(command, cwd=cwd_path, policy=policy)
+            if policy is not None else ["sh", "-c", command])
     proc = await anyio.open_process(
-        ["sh", "-c", command],
+        argv,
         stdin=None,
         stdout=PIPE,
         stderr=PIPE,

@@ -14,11 +14,11 @@ plans, then route to one of three outcomes.
 
 ## Context to Load
 
-- **Spec:** `/project/imp/specs/{{ change.slug }}.md` — the requirements this
+- **Spec:** `imp/specs/{{ change.slug }}.md` — the requirements this
   change must satisfy.
-- **Plans:** `/project/imp/plans/{{ change.slug }}-plan-*.md` — what was planned
+- **Plans:** `imp/plans/{{ change.slug }}-plan-*.md` — what was planned
   and intended for each phase.
-- **Progress:** `/project/.imp/change/progress.md` — what tasks were completed,
+- **Progress:** `.imp/change/progress.md` — what tasks were completed,
   any deferred followups, and deviation notes.
 - **Diff:** in `bash`, run `git diff <base>..HEAD` (or `git show HEAD`) to see
   everything that was implemented — the work is already committed, so a bare

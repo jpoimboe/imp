@@ -7,7 +7,7 @@ import pytest
 AGENTS_DIR = Path("src/imp/assets/workflows/default/agents")
 
 # Subagents (non-interactive, dispatched via `task`): the contract under test.
-SUBAGENT_FILES = ["implementer.md", "spec-task-reviewer.md", "quality-reviewer.md"]
+SUBAGENT_FILES = ["implementer.md", "quality-reviewer.md"]
 # Interactive STEPS: the executor wires their resume hooks, so a turn-ending
 # question is correct for them. Exempt from the no-bare-question rule.
 INTERACTIVE_STEP_FILES = ["spec-writer.md", "final-review.md"]

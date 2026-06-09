@@ -57,6 +57,32 @@ def _reset_theme() -> Generator[None, None, None]:
     pal.set_theme("ansi")
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_fallback_without_bwrap(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep run_change-based tests green with OR without bwrap.
+
+    run_change builds a sandbox policy whose default posture (enabled, NOT
+    allow_unsandboxed) HARD-FAILS with SandboxUnavailable when bwrap is absent.
+    On a host WITH bwrap this fixture is a NO-OP, so those tests exercise the real
+    sandbox. On a host WITHOUT bwrap it forces the executor's policy build to
+    inactive so the run proceeds bare. Tests marked `real_sandbox_policy` (the
+    unit tests asserting the raw three-way posture) opt out and see the real fn.
+    """
+    if request.node.get_closest_marker("real_sandbox_policy"):
+        return
+    from imp.engine.sandbox import sandbox_available
+    if sandbox_available():
+        return
+    import imp.engine.executor as ex
+    from imp.engine.sandbox import _inactive
+    monkeypatch.setattr(
+        ex, "_build_sandbox_policy",
+        lambda change, config, log: _inactive(note="test_fallback_no_bwrap"),
+    )
+
+
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
     """An empty 'project' directory under tmp_path."""

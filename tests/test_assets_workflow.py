@@ -52,30 +52,30 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["run-tests"].rules[-1].action.resume is True            # -> task-lead
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
     # phase jumps clear (plain goto)
-    assert by["code-reviewer"].rules[1].action.resume is False    # rework -> plan-writer
+    assert by["recheck"].rules[1].action.resume is False    # rework -> plan-writer
     assert by["spec-verify-commit"].kind == "script"
     assert wf.phases[-1].name == "merge" and wf.phases[-1].steps == ()
 
 
-def test_default_workflow_has_code_review_constraint():
-    from imp.assets import default_workflow_dir
-    from imp.engine.loader import load_workflow
-    wf = load_workflow(default_workflow_dir())
-    # code-reviewer must differ from task-lead (the implementer step tier) for
-    # cross-provider review; the reviewer is constrained to differ from task-lead.
-    by = {s.name: s for s in wf.flat_steps()}
-    assert by["code-reviewer"].differ_from == "task-lead"
-
-
-def test_default_code_reviewer_step_declares_tier():
-    # In the feature workflow tier is assigned at the step level in
-    # workflow.yaml, not in the agent frontmatter.  Verify the step-level
-    # declaration is present and correct so code_review diversity wiring works.
+def test_review_phase_has_no_differ_from():
+    # Single provider by design: differ_from is removed from the review phase.
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["code-reviewer"].tier == "high"
+    assert by["review-panel"].differ_from is None
+    assert by["recheck"].differ_from is None
+
+
+def test_review_steps_declare_tiers():
+    # review-panel coordinator + recheck loop are both sonnet (tier: medium); the
+    # opus members are dispatched by the coordinator at runtime tier="high".
+    from imp.assets import default_workflow_dir
+    from imp.engine.loader import load_workflow
+    wf = load_workflow(default_workflow_dir())
+    by = {s.name: s for s in wf.flat_steps()}
+    assert by["review-panel"].tier == "medium"
+    assert by["recheck"].tier == "medium"
 
 
 def test_default_workflow_loads() -> None:
@@ -222,7 +222,7 @@ def test_review_phase_stamps_trailers_after_autosquash() -> None:
     names = [s.name for s in review.steps]
     assert "stamp-trailers" in names, names
     assert names.index("stamp-trailers") == names.index("autosquash") + 1, names
-    assert names.index("stamp-trailers") < names.index("code-reviewer"), names
+    assert names.index("stamp-trailers") < names.index("panel-gate"), names
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
@@ -248,7 +248,7 @@ def test_fast_path_gates_skip_depth_keep_safety() -> None:
     assert isinstance(plan_gate.action, Goto) and plan_gate.action.target == "task-lead"
     cycle_gate = steps["fast-path-cycle-gate"].rules[0]
     assert isinstance(cycle_gate.action, Goto) and cycle_gate.action.target == "review"
-    assert "code-reviewer" in steps
+    assert "review-panel" in steps and "recheck" in steps
     assert wf.phases[-1].name == "merge"
 
 

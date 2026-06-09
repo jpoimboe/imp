@@ -1,7 +1,7 @@
 """read_file, write_file, edit_file (spec §6.6).
 
-Permissions enforced inline (no backend layer). Virtual paths resolved via
-ToolContext.resolve_path; /scratch/* values live in ctx.scratch.
+Permissions enforced inline (no backend layer). Paths are worktree-RELATIVE and
+resolved via ToolContext.resolve_path, which enforces worktree containment.
 """
 
 from __future__ import annotations
@@ -22,16 +22,12 @@ from imp.agents.tools.limits import (
     name="read_file",
     description=(
         "Read a file's contents (bounded — output is capped at 50 KB). "
-        "Paths use /project/ or /scratch/ prefixes."
+        "Paths are relative to the project root (e.g. src/foo.py)."
     ),
 )
 async def read_file(ctx: ToolContext, path: str) -> str:
     ctx.check_fs_permission("read", path)
     resolved = ctx.resolve_path(path)
-    if resolved is None:
-        if path not in ctx.scratch:
-            raise FileNotFoundError(f"{path!r} not in scratch")
-        return ctx.scratch[path]
     text, truncated = await read_text_capped(
         resolved,
         coordinator=getattr(ctx, "coordinator", None),
@@ -47,9 +43,6 @@ async def read_file(ctx: ToolContext, path: str) -> str:
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
     ctx.check_fs_permission("write", path)
     resolved = ctx.resolve_path(path)
-    if resolved is None:
-        ctx.scratch[path] = content
-        return f"wrote {len(content)} bytes to {path}"
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(content)
     return f"wrote {len(content)} bytes to {path}"
@@ -66,21 +59,11 @@ def edit_file(ctx: ToolContext, path: str, old: str, new: str) -> str:
     ctx.check_fs_permission("read", path)
     ctx.check_fs_permission("write", path)
     resolved = ctx.resolve_path(path)
-    if resolved is None:
-        body = ctx.scratch.get(path)
-        if body is None:
-            raise FileNotFoundError(f"{path!r} not in scratch")
-    else:
-        body = resolved.read_text()
-
+    body = resolved.read_text()
     count = body.count(old)
     if count == 0:
         raise ValueError(f"{old!r} not found in {path!r}")
     if count > 1:
         raise ValueError(f"{old!r} not unique in {path!r} (found {count} occurrences)")
-    new_body = body.replace(old, new, 1)
-    if resolved is None:
-        ctx.scratch[path] = new_body
-    else:
-        resolved.write_text(new_body)
+    resolved.write_text(body.replace(old, new, 1))
     return f"replaced 1 occurrence in {path}"

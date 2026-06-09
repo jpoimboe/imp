@@ -197,6 +197,7 @@ async def dispatch_task(
         lint_command=ctx.lint_command,
         test_command=ctx.test_command,
         non_interactive=ctx.non_interactive,
+        sandbox_policy=ctx.sandbox_policy,
     )
 
     # Drive via the shared loop, with backoff (omission #4). Each backoff

@@ -1,7 +1,9 @@
 """Step-body helpers: run a script step, evaluate a rules block."""
 from __future__ import annotations
 
+import contextlib
 import os
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +11,7 @@ from typing import Any
 
 from imp.engine.env import overlay_engine_env
 from imp.engine.expr import EvalEnv, evaluate
+from imp.engine.sandbox import SandboxPolicy, build_sandbox_argv
 from imp.engine.types import Action, Continue, Rule, Step
 
 
@@ -42,29 +45,46 @@ def evaluate_rules(
 
 def run_script(
     step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
+    policy: SandboxPolicy | None = None,
 ) -> dict[str, Any]:
     """Run a script step; return {exit, stdout, stderr} for rule evaluation.
 
-    `shell=True` is intentional and not a security issue: `command:` strings are
-    explicit shell expressions the engine reads live from the Change's own
-    worktree working tree (an uncommitted edit is honored on resume). The trust
-    is principal-based, not snapshot-based: the Change author and the workflow
-    author are the same trust principal in V0, so executing the worktree's
-    (possibly uncommitted) command bytes grants no privilege the Change author
-    doesn't already have.
+    The command string is an explicit shell expression read live from the
+    Change's own worktree (principal-based trust: the Change author and workflow
+    author are the same V0 principal). When `policy` is active it is wrapped with
+    bwrap (build_sandbox_argv appends `sh -c <command>`); otherwise the bare
+    `sh -c` runs.
 
-    `env_extra` (an `engine_env` result) is overlaid authoritatively on the current
-    process environment so engine-level variables (e.g. IMP_CHANGE_SLUG) are visible
-    to scripts, while a stale inherited engine var (e.g. IMP_LINT_COMMAND from an
-    outer imp process) cannot leak past engine_env's "absent => no gate" contract.
+    Reaping (spec B.9/H-A): because the sandbox drops --die-with-parent, a timeout
+    must kill the process GROUP, not just the bwrap pid — else the inner `sh` is
+    orphaned. So this uses Popen(start_new_session=True) + communicate(timeout) and
+    killpg(SIGKILL) on TimeoutExpired. A gate's cwd (step.cwd or cwd) must lie
+    inside the writable set (worktree/`/tmp`); a gate pointed at the RO floor fails.
+
+    `env_extra` (an engine_env result) is overlaid authoritatively so engine vars
+    are visible while a stale inherited engine var cannot leak (engine_env's
+    "absent => no gate" contract).
     """
-    # The loader only constructs script steps with a non-None command; this
-    # assert is purely for mypy (command: str | None in Step's type).
     assert step.command is not None, "script step must have a command"
     env = overlay_engine_env(os.environ, env_extra or {})
-    proc = subprocess.run(
-        step.command, shell=True, cwd=step.cwd or str(cwd),
-        capture_output=True, text=True, timeout=step.timeout_seconds,
-        check=False, env=env,
+    run_cwd = step.cwd or str(cwd)
+    argv = (build_sandbox_argv(step.command, cwd=run_cwd, policy=policy)
+            if policy is not None else ["sh", "-c", step.command])
+    proc = subprocess.Popen(
+        argv, cwd=run_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env, start_new_session=True,
     )
-    return {"exit": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
+    try:
+        stdout, stderr = proc.communicate(timeout=step.timeout_seconds)
+    except subprocess.TimeoutExpired:
+        # H-A: --die-with-parent is dropped, so kill the GROUP to reap the inner sh.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+        # communicate() leaves the parent-side read FDs open when it times out;
+        # close them so a timed-out gate doesn't leak two FDs until GC.
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
+        raise
+    return {"exit": proc.returncode, "stdout": stdout, "stderr": stderr}

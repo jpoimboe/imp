@@ -204,11 +204,14 @@ def _v_fs_permissions_paths(workflow: Workflow, errors: list[LoadError]) -> None
 
 def _v_check_paths(rule: FsRule, errors: list[LoadError]) -> None:
     for p in rule.paths:
-        if not p.startswith("/"):
+        if p.startswith("/"):
             errors.append(
-                LoadError(f"fs_permissions path must start with '/': {p!r}", rule.source)
+                LoadError(
+                    f"fs_permissions path must be worktree-relative (no leading '/'): {p!r}",
+                    rule.source,
+                )
             )
-        # Use path components so e.g. "/var/log/app..log" is not flagged.
+        # Use path components so e.g. "var/log/app..log" is not flagged.
         parts = PurePosixPath(p).parts
         if any(part == ".." for part in parts):
             errors.append(

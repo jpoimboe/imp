@@ -46,9 +46,9 @@ def _evals_agents_root() -> Path:
 
 
 def baseline_agent_path(name: str) -> Path:
-    """Resolve an agent .md by name: the baseline reviewers live in the asset
-    workflow; the eval-only agents (completeness-slice, grader-judge,
-    label-normalizer) live under evals/data/agents."""
+    """Resolve an agent .md by name: the baseline reviewers (including the
+    review-panel slices) live in the asset workflow; the eval-only agents
+    (grader-judge, label-normalizer) live under evals/data/agents."""
     asset = _assets_root() / "agents" / f"{name}.md"
     if asset.exists():
         return asset
@@ -159,7 +159,7 @@ async def drive_agent(
         ),
         user_chat_input_fn=None,
         transcript_dir=events_dir / "transcripts",
-        fs_permissions=(),  # reviewers/judges are read-only; file tools via /project map
+        fs_permissions=(),  # reviewers/judges are read-only; file tools use worktree-relative paths
         events_path=events_path,
         subagent_defs={},  # reviewers/judges/normalizers have no subagents
         tiers=(),

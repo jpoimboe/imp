@@ -274,6 +274,23 @@ def test_v11_fs_permissions_bad_paths(tmp_path: Path) -> None:
     assert any("'..'" in str(e) for e in ei.value.errors)
 
 
+def test_v11_fs_permissions_rejects_absolute_path(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/stub.md
+                fs_permissions:
+                  - {operations: [read], paths: ['/etc/**'], mode: allow}
+        """, agents={"stub": _OK_AGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert any("leading '/'" in str(e) for e in ei.value.errors)
+
+
 def test_v11_dotted_filename_allowed(tmp_path: Path) -> None:
     """Paths with '..' inside a filename component should NOT be flagged."""
     wf = _wf(tmp_path, """\
@@ -285,7 +302,7 @@ def test_v11_dotted_filename_allowed(tmp_path: Path) -> None:
               - name: s
                 file: agents/stub.md
                 fs_permissions:
-                  - {operations: [read], paths: ['/var/log/app..log'], mode: allow}
+                  - {operations: [read], paths: ['var/log/app..log'], mode: allow}
         """, agents={"stub": _OK_AGENT})
     load_workflow(wf)  # must not raise
 
@@ -324,8 +341,8 @@ def test_v15_pass_write_file_with_write_permission(tmp_path: Path) -> None:
               - name: s
                 file: agents/writer.md
                 fs_permissions:
-                  - {operations: [read], paths: ['/artifacts/**'], mode: allow}
-                  - {operations: [write], paths: ['/artifacts/**'], mode: allow}
+                  - {operations: [read], paths: ['artifacts/**'], mode: allow}
+                  - {operations: [write], paths: ['artifacts/**'], mode: allow}
         """, agents={"writer": _WRITE_FILE_AGENT})
     load_workflow(wf)  # must not raise
 
@@ -360,7 +377,7 @@ def test_v15_fail_write_file_only_read_permission(tmp_path: Path) -> None:
               - name: s
                 file: agents/writer.md
                 fs_permissions:
-                  - {operations: [read], paths: ['/artifacts/**'], mode: allow}
+                  - {operations: [read], paths: ['artifacts/**'], mode: allow}
         """, agents={"writer": _WRITE_FILE_AGENT})
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)

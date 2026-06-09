@@ -31,5 +31,9 @@ should have touched but did not.
 
 Use the same severity sections as a standard review. In `findings`, for each gap
 name the changed symbol, the parallel path that was missed, and `file:line`. Set
-`verdict` to `task_gap` if any consistency gap exists, else `approve`. Report ONLY
+`verdict` to `task_gap` ONLY for a **material** consistency gap — a parallel path that
+is genuinely reachable and would misbehave because the change was not applied there. A
+theoretical or unreachable inconsistency is a **Minor/Nit**: still name it in
+`findings`, but return `approve` — it is surfaced to the author, not gated on. Never
+bounce a change back to rework over a gap that cannot actually misbehave. Report ONLY
 completeness gaps; do not pad with style notes.

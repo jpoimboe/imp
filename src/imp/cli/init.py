@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from imp.assets import default_workflow_dir
+from imp.engine.sandbox import sandbox_available
 
 # The order providers are presented in the picker. Bindings (tier→model) are
 # owned by the provider-code floor now, so init no longer carries a model table.
@@ -64,6 +65,20 @@ def _build_user_config(
     }
 
 
+# claude_code (Anthropic) is the recommended single-provider default (review
+# architecture spec, M2). Pre-select it in the picker so the common path produces
+# a single-provider config; multi-select stays available for codex/openai.
+_RECOMMENDED_DEFAULT = "claude_code"
+
+
+def _initial_selection(available: list[str]) -> set[int]:
+    """Indices pre-selected when the picker opens: the recommended default if it
+    is offered, else nothing (the picker still requires >=1 before confirm)."""
+    if _RECOMMENDED_DEFAULT in available:
+        return {available.index(_RECOMMENDED_DEFAULT)}
+    return set()
+
+
 def _interactive_provider_picker(available: list[str]) -> list[str]:
     """Inline cursor picker rendered with prompt_toolkit.
 
@@ -89,7 +104,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     from prompt_toolkit.layout.dimension import Dimension
 
     cursor = 0
-    selected: set[int] = set()  # default: none selected
+    selected: set[int] = _initial_selection(available)  # pre-select the recommended default
 
     def _render() -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = [
@@ -189,6 +204,18 @@ def run_init(
     theme = detect()
     if theme != "ansi":
         output_fn(f"Detected a {theme} terminal — colors tuned to match.")
+
+    # --- sandbox posture (spec B.7): probe bwrap, surface if unavailable ---
+    if not sandbox_available():
+        output_fn("")
+        output_fn("WARNING: bubblewrap (bwrap) not found — imp can't OS-sandbox the agent's")
+        output_fn("   shell. Install it for a real filesystem boundary:")
+        output_fn("     Fedora:  sudo dnf install bubblewrap")
+        output_fn("     Debian:  sudo apt install bubblewrap")
+        output_fn("   Until then, set `sandbox.allow_unsandboxed: true` in your")
+        output_fn(f"   user config ({user_config_path()}) to run without a boundary,")
+        output_fn("   or runs will hard-fail. (You can also re-run init after installing.)")
+        output_fn("")
 
     # --- committed project file (idempotent: never overwrite an existing one) ---
     if not already_initialized:

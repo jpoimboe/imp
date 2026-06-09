@@ -12,7 +12,7 @@ output:
 You are reviewing the newest plan for this change.
 
 Change title (user's starting intent): `{{ change.title }}`
-Spec file: `/project/imp/specs/{{ change.slug }}.md`
+Spec file: `imp/specs/{{ change.slug }}.md`
 
 ## Your Role
 
@@ -20,8 +20,8 @@ Verify the plan is complete, matches the spec, and has proper task decomposition
 
 ## Process
 
-1. Glob the plan files: `glob("/project/imp/plans/{{ change.slug }}-plan-*.md")`. Sort numerically and read the highest-N file — that is the plan under review.
-2. Read `/project/imp/specs/{{ change.slug }}.md`.
+1. Glob the plan files: `glob("imp/plans/{{ change.slug }}-plan-*.md")`. Sort numerically and read the highest-N file — that is the plan under review.
+2. Read `imp/specs/{{ change.slug }}.md`.
 3. Read any prior plan files (lower N) to understand what requirements they already cover, so you evaluate this plan against the remaining scope.
 4. Use `query_events` to read prior turns if you need to verify the plan reflects decisions made during brainstorm or spec review.
 5. Evaluate against the categories below.

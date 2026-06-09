@@ -19,14 +19,14 @@ Before writing anything, determine which plan number N to write and whether you 
 **Step 1 — glob existing plan files:**
 
 ```
-glob("/project/imp/plans/{{ change.slug }}-plan-*.md")
+glob("imp/plans/{{ change.slug }}-plan-*.md")
 ```
 
 Sort the results numerically. The highest N found is the "current plan".
 
 **Step 2 — read progress state:**
 
-If `/project/.imp/change/progress.md` exists, read it.
+If `.imp/change/progress.md` exists, read it.
 
 **Step 3 — decide:**
 
@@ -58,12 +58,12 @@ Write a complete, zero-ambiguity implementation plan that a skilled developer wi
 
 ## Explore the Codebase First
 
-Read the spec at `/project/imp/specs/{{ change.slug }}.md`.
+Read the spec at `imp/specs/{{ change.slug }}.md`.
 
 Glob and read existing plan files to understand what has already been planned or implemented:
 
 ```
-glob("/project/imp/plans/{{ change.slug }}-plan-*.md")
+glob("imp/plans/{{ change.slug }}-plan-*.md")
 ```
 
 Read relevant source files to understand current patterns, interfaces, and conventions before decomposing tasks. Do not guess at file layout — read the actual code.
@@ -134,6 +134,12 @@ Every plan MUST start with this header:
 
 Then a sequence of `## Task N` sections. Use this structure for each:
 
+> **This skeleton is illustrative — shown in Python for concreteness. Your
+> actual plan MUST be written in the repo's own language: real file paths, real
+> test syntax, and the project's own focused-test command (discover it from the
+> repo — it is NOT necessarily `pytest`). What's prescriptive here is the
+> *structure* (failing test → run → minimal impl → run → commit), not the syntax.**
+
 ````markdown
 ## Task N: [Component Name]
 
@@ -152,7 +158,8 @@ def test_specific_behavior():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pytest tests/path/test_file.py::test_specific_behavior -v`
+Run: the project's focused-test command for this one test (shown here as
+`pytest …` — substitute the repo's real one)
 Expected: FAIL with "function not defined"
 
 - [ ] **Step 3: Write minimal implementation**
@@ -169,7 +176,8 @@ def function(input):
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pytest tests/path/test_file.py::test_specific_behavior -v`
+Run: the project's focused-test command for this one test (shown here as
+`pytest …` — substitute the repo's real one)
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -229,7 +237,7 @@ If you find issues, fix them inline. If you find a spec requirement with no task
 
 ## Writing the File
 
-Write to `/project/imp/plans/{{ change.slug }}-plan-N.md` (substitute the actual integer for N).
+Write to `imp/plans/{{ change.slug }}-plan-N.md` (substitute the actual integer for N).
 
 Do NOT write code. Only write the plan document.
 

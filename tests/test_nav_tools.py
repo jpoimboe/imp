@@ -39,23 +39,23 @@ def test_glob_finds_files(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("")
     (tmp_path / "b.py").write_text("")
     (tmp_path / "c.txt").write_text("")
-    out = _glob(_ctx(tmp_path), pattern="/project/*.py")
-    assert "/project/a.py" in out
-    assert "/project/b.py" in out
-    assert "/project/c.txt" not in out
+    out = _glob(_ctx(tmp_path), pattern="*.py")
+    assert "a.py" in out
+    assert "b.py" in out
+    assert "c.txt" not in out
 
 
 def test_glob_recursive(tmp_path: Path) -> None:
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "x.md").write_text("")
-    out = _glob(_ctx(tmp_path), pattern="/project/**/*.md")
-    assert "/project/sub/x.md" in out
+    out = _glob(_ctx(tmp_path), pattern="**/*.md")
+    assert "sub/x.md" in out
 
 
 def test_grep_finds_match(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("hello world\nfoo bar\n")
     (tmp_path / "b.py").write_text("nothing\n")
-    out = _grep(_ctx(tmp_path), pattern="hello", path="/project")
+    out = _grep(_ctx(tmp_path), pattern="hello", path=".")
     assert "a.py" in out
     assert "b.py" not in out
 
@@ -63,7 +63,7 @@ def test_grep_finds_match(tmp_path: Path) -> None:
 def test_ls_lists_dir(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("")
     (tmp_path / "sub").mkdir()
-    out = get_registry()["ls"].invoke(_ctx(tmp_path), {"path": "/project"})
+    out = get_registry()["ls"].invoke(_ctx(tmp_path), {"path": "."})
     assert "a.py" in out
     assert "sub" in out
 
@@ -75,7 +75,7 @@ def test_grep_excludes_imp_and_git(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "config").write_text("SECRET in git config\n")
 
-    out = _grep(_ctx(tmp_path), pattern="SECRET")
+    out = _grep(_ctx(tmp_path), pattern="SECRET", path=".")
 
     assert "code.py" in out
     assert ".imp" not in out
@@ -127,7 +127,7 @@ def test_glob_excludes_imp_and_git(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "config").write_text("x")
 
-    out = _glob(_ctx(tmp_path), pattern="/project/**/*")
+    out = _glob(_ctx(tmp_path), pattern="**/*")
 
     assert "a.py" in out
     assert ".imp" not in out
@@ -139,5 +139,52 @@ def test_glob_aborts_promptly_on_pause(tmp_path: Path) -> None:
         (tmp_path / f"f{i}.txt").write_text("x")
     ctx = _ctx(tmp_path, coord=_Coord(should_pause=True))
     with pytest.raises(ToolAborted) as ei:
-        _glob(ctx, pattern="/project/**/*")
+        _glob(ctx, pattern="**/*")
     assert ei.value.reason == "interrupted"
+
+
+# --- Containment / escape-guard tests (Task A2, spec H1) ---
+
+from imp.agents.permissions import PermissionDenied  # noqa: E402
+
+
+def test_grep_rejects_parent_escape(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        anyio.run(get_registry()["grep"].async_invoke, ctx,
+                  {"pattern": "root", "path": "../../etc"})
+
+
+def test_grep_rejects_absolute_project_escape(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        anyio.run(get_registry()["grep"].async_invoke, ctx,
+                  {"pattern": "root", "path": "/project/../../etc"})
+
+
+def test_ls_rejects_parent_escape(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        get_registry()["ls"].invoke(ctx, {"path": "../.."})
+
+
+def test_glob_rejects_absolute_pattern(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        anyio.run(get_registry()["glob"].async_invoke, ctx,
+                  {"pattern": "/project/**/*.py"})
+
+
+def test_glob_rejects_dotdot_pattern(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        anyio.run(get_registry()["glob"].async_invoke, ctx,
+                  {"pattern": "../../etc/**"})
+
+
+def test_grep_reports_relative_paths(tmp_path: Path) -> None:
+    (tmp_path / "a.txt").write_text("needle here\n")
+    ctx = _ctx(tmp_path)
+    out = anyio.run(get_registry()["grep"].async_invoke, ctx,
+                    {"pattern": "needle", "path": "."})
+    assert out.startswith("a.txt:")          # relative, no /project prefix
