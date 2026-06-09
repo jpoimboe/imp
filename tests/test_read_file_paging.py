@@ -12,7 +12,7 @@ import pytest
 import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.limits import MATCH_LINE_CAP_BYTES
+from imp.agents.tools.limits import MATCH_LINE_CAP_BYTES, TOOL_OUTPUT_CAP_BYTES
 from imp.engine.types import FsRule, SourceLoc
 
 
@@ -144,3 +144,34 @@ def test_directory_error_text(tmp_path: Path) -> None:
     (tmp_path / "d").mkdir()
     with pytest.raises(IsADirectoryError, match="is a directory: d"):
         _read(_ctx(tmp_path), path="d")
+
+
+def test_output_budget_cutoff_renders_crossing_line_full_and_resumes(tmp_path: Path) -> None:
+    # 3000 ~100-char lines: the 50 KB budget fires long before limit=2000.
+    # Replicate the spec'd accounting (len(entry)+1 per rendered line, the
+    # crossing line emitted in full, notice uncounted) to compute the expected
+    # last line; then assert the verbatim notice and gap-free continuation.
+    content = "".join(f"line {i:04d} " + "x" * 90 + "\n" for i in range(1, 3001))
+    (tmp_path / "big.txt").write_text(content)
+    lines = content.split("\n")[:-1]
+
+    acc = 0
+    expected_last = 0
+    for i, line in enumerate(lines[:2000], start=1):
+        acc += len(f"{i:>6}\t{line}") + 1
+        expected_last = i
+        if acc >= TOOL_OUTPUT_CAP_BYTES:
+            break
+    assert expected_last < 2000  # the BUDGET, not limit, is the limiter here
+
+    out = _read(_ctx(tmp_path), path="big.txt", offset=1, limit=2000)
+    body, notice = out.rsplit("\n", 1)
+    # (a) the budget-crossing line is rendered IN FULL, not cut mid-line
+    assert body.endswith(_num(expected_last, lines[expected_last - 1]))
+    # (b) verbatim notice with the computed {next} value
+    assert notice == (f"[showing lines 1-{expected_last} of 3000; "
+                      f"continue with offset={expected_last + 1}]")
+
+    # (c) offset = last + 1 is gap-free and overlap-free by construction
+    out2 = _read(_ctx(tmp_path), path="big.txt", offset=expected_last + 1, limit=2000)
+    assert out2.split("\n", 1)[0] == _num(expected_last + 1, lines[expected_last])
