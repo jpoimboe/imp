@@ -213,3 +213,69 @@ def test_resolve_policy_unavailable_without_allow_hard_fails(tmp_path):
 
 def test_sandbox_available_is_cached_bool():
     assert isinstance(sandbox_available(), bool)
+
+
+def test_resolve_policy_secret_paths_classified_dir_and_file(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / ".mykeys").mkdir()           # dir
+    (home / ".mytoken").write_text("x")  # file
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home, secret_paths=(".mykeys", ".mytoken")),
+        engine_env_result={}, environ={}, available=True,
+    )
+    assert str(home / ".mykeys") in pol.secret_dirs
+    assert str(home / ".mytoken") in pol.secret_files
+
+
+def test_resolve_policy_writable_caches_override_replaces_defaults(tmp_path):
+    control, wt = _layout(tmp_path)
+    home = tmp_path / "home"
+    (home / ".customcache").mkdir(parents=True)
+    (home / ".cache").mkdir(parents=True)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(home=home, writable_caches=(".customcache",)),
+        engine_env_result={}, environ={}, available=True,
+    )
+    assert str(home / ".customcache") in pol.writable_caches
+    assert str(home / ".cache") not in pol.writable_caches
+
+
+def test_resolve_policy_extra_readable_writable_plumbed(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(extra_readable=("/opt/ro",), extra_writable=("/opt/rw",)),
+        engine_env_result={}, environ={}, available=True,
+    )
+    assert "/opt/ro" in pol.extra_readable
+    assert "/opt/rw" in pol.extra_writable
+
+
+def test_build_setenv_dedups_overlapping_extra_env(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(extra_env=("TMPDIR",)),
+        engine_env_result={},
+        environ={"PATH": "/usr/bin", "TMPDIR": "/var/tmp"},
+        available=True,
+    )
+    # Forced /tmp override must win.
+    assert ("TMPDIR", "/tmp") in pol.setenv
+    # No key appears more than once.
+    keys = [k for k, _ in pol.setenv]
+    assert len(keys) == len(set(keys))
+
+
+def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
+    control, wt = _layout(tmp_path)
+    pol = resolve_policy(
+        worktree=wt, control_root=control, change_id="abc",
+        cfg=SandboxConfig(uid=0),
+        engine_env_result={}, environ={}, available=True,
+    )
+    assert "/run/user/0" in pol.secret_dirs

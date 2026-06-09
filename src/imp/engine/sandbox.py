@@ -119,7 +119,7 @@ class SandboxConfig:
     allow_unsandboxed: bool = False
     network: bool = True
     secret_paths: tuple[str, ...] = ()        # EXTENDS the code default dirs+files
-    writable_caches: tuple[str, ...] = ()     # OVERRIDES/extends the code default caches
+    writable_caches: tuple[str, ...] = ()     # REPLACES the code default caches when non-empty
     extra_readable: tuple[str, ...] = ()
     extra_writable: tuple[str, ...] = ()
     extra_env: tuple[str, ...] = ()
@@ -130,7 +130,11 @@ class SandboxConfig:
 
 @lru_cache(maxsize=1)
 def sandbox_available() -> bool:
-    """Linux + bwrap on PATH + a one-shot userns probe succeeds. Cached."""
+    """Linux + bwrap on PATH + a one-shot userns probe succeeds. Cached.
+
+    Tests that monkeypatch shutil.which or subprocess.run must call
+    sandbox_available.cache_clear() first (the result is process-global cached).
+    """
     if platform.system() != "Linux" or shutil.which("bwrap") is None:
         return False
     try:
@@ -227,19 +231,24 @@ def _build_setenv(
     extra_env: tuple[str, ...],
 ) -> tuple[tuple[str, str], ...]:
     """Env allowlist (spec B.4). IMP_* come from engine_env_result (authoritative,
-    M2-r5); generic + LC_* + extra_env pass through from `environ`; TMPDIR=/tmp."""
-    out: list[tuple[str, str]] = []
+    M2-r5); generic + LC_* + extra_env pass through from `environ`; TMPDIR=/tmp.
+
+    Dedup: accumulated into a dict (insertion-ordered); re-assigning a key updates
+    its value in place (first-seen position, last value wins). TMPDIR is assigned
+    last so the forced /tmp override beats any ambient or extra_env value.
+    """
+    d: dict[str, str] = {}
     for k in _GENERIC_ENV:
         if k in environ:
-            out.append((k, environ[k]))
+            d[k] = environ[k]
     for k, v in environ.items():
         if k.startswith("LC_"):
-            out.append((k, v))
+            d[k] = v
     for k in extra_env:
         if k in environ:
-            out.append((k, environ[k]))
+            d[k] = environ[k]
     for k, v in engine_env_result.items():
         if k.startswith("IMP_"):
-            out.append((k, v))
-    out.append(("TMPDIR", "/tmp"))
-    return tuple(out)
+            d[k] = v
+    d["TMPDIR"] = "/tmp"   # forced last — wins over any ambient/extra_env value
+    return tuple(d.items())
