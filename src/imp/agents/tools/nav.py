@@ -120,12 +120,18 @@ async def grep(
     result_rows = 0     # what the sentinel (and head_limit, Task 12) key on
     notes: list[str] = []  # trailing-mode scan notes (files_with_matches/count)
 
-    def emit(row: str) -> None:
+    def emit(row: str) -> bool:
+        """Append a row, charging it to the 50 KB budget. Returns True once
+        the budget has fired (the crossing row stays emitted — old behavior).
+        Returned rather than only closed-over: mypy narrows a closure-mutated
+        bool to Literal[False] at the call sites and flags the checks
+        unreachable."""
         nonlocal out_bytes, capped
         out.append(row)
         out_bytes += len(row) + 1  # +1 = the join newline
         if out_bytes >= TOOL_OUTPUT_CAP_BYTES:
-            capped = True  # crossing row stays emitted (matches old behavior)
+            capped = True
+        return capped
 
     for f in _iter_files(target):
         if capped:
@@ -145,27 +151,27 @@ async def grep(
             # read is already paid). A LISTED truncated file resolved itself;
             # an UNLISTED one is a potential false negative — note it.
             if any(rgx.search(line) for line in lines):
-                emit(rel_str)
+                capped = emit(rel_str)
                 result_rows += 1
             elif cap_truncated:
                 notes.append(f"[{rel_str}: scanned first 5 MB only]")
         elif output_mode == "count":
             n = sum(1 for line in lines if rgx.search(line))
             if n:  # non-zero rows only (ripgrep -c, not GNU grep's path:0 flood)
-                emit(f"{rel_str}:{n}")
+                capped = emit(f"{rel_str}:{n}")
                 result_rows += 1
             if cap_truncated:  # the count is a lower bound — always note
                 notes.append(f"[{rel_str}: scanned first 5 MB only]")
         else:  # content
             for i, line in enumerate(lines, start=1):
                 if rgx.search(line):
-                    emit(f"{rel_str}:{i}:{truncate_line(line)}")
+                    capped = emit(f"{rel_str}:{i}:{truncate_line(line)}")
                     result_rows += 1
                     if capped:
                         break
             if cap_truncated and not capped:
                 # Inline (as today), own bracketed line in every mode.
-                emit(f"[{rel_str}: scanned first 5 MB only]")
+                capped = emit(f"[{rel_str}: scanned first 5 MB only]")
 
     if result_rows == 0:
         # Sentinel keys on zero RESULT rows, not on empty output — a note
@@ -175,7 +181,7 @@ async def grep(
         for note in notes:  # trailing modes: result rows, then notes
             if capped:
                 break
-            emit(note)
+            capped = emit(note)
     if capped:
         # Appended AFTER accounting stops. Remaining notes (if any) were
         # dropped — acceptable only because this marker itself discloses

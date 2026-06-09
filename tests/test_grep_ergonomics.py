@@ -228,6 +228,8 @@ def test_byte_cap_during_trailing_notes_drops_remainder_with_marker(
     note_len = len("[a_trunc1.txt: scanned first 5 MB only]") + 1
     row_len = len("m0000.txt") + 1
     n = (TOOL_OUTPUT_CAP_BYTES - note_len) // row_len + 1
+    assert n <= 9999  # m{i:04d} stays 4 digits — row_len arithmetic depends on it
+    assert note_len > row_len  # first note must be what crosses, not a row
     for i in range(n):  # rows total < cap; rows + first note >= cap
         (tmp_path / f"m{i:04d}.txt").write_text("needle\n")
     out = _grep(_ctx(tmp_path), pattern="needle")
