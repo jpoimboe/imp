@@ -28,7 +28,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     ctx = ToolContext(
         project_root=tmp_path,
         fs_permissions=(FsRule(
-            operations=("read", "write"), paths=("/project/**",), mode="allow",
+            operations=("read", "write"), paths=("**",), mode="allow",
             source=SourceLoc(file=Path("w.yaml"), line=1),
         ),),
         events_path=tmp_path / "events.jsonl",
@@ -84,7 +84,7 @@ async def test_wrap_regular_tool_returns_invoke_result(tmp_path: Path) -> None:
     wrapped = _wrap_one(
         "read_file", read, _ctx(tmp_path), state, _passthrough_decorator,
     )
-    out = await wrapped({"path": "/project/x.txt"})
+    out = await wrapped({"path": "x.txt"})
     assert out["content"][0]["text"] == "hello"
     assert state.runtime_errors == []
 
@@ -99,7 +99,7 @@ async def test_wrap_tool_raises_surfaces_as_is_error(tmp_path: Path) -> None:
     wrapped = _wrap_one(
         "read_file", read, _ctx(tmp_path), state, _passthrough_decorator,
     )
-    out = await wrapped({"path": "/project/nonexistent.txt"})
+    out = await wrapped({"path": "nonexistent.txt"})
     assert out.get("isError") is True
     assert "FileNotFoundError" in out["content"][0]["text"]
     assert state.runtime_errors  # error was recorded

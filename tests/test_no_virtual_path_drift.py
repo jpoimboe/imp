@@ -33,7 +33,7 @@ def test_no_virtual_paths_in_default_workflow_assets():
 
 
 def test_no_virtual_paths_in_tool_descriptions():
-    import imp.agents.tools.fs   # noqa: F401
+    import imp.agents.tools.fs
     import imp.agents.tools.nav  # noqa: F401
     from imp.agents.tools import get_registry
 
