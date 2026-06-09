@@ -44,3 +44,17 @@ def test_no_virtual_paths_in_tool_descriptions():
         if "/project" in desc or "/scratch" in desc:
             offenders.append(f"{name} description: {desc!r}")
     assert not offenders, "tool-description drift:\n" + "\n".join(offenders)
+
+
+def test_git_escape_behavioral_test_is_not_skipped():
+    """The git escape-vector test (M1/F-9) is the most security-load-bearing
+    behavioral check. Fail loudly if it ever ships as a pytest.skip scaffold."""
+    src = Path(__file__).parent.joinpath("test_sandbox_behavioral.py").read_text()
+    i = src.index("def test_git_commit_works_but_escape_vectors_blocked")
+    # window from the def to the next top-level def (or EOF)
+    rest = src[i + 1:]
+    j = rest.find("\ndef ")
+    body = rest[: j if j != -1 else len(rest)]
+    assert "pytest.skip(" not in body, (
+        "the git escape-vector behavioral test must be implemented, not skipped"
+    )
