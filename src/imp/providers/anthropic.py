@@ -136,6 +136,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         if name == "load_skill":
             # Auto-injected below; tolerate a redundant explicit declaration.
             continue
+        if name == "wait_for_user":
+            # Synthesized below when declared; tolerate the explicit declaration.
+            continue
         if name not in reg:
             raise KeyError(f"agent declares unknown tool {name!r}")
         out[name] = reg[name]
@@ -147,6 +150,9 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
         out["task"] = make_task_tool(invocation.tiers)
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
+    if "wait_for_user" in invocation.agent_def.tools:
+        from imp.agents.tools.wait_for_user import make_wait_for_user_tool
+        out["wait_for_user"] = make_wait_for_user_tool()
     return out
 
 
@@ -435,6 +441,7 @@ class AnthropicAgentRunner:
             model_name=invocation.model_name,
             parent_transcript_dir=invocation.transcript_dir,
             interactive=invocation.interactive,
+            agent_id=aid,
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
         ctx.change_state = invocation.change_state

@@ -228,6 +228,7 @@ class CodexAgentRunner:
             model_name=invocation.model_name,
             parent_transcript_dir=invocation.transcript_dir,
             interactive=invocation.interactive,
+            agent_id=aid,
         )
         ctx.change_context = invocation.change_context
         ctx.change_state = invocation.change_state
