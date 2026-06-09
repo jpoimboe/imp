@@ -80,6 +80,13 @@ def branch_exists(control_root: Path, branch: str) -> bool:
     ).returncode == 0
 
 
+def _tmp_dir(control_root: Path, change_id: str) -> Path:
+    """The persistent per-change host dir bound at /tmp inside the sandbox (spec
+    B.6). sandbox.resolve_policy constructs the same path independently; keep the
+    two in sync."""
+    return control_root / ".imp" / "tmp" / change_id
+
+
 def create_worktree(control_root: Path, change_id: str, base: str) -> Path:
     """`git worktree add -b imp/<id> .imp/worktrees/<id> <base>` (spec §4).
     Branch collision surfaces as BranchExists — the caller reports a clean error
@@ -97,7 +104,7 @@ def create_worktree(control_root: Path, change_id: str, base: str) -> Path:
     # Persistent per-change /tmp (spec B.6): bound at /tmp inside the sandbox,
     # survives across tool calls, isolated from host /tmp. Lives under .imp/
     # (gitignored), so it never shows in `git status`.
-    (control_root / ".imp" / "tmp" / change_id).mkdir(parents=True, exist_ok=True)
+    _tmp_dir(control_root, change_id).mkdir(parents=True, exist_ok=True)
     return (control_root / rel).resolve()
 
 
@@ -110,7 +117,7 @@ def remove_worktree(control_root: Path, change_id: str, *, force: bool = False) 
     --force, then prune git's bookkeeping and drop any leftover directory so a
     re-run after a crash converges."""
     rel = Path(".imp") / "worktrees" / change_id
-    tmp_dir = control_root / ".imp" / "tmp" / change_id
+    tmp_dir = _tmp_dir(control_root, change_id)
     with RepoGitLock(control_root).acquire():
         if not force:
             _git_ok(control_root, "worktree", "remove", str(rel))
@@ -154,7 +161,7 @@ def destroy_worktree(control_root: Path, change_id: str) -> None:
         # leaking the branch. Prune the stale entry first so the delete succeeds.
         _git(control_root, "worktree", "prune")
         _git(control_root, "branch", "-D", branch)
-        shutil.rmtree(control_root / ".imp" / "tmp" / change_id, ignore_errors=True)
+        shutil.rmtree(_tmp_dir(control_root, change_id), ignore_errors=True)
 
 
 class RepoGitLock:
