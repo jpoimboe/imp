@@ -59,7 +59,8 @@ def run_script(
     The command string is an explicit shell expression read live from the
     Change's own worktree (principal-based trust: the Change author and workflow
     author are the same V0 principal). When `policy` is active it is wrapped with
-    bwrap (build_sandbox_argv prepends `sh -c`); otherwise the bare `sh -c` runs.
+    bwrap (build_sandbox_argv appends `sh -c <command>`); otherwise the bare
+    `sh -c` runs.
 
     Reaping (spec B.9/H-A): because the sandbox drops --die-with-parent, a timeout
     must kill the process GROUP, not just the bwrap pid — else the inner `sh` is
@@ -87,6 +88,11 @@ def run_script(
         with contextlib.suppress(ProcessLookupError):
             os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
+        # communicate() leaves the parent-side read FDs open when it times out;
+        # close them so a timed-out gate doesn't leak two FDs until GC.
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
         raise
     return {"exit": proc.returncode, "stdout": stdout, "stderr": stderr}
 
