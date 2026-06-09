@@ -105,7 +105,7 @@ def test_new_non_interactive_does_not_spawn_esc_reader(
 
     monkeypatch.setattr(cli_main, "run_change", _fake_run_change)
     rc = anyio.run(cli_main._async_cmd_new, argparse.Namespace(
-        title="ni", non_interactive=True, default_reply="ok"))
+        title="ni", non_interactive=True, message=None))
     assert rc == 0
     assert seen == []
 

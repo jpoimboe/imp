@@ -1,12 +1,24 @@
-import anyio
+import pytest
 
-from imp.cli.main import make_stdin_reply_fn
+from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.cli.main import make_message_reply_fn
 
 
-def test_stdin_reply_reads_lines_then_defaults_on_eof(monkeypatch) -> None:
-    import io
-    monkeypatch.setattr("sys.stdin", io.StringIO("first line\n"))
-    reply = make_stdin_reply_fn("Proceed using your best judgment.")
-    assert anyio.run(reply) == "first line"
-    assert anyio.run(reply) == "Proceed using your best judgment."   # EOF → default
-    assert anyio.run(reply) == "Proceed using your best judgment."   # stays default
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_message_reply_returns_message_then_pauses() -> None:
+    reply = make_message_reply_fn("ship it")
+    assert await reply() == "ship it"          # first solicit consumes --message
+    with pytest.raises(AwaitingUserInput):     # second solicit: none left → pause
+        await reply()
+
+
+@pytest.mark.anyio
+async def test_message_reply_none_pauses_immediately() -> None:
+    reply = make_message_reply_fn(None)
+    with pytest.raises(AwaitingUserInput):     # no --message → pause on first solicit
+        await reply()

@@ -405,6 +405,99 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
 
 
 @pytest.mark.anyio
+async def test_headless_message_does_not_pause_on_first_wait_for_user(
+    tmp_path: Path,
+) -> None:
+    """Regression: under a headless `--message` run the invocation is
+    non_interactive=True AND has a one-shot reply user_input_fn attached. The
+    runner-level dual-write must treat that as ATTENDED (attended iff a
+    user_input_fn exists; non_interactive no longer participates), so it does
+    NOT mark awaiting_user on the first wait_for_user. The run consumes the
+    reply and proceeds to complete_step rather than pausing immediately.
+
+    Guards the stale `and not invocation.non_interactive` rule that killed
+    `--message` on the production claude_code provider."""
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    inv = _inv(
+        tmp_path,
+        tools=frozenset({"complete_step", "wait_for_user"}),
+        event_log=log,
+    )
+    inv = replace(inv, non_interactive=True)
+
+    scripted = [
+        assistant(
+            text("need a decision"),
+            tool_use("wfu1", "wait_for_user", {"prompt": "merge?"}),
+        ),
+        assistant(
+            text("proceeding"),
+            tool_use("c1", "complete_step", {"status": "Success"}),
+        ),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=factory,
+        # One-shot reply channel installed by a headless --message run.
+        user_input_fn=lambda _prompt: "go ahead",
+    )
+
+    events = []
+    async for ev in runner.run(inv):
+        events.append(ev)
+
+    # With the stale rule the runner would have raised AwaitingUserInput on the
+    # first wait_for_user (awaiting_user=True) and never reached complete_step.
+    kinds = [e["type"] for e in events]
+    assert kinds[-1] == "agent_output", f"expected agent_output, got {kinds}"
+    assert events[-1]["payload"] == {"status": "Success"}
+
+
+@pytest.mark.anyio
+async def test_no_channel_wait_for_user_marks_pause(tmp_path: Path) -> None:
+    """The dual-write's ONLY remaining job: when NO reply channel is attached
+    (user_input_fn is None — subagent / no-channel run), the first
+    wait_for_user marks the pause and run() unwinds with AwaitingUserInput."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    inv = _inv(
+        tmp_path,
+        tools=frozenset({"complete_step", "wait_for_user"}),
+        event_log=log,
+    )
+
+    scripted = [
+        assistant(
+            text("need a decision"),
+            tool_use("wfu1", "wait_for_user", {"prompt": "merge?"}),
+        ),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=factory,
+        user_input_fn=None,
+    )
+
+    with pytest.raises(AwaitingUserInput) as ei:
+        async for _ev in runner.run(inv):
+            pass
+    assert ei.value.prompt == "merge?"
+
+
+@pytest.mark.anyio
 async def test_thinking_block_emits_thinking_event(tmp_path: Path) -> None:
     """Extended-thinking output from claude_code is captured as a `thinking`
     event in the log, not folded into runner_warning."""

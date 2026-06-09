@@ -19,6 +19,7 @@ from typing import Any, NoReturn
 
 import anyio
 
+from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import palette as pal
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
@@ -34,8 +35,6 @@ from imp.engine.executor import RunResult, run_change
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import dated_slug, new_change_id
 from imp.engine.state import LockHeld, ProjectLock, State
-
-_DEFAULT_NONINTERACTIVE_REPLY = "Proceed using your best judgment."
 
 
 class ReplyInterjectRouter:
@@ -98,20 +97,22 @@ class ReplyInterjectRouter:
             self._coord.enqueue_interject(line)
 
 
-def make_stdin_reply_fn(default_reply: str) -> Callable[[], Awaitable[str]]:
-    """A scripted reply channel for --non-interactive runs (§12): each call reads
-    the next stdin line; on EOF it returns `default_reply`. Used for the
-    wait_for_user reply channel and the interactive-agent ask. No TTY, no
-    prompt_toolkit."""
-    async def _reply() -> str:
-        # Blocking read: the default (non-cancellable) thread means a stalled read
-        # blocks task-group cancellation; callers must close stdin (pipe/redirect
-        # EOF) to unblock. The §10/§12 wall-clock retry ceiling (Task 12) is the
-        # headless backstop.
-        line: str = await anyio.to_thread.run_sync(sys.stdin.readline)
-        if line == "":                 # EOF
-            return default_reply
-        return line.rstrip("\r\n")    # strip both CR and LF for Windows-style endings
+def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
+    """Headless reply channel: yield the single --message once, then pause.
+
+    The first wait_for_user solicit (live opener OR the dangling wait_for_user
+    resolved on resume) consumes `message`; any later solicit in the same
+    invocation raises AwaitingUserInput, unwinding to a clean pause the operator
+    continues with another `imp resume <id> --message "..."`."""
+    delivered = False
+
+    async def _reply(*_a: object, **_k: object) -> str:
+        nonlocal delivered
+        if message is not None and not delivered:
+            delivered = True
+            return message
+        raise AwaitingUserInput()
+
     return _reply
 
 
@@ -330,8 +331,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
-                reply_input_fn: Callable[[], Awaitable[str]] = make_stdin_reply_fn(
-                    args.default_reply)
+                reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
+                    args.message)
             else:
                 esc_reader = EscKeyReader(coord)
                 # Task 11: the ESC reader (sole /dev/tty owner during thinking)
@@ -521,8 +522,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
             esc_reader: EscKeyReader | None = None
             if non_interactive:
-                reply_input_fn: Callable[[], Awaitable[str]] = make_stdin_reply_fn(
-                    args.default_reply)
+                reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
+                    args.message)
             else:
                 esc_reader = EscKeyReader(coord)
                 # Task 11: ESC reader captures interjects; router-flagged prompt is
@@ -1108,17 +1109,21 @@ def main(argv: list[str] | None = None) -> int:
     p_new = sub.add_parser("new")
     p_new.add_argument("title", nargs="?")
     p_new.add_argument("--non-interactive", action="store_true",
-                       help="Headless: read replies from stdin, default on EOF, no live chrome.")
-    p_new.add_argument("--default-reply", default=_DEFAULT_NONINTERACTIVE_REPLY,
-                       help="Reply used when stdin reaches EOF (non-interactive).")
+                       help="Headless: no live prompt; supply the reply via --message.")
+    p_new.add_argument("--message", metavar="TEXT", default=None,
+                       help="Headless reply consumed by the first wait_for_user; "
+                            "pause+resume with another --message. "
+                            "Requires --non-interactive.")
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
     p_resume.add_argument("token")
     p_resume.add_argument("--non-interactive", action="store_true",
-                          help="Headless: read replies from stdin, default on EOF, no live chrome.")
-    p_resume.add_argument("--default-reply", default=_DEFAULT_NONINTERACTIVE_REPLY,
-                          help="Reply used when stdin reaches EOF (non-interactive).")
+                          help="Headless: no live prompt; supply the reply via --message.")
+    p_resume.add_argument("--message", metavar="TEXT", default=None,
+                          help="Headless reply consumed by the first wait_for_user; "
+                               "pause+resume with another --message. "
+                               "Requires --non-interactive.")
     p_resume.add_argument(
         "--from", dest="from_target", metavar="TARGET",
         help="Rewind/jump the step cursor to TARGET (a step or phase name) and "

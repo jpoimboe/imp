@@ -85,9 +85,25 @@ async def test_empty_interject_queue_falls_through_to_solicit(tmp_path):
 
 
 @pytest.mark.anyio
-async def test_non_interactive_run_pauses_even_with_input_fn(tmp_path):
-    # --non-interactive is "headless": pause, don't consume a scripted reply.
+async def test_non_interactive_returns_scripted_reply(tmp_path):
+    # New model: --non-interactive is still ATTENDED via the one-shot --message
+    # channel. With a user_input_fn that returns a value, the tool RETURNS it
+    # regardless of non_interactive (the message-consumed case). The headless
+    # pause now comes from the reply fn raising, not from the tool.
     ctx = _ctx(tmp_path, user_input_fn=lambda _q: "scripted", non_interactive=True)
+    tool = make_wait_for_user_tool()
+    result = await tool.async_invoke(ctx, {"prompt": "x"})
+    assert result == "scripted"
+
+
+@pytest.mark.anyio
+async def test_non_interactive_propagates_reply_fn_pause(tmp_path):
+    # The message-exhausted case: the one-shot reply fn raises AwaitingUserInput
+    # when no --message remains; the tool propagates it to a clean pause.
+    def _raise(_q):
+        raise AwaitingUserInput()
+
+    ctx = _ctx(tmp_path, user_input_fn=_raise, non_interactive=True)
     tool = make_wait_for_user_tool()
     with pytest.raises(AwaitingUserInput):
         await tool.async_invoke(ctx, {"prompt": "x"})

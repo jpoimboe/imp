@@ -1043,21 +1043,28 @@ class ClaudeCodeAgentRunner:
                                     if b.name == "complete_step":
                                         state.complete_step_called = True
                                         state.complete_step_args = b.input
-                                    # Dual-write the headless wait_for_user pause
-                                    # at the runner level (same reasoning as
-                                    # complete_step above). Attended is the tool's
-                                    # own rule: a user_input_fn exists AND we are
-                                    # not non_interactive. When unattended, mark
-                                    # the pause; the receive loop raises
-                                    # AwaitingUserInput out of run() before any
-                                    # tool_result for this block is appended, so
-                                    # the transcript ends at this dangling
-                                    # wait_for_user tool_use. (In production _impl
-                                    # also sets these — idempotent.)
+                                    # Dual-write the wait_for_user pause at the
+                                    # runner level (same reasoning as complete_step
+                                    # above). Attended is the tool's own rule:
+                                    # attended iff a user_input_fn (reply channel)
+                                    # is attached; non_interactive no longer
+                                    # participates. A headless run sets a one-shot
+                                    # --message reply fn AND keeps
+                                    # non_interactive=True, so it is attended here
+                                    # and consumes --message on the first solicit;
+                                    # the pause then comes from that reply fn
+                                    # raising AwaitingUserInput on a later solicit,
+                                    # marked by the MCP wrapper's except (see
+                                    # ~line 384). This dual-write only marks the
+                                    # subagent / no-channel case (user_input_fn is
+                                    # None). When unattended, mark the pause; the
+                                    # receive loop raises AwaitingUserInput out of
+                                    # run() before any tool_result for this block
+                                    # is appended, so the transcript ends at this
+                                    # dangling wait_for_user tool_use. (In
+                                    # production _impl also sets these — idempotent.)
                                     if b.name == "wait_for_user":
-                                        attended = (
-                                            self._user_input_fn is not None
-                                            and not invocation.non_interactive)
+                                        attended = self._user_input_fn is not None
                                         if not attended:
                                             state.awaiting_user = True
                                             state.awaiting_prompt = (
