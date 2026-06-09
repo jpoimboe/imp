@@ -83,8 +83,18 @@ def test_bash_kill_flips_before_signaling(tmp_path: Path) -> None:
     PROCESS_KILL_GRACE_S) — budgeted; do NOT shrink the grace constant."""
     async def main() -> None:
         ctx = _ctx(tmp_path)
-        out = await _spawn(ctx, "trap '' TERM; sleep 60")   # survives SIGTERM
+        out = await _spawn(ctx, "trap '' TERM; echo ready; sleep 60")   # survives SIGTERM
         bp = ctx.background_processes[out["id"]]
+
+        # Don't signal until the trap is installed: SIGTERM racing the trap
+        # builtin kills the group instantly — _kill returns in ~0ms, the
+        # 0.5 s observer samples after completion, and the mid-grace pin
+        # is hollow (a flip-after-signal regression would pass).
+        seen_out = ""
+        with anyio.fail_after(10):
+            while "ready" not in seen_out:
+                seen_out += (await _read(ctx, out["id"]))["stdout"]
+                await anyio.sleep(0.05)
 
         seen: list[tuple[str, str | None]] = []
 
