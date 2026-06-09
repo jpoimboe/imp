@@ -160,7 +160,7 @@ async def drive_agent(
         interactive=False,
         user_chat_input_fn=None,
         transcript_dir=events_dir / "transcripts",
-        fs_permissions=(),  # reviewers/judges are read-only; file tools via /project map
+        fs_permissions=(),  # reviewers/judges are read-only; file tools use worktree-relative paths
         events_path=events_path,
         subagent_defs={},  # reviewers/judges/normalizers have no subagents
         tiers=(),
