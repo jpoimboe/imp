@@ -604,6 +604,12 @@ class AnthropicAgentRunner:
                 raw=raw, usage=raw.get("usage") or {},
                 stop_reason=raw.get("stop_reason"))
             _emit_anthropic_web_events(raw, elog, aid)
+            # Heartbeat after each model-API response: decouples the watchdog
+            # margin from API latency (a long extended-thinking stream followed
+            # by a near-wall-clock tool must not be misclassified as stalled).
+            # Pause-inert by design — drive_invocation drops these before both
+            # consumers. Task 12 adds the post-API _sweep_bg at this site.
+            yield {"type": "tool_heartbeat", "payload": {}}
 
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
             if not tool_uses:
@@ -661,6 +667,12 @@ class AnthropicAgentRunner:
                 if terminal is not None:
                     yield terminal
                     return
+                # Heartbeat contract (pinned): exactly one per tool_use
+                # processed that does not terminate the invocation — uniform
+                # across all arms (dispatch success, is_error, task, unknown
+                # tool, ceiling backfill). Terminal arms end the generator and
+                # never reach this yield.
+                yield {"type": "tool_heartbeat", "payload": {}}
             tool_calls_used = turn.tool_calls_used
             ceiling_tripped = turn.ceiling_tripped
 

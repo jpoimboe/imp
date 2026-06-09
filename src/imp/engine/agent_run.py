@@ -278,6 +278,14 @@ async def drive_invocation(
             gen = runner.run(invocation)
             async for event in _pull_with_inactivity_watchdog(
                     gen, runner=runner, stall=stall):
+                if event["type"] == "tool_heartbeat":
+                    # Watchdog-only event: consumed-and-dropped BEFORE both
+                    # consumers. Not appended (one per tool call would bloat
+                    # the log and feed an unknown type to NarrativeBuilder and
+                    # replay readers); NOT a pause point (pausing here would
+                    # return mid-assistant-turn, abandoning the generator
+                    # between tools with a dangling tool_use in the transcript).
+                    continue
                 if emit_events and log is not None:
                     log.append(agent_id=invocation.agent_id,
                                type=event["type"], payload=event.get("payload", {}))

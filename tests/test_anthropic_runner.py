@@ -22,6 +22,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
+from tests._events import control_events
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, thinking, tool_use
 
 
@@ -87,7 +88,7 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
     assert "user_message" in log_types
     assert "llm_response" in log_types
     # audit events are NOT yielded any more — only control signals
-    assert [e["type"] for e in yielded] == ["agent_output"]
+    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
     resp = next(e for e in log.read() if e["type"] == "llm_response")
     assert "raw" in resp["payload"]
     assert resp["agent_id"] == "step:p/s"
@@ -215,7 +216,7 @@ async def test_resume_with_retry_feedback_injects_and_continues(tmp_path: Path) 
     yielded = [ev async for ev in runner.run(inv)]
 
     # SEND_TO_LLM path taken (no missing_complete_step error), agent re-completed.
-    assert [e["type"] for e in yielded] == ["agent_output"]
+    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
     assert yielded[-1]["payload"]["note"] == "fixed"
     # The feedback was injected as a user turn balancing the prior complete_step.
     msgs = transcript.load()
@@ -648,7 +649,7 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
     inv = replace(_inv(tmp_path, event_log=log),
                   continuation_fn=lambda _last: "please call complete_step")
     events = [e async for e in runner.run(inv)]
-    assert [e["type"] for e in events] == ["agent_output"]
+    assert [e["type"] for e in control_events(events)] == ["agent_output"]
     user_msgs = [e for e in log.read() if e["type"] == "user_message"]
     # initial "go" + injected nudge
     assert len(user_msgs) == 2
