@@ -117,3 +117,37 @@ def test_vanished_after_truncated_read_refuses(tmp_path: Path,
     monkeypatch.setattr(fs, "read_bytes_capped", fake_read)
     with pytest.raises(ValueError, match="larger than 5 MB"):
         _edit(_ctx(tmp_path), path="v.txt", old="data", new="x")
+
+
+def test_replace_all_replaces_every_occurrence(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a = 1\na = 1\na = 1\n")
+    out = _edit(_ctx(tmp_path), path="x.py", old="a = 1", new="b = 2",
+                replace_all=True)
+    assert out == "replaced 3 occurrences in x.py"  # pinned return skeleton
+    assert (tmp_path / "x.py").read_text() == "b = 2\nb = 2\nb = 2\n"
+
+
+def test_replace_all_absent_old_still_raises(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("nothing\n")
+    with pytest.raises(ValueError, match="not found"):
+        _edit(_ctx(tmp_path), path="x.py", old="missing", new="x",
+              replace_all=True)
+
+
+def test_default_mode_still_rejects_non_unique(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a\na\n")
+    with pytest.raises(ValueError, match="not unique"):
+        _edit(_ctx(tmp_path), path="x.py", old="a", new="b")
+
+
+@pytest.mark.parametrize("replace_all", [False, True])
+def test_empty_old_rejected_file_untouched(tmp_path: Path, replace_all: bool) -> None:
+    # "abc".count("") == len+1: an empty old is never "absent", and under
+    # replace_all the literal rule would insert `new` between EVERY character
+    # of the file — a catastrophic rewrite from a degenerate argument.
+    p = tmp_path / "x.py"
+    p.write_text("content\n")
+    with pytest.raises(ValueError, match="old must not be empty"):
+        _edit(_ctx(tmp_path), path="x.py", old="", new="EVIL",
+              replace_all=replace_all)
+    assert p.read_text() == "content\n"

@@ -120,7 +120,15 @@ def write_file(ctx: ToolContext, path: str, content: str) -> str:
         "Raises if `old` not found or not unique."
     ),
 )
-async def edit_file(ctx: ToolContext, path: str, old: str, new: str) -> str:
+async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
+                    replace_all: bool = False) -> str:
+    if old == "":
+        # "abc".count("") == len+1, so an empty old is never "absent" — and
+        # under replace_all, body.replace("", new) would insert `new` between
+        # EVERY character of the file. (Previously only the accidental
+        # count("") > 1 uniqueness error blocked this, with a misleading
+        # message; replace_all=True removes exactly that accident.)
+        raise ValueError("old must not be empty")
     ctx.check_fs_permission("read", path)
     ctx.check_fs_permission("write", path)
     resolved = ctx.resolve_path(path)
@@ -159,9 +167,12 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str) -> str:
     count = body.count(old)
     if count == 0:
         raise ValueError(f"{old!r} not found in {path!r}")
-    if count > 1:
+    if not replace_all and count > 1:
         raise ValueError(f"{old!r} not unique in {path!r} (found {count} occurrences)")
+    edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
     # Bytes-faithful write-back: encode and write BYTES (no platform newline
     # translation — the old read_text() path mangled CRLF files).
-    resolved.write_bytes(body.replace(old, new, 1).encode("utf-8"))
+    resolved.write_bytes(edited.encode("utf-8"))
+    if replace_all:
+        return f"replaced {count} occurrences in {path}"
     return f"replaced 1 occurrence in {path}"
