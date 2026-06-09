@@ -555,16 +555,9 @@ async def test_final_review_wait_for_user_solicit_then_merge(tmp_path: Path) -> 
     tool_use. user_chat_input_fn returns "looks good, merge it" which is
     injected as the tool_result for the wait_for_user call.
     """
-    from imp.engine.loader import load_workflow
-    from imp.providers.effective import load_effective_config
-
     change = _seed_default_workflow(tmp_path)
 
     # Position the Change directly at final-review, bypassing earlier phases.
-    wf = load_workflow(change.workflow_dir,
-                       configured_tiers=load_effective_config(
-                           project_root=tmp_path,
-                           control_root=tmp_path).config.tier_names())
     st = State.load(change.state_dir)
     st.step = "final-review"
     st.status = "running"
