@@ -151,6 +151,7 @@ def test_bg_stream_cap_not_aliased_to_read_cap() -> None:
     read-cap bump forces a conscious decision about kill policy."""
     import inspect
     import re
+
     from imp.agents.tools import limits
     assert limits.BG_STREAM_FILE_CAP_BYTES == 5_000_000
     src = inspect.getsource(limits)
