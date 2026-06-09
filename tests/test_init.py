@@ -167,3 +167,14 @@ def test_init_scaffolds_commented_lint_command(tmp_path: Path) -> None:
     )
     text = (tmp_path / "imp" / "project.yaml").read_text()
     assert "# lint_command:" in text
+
+
+def test_initial_selection_preselects_claude_code() -> None:
+    from imp.cli.init import _initial_selection
+    available = ["claude_code", "anthropic", "openai", "codex"]
+    assert _initial_selection(available) == {0}
+
+
+def test_initial_selection_empty_when_claude_code_absent() -> None:
+    from imp.cli.init import _initial_selection
+    assert _initial_selection(["anthropic", "openai"]) == set()
