@@ -12,7 +12,11 @@ import pytest
 import imp.agents.tools.fs as fs_tools  # noqa: F401  triggers registration
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.limits import MATCH_LINE_CAP_BYTES, TOOL_OUTPUT_CAP_BYTES
+from imp.agents.tools.limits import (
+    FILE_READ_CAP_BYTES,
+    MATCH_LINE_CAP_BYTES,
+    TOOL_OUTPUT_CAP_BYTES,
+)
 from imp.engine.types import FsRule, SourceLoc
 
 
@@ -175,3 +179,135 @@ def test_output_budget_cutoff_renders_crossing_line_full_and_resumes(tmp_path: P
     # (c) offset = last + 1 is gap-free and overlap-free by construction
     out2 = _read(_ctx(tmp_path), path="big.txt", offset=expected_last + 1, limit=2000)
     assert out2.split("\n", 1)[0] == _num(expected_last + 1, lines[expected_last])
+
+
+def _write_lines(tmp_path: Path, n_lines: int, line_len: int) -> Path:
+    """n_lines lines of exactly line_len bytes each (content + newline)."""
+    p = tmp_path / "big.txt"
+    with p.open("wb") as f:
+        f.write((b"x" * (line_len - 1) + b"\n") * n_lines)
+    return p
+
+
+def test_cap_truncated_more_readable_lines_notice(tmp_path: Path) -> None:
+    # 99-byte lines: the 5 MB cap cuts mid-line (5,000,000 % 99 == 5), so the
+    # trailing 5-byte fragment is dropped. Window ends via cutoff 1 (limit),
+    # but cap-truncation is a FILE property: readable-window vocabulary, no
+    # fabricated total.
+    _write_lines(tmp_path, 51_000, 99)  # 5,049,000 bytes > 5 MB cap
+    readable = FILE_READ_CAP_BYTES // 99
+    out = _read(_ctx(tmp_path), path="big.txt", offset=1, limit=10)
+    body, notice = out.rsplit("\n", 1)
+    assert body.startswith(_num(1, "x" * 98))
+    assert notice == (f"[showing lines 1-10 of the first 5 MB "
+                      f"({readable} lines readable; total unknown); "
+                      f"continue with offset=11]")
+
+
+def test_cap_truncated_budget_cutoff_uses_readable_vocab(tmp_path: Path) -> None:
+    # Cutoff 2 (50 KB budget) fires (~470 numbered 98-char lines) — vocabulary
+    # must STILL be readable-window: the cutoff that fired doesn't matter.
+    import re
+
+    _write_lines(tmp_path, 51_000, 99)
+    readable = FILE_READ_CAP_BYTES // 99
+    out = _read(_ctx(tmp_path), path="big.txt", offset=1, limit=2000)
+    notice = out.rsplit("\n", 1)[1]
+    m = re.fullmatch(
+        r"\[showing lines 1-(\d+) of the first 5 MB "
+        rf"\({readable} lines readable; total unknown\); continue with offset=(\d+)\]",
+        notice)
+    assert m is not None, notice
+    last = int(m.group(1))
+    assert 1 < last < 2000
+    assert int(m.group(2)) == last + 1
+
+
+def test_end_of_readable_window_notice_exact_and_overshoot(tmp_path: Path) -> None:
+    # A window ending at the last readable line must NOT end silently (quiet
+    # endings claim completeness) — exact fit AND overshoot, same >= rule as
+    # the normal-file notice predicate.
+    _write_lines(tmp_path, 51_000, 99)
+    readable = FILE_READ_CAP_BYTES // 99
+    edge = ("[showing lines {first}-{last}; end of the readable window (first 5 MB) "
+            "— the file continues but is not readable via read_file; total unknown]")
+
+    out = _read(_ctx(tmp_path), path="big.txt", offset=readable - 9, limit=10)
+    assert out.rsplit("\n", 1)[1] == edge.format(first=readable - 9, last=readable)
+
+    out = _read(_ctx(tmp_path), path="big.txt", offset=readable - 9, limit=500)
+    assert out.rsplit("\n", 1)[1] == edge.format(first=readable - 9, last=readable)
+
+
+def test_offset_past_readable_window(tmp_path: Path) -> None:
+    _write_lines(tmp_path, 51_000, 99)
+    readable = FILE_READ_CAP_BYTES // 99
+    out = _read(_ctx(tmp_path), path="big.txt", offset=readable + 1)
+    assert out == (f"[offset {readable + 1} is past the readable window "
+                   f"({readable} lines within the first 5 MB; total unknown)]")
+
+
+def test_giant_single_line_file_has_zero_readable_lines(tmp_path: Path) -> None:
+    # The incident shape itself: a >5 MB file with no \n in its first 5 MB.
+    # The whole readable window is one partial fragment, which the drop rule
+    # removes — readable == 0 and EVERY call lands past the readable window.
+    # Pinned DELIBERATELY: today's tool showed the first 50 KB of such a file;
+    # under the paging model it is wholly unreadable via read_file (use
+    # bash/grep). A friendlier message is a spec change, not a plan deviation.
+    p = tmp_path / "one_line.bin"
+    p.write_bytes(b"z" * (FILE_READ_CAP_BYTES + 100))
+    out = _read(_ctx(tmp_path), path="one_line.bin")
+    assert out == ("[offset 1 is past the readable window "
+                   "(0 lines within the first 5 MB; total unknown)]")
+
+
+def test_exactly_5mb_file_is_complete(tmp_path: Path) -> None:
+    # st_size disambiguation: reader says truncated=True, but nothing was
+    # dropped — real final line, true total, normal-file silence at EOF.
+    n = FILE_READ_CAP_BYTES // 100  # 50,000 lines of 100 bytes = exactly 5 MB
+    p = _write_lines(tmp_path, n, 100)
+    assert p.stat().st_size == FILE_READ_CAP_BYTES
+    out = _read(_ctx(tmp_path), path="big.txt", offset=n - 1, limit=10)
+    assert out == f"{_num(n - 1, 'x' * 99)}\n{_num(n, 'x' * 99)}"
+
+
+def test_cap_on_newline_boundary_keeps_last_readable_line(tmp_path: Path) -> None:
+    # The 5 MB cap lands exactly ON a \n; the trailing split element is the
+    # phantom "" (already removed by the phantom rule) — a naive
+    # drop-the-last-element would delete a complete, real final readable line
+    # and shift every continuation number.
+    n = FILE_READ_CAP_BYTES // 100
+    p = tmp_path / "big.txt"
+    with p.open("wb") as f:
+        f.write((b"x" * 99 + b"\n") * n)   # exactly 5 MB, ends on \n
+        f.write(b"beyond the cap\n" * 10)  # file continues -> cap-truncated
+    out = _read(_ctx(tmp_path), path="big.txt", offset=n, limit=1)
+    assert out.split("\n")[0] == _num(n, "x" * 99)
+    assert "end of the readable window" in out
+
+
+def test_vanished_file_stat_split(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # truncated=False + stat failure -> complete (silent normal render);
+    # truncated=True + stat failure -> cap-truncated vocabulary, no total.
+    import imp.agents.tools.fs as fs
+
+    async def fake_read_complete(path: Path, **kw: object) -> tuple[str, bool]:
+        path.unlink()  # vanish between read and the st_size sample
+        return ("a\nb\n", False)
+
+    async def fake_read_truncated(path: Path, **kw: object) -> tuple[str, bool]:
+        path.unlink()
+        return ("a\nb\npartial", True)
+
+    (tmp_path / "v.txt").write_text("a\nb\n")
+    monkeypatch.setattr(fs, "read_text_capped", fake_read_complete)
+    out = _read(_ctx(tmp_path), path="v.txt")
+    assert out == f"{_num(1, 'a')}\n{_num(2, 'b')}"  # complete: silent, not a flake
+
+    (tmp_path / "v.txt").write_text("a\nb\npartial")
+    monkeypatch.setattr(fs, "read_text_capped", fake_read_truncated)
+    out = _read(_ctx(tmp_path), path="v.txt")
+    # partial fragment dropped, window ends at the readable edge
+    assert out.rsplit("\n", 1)[1] == (
+        "[showing lines 1-2; end of the readable window (first 5 MB) "
+        "— the file continues but is not readable via read_file; total unknown]")
