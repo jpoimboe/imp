@@ -94,6 +94,11 @@ def test_plan_rewind_forward_to_merge_with_force() -> None:
         "recheck", "integrate-merge", "integrate-tests",
         "integration-review", "final-review",
     )
+    # B3 gate-span audit (Task 11b): the span is [cursor, target_idx-1] =
+    # [17, 24], so the new merge-phase steps (base-fresh-check at 25,
+    # merge-to-base at 26) are NOT in the bypass list — they run normally.
+    assert "base-fresh-check" not in plan.bypass_gates
+    assert "merge-to-base" not in plan.bypass_gates
 
 
 def test_plan_rewind_merge_blocked_reentry_no_force_no_gates() -> None:

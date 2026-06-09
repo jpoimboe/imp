@@ -714,6 +714,100 @@ async def test_autonomous_mode_integrates_reviews_and_merges_without_human(tmp_p
 
 
 @pytest.mark.anyio
+async def test_forced_rewind_to_merge_with_no_integrated_sha_merges_directly(
+    tmp_path: Path,
+) -> None:
+    """B3 Task 11b behavioral test (property 1): a forced --from merge rewind
+    with no integrated_base_sha present must route directly through
+    base-fresh-check (exit 0, missing SHA -> proceed) into merge-to-base and
+    emit change_merged.  It must NOT route to integrate-merge after the rewind.
+
+    Preconditions:
+    - Change pre-positioned at recheck (paused), ready_to_merge=False.
+    - apply_rewind(..., 'merge', force=True) sets cursor to base-fresh-check
+      and ready_to_merge=True.
+    - No .imp/change/integrated_base_sha file exists (never integrated).
+    - The real base-fresh-check.sh (NOT shimmed here) exits 0 on missing SHA.
+    """
+    from imp.engine import recovery
+    from imp.engine.loader import load_workflow
+    from imp.providers.effective import load_effective_config
+
+    change = _seed_default_workflow(tmp_path)
+
+    # Restore the REAL base-fresh-check.sh (the seed shimmed it to exit 0;
+    # we need the real script to verify it handles the missing-SHA path
+    # correctly, even though both the shim and the real script exit 0 here).
+    src = (Path(__file__).resolve().parents[1] / "src" / "imp" / "assets"
+           / "workflows" / "default" / "scripts" / "base-fresh-check.sh")
+    dst = (change.project_root / "imp" / "workflows" / "default"
+           / "scripts" / "base-fresh-check.sh")
+    import shutil as _shutil
+    _shutil.copy2(src, dst)
+    dst.chmod(0o755)
+
+    # Position the Change as paused at recheck (typical forced-rewind source).
+    st = State.load(change.state_dir)
+    st.step = "recheck"
+    st.status = "paused"
+    st.save(change.state_dir)
+
+    # Confirm no integrated_base_sha is present (never ran integrate-merge).
+    integrated_sha_path = change.project_root / ".imp" / "change" / "integrated_base_sha"
+    assert not integrated_sha_path.exists(), "test precondition: no integrated_base_sha"
+
+    # Apply the forced rewind: cursor moves to base-fresh-check, ready_to_merge set.
+    wf = load_workflow(change.workflow_dir,
+                       configured_tiers=load_effective_config(
+                           project_root=tmp_path,
+                           control_root=tmp_path).config.tier_names())
+    plan = recovery.plan_rewind(wf, st, "merge", force=True)
+    assert plan.to_step == "base-fresh-check"
+    assert plan.set_ready_to_merge is True
+    recovery.apply_rewind(plan, wf, st, change.event_log())
+    st.status = "running"
+    st.save(change.state_dir)
+
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic",
+        env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.COMPLETED
+
+    started = [e["payload"].get("step") for e in change.event_log().read()
+               if e.get("type") == "step_started"]
+    types_seen = [e.get("type") for e in change.event_log().read()]
+
+    # base-fresh-check exited 0 (missing SHA -> proceed) -> merge-to-base ran.
+    assert "base-fresh-check" in started, f"base-fresh-check not in {started}"
+    assert "merge-to-base" in started, f"merge-to-base not in {started}"
+    assert "change_merged" in types_seen, f"change_merged not in {types_seen}"
+
+    # integrate-merge must NOT have run after the rewind (no loopback into
+    # re-integration). The rewind marker precedes all started events so we
+    # check no integrate-merge step appears after the rewind.
+    events = list(change.event_log().read())
+    rewind_indices = [i for i, e in enumerate(events) if e["type"] == "step_rewound"]
+    assert rewind_indices, "step_rewound event missing"
+    rewind_idx = rewind_indices[-1]
+    post_rewind_steps = [
+        e["payload"].get("step") for e in events[rewind_idx:]
+        if e.get("type") == "step_started"
+    ]
+    assert "integrate-merge" not in post_rewind_steps, (
+        f"integrate-merge ran after the forced rewind (loopback unexpected): "
+        f"{post_rewind_steps}"
+    )
+
+
+@pytest.mark.anyio
 async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -> None:
     """The re-integration EDGE (base advanced during review -> goto integrate-merge
     -> re-integrate -> merge), driven deterministically. We do NOT try to provoke
