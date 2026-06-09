@@ -36,8 +36,9 @@ def test_review_phase_step_order() -> None:
     names = [s.name for s in review.steps]
     assert names == [
         "autosquash", "stamp-trailers", "panel-gate",
-        "review-panel", "recheck", "summarizer",
-        "final-review-gate", "final-review",
+        "review-panel", "recheck",
+        "integrate-merge", "integrator", "integrate-tests", "integration-review",
+        "summarizer", "final-review-gate", "final-review",
     ], names
 
 
@@ -87,7 +88,7 @@ def test_review_panel_routes_and_sets_panel_done() -> None:
     rules = _steps(_wf())["review-panel"].rules
     for verdict, target in [("task_gap", "implement"),
                             ("plan_gap", "plan-writer"),
-                            ("approve", "summarizer")]:
+                            ("approve", "integrate-merge")]:
         m = evaluate_rules(rules, vars=_BASE_VARS,
                            output={"status": "Success", "verdict": verdict, "findings": "x"})
         assert isinstance(m.action, Goto) and m.action.target == target, verdict
@@ -117,7 +118,7 @@ def test_parse_contract_declared_schema_routes_correctly() -> None:
     rules = _steps(wf)["review-panel"].rules
     for verdict, target in [("task_gap", "implement"),
                             ("plan_gap", "plan-writer"),
-                            ("approve", "summarizer")]:
+                            ("approve", "integrate-merge")]:
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
         validate_agent_output(payload, schema)   # must not raise
         m = evaluate_rules(rules, vars=_BASE_VARS, output=payload)

@@ -171,7 +171,10 @@ def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) 
     assert types.index("workflow_resumed") < types.index("gates_bypassed")
     assert types.index("gates_bypassed") < types.index("step_rewound")
     bypassed = next(e for e in events if e["type"] == "gates_bypassed")
-    assert bypassed["payload"]["gates"] == ["recheck", "final-review"]
+    assert bypassed["payload"]["gates"] == [
+        "recheck", "integrate-merge", "integrate-tests",
+        "integration-review", "final-review",
+    ]
 
     # Persisted: terminal cursor + ready_to_merge set (land as-is).
     final = State.load(ch.state_dir)

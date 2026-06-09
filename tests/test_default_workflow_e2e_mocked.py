@@ -46,6 +46,7 @@ def _canned_anthropic(**overrides):
         "built": "stub", "test_status": "ok",
         "open_items": "", "next_steps": "",
         "result": "DONE", "report": "ok",
+        "integration": "clean",
     }
     fields.update(overrides)
     return response(tool_use("c0", "complete_step", fields), stop_reason="tool_use")
@@ -217,6 +218,8 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             # implementer
             "result": "DONE",
             "report": "ok",
+            # integrator
+            "integration": "clean",
         }),
         stop_reason="tool_use",
     )
@@ -277,6 +280,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
             "built": "stub", "test_status": "ok",
             "open_items": "", "next_steps": "",
             "result": "DONE", "report": "ok",
+            "integration": "clean",
         })),
     )
     fake = FakeResponsesClient([], default_response=default_completion)
@@ -338,6 +342,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "built": "stub", "test_status": "ok",
                     "open_items": "", "next_steps": "",
                     "result": "DONE", "report": "ok",
+                    "integration": "clean",
                 }),
             ),
             cc_result(),
@@ -499,6 +504,7 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
             "built": "stub", "test_status": "ok",
             "open_items": "", "next_steps": "",
             "result": "DONE", "report": "ok",
+            "integration": "clean",
         }),
         stop_reason="tool_use",
     )
@@ -597,3 +603,32 @@ async def test_final_review_wait_for_user_solicit_then_merge(tmp_path: Path) -> 
     assert "awaiting_user_input" in event_types, (
         f"awaiting_user_input event not found in {event_types}"
     )
+
+
+@pytest.mark.anyio
+async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> None:
+    """A standard (non-fast-path) change: base integrated, integrator clean,
+    integration-review approves, summarizer + final-review -> merge. Asserts the
+    new steps appear in the event log in order, before summarizer."""
+    change = _seed_default_workflow(tmp_path)  # existing fixture; shims script gates to exit 0
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic",
+        env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.COMPLETED
+    steps = [e["payload"].get("step") for e in change.event_log().read()
+             if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
+    # The four new steps appear, in order, before summarizer.
+    for name in ("integrate-merge", "integrator", "integrate-tests", "integration-review"):
+        assert name in steps, f"{name} did not run"
+    assert (steps.index("integrate-merge")
+            < steps.index("integrator")
+            < steps.index("integrate-tests")
+            < steps.index("integration-review")
+            < steps.index("summarizer"))

@@ -15,12 +15,14 @@ def test_gate_steps_in_span_review_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [15..20] = panel-gate, review-panel, recheck, summarizer,
-    # final-review-gate, final-review. Gates: review-panel + recheck (goto
-    # implement/plan-writer backward) + final-review (goto implement backward /
-    # pause). panel-gate (forward goto recheck), summarizer (no rules) and
-    # final-review-gate (goto merge forward only) are NOT gates.
-    assert gate_steps_in_span(wf, 15, 20) == ("review-panel", "recheck", "final-review")
+    # Span [15..20] = panel-gate, review-panel, recheck, integrate-merge,
+    # integrator, integrate-tests. Gates: review-panel + recheck (goto
+    # implement/plan-writer backward) + integrate-merge (pause) +
+    # integrate-tests (resume: integrator, backward). panel-gate (forward
+    # goto recheck) and integrator (continue-only rules) are NOT gates.
+    assert gate_steps_in_span(wf, 15, 20) == (
+        "review-panel", "recheck", "integrate-merge", "integrate-tests"
+    )
 
 
 def test_gate_steps_in_span_detects_pause_only_gates() -> None:
@@ -73,8 +75,11 @@ def test_plan_rewind_forward_to_merge_without_force_refused() -> None:
 
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("recheck"), "merge", force=False)
-    # The overridden cursor gate + the downstream gate are both named.
-    assert exc.value.gate_steps == ("recheck", "final-review")
+    # The overridden cursor gate + all downstream gates are named.
+    assert exc.value.gate_steps == (
+        "recheck", "integrate-merge", "integrate-tests",
+        "integration-review", "final-review",
+    )
     assert "recheck" in str(exc.value)
 
 
@@ -83,9 +88,12 @@ def test_plan_rewind_forward_to_merge_with_force() -> None:
 
     plan = plan_rewind(_wf(), _state("recheck"), "merge", force=True)
     assert plan.to_step is None                      # terminal
-    assert plan.target_idx == 21
+    assert plan.target_idx == 25
     assert plan.set_ready_to_merge is True
-    assert plan.bypass_gates == ("recheck", "final-review")
+    assert plan.bypass_gates == (
+        "recheck", "integrate-merge", "integrate-tests",
+        "integration-review", "final-review",
+    )
 
 
 def test_plan_rewind_merge_blocked_reentry_no_force_no_gates() -> None:
@@ -104,7 +112,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # recheck (17) maxed; task-lead (8) upstream; final-review (20) downstream.
+    # recheck (17) maxed; task-lead (8) upstream; final-review (24) downstream.
     st = _state("recheck",
                 loop_counts={"task-lead": 2, "recheck": 6, "final-review": 1})
     log = InMemoryEventLog()
@@ -135,13 +143,16 @@ def test_apply_rewind_force_sets_var_and_emits_gates_bypassed() -> None:
     assert st.step is None
     assert st.vars["ready_to_merge"] is True
     bypassed = next(e for e in log.read() if e["type"] == "gates_bypassed")
-    assert bypassed["payload"]["gates"] == ["recheck", "final-review"]
+    assert bypassed["payload"]["gates"] == [
+        "recheck", "integrate-merge", "integrate-tests",
+        "integration-review", "final-review",
+    ]
 
 
 def test_plan_rewind_forward_no_gate_allowed_without_force() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # summarizer (18) -> final-review (20): span [18,19] = summarizer +
+    # summarizer (22) -> final-review (24): span [22,23] = summarizer +
     # final-review-gate, both non-gates -> a forward jump bypassing no gate,
     # so it is allowed without --force and sets no ready_to_merge.
     plan = plan_rewind(_wf(), _state("summarizer"), "final-review", force=False)

@@ -167,7 +167,7 @@ phases:
         rules:
           - {if: {verdict: task_gap}, set: {panel_done: true}, goto: implement, feedback: "The review panel found gaps to fix. Findings:"}
           - {if: {verdict: plan_gap}, set: {panel_done: true}, goto: plan-writer, feedback: "The review panel found the plan needs revision. Findings:"}
-          - {else: true, set: {panel_done: true}, goto: summarizer}   # approve -> skip the re-check
+          - {else: true, set: {panel_done: true}, goto: integrate-merge}   # approve -> integrate (was: summarizer)
 
       - name: recheck              # sonnet verification loop (reuses the generalist prompt)
         file: agents/code-reviewer.md
@@ -177,6 +177,42 @@ phases:
           - {if: {verdict: task_gap}, goto: implement, feedback: "The code reviewer found gaps to fix. Findings:"}      # carries findings
           - {if: {verdict: plan_gap}, goto: plan-writer, feedback: "The code reviewer found the plan needs revision. Findings:"}    # carries findings
           - {else: true, continue: true}                    # approve
+
+      # ── integrate base into the branch, before review folds into one decision ──
+      - name: integrate-merge        # B2: merge base into the branch, uncommitted
+        command: ./scripts/integrate-merge.sh
+        rules:
+          - {if: {exit: 2}, goto: summarizer}     # base already integrated -> skip integration
+          - {if: {exit: 0}, continue: true}        # clean or conflicted tree -> integrator
+          - {else: true, pause: true}              # exit 3 (bad base ref, R7) / exit 5 (dirty entry or merge refusal) [exit 4 re-integration limit added in B3]
+
+      - name: integrator             # B2: resolve textual+semantic conflicts, commit a clean merge
+        file: agents/integrator.md
+        tier: high
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["**"], mode: allow}
+        rules:
+          # R4: the integrator is the writer of integration_needs_review, set BOTH
+          # ways every round (a clean round after a flagged one resets it).
+          - {if: {integration: review}, set: {integration_needs_review: true}, continue: true}
+          - {else: true, set: {integration_needs_review: false}, continue: true}
+
+      - name: integrate-tests        # B2: reuse the wired IMP_TEST_COMMAND
+        command: ./scripts/run-tests.sh
+        max_loops: 5                 # bound the integrator<->tests bounce (default is 1000)
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, resume: integrator}       # post-merge failure (often IS the semantic conflict)
+
+      - name: integration-review     # B2/F2: review the integrator's resolutions (reuses code-reviewer)
+        file: agents/code-reviewer.md
+        tier: high
+        max_loops: 5
+        rules:
+          - {if: {verdict: task_gap}, resume: integrator, feedback: "Integration review found gaps in the merge resolution. Findings:"}
+          - {if: {verdict: plan_gap}, resume: integrator, feedback: "Integration review flagged a deeper issue with the merge. Findings:"}
+          - {else: true, continue: true}            # approve
 
       - name: summarizer
         file: agents/summarizer.md
