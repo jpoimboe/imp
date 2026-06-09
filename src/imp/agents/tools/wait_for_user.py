@@ -54,6 +54,7 @@ def make_wait_for_user_tool() -> Tool:
         reply = ctx.user_input_fn("")
         if inspect.isawaitable(reply):
             reply = await reply
+        assert isinstance(reply, str)
         return reply
 
     return Tool(
