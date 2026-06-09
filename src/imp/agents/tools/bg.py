@@ -234,7 +234,32 @@ def _tombstone_result(ctx: ToolContext, bg_id: str) -> str | None:
 async def _wait_for_terminal(
     ctx: ToolContext, bp: BgProc, timeout: float | None,
 ) -> str:
-    raise NotImplementedError  # Task 11
+    """Cooperative wait — a poll loop, never a hard OS wait. Intra-tick order
+    is PINNED: (1) sweep, (2) checkpoint, (3) only then the terminal-status
+    return decision, (4) a REAL idle sleep. Checkpoint-before-status-return is
+    load-bearing: on a pause, interrupt-path teardown (signal-receiver's task)
+    marks the proc killed concurrently — a status-first tick could return a
+    normal 'killed' result instead of the interrupt surface, making the pause
+    outcome an interleaving lottery. The budget read goes through _limits so
+    tests can shrink it; tool_checkpoint gets NO deadline (the budget return
+    pre-empts the tool wall clock; the only exception out of the wait is a
+    genuine interrupt)."""
+    start = anyio.current_time()
+    budget_deadline = start + _limits.BG_WAIT_MAX_S
+    caller_deadline = start + timeout if timeout is not None else None
+    while True:
+        await _sweep_bg(ctx)
+        await tool_checkpoint(ctx.coordinator, deadline=None)
+        if bp.status != "running":
+            # "exit" is pinned: reached a TERMINAL status — exited OR killed
+            # (a sweep cap-kill during the agent's own wait ends it here).
+            return _snapshot_or_tombstone(ctx, bp, wait_ended="exit")
+        now = anyio.current_time()
+        if caller_deadline is not None and now >= caller_deadline:
+            return _snapshot_or_tombstone(ctx, bp, wait_ended="timeout")
+        if now >= budget_deadline:
+            return _snapshot_or_tombstone(ctx, bp, wait_ended="budget")
+        await anyio.sleep(_WAIT_POLL_S)
 
 
 @imp_tool(
