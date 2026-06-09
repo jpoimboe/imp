@@ -26,7 +26,6 @@ def _policy(**over) -> SandboxPolicy:
         writable_caches=("/home/u/.cache", "/home/u/.cargo"),
         extra_readable=(),
         extra_writable=(),
-        tmp_host_dir="/ctl/.imp/tmp/abc",
         secret_dirs=("/home/u/.ssh", "/run/user/1000"),
         secret_files=("/home/u/.netrc",),
         setenv=(("PATH", "/usr/bin"), ("HOME", "/home/u"),
@@ -75,9 +74,19 @@ def test_secret_masks_emitted_after_every_bind_even_overlapping_extra_writable()
     assert i_tmpfs > i_writable, "secret --tmpfs must come AFTER extra_writable bind"
 
 
-def test_tmp_is_bound_persistent_not_tmpfs():
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy()))
-    assert "--bind /ctl/.imp/tmp/abc /tmp" in argv
+def test_real_tmp_is_bound_rw_early():
+    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy())
+    flat = " ".join(argv)
+    # Real /tmp is bound rw (identity bind).
+    assert "--bind /tmp /tmp" in flat
+    # Ordering: /tmp bind must appear right after the ro-floor and BEFORE
+    # the worktree bind (bwrap last-wins; /tmp early means worktree/git/remask
+    # still win on their paths even if a repo lives under /tmp).
+    i_ro_floor = argv.index("/")          # first "/" after --ro-bind is the src
+    i_tmp_bind = argv.index("/tmp")       # first "/tmp" after --bind is the src
+    i_wt_bind = argv.index("/ctl/.imp/worktrees/abc")  # worktree src
+    assert i_tmp_bind > i_ro_floor, "/tmp bind must come after ro-floor"
+    assert i_tmp_bind < i_wt_bind, "/tmp bind must come BEFORE worktree bind"
 
 
 def test_clearenv_and_setenv_allowlist():
@@ -117,7 +126,6 @@ def _layout(tmp_path):
     wdir = control / ".git" / "worktrees" / "abc"
     wdir.mkdir(parents=True)
     (wdir / "config.worktree").write_text("")
-    (control / ".imp" / "tmp" / "abc").mkdir(parents=True)
     return control, wt
 
 
@@ -135,7 +143,6 @@ def test_resolve_policy_active_when_enabled_and_available(tmp_path):
     assert pol.git_common_dir == str(control / ".git")
     assert ("IMP_PROJECT_ROOT", str(wt)) in pol.setenv
     assert ("TMPDIR", "/tmp") in pol.setenv
-    assert pol.tmp_host_dir == str(control / ".imp" / "tmp" / "abc")
 
 
 def test_resolve_policy_binds_sibling_config_worktree(tmp_path):

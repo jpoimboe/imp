@@ -818,7 +818,7 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
     pol = SandboxPolicy(
         active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
         git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
-        tmp_host_dir=str(tmp_path / "tmp"), secret_dirs=(), secret_files=(),
+        secret_dirs=(), secret_files=(),
         setenv=(), network=True, note="",
     )
     ctx.sandbox_policy = pol

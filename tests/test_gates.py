@@ -141,7 +141,7 @@ def test_run_script_wraps_with_active_policy(tmp_path, monkeypatch) -> None:
     pol = SandboxPolicy(active=True, worktree=str(tmp_path),
                         git_common_dir=str(tmp_path), git_ro_remask=(),
                         writable_caches=(), extra_readable=(), extra_writable=(),
-                        tmp_host_dir=str(tmp_path), secret_dirs=(), secret_files=(),
+                        secret_dirs=(), secret_files=(),
                         setenv=(), network=True, note="")
     step = _script_step("echo hi")
     run_script(step, cwd=tmp_path, policy=pol)

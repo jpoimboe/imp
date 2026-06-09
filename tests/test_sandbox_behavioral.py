@@ -4,10 +4,10 @@ Each test builds a REAL active SandboxPolicy, runs a real bash command under
 bwrap, and asserts the OS-level outcome (write-confinement, secret masking,
 /tmp persistence, network argv, git commit + escape-vector blocking).
 
-/var/tmp REQUIREMENT: bwrap's policy binds `tmp_host_dir` onto /tmp (step 8 of
-build_sandbox_argv). If the sandbox worktree lives under /tmp, that bind
-SHADOWS the worktree mount inside the namespace so --chdir <worktree> fails.
-pytest's tmp_path is under /tmp. ALL sandbox roots here are under /var/tmp.
+Sandbox worktrees use the default temp directory (/tmp). The real /tmp is
+bound rw by identity (--bind /tmp /tmp emitted right after the ro-floor), so
+a worktree under /tmp is NOT shadowed inside the namespace — --chdir works
+and /tmp files are visible inside and outside the sandbox.
 """
 from __future__ import annotations
 
@@ -35,24 +35,9 @@ from imp.engine.sandbox import (
     sandbox_available,
 )
 
-
-def _var_tmp_writable() -> bool:
-    """These tests place the sandbox worktree under /var/tmp (bwrap rebinds /tmp,
-    which would shadow a worktree under it). /var/tmp is writable on a normal host
-    but READ-ONLY when this suite itself runs INSIDE an imp sandbox (imp-on-imp /
-    dogfood: only the worktree + caches + /tmp are rw). Skip there rather than
-    erroring the gate — host CI still exercises these fully."""
-    try:
-        d = tempfile.mkdtemp(dir="/var/tmp", prefix="imp-sb-probe-")
-        os.rmdir(d)
-        return True
-    except OSError:
-        return False
-
-
 pytestmark = pytest.mark.skipif(
-    not sandbox_available() or not _var_tmp_writable(),
-    reason="bwrap unavailable or /var/tmp not writable (e.g. running inside a sandbox)",
+    not sandbox_available(),
+    reason="bwrap unavailable",
 )
 
 
@@ -61,8 +46,12 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 
 def _make_root(prefix: str = "imp-test-beh-") -> Path:
-    """Create a sandbox root under /var/tmp (NOT /tmp — see module docstring)."""
-    return Path(tempfile.mkdtemp(dir="/var/tmp", prefix=prefix))
+    """Create a sandbox root under the default temp dir (/tmp).
+
+    The real /tmp identity bind means the worktree is not shadowed inside the
+    namespace — no /var/tmp workaround needed.
+    """
+    return Path(tempfile.mkdtemp(prefix=prefix))
 
 
 def _active_policy(worktree: Path, *, home: Path | None = None,
@@ -71,9 +60,9 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
 
     Uses PATH from the real environment so git, cat, echo, etc. resolve.
     HOME is set to a dir under the worktree root (or the provided `home`).
+    The real /tmp is bound rw by identity in build_sandbox_argv — no per-test
+    tmp dir setup is needed.
     """
-    tmp = worktree / "tmp"
-    tmp.mkdir(exist_ok=True)
     git = worktree / ".git"
     git.mkdir(exist_ok=True)
     _home = home or (worktree / "home")
@@ -87,7 +76,6 @@ def _active_policy(worktree: Path, *, home: Path | None = None,
         writable_caches=(),
         extra_readable=(),
         extra_writable=(),
-        tmp_host_dir=str(tmp),
         secret_dirs=secret_dirs,
         secret_files=(),
         setenv=(
@@ -190,27 +178,22 @@ def test_write_outside_worktree_fails() -> None:
 def test_rm_outside_fails() -> None:
     """rm of a file outside the rw worktree must not delete it on the host.
 
-    The victim lives under the /var/tmp root but OUTSIDE wt/ (i.e. not under
-    the rw bind), so the sandbox sees it as RO and rm fails inside the ns.
-    The host file must still exist after the sandbox exits.
+    With the real-/tmp identity bind, /tmp is entirely rw inside the sandbox.
+    The victim is /etc/hosts (always present, in the RO floor, outside all rw
+    binds). rm inside the sandbox must fail; the host file must still exist.
     """
     root = _make_root()
     try:
-        # Create the worktree subdir first (so _active_policy can create wt/tmp etc.)
-        worktree = root / "wt"
-        worktree.mkdir(parents=True, exist_ok=True)
-        # Place victim outside the worktree subtree but inside the /var/tmp root.
-        victim = root / "victim.txt"
-        victim.write_text("do-not-delete\n")
-
-        pol = _active_policy(worktree)
-        ctx = _ctx(worktree, pol)
-        # Inside the sandbox the victim is visible (host ro-bind) but read-only.
-        _bash(ctx, f"rm -f {victim} 2>/dev/null; true")
-        # Host file must still exist — rm was blocked by RO floor.
-        assert victim.exists(), (
-            f"victim {victim} was deleted by rm inside sandbox — RO floor not enforced"
+        pol = _active_policy(root)
+        ctx = _ctx(root, pol)
+        # /etc/hosts is in the RO floor (--ro-bind / /) and never rw-bound.
+        result = _bash(ctx, "rm -f /etc/hosts 2>&1; echo rc=$?")
+        # rm must fail (permission denied) — RO floor is enforced.
+        assert "rc=0" not in result["stdout"], (
+            "rm /etc/hosts succeeded inside sandbox — RO floor not enforced"
         )
+        # Host /etc/hosts must still exist.
+        assert Path("/etc/hosts").exists(), "/etc/hosts deleted by sandbox rm"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -259,8 +242,8 @@ def test_secret_env_dropped() -> None:
 # ---------------------------------------------------------------------------
 
 def test_tmp_persists_across_calls() -> None:
-    """/tmp inside the sandbox is the per-change tmp_host_dir; it persists between
-    bash invocations on the same ctx/policy (same host dir re-bound each call).
+    """/tmp inside the sandbox is the real host /tmp (identity bind); it persists
+    between bash invocations on the same ctx/policy (same /tmp re-bound each call).
     """
     root = _make_root()
     try:
@@ -314,20 +297,19 @@ def test_network_off_adds_unshare_net() -> None:
     """build_sandbox_argv with network=False must include --unshare-net (spec B.2 step 15)."""
     pol = SandboxPolicy(
         active=True,
-        worktree="/var/tmp/fake-wt",
-        git_common_dir="/var/tmp/fake-wt/.git",
+        worktree="/tmp/fake-wt",
+        git_common_dir="/tmp/fake-wt/.git",
         git_ro_remask=(),
         writable_caches=(),
         extra_readable=(),
         extra_writable=(),
-        tmp_host_dir="/var/tmp/fake-tmp",
         secret_dirs=(),
         secret_files=(),
         setenv=(("PATH", "/usr/bin:/bin"),),
         network=False,  # <-- network isolation
         note="",
     )
-    argv = build_sandbox_argv("curl example.com", cwd="/var/tmp/fake-wt", policy=pol)
+    argv = build_sandbox_argv("curl example.com", cwd="/tmp/fake-wt", policy=pol)
     assert "--unshare-net" in argv, (
         f"--unshare-net missing from argv when network=False: {argv}"
     )
@@ -386,7 +368,7 @@ def test_git_commit_works_but_escape_vectors_blocked() -> None:
         resolve_policy).
       - Writing .git/info/attributes succeeds but the filter DRIVER config write is BLOCKED.
     """
-    control = Path(tempfile.mkdtemp(dir="/var/tmp", prefix="imp-test-gitesc-"))
+    control = Path(tempfile.mkdtemp(prefix="imp-test-gitesc-"))
     try:
         # --- repo setup ---
         _init_repo(control)

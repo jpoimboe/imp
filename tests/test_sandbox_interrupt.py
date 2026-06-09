@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import tempfile
@@ -18,40 +17,23 @@ from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.engine.sandbox import SandboxPolicy, sandbox_available
 
-
-def _var_tmp_writable() -> bool:
-    """The interrupt-grace worktree lives under /var/tmp (bwrap rebinds /tmp, which
-    would shadow a worktree under it). /var/tmp is read-only when this suite runs
-    INSIDE an imp sandbox (imp-on-imp / dogfood), so skip there rather than erroring
-    the gate — host CI still runs these fully."""
-    try:
-        d = tempfile.mkdtemp(dir="/var/tmp", prefix="imp-sb-probe-")
-        os.rmdir(d)
-        return True
-    except OSError:
-        return False
-
-
 pytestmark = pytest.mark.skipif(
-    not sandbox_available() or not _var_tmp_writable(),
-    reason="bwrap unavailable or /var/tmp not writable (e.g. running inside a sandbox)",
+    not sandbox_available(),
+    reason="bwrap unavailable",
 )
 
 
 def _sandbox_worktree() -> Path:
-    """Return a temp dir NOT under /tmp.
+    """Return a temp dir for the sandbox worktree.
 
-    bwrap's policy binds a sub-dir of worktree onto /tmp (``tmp_host_dir``).
-    If the worktree itself lives under /tmp that bind shadows the worktree path
-    inside the namespace, making ``--chdir <worktree>`` fail. /var/tmp is
-    outside /tmp and avoids this shadowing.
+    The real /tmp is now bound rw by identity (--bind /tmp /tmp) so a worktree
+    under /tmp is no longer shadowed inside the namespace — default tempfile
+    is fine.
     """
-    return Path(tempfile.mkdtemp(dir="/var/tmp", prefix="imp-test-sb-"))
+    return Path(tempfile.mkdtemp(prefix="imp-test-sb-"))
 
 
 def _active_policy(worktree: Path) -> SandboxPolicy:
-    tmp = worktree / "tmp"
-    tmp.mkdir(exist_ok=True)
     git = worktree / ".git"
     git.mkdir(exist_ok=True)
     return SandboxPolicy(
@@ -62,7 +44,6 @@ def _active_policy(worktree: Path) -> SandboxPolicy:
         writable_caches=(),
         extra_readable=(),
         extra_writable=(),
-        tmp_host_dir=str(tmp),
         secret_dirs=(),
         secret_files=(),
         setenv=(("PATH", "/usr/bin:/bin"),),

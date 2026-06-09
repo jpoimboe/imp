@@ -5,8 +5,9 @@ gates (engine/gates.py). `resolve_policy` does the one-time stat I/O and bakes a
 frozen `SandboxPolicy`; `build_sandbox_argv` is pure given that policy.
 
 The flag ORDER in build_sandbox_argv is load-bearing: bwrap is last-wins, so the
-secret masks MUST be emitted AFTER every bind (incl. extra_writable), else a
-config-driven bind could re-expose a masked secret dir (spec L1-r5). No
+/tmp bind is emitted EARLY (right after the ro-floor, before worktree/git/remask)
+and the secret masks MUST be emitted AFTER every bind (incl. extra_writable), else
+a config-driven bind could re-expose a masked secret dir (spec L1-r5). No
 --unshare-pid / --die-with-parent / --new-session — all three break the runner's
 interrupt grace (spec B.9); reaping is via the process group.
 """
@@ -32,7 +33,6 @@ class SandboxPolicy:
     writable_caches: tuple[str, ...]          # rw toolchain cache dirs (existing only)
     extra_readable: tuple[str, ...]           # config extra_readable (ro)
     extra_writable: tuple[str, ...]           # config extra_writable (rw)
-    tmp_host_dir: str                         # persistent per-change dir bound at /tmp
     secret_dirs: tuple[str, ...]              # --tmpfs masks (existing only) incl. /run/user/$UID
     secret_files: tuple[str, ...]             # --ro-bind /dev/null masks (existing only)
     setenv: tuple[tuple[str, str], ...]       # resolved env allowlist key/value pairs
@@ -49,22 +49,25 @@ def build_sandbox_argv(command: str, *, cwd: str, policy: SandboxPolicy) -> list
     argv: list[str] = ["bwrap"]
     # 1. whole host readable
     argv += ["--ro-bind", "/", "/"]
-    # 2-3. worktree + git db writable (real paths)
+    # 2. real host /tmp, writable — emitted EARLY (right after the ro floor) so the
+    #    later worktree/git binds, git RO-remask, and secret masks all win over it
+    #    (bwrap is last-wins). A late /tmp bind would re-expose .git escape vectors
+    #    for a repo under /tmp. /tmp is the agent's scratch, like a normal shell.
+    argv += ["--bind", "/tmp", "/tmp"]
+    # 3-4. worktree + git db writable (real paths)
     argv += ["--bind", policy.worktree, policy.worktree]
     argv += ["--bind", policy.git_common_dir, policy.git_common_dir]
-    # 4. re-mask git escape vectors RO (hooks/config/config.worktree incl. siblings)
+    # 5. re-mask git escape vectors RO (hooks/config/config.worktree incl. siblings)
     for p in policy.git_ro_remask:
         argv += ["--ro-bind", p, p]
-    # 5. writable toolchain caches
+    # 6. writable toolchain caches
     for c in policy.writable_caches:
         argv += ["--bind", c, c]
-    # 6-7. config extra binds (readable then writable)
+    # 7-8. config extra binds (readable then writable)
     for r in policy.extra_readable:
         argv += ["--ro-bind", r, r]
     for w in policy.extra_writable:
         argv += ["--bind", w, w]
-    # 8. persistent per-change /tmp
-    argv += ["--bind", policy.tmp_host_dir, "/tmp"]
     # 9-10. secret masks — LAST, AFTER every bind (last-wins; spec L1-r5)
     for d in policy.secret_dirs:
         argv += ["--tmpfs", d]
@@ -199,8 +202,6 @@ def resolve_policy(
             secret_files.append(str(p))
     secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
 
-    tmp_host = control_root / ".imp" / "tmp" / change_id
-
     return SandboxPolicy(
         active=True,
         worktree=str(worktree),
@@ -209,7 +210,6 @@ def resolve_policy(
         writable_caches=caches,
         extra_readable=tuple(cfg.extra_readable),
         extra_writable=tuple(cfg.extra_writable),
-        tmp_host_dir=str(tmp_host),
         secret_dirs=tuple(secret_dirs),
         secret_files=tuple(secret_files),
         setenv=_build_setenv(engine_env_result, environ, cfg.extra_env),
@@ -221,7 +221,7 @@ def resolve_policy(
 def _inactive(*, note: str) -> SandboxPolicy:
     return SandboxPolicy(
         active=False, worktree="", git_common_dir="", git_ro_remask=(),
-        writable_caches=(), extra_readable=(), extra_writable=(), tmp_host_dir="",
+        writable_caches=(), extra_readable=(), extra_writable=(),
         secret_dirs=(), secret_files=(), setenv=(), network=True, note=note,
     )
 
