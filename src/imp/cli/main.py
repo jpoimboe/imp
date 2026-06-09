@@ -207,9 +207,9 @@ def _emit_merge_blocked(change: Change, reason: str | None) -> None:
     cid, base = change.id, change.base_branch
     if reason == "worktree_dirty":
         msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
-    elif reason == "base_dirty":
-        msg = (f"Uncommitted changes on `{base}`; commit or stash them, "
-               f"then `imp resume {cid}`.")
+    elif reason == "refused":
+        msg = (f"Uncommitted changes on `{base}` would be overwritten by the merge; "
+               f"commit or stash them, then `imp resume {cid}`.")
     elif reason == "conflict":
         msg = (f"`imp/{cid}` doesn't auto-merge into `{base}`. imp can't resolve "
                f"conflicts in this version — merge `imp/{cid}` into `{base}` manually, "

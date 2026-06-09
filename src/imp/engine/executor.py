@@ -257,7 +257,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
       completed, drop steps/, return COMPLETED.
     - When ready_to_merge IS set: does git I/O (merge→journal→remove — three
       separate lock acquisitions) and CAN return PAUSED with
-      state.status="merge_blocked" on worktree_dirty, CONFLICT, or BASE_DIRTY.
+      state.status="merge_blocked" on worktree_dirty, CONFLICT, or REFUSED.
       Crash safety: merge→journal→remove are ordered so the worst-case mid-
       sequence crash leaves the merge commit already on base (durable) but the
       worktree still present (a harmless leftover); resume re-enters here, sees
@@ -278,8 +278,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     from imp.engine import worktree
 
     # H1 safety net: merge_to_base merges the committed branch tip only. Any
-    # uncommitted work would be SILENTLY LOST. Refuse — symmetric with
-    # BASE_DIRTY — so the user commits and `imp resume`s to retry.
+    # uncommitted work would be SILENTLY LOST. Refuse so the user commits and
+    # `imp resume`s to retry.
     if worktree.is_dirty(change.project_root):
         state.status = "merge_blocked"
         state.save(change.state_dir)
@@ -289,11 +289,12 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
 
     result = worktree.merge_to_base(
         change.control_root, change.id, change.base_branch, title=change.title)
-    if result.status in ("CONFLICT", "BASE_DIRTY"):
+    if result.status in ("CONFLICT", "REFUSED"):
         state.status = "merge_blocked"
         state.save(change.state_dir)
         _emit(log, "merge_blocked",
-              {"reason": result.status.lower(), "base": change.base_branch})
+              {"reason": result.status.lower(), "base": change.base_branch,
+               "detail": result.detail})
         return RunResult.PAUSED
 
     # MERGED — only NOW terminal success. Base ref already advanced (durable).

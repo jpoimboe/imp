@@ -130,15 +130,56 @@ def test_merge_base_checked_out_clean(tmp_path: Path) -> None:
     assert "(imp/feat)" in subject
 
 
-def test_merge_base_dirty_backs_off(tmp_path: Path) -> None:
-    _init_repo(tmp_path)
-    wt.create_worktree(tmp_path, "feat", "main")
-    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
-    (tmp_path / "README.md").write_text("dirty edit")  # uncommitted on main
+def _seed_base_and_branch(root: Path) -> None:
+    """Init a repo at `root` on `main` with `.imp/` gitignored, an initial commit
+    containing `shared.txt`, and branch `imp/feat` that commits a change to
+    `shared.txt`. Leaves `main` checked out at `root`."""
+    _init_repo(root)  # main branch, .imp/ gitignored, README.md committed
+    # Commit shared.txt on main
+    (root / "shared.txt").write_text("original\n")
+    _git(root, "add", "shared.txt")
+    _git(root, "commit", "-qm", "add shared.txt")
+    # Create imp/feat branch and commit a change to shared.txt
+    wt.create_worktree(root, "feat", "main")
+    wtpath = root / ".imp" / "worktrees" / "feat"
+    (wtpath / "shared.txt").write_text("branch version\n")
+    _git(wtpath, "add", "shared.txt")
+    _git(wtpath, "commit", "-qm", "update shared.txt on branch")
+    # main is still checked out at root
 
+
+def test_merge_proceeds_when_base_dirt_does_not_overlap(tmp_path: Path) -> None:
+    # Base checkout has an unstaged change to a TRACKED file the merge does NOT
+    # touch; git merges cleanly. The old BASE_DIRTY blanket pre-check refused on
+    # any dirt at all.
+    _seed_base_and_branch(tmp_path)
+    # Commit a tracked unrelated file on main, then leave an unstaged edit to it.
+    (tmp_path / "unrelated.txt").write_text("committed\n")
+    _git(tmp_path, "add", "unrelated.txt")
+    _git(tmp_path, "commit", "-m", "add unrelated")
+    (tmp_path / "unrelated.txt").write_text("uncommitted edit\n")
     result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
-    assert result.status == "BASE_DIRTY"
-    assert not (tmp_path / "feature.txt").exists()  # nothing advanced
+    assert result.status == "MERGED"
+    assert result.merge_commit is not None
+    # The unstaged edit to the unrelated file must be preserved — the key invariant
+    # distinguishing the new per-file check from the old blanket pre-check.
+    assert (tmp_path / "unrelated.txt").read_text() == "uncommitted edit\n"
+    # shared.txt should have advanced to the branch version after the merge.
+    assert (tmp_path / "shared.txt").read_text() == "branch version\n"
+
+
+def test_merge_overwrite_refusal_does_not_abort(tmp_path: Path) -> None:
+    # Base checkout has an unstaged change to a file the merge WOULD overwrite.
+    # git refuses before starting a merge; we must NOT call `git merge --abort`
+    # (there is no merge to abort) and must report REFUSED, not CONFLICT.
+    _seed_base_and_branch(tmp_path)
+    # 'shared.txt' is modified on the branch (part of the merge) AND dirty on base.
+    (tmp_path / "shared.txt").write_text("uncommitted base edit\n")
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+    assert result.status == "REFUSED"
+    assert result.detail is not None  # git writes a refusal reason to stderr
+    # The base working tree is untouched (git refused atomically).
+    assert (tmp_path / "shared.txt").read_text() == "uncommitted base edit\n"
 
 
 def test_merge_base_checked_out_nowhere(tmp_path: Path) -> None:

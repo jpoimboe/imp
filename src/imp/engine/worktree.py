@@ -176,8 +176,9 @@ class RepoGitLock:
 
 @dataclass(frozen=True)
 class MergeResult:
-    status: Literal["MERGED", "CONFLICT", "BASE_DIRTY"]
+    status: Literal["MERGED", "CONFLICT", "REFUSED"]
     merge_commit: str | None = None
+    detail: str | None = None   # git's stderr on a blocking outcome (surfaced to the human)
 
 
 def _worktree_on_branch(control_root: Path, base: str) -> Path | None:
@@ -203,28 +204,41 @@ def is_dirty(worktree: Path) -> bool:
 
 def merge_to_base(control_root: Path, change_id: str, base: str, *, title: str) -> MergeResult:
     """Integrate imp/<id> into <base> without ever desyncing a live checkout
-    (spec §4). The merge subject uses the human title; the id appears in the body
-    for branch traceability."""
+    (spec §4). B1: no blanket base-dirty pre-check — git proceeds when unstaged
+    base files don't overlap the merge, and refuses cleanly (REFUSED) only when
+    one would be overwritten. The merge subject uses the human title; the id
+    appears in the body for branch traceability."""
     branch = f"imp/{change_id}"
     with RepoGitLock(control_root).acquire():
         live = _worktree_on_branch(control_root, base)
         if live is not None:
-            if is_dirty(live):
-                return MergeResult("BASE_DIRTY")
             return _merge_in_place(live, branch, title, change_id)
         return _merge_detached(control_root, change_id, branch, base, title)
 
 
 def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> MergeResult:
     """Branch 1: advance ref + index + working tree atomically in the live
-    checkout. (See the dirty-safety note in merge_to_base.)"""
+    checkout. (See the dirty-safety note in merge_to_base.)
+
+    F6: on a non-zero merge, branch on whether a merge is actually in progress
+    (MERGE_HEAD) BEFORE deciding to abort. A real conflict starts a merge we must
+    abort; a clean refusal (uncommitted base files would be clobbered, unrelated
+    histories, …) starts nothing — calling `git merge --abort` there errors ("no
+    merge to abort"). MERGE_HEAD answers this locale-independently. git's stderr
+    is carried in `detail` so the surfaced reason is truthful for any refusal."""
     subject = f"Merge {title}\n\n(imp/{change_id})"
     proc = _git(worktree, "merge", "--no-ff", "-m", subject, branch)
-    if proc.returncode != 0:
+    if proc.returncode == 0:
+        commit = _git_ok(worktree, "rev-parse", "HEAD").strip()
+        return MergeResult("MERGED", commit)
+    detail = (proc.stderr or proc.stdout).strip() or None
+    merge_in_progress = _git(
+        worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD"
+    ).returncode == 0
+    if merge_in_progress:
         _git(worktree, "merge", "--abort")
-        return MergeResult("CONFLICT")
-    commit = _git_ok(worktree, "rev-parse", "HEAD").strip()
-    return MergeResult("MERGED", commit)
+        return MergeResult("CONFLICT", detail=detail)
+    return MergeResult("REFUSED", detail=detail)
 
 
 def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
