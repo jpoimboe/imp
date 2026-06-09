@@ -792,3 +792,36 @@ async def test_dispatch_task_forwards_non_interactive_false(tmp_path: Path) -> N
 
     await dispatch_task(ctx, "helper", "do it")
     assert capture["inv"].non_interactive is False
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
+    """Security fix: dispatch_task must thread ctx.sandbox_policy into the child
+    AgentInvocation so the subagent's bash tool is sandboxed. Without the fix,
+    build_agent_invocation defaults sandbox_policy=None and the OS sandbox is
+    silently absent for all dispatched subagents."""
+    from imp.engine.sandbox import SandboxPolicy
+
+    capture: dict = {}
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                     events_path=tmp_path / "events.jsonl")
+    ctx.subagent_defs = {"helper": _agent("helper")}
+    ctx.provider_name = "anthropic"
+    ctx.model_name = "m"
+    ctx.parent_transcript_dir = tmp_path / "steps/p/s"
+    ctx.coordinator = InterruptCoordinator()
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        capture=capture)
+    ctx.change_context = ChangeContext(slug="c", title="C", project_root=tmp_path,
+                                       workflow_dir=tmp_path / "wf")
+    pol = SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        tmp_host_dir=str(tmp_path / "tmp"), secret_dirs=(), secret_files=(),
+        setenv=(), network=True, note="",
+    )
+    ctx.sandbox_policy = pol
+
+    await dispatch_task(ctx, "helper", "do it")
+    assert capture["inv"].sandbox_policy is pol
