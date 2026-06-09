@@ -411,6 +411,10 @@ class EscKeyReader:
                 sink(line)
             return
         if byte in (b"\x7f", b"\x08"):          # DEL / BS
+            # Byte-level (not grapheme) edit: backspacing a multibyte UTF-8 char
+            # mid-line drops one continuation byte and under-erases the echo.
+            # Acceptable for this raw interject channel; clean type+Enter decodes
+            # correctly (errors="replace" only bites on mid-line multibyte edits).
             if self._line_buf:
                 self._line_buf.pop()
                 with _suppress(OSError):

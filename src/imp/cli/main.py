@@ -57,10 +57,17 @@ class ReplyInterjectRouter:
     race where a sink call lands during a prompt — that line is then a reply, not
     a stray interject.
 
-    Slash interception is NOT this object's concern: it happens in the line
-    reader (`ask_line_with_slash`), so a `/help`/`/skills` line is consumed and
-    re-prompted before ever reaching `route`, and a `/<skill>` line arrives here
-    already resolved to its skill body (then routed by the same flag).
+    Slash interception is scoped to the REPLY path only: when a solicit is
+    active the line reader (`ask_line_with_slash`) consumes `/help`/`/skills`
+    (print + re-prompt) and resolves `/<skill>` to its body before the line
+    reaches `route`. On the INTERJECT path (a line typed mid-run, solicit
+    inactive) there is NO slash interception — the raw line is enqueued verbatim
+    and delivered to the agent as a user message. Loading a skill via `/<name>`
+    mid-run is therefore not supported (do it at the next solicit boundary); a
+    mid-run `/...` line reaches the agent as literal text. This is a deliberate
+    scope boundary: intercepting slash on the interject path would require
+    coupling the Change/event-log and a status-suspending print into the raw-tty
+    reader, on the one path already known to CPR-degrade.
     """
 
     def __init__(

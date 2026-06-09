@@ -3,9 +3,11 @@
 Drives the routing CORE (ReplyInterjectRouter) directly — no TTY, no
 prompt_toolkit. A line submitted while a solicit is ACTIVE is a reply (delivered
 to the reply sink); a line submitted while INACTIVE (agent running) is enqueued
-as an interject. Slash interception lives in the line reader
-(ask_line_with_slash), upstream of the router, so it is covered separately
-against handle_slash_line.
+as an interject. Slash interception is scoped to the REPLY path only — it lives
+in the line reader (ask_line_with_slash), covered separately against
+handle_slash_line. The INTERJECT path does NOT intercept slash: a mid-run `/...`
+line is enqueued verbatim and reaches the agent as literal text (a deliberate
+scope boundary; see ReplyInterjectRouter's docstring).
 """
 
 from __future__ import annotations
