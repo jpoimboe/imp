@@ -6,6 +6,12 @@ resolved via ToolContext.resolve_path, which enforces worktree containment.
 
 from __future__ import annotations
 
+import contextlib
+import os
+import stat
+import tempfile
+from pathlib import Path
+
 import anyio
 
 from imp.agents.tools import imp_tool
@@ -113,6 +119,33 @@ def write_file(ctx: ToolContext, path: str, content: str) -> str:
     return f"wrote {len(content)} bytes to {path}"
 
 
+def _atomic_write_bytes(resolved: Path, data: bytes) -> None:
+    """Atomic write-back: temp file + os.replace. Two load-bearing details:
+    (1) the temp file is created in the TARGET's directory — os.replace
+    across filesystems raises EXDEV, and /tmp is routinely a different mount
+    under the project's sandbox reality; (2) the original's permission bits
+    are copied onto the temp file BEFORE the replace — mkstemp creates 0600,
+    and a bare replace silently strips a script's exec bit. Ownership/xattrs/
+    ACLs are waived as accepted. Symlinks are safe by construction:
+    resolve_path already resolved, so the replace targets the link TARGET.
+    The read-modify-write race (the file changing between the bounded read
+    and this replace — real in the parallel-sessions shared tree) is
+    accepted, not closed: last-writer-wins, same as before; compare-and-refuse
+    on mtime was considered and dropped as false-positive-prone."""
+    mode = stat.S_IMODE(resolved.stat().st_mode)
+    fd, tmp_name = tempfile.mkstemp(dir=resolved.parent)
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.chmod(tmp, mode)
+        os.replace(tmp, resolved)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
 @imp_tool(
     name="edit_file",
     description=(
@@ -172,7 +205,7 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
     edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
     # Bytes-faithful write-back: encode and write BYTES (no platform newline
     # translation — the old read_text() path mangled CRLF files).
-    resolved.write_bytes(edited.encode("utf-8"))
+    _atomic_write_bytes(resolved, edited.encode("utf-8"))
     if replace_all:
         return f"replaced {count} occurrences in {path}"
     return f"replaced 1 occurrence in {path}"

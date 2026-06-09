@@ -151,3 +151,50 @@ def test_empty_old_rejected_file_untouched(tmp_path: Path, replace_all: bool) ->
         _edit(_ctx(tmp_path), path="x.py", old="", new="EVIL",
               replace_all=replace_all)
     assert p.read_text() == "content\n"
+
+
+def test_exec_bit_survives_edit(tmp_path: Path) -> None:
+    # mkstemp creates 0600; a bare temp+replace would silently strip a
+    # script's executable bit. (Ownership/xattrs/ACLs are waived as accepted.)
+    p = tmp_path / "run.sh"
+    p.write_text("#!/bin/sh\necho hi\n")
+    p.chmod(0o755)
+    _edit(_ctx(tmp_path), path="run.sh", old="echo hi", new="echo bye")
+    assert (p.stat().st_mode & 0o777) == 0o755
+    assert p.read_text() == "#!/bin/sh\necho bye\n"
+
+
+def test_no_stray_temp_files_after_edit(tmp_path: Path) -> None:
+    (tmp_path / "x.py").write_text("a = 1\n")
+    _edit(_ctx(tmp_path), path="x.py", old="a = 1", new="a = 2")
+    # mkstemp names start with "tmp" — none may survive the os.replace.
+    assert [f.name for f in tmp_path.iterdir() if f.name.startswith("tmp")] == []
+
+
+def test_failed_replace_leaves_original_intact(tmp_path: Path,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    # Crash mid-write-back must not leave a truncated target — the original
+    # survives untouched and the temp file is cleaned up.
+    import imp.agents.tools.fs as fs
+
+    def boom(src: object, dst: object) -> None:
+        raise OSError("simulated replace failure")
+
+    (tmp_path / "x.py").write_text("a = 1\n")
+    monkeypatch.setattr(fs.os, "replace", boom)
+    with pytest.raises(OSError, match="simulated replace failure"):
+        _edit(_ctx(tmp_path), path="x.py", old="a = 1", new="a = 2")
+    assert (tmp_path / "x.py").read_text() == "a = 1\n"
+    leftovers = [f.name for f in tmp_path.iterdir()
+                 if f.name not in ("x.py", "events.jsonl")]
+    assert leftovers == []
+
+
+def test_replace_all_single_occurrence_message_pinned(tmp_path: Path) -> None:
+    # The spec pins f"replaced {count} occurrences" under replace_all — for
+    # count=1 that is "replaced 1 occurrences", deliberately. A grammar "fix"
+    # is a spec change.
+    (tmp_path / "x.py").write_text("a = 1\n")
+    out = _edit(_ctx(tmp_path), path="x.py", old="a = 1", new="b = 2",
+                replace_all=True)
+    assert out == "replaced 1 occurrences in x.py"
