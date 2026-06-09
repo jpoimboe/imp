@@ -22,5 +22,14 @@ Report:
   progress.md.
 - `next_steps`: suggested follow-on work.
 
+## Integration outcome
+
+If `.imp/change/integration-notes.md` exists, read it and fold its content into
+your summary: mention in `built` that base was integrated (e.g. "Merged base (N
+commits); resolved X conflicts — Y flagged uncertain; M semantic concerns"), and
+surface any flagged-uncertain resolutions or semantic concerns under
+`open_items`. If the file is **absent**, there was no base integration this change
+— do not treat that as an error and do not mention integration.
+
 This lands in the event log and is queryable via `imp log {{ change.slug }}`.
 Do not write files; do not commit.
