@@ -329,3 +329,15 @@ def test_glob_variants_unit() -> None:
     # mid-segment a**/b counts too (fnmatch has no segment concept).
     assert _glob_variants("a**/b") == ["a**/b", "ab"]
     assert len(_glob_variants("src/**/f/**/*.ts")) == 4
+
+
+def test_glob_filtered_truncated_file_gets_no_note_and_no_read(tmp_path: Path) -> None:
+    # The glob filter sits BEFORE the read: a filtered-out cap-truncated file
+    # never pays the 5 MB read, never computes cap-truncation, and must not
+    # produce a scan note (it was excluded by the agent's own filter — the
+    # false-negative disclosure rationale doesn't apply).
+    _write_cap_cut(tmp_path, "big.log")
+    (tmp_path / "a.py").write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", glob="*.py")
+    assert out == "a.py"
+    assert "scanned first 5 MB" not in out
