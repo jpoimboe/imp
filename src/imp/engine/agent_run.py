@@ -166,7 +166,7 @@ def build_agent_invocation(
     """Construct one AgentInvocation, owning the completion-contract invariant
     that drifted between the two creation paths: append
     `completion_instruction(schema)` to the system prompt AND build the
-    continuation_fn (interactive wrap vs. nudge) from that SAME instruction.
+    continuation_fn (always the nudge backstop) from that SAME instruction.
 
     The caller renders the prompt with its own PromptContext and resolves its
     own (provider, model) — the builder never branches on agent kind. `model`
