@@ -329,6 +329,70 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
     assert "> do the real thing" in out
 
 
+def test_step_interactive_sourced_from_awaiting_event_not_step_started() -> None:
+    # Task 8: a step is "interactive" (it solicited the human) ONLY because it
+    # emitted an awaiting_user_input event — NOT because step_started carried an
+    # `interactive` key. A step whose stream has no awaiting_user_input is not
+    # interactive even if step_started carried interactive=True (the key is gone
+    # in Task 7; the narrative must already ignore it).
+    solicited = nv.build_tree([
+        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("2", "awaiting_user_input", agent_id="step:p/s",
+            prompt="Merge?"),
+        _ev("3", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "yes"}]),
+    ])
+    step = solicited.root.children[0].children[0]
+    assert isinstance(step, nv.StepNode)
+    assert step.interactive is True
+
+    not_solicited = nv.build_tree([
+        # step_started STILL carries interactive=True (Task 7 hasn't removed it yet)
+        # but with no awaiting_user_input event the step must NOT be interactive.
+        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m",
+            interactive=True),
+        _ev("2", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "begin"}]),
+    ])
+    step2 = not_solicited.root.children[0].children[0]
+    assert isinstance(step2, nv.StepNode)
+    assert step2.interactive is False
+
+
+def test_awaiting_user_input_prompt_rendered_as_pending_question() -> None:
+    # M3: a non-empty prompt from the awaiting_user_input event renders as the
+    # pending-input question, above the human-reply caret.
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("2", "awaiting_user_input", agent_id="step:p/s",
+            prompt="Should I merge the branch?"),
+        _ev("3", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "yes please"}]),
+    ]))
+    q_i = next(i for i, ln in enumerate(out.splitlines())
+               if "Should I merge the branch?" in ln)
+    reply_i = next(i for i, ln in enumerate(out.splitlines())
+                   if "> yes please" in ln)
+    assert q_i < reply_i                     # question sits above the reply caret
+
+
+def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
+    # L3: an attended resume re-emits awaiting_user_input with the stored prompt;
+    # the reply that follows must still render with the human-reply caret.
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("2", "awaiting_user_input", agent_id="step:p/s", prompt="Continue?"),
+        _ev("3", "workflow_paused", reason="ctrl-c"),
+        _ev("4", "workflow_resumed"),
+        # resume re-enters the step and re-emits awaiting_user_input + the reply
+        _ev("5", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("6", "awaiting_user_input", agent_id="step:p/s", prompt="Continue?"),
+        _ev("7", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "go ahead"}]),
+    ]))
+    assert "> go ahead" in out
+
+
 def test_chrome_step_collapses_to_single_breadcrumb() -> None:
     # A no-op gate/script step renders ONLY its breadcrumb — the redundant
     # name-only header line above it is dropped. Because that start line is never

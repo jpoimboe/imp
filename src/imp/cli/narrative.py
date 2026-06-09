@@ -111,6 +111,10 @@ class UserMessageNode:
                                         # the engine blocked for via awaiting_user_input).
                                         # Synthetic prompts — the "begin" kickoff, a
                                         # resume nudge — are False and never rendered.
+    pending_question: str = ""          # the prompt carried by the awaiting_user_input
+                                        # event that solicited this reply (M3). Rendered
+                                        # as the question line above the `>` reply caret.
+                                        # Empty when the solicit carried no prompt.
     collapsible = False
 
 
@@ -302,6 +306,10 @@ class NarrativeBuilder:
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
         self._awaiting_reply = False
+        # The prompt carried by the awaiting_user_input event that armed
+        # _awaiting_reply, handed to the answering user_message as its rendered
+        # question line (M3). Reset to "" when consumed.
+        self._pending_question = ""
 
     # -- public API -----------------------------------------------------------
     @property
@@ -503,15 +511,21 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.kind = kind
             existing.model = p.get("model")
             existing.provider = p.get("provider")
-            existing.interactive = bool(p.get("interactive", False))
+            # Interactivity is re-sourced from the event stream (an
+            # awaiting_user_input event sets it), NOT from step_started — so
+            # reset it to False here; a re-emitted awaiting_user_input on the
+            # resumed step re-arms it (Task 8 / L3).
+            existing.interactive = False
             existing.start_ts = event.get("timestamp")
             existing.agent_output = None
             self._step_stack = [existing]
             return
     _ensure_phase(self, phase)
+    # interactive defaults False — it is re-sourced from the event stream (an
+    # awaiting_user_input event marks the step interactive), NOT from
+    # step_started.interactive (which Task 7 removes).
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
-                    interactive=bool(p.get("interactive", False)),
                     start_ts=event.get("timestamp"))
     self._append(node)
     self._step_stack.append(node)
@@ -588,11 +602,17 @@ def _h_human_prompt_pending(
 def _h_awaiting_user_input(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any],
 ) -> None:
-    # Programmatic marker that the engine is blocking for an interactive
-    # end-of-turn reply. The question already rendered as agent text and the
-    # reply renders as the next user_message, so render nothing here — but arm
-    # the flag so that next user_message is tagged as a genuine human turn.
+    # The authoritative signal that this step is soliciting the human (Task 8):
+    # mark the CURRENT open step interactive (drives the conversational-beat
+    # blank-line spacing in render_text), and arm the flag so the next
+    # user_message is tagged as a genuine human turn (rendered as `> …`) rather
+    # than a synthetic engine prompt (dropped). The event's prompt payload is
+    # carried onto the pending reply as its question line (M3); render nothing
+    # here — the reply node renders the question above its caret.
+    if self._step_stack:
+        self._step_stack[-1].interactive = True
     self._awaiting_reply = True
+    self._pending_question = str(p.get("prompt") or "")
     return None
 
 
@@ -665,10 +685,40 @@ def _elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
         return None
 
 
+def _last_prose_text(self: NarrativeBuilder) -> str:
+    """Text of the most recent agent-prose child in the open container, or "".
+    Used to suppress a pending_question that merely duplicates the agent's
+    end-of-turn message (the usual attended case: the solicited prompt IS the
+    assistant text that just rendered)."""
+    children = self._container().children
+    for child in reversed(children):
+        if isinstance(child, AgentTextNode):
+            return child.text.strip()
+        if isinstance(child, LiteralTextNode):
+            return child.text.strip()
+        if isinstance(child, (ThinkingFold, ToolBurstFold, SkillLoadNode)):
+            continue  # interstitial chrome; keep scanning for the prose turn
+        break
+    return ""
+
+
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     interactive, self._awaiting_reply = self._awaiting_reply, False
-    self._append(UserMessageNode(text=_user_message_text(p), interactive=interactive))
+    question, self._pending_question = self._pending_question, ""
+    # M3: the event's prompt is the only GUARANTEED source of the question (the
+    # attended tool path solicits with ""). But in the usual case the agent's
+    # end-of-turn assistant text — already rendered as prose just above — IS the
+    # prompt, so echoing it as a pending-question line would duplicate the whole
+    # turn. Carry the question ONLY when it isn't already that preceding prose.
+    # A synthetic prompt (no preceding awaiting_user_input) carries no question.
+    if interactive and question and question.strip() != _last_prose_text(self):
+        rendered_question = question
+    else:
+        rendered_question = ""
+    self._append(UserMessageNode(
+        text=_user_message_text(p), interactive=interactive,
+        pending_question=rendered_question))
 
 
 def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -988,7 +1038,8 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, AgentTextNode):
         return {"t": t, "text": node.text}
     if isinstance(node, UserMessageNode):
-        return {"t": t, "text": node.text, "interactive": node.interactive}
+        return {"t": t, "text": node.text, "interactive": node.interactive,
+                "pending_question": node.pending_question}
     if isinstance(node, ThinkingFold):
         return {"t": t, "content": node.content}
     if isinstance(node, ToolBurstFold):
