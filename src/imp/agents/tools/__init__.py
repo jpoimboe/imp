@@ -105,6 +105,7 @@ def _register_builtins() -> None:
     """Import all built-in tool modules so their @imp_tool decorations fire."""
     from imp.agents.tools import (  # noqa: F401
         bash,
+        bg,
         fs,
         nav,
         query_events,
