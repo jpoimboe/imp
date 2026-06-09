@@ -160,6 +160,11 @@ class AgentInvocation:
     # Threaded from run_change → _route_agent → _run_agent_invocation →
     # build_agent_invocation → provider → ToolContext → dispatch_task.
     non_interactive: bool = False
+    # Resolved sandbox posture for this run. Threaded from run_change →
+    # _route_agent → _run_agent_invocation → build_agent_invocation → provider →
+    # ToolContext so every bash tool call applies the same posture. Any to avoid
+    # importing SandboxPolicy here; None means no-op (bare sh -c, inactive policy).
+    sandbox_policy: Any = None
 
 
 Event = dict[str, Any]                     # {"type": str, "payload": dict}

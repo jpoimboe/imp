@@ -35,7 +35,7 @@ from imp.engine.backoff import (
     interruptible_sleep as _interruptible_sleep,
 )
 from imp.engine.change import Change
-from imp.engine.env import engine_env
+from imp.engine.env import engine_env, overlay_engine_env
 from imp.engine.feedback import (
     format_script_feedback,
     render_output_fields,
@@ -47,6 +47,12 @@ from imp.engine.gates import (
     run_script,
 )
 from imp.engine.loader import load_workflow
+from imp.engine.sandbox import (
+    SandboxConfig,
+    SandboxUnavailable,
+    resolve_policy,
+    sandbox_available,
+)
 from imp.engine.state import CurrentStep, EventLog, JsonlEventLog, State
 from imp.engine.types import (
     Action,
@@ -143,6 +149,7 @@ async def run_change(
             project_root=change.project_root, control_root=change.control_root,
         ).config
         log: EventLog = JsonlEventLog(change.events_path, on_event=on_event)
+        sandbox_policy = _build_sandbox_policy(change, config, log)
         state = State.load(change.state_dir)
 
         # Resolve tiers once per run and persist, so resume never re-snapshots the
@@ -176,7 +183,8 @@ async def run_change(
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 lint_command=config.lint_command,
                 test_command=config.test_command,
-                non_interactive=non_interactive)
+                non_interactive=non_interactive,
+                sandbox_policy=sandbox_policy)
 
             if coordinator.should_pause or isinstance(action, Pause):
                 state.status = "paused"
@@ -319,6 +327,7 @@ async def _dispatch_step(
     coordinator: Any, lint_command: str | None = None,
     test_command: str | None = None,
     non_interactive: bool = False,
+    sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Returns (action, feedback_text, var_mutations)."""
     wrapper_text: str | None = None
@@ -332,14 +341,15 @@ async def _dispatch_step(
         return _route_branch(step, state, log)
     if step.kind == "script":
         return _route_script(step, change, state, log, lint_command=lint_command,
-                             test_command=test_command)
+                             test_command=test_command, sandbox_policy=sandbox_policy)
     if step.kind == "human":
         return await _route_human(step, state, log, human_input_fn, human_output_fn)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
         wrapper_text=wrapper_text, is_resume=is_resume, lint_command=lint_command,
-        test_command=test_command, non_interactive=non_interactive)
+        test_command=test_command, non_interactive=non_interactive,
+        sandbox_policy=sandbox_policy)
 
 
 def _emit_started(log: EventLog, step: Step, **extra: Any) -> dict[str, Any]:
@@ -372,6 +382,7 @@ def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
     *, lint_command: str | None = None,
     test_command: str | None = None,
+    sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step)
     out = run_script(step, cwd=change.workflow_dir,
@@ -380,7 +391,8 @@ def _route_script(
                                           change_slug=change.slug,
                                           change_title=change.title,
                                           lint_command=lint_command,
-                                          test_command=test_command))
+                                          test_command=test_command),
+                     policy=sandbox_policy)
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, match)
@@ -419,6 +431,7 @@ async def _route_agent(
     lint_command: str | None = None,
     test_command: str | None = None,
     non_interactive: bool = False,  # §10/§12: consumed by the headless wall-clock retry ceiling
+    sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
@@ -467,7 +480,8 @@ async def _route_agent(
             balance_on_resume=balance,
             initial_messages=initial, is_resume=is_resume,
             lint_command=lint_command,
-            test_command=test_command, non_interactive=non_interactive)
+            test_command=test_command, non_interactive=non_interactive,
+            sandbox_policy=sandbox_policy)
         if result.delay is None:
             break
         # §10/§12 headless backstop: an unattended run has no human to Ctrl-C, so
@@ -528,7 +542,8 @@ async def _route_agent(
                                   coordinator=coordinator, wrapper_text=wrapper_text,
                                   is_resume=is_resume, lint_command=lint_command,
                                   test_command=test_command,
-                                  non_interactive=non_interactive)
+                                  non_interactive=non_interactive,
+                                  sandbox_policy=sandbox_policy)
 
     state.step_attempt = 0
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
@@ -576,6 +591,7 @@ async def _run_agent_invocation(
     lint_command: str | None = None,
     test_command: str | None = None,
     non_interactive: bool = False,
+    sandbox_policy: Any = None,
 ) -> AgentRunResult:
     """Run one top-level agent step to a terminal AgentRunResult.
 
@@ -665,6 +681,7 @@ async def _run_agent_invocation(
         lint_command=lint_command,
         test_command=test_command,
         non_interactive=non_interactive,
+        sandbox_policy=sandbox_policy,
     )
 
     runner = provider.create_runner(invocation)
@@ -677,3 +694,38 @@ async def _run_agent_invocation(
 def _emit(log: EventLog, type_: str, payload: dict[str, Any], *,
           agent_id: str | None = None) -> dict[str, Any]:
     return log.append(agent_id=agent_id, type=type_, payload=payload)
+
+
+def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
+    """Resolve the SandboxPolicy once per run (IMP_* are change-stable, so one
+    build matches every spawn point). Emit a durable posture event; on a hard-fail
+    posture, emit + re-raise so the run stops rather than silently running bare."""
+    raw = config.sandbox or {}
+    cfg = SandboxConfig(
+        enabled=raw.get("enabled", True),
+        allow_unsandboxed=raw.get("allow_unsandboxed", False),
+        network=raw.get("network", True),
+        secret_paths=tuple(raw.get("secret_paths", ())),
+        writable_caches=tuple(raw.get("writable_caches", ())),
+        extra_readable=tuple(raw.get("extra_readable", ())),
+        extra_writable=tuple(raw.get("extra_writable", ())),
+        extra_env=tuple(raw.get("extra_env", ())),
+    )
+    eng = overlay_engine_env(
+        os.environ,
+        engine_env(project_root=change.project_root, change_id=change.id,
+                   change_slug=change.slug, change_title=change.title,
+                   lint_command=config.lint_command, test_command=config.test_command),
+    )
+    try:
+        policy = resolve_policy(
+            worktree=change.project_root, control_root=change.control_root,
+            change_id=change.id, cfg=cfg, engine_env_result=eng,
+            environ=os.environ, available=sandbox_available(),
+        )
+    except SandboxUnavailable as exc:
+        _emit(log, "sandbox_unavailable", {"message": str(exc)}, agent_id=None)
+        raise
+    if not policy.active:
+        _emit(log, "sandbox_inactive", {"reason": policy.note}, agent_id=None)
+    return policy

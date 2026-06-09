@@ -1,6 +1,8 @@
 """Always-on sandbox tests — no bwrap needed (pure argv + policy resolution)."""
 from __future__ import annotations
 
+import types as _types
+
 import pytest
 
 from imp.engine.sandbox import (
@@ -279,3 +281,75 @@ def test_resolve_policy_uid_zero_masks_run_user_0(tmp_path):
         engine_env_result={}, environ={}, available=True,
     )
     assert "/run/user/0" in pol.secret_dirs
+
+
+# ── _build_sandbox_policy unit tests (B.7) ───────────────────────────────────
+
+
+def _fake_change(tmp_path):
+    control = tmp_path / "ctl"
+    wt = control / ".imp" / "worktrees" / "abc"
+    wt.mkdir(parents=True, exist_ok=True)
+    (control / ".git").mkdir(parents=True, exist_ok=True)
+    return _types.SimpleNamespace(
+        project_root=wt, control_root=control, id="abc",
+        slug="abc-slug", title="Abc Title")
+
+
+def _fake_config(**over):
+    base = dict(sandbox={}, lint_command=None, test_command=None)
+    base.update(over)
+    return _types.SimpleNamespace(**base)
+
+
+class _CaptureLog:
+    """Minimal EventLog stub: records every log.append() call as an event dict."""
+    def __init__(self):
+        self.events = []
+
+    def append(self, *, agent_id, type, payload):
+        record = {"type": type, "payload": payload, "agent_id": agent_id,
+                  "id": str(len(self.events))}
+        self.events.append(record)
+        return record
+
+    # Protocol methods that _emit does NOT call but EventLog declares; stubs only.
+    def read(self):
+        return iter(self.events)
+
+    def append_step_context(self, **_kw): ...
+    def append_user_message(self, **_kw): ...
+    def append_llm_response(self, **_kw): ...
+    def append_tool_call(self, **_kw): ...
+    def append_tool_result(self, **_kw): ...
+    def update_last_llm_response_usage(self, **_kw): ...
+
+
+def test_build_sandbox_policy_hard_fails_when_unavailable(tmp_path, monkeypatch):
+    """enabled + unavailable + allow_unsandboxed unset → the run must NOT silently
+    proceed unsandboxed: _build_sandbox_policy re-raises SandboxUnavailable (B.7)."""
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: False)
+    # Clear the lru_cache so the monkeypatched function is actually used.
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+
+    change = _fake_change(tmp_path)
+    config = _fake_config(sandbox={})      # enabled defaults True, allow_unsandboxed False
+    log = _CaptureLog()
+    with pytest.raises(SandboxUnavailable):
+        ex._build_sandbox_policy(change, config, log)
+    assert any(e["type"] == "sandbox_unavailable" for e in log.events)
+
+
+def test_build_sandbox_policy_bare_when_allow_unsandboxed(tmp_path, monkeypatch):
+    import imp.engine.executor as ex
+    monkeypatch.setattr(ex, "sandbox_available", lambda: False)
+    from imp.engine import sandbox as _sb
+    _sb.sandbox_available.cache_clear()
+
+    change = _fake_change(tmp_path)
+    config = _fake_config(sandbox={"allow_unsandboxed": True})
+    log = _CaptureLog()
+    pol = ex._build_sandbox_policy(change, config, log)
+    assert pol.active is False and pol.note == "unsandboxed_by_config"
