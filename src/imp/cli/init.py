@@ -23,6 +23,7 @@ from typing import Any
 import yaml
 
 from imp.assets import default_workflow_dir
+from imp.engine.sandbox import sandbox_available
 
 # The order providers are presented in the picker. Bindings (tier→model) are
 # owned by the provider-code floor now, so init no longer carries a model table.
@@ -189,6 +190,17 @@ def run_init(
     theme = detect()
     if theme != "ansi":
         output_fn(f"Detected a {theme} terminal — colors tuned to match.")
+
+    # --- sandbox posture (spec B.7): probe bwrap, surface if unavailable ---
+    if not sandbox_available():
+        output_fn("")
+        output_fn("WARNING: bubblewrap (bwrap) not found — imp can't OS-sandbox the agent's")
+        output_fn("   shell. Install it for a real filesystem boundary:")
+        output_fn("     Fedora:  sudo dnf install bubblewrap")
+        output_fn("     Debian:  sudo apt install bubblewrap")
+        output_fn("   Until then, set `sandbox.allow_unsandboxed: true` in your")
+        output_fn(f"   user config ({user_config_path()}) to run without a boundary,")
+        output_fn("   or runs will hard-fail. (You can also re-run init after installing.)")
 
     # --- committed project file (idempotent: never overwrite an existing one) ---
     if not already_initialized:

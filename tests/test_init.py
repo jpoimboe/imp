@@ -167,3 +167,32 @@ def test_init_scaffolds_commented_lint_command(tmp_path: Path) -> None:
     )
     text = (tmp_path / "imp" / "project.yaml").read_text()
     assert "# lint_command:" in text
+
+
+def test_init_surfaces_bwrap_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.cli.init as initmod
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: False, raising=False)
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("anthropic"),
+        input_fn=_inputs(),
+        output_fn=msgs.append,
+        detect_theme_fn=lambda: "ansi",
+    )
+    blob = "\n".join(msgs)
+    assert "bubblewrap" in blob.lower()
+
+
+def test_init_available_bwrap_is_quiet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.cli.init as initmod
+    monkeypatch.setattr(initmod, "sandbox_available", lambda: True, raising=False)
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("anthropic"),
+        input_fn=_inputs(),
+        output_fn=msgs.append,
+        detect_theme_fn=lambda: "ansi",
+    )
+    assert "install bubblewrap" not in "\n".join(msgs).lower()
