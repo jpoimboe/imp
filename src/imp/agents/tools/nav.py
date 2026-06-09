@@ -287,6 +287,11 @@ async def grep(
             if cap_truncated and not capped:
                 # Inline (as today), own bracketed line in every mode.
                 capped = emit(f"[{rel_str}: scanned first 5 MB only]")
+            if head_limit is not None and result_rows >= head_limit:
+                limit_hit = True  # end-of-file boundary: the row checks above
+                # only run for files WITH matches — without this, a limit
+                # landing exactly on a file's last match keeps scanning every
+                # remaining file and never emits the notice.
 
     if result_rows == 0:
         # Sentinel keys on zero RESULT rows, not on empty output — a note

@@ -536,3 +536,37 @@ def test_head_limit_below_one_rejected(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("x\n")
     with pytest.raises(ValueError, match="head_limit must be >= 1"):
         _grep(_ctx(tmp_path), pattern="x", head_limit=0)
+
+
+def test_head_limit_content_exact_landing_stops_scan_and_notices(tmp_path: Path) -> None:
+    # The limit lands exactly on a.txt's last match: the scan must stop —
+    # a truncated NON-matching file sorting later must not be read (its scan
+    # note must not leak), and the notice must still be emitted (vacuous-
+    # notice semantics, same as fwm).
+    (tmp_path / "a.txt").write_text("NEEDLE\n")
+    _write_cap_cut(tmp_path, "z_trunc.txt")  # sorts after; no match in window
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content",
+                head_limit=1)
+    assert out == ("a.txt:1:NEEDLE\n"
+                   + _HEAD_NOTICE.format(n=1))
+
+
+def test_byte_cap_wins_over_head_limit_when_both_fire(tmp_path: Path) -> None:
+    # The row that reaches head_limit also crosses the 50 KB budget: the
+    # byte marker (physical cut — stronger disclosure) wins; never two
+    # markers.
+    #
+    # Arithmetic: line = "y" * 1_900; each row = "big.txt:{i}:{line} NEEDLE"
+    # Row lengths: rows 1-9 are "big.txt:N:..." (8+1900+8=1917 chars + 1 join) = 1918 bytes
+    # rows 10-27 are "big.txt:NN:..." (9+1900+8=1917 chars + 1 join) = 1919 bytes
+    # Cumulative at row 26: 9*1918 + 17*1919 = 17262 + 32623 = 49885 bytes (< 50000)
+    # Cumulative at row 27: 49885 + 1919 = 51804 bytes (>= 50000) -> cap fires at row 27
+    # So head_limit=27 means the 27th row is BOTH the head_limit boundary AND the
+    # budget-crossing row.
+    line = "y" * 1_900
+    body = "".join(f"{line} NEEDLE\n" for _ in range(40))
+    (tmp_path / "big.txt").write_text(body)
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content",
+                head_limit=27)  # row 27 is the budget-crossing row (see arithmetic above)
+    assert "[output truncated at 50 KB]" in out
+    assert "further results omitted" not in out
