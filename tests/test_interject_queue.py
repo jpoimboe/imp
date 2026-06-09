@@ -165,6 +165,14 @@ async def test_anthropic_delivers_interject_at_turn_boundary(tmp_path: Path) -> 
         for block in m["content"] if block.get("type") == "text"
     ]
     assert "please also check the tests" in texts
+    # ABSENT from turn 1's model call — NOT delivered mid-turn/early.
+    first_call = fake.messages.calls[0]
+    first_texts = [
+        block.get("text")
+        for m in first_call["messages"] if m["role"] == "user"
+        for block in m["content"] if block.get("type") == "text"
+    ]
+    assert "please also check the tests" not in first_texts
     # Queue drained: only one delivery.
     assert coord.drain_interject() is None
 
@@ -230,6 +238,15 @@ async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> Non
         for c in item.get("content", [])
     ]
     assert "please also check the tests" in texts
+    # ABSENT from turn 1's model call — NOT delivered mid-turn/early.
+    first_call = fake.responses.calls[0]
+    first_texts = [
+        c.get("text")
+        for item in first_call["input"]
+        if item.get("type") == "message" and item.get("role") == "user"
+        for c in item.get("content", [])
+    ]
+    assert "please also check the tests" not in first_texts
     assert coord.drain_interject() is None
 
 
@@ -305,6 +322,8 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
     # The re-query (queries[1]) folded the interject text into the next prompt.
     requery = captured["client"].queries[1]
     assert "please also check the tests" in requery
+    # ABSENT from turn 1's query — NOT delivered mid-turn/early.
+    assert "please also check the tests" not in captured["client"].queries[0]
     assert coord.drain_interject() is None
 
 
@@ -383,4 +402,129 @@ async def test_codex_delivers_interject_at_turn_boundary(tmp_path: Path) -> None
     # The interject folded into turn 2's prompt (run_calls[1]).
     second_prompt = fake.thread.run_calls[1][0]
     assert "please also check the tests" in second_prompt
+    # ABSENT from turn 1's prompt — NOT delivered mid-turn/early.
+    assert "please also check the tests" not in fake.thread.run_calls[0][0]
+    assert coord.drain_interject() is None
+
+
+# --- nudge-branch delivery (tool-less turn) -------------------------------
+
+
+@pytest.mark.anyio
+async def test_anthropic_delivers_interject_on_nudge_branch(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
+
+    (tmp_path / "art").mkdir()
+    # Turn 1 is text-only (NO tool call) → continuation_fn nudges → re-query.
+    # Turn 2 completes. The interject must ride the nudge re-query, not wait.
+    fake = FakeAsyncAnthropic([
+        response(text("still thinking"), stop_reason="end_turn"),
+        response(tool_use("c1", "complete_step", {"status": "Success", "note": "ok"})),
+    ])
+    log = InMemoryEventLog()
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("please also check the tests")
+
+    inv = _inv(tmp_path, event_log=log, coordinator=coord,
+               tools=frozenset({"complete_step"}))
+    inv = replace(inv, continuation_fn=lambda _last: "call complete_step now")
+
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6", client_factory=lambda: fake)
+    events = [e async for e in runner.run(inv)]
+
+    assert "agent_output" in [e["type"] for e in events], events
+    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert len(interjected) == 1
+    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    # The interject rode into turn 2's (the nudge re-query) model call.
+    second_call = fake.messages.calls[1]
+    texts = [
+        block.get("text")
+        for m in second_call["messages"] if m["role"] == "user"
+        for block in m["content"] if block.get("type") == "text"
+    ]
+    assert "please also check the tests" in texts
+    # ABSENT from turn 1's model call — NOT delivered mid-turn/early.
+    first_call = fake.messages.calls[0]
+    first_texts = [
+        block.get("text")
+        for m in first_call["messages"] if m["role"] == "user"
+        for block in m["content"] if block.get("type") == "text"
+    ]
+    assert "please also check the tests" not in first_texts
+    assert coord.drain_interject() is None
+
+
+@pytest.mark.anyio
+async def test_openai_delivers_interject_on_nudge_branch(tmp_path: Path) -> None:
+    from imp.agents.runner import ChangeContext as _CC
+    from imp.providers.openai import OpenAIAgentRunner
+    from tests.openai_fakes import (
+        FakeResponsesClient,
+        resp_function_call,
+        resp_message,
+        resp_response,
+    )
+
+    (tmp_path / "art").mkdir()
+    # Turn 1 is text-only (NO function call) → nudge re-query. Turn 2 completes.
+    fake = FakeResponsesClient([
+        resp_response(resp_message("still thinking")),
+        resp_response(
+            resp_message("done"),
+            resp_function_call("c1", "complete_step",
+                               '{"status": "Success", "note": "ok"}'),
+        ),
+    ])
+    log = InMemoryEventLog()
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("please also check the tests")
+
+    inv = AgentInvocation(
+        agent_def=_agent_def(tools=frozenset({"complete_step"})),
+        provider_name="openai", model_name="gpt-4o-mini",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=_CC(
+            id="test", slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+        transcript_dir=tmp_path / "step",
+        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
+                               mode="allow",
+                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s",
+        event_log=log,
+        coordinator=coord,
+        continuation_fn=lambda _last: "call complete_step now",
+    )
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini", client_factory=lambda: fake)
+    events = [e async for e in runner.run(inv)]
+
+    assert "agent_output" in [e["type"] for e in events], events
+    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert len(interjected) == 1
+    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    # The interject rode into turn 2's (the nudge re-query) model call.
+    second_call = fake.responses.calls[1]
+    texts = [
+        c.get("text")
+        for item in second_call["input"]
+        if item.get("type") == "message" and item.get("role") == "user"
+        for c in item.get("content", [])
+    ]
+    assert "please also check the tests" in texts
+    # ABSENT from turn 1's model call — NOT delivered mid-turn/early.
+    first_call = fake.responses.calls[0]
+    first_texts = [
+        c.get("text")
+        for item in first_call["input"]
+        if item.get("type") == "message" and item.get("role") == "user"
+        for c in item.get("content", [])
+    ]
+    assert "please also check the tests" not in first_texts
     assert coord.drain_interject() is None

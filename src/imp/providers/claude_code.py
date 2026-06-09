@@ -144,16 +144,17 @@ def _drain_interject_message(coordinator: Any, elog: Any,
                              agent_id: str) -> Message | None:
     """claude_code variant of agent_run.deliver_interject. The SDK is queried
     with a STRING, not a messages list, so the caller folds the returned
-    message's text into the next query itself — here we only drain the queue and
-    emit `user_interjected`, returning a user Message (or None when empty).
-    The caller appends it to messages/transcript and emits the user_message
-    event so the persisted history matches the nudge re-query path exactly."""
+    message's text into the next query itself — here we only drain the queue,
+    returning a user Message (or None when empty). The caller appends it to
+    messages/transcript and emits the `user_message` THEN `user_interjected`
+    events (in that order, uniform with deliver_interject and codex) so a log
+    consumer sees `user_message` before `user_interjected` across all providers,
+    and the persisted history matches the nudge re-query path exactly."""
     if coordinator is None:
         return None
     text = coordinator.drain_interject()
     if text is None:
         return None
-    elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
     return Message(role="user", content=(TextBlock(text=text),))
 
 
@@ -1253,8 +1254,14 @@ class ClaudeCodeAgentRunner:
                             if interject_msg is not None:
                                 messages.append(interject_msg)
                                 transcript.append(interject_msg)
+                                # Emit user_message THEN user_interjected, uniform
+                                # with deliver_interject/codex (issue: order was
+                                # reversed here).
                                 elog.append_user_message(
                                     agent_id=aid, message=interject_msg)
+                                elog.append(
+                                    agent_id=aid, type="user_interjected",
+                                    payload={"text": _text_of(interject_msg)})
                                 next_query = f"{next_text}\n\n{_text_of(interject_msg)}"
                             # Re-query on a FRESH receive_response() (issue 7):
                             # break the inner loop so the outer while restarts.

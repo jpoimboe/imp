@@ -647,6 +647,13 @@ class OpenAIAgentRunner:
                         yield perr.make_error_event(
                             loop_err, kind=getattr(loop_err, "kind", ""))
                         return
+                    # Turn boundary (nudge path): the tool-less turn ended and the
+                    # nudge user message was appended. Deliver any queued interject
+                    # now — same as the tool-result turn boundary — so an interject
+                    # during a nudge stall rides into the next model call instead of
+                    # waiting an extra turn. No tool call means no subagent — S4 holds.
+                    deliver_interject(invocation.coordinator, messages, transcript,
+                                      elog, aid)
                     continue
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",
