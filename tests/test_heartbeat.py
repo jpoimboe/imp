@@ -21,7 +21,7 @@ from imp.agents.runner import (
     TextBlock,
 )
 from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
-from imp.engine.agent_run import AgentRunResult, drive_invocation
+from imp.engine.agent_run import drive_invocation
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.anthropic import AnthropicAgentRunner
@@ -125,6 +125,7 @@ async def test_ceiling_backfill_arm_heartbeats(tmp_path: Path) -> None:
 async def test_openai_runner_heartbeats_identically(tmp_path: Path) -> None:
     """Parity: the openai sibling emits the same heartbeat pattern."""
     import json
+
     from tests.openai_fakes import (
         FakeResponsesClient,
         resp_function_call,
@@ -180,7 +181,7 @@ class _RecLog:
     def __init__(self) -> None:
         self.appended: list[str] = []
 
-    def append(self, *, agent_id, type, payload):  # noqa: A002 (shape parity)
+    def append(self, *, agent_id, type, payload):
         self.appended.append(type)
         return {"id": "e", "type": type}
 
