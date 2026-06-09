@@ -27,7 +27,7 @@ def _inv(provider: str, tools: frozenset[str]) -> AgentInvocation:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(slug="s", title="t", project_root=Path("/"),
                                      workflow_dir=Path("/")),
-        interactive=False, transcript_dir=Path("/"),
+        transcript_dir=Path("/"),
         fs_permissions=(), events_path=Path("/events.jsonl"))
 
 

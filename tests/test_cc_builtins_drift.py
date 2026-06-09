@@ -127,7 +127,7 @@ def test_web_builtins_are_intentionally_enabled_when_declared(tmp_path: Path) ->
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path),
-        interactive=False, transcript_dir=tmp_path, fs_permissions=(),
+        transcript_dir=tmp_path, fs_permissions=(),
         events_path=tmp_path / "events.jsonl")
     opts = ClaudeCodeAgentRunner("m")._build_options(inv, object(), ["bash"])
     assert {"WebSearch", "WebFetch"} <= set(opts.allowed_tools)

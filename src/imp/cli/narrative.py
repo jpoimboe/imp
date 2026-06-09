@@ -522,8 +522,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             return
     _ensure_phase(self, phase)
     # interactive defaults False — it is re-sourced from the event stream (an
-    # awaiting_user_input event marks the step interactive), NOT from
-    # step_started.interactive (which Task 7 removes).
+    # awaiting_user_input event marks the step interactive); step_started no
+    # longer carries an interactive key.
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
                     start_ts=event.get("timestamp"))

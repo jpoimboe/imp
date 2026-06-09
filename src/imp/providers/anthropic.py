@@ -6,7 +6,7 @@ Loop:
   3. Append assistant response to transcript; append llm_response to EventLog
   4. For each tool_use block: dispatch tool, append tool_result to EventLog
   5. complete_step catches StepComplete → validate, emit agent_output, return
-  6. No tool_use in assistant and interactive: prompt user; else error
+  6. No tool_use in assistant: nudge via continuation_fn; else error
 
 Yields ONLY control signals: agent_output, error.
 All audit events (step_context, user_message, llm_response, tool_call,
@@ -443,7 +443,6 @@ class AnthropicAgentRunner:
             provider_name=invocation.provider_name,
             model_name=invocation.model_name,
             parent_transcript_dir=invocation.transcript_dir,
-            interactive=invocation.interactive,
             agent_id=aid,
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
@@ -629,30 +628,13 @@ class AnthropicAgentRunner:
                     messages.append(user_msg)
                     transcript.append(user_msg)
                     elog.append_user_message(agent_id=aid, message=user_msg)
-                    if invocation.interactive:
-                        # Human handoff: this text-only turn awaits fresh human
-                        # input, so it is not an autonomous loop iteration —
-                        # reset so normal multi-turn conversation never trips
-                        # no_progress. (The nudge path below still observes.)
-                        guard.note_external_input()
-                    else:
-                        loop_err = guard.observe(TurnRecord(
-                            assistant_text=last_text, tools=[],
-                            has_complete_step=False))
-                        if loop_err is not None:
-                            yield perr.make_error_event(
-                                loop_err, kind=getattr(loop_err, "kind", ""))
-                            return
-                    continue
-                # Legacy/test fallback: no continuation_fn wired by the executor.
-                if invocation.interactive and ctx.user_input_fn is not None:
-                    user_text = ctx.user_input_fn("")
-                    if inspect.isawaitable(user_text):
-                        user_text = await user_text
-                    user_msg = Message(role="user", content=(TextBlock(text=user_text),))
-                    messages.append(user_msg)
-                    transcript.append(user_msg)
-                    elog.append_user_message(agent_id=aid, message=user_msg)
+                    loop_err = guard.observe(TurnRecord(
+                        assistant_text=last_text, tools=[],
+                        has_complete_step=False))
+                    if loop_err is not None:
+                        yield perr.make_error_event(
+                            loop_err, kind=getattr(loop_err, "kind", ""))
+                        return
                     continue
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",

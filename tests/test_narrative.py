@@ -85,7 +85,7 @@ def test_phase_derived_from_step_started_payload() -> None:
     tree = nv.build_tree([
         _ev("1", "change_created", change_id=1, title="x"),
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
-            model="m", provider="anthropic", interactive=False),
+            model="m", provider="anthropic"),
         _ev("3", "step_completed", step="spec", kind="agent",
             action={"verb": "continue"}, var_mutations={}),
     ])
@@ -135,7 +135,7 @@ def test_open_step_is_a_valid_terminal_state() -> None:
     # User-pause path emits no step_completed (design §5.1). The step stays open.
     tree = nv.build_tree([
         _ev("2", "step_started", step="spec", kind="agent", phase="design",
-            model="m", provider="anthropic", interactive=False),
+            model="m", provider="anthropic"),
         _ev("3", "workflow_paused", reason="ctrl-c"),
     ])
     phase = tree.root.children[0]

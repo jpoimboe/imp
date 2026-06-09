@@ -31,7 +31,6 @@ class ToolContext:
     provider_name: str = ""
     model_name: str = ""
     parent_transcript_dir: Path | None = None
-    interactive: bool = False
     running_processes: list[Any] = field(default_factory=list)
     # The change being processed; used by subagent dispatch to propagate slug/title.
     change_context: Any = None
@@ -42,8 +41,8 @@ class ToolContext:
     # rename_change tool mutates change.title + rewrites change.json through it.
     # Distinct from change_context, which is the FROZEN render-time snapshot.
     change: Any = None
-    # The runner injects this callable so the PROMPT_USER resume path can read
-    # the user's reply when an interactive transcript ends on assistant text.
+    # The runner injects this callable as the wait_for_user / AWAITING_USER
+    # resume input channel, used to read the user's reply. None for subagents.
     user_input_fn: Any = None
     # Shared EventLog WRITE instance, set by the parent runner at the same site
     # it sets spawn_subagent. dispatch_task threads this into the subagent's

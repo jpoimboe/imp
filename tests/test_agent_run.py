@@ -67,7 +67,7 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
         initial_messages=(), change_context=_cc(tmp_path),
-        interactive=False, user_chat_input_fn=None,
+        user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=7, agent_id="sub:abc", event_log=None,
@@ -101,7 +101,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
         initial_messages=(), change_context=_cc(tmp_path),
-        interactive=False, user_chat_input_fn=None,
+        user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
@@ -127,7 +127,7 @@ def test_build_agent_invocation_omits_bash_paths_note_without_bash(
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
         initial_messages=(), change_context=_cc(tmp_path),
-        interactive=False, user_chat_input_fn=None,
+        user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
@@ -137,13 +137,15 @@ def test_build_agent_invocation_omits_bash_paths_note_without_bash(
     assert "IMP_PROJECT_ROOT" not in inv.system_prompt
 
 
-def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) -> None:
+def test_build_agent_invocation_wires_user_input_unconditionally(
+    tmp_path: Path,
+) -> None:
     from imp.engine.agent_run import build_agent_invocation
 
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), interactive=True,
+        change_context=_cc(tmp_path),
         user_chat_input_fn=lambda _p: "hi",
         transcript_dir=tmp_path / "td", fs_permissions=(),
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
@@ -151,9 +153,10 @@ def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) -> 
         change_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
-    assert inv.interactive is True
     assert inv.continuation_fn is not None
-    assert inv.user_input_fn is not None  # interactive -> AWAITING_USER resume wired
+    # user_chat_input_fn is wired unconditionally (the wait_for_user / AWAITING_USER
+    # resume input channel for any attended top-level agent).
+    assert inv.user_input_fn is not None
 
 
 def test_build_agent_invocation_threads_lint_command(tmp_path: Path) -> None:
@@ -162,7 +165,7 @@ def test_build_agent_invocation_threads_lint_command(tmp_path: Path) -> None:
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), interactive=False,
+        change_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
@@ -178,7 +181,7 @@ def test_build_agent_invocation_threads_test_command(tmp_path: Path) -> None:
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), interactive=False,
+        change_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
@@ -193,7 +196,7 @@ def _inv(tmp_path: Path):
     return build_agent_invocation(
         agent_def=_agent(), provider_name="p", model_name="m",
         rendered_system_prompt="B", initial_messages=(),
-        change_context=_cc(tmp_path), interactive=False,
+        change_context=_cc(tmp_path),
         user_chat_input_fn=None, transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl",
         subagent_defs={}, tiers=(), max_tool_calls=None,
@@ -381,7 +384,7 @@ def _build_inv(tmp_path: Path, **kw):
         agent_def=_agent(tools=frozenset({"bash", "complete_step"})),
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path), interactive=False, user_chat_input_fn=None,
+        change_context=_cc(tmp_path), user_chat_input_fn=None,
         transcript_dir=tmp_path, fs_permissions=(), events_path=tmp_path / "e",
         subagent_defs={}, tiers=(), max_tool_calls=None, agent_id="step:p/s",
         event_log=None, change_state=None, first_event_parent_id=None,
@@ -445,7 +448,7 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
         initial_messages=(), change_context=_cc(tmp_path),
-        interactive=False, user_chat_input_fn=None,
+        user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,
@@ -467,7 +470,7 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
         provider_name="anthropic", model_name="m",
         rendered_system_prompt="RENDERED BODY",
         initial_messages=(), change_context=_cc(tmp_path),
-        interactive=False, user_chat_input_fn=None,
+        user_chat_input_fn=None,
         transcript_dir=tmp_path / "td", fs_permissions=(),
         events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
         max_tool_calls=None, agent_id="step:p/s", event_log=None,

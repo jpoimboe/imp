@@ -34,7 +34,7 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(slug="test", title="Test", project_root=tmp_path,
                                      workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
-        interactive=False, transcript_dir=tmp_path / "s",
+        transcript_dir=tmp_path / "s",
         fs_permissions=(), events_path=tmp_path / "events.jsonl",
     )
 

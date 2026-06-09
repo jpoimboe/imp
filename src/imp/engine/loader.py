@@ -577,7 +577,6 @@ def _parse_step(
                 _parse_fs_rule(r, source, yaml_path)
                 for r in (raw.get("fs_permissions") or [])
             ),
-            interactive=bool(raw.get("interactive", False)),
             max_tool_calls=raw.get("max_tool_calls"),
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
         )

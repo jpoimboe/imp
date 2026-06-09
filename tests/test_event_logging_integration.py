@@ -122,7 +122,6 @@ def _inv(
     agent_id: str = "step:p/s",
     agent_def: AgentDef | None = None,
     subagent_defs: dict | None = None,
-    interactive: bool = False,
     user_input_fn=None,
 ) -> AgentInvocation:
     """Build an AgentInvocation mirroring test_anthropic_runner.py._inv()."""
@@ -136,7 +135,7 @@ def _inv(
         change_context=ChangeContext(
             slug="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
-        interactive=interactive, transcript_dir=tmp_path / "step",
+        transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                mode="allow",
                                source=SourceLoc(file=Path("w.yaml"), line=1)),),

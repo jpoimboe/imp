@@ -72,7 +72,7 @@ def _agent_def() -> AgentDef:
 
 
 def _inv(
-    tmp_path: Path, *, interactive: bool = False,
+    tmp_path: Path,
 ) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent_def(),
@@ -83,7 +83,6 @@ def _inv(
         change_context=ChangeContext(
             slug="s", title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
-        interactive=interactive,
         transcript_dir=tmp_path / "tx",
         fs_permissions=(
             FsRule(operations=("read", "write"), paths=("**",),
@@ -97,7 +96,7 @@ def _inv(
 def _inv_with_continuation(
     tmp_path: Path, *, continuation_fn: object,
 ) -> AgentInvocation:
-    """Interactive invocation with a `continuation_fn` for nudges.
+    """Invocation with a `continuation_fn` for nudges.
 
     When the codex run finishes a turn without calling `complete_step`, the
     runner must call `continuation_fn(last_agent_text)`. A non-None return →
@@ -112,7 +111,6 @@ def _inv_with_continuation(
         change_context=ChangeContext(
             slug="s", title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
-        interactive=True,
         transcript_dir=tmp_path / "tx",
         fs_permissions=(
             FsRule(operations=("read", "write"), paths=("**",),
@@ -163,7 +161,7 @@ async def test_no_complete_step_autonomous_yields_agent_output_missing(
         client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
     )
     runner._canonical_auth_override = tmp_path / "auth.json"
-    inv = _inv(tmp_path, interactive=False)
+    inv = _inv(tmp_path)
     events = [ev async for ev in runner.run(inv)]
     err = next(e for e in events if e.get("type") == "error")
     assert err["payload"]["kind"] == "no_complete_step"
@@ -190,7 +188,7 @@ async def test_classified_auth_text_wins_over_no_complete_step(
         client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
     )
     runner._canonical_auth_override = tmp_path / "auth.json"
-    inv = _inv(tmp_path, interactive=False)
+    inv = _inv(tmp_path)
     events = [ev async for ev in runner.run(inv)]
     err = next(e for e in events if e.get("type") == "error")
     assert err["payload"]["category"] == "auth"

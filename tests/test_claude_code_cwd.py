@@ -55,7 +55,6 @@ def _invocation(project_root: Path) -> AgentInvocation:
             project_root=project_root,
             workflow_dir=project_root / ".imp" / "change" / "workflow",
         ),
-        interactive=False,
         transcript_dir=project_root / ".imp" / "steps",
         fs_permissions=(
             FsRule(

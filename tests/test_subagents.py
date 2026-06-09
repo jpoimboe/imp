@@ -163,7 +163,7 @@ async def test_dispatch_task_awaits_spawn_subagent(tmp_path: Path) -> None:
     assert json.loads(out) == {"status": "Success", "note": "done"}
     inv = capture["inv"]
     assert inv.agent_def.name == "reviewer"
-    assert inv.interactive is False
+    assert inv.user_input_fn is None  # subagents are headless
     assert inv.provider_name == "anthropic"
     assert inv.change_context.slug == "change-42"
 

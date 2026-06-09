@@ -73,7 +73,6 @@ def _inv(tmp_path: Path) -> AgentInvocation:
         change_context=ChangeContext(
             slug="s", title="t", project_root=tmp_path,
             workflow_dir=tmp_path, id="c1"),
-        interactive=False,
         transcript_dir=tmp_path / "tx",
         fs_permissions=(
             FsRule(operations=("read", "write"), paths=("**",),

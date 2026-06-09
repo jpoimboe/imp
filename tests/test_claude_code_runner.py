@@ -65,7 +65,7 @@ def _inv(
             slug="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
-        interactive=False, transcript_dir=tmp_path / "step",
+        transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(
             operations=("read",), paths=("/project/**",), mode="allow",
             source=SourceLoc(file=Path("w.yaml"), line=1),
@@ -346,7 +346,7 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
-    inv = replace(inv, interactive=True, balance_on_resume=True)
+    inv = replace(inv, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
@@ -664,9 +664,9 @@ def test_fake_receive_response_segments_per_result_message() -> None:
 
 
 @pytest.mark.anyio
-async def test_interactive_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> None:
-    """An interactive turn ending without complete_step re-queries; turn 2 calls
-    complete_step. With per-turn receive_response() this must NOT surface a
+async def test_requery_across_two_receive_rounds_no_error(tmp_path: Path) -> None:
+    """A turn ending without complete_step re-queries via continuation_fn; turn 2
+    calls complete_step. With per-turn receive_response() this must NOT surface a
     no_result_message error (issue 7 regression)."""
     (tmp_path / "art").mkdir()
 
@@ -681,7 +681,7 @@ async def test_interactive_requery_across_two_receive_rounds_no_error(tmp_path: 
 
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log)
-    inv = replace(inv, interactive=True,
+    inv = replace(inv,
                   continuation_fn=lambda _last: "looks good, proceed")
 
     runner = ClaudeCodeAgentRunner(

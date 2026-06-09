@@ -65,7 +65,7 @@ def _inv(provider, model, tmp_path):
         system_prompt="", initial_messages=(),
         change_context=ChangeContext(
             1, tmp_path, tmp_path, tmp_path / ".imp" / "change" / "workflow"),
-        interactive=False, transcript_dir=tmp_path, fs_permissions=(),
+        transcript_dir=tmp_path, fs_permissions=(),
         events_path=tmp_path / "e.jsonl")
 
 
@@ -114,7 +114,7 @@ async def test_spawn_subagent_via_registry_returns_runner(tmp_path) -> None:
         change_context=ChangeContext(slug="x", title="t",
                                      project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
-        interactive=False, transcript_dir=tmp_path / "td",
+        transcript_dir=tmp_path / "td",
         fs_permissions=(), events_path=tmp_path / "e.jsonl")
 
     runner = await spawn_subagent_via_registry(inv)

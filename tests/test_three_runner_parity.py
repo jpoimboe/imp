@@ -80,7 +80,6 @@ def _shared_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentI
             slug="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
-        interactive=False,
         transcript_dir=tmp_path / f"step-{provider_name}",
         fs_permissions=(FsRule(
             operations=("read",), paths=("/project/**",), mode="allow",

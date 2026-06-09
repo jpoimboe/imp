@@ -44,7 +44,7 @@ def _agent_def() -> AgentDef:
         prompt_template_source="", source_path=Path("a.md"), source=_SRC, tier=None)
 
 
-def _invocation(tmp_path: Path, *, event_log: object, interactive: bool = False,
+def _invocation(tmp_path: Path, *, event_log: object,
                 continuation_fn: object = None,
                 user_input_fn: object = None) -> AgentInvocation:
     return AgentInvocation(
@@ -52,7 +52,7 @@ def _invocation(tmp_path: Path, *, event_log: object, interactive: bool = False,
         system_prompt="you are a test agent", initial_messages=(),
         change_context=ChangeContext(
             slug="s", title="t", project_root=tmp_path, workflow_dir=tmp_path, id="c1"),
-        interactive=interactive, transcript_dir=tmp_path / "tx",
+        transcript_dir=tmp_path / "tx",
         fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),
                                mode="allow", source=_SRC),),
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
@@ -108,7 +108,7 @@ async def test_cancel_after_continuation_resolves_yields_interrupted(tmp_path: P
         runner._cancel = True   # interrupt lands while the nudge is computed
         return "keep going"
 
-    inv = _invocation(tmp_path, event_log=elog, interactive=True, continuation_fn=_cont)
+    inv = _invocation(tmp_path, event_log=elog, continuation_fn=_cont)
     events = [ev async for ev in runner.run(inv)]
 
     # Guard 2 (post-cont() cancel check) must prevent the second turn from running:
@@ -138,7 +138,7 @@ async def test_cancel_raised_inside_continuation_yields_interrupted(tmp_path: Pa
         runner._cancel = True
         raise RuntimeError("transport died mid-nudge")
 
-    inv = _invocation(tmp_path, event_log=elog, interactive=True, continuation_fn=_cont)
+    inv = _invocation(tmp_path, event_log=elog, continuation_fn=_cont)
     events = [ev async for ev in runner.run(inv)]
 
     assert events[-1]["payload"]["kind"] == "interrupted"
@@ -295,7 +295,7 @@ async def test_awaiting_user_resume_injects_reply_not_system_prompt(
         assert prompt == ""
         return "the README"
 
-    inv = _invocation(tmp_path, event_log=elog, interactive=True,
+    inv = _invocation(tmp_path, event_log=elog,
                       user_input_fn=_solicit)
     # Mark this as a resume.
     object.__setattr__(inv, "balance_on_resume", True)

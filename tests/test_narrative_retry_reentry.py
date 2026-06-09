@@ -14,19 +14,19 @@ def _retry_sequence() -> list[dict[str, object]]:
     return [
         ev("1", "change_created", slug="x", title="x"),
         ev("2", "step_started", step="coder", kind="agent", phase="implement",
-           model="m", provider="anthropic", interactive=False),
+           model="m", provider="anthropic"),
         ev("3", "error", agent_id="step:implement/coder",
            message="429 …", category="rate_limit"),
         ev("4", "agent_retry",
            category="rate_limit", attempt=1, backoff_seconds=1.0),
         ev("5", "step_started", step="coder", kind="agent", phase="implement",
-           model="m", provider="anthropic", interactive=False),
+           model="m", provider="anthropic"),
         ev("6", "error", agent_id="step:implement/coder",
            message="429 …", category="rate_limit"),
         ev("7", "agent_retry",
            category="rate_limit", attempt=2, backoff_seconds=2.0),
         ev("8", "step_started", step="coder", kind="agent", phase="implement",
-           model="m", provider="anthropic", interactive=False),
+           model="m", provider="anthropic"),
         ev("9", "step_completed", step="coder", kind="agent",
            action={"verb": "success"}, var_mutations={}),
     ]
@@ -79,12 +79,12 @@ def test_retry_reentry_preserves_first_attempt_start_ts() -> None:
         {"id": "2", "agent_id": None, "type": "step_started",
          "timestamp": "2026-06-04T00:00:00+00:00",
          "payload": {"step": "coder", "kind": "agent", "phase": "implement",
-                     "model": "m", "provider": "anthropic", "interactive": False}},
+                     "model": "m", "provider": "anthropic"}},
         ev("3", "agent_retry", category="network", attempt=1, backoff_seconds=1.0),
         {"id": "4", "agent_id": None, "type": "step_started",
          "timestamp": "2026-06-04T00:00:05+00:00",
          "payload": {"step": "coder", "kind": "agent", "phase": "implement",
-                     "model": "m", "provider": "anthropic", "interactive": False}},
+                     "model": "m", "provider": "anthropic"}},
     ]
     tree = nv.build_tree(events)
     phase = next(c for c in tree.root.children if isinstance(c, nv.PhaseNode))

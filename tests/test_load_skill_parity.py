@@ -126,7 +126,6 @@ def _make_invocation(tmp_path: Path, provider_name: str, model: str) -> AgentInv
             slug="test", title="Test", project_root=tmp_path,
             workflow_dir=workflow_dir,
         ),
-        interactive=False,
         transcript_dir=tmp_path / f"step-{provider_name}",
         fs_permissions=(FsRule(
             operations=("read",), paths=("/project/**",), mode="allow",

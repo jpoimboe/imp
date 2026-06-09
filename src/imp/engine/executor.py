@@ -456,12 +456,12 @@ async def _route_agent(
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
             # MUST include "step" — _run_agent_invocation builds step_started as
-            # {model, provider, tools, interactive, **extras}; the narrative tree
+            # {model, provider, tools, **extras}; the narrative tree
             # names/pairs the node on payload.step. Branch/script/human get it via
             # _emit_started; the agent path must match.
             step_started_payload_extras={
                 "step": step.name, "kind": "agent", "phase": step.phase},
-            interactive=step.interactive, user_chat_input_fn=user_chat_input_fn,
+            user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
@@ -572,7 +572,6 @@ async def _run_agent_invocation(
     log: EventLog,
     transcript_dir: Any,
     step_started_payload_extras: dict[str, Any],
-    interactive: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any,
     initial_messages: tuple[Message, ...],
@@ -635,7 +634,6 @@ async def _run_agent_invocation(
         "model": provider.model,
         "provider": provider.name,
         "tools": sorted(agent_def.tools),
-        "interactive": interactive,
         **step_started_payload_extras,
     }, agent_id=None)
 
@@ -650,7 +648,6 @@ async def _run_agent_invocation(
             id=change.id, slug=change.slug, title=change.title,
             project_root=change.project_root, workflow_dir=change.workflow_dir,
         ),
-        interactive=interactive,
         user_chat_input_fn=user_chat_input_fn,
         transcript_dir=transcript_dir,
         fs_permissions=fs_permissions,

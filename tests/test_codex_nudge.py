@@ -10,7 +10,7 @@ from imp.agents.runner import AgentInvocation, ChangeContext
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.codex_runner import CodexAgentRunner
-from tests.codex_fakes import FakeCodex, agent_message, mcp_call, thread_started, turn_completed
+from tests.codex_fakes import FakeCodex, agent_message, thread_started, turn_completed
 
 _SRC = SourceLoc(file=Path("a.md"), line=1)
 
@@ -33,7 +33,7 @@ def _seed(tmp_path: Path) -> Path:
     return auth
 
 
-def _inv(tmp_path, elog, *, interactive, continuation_fn) -> AgentInvocation:
+def _inv(tmp_path, elog, *, continuation_fn) -> AgentInvocation:
     adef = AgentDef(
         name="t", description="", tools=frozenset({"complete_step"}), subagents=(),
         output_schema=OutputSchema(
@@ -45,34 +45,11 @@ def _inv(tmp_path, elog, *, interactive, continuation_fn) -> AgentInvocation:
         system_prompt="sp", initial_messages=(),
         change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
                                      workflow_dir=tmp_path, id="c1"),
-        interactive=interactive, transcript_dir=tmp_path / "tx",
+        transcript_dir=tmp_path / "tx",
         fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),
                                mode="allow", source=_SRC),),
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
         event_log=elog, continuation_fn=continuation_fn)
-
-
-@pytest.mark.anyio
-async def test_interactive_wrap_not_capped_at_three(tmp_path: Path) -> None:
-    """#11: an interactive run continues past 3 wrap turns."""
-    auth = _seed(tmp_path)
-    elog = InMemoryEventLog()
-    no_cs = [agent_message("q?"), turn_completed(output_tokens=1)]
-    finish = [agent_message("ok"),
-              mcp_call(name="complete_step", args={"answer": "done"},
-                       result="step complete", item_id="cs"),
-              turn_completed(output_tokens=1)]
-    # 5 no-complete-step turns, then finish — would die at 3 if capped.
-    scripted = [[thread_started("t"), *no_cs]] + [list(no_cs) for _ in range(4)] + [finish]
-
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
-    runner._canonical_auth_override = auth
-    inv = _inv(tmp_path, elog, interactive=True, continuation_fn=lambda _t: "keep going")
-    events = [ev async for ev in runner.run(inv)]
-
-    assert any(e.get("type") == "agent_output" for e in events), events
 
 
 @pytest.mark.anyio
@@ -92,7 +69,7 @@ async def test_autonomous_run_nudges_then_terminates(tmp_path: Path) -> None:
         model_name="gpt-5.5",
         client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
     runner._canonical_auth_override = auth
-    inv = _inv(tmp_path, elog, interactive=False, continuation_fn=_nudge)
+    inv = _inv(tmp_path, elog, continuation_fn=_nudge)
     events = [ev async for ev in runner.run(inv)]
 
     assert calls["n"] >= 1  # autonomous DID nudge (was 0 before #12)

@@ -230,7 +230,6 @@ class CodexAgentRunner:
             provider_name=invocation.provider_name,
             model_name=invocation.model_name,
             parent_transcript_dir=invocation.transcript_dir,
-            interactive=invocation.interactive,
             agent_id=aid,
         )
         ctx.change_context = invocation.change_context
@@ -390,11 +389,11 @@ class CodexAgentRunner:
         """Start a thread, run streamed turns, consume events.
 
         Multi-turn nudge loop (Task 28): on a turn that completes without
-        `complete_step`, classified provider-error text short-circuits; an
-        interactive run with a wired `continuation_fn` is nudged for another
-        turn; autonomous or exhausted runs emit the appropriate terminal
-        error. Inline cap-abort / native-violation / turn.failed / interrupt
-        handling is preserved verbatim inside the inner loop.
+        `complete_step`, classified provider-error text short-circuits; a run
+        with a wired `continuation_fn` is nudged for another turn; exhausted
+        runs emit the appropriate terminal error. Inline cap-abort /
+        native-violation / turn.failed / interrupt handling is preserved
+        verbatim inside the inner loop.
         """
         # Enable codex's model-hosted web_search ONLY when this agent declared
         # the tool (governance: agents opt in via `tools:`). The flag also gates
@@ -568,58 +567,17 @@ class CodexAgentRunner:
                     info = state.killed_tool_uses.pop(0)
                     elog.append(agent_id=aid, type="tool_killed", payload=info)
 
-                # Native-tool violation → fail-closed. AC #18:
-                #   - autonomous: unconditional revert + bail.
-                #   - interactive: prompt user (default revert); a "keep"
-                #     choice is explicitly logged BEFORE bytes are retained,
-                #     so a post-mortem reader sees the keep before any
-                #     subsequent event confirming retention.
+                # Native-tool violation → fail-closed. AC #18: unconditional
+                # revert + bail.
                 if proc_state.get("native_violation") is not None:
                     detail = proc_state["native_violation"]
-                    keep = False
-                    if (invocation.interactive
-                            and self._user_input_fn is not None):
-                        import inspect as _inspect
-                        prompt = (
-                            f"codex used a native {detail['kind']} tool; the "
-                            "bytes are already on disk. Type 'keep' to retain "
-                            "them; anything else (default) reverts to entry "
-                            "state. > "
-                        )
-                        try:
-                            answer = self._user_input_fn(prompt)
-                            if _inspect.isawaitable(answer):
-                                answer = await answer
-                        except Exception:
-                            # If the prompt itself fails, default to the
-                            # spec-mandated revert. Do NOT swallow into a keep.
-                            answer = ""
-                        keep = str(answer or "").strip().lower() == "keep"
-                        # Log the decision BEFORE acting on it. This entry
-                        # must precede any event that could be construed as
-                        # confirming retention (the terminal error event is
-                        # the NEXT thing yielded; nothing else writes
-                        # between).
-                        elog.append(
-                            agent_id=aid, type="runner_warning",
-                            payload={
-                                "message": (
-                                    f"codex native-tool violation: user chose "
-                                    f"{'keep' if keep else 'revert'}"),
-                                "detail": detail,
-                                "decision": "keep" if keep else "revert",
-                            },
-                        )
-                    if not keep:
-                        restore_to_snapshot(ctx.project_root, entry_snapshot)
+                    restore_to_snapshot(ctx.project_root, entry_snapshot)
                     yield {"type": "error", "payload": {
                         "category": "config", "kind": "native_tool_violation",
                         "message": (
                             f"codex used a native {detail['kind']} tool; "
-                            + ("bytes retained per user 'keep'."
-                               if keep else
-                               "worktree reverted to entry state.")),
-                        "detail": {**detail, "kept_bytes": keep}}}
+                            "worktree reverted to entry state."),
+                        "detail": {**detail, "kept_bytes": False}}}
                     return
 
                 # Mirror complete_step_args from the shared state into
@@ -643,24 +601,14 @@ class CodexAgentRunner:
                         tools=list(proc_state.get("turn_tool_outcomes", [])),
                         has_complete_step=bool(proc_state.get("complete_step_called")),
                     )
-                    # Mirror claude_code's guard gating now that G3 drives BOTH
-                    # modes off continuation_fn. An interactive pure-text turn
-                    # awaiting fresh human input is a human handoff, not an
-                    # autonomous loop iteration: reset the guard so normal
-                    # multi-turn conversation never trips no_progress. A
-                    # tool-bearing interactive turn still observes (an
-                    # interactive re-read loop is still caught), and autonomous
-                    # nudge turns always observe — so repeated no-progress
-                    # automated nudges still accumulate toward a trip (the C1
+                    # Every turn observes the loop guard: repeated no-progress
+                    # automated nudges accumulate toward a trip (the C1
                     # loop-guard backstop the unification work was waiting on).
-                    if invocation.interactive and not record.tools:
-                        guard.note_external_input()
-                    else:
-                        loop_err = guard.observe(record)
-                        if loop_err is not None:
-                            yield perr.make_error_event(
-                                loop_err, kind=getattr(loop_err, "kind", ""))
-                            return
+                    loop_err = guard.observe(record)
+                    if loop_err is not None:
+                        yield perr.make_error_event(
+                            loop_err, kind=getattr(loop_err, "kind", ""))
+                        return
                     if proc_state.get("complete_step_called"):
                         args = proc_state.get("complete_step_args") or {}
                         try:
@@ -686,8 +634,8 @@ class CodexAgentRunner:
                             classified, kind=getattr(classified, "kind", ""))
                         return
                     # Turn ended without complete_step. If a continuation_fn is
-                    # wired, cross to the outer loop (interactive wrap OR
-                    # autonomous nudge); the closure itself decides when to stop
+                    # wired, cross to the outer loop for the autonomous nudge;
+                    # the closure itself decides when to stop
                     # (returning None -> terminate via no_complete_step_after_
                     # nudges). Without a continuation_fn there is no way to
                     # continue, so emit the immediate `no_complete_step`.

@@ -24,7 +24,6 @@ def _ctx(tmp_path: Path) -> ToolContext:
         provider_name="codex",
         model_name="gpt-5.5",
         parent_transcript_dir=tmp_path,
-        interactive=False,
     )
 
 

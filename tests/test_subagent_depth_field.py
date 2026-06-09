@@ -26,7 +26,7 @@ def test_invocation_subagent_depth_and_coordinator_default() -> None:
         change_context=ChangeContext(slug="x", title="t",
                                      project_root=Path("/tmp"),
                                      workflow_dir=Path("/tmp/wf")),
-        interactive=False, transcript_dir=Path("/tmp/td"),
+        transcript_dir=Path("/tmp/td"),
         fs_permissions=(), events_path=Path("/tmp/e.jsonl"))
     assert inv.subagent_depth == 0
     assert inv.coordinator is None

@@ -182,7 +182,6 @@ class Step:
                                         # this step's resolved (provider, model)
                                         # is scored to differ from that step's.
     fs_permissions: tuple[FsRule, ...] = ()
-    interactive: bool = False
     max_tool_calls: int | None = None
     max_retries: int = 0
     # script-only

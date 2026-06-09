@@ -83,24 +83,22 @@ class AgentInvocation:
     system_prompt: str
     initial_messages: tuple[Message, ...]
     change_context: ChangeContext
-    interactive: bool
     transcript_dir: Path                   # .imp/change/steps/<phase>/<step>/
     fs_permissions: tuple[FsRule, ...]
     events_path: Path
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     # resolved by engine (Task 27a/28); None means no tool-count cap (opt-in only)
     max_tool_calls: int | None = None
-    # Set by the executor when the step is interactive. Called by the providers'
-    # PROMPT_USER resume path and the legacy end-of-turn fallback to read the
-    # user's reply. May return either a `str` or an `Awaitable[str]`; both
-    # call-sites await-if-awaitable.
+    # The wait_for_user / AWAITING_USER resume input channel. Wired for attended
+    # top-level agents; None for subagents (their wait_for_user pauses headless).
+    # May return either a `str` or an `Awaitable[str]`; call-sites await-if-awaitable.
     user_input_fn: Callable[[str], str | Awaitable[str]] | None = None
-    # Set by the executor for the END-OF-TURN resume — distinct from
-    # user_input_fn, which serves the PROMPT_USER resume path.
+    # Set by the executor for the END-OF-TURN nudge — distinct from
+    # user_input_fn, which serves the wait_for_user / AWAITING_USER resume path.
     # Called with the agent's last text; returns the next user-message text to
     # inject and continue, or None to stop (→ agent_incomplete). None means
-    # "no end-of-turn resume wired" (legacy/test); providers then fall back to
-    # the prior interactive-resume / no_complete_step behavior.
+    # "no end-of-turn nudge wired" (legacy/test); providers then emit the
+    # immediate no_complete_step behavior.
     continuation_fn: (
         Callable[[str], str | None | Awaitable[str | None]] | None
     ) = None

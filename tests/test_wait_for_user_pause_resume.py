@@ -88,7 +88,7 @@ def _cc_inv(tmp_path: Path):
         change_context=ChangeContext(
             slug="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
-        interactive=False, transcript_dir=tmp_path / "step",
+        transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                mode="allow",
                                source=SourceLoc(file=Path("w.yaml"), line=1)),),
@@ -424,7 +424,7 @@ async def test_anthropic_e2e_headless_pause_then_attended_resume(
             change_context=ChangeContext(
                 slug="test", title="Test", project_root=tmp_path,
                 workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
-            interactive=False, transcript_dir=transcript_dir,
+            transcript_dir=transcript_dir,
             fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                    mode="allow",
                                    source=SourceLoc(file=Path("w.yaml"), line=1)),),
@@ -499,7 +499,6 @@ async def test_anthropic_e2e_headless_pause_then_attended_resume(
     inv_resume = dataclasses.replace(
         _make_inv(event_log=log_resume),
         balance_on_resume=True,
-        interactive=True,
     )
 
     events_resume = [ev async for ev in runner_resume.run(inv_resume)]
@@ -645,7 +644,6 @@ async def test_claude_code_e2e_headless_pause_then_attended_resume(
         inv_pause,
         event_log=log_resume,
         balance_on_resume=True,
-        interactive=True,
         non_interactive=False,
     )
 

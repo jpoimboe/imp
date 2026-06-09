@@ -157,7 +157,6 @@ async def drive_agent(
             project_root=project_root,
             workflow_dir=workflow_dir or _assets_root(),
         ),
-        interactive=False,
         user_chat_input_fn=None,
         transcript_dir=events_dir / "transcripts",
         fs_permissions=(),  # reviewers/judges are read-only; file tools via /project map

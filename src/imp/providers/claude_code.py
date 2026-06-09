@@ -448,8 +448,9 @@ def _history_dicts(messages: list[Message]) -> Any:
     The trailing message determines whether claude needs a fresh trigger:
     if the last message is a user turn carrying tool_results, claude
     proceeds to the next assistant turn automatically; if it's an assistant
-    text-only turn (interactive resume state), the runner has to send a
-    fresh user prompt first (handled in the runner above the stream).
+    text-only turn (a resume state ending on assistant prose), the runner
+    has to send a fresh user prompt first (handled in the runner above the
+    stream).
     """
     session_id = "imp"
     for m in messages:
@@ -797,7 +798,6 @@ class ClaudeCodeAgentRunner:
             provider_name=invocation.provider_name,
             model_name=invocation.model_name,
             parent_transcript_dir=invocation.transcript_dir,
-            interactive=invocation.interactive,
             agent_id=aid,
         )
         ctx.change_context = invocation.change_context
@@ -1133,25 +1133,16 @@ class ClaudeCodeAgentRunner:
                         # handling so a detected loop wins over a nudge.
                         flushed = _flush_pending()
                         if flushed is not None:
-                            if invocation.interactive and not flushed.tools:
-                                # Human handoff: a pure-text turn awaiting fresh
-                                # human input is not an autonomous loop iteration,
-                                # so reset rather than observe — normal multi-turn
-                                # conversation must not trip no_progress. A
-                                # tool-bearing interactive turn still observes, so
-                                # an interactive re-read loop is still caught.
-                                guard.note_external_input()
-                            else:
-                                loop_err = guard.observe(flushed)
-                                if loop_err is not None:
-                                    yield perr.make_error_event(
-                                        loop_err, kind=getattr(loop_err, "kind", ""))
-                                    return
+                            loop_err = guard.observe(flushed)
+                            if loop_err is not None:
+                                yield perr.make_error_event(
+                                    loop_err, kind=getattr(loop_err, "kind", ""))
+                                return
 
                         # End-of-turn:
                         #   a) complete_step captured → emit agent_output, return
-                        #   b) interactive mode → prompt user, send another query
-                        #   c) autonomous mode without complete_step → error
+                        #   b) nudge via continuation_fn → send another query
+                        #   c) no complete_step and no nudge → error
                         if state.complete_step_called:
                             try:
                                 validate_agent_output(
@@ -1187,21 +1178,16 @@ class ClaudeCodeAgentRunner:
                                 last_text = _text_of(prev)
                                 break
 
-                        # Classify ONLY on the non-interactive path, before the
-                        # nudge: a surfaced provider error (auth/quota) must win
-                        # over a pointless nudge. Never classify an interactive
-                        # turn — its prose can legitimately contain auth/quota
-                        # substrings (see _classify_agent_text docstring). Note:
-                        # this now runs on each non-interactive nudge turn (up to
-                        # N+1), not just the terminal one — intentional, so an
-                        # auth failure surfaces on turn 1 instead of after N
-                        # nudges.
-                        if not invocation.interactive:
-                            classified = _classify_agent_text(last_text)
-                            if classified is not None:
-                                yield perr.make_error_event(
-                                    classified, kind=getattr(classified, "kind", ""))
-                                return
+                        # Classify before the nudge: a surfaced provider error
+                        # (auth/quota) must win over a pointless nudge. This runs
+                        # on each nudge turn (up to N+1), not just the terminal one
+                        # — intentional, so an auth failure surfaces on turn 1
+                        # instead of after N nudges.
+                        classified = _classify_agent_text(last_text)
+                        if classified is not None:
+                            yield perr.make_error_event(
+                                classified, kind=getattr(classified, "kind", ""))
+                            return
 
                         cont = invocation.continuation_fn
                         if cont is not None:
@@ -1239,23 +1225,6 @@ class ClaudeCodeAgentRunner:
                             # Re-query on a FRESH receive_response() (issue 7):
                             # break the inner loop so the outer while restarts.
                             next_query = next_text
-                            requery = True
-                            break
-
-                        # Legacy/test fallback: no continuation_fn wired.
-                        if invocation.interactive and ctx.user_input_fn is not None:
-                            user_text = ctx.user_input_fn("")
-                            if inspect.isawaitable(user_text):
-                                user_text = await user_text
-                            user_msg = Message(
-                                role="user", content=(TextBlock(text=user_text),),
-                            )
-                            messages.append(user_msg)
-                            transcript.append(user_msg)
-                            elog.append_user_message(agent_id=aid, message=user_msg)
-                            # Re-query on a FRESH receive_response() (issue 7):
-                            # break the inner loop so the outer while restarts.
-                            next_query = user_text
                             requery = True
                             break
 

@@ -21,7 +21,7 @@ def ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> dic
 SAMPLE: list[dict[str, Any]] = [
     ev("1", "change_created", change_id=1, title="x"),
     ev("2", "step_started", step="spec", kind="agent", phase="design",
-       model="m", provider="anthropic", interactive=False),
+       model="m", provider="anthropic"),
     ev("3", "thinking", agent_id="step:design/spec", content="hmm"),
     ev("4", "step_completed", step="spec", kind="agent",
        action={"verb": "continue"}, var_mutations={}),

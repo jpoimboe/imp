@@ -99,7 +99,7 @@ async def test_pause_propagates_through_dispatch_task_and_task_wrapper(tmp_path)
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(slug="t", title="T", project_root=tmp_path,
                                      workflow_dir=tmp_path / "wf"),
-        interactive=False, transcript_dir=tmp_path / "step",
+        transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
                                mode="allow",
                                source=SourceLoc(file=Path("w.yaml"), line=1)),),

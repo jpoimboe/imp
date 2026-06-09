@@ -172,7 +172,6 @@ async def dispatch_task(
         initial_messages=(Message(
             role="user", content=(TextBlock(text=task_description),)),),
         change_context=cc,
-        interactive=False,
         user_chat_input_fn=None,
         transcript_dir=ctx.parent_transcript_dir / "subagents"
         / f"{subagent_name}-{invocation_id}",

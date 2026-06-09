@@ -52,7 +52,7 @@ def _agent_def(tools=frozenset({"complete_step", "read_file"})) -> AgentDef:
 
 
 def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
-         interactive=False, user_input_fn=None) -> AgentInvocation:
+         user_input_fn=None) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent_def(tools or frozenset({"complete_step", "read_file"})),
         provider_name="openai", model_name="gpt-4o-mini",
@@ -62,7 +62,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
             id="test", slug="test", title="Test", project_root=tmp_path,
             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
         ),
-        interactive=interactive, transcript_dir=tmp_path / "step",
+        transcript_dir=tmp_path / "step",
         fs_permissions=(FsRule(
             operations=("read",), paths=("/project/**",), mode="allow",
             source=SourceLoc(file=Path("w.yaml"), line=1),
@@ -360,7 +360,7 @@ async def test_awaiting_user_resume_fills_tool_result_then_continues(
     from imp.agents.transcript import Transcript
 
     (tmp_path / "art").mkdir()
-    inv = _inv(tmp_path, interactive=True)
+    inv = _inv(tmp_path)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")

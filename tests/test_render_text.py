@@ -333,8 +333,8 @@ def test_step_interactive_sourced_from_awaiting_event_not_step_started() -> None
     # Task 8: a step is "interactive" (it solicited the human) ONLY because it
     # emitted an awaiting_user_input event — NOT because step_started carried an
     # `interactive` key. A step whose stream has no awaiting_user_input is not
-    # interactive even if step_started carried interactive=True (the key is gone
-    # in Task 7; the narrative must already ignore it).
+    # interactive even if step_started carried a stray interactive=True (the key
+    # is gone in Task 7; the narrative ignores any leftover).
     solicited = nv.build_tree([
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
         _ev("2", "awaiting_user_input", agent_id="step:p/s",
@@ -347,8 +347,8 @@ def test_step_interactive_sourced_from_awaiting_event_not_step_started() -> None
     assert step.interactive is True
 
     not_solicited = nv.build_tree([
-        # step_started STILL carries interactive=True (Task 7 hasn't removed it yet)
-        # but with no awaiting_user_input event the step must NOT be interactive.
+        # step_started carries a stray interactive=True payload key, but with no
+        # awaiting_user_input event the step must NOT be interactive.
         _ev("1", "step_started", step="s", kind="agent", phase="p", model="m",
             interactive=True),
         _ev("2", "user_message", agent_id="step:p/s",
