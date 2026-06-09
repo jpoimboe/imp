@@ -8,6 +8,7 @@ are relative to the worktree root.
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import re
 from collections.abc import Iterator
@@ -79,6 +80,38 @@ async def glob(ctx: ToolContext, pattern: str) -> str:
     return "\n".join(out) if out else "(no matches)"
 
 
+def _glob_variants(pat: str) -> list[str]:
+    """Expand each `**/` occurrence (literal, non-overlapping, left-to-right —
+    the same occurrences `pat.count("**/")` sees) as independently kept or
+    deleted, restoring the zero-or-more-directories meaning fnmatch lacks
+    (fnmatch's `**/` must consume at least one `/`, so `src/**/*.ts` alone
+    would silently miss files directly inside src/). 2^n variants; the caller
+    bounds n at 5. A single global replace("**/", "") would NOT suffice: it
+    yields only the all-kept and all-deleted variants and misses mixed-depth
+    cases anchored by a literal segment. Accepted corner: deleting a
+    mid-segment `**/` (a**/b -> ab) licenses a match no glob dialect accepts —
+    false INCLUDES on pathological patterns only."""
+    variants = [""]
+    i = 0
+    while i < len(pat):
+        if pat.startswith("**/", i):
+            variants = [v + tail for v in variants for tail in ("**/", "")]
+            i += 3
+        else:
+            variants = [v + pat[i] for v in variants]
+            i += 1
+    return list(dict.fromkeys(variants))
+
+
+def _compile_glob(pat: str) -> re.Pattern[str]:
+    """ONE compiled union regex per grep call — never per candidate file.
+    fnmatch.translate gives fnmatchCASE semantics (no os.path.normcase):
+    case-sensitive, platform-independent, `*`/`**` cross `/`. Matched against
+    the worktree-relative POSIX path — NOT relative to grep's `path` arg."""
+    return re.compile("|".join(
+        "(?:" + fnmatch.translate(v) + ")" for v in _glob_variants(pat)))
+
+
 _GREP_MODES = ("files_with_matches", "content", "count")
 
 
@@ -97,12 +130,24 @@ async def grep(
     *,
     output_mode: Literal["files_with_matches", "content", "count"] = "files_with_matches",
     case_insensitive: bool = False,
+    glob: str | None = None,
 ) -> str:
     # No validation layer sits between the JSON schema and this call — every
     # constraint is enforced here in the body.
     if output_mode not in _GREP_MODES:
         raise ValueError(f"invalid output_mode {output_mode!r}; "
                          f"valid modes: files_with_matches, content, count")
+    # `glob` (the wire name agents expect) shadows this module's glob() tool
+    # function inside this body — rebind to a distinct local and never call
+    # glob() in here.
+    glob_pattern = glob
+    glob_rx: re.Pattern[str] | None = None
+    if glob_pattern is not None:
+        if not glob_pattern.strip():
+            raise ValueError("glob pattern must not be empty")
+        if glob_pattern.count("**/") > 5:
+            raise ValueError("glob pattern has too many **/ occurrences (max 5)")
+        glob_rx = _compile_glob(glob_pattern)
     ctx.check_fs_permission("read", path)
     target = ctx.resolve_path(path)
     # A typo'd/stale path — or a fifo/socket/device — must not read as
@@ -137,13 +182,15 @@ async def grep(
         if capped:
             break
         await tool_checkpoint(coordinator, deadline)
+        rel_str = f.relative_to(root).as_posix()
+        if glob_rx is not None and glob_rx.match(rel_str) is None:
+            continue  # applies uniformly — including when path names one file
         try:
             text, read_truncated = await read_text_capped(
                 f, coordinator=coordinator, deadline=deadline)
         except OSError:
             continue
         cap_truncated = file_is_cap_truncated(read_truncated, f)
-        rel_str = f.relative_to(root).as_posix()
         lines = split_lines(text, cap_truncated=cap_truncated)
 
         if output_mode == "files_with_matches":

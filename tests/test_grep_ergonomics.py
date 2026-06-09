@@ -237,3 +237,95 @@ def test_byte_cap_during_trailing_notes_drops_remainder_with_marker(
     assert lines[-1] == "... [output truncated at 50 KB] ..."
     assert "[a_trunc1.txt: scanned first 5 MB only]" in out
     assert "a_trunc2.txt" not in out  # its note was dropped under the cap
+
+
+# --- glob filter -------------------------------------------------------------
+
+def test_glob_star_matches_any_depth(tmp_path: Path) -> None:
+    # fnmatch semantics: * crosses /, so *.py matches at ANY depth (CC's
+    # "match anywhere" intent) — unlike the glob TOOL's Path.glob semantics.
+    (tmp_path / "a.py").write_text("needle\n")
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "e.py").write_text("needle\n")
+    (tmp_path / "d" / "f.txt").write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", glob="*.py")
+    assert out == "a.py\nd/e.py"
+
+
+def test_glob_doublestar_nested_and_zero_depth(tmp_path: Path) -> None:
+    # fnmatch's **/ must consume a /; the variant expansion restores the
+    # zero-or-more-directories meaning: src/**/*.ts matches BOTH.
+    (tmp_path / "src" / "a").mkdir(parents=True)
+    (tmp_path / "src" / "a" / "b.ts").write_text("needle\n")
+    (tmp_path / "src" / "x.ts").write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", glob="src/**/*.ts")
+    # Walk order: a directory's own files come before its subdirs' files.
+    assert out == "src/x.ts\nsrc/a/b.ts"
+
+
+def test_glob_mixed_depth_multi_doublestar(tmp_path: Path) -> None:
+    # The discriminating shape: first **/ non-zero-depth, second zero-depth,
+    # with the literal fixtures/ anchoring the pattern. The rejected
+    # two-variant implementation (all-kept + all-deleted only) misses this
+    # file. (src/fixtures/a/b.ts would NOT discriminate — the all-deleted
+    # variant matches it via the slash-crossing trailing *.)
+    p = tmp_path / "src" / "a" / "fixtures"
+    p.mkdir(parents=True)
+    (p / "b.ts").write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", glob="src/**/fixtures/**/*.ts")
+    assert out == "src/a/fixtures/b.ts"
+
+
+def test_glob_empty_or_whitespace_rejected(tmp_path: Path) -> None:
+    # fnmatchcase would silently match nothing; "(no matches)" must not hide
+    # that the FILTER was the problem.
+    (tmp_path / "a.py").write_text("x\n")
+    with pytest.raises(ValueError, match="glob pattern must not be empty"):
+        _grep(_ctx(tmp_path), pattern="x", glob="")
+    with pytest.raises(ValueError, match="glob pattern must not be empty"):
+        _grep(_ctx(tmp_path), pattern="x", glob="   ")
+
+
+def test_glob_too_many_doublestar_occurrences(tmp_path: Path) -> None:
+    # Model-generated input: bound the 2^n expansion at 5 occurrences.
+    (tmp_path / "a.py").write_text("x\n")
+    with pytest.raises(ValueError,
+                       match=r"glob pattern has too many \*\*/ occurrences \(max 5\)"):
+        _grep(_ctx(tmp_path), pattern="x", glob="**/" * 6 + "*.py")
+
+
+def test_glob_filters_single_file_path_uniformly(tmp_path: Path) -> None:
+    # One anchoring base regardless of `path`: a single-file path that fails
+    # the glob filter is filtered out, not exempted.
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "x.py").write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", path="src/x.py", glob="*.ts")
+    assert out == "(no matches)"
+
+
+def test_glob_stays_case_sensitive_under_case_insensitive(tmp_path: Path) -> None:
+    # case_insensitive applies to the REGEX only; the glob filter is always
+    # case-sensitive (fnmatchcase, no normcase).
+    (tmp_path / "a.md").write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", case_insensitive=True, glob="*.MD")
+    assert out == "(no matches)"
+
+
+def test_single_file_path_bypasses_excluded_dirs(tmp_path: Path) -> None:
+    # Pre-existing behavior, owned and KEPT (not a drive-by fix): an explicit
+    # single-file path reaches files the walk never would — explicit path is
+    # explicit intent.
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("SECRET\n")
+    out = _grep(_ctx(tmp_path), pattern="SECRET", path=".git/config")
+    assert out == ".git/config"
+
+
+def test_glob_variants_unit() -> None:
+    from imp.agents.tools.nav import _glob_variants
+
+    assert _glob_variants("src/**/*.ts") == ["src/**/*.ts", "src/*.ts"]
+    # Literal non-overlapping count: ***/ contains one **/ (at offset 1);
+    # mid-segment a**/b counts too (fnmatch has no segment concept).
+    assert _glob_variants("a**/b") == ["a**/b", "ab"]
+    assert len(_glob_variants("src/**/f/**/*.ts")) == 4
