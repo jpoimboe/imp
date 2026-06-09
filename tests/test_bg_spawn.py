@@ -35,6 +35,7 @@ async def _spawn(ctx: ToolContext, command: str) -> dict:
 
 async def _cleanup(ctx: ToolContext) -> None:
     import signal as _sig
+
     from imp.agents.tools.context import kill_process_group
     for bp in ctx.background_processes.values():
         await kill_process_group(bp.proc, _sig.SIGKILL)
@@ -127,6 +128,7 @@ def test_err_open_failure_cleans_out_file(tmp_path: Path, monkeypatch) -> None:
     """The err-file open branch: out_f is closed and bg1.out unlinked."""
     async def main() -> None:
         import builtins
+
         import imp.agents.tools.bg as bg_mod
         from imp.agents.tools.bg import _bg_dir
         ctx = _ctx(tmp_path)

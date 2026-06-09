@@ -67,7 +67,6 @@ known-first-party = ["imp", "impty"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/test_types.py" = ["F401"]  # imports verify public API surface, not all are used inline
-"tests/test_bg_spawn.py" = ["I001"]  # local imports inside async def bodies; isort can't sort them
 
 [tool.mypy]
 python_version = "3.11"
