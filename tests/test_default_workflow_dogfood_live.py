@@ -14,8 +14,10 @@ What this proves:
   3. The reviewer reviews a real diff.
   4. The driver decides when to act based on engine-emitted events,
      not by matching renderer output strings.
-  5. `imp log` and `imp log --full` smoke-pass.
-  6. The coder's specific code change landed (sentinel grep).
+  5. The headless `--message` new→resume loop drives a multi-solicit
+     workflow to completion (one reply per invocation).
+  6. `imp log` and `imp log --full` smoke-pass.
+  7. The coder's specific code change landed (sentinel grep).
 
 Skip predicates (all must pass):
   - first_opted_in() is not None  (IMP_LIVE_PROVIDERS opt-in)
@@ -218,10 +220,15 @@ def test_dogfood_imp_on_imp_default_workflow(
     """Run the shipped default workflow against imp's own source.
 
     Dogfoods imp by asking the workflow to add a unique sentinel print to
-    src/imp/agents/tools/bash.py. Launched via --non-interactive with stdin=PIPE:
-    the feature intent is written to stdin then stdin is closed so all subsequent
-    asks use the EOF default. After completion, verifies the sentinel landed in
-    the right file plus all the events.jsonl/imp-log invariants.
+    src/imp/agents/tools/bash.py. Driven headlessly via the `--message`
+    new→resume loop: `imp new <title> --non-interactive --message <intent>`
+    delivers the feature intent to the spec-writer's opening wait_for_user;
+    each later wait_for_user in a given invocation exhausts the one allotted
+    message and PAUSES cleanly, which the driver continues with
+    `imp resume <id> --non-interactive --message <proceed_reply>` — one reply
+    per invocation — until the change completes and merges. After completion,
+    verifies the sentinel landed in the right file plus all the
+    events.jsonl/imp-log invariants.
     """
     # Isolate XDG_CONFIG_HOME to a tmp dir BEFORE anything reads/writes user
     # config. _seed_dogfood_project() runs run_init() in-process, which now
@@ -303,9 +310,11 @@ def test_dogfood_imp_on_imp_default_workflow(
     # The spec-writer now ALWAYS opens with a clarifying question (its prompt
     # mandates a turn-1 ask, no tools, no exploration). The system prompt no
     # longer surfaces the title, so the agent learns the task from the FIRST
-    # awaiting_user_input reply — that is where the driver delivers the title
-    # text below. With --non-interactive, the intent is written to stdin and
-    # stdin is closed; all subsequent asks use the EOF default (first option).
+    # wait_for_user reply — that is the FIRST `--message` (the intent) below.
+    # In --non-interactive mode each invocation carries ONE `--message`: the
+    # first wait_for_user solicit consumes it; any later solicit in the same
+    # invocation has no message left and the run PAUSES (clean, resumable). The
+    # driver loop continues with `imp resume <id> --message <proceed_reply>`.
 
     # Title carries the feature intent. Unique sentinel per run prevents
     # stale state from faking a pass.
@@ -382,55 +391,66 @@ def test_dogfood_imp_on_imp_default_workflow(
 
         request.addfinalizer(_dump_capture)
 
-    # Launch imp new via --non-interactive with stdin=PIPE (no PTY needed).
-    # Deliver the feature intent as the FIRST scripted reply (the spec-writer's
-    # opening ask), then close stdin so every later ask falls to the EOF default.
-    proc = subprocess.Popen(
-        [str(venv_python), "-m", "imp", "new", title, "--non-interactive"],
-        cwd=tmp_path,
-        stdin=subprocess.PIPE,
-        stdout=(cap_out if cap_out is not None else subprocess.DEVNULL),
-        stderr=(subprocess.STDOUT if cap_out is not None else subprocess.DEVNULL),
-        env=env,
-        start_new_session=True,
-        text=False,
-    )
-    with contextlib.suppress(BrokenPipeError):
-        proc.stdin.write(title.encode("utf-8") + b"\n")
-        proc.stdin.close()
-
     TOTAL_TIMEOUT = 1800.0
     EVENTS_FIRST_APPEAR_TIMEOUT = 30.0
+    MAX_RESUMES = 8
 
-    # SIGINT handling: hard-kill the subprocess PG so Ctrl-C is
-    # unambiguous (raising KeyboardInterrupt from a signal handler is
-    # unreliable inside pytest — some plugins swallow it).
+    # The FIRST `--message` is the feature intent (the spec-writer's opening
+    # wait_for_user consumes it). Any LATER wait_for_user in the same invocation
+    # has no message left and pauses; the driver resumes with this firm generic
+    # continuation so the workflow proceeds without further human input.
+    intent = title
+    proceed_reply = (
+        "Proceed using your best judgment. The requirements in my first "
+        "message are complete and final — implement exactly as specified and "
+        "do not ask further questions."
+    )
+
+    # SIGINT handling: hard-kill the CURRENTLY-running subprocess PG so Ctrl-C
+    # is unambiguous (raising KeyboardInterrupt from a signal handler is
+    # unreliable inside pytest — some plugins swallow it). `current_proc` is a
+    # one-element mutable holder updated on each launch so the handler/teardown
+    # always target the live invocation.
+    current_proc: list[subprocess.Popen[bytes] | None] = [None]
+
     def _on_sigint(_signum: int, _frame: Any) -> None:
         with contextlib.suppress(OSError):
             os.write(2, b"\n[dogfood] SIGINT received; killing subprocess and aborting\n")
-        with contextlib.suppress(OSError, ProcessLookupError):
-            os.killpg(proc.pid, signal.SIGKILL)
+        p = current_proc[0]
+        if p is not None:
+            with contextlib.suppress(OSError, ProcessLookupError):
+                os.killpg(p.pid, signal.SIGKILL)
         os._exit(130)
     _prev_sigint = signal.signal(signal.SIGINT, _on_sigint)
 
     def _teardown_proc() -> None:
         signal.signal(signal.SIGINT, _prev_sigint)
-        if proc.poll() is None:
+        p = current_proc[0]
+        if p is not None and p.poll() is None:
             with contextlib.suppress(OSError, ProcessLookupError):
-                os.killpg(proc.pid, signal.SIGKILL)
-            proc.kill()
-            proc.wait()
+                os.killpg(p.pid, signal.SIGKILL)
+            p.kill()
+            p.wait()
 
-    # Discover the Change worktree (created at startup, before any LLM call).
-    # Capture the slug NOW — the worktree is transient and is removed at merge.
-    # Guarded so a startup-crash timeout still tears down proc.
-    try:
-        change_wt = _await_worktree(tmp_path, timeout=EVENTS_FIRST_APPEAR_TIMEOUT)
-    except BaseException:
-        _teardown_proc()
-        raise
-    slug = change_wt.name
-    events_file = change_wt / ".imp" / "change" / "events.jsonl"
+    stdout_sink = cap_out if cap_out is not None else subprocess.DEVNULL
+    stderr_sink = subprocess.STDOUT if cap_out is not None else subprocess.DEVNULL
+
+    def _launch(argv: list[str]) -> subprocess.Popen[bytes]:
+        """Launch one headless invocation (new or resume) and record it as the
+        current proc for the SIGINT handler/teardown. stdin is DEVNULL — the
+        reply channel is `--message`, not stdin."""
+        p: subprocess.Popen[bytes] = subprocess.Popen(
+            argv,
+            cwd=tmp_path,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_sink,
+            stderr=stderr_sink,
+            env=env,
+            start_new_session=True,
+            text=False,
+        )
+        current_proc[0] = p
+        return p
 
     events_seen_bytes = 0
     all_events_accum: list[dict[str, Any]] = []
@@ -444,9 +464,14 @@ def test_dogfood_imp_on_imp_default_workflow(
         file=sys.stderr, flush=True,
     )
 
+    # events_file is bound after the worktree is discovered (below) and is
+    # appended-to across every resume invocation — the byte cursor is therefore
+    # continuous across the whole loop.
+    events_file: Path | None = None
+
     def _tail_events() -> list[dict[str, Any]]:
         nonlocal events_seen_bytes, events_first_seen_at
-        if not events_file.exists():
+        if events_file is None or not events_file.exists():
             return []
         if events_first_seen_at is None:
             events_first_seen_at = time.time()
@@ -480,17 +505,25 @@ def test_dogfood_imp_on_imp_default_workflow(
                 continue
         return out
 
-    try:
-        while time.time() < deadline:
-            # Startup guard: fail only if events were NEVER seen. We key off
-            # events_first_seen_at (set by _tail_events on first sighting), not
-            # events_file.exists() — at merge the worktree (and events.jsonl) is
-            # removed, so a "currently absent" check would misfire on a healthy
-            # run that has merged, reporting a bogus "did not initialize".
+    def _drive_until_exit(
+        proc: subprocess.Popen[bytes], *, startup_guard: bool
+    ) -> None:
+        """Drain events and poll until `proc` exits on its own.
+
+        Fail-fast on a NON-null-reason workflow_paused (max_loops/agent error/
+        max_retries exhaustion). An awaiting-user pause carries reason=None
+        (executor.py awaiting-user Pause()) — that is NOT a failure: the proc
+        will exit cleanly (rc 0) and the driver loop resumes with --message.
+        Enforces the GLOBAL wall-clock deadline across the whole new→resume loop.
+        """
+        while proc.poll() is None:
             if (
-                events_first_seen_at is None
+                startup_guard
+                and events_first_seen_at is None
                 and time.time() - start_time > EVENTS_FIRST_APPEAR_TIMEOUT
             ):
+                with contextlib.suppress(OSError, ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
                 proc.kill()
                 proc.wait()
                 pytest.fail(
@@ -501,48 +534,111 @@ def test_dogfood_imp_on_imp_default_workflow(
 
             for ev in _tail_events():
                 all_events_accum.append(ev)
-                etype = ev.get("type")
+                if ev.get("type") != "workflow_paused":
+                    continue
                 payload = ev.get("payload") or {}
-                if etype == "workflow_paused":
-                    # Pause fail-fast: the engine emits workflow_paused at
-                    # executor.py:100/106 whenever it halts (including
-                    # on_max_retries: pause). The driver has no resumer,
-                    # so without this branch we'd just burn the wall-clock.
-                    reason = payload.get("reason", "(no reason recorded)")
+                # reason is None  -> awaiting-user pause (resumable): NOT a
+                #                    failure; keep draining until the proc exits.
+                # reason non-null -> real failure (max_loops / error category /
+                #                    max_retries exhaustion): fail-fast.
+                if payload.get("reason") is not None:
+                    with contextlib.suppress(OSError, ProcessLookupError):
+                        os.killpg(proc.pid, signal.SIGKILL)
                     proc.kill()
                     proc.wait()
                     pytest.fail(
-                        f"engine emitted workflow_paused (reason={reason!r}); "
-                        f"likely max_retries exhausted in a step or phase."
+                        f"engine emitted workflow_paused with non-null reason "
+                        f"({payload.get('reason')!r}); likely max_loops or "
+                        f"max_retries exhausted in a step or phase."
                     )
 
-            if proc.poll() is not None:
-                break
+            if time.time() >= deadline:
+                with contextlib.suppress(OSError, ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                proc.kill()
+                proc.wait()
+                pytest.fail(
+                    f"dogfood workflow exceeded {TOTAL_TIMEOUT}s wall clock "
+                    f"(may be reviewer flake or coder iteration storm; "
+                    f"rerun once before investigating)."
+                )
 
             time.sleep(0.05)
-        else:
-            proc.kill()
-            proc.wait()
+
+    change_id: str | None = None
+    slug = "(unknown)"
+    try:
+        # ── First invocation: imp new --message <intent> ──────────────────
+        proc = _launch(
+            [str(venv_python), "-m", "imp", "new", title,
+             "--non-interactive", "--message", intent]
+        )
+
+        # Discover the Change worktree (created at startup, before any LLM call).
+        # The PATH is stable across the spec-writer's rename, so this stays valid
+        # until merge. Read the IMMUTABLE id from change.json — the slug changes
+        # on rename, but the id is the stable resume token for ALL resumes.
+        change_wt = _await_worktree(tmp_path, timeout=EVENTS_FIRST_APPEAR_TIMEOUT)
+        slug = change_wt.name
+        events_file = change_wt / ".imp" / "change" / "events.jsonl"
+        state_file = change_wt / ".imp" / "change" / "state.json"
+        change_id = json.loads(
+            (change_wt / ".imp" / "change" / "change.json").read_text()
+        )["id"]
+
+        _drive_until_exit(proc, startup_guard=True)
+        rc = proc.wait(timeout=10)
+        # rc 0 covers BOTH a clean awaiting-user pause and completion.
+        assert rc == 0, f"new exit {rc}"
+
+        # ── Resume loop: one --message per invocation until completion ─────
+        resumes = 0
+        while True:
+            # A completing invocation removes the worktree at merge, so check
+            # existence BEFORE reading state_file.
+            if not change_wt.exists():
+                break  # merged/completed -> verify via journal below
+            try:
+                state = json.loads(state_file.read_text())
+            except FileNotFoundError:
+                break  # worktree torn down mid-read -> merged/completed
+            status = state.get("status")
+            if status == "completed":
+                break
+            if status == "paused":
+                # Reached only on an awaiting-user pause: a non-null-reason
+                # pause already fail-fasted inside _drive_until_exit.
+                resumes += 1
+                if resumes > MAX_RESUMES:
+                    pytest.fail(
+                        f"exceeded {MAX_RESUMES} resume cycles; workflow keeps "
+                        f"soliciting (status={status!r}, step={state.get('step')!r})"
+                    )
+                proc = _launch(
+                    [str(venv_python), "-m", "imp", "resume", change_id,
+                     "--non-interactive", "--message", proceed_reply]
+                )
+                _drive_until_exit(proc, startup_guard=False)
+                rc = proc.wait(timeout=10)
+                assert rc == 0, f"resume exit {rc}"
+                continue
             pytest.fail(
-                f"dogfood workflow exceeded {TOTAL_TIMEOUT}s wall clock "
-                f"(may be reviewer flake or coder iteration storm; "
-                f"rerun once before investigating)."
+                f"unexpected paused state status={status!r} "
+                f"step={state.get('step')!r}"
             )
+    except BaseException:
+        _teardown_proc()
+        raise
     finally:
         _teardown_proc()
 
-    rc = proc.wait(timeout=10)
-    assert rc == 0, (
-        f"expected exit 0, got {rc}"
-    )
-
-    # Resolve the change id from the journal. The id is immutable, so it equals
-    # the startup worktree name, but read it back from the journal anyway to
-    # assert exactly one change ran here. The journal is keyed under the id.
+    # Resolve the change id from the journal. The id is immutable; read it back
+    # from the journal to assert exactly one change ran here. The journal is
+    # keyed under the id (== change_id used to drive the resume loop above).
     journaled_ids = journal.journal_ids(tmp_path)
     assert len(journaled_ids) == 1, (
         f"expected exactly one journaled change, got {journaled_ids} "
-        f"(startup id was {slug!r})"
+        f"(startup worktree slug was {slug!r}, change_id was {change_id!r})"
     )
     slug = journaled_ids[0]
 
