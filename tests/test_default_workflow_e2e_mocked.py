@@ -178,7 +178,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     # the fix is to construct per-agent canned responses instead.
     #
     # Fields that drive workflow routing (must produce a single-pass run):
-    #   verdict:approve    code-reviewer → continue (not task_gap/plan_gap)
+    #   verdict:approve    review-panel / recheck → continue (not task_gap/plan_gap)
     #   decision:merge     final-review  → sets ready_to_merge=true, continue
     #   phase:written      spec-writer   → not drafting, advances
     #   done:true          task-lead     → plan fully implemented
@@ -188,7 +188,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     default = response(
         tool_use("c0", "complete_step", {
             "status": "Success",
-            # code-reviewer routing
+            # review-panel / recheck routing
             "verdict": "approve",
             "findings": "none",
             # final-review routing (superpowers workflow)
@@ -441,12 +441,12 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
 
 @pytest.mark.anyio
-async def test_fast_path_skips_both_reviewers_but_not_code_reviewer(
+async def test_fast_path_skips_both_reviewers_but_not_review_panel(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
     # complexity:trivial -> spec-writer sets fast_path=true; both the spec and
-    # plan reviewers are skipped, but the final code-reviewer still runs.
+    # plan reviewers are skipped, but the final review-panel still runs.
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
 
     resolve.reset_providers_for_tests()
@@ -470,7 +470,7 @@ async def test_fast_path_skips_both_reviewers_but_not_code_reviewer(
     assert result is RunResult.COMPLETED
     assert "spec-reviewer" not in started, started
     assert "plan-review" not in started, started
-    assert "code-reviewer" in started, started
+    assert "review-panel" in started, started
 
 
 @pytest.mark.anyio
@@ -481,7 +481,7 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
 
     change = _seed_default_workflow(tmp_path)
 
-    # Position the Change as if paused at a maxed-out code-reviewer: its loop
+    # Position the Change as if paused at a maxed-out recheck: its loop
     # budget (max_loops 5) is exhausted at 6. apply_rewind must clear that count
     # so a re-entry that loops back (a reject verdict) gets a fresh budget rather
     # than tripping the max_loops re-pause again. (On the approve path below the
@@ -489,20 +489,20 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     # is guarded by the explicit assert on st.loop_counts, not by the COMPLETED
     # outcome; the runtime reset semantics are unit-tested in test_recovery.py.)
     st = State.load(change.state_dir)
-    st.step = "code-reviewer"
+    st.step = "recheck"
     st.status = "paused"
-    st.loop_counts = {"code-reviewer": 6}
+    st.loop_counts = {"recheck": 6}
     st.save(change.state_dir)
 
     wf = load_workflow(change.workflow_dir,
                        configured_tiers=load_effective_config(
                            project_root=tmp_path,
                            control_root=tmp_path).config.tier_names())
-    plan = recovery.plan_rewind(wf, st, "code-reviewer", force=False)
+    plan = recovery.plan_rewind(wf, st, "recheck", force=False)
     recovery.apply_rewind(plan, wf, st, change.event_log())
     st.status = "running"
     st.save(change.state_dir)
-    assert "code-reviewer" not in st.loop_counts          # the load-bearing reset guard
+    assert "recheck" not in st.loop_counts          # the load-bearing reset guard
 
     default = response(
         tool_use("c0", "complete_step", {

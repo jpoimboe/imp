@@ -13,7 +13,7 @@ from tests.conftest import _git, _init_repo, _seed_control
 def _seed_control_default(root: Path) -> None:
     """Like conftest._seed_control, but commits the REAL shipped default
     workflow at imp/workflows/default plus a config defining every tier it
-    uses — so Change.create copies the real workflow (with code-reviewer, gates,
+    uses — so Change.create copies the real workflow (with review-panel/recheck, gates,
     a merge phase) into the worktree."""
     _init_repo(root)
     shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
@@ -109,9 +109,9 @@ def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -
     _seed_control_default(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
-    st.step = "code-reviewer"
+    st.step = "recheck"
     st.status = "paused"
-    st.loop_counts = {"task-lead": 2, "code-reviewer": 6}
+    st.loop_counts = {"task-lead": 2, "recheck": 6}
     st.save(ch.state_dir)
 
     async def fake_run_change(change, **kwargs):
@@ -120,7 +120,7 @@ def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
-    args = argparse.Namespace(token="feat", from_target="code-reviewer", force=False)
+    args = argparse.Namespace(token="feat", from_target="recheck", force=False)
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 0
 
@@ -133,13 +133,13 @@ def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -
 
     # Persisted cursor + downstream-only loop-count reset.
     final = State.load(ch.state_dir)
-    assert final.step == "code-reviewer"
-    assert final.loop_counts == {"task-lead": 2}     # code-reviewer reset, upstream kept
+    assert final.step == "recheck"
+    assert final.loop_counts == {"task-lead": 2}     # recheck reset, upstream kept
 
 
 def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) -> None:
     """The --force forward path through the real CLI seam: --from merge --force
-    from a paused code-reviewer emits gates_bypassed (after workflow_resumed),
+    from a paused recheck emits gates_bypassed (after workflow_resumed),
     sets ready_to_merge, and terminates the cursor (to_step None)."""
     import argparse
 
@@ -151,7 +151,7 @@ def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) 
     _seed_control_default(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
-    st.step = "code-reviewer"
+    st.step = "recheck"
     st.status = "paused"
     st.save(ch.state_dir)
 
@@ -171,7 +171,7 @@ def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) 
     assert types.index("workflow_resumed") < types.index("gates_bypassed")
     assert types.index("gates_bypassed") < types.index("step_rewound")
     bypassed = next(e for e in events if e["type"] == "gates_bypassed")
-    assert bypassed["payload"]["gates"] == ["code-reviewer", "final-review"]
+    assert bypassed["payload"]["gates"] == ["recheck", "final-review"]
 
     # Persisted: terminal cursor + ready_to_merge set (land as-is).
     final = State.load(ch.state_dir)
@@ -194,7 +194,7 @@ def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> N
     _seed_control_default(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     st = State.load(ch.state_dir)
-    st.step = "code-reviewer"
+    st.step = "recheck"
     st.status = "paused"
     st.save(ch.state_dir)
 

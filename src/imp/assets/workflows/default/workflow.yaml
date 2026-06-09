@@ -4,11 +4,11 @@ description: |
 
 
 # The tier menu is config.tiers.keys() (always low/medium/high in this design).
-# `code-reviewer` carries the cross-vendor diversity guarantee via
-# `differ_from: task-lead` — the implementer subagent is dispatched by
-# `task-lead`, so the final code reviewer differs from the task-lead's
-# resolved (provider, model). Subagent dispatch (`task` tool) has no
-# diversity guarantee — accepted limitation (spec §11).
+# Single provider by design: review independence is by MODEL TIER (an opus panel
+# reviewing sonnet's work), not by vendor. `differ_from` is removed from the
+# review phase. The `review-panel` step is a sonnet coordinator that dispatches a
+# four-member opus discovery panel ONCE (guarded by `panel_done`); the `recheck`
+# step is a sonnet generalist re-review loop that iterates until clean.
 
 vars:
   ready_to_merge:         {type: bool, default: false}
@@ -16,6 +16,7 @@ vars:
   fast_path:              {type: bool, default: false}
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
+  panel_done:             {type: bool, default: false}
 
 defaults:
   max_retries: 3
@@ -130,7 +131,7 @@ phases:
 
       - name: fast-path-cycle-gate
         rules:
-          - {if: {fast_path: true}, goto: review}       # straight to autosquash/code-review
+          - {if: {fast_path: true}, goto: review}       # straight to autosquash/review
           - {else: true, continue: true}
 
       - name: plan-cycle-check
@@ -155,10 +156,22 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}   # self-verify failed → human resolves
 
-      - name: code-reviewer
+      - name: panel-gate           # one-shot guard: skip the opus panel on re-entry
+        rules:
+          - {if: {panel_done: true}, goto: recheck}         # panel already ran -> sonnet re-check only
+          - {else: true, continue: true}
+
+      - name: review-panel         # opus discovery panel behind a sonnet coordinator; runs ONCE
+        file: agents/review-panel.md
+        tier: medium               # sonnet coordinator (mechanical collapse, not judgment)
+        rules:
+          - {if: {verdict: task_gap}, set: {panel_done: true}, goto: implement, feedback: "The review panel found gaps to fix. Findings:"}
+          - {if: {verdict: plan_gap}, set: {panel_done: true}, goto: plan-writer, feedback: "The review panel found the plan needs revision. Findings:"}
+          - {else: true, set: {panel_done: true}, goto: summarizer}   # approve -> skip the re-check
+
+      - name: recheck              # sonnet verification loop (reuses the generalist prompt)
         file: agents/code-reviewer.md
-        tier: high
-        differ_from: task-lead
+        tier: medium
         max_loops: 5                 # combined task_gap + plan_gap budget
         rules:
           - {if: {verdict: task_gap}, goto: implement, feedback: "The code reviewer found gaps to fix. Findings:"}      # carries findings

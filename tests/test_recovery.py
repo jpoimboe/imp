@@ -15,11 +15,12 @@ def test_gate_steps_in_span_review_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [15..18] = code-reviewer, summarizer, final-review-gate, final-review.
-    # Gates: code-reviewer (goto implement/plan-writer backward) + final-review
-    # (goto implement backward / pause). summarizer (no rules) and
+    # Span [15..20] = panel-gate, review-panel, recheck, summarizer,
+    # final-review-gate, final-review. Gates: review-panel + recheck (goto
+    # implement/plan-writer backward) + final-review (goto implement backward /
+    # pause). panel-gate (forward goto recheck), summarizer (no rules) and
     # final-review-gate (goto merge forward only) are NOT gates.
-    assert gate_steps_in_span(wf, 15, 18) == ("code-reviewer", "final-review")
+    assert gate_steps_in_span(wf, 15, 20) == ("review-panel", "recheck", "final-review")
 
 
 def test_gate_steps_in_span_detects_pause_only_gates() -> None:
@@ -49,42 +50,42 @@ def test_plan_rewind_unknown_target_lists_names() -> None:
     from imp.engine.recovery import RewindError, plan_rewind
 
     with pytest.raises(RewindError) as exc:
-        plan_rewind(_wf(), _state("code-reviewer"), "no-such-step", force=False)
+        plan_rewind(_wf(), _state("recheck"), "no-such-step", force=False)
     msg = str(exc.value)
     assert "no-such-step" in msg
-    assert "code-reviewer" in msg          # a valid step is listed
-    assert "merge" in msg                  # a valid phase is listed
+    assert "recheck" in msg                 # a valid step is listed
+    assert "merge" in msg                   # a valid phase is listed
 
 
 def test_plan_rewind_backward_to_step() -> None:
     from imp.engine.recovery import plan_rewind
 
-    plan = plan_rewind(_wf(), _state("code-reviewer"), "code-reviewer", force=False)
-    assert plan.to_step == "code-reviewer"
-    assert plan.target_idx == 15
+    plan = plan_rewind(_wf(), _state("recheck"), "recheck", force=False)
+    assert plan.to_step == "recheck"
+    assert plan.target_idx == 17
     assert plan.bypass_gates == ()
     assert plan.set_ready_to_merge is False
-    assert plan.from_step == "code-reviewer"
+    assert plan.from_step == "recheck"
 
 
 def test_plan_rewind_forward_to_merge_without_force_refused() -> None:
     from imp.engine.recovery import GateBypassRequired, plan_rewind
 
     with pytest.raises(GateBypassRequired) as exc:
-        plan_rewind(_wf(), _state("code-reviewer"), "merge", force=False)
+        plan_rewind(_wf(), _state("recheck"), "merge", force=False)
     # The overridden cursor gate + the downstream gate are both named.
-    assert exc.value.gate_steps == ("code-reviewer", "final-review")
-    assert "code-reviewer" in str(exc.value)
+    assert exc.value.gate_steps == ("recheck", "final-review")
+    assert "recheck" in str(exc.value)
 
 
 def test_plan_rewind_forward_to_merge_with_force() -> None:
     from imp.engine.recovery import plan_rewind
 
-    plan = plan_rewind(_wf(), _state("code-reviewer"), "merge", force=True)
+    plan = plan_rewind(_wf(), _state("recheck"), "merge", force=True)
     assert plan.to_step is None                      # terminal
-    assert plan.target_idx == 19
+    assert plan.target_idx == 21
     assert plan.set_ready_to_merge is True
-    assert plan.bypass_gates == ("code-reviewer", "final-review")
+    assert plan.bypass_gates == ("recheck", "final-review")
 
 
 def test_plan_rewind_merge_blocked_reentry_no_force_no_gates() -> None:
@@ -103,14 +104,14 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # code-reviewer (17) maxed; task-lead (10) upstream; final-review (20) downstream.
-    st = _state("code-reviewer",
-                loop_counts={"task-lead": 2, "code-reviewer": 6, "final-review": 1})
+    # recheck (17) maxed; task-lead (8) upstream; final-review (20) downstream.
+    st = _state("recheck",
+                loop_counts={"task-lead": 2, "recheck": 6, "final-review": 1})
     log = InMemoryEventLog()
-    plan = plan_rewind(wf, st, "code-reviewer", force=False)
+    plan = plan_rewind(wf, st, "recheck", force=False)
     apply_rewind(plan, wf, st, log)
 
-    assert st.step == "code-reviewer"
+    assert st.step == "recheck"
     assert st.step_attempt == 0
     assert st.resume_pending is None
     assert st.current_step is None
@@ -118,15 +119,15 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     types = [e["type"] for e in log.read()]
     assert "step_rewound" in types
     rewound = next(e for e in log.read() if e["type"] == "step_rewound")
-    assert rewound["payload"]["from_step"] == "code-reviewer"
-    assert rewound["payload"]["to_target"] == "code-reviewer"
+    assert rewound["payload"]["from_step"] == "recheck"
+    assert rewound["payload"]["to_target"] == "recheck"
 
 
 def test_apply_rewind_force_sets_var_and_emits_gates_bypassed() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    st = _state("code-reviewer")
+    st = _state("recheck")
     log = InMemoryEventLog()
     plan = plan_rewind(wf, st, "merge", force=True)
     apply_rewind(plan, wf, st, log)
@@ -134,7 +135,7 @@ def test_apply_rewind_force_sets_var_and_emits_gates_bypassed() -> None:
     assert st.step is None
     assert st.vars["ready_to_merge"] is True
     bypassed = next(e for e in log.read() if e["type"] == "gates_bypassed")
-    assert bypassed["payload"]["gates"] == ["code-reviewer", "final-review"]
+    assert bypassed["payload"]["gates"] == ["recheck", "final-review"]
 
 
 def test_plan_rewind_forward_no_gate_allowed_without_force() -> None:
