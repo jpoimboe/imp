@@ -282,6 +282,62 @@ async def bash_output(
     return await _wait_for_terminal(ctx, bp, timeout)
 
 
+async def _kill_group_escalate(bp: BgProc) -> None:
+    """SIGTERM group -> grace -> SIGKILL group. The final SIGKILL is sent
+    UNCONDITIONALLY to the group (kill_process_group suppresses ESRCH on a
+    fully-dead group): grace-waiting the LEADER tells us nothing about forked
+    children that inherited the write fds. Shielded: a ticker/wait-tick
+    cancellation landing mid-grace must not skip the SIGKILL escalation — the
+    caller already flipped kill_reason, so no later sweep would retry."""
+    with anyio.CancelScope(shield=True):
+        await kill_process_group(bp.proc, signal.SIGTERM)
+        with anyio.move_on_after(PROCESS_KILL_GRACE_S):
+            with contextlib.suppress(Exception):
+                await bp.proc.wait()
+        await kill_process_group(bp.proc, signal.SIGKILL)
+        with anyio.move_on_after(PROCESS_KILL_GRACE_S):
+            with contextlib.suppress(Exception):
+                await bp.proc.wait()
+
+
+@imp_tool(
+    name="bash_kill",
+    description=(
+        "Terminate a background process started with "
+        "bash(run_in_background=true): SIGTERM to its process group, 4 s "
+        "grace, then SIGKILL. Returns a final-status JSON snapshot {stdout, "
+        "stderr, status, returncode, kill_reason?} — the snapshot is a real "
+        "read and advances the output cursors, so a follow-up bash_output "
+        "continues from there without duplicate bytes; remaining output "
+        "stays pageable. Idempotent on an already-exited or already-killed "
+        "id (returns the current snapshot)."
+    ),
+)
+async def bash_kill(ctx: ToolContext, id: str) -> str:
+    bp = ctx.background_processes.get(id)
+    if bp is None:
+        result = _tombstone_result(ctx, id)
+        if result is None:
+            raise ValueError(f"unknown background process id {id!r}")
+        return result
+    _reap(bp)
+    if bp.status == "running":
+        # Flip-first, BEFORE signaling (same check-and-set discipline as
+        # teardown step 1): marking only after the grace await would reopen
+        # the sweep-relabel window mid-grace. Decision 6: an agent-requested
+        # kill is EXPECTED — no tool_killed event; the real negative-signal
+        # returncode flows back as plain data (the provider heuristic is
+        # gated on tu.name == "bash" and never sees this result).
+        bp.status = "killed"
+        bp.kill_reason = "agent"
+        await _kill_group_escalate(bp)
+        if bp.returncode is None and bp.proc.returncode is not None:
+            # status is already terminal, so a vanilla _reap would no-op —
+            # record the reaped returncode directly.
+            bp.returncode = bp.proc.returncode
+    return _snapshot_or_tombstone(ctx, bp)
+
+
 async def spawn_background(
     ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
     env: dict[str, str],
