@@ -329,6 +329,33 @@ def test_synthetic_user_message_dropped_genuine_shown() -> None:
     assert "> do the real thing" in out
 
 
+def test_interjected_user_message_renders_as_human_turn() -> None:
+    # A human INTERJECT is delivered unprompted while the agent runs: the engine
+    # emits user_message (the typed text) IMMEDIATELY followed by user_interjected
+    # — with NO preceding awaiting_user_input. Without consuming user_interjected
+    # the message would be tagged interactive=False and dropped as a synthetic
+    # engine prompt. It must instead render as a genuine `> …` human turn.
+    events = [
+        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("2", "llm_response", agent_id="step:p/s", provider="anthropic",
+            model="m", stop_reason="end_turn", usage={},
+            raw={"content": [{"type": "text", "text": "working on it"}]}),
+        _ev("3", "user_message", agent_id="step:p/s",
+            content=[{"type": "text", "text": "actually use postgres"}]),
+        _ev("4", "user_interjected", agent_id="step:p/s",
+            text="actually use postgres"),
+    ]
+    tree = nv.build_tree(events)
+    out = "\n".join(render_tree(tree, full=False, color=False, width=80))
+    assert "> actually use postgres" in out
+    step = tree.root.children[0].children[0]
+    assert isinstance(step, nv.StepNode)
+    um = next(c for c in step.children if isinstance(c, nv.UserMessageNode))
+    assert um.interactive is True
+    # Unsolicited: no question was asked, so no pending-question line synthesized.
+    assert um.pending_question == ""
+
+
 def test_step_interactive_sourced_from_awaiting_event_not_step_started() -> None:
     # Task 8: a step is "interactive" (it solicited the human) ONLY because it
     # emitted an awaiting_user_input event — NOT because step_started carried an

@@ -616,8 +616,27 @@ def _h_awaiting_user_input(
     return None
 
 
+def _h_user_interjected(
+    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any],
+) -> None:
+    # A human interject is delivered UNPROMPTED (no preceding awaiting_user_input),
+    # so deliver_interject emits user_message THEN user_interjected (that emit order
+    # is a deliberate prior decision — keep it). The user_message just appended a
+    # UserMessageNode with interactive=False, which render_text would drop as a
+    # synthetic engine prompt. Retroactively mark that node interactive=True so it
+    # renders as a genuine `> …` human turn. It carries no question (unsolicited),
+    # so pending_question stays "". The node is the most-recently-appended child of
+    # the current container (post-append mutation is an established pattern — see
+    # the resume re-entry path mutating existing.interactive).
+    children = self._container().children
+    if children and isinstance(children[-1], UserMessageNode):
+        children[-1].interactive = True
+    return None
+
+
 NarrativeBuilder._HANDLERS["human_prompt_pending"] = _h_human_prompt_pending
 NarrativeBuilder._HANDLERS["awaiting_user_input"] = _h_awaiting_user_input
+NarrativeBuilder._HANDLERS["user_interjected"] = _h_user_interjected
 
 
 def _sanitize_activity_arg(value: Any, *, limit: int = 50) -> str:
