@@ -133,6 +133,155 @@ def _split_incomplete_utf8_tail(buf: bytes) -> tuple[bytes, bytes]:
     return buf, b""                       # 3 bare continuations: corrupt — emit
 
 
+def _reap(bp: BgProc) -> None:
+    """Resolve an observed exit. SYNCHRONOUS check-and-set: flip to terminal
+    before any side effect, NO await between check and set — callers (sweep,
+    wait tick, snapshot poll, bash_kill, teardown) run in different tasks
+    interleaved at await points; sequential idempotency is not enough."""
+    rc = bp.proc.returncode
+    if rc is None or bp.status != "running":
+        return
+    bp.status = "exited"
+    bp.returncode = rc
+
+
+def _read_page(bp: BgProc, which: str) -> tuple[str, int]:
+    """One page from a stream file at its cursor -> (text, remaining_bytes).
+
+    The cursor advances only by bytes actually returned, so a flood is PAGED
+    across calls, never lost. UTF-8 rule (after EVERY page, cap-bounded or
+    EOF-bounded): a valid incomplete multibyte prefix in the last 1-3 bytes is
+    excluded and the cursor not advanced past it — re-read next call. Terminal
+    flush: once status is terminal AND the read hit EOF, a held-back prefix
+    can never complete — decode with replace and advance fully."""
+    path = bp.out_path if which == "out" else bp.err_path
+    cursor = bp.out_cursor if which == "out" else bp.err_cursor
+    with open(path, "rb") as f:
+        f.seek(cursor)
+        chunk = f.read(TOOL_OUTPUT_CAP_BYTES)
+        at_eof = len(chunk) < TOOL_OUTPUT_CAP_BYTES or f.read(1) == b""
+        size = f.seek(0, os.SEEK_END)
+    emit, held = _split_incomplete_utf8_tail(chunk)
+    if held and bp.status != "running" and at_eof:
+        emit, held = chunk, b""
+    new_cursor = cursor + len(emit)
+    if which == "out":
+        bp.out_cursor = new_cursor
+    else:
+        bp.err_cursor = new_cursor
+    return emit.decode("utf-8", "replace"), max(0, size - new_cursor)
+
+
+def _snapshot(ctx: ToolContext, bp: BgProc, *, wait_ended: str | None = None) -> str:
+    out_text, out_rem = _read_page(bp, "out")
+    err_text, err_rem = _read_page(bp, "err")
+    result: dict[str, Any] = {
+        "stdout": out_text, "stderr": err_text,
+        "status": bp.status, "returncode": bp.returncode,
+    }
+    if bp.kill_reason is not None:
+        result["kill_reason"] = bp.kill_reason
+    if wait_ended is not None:
+        result["wait_ended"] = wait_ended
+    if out_rem or err_rem:
+        root = ctx.project_root.resolve()
+        result["stdout_remaining_bytes"] = out_rem
+        result["stderr_remaining_bytes"] = err_rem
+        result["out_path"] = os.path.relpath(bp.out_path.resolve(), root)
+        result["err_path"] = os.path.relpath(bp.err_path.resolve(), root)
+        result["notice"] = (
+            f'more output available — call bash_output("{bp.id}") again to '
+            "continue paging, or process the stream files in bulk with bash "
+            "(grep/tail)")
+    # ensure_ascii=False: default JSON escaping inflates non-ASCII up to 6x
+    # (a 50 KB CJK page becomes ~300 KB of context). Encoding, not semantics.
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _snapshot_or_tombstone(
+    ctx: ToolContext, bp: BgProc, *, wait_ended: str | None = None,
+) -> str:
+    try:
+        return _snapshot(ctx, bp, wait_ended=wait_ended)
+    except FileNotFoundError:
+        # Teardown deleted the stream files mid-call. Its check-and-set pass
+        # ran FIRST (ordering pin), so the in-memory entry is already a
+        # correct tombstone — never surface a raw read error.
+        result: dict[str, Any] = {"stdout": "", "stderr": "",
+                                  "status": bp.status,
+                                  "returncode": bp.returncode}
+        if bp.kill_reason is not None:
+            result["kill_reason"] = bp.kill_reason
+        if wait_ended is not None:
+            result["wait_ended"] = wait_ended
+        return json.dumps(result, ensure_ascii=False)
+
+
+def _tombstone_result(ctx: ToolContext, bg_id: str) -> str | None:
+    ts = _load_tombstones(_tombstone_path(ctx)).get(bg_id)
+    if ts is None:
+        return None
+    result: dict[str, Any] = {
+        "stdout": "", "stderr": "",
+        "status": ts.get("status", "killed"),
+        "returncode": ts.get("returncode"),
+    }
+    if ts.get("kill_reason") is not None:
+        result["kill_reason"] = ts.get("kill_reason")
+    return json.dumps(result, ensure_ascii=False)
+
+
+async def _wait_for_terminal(
+    ctx: ToolContext, bp: BgProc, timeout: float | None,
+) -> str:
+    raise NotImplementedError  # Task 11
+
+
+@imp_tool(
+    name="bash_output",
+    description=(
+        "Read incremental output from a background process started with "
+        "bash(run_in_background=true). Returns JSON {stdout, stderr, status, "
+        "returncode, kill_reason?, wait_ended?}; status is running|exited|"
+        "killed. Each call returns only NEW output since the previous call "
+        "(per-stream cursors), capped at 50 KB per stream per call; when more "
+        "remains, the result carries a notice with per-stream remaining byte "
+        "counts and the stream-file paths. Page fully only when the content "
+        "matters — for bulk logs (a 5 MB stream is ~100 pages of context), "
+        "use bash (grep/tail) or read_file on the stream files instead. An "
+        "exited or killed id stays readable until the invocation ends. "
+        "wait=true blocks until the process reaches a terminal status, your "
+        "timeout elapses, or the 20-minute wait budget is exhausted — "
+        "wait_ended says which ('exit'|'timeout'|'budget'); timeout/budget "
+        "returns are normal results, and a timeout above the budget is "
+        "clipped to it. timeout requires wait=true and must be > 0. Note: "
+        "file-redirected output is block-buffered (~4 KB) by most programs, "
+        "so very recent output may lag until the child flushes."
+    ),
+)
+async def bash_output(
+    ctx: ToolContext, id: str, *, wait: bool = False,
+    timeout: float | None = None,
+) -> str:
+    if timeout is not None and not wait:
+        raise ValueError("timeout is only meaningful with wait=true")
+    if timeout is not None and timeout <= 0:
+        raise ValueError("timeout must be > 0")
+    bp = ctx.background_processes.get(id)
+    if bp is None:
+        # In-memory registry first; else the persisted tombstone file (the
+        # registry dies with the runner — a resume re-drives with a fresh
+        # ToolContext); else unknown.
+        result = _tombstone_result(ctx, id)
+        if result is None:
+            raise ValueError(f"unknown background process id {id!r}")
+        return result
+    _reap(bp)
+    if not wait:
+        return _snapshot_or_tombstone(ctx, bp)
+    return await _wait_for_terminal(ctx, bp, timeout)
+
+
 async def spawn_background(
     ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
     env: dict[str, str],
