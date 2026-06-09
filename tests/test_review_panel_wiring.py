@@ -73,6 +73,16 @@ def test_one_shot_gating() -> None:
     assert isinstance(m_again.action, Goto) and m_again.action.target == "recheck"
 
 
+def test_fast_path_skips_opus_panel_to_recheck() -> None:
+    # A trivial (fast_path) change skips the expensive opus panel entirely and
+    # gets only the cheap sonnet recheck whole-diff review. panel_done stays false
+    # (the panel never ran), so re-entry keeps routing fast-path -> recheck.
+    rules = _steps(_wf())["panel-gate"].rules
+    fp_vars = {**_BASE_VARS, "fast_path": True, "panel_done": False}
+    m = evaluate_rules(rules, vars=fp_vars, output=None)
+    assert isinstance(m.action, Goto) and m.action.target == "recheck"
+
+
 def test_review_panel_routes_and_sets_panel_done() -> None:
     rules = _steps(_wf())["review-panel"].rules
     for verdict, target in [("task_gap", "implement"),

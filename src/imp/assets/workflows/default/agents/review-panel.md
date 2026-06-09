@@ -30,13 +30,25 @@ whole diff at `HEAD` (they each run `git show HEAD` / `git diff <base>..HEAD`
 themselves), plus the spec at `/project/imp/specs/{{ change.slug }}.md`. Name
 tiers, never model names — the configured provider may not be Anthropic.
 
+**Pass every member this calibration bar in its dispatch** (state it in each
+`task_description`, so all four apply the same threshold regardless of their own
+prompt): *reserve `task_gap` for a **material** defect — one reachable in the code's
+actual usage that genuinely blocks merge — not a speculative, defense-in-depth, or
+nit-level concern. Report minor / speculative / theoretical observations in
+`findings`, but return `approve` for them.* A single member escalating a nit to
+`task_gap` forces the whole panel into rework (precedence below), so this bar is what
+keeps the panel from bouncing a clean change back over a theoretical edge.
+
 Each member returns the same `{status, verdict, findings}` schema, where `verdict`
 is one of `approve` / `task_gap` / `plan_gap`.
 
 ## Collapse — COMPUTE, do not judge
 
 You apply two **rules**. You are not adjudicating whether a member is "really"
-right: if a member says `task_gap`, the panel is at least `task_gap`.
+right: if a member says `task_gap`, the panel is at least `task_gap`. Equally, you
+never **originate or upgrade** a finding of your own — the panel verdict reflects
+ONLY what the members returned. If every member returned `approve`, the panel
+approves; you do not add a `task_gap` because something looked off to you.
 
 **1. `verdict` = strict precedence over the members' verdicts:**
 - if ANY member returned `plan_gap` → panel verdict is `plan_gap`;

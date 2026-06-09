@@ -8,7 +8,9 @@ description: |
 # reviewing sonnet's work), not by vendor. `differ_from` is removed from the
 # review phase. The `review-panel` step is a sonnet coordinator that dispatches a
 # four-member opus discovery panel ONCE (guarded by `panel_done`); the `recheck`
-# step is a sonnet generalist re-review loop that iterates until clean.
+# step is a sonnet generalist re-review loop that iterates until clean. The opus
+# panel runs only on substantive changes: a `fast_path` (trivial) change skips it
+# at `panel-gate` and gets just the one cheap sonnet `recheck` whole-diff review.
 
 vars:
   ready_to_merge:         {type: bool, default: false}
@@ -156,9 +158,10 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}   # self-verify failed → human resolves
 
-      - name: panel-gate           # one-shot guard: skip the opus panel on re-entry
+      - name: panel-gate           # guard the opus panel: skip it on re-entry AND on fast-path
         rules:
           - {if: {panel_done: true}, goto: recheck}         # panel already ran -> sonnet re-check only
+          - {if: {fast_path: true}, goto: recheck}          # trivial change -> skip the opus panel; one cheap sonnet whole-diff recheck still runs
           - {else: true, continue: true}
 
       - name: review-panel         # opus discovery panel behind a sonnet coordinator; runs ONCE

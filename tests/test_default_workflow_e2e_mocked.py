@@ -441,12 +441,13 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
 
 @pytest.mark.anyio
-async def test_fast_path_skips_both_reviewers_but_not_review_panel(
+async def test_fast_path_skips_panel_but_runs_recheck(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
-    # complexity:trivial -> spec-writer sets fast_path=true; both the spec and
-    # plan reviewers are skipped, but the final review-panel still runs.
+    # complexity:trivial -> spec-writer sets fast_path=true; the spec and plan
+    # reviewers are skipped AND the expensive opus review-panel is skipped at
+    # panel-gate. The one cheap sonnet recheck whole-diff review still runs.
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
 
     resolve.reset_providers_for_tests()
@@ -470,7 +471,8 @@ async def test_fast_path_skips_both_reviewers_but_not_review_panel(
     assert result is RunResult.COMPLETED
     assert "spec-reviewer" not in started, started
     assert "plan-review" not in started, started
-    assert "review-panel" in started, started
+    assert "review-panel" not in started, started   # opus panel skipped on fast-path
+    assert "recheck" in started, started             # cheap sonnet whole-diff review still runs
 
 
 @pytest.mark.anyio
