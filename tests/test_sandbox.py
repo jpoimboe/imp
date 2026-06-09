@@ -338,6 +338,7 @@ class _CaptureLog:
     def update_last_llm_response_usage(self, **_kw): ...
 
 
+@pytest.mark.real_sandbox_policy
 def test_build_sandbox_policy_hard_fails_when_unavailable(tmp_path, monkeypatch):
     """enabled + unavailable + allow_unsandboxed unset → the run must NOT silently
     proceed unsandboxed: _build_sandbox_policy re-raises SandboxUnavailable (B.7)."""
@@ -355,6 +356,7 @@ def test_build_sandbox_policy_hard_fails_when_unavailable(tmp_path, monkeypatch)
     assert any(e["type"] == "sandbox_unavailable" for e in log.events)
 
 
+@pytest.mark.real_sandbox_policy
 def test_build_sandbox_policy_bare_when_allow_unsandboxed(tmp_path, monkeypatch):
     import imp.engine.executor as ex
     monkeypatch.setattr(ex, "sandbox_available", lambda: False)
@@ -372,6 +374,7 @@ def test_build_sandbox_policy_bare_when_allow_unsandboxed(tmp_path, monkeypatch)
     assert inactive and inactive[0]["payload"]["reason"] == "unsandboxed_by_config"
 
 
+@pytest.mark.real_sandbox_policy
 def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monkeypatch):
     """The active (happy) path: available+enabled → active policy, no posture
     event (active is the silent common case), and the engine_env overlay reaches

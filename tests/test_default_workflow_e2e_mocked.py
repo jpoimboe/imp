@@ -126,14 +126,7 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  medium: {anthropic: claude-sonnet-4-6}\n"
         "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
-    # Disable the OS sandbox for these orchestration tests: they mock the LLM but
-    # run the REAL executor + script gates, and the throwaway worktree lives under
-    # pytest's tmp_path (/tmp) — where bwrap's /tmp rebind would shadow the worktree
-    # mount and break the gates' --chdir. Sandbox+gate behavior is covered by the
-    # behavioral/interrupt tests (test_sandbox_*); here we test orchestration. This
-    # also keeps the suite portable on hosts without bwrap (no SandboxUnavailable).
-    (tmp_path / "imp" / "project.yaml").write_text(
-        "workflow: default\nsandbox:\n  enabled: false\n")
+    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
 
