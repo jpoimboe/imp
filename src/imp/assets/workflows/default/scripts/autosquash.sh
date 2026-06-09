@@ -17,21 +17,44 @@ if ! git log --format='%s' "$FORK"..HEAD | grep -q '^fixup!'; then
 fi
 
 # A prior base integration leaves a real merge commit in FORK..HEAD. Plain
-# `rebase -i --autosquash` would linearize it, silently dropping the integrator's
-# in-merge conflict resolutions (review finding #3). Refuse — the engine pauses —
-# rather than destroy that work. (No-op path above already returned when there are
-# no fixups, so the merge survives the common rework-without-fixups case.)
-if git rev-list --merges "$FORK"..HEAD | grep -q .; then
-  echo "autosquash: a prior integration merge is in range; squashing would drop" >&2
-  echo "its conflict resolutions. Refusing — rework before integration, squash the" >&2
-  echo "fixups by hand, or re-run integration after this lands." >&2
+# `rebase -i --autosquash $FORK` would linearize it, silently dropping the
+# integrator's in-merge conflict resolutions (review finding #3). When a merge is
+# in range, rebase only the segment ABOVE the most recent integration merge: a
+# fixup! that targets a POST-merge commit folds into it while the merge commit
+# (and the resolutions baked into its tree) is left untouched as the rebase base.
+#
+# A fixup! that targets a PRE-merge commit can't be folded above the merge, so it
+# survives the rebase as a leftover; we detect that, restore the branch to its
+# exact pre-run state, and refuse (the engine pauses). Auto-handling that hard
+# case would require recreating the merge (`git rebase --rebase-merges` re-runs
+# the merge and can drop the integrator's manual resolution), so it is left for a
+# human / a future follow-up.
+MERGE=$(git rev-list --merges --max-count=1 "$FORK"..HEAD)
+if [ -n "$MERGE" ]; then
+  BEFORE=$(git rev-parse HEAD)
+  if GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash "$MERGE"; then
+    if git log --format='%s' "$FORK"..HEAD | grep -qE '^(fixup|squash|amend)!'; then
+      git reset --hard "$BEFORE" >/dev/null
+      echo "autosquash: a fixup!/squash!/amend! targets a commit at or below the integration" >&2
+      echo "merge; folding it would linearize the merge and drop the integrator's resolutions." >&2
+      echo "Refusing (branch left intact). Squash it by hand, preserving the merge:" >&2
+      echo "  git rebase -i --rebase-merges --autosquash \"\$(git merge-base $BASE HEAD)\"" >&2
+      echo "then \`imp resume\`.  [follow-up: auto-handle pre-merge-target fixups]" >&2
+      exit 1
+    fi
+    echo "autosquash: folded post-merge fixups; integration merge preserved"
+    exit 0
+  fi
+  git rebase --abort 2>/dev/null || true
+  echo "autosquash rebase conflicted; branch left intact for human resolution" >&2
   exit 1
 fi
 
-# Non-interactive autosquash: GIT_SEQUENCE_EDITOR=true accepts the todo list that
-# --autosquash has already reordered (fixups placed under their targets).
+# No integration merge in range: ordinary autosquash from the fork point.
+# GIT_SEQUENCE_EDITOR=true accepts the todo list --autosquash has already reordered
+# (fixups placed under their targets).
 if GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash "$FORK"; then
-  if git log --format='%s' "$FORK"..HEAD | grep -q '^fixup!'; then
+  if git log --format='%s' "$FORK"..HEAD | grep -qE '^(fixup|squash|amend)!'; then
     echo "fixup! commits remain after autosquash (unmatched target subject?)" >&2
     exit 1
   fi
