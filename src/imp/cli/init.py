@@ -201,6 +201,7 @@ def run_init(
         output_fn("   Until then, set `sandbox.allow_unsandboxed: true` in your")
         output_fn(f"   user config ({user_config_path()}) to run without a boundary,")
         output_fn("   or runs will hard-fail. (You can also re-run init after installing.)")
+        output_fn("")
 
     # --- committed project file (idempotent: never overwrite an existing one) ---
     if not already_initialized:
