@@ -42,6 +42,10 @@ def _read_file(ctx: ToolContext, **args: object) -> str:
     return anyio.run(get_registry()["read_file"].async_invoke, ctx, args)
 
 
+def _edit_file(ctx: ToolContext, **args: object) -> str:
+    return anyio.run(get_registry()["edit_file"].async_invoke, ctx, args)
+
+
 def test_read_file_returns_numbered_contents(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("hello")
     out = _read_file(_ctx(tmp_path, "read"), path="a.txt")
@@ -89,9 +93,7 @@ def test_write_file_rejects_escape(tmp_path: Path) -> None:
 def test_edit_file_unique_replacement(tmp_path: Path) -> None:
     (tmp_path / "x.py").write_text("def foo():\n    return 1\n")
     ctx = _ctx(tmp_path, "read", "write")
-    get_registry()["edit_file"].invoke(ctx, {
-        "path": "x.py", "old": "return 1", "new": "return 2",
-    })
+    _edit_file(ctx, path="x.py", old="return 1", new="return 2")
     assert (tmp_path / "x.py").read_text() == "def foo():\n    return 2\n"
 
 
@@ -99,15 +101,11 @@ def test_edit_file_ambiguous_raises(tmp_path: Path) -> None:
     (tmp_path / "x.py").write_text("x = 1\nx = 1\n")
     ctx = _ctx(tmp_path, "read", "write")
     with pytest.raises(ValueError, match="not unique"):
-        get_registry()["edit_file"].invoke(ctx, {
-            "path": "x.py", "old": "x = 1", "new": "y = 2",
-        })
+        _edit_file(ctx, path="x.py", old="x = 1", new="y = 2")
 
 
 def test_edit_file_missing_raises(tmp_path: Path) -> None:
     (tmp_path / "x.py").write_text("nothing here\n")
     ctx = _ctx(tmp_path, "read", "write")
     with pytest.raises(ValueError, match="not found"):
-        get_registry()["edit_file"].invoke(ctx, {
-            "path": "x.py", "old": "missing", "new": "x",
-        })
+        _edit_file(ctx, path="x.py", old="missing", new="x")

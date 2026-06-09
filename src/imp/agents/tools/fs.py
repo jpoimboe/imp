@@ -14,6 +14,7 @@ from imp.agents.tools.limits import (
     FILE_READ_CAP_BYTES,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
+    read_bytes_capped,
     read_text_capped,
     tool_checkpoint,
 )
@@ -119,15 +120,48 @@ def write_file(ctx: ToolContext, path: str, content: str) -> str:
         "Raises if `old` not found or not unique."
     ),
 )
-def edit_file(ctx: ToolContext, path: str, old: str, new: str) -> str:
+async def edit_file(ctx: ToolContext, path: str, old: str, new: str) -> str:
     ctx.check_fs_permission("read", path)
     ctx.check_fs_permission("write", path)
     resolved = ctx.resolve_path(path)
-    body = resolved.read_text()
+    coordinator = getattr(ctx, "coordinator", None)
+    deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
+    # Bounded via the READ itself, not a stat-then-read guard (a file that
+    # grows between stat and read — an appending log — would reopen the
+    # 3 GB-single-line incident).
+    try:
+        raw, read_truncated = await read_bytes_capped(
+            resolved, coordinator=coordinator, deadline=deadline)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"no such file: {path}") from None
+    except IsADirectoryError:
+        raise IsADirectoryError(f"is a directory: {path}") from None
+    # Refusal order pinned: SIZE before strict decode. A >5 MB valid-UTF-8
+    # file has its byte cap land mid-multibyte-sequence; decode-first would
+    # blame encoding for a size problem. file_is_cap_truncated also refuses a
+    # file that vanished after a truncated read (it may be larger than what
+    # we read), and admits an exactly-5 MB file (read completely — editable).
+    if file_is_cap_truncated(read_truncated, resolved):
+        raise ValueError(
+            f"{path} is larger than 5 MB; edit_file refuses to rewrite files "
+            f"past the read cap — use bash instead")
+    try:
+        # STRICT decode. errors="replace" is fine for display-only tools but
+        # catastrophic in a read-modify-WRITE tool: every invalid byte
+        # anywhere in the file would become U+FFFD in body, and the
+        # write-back rewrites the whole file.
+        body = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError(
+            f"{path} is not valid UTF-8; edit_file refuses to rewrite it "
+            f"(the write-back would corrupt non-UTF-8 bytes) — use bash instead"
+        ) from None
     count = body.count(old)
     if count == 0:
         raise ValueError(f"{old!r} not found in {path!r}")
     if count > 1:
         raise ValueError(f"{old!r} not unique in {path!r} (found {count} occurrences)")
-    resolved.write_text(body.replace(old, new, 1))
+    # Bytes-faithful write-back: encode and write BYTES (no platform newline
+    # translation — the old read_text() path mangled CRLF files).
+    resolved.write_bytes(body.replace(old, new, 1).encode("utf-8"))
     return f"replaced 1 occurrence in {path}"
