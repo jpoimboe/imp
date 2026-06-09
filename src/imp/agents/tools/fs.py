@@ -119,7 +119,7 @@ def write_file(ctx: ToolContext, path: str, content: str) -> str:
     return f"wrote {len(content)} bytes to {path}"
 
 
-def _atomic_write_bytes(resolved: Path, data: bytes) -> None:
+def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> None:
     """Atomic write-back: temp file + os.replace. Two load-bearing details:
     (1) the temp file is created in the TARGET's directory — os.replace
     across filesystems raises EXDEV, and /tmp is routinely a different mount
@@ -131,9 +131,18 @@ def _atomic_write_bytes(resolved: Path, data: bytes) -> None:
     The read-modify-write race (the file changing between the bounded read
     and this replace — real in the parallel-sessions shared tree) is
     accepted, not closed: last-writer-wins, same as before; compare-and-refuse
-    on mtime was considered and dropped as false-positive-prone."""
+    on mtime was considered and dropped as false-positive-prone. Durability is
+    waived — no fsync before the replace; power-loss may revert/empty the file
+    on some filesystems (git is the recovery path). Hard links are waived: the
+    replace switches inodes."""
     mode = stat.S_IMODE(resolved.stat().st_mode)
-    fd, tmp_name = tempfile.mkstemp(dir=resolved.parent)
+    try:
+        fd, tmp_name = tempfile.mkstemp(dir=resolved.parent)
+    except PermissionError:
+        raise PermissionError(
+            f"directory of {display_path} is not writable; edit_file's atomic "
+            f"write-back creates a temp file beside the target — use bash instead"
+        ) from None
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as fh:
@@ -205,7 +214,7 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
     edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
     # Bytes-faithful write-back: encode and write BYTES (no platform newline
     # translation — the old read_text() path mangled CRLF files).
-    _atomic_write_bytes(resolved, edited.encode("utf-8"))
+    _atomic_write_bytes(resolved, edited.encode("utf-8"), display_path=path)
     if replace_all:
         return f"replaced {count} occurrences in {path}"
     return f"replaced 1 occurrence in {path}"
