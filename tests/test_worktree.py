@@ -317,6 +317,61 @@ def test_destroy_worktree_removes_worktree_and_branch(tmp_path: Path) -> None:
     assert not wt.branch_exists(tmp_path, "imp/gone")
 
 
+def _checkout_branch_worktree(control_root: Path, branch: str) -> Path:
+    """Return the existing worktree path for `branch` if it already exists (as
+    created by _seed_base_and_branch), or add a new one. imp/feat is already
+    at .imp/worktrees/feat after _seed_base_and_branch, so we reuse it."""
+    slug = branch.removeprefix("imp/")
+    dest = control_root / ".imp" / "worktrees" / slug
+    if not dest.exists():
+        proc = _git(control_root, "worktree", "add", str(dest), branch)
+        assert proc.returncode == 0, f"worktree add failed: {proc.stderr}"
+    return dest
+
+
+def test_merge_stale_when_base_advanced_past_recorded_sha(tmp_path: Path) -> None:
+    _seed_base_and_branch(tmp_path)  # from Task 1
+    stale_sha = "0" * 40  # a SHA that is not the current base tip
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature",
+                              project_root=tmp_path, expected_base_sha=stale_sha)
+    assert result.status == "STALE"
+    assert result.merge_commit is None
+
+
+def test_merge_dirty_worktree_refused_under_lock(tmp_path: Path) -> None:
+    _seed_base_and_branch(tmp_path)
+    base_sha = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    # The CHANGE worktree (project_root) is dirty -> DIRTY, before any merge.
+    wt_dir = _checkout_branch_worktree(tmp_path, "imp/feat")  # helper: add a worktree on imp/feat
+    (wt_dir / "uncommitted.txt").write_text("dirty\n")
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature",
+                              project_root=wt_dir, expected_base_sha=base_sha)
+    assert result.status == "DIRTY"
+
+
+def test_merge_fresh_sha_proceeds(tmp_path: Path) -> None:
+    _seed_base_and_branch(tmp_path)
+    base_sha = _git(tmp_path, "rev-parse", "main").stdout.strip()
+    # project_root=control_root is clean here; production passes the change worktree.
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature",
+                              project_root=tmp_path, expected_base_sha=base_sha)
+    assert result.status == "MERGED"
+
+
+def test_merge_already_in_base_is_idempotent_merged(tmp_path: Path) -> None:
+    _seed_base_and_branch(tmp_path)
+    # Merge the branch into base first (simulates the durable merge before a crash).
+    first = wt.merge_to_base(tmp_path, "feat", "main", title="Feature",
+                             project_root=tmp_path, expected_base_sha=_git(
+                                 tmp_path, "rev-parse", "main^{commit}").stdout.strip())
+    assert first.status == "MERGED"
+    # Resume with the OLD (pre-merge) expected SHA: base advanced by our own merge.
+    stale = "0" * 40
+    again = wt.merge_to_base(tmp_path, "feat", "main", title="Feature",
+                             project_root=tmp_path, expected_base_sha=stale)
+    assert again.status == "MERGED"   # idempotent, NOT STALE
+
+
 def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
