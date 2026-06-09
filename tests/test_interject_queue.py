@@ -166,3 +166,67 @@ async def test_anthropic_delivers_interject_at_turn_boundary(tmp_path: Path) -> 
     assert "please also check the tests" in texts
     # Queue drained: only one delivery.
     assert coord.drain_interject() is None
+
+
+@pytest.mark.anyio
+async def test_openai_delivers_interject_at_turn_boundary(tmp_path: Path) -> None:
+    from imp.agents.runner import ChangeContext as _CC
+    from imp.providers.openai import OpenAIAgentRunner
+    from tests.openai_fakes import (
+        FakeResponsesClient,
+        resp_function_call,
+        resp_message,
+        resp_response,
+    )
+
+    (tmp_path / "art").mkdir()
+    (tmp_path / "data.txt").write_text("payload")
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_message("reading"),
+            resp_function_call("u1", "read_file", '{"path": "/project/data.txt"}'),
+        ),
+        resp_response(
+            resp_message("done"),
+            resp_function_call("c1", "complete_step",
+                               '{"status": "Success", "note": "ok"}'),
+        ),
+    ])
+    log = InMemoryEventLog()
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("please also check the tests")
+
+    inv = AgentInvocation(
+        agent_def=_agent_def(),
+        provider_name="openai", model_name="gpt-4o-mini",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=_CC(
+            id="test", slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow"),
+        transcript_dir=tmp_path / "step",
+        fs_permissions=(FsRule(operations=("read",), paths=("/project/**",),
+                               mode="allow",
+                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s",
+        event_log=log,
+        coordinator=coord,
+    )
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini", client_factory=lambda: fake)
+    events = [e async for e in runner.run(inv)]
+
+    assert "agent_output" in [e["type"] for e in events]
+    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert len(interjected) == 1
+    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    # The interject rode into turn 2's model call as a user input_text item.
+    second_call = fake.responses.calls[1]
+    texts = [
+        c.get("text")
+        for item in second_call["input"]
+        if item.get("type") == "message" and item.get("role") == "user"
+        for c in item.get("content", [])
+    ]
+    assert "please also check the tests" in texts
+    assert coord.drain_interject() is None

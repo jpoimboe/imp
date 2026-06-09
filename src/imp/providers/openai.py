@@ -49,6 +49,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
+from imp.engine.agent_run import deliver_interject
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
@@ -780,6 +781,12 @@ class OpenAIAgentRunner:
             if loop_err is not None:
                 yield perr.make_error_event(loop_err, kind=getattr(loop_err, "kind", ""))
                 return
+
+            # Turn boundary: this turn's tool_results are appended; deliver any
+            # queued human interject as a user message before the next model
+            # call. Reached only after every tool (including an awaited `task`
+            # dispatch) has resolved, so no subagent is mid-dispatch — S4 holds.
+            deliver_interject(invocation.coordinator, messages, transcript, elog, aid)
 
         # cancelled (interrupt)
         yield {"type": "error", "payload": {
