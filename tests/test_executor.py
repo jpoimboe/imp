@@ -1245,3 +1245,86 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
 
     # Resume-kept entry: NO seed message at all.
     assert coder_invs[1].initial_messages == ()
+
+
+# ── script-step pause emits script_blocked event ────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
+    """A script step that exits non-zero and matches a {else: true, pause: true}
+    rule must journal a script_blocked event carrying the step name, exit code,
+    and stderr text.  Previously the pause was bare (no reason) and all stderr
+    was silently discarded."""
+    wf = tmp_path / "imp" / "workflows" / "default"
+    wf.mkdir(parents=True)
+    # A single script step: exit 7 with stderr text; the else-rule pauses.
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: check\n"
+        "        command: 'echo boom-remediation >&2; exit 7'\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    # The sandbox policy binds control_root/.git; git init ensures bwrap finds it.
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})  # resolve_run needs a registered provider
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.PAUSED
+    state = State.load(change.state_dir)
+    assert state.status == "paused"
+
+    evs = [e for e in change.event_log().read() if e.get("type") == "script_blocked"]
+    assert evs, "expected at least one script_blocked event"
+    last = evs[-1]
+    assert last["payload"]["step"] == "check"
+    assert last["payload"]["exit"] == 7
+    assert "boom-remediation" in last["payload"]["stderr"]
+
+
+# ── _last_script_blocked selection logic ────────────────────────────────────
+
+
+def test_last_script_blocked_returns_last_match() -> None:
+    """_last_script_blocked returns the LAST event whose payload.step matches,
+    ignoring events for other steps and returning None when absent."""
+    from imp.cli.main import _last_script_blocked
+
+    events: list[dict] = [
+        {"type": "script_blocked", "payload": {"step": "check", "stderr": "first", "exit": 3}},
+        {"type": "script_blocked", "payload": {"step": "other", "stderr": "noise", "exit": 1}},
+        {"type": "script_blocked", "payload": {"step": "check", "stderr": "second", "exit": 5}},
+    ]
+
+    # Returns the LAST match for "check" (index 2), not the first (index 0).
+    result = _last_script_blocked(events, "check")
+    assert result is not None
+    assert result["payload"]["stderr"] == "second"
+
+    # Returns the sole match for "other".
+    result_other = _last_script_blocked(events, "other")
+    assert result_other is not None
+    assert result_other["payload"]["stderr"] == "noise"
+
+    # Returns None when the step name is absent.
+    assert _last_script_blocked(events, "missing") is None
+
+    # Returns None for an empty event list.
+    assert _last_script_blocked([], "check") is None
+
+    # Ignores non-script_blocked events.
+    mixed: list[dict] = [
+        {"type": "step_started", "payload": {"step": "check"}},
+        {"type": "script_blocked", "payload": {"step": "check", "stderr": "only", "exit": 4}},
+        {"type": "step_completed", "payload": {"step": "check"}},
+    ]
+    assert _last_script_blocked(mixed, "check") == mixed[1]

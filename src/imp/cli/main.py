@@ -220,6 +220,31 @@ def _emit_merge_blocked(change: Change, reason: str | None) -> None:
     print(ansi(f"{mark}{msg}", "yellow", enabled=color))
 
 
+def _emit_script_blocked(step: str, stderr: str) -> None:
+    """A script step paused (e.g. integrate-merge exit 3/4/5, base-fresh-check exit 1).
+    Print its stderr so the recovery text reaches the user."""
+    color = should_use_color(sys.stdout)
+    mark = "⚠ " if color else ""
+    print(ansi(f"{mark}{step} paused:\n{stderr.strip()}", "yellow", enabled=color))
+
+
+def _last_script_blocked(
+    events: list[dict[str, Any]], step: str,
+) -> dict[str, Any] | None:
+    """Return the LAST script_blocked event whose payload.step == `step`, or None.
+
+    A step may pause, be resumed, and pause again with different stderr.  Iterating
+    forward and keeping only the last match ensures we surface the most-recent
+    block reason and never emit stale output from an earlier pause that was
+    subsequently resumed."""
+    matched: dict[str, Any] | None = None
+    for ev in events:
+        if (ev.get("type") == "script_blocked"
+                and (ev.get("payload") or {}).get("step") == step):
+            matched = ev
+    return matched
+
+
 def _project_root() -> Path:
     return find_project_root()
 
@@ -394,7 +419,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                                             merged=not wt_path.exists())
                             rc = 0
                         else:
-                            # PAUSED — surface merge_blocked remediation, if any.
+                            # PAUSED — surface merge_blocked or script-step remediation.
                             final_state = State.load(change.state_dir)
                             if final_state.status == "merge_blocked":
                                 reason = None
@@ -402,6 +427,17 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                                     if ev.get("type") == "merge_blocked":
                                         reason = (ev.get("payload") or {}).get("reason")
                                 _emit_merge_blocked(change, reason)
+                            elif final_state.step is not None:
+                                # Surface the LAST script_blocked for the paused step
+                                # (keyed on step name to avoid stale events from earlier
+                                # pauses that were subsequently resumed; emitted once).
+                                matched = _last_script_blocked(
+                                    list(change.event_log().read()), final_state.step)
+                                if matched is not None:
+                                    _emit_script_blocked(
+                                        final_state.step,
+                                        (matched.get("payload") or {}).get("stderr", ""),
+                                    )
                             _emit_paused_summary(change, result.value)
                             rc = 1
                 finally:
@@ -584,7 +620,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                                             merged=not wt_path.exists())
                             rc = 0
                         else:
-                            # PAUSED — surface merge_blocked remediation, if any.
+                            # PAUSED — surface merge_blocked or script-step remediation.
                             final_state = State.load(change.state_dir)
                             if final_state.status == "merge_blocked":
                                 reason = None
@@ -592,6 +628,17 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                                     if ev.get("type") == "merge_blocked":
                                         reason = (ev.get("payload") or {}).get("reason")
                                 _emit_merge_blocked(change, reason)
+                            elif final_state.step is not None:
+                                # Surface the LAST script_blocked for the paused step
+                                # (keyed on step name to avoid stale events from earlier
+                                # pauses that were subsequently resumed; emitted once).
+                                matched = _last_script_blocked(
+                                    list(change.event_log().read()), final_state.step)
+                                if matched is not None:
+                                    _emit_script_blocked(
+                                        final_state.step,
+                                        (matched.get("payload") or {}).get("stderr", ""),
+                                    )
                             _emit_paused_summary(change, result.value)
                             rc = 1
                 finally:
