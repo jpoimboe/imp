@@ -1,7 +1,13 @@
+from __future__ import annotations
+
 from pathlib import Path
 
+import pytest
+
 from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
-from imp.providers.anthropic import _build_tools
+from imp.providers import anthropic, claude_code, openai
+
+PROVIDERS = [anthropic, openai, claude_code]
 
 
 def _agent(tools):
@@ -27,11 +33,13 @@ class _Inv:
         self.tiers = ()
 
 
-def test_wait_for_user_injected_when_declared():
-    tools = _build_tools(_Inv(["complete_step", "wait_for_user"]))
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_wait_for_user_injected_when_declared(provider):
+    tools = provider._build_tools(_Inv(["complete_step", "wait_for_user"]))
     assert "wait_for_user" in tools
 
 
-def test_wait_for_user_absent_when_not_declared():
-    tools = _build_tools(_Inv(["complete_step"]))
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_wait_for_user_absent_when_not_declared(provider):
+    tools = provider._build_tools(_Inv(["complete_step"]))
     assert "wait_for_user" not in tools

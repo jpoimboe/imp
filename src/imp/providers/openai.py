@@ -42,6 +42,7 @@ from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
+from imp.agents.tools.wait_for_user import make_wait_for_user_tool
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
@@ -146,7 +147,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     out["complete_step"] = make_complete_step_tool(invocation.agent_def.output_schema)
     out["load_skill"] = make_load_skill_tool()
     if "wait_for_user" in invocation.agent_def.tools:
-        from imp.agents.tools.wait_for_user import make_wait_for_user_tool
         out["wait_for_user"] = make_wait_for_user_tool()
     return out
 
