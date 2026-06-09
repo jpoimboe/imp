@@ -200,16 +200,26 @@ def _emit_paused_summary(change: Change, value: str) -> None:
     print(ansi(f"{mark}Change {change.id}: {value}", "dim", enabled=color))
 
 
-def _emit_merge_blocked(change: Change, reason: str | None) -> None:
-    """Merge couldn't complete — the user must act: yellow, ⚠."""
+def _emit_merge_blocked(
+    change: Change, reason: str | None, detail: str | None = None,
+) -> None:
+    """Merge couldn't complete — the user must act: yellow, ⚠.
+
+    `detail` is git's own stderr (carried on the `merge_blocked` event). The
+    `refused` and `conflict` reasons are neutral buckets — REFUSED alone covers
+    overwrite, unrelated histories, ref-lock, and object-store corruption — so the
+    template can only describe the common case. We append git's actual words for
+    those two so the surfaced reason is truthful for every refusal, not just the
+    overwrite one. `worktree_dirty` has a precise template and gets no detail."""
     color = should_use_color(sys.stdout)
     mark = "⚠ " if color else ""
     cid, base = change.id, change.base_branch
     if reason == "worktree_dirty":
         msg = f"Uncommitted work in the worktree; commit it, then `imp resume {cid}`."
     elif reason == "refused":
-        msg = (f"Uncommitted changes on `{base}` would be overwritten by the merge; "
-               f"commit or stash them, then `imp resume {cid}`.")
+        msg = (f"git refused to merge `imp/{cid}` into `{base}` (commonly: uncommitted "
+               f"changes on `{base}` that the merge would overwrite). Resolve, then "
+               f"`imp resume {cid}`.")
     elif reason == "conflict":
         msg = (f"`imp/{cid}` doesn't auto-merge into `{base}`. imp can't resolve "
                f"conflicts in this version — merge `imp/{cid}` into `{base}` manually, "
@@ -217,6 +227,8 @@ def _emit_merge_blocked(change: Change, reason: str | None) -> None:
                f"can be removed).")
     else:
         msg = f"Change {cid}: merge_blocked. Resolve, then `imp resume {cid}`."
+    if detail and reason in ("refused", "conflict"):
+        msg = f"{msg}\ngit said: {detail.strip()}"
     print(ansi(f"{mark}{msg}", "yellow", enabled=color))
 
 
@@ -422,11 +434,14 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                             # PAUSED — surface merge_blocked or script-step remediation.
                             final_state = State.load(change.state_dir)
                             if final_state.status == "merge_blocked":
-                                reason = None
+                                mb_reason: str | None = None
+                                mb_detail: str | None = None
                                 for ev in change.event_log().read():
                                     if ev.get("type") == "merge_blocked":
-                                        reason = (ev.get("payload") or {}).get("reason")
-                                _emit_merge_blocked(change, reason)
+                                        payload = ev.get("payload") or {}
+                                        mb_reason = payload.get("reason")
+                                        mb_detail = payload.get("detail")
+                                _emit_merge_blocked(change, mb_reason, mb_detail)
                             elif final_state.step is not None:
                                 # Surface the LAST script_blocked for the paused step
                                 # (keyed on step name to avoid stale events from earlier
@@ -623,11 +638,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                             # PAUSED — surface merge_blocked or script-step remediation.
                             final_state = State.load(change.state_dir)
                             if final_state.status == "merge_blocked":
-                                reason = None
+                                mb_reason: str | None = None
+                                mb_detail: str | None = None
                                 for ev in change.event_log().read():
                                     if ev.get("type") == "merge_blocked":
-                                        reason = (ev.get("payload") or {}).get("reason")
-                                _emit_merge_blocked(change, reason)
+                                        payload = ev.get("payload") or {}
+                                        mb_reason = payload.get("reason")
+                                        mb_detail = payload.get("detail")
+                                _emit_merge_blocked(change, mb_reason, mb_detail)
                             elif final_state.step is not None:
                                 # Surface the LAST script_blocked for the paused step
                                 # (keyed on step name to avoid stale events from earlier
