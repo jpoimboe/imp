@@ -338,6 +338,69 @@ async def bash_kill(ctx: ToolContext, id: str) -> str:
     return _snapshot_or_tombstone(ctx, bp)
 
 
+def _emit_cap_warning(ctx: ToolContext, bp: BgProc) -> None:
+    """Decision 6: an output-cap kill is UNEXPECTED (imp unilaterally killing
+    the user's process) — emit runner_warning via ctx.event_log, the shared
+    EventLog WRITE instance. The ctx field (not a loop-local) is what makes
+    emission work identically from provider-loop sweep sites and from inside
+    bash_output's wait ticks."""
+    if ctx.event_log is None:
+        return
+    cmd = bp.command[:_CMD_TRUNC]
+    ctx.event_log.append(
+        agent_id=ctx.agent_id, type="runner_warning",
+        payload={
+            # message is REQUIRED: the only UI consumer renders
+            # payload.get("message", "?") (narrative.py:936).
+            "message": (f"background process {bp.id} ({cmd}) killed: "
+                        "output cap exceeded"),
+            "id": bp.id, "command": cmd, "reason": "output-cap",
+        })
+
+
+async def _sweep_bg(ctx: ToolContext) -> None:
+    """Poll exits + enforce the per-stream file cap for EVERY registered
+    BgProc — REGARDLESS of status (forking-server rule: an exited leader's
+    children inherit the write fds and keep growing the files). Sweep sites
+    (Decision 10): every tool dispatch, every wait=True tick, the foreground
+    bash ticker, post-API. Reads the cap through the limits module so tests
+    (and only tests) can shrink it."""
+    for bp in list(ctx.background_processes.values()):
+        _reap(bp)
+        if bp.kill_reason is not None:
+            # Breach handling fires ONCE per process — gate on kill_reason is
+            # None. Not status != "killed" (conflicts with regardless-of-
+            # status); not kill_reason != "output-cap" (an agent-killed
+            # flooder would be re-killed and RELABELED, and a teardown flip
+            # could be erased mid-grace). The forking-server case has
+            # kill_reason None and stays cap-stat'ed.
+            continue
+        try:
+            over = (os.stat(bp.out_path).st_size > _limits.BG_STREAM_FILE_CAP_BYTES
+                    or os.stat(bp.err_path).st_size > _limits.BG_STREAM_FILE_CAP_BYTES)
+        except OSError:
+            # FileNotFoundError: interrupt-path teardown can delete a stream
+            # file between the registry walk and this stat — teardown owns the
+            # entry now. Broadened to OSError because the sweep also runs
+            # inside the foreground-bash ticker, where ANY raise would crash
+            # that call's task group and fail an unrelated foreground command.
+            # (bash_output's READ path keeps the narrow FileNotFoundError →
+            # tombstone fallthrough; other read errors surface there, per the
+            # spec's error-handling table.)
+            continue
+        if not over:
+            continue
+        # Flip-first, then signal (check-and-set discipline; see bash_kill).
+        # status -> killed RETAINS an already-recorded returncode (exited
+        # leader case).
+        bp.kill_reason = "output-cap"
+        bp.status = "killed"
+        _emit_cap_warning(ctx, bp)
+        await _kill_group_escalate(bp)
+        if bp.returncode is None and bp.proc.returncode is not None:
+            bp.returncode = bp.proc.returncode
+
+
 async def spawn_background(
     ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
     env: dict[str, str],
