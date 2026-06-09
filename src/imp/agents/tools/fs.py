@@ -30,8 +30,20 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
 @imp_tool(
     name="read_file",
     description=(
-        "Read a file's contents (bounded — output is capped at 50 KB). "
-        "Paths are relative to the project root (e.g. src/foo.py)."
+        "Read a text file with 1-based line numbers, `cat -n` style: each "
+        "output line is `{lineno}<TAB>{content}`. `offset` (default 1) is the "
+        "first line to show; `limit` (default 2000) caps the lines returned; "
+        "a trailing [notice] says how to continue when more lines remain "
+        "(output is also bounded at 50 KB, and only the first 5 MB of a file "
+        "is readable). Paths are relative to the project root (e.g. "
+        "src/foo.py). IMPORTANT: the line-number prefix is display-only — "
+        "never copy it into any write path (edit_file's `old`, write_file's "
+        "`content`, or a bash heredoc); doing so writes numbered garbage and "
+        "nothing errors. Three more display artifacts are not file content: "
+        "an invisible trailing carriage return on CRLF lines, the "
+        "`…[truncated]` suffix on lines over 2000 chars, and U+FFFD "
+        "replacement characters standing in for invalid bytes — pasting any "
+        "of them into edit_file/write_file corrupts or never matches."
     ),
 )
 async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int = 2000) -> str:
@@ -110,7 +122,14 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
     return f"{body}\n{notice}" if notice else body
 
 
-@imp_tool(name="write_file", description="Write (overwrite) a file. Creates parent dirs as needed.")
+@imp_tool(
+    name="write_file",
+    description=(
+        "Write (overwrite) a file. Creates parent dirs as needed. `content` "
+        "must be file-faithful text — never read_file's numbered display "
+        "output (the `{lineno}<TAB>` prefixes would be written literally)."
+    ),
+)
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
     ctx.check_fs_permission("write", path)
     resolved = ctx.resolve_path(path)
@@ -158,8 +177,15 @@ def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> No
 @imp_tool(
     name="edit_file",
     description=(
-        "Replace a single unique occurrence of `old` with `new` in `path`. "
-        "Raises if `old` not found or not unique."
+        "Replace `old` with `new` in `path`. Default: `old` must occur "
+        "exactly once (raises if absent or not unique). With "
+        "`replace_all=true`: replaces every occurrence (raises only if "
+        "absent). Refuses files larger than 5 MB and files that are not "
+        "valid UTF-8 — use bash for those (a non-UTF-8 file LOOKS editable; "
+        "retrying edit_file on it will keep failing). `old` must be "
+        "file-faithful text — never read_file/grep display output with its "
+        "line-number prefixes, `…[truncated]` suffixes, or U+FFFD "
+        "characters; those exist only in the display and will never match."
     ),
 )
 async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,

@@ -10,6 +10,7 @@ from pathlib import Path
 import anyio
 import pytest
 
+import imp.agents.tools.fs  # side-effect: triggers tool registration
 import imp.agents.tools.nav  # noqa: F401  triggers registration
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
@@ -570,3 +571,50 @@ def test_byte_cap_wins_over_head_limit_when_both_fire(tmp_path: Path) -> None:
                 head_limit=27)  # row 27 is the budget-crossing row (see arithmetic above)
     assert "[output truncated at 50 KB]" in out
     assert "further results omitted" not in out
+
+
+# --- cross-tool claims --------------------------------------------------------
+
+def _read_ctx(tmp_path: Path) -> ToolContext:
+    from imp.engine.types import FsRule, SourceLoc
+    ctx = ToolContext(
+        project_root=tmp_path,
+        fs_permissions=(FsRule(
+            operations=("read",), paths=("**",), mode="allow",
+            source=SourceLoc(file=Path("t.yaml"), line=1),
+        ),),
+        events_path=tmp_path / "events.jsonl",
+    )
+    ctx.coordinator = None
+    return ctx
+
+
+def test_files_with_matches_rows_round_trip_into_read_file_and_grep(
+        tmp_path: Path) -> None:
+    # The machine-consumable claim, exercised: a files_with_matches row feeds
+    # straight back into read_file and grep path= (this is why scan notes
+    # must never be appended to a path row).
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "deep.py").write_text("needle here\n")
+    row = _grep(_ctx(tmp_path), pattern="needle")
+    assert row == "src/deep.py"
+
+    read_out = anyio.run(get_registry()["read_file"].async_invoke,
+                         _read_ctx(tmp_path), {"path": row})
+    assert read_out == "     1\tneedle here"
+
+    again = _grep(_ctx(tmp_path), pattern="needle", path=row,
+                  output_mode="content")
+    assert again == "src/deep.py:1:needle here"
+
+
+def test_grep_and_read_file_agree_on_formfeed_line_numbers(tmp_path: Path) -> None:
+    # Cross-tool alignment — the whole point of \n-splitting both tools: on a
+    # form-feed file, grep's reported lineno N is read_file's rendered line N
+    # (splitlines() would have called NEEDLE line 3 in one tool only).
+    (tmp_path / "ff.txt").write_text("a\fb\nNEEDLE\nc\n")
+    g = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content")
+    assert g == "ff.txt:2:NEEDLE"
+    r = anyio.run(get_registry()["read_file"].async_invoke,
+                  _read_ctx(tmp_path), {"path": "ff.txt"})
+    assert r.split("\n")[1] == "     2\tNEEDLE"

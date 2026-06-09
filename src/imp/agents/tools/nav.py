@@ -53,8 +53,10 @@ def _iter_files(target: Path) -> Iterator[Path]:
 @imp_tool(
     name="glob",
     description=(
-        "List file paths matching a relative glob (e.g. **/*.py or src/**/*.ts). "
-        "Skips .imp/ and .git/."
+        "List file paths matching a relative glob (e.g. **/*.py or "
+        "src/**/*.ts). Skips .imp/ and .git/. Uses pathlib glob semantics — "
+        "a bare *.py matches top-level files only; this differs from grep's "
+        "`glob` parameter, where * and ** cross /."
     ),
 )
 async def glob(ctx: ToolContext, pattern: str) -> str:
@@ -118,9 +120,23 @@ _GREP_MODES = ("files_with_matches", "content", "count")
 @imp_tool(
     name="grep",
     description=(
-        "Search for a regex pattern in files under a relative path (default '.'). "
-        "Returns matching lines with file paths. Skips .imp/ and .git/; "
-        "output is capped at 50 KB."
+        "Search file contents with a regex under a relative path (default "
+        "'.'). output_mode: 'files_with_matches' (default) lists matching "
+        "file paths only; 'content' shows path:lineno:line rows (context "
+        "rows from before/after/context use path-lineno-line); 'count' shows "
+        "path:count for files with matches. before/after/context require "
+        "content mode. head_limit caps result rows. case_insensitive applies "
+        "to the REGEX only — the `glob` filter is always case-sensitive. "
+        "`glob` filters by the path relative to the project root (NOT "
+        "relative to the `path` argument — use glob=\"src/a/*.py\" or a bare "
+        "basename pattern), with fnmatch semantics where both * and ** cross "
+        "/ — unlike the glob tool, whose patterns do not. Lines are split on "
+        "\\n only: on CRLF files match the invisible trailing \\r with "
+        "`\\r?$`. Output rows can carry display artifacts that are not file "
+        "content (trailing \\r, `…[truncated]` on >2000-char lines, U+FFFD "
+        "for invalid bytes) — never paste rows into edit_file/write_file. "
+        "Skips .imp/ and .git/; scans the first 5 MB per file; output capped "
+        "at 50 KB."
     ),
 )
 async def grep(
