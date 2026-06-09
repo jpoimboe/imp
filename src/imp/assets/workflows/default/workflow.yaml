@@ -28,7 +28,6 @@ phases:
       - name: spec-writer
         file: agents/spec-writer.md
         tier: high
-        interactive: true
         fs_permissions:
           - {operations: [read],  paths: ["/project/**"], mode: allow}
           - {operations: [write], paths: ["/project/imp/specs/**"], mode: allow}
@@ -177,8 +176,7 @@ phases:
       - name: final-review
         file: agents/final-review.md
         tier: medium
-        interactive: true
-        max_loops: 20                # interactive back-to-implement edge
+        max_loops: 20
         rules:
           - {if: {decision: merge},  set: {ready_to_merge: true}, continue: true}
           - {if: {decision: rework}, goto: implement, feedback: "Here's the feedback to address:"}        # carries comments

@@ -234,8 +234,9 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     )
 
     # The superpowers workflow has no classic human-gate prompts (no steps with
-    # options:). The final-review step is interactive=true but the fake provider
-    # returns complete_step immediately so human_input_fn is never called.
+    # options:). The final-review agent uses wait_for_user to solicit the human,
+    # but the fake provider returns complete_step immediately (no wait_for_user
+    # call in the scripted response), so human_input_fn is never called.
     answer_count = [0]
     def _human_input() -> str:
         answer_count[0] += 1
@@ -252,9 +253,10 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
         f"expected COMPLETED, got {result!r}; "
         f"human gates answered: {answer_count[0]}"
     )
-    # No classic human gate in the superpowers workflow (final-review is an
-    # interactive agent, not a human-options gate, and the fake completes it
-    # directly with decision=merge).
+    # No classic human gate in the superpowers workflow (final-review uses
+    # wait_for_user, but the fake skips it and completes directly with
+    # decision=merge — the genuine solicit flow is covered by
+    # test_final_review_wait_for_user_solicit_then_merge).
     assert answer_count[0] == 0
 
 
@@ -539,3 +541,93 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     assert any(e["type"] == "step_rewound" for e in events)
     # Merged: worktree removed by the terminal merge gate.
     assert not (tmp_path / ".imp" / "worktrees" / "test-change").exists()
+
+
+@pytest.mark.anyio
+async def test_final_review_wait_for_user_solicit_then_merge(tmp_path: Path) -> None:
+    """Exercises the wait_for_user flow in final-review: the agent calls
+    wait_for_user to solicit the human, receives the reply as the tool result,
+    then completes the step with decision=merge.
+
+    The change is pre-positioned at final-review (skipping the earlier phases)
+    so only the final-review → merge path runs. The fake provider is scripted
+    with TWO responses: first a wait_for_user tool_use, then a complete_step
+    tool_use. user_chat_input_fn returns "looks good, merge it" which is
+    injected as the tool_result for the wait_for_user call.
+    """
+    from imp.engine.loader import load_workflow
+    from imp.providers.effective import load_effective_config
+
+    change = _seed_default_workflow(tmp_path)
+
+    # Position the Change directly at final-review, bypassing earlier phases.
+    wf = load_workflow(change.workflow_dir,
+                       configured_tiers=load_effective_config(
+                           project_root=tmp_path,
+                           control_root=tmp_path).config.tier_names())
+    st = State.load(change.state_dir)
+    st.step = "final-review"
+    st.status = "running"
+    # final-review checks final_review var (default true → runs) and
+    # ready_to_merge must be false to avoid skipping.
+    st.vars["final_review"] = True
+    st.vars["ready_to_merge"] = False
+    st.save(change.state_dir)
+
+    # Script two responses for the final-review agent:
+    #   1. wait_for_user — agent solicits the human
+    #   2. complete_step(decision=merge) — agent finishes after receiving reply
+    wfu_response = response(
+        tool_use("wfu1", "wait_for_user", {"prompt": "Summary: stub change. Merge or rework?"}),
+        stop_reason="tool_use",
+    )
+    merge_response = response(
+        tool_use("c1", "complete_step", {
+            "status": "Success",
+            "decision": "merge",
+            "comments": "user approved",
+        }),
+        stop_reason="tool_use",
+    )
+    fake = FakeAsyncAnthropic([wfu_response, merge_response])
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake),
+    )
+
+    # Attended: user_chat_input_fn supplies the reply for wait_for_user.
+    human_replies: list[str] = []
+
+    def _user_chat_input(prompt: str) -> str:
+        human_replies.append(prompt)
+        return "looks good, merge it"
+
+    events_seen: list[dict] = []
+    result = await run_change(
+        change, on_event=events_seen.append,
+        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
+        user_chat_input_fn=_user_chat_input,
+    )
+
+    # The run completes: final-review → merge → COMPLETED.
+    assert result is RunResult.COMPLETED, (
+        f"expected COMPLETED, got {result!r}; events: {[e['type'] for e in events_seen]}"
+    )
+
+    # The human was solicited exactly once via wait_for_user.
+    assert len(human_replies) == 1, (
+        f"expected 1 wait_for_user solicit, got {human_replies!r}"
+    )
+
+    # awaiting_user_input event was emitted (the runner records the solicit).
+    event_types = [e["type"] for e in events_seen]
+    assert "awaiting_user_input" in event_types, (
+        f"awaiting_user_input event not found in {event_types}"
+    )
+
+    # The fake client's canned list is exhausted: both scripted responses were consumed.
+    assert len(fake.messages._responses) == 0, (
+        "not all scripted responses were consumed — wait_for_user call may have been skipped"
+    )

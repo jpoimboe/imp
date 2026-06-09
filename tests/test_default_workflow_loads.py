@@ -54,9 +54,11 @@ def test_every_declared_tool_is_real() -> None:
     # This gate checks tool names itself to close that gap.
     from imp.agents.tools import get_registry
     registry = set(get_registry())
-    # Auto-injected (complete_step/task/load_skill) + provider-native reserved
-    # names (web_search/web_fetch, web_native.py) are valid but not in the registry.
-    reserved = {"complete_step", "task", "load_skill", "web_search", "web_fetch"}
+    # Auto-injected (complete_step/task/load_skill/wait_for_user) + provider-native
+    # reserved names (web_search/web_fetch, web_native.py) are valid but not in
+    # the @imp_tool registry (they are synthesized per-runner at runtime).
+    reserved = {"complete_step", "task", "load_skill", "wait_for_user",
+                "web_search", "web_fetch"}
     allowed = registry | reserved
     bad = {a.name: sorted(set(a.tools) - allowed)
            for a in _wf().agents.values() if set(a.tools) - allowed}
