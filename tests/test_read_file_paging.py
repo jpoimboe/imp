@@ -86,7 +86,9 @@ def test_formfeed_numbers_by_newline_count(tmp_path: Path) -> None:
     # splitlines() would call this 4 lines; \n-counting says 2.
     (tmp_path / "ff.txt").write_text("a\fb\nc\vd")
     out = _read(_ctx(tmp_path), path="ff.txt")
-    assert out == f"{_num(1, 'a\fb')}\n{_num(2, 'c\vd')}"
+    ff_line = "a\fb"
+    vd_line = "c\vd"
+    assert out == f"{_num(1, ff_line)}\n{_num(2, vd_line)}"
 
 
 def test_empty_file_sentinel(tmp_path: Path) -> None:
@@ -119,14 +121,14 @@ def test_long_line_truncated_prefix_excluded_from_content_cap(tmp_path: Path) ->
     assert line2 == _num(2, "short")
 
 
-@pytest.mark.parametrize("bad", [0, -1])
+@pytest.mark.parametrize("bad", [0, -1, True, 1.0, "3"])
 def test_invalid_offset_rejected(tmp_path: Path, bad: int) -> None:
     (tmp_path / "a.txt").write_text("x\n")
     with pytest.raises(ValueError, match="offset"):
         _read(_ctx(tmp_path), path="a.txt", offset=bad)
 
 
-@pytest.mark.parametrize("bad", [0, -3])
+@pytest.mark.parametrize("bad", [0, -3, True, 2.5, "10"])
 def test_invalid_limit_rejected(tmp_path: Path, bad: int) -> None:
     (tmp_path / "a.txt").write_text("x\n")
     with pytest.raises(ValueError, match="limit"):
@@ -134,7 +136,7 @@ def test_invalid_limit_rejected(tmp_path: Path, bad: int) -> None:
 
 
 def test_missing_file_error_text(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="no such file: nope.txt"):
+    with pytest.raises(FileNotFoundError, match=r"no such file: nope\.txt"):
         _read(_ctx(tmp_path), path="nope.txt")
 
 
