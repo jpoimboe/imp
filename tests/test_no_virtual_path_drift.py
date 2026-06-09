@@ -46,6 +46,34 @@ def test_no_virtual_paths_in_tool_descriptions():
     assert not offenders, "tool-description drift:\n" + "\n".join(offenders)
 
 
+# Lines in src that legitimately mention `/project`/`/scratch` — all NEGATIONS
+# documenting the namespace's ABSENCE (Part A). Matched by stripped content so a
+# line move doesn't break the allowlist; a NEW occurrence (not in this set) trips
+# the guard and must be consciously added here (the whole point of the guard).
+_SRC_ALLOWLIST = {
+    "no virtual `/project`/`/scratch` namespace and no in-memory scratch store; system",
+    "# `head`/`sed`. The path model is worktree-relative (Part A): no `/project`.",
+    "host; `fs_permissions` patterns are worktree-relative (no `/project` namespace).",
+}
+
+
+def test_no_virtual_paths_in_python_source():
+    """M2: the asset/description guards above miss `/project` drift in Python
+    comments/docstrings (and any prompt string built in code). Scan src/imp/**/*.py
+    too, allowlisting only the known negations that document the namespace's removal."""
+    src_root = Path(__file__).resolve().parents[1] / "src" / "imp"
+    offenders: list[str] = []
+    for f in sorted(src_root.rglob("*.py")):
+        for i, line in enumerate(f.read_text().splitlines(), start=1):
+            if _FORBIDDEN.search(line) and line.strip() not in _SRC_ALLOWLIST:
+                offenders.append(f"{f.relative_to(src_root)}:{i}: {line.strip()}")
+    assert not offenders, (
+        "virtual-path drift in Python source (add to _SRC_ALLOWLIST only if it is "
+        "a deliberate negation documenting the namespace's absence):\n"
+        + "\n".join(offenders)
+    )
+
+
 def test_git_escape_behavioral_test_is_not_skipped():
     """The git escape-vector test (M1/F-9) is the most security-load-bearing
     behavioral check. Fail loudly if it ever ships as a pytest.skip scaffold."""
