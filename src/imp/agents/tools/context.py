@@ -73,6 +73,10 @@ class ToolContext:
     # Optional test-run gate command (config.test_command). Threaded onto the
     # subprocess env (IMP_TEST_COMMAND) by the bash tool. None => no test gate.
     test_command: str | None = None
+    # Resolved SandboxPolicy for shell wrapping (spec Part B). None => bare sh -c
+    # (no sandbox), preserving pre-sandbox behavior. Set by the runner from
+    # invocation.sandbox_policy.
+    sandbox_policy: Any = None
     # §10/§12: when True, the run is headless (no human at the keyboard). The
     # subagent backoff loop applies a wall-clock ceiling instead of retrying
     # forever. Copied from invocation.non_interactive by each provider.

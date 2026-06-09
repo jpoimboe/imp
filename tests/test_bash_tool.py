@@ -205,3 +205,44 @@ def test_bash_relative_cd_works(tmp_path: Path) -> None:
     out = json.loads(_run_bash(_ctx(tmp_path), {"command": "cd src && pwd"}))
     assert out["returncode"] == 0
     assert str(sub) in out["stdout"]
+
+
+def test_bash_wraps_with_active_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.agents.tools.bash as bashmod
+    from imp.engine.sandbox import SandboxPolicy
+
+    captured: dict[str, object] = {}
+
+    async def fake_open_process(argv: list[str], **kw: object) -> object:
+        captured["argv"] = argv
+        raise RuntimeError("stop after capture")   # we only assert the argv
+
+    monkeypatch.setattr(bashmod.anyio, "open_process", fake_open_process)
+    ctx = _ctx(tmp_path)
+    ctx.sandbox_policy = SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        tmp_host_dir=str(tmp_path / "tmp"), secret_dirs=(), secret_files=(),
+        setenv=(("PATH", "/usr/bin"),), network=True, note="",
+    )
+    # _run_bash propagates the RuntimeError out via anyio.run
+    with pytest.raises(RuntimeError):
+        _run_bash(ctx, {"command": "echo hi"})
+    assert captured["argv"][0] == "bwrap"
+    assert captured["argv"][-3:] == ["sh", "-c", "echo hi"]
+
+
+def test_bash_bare_when_no_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.agents.tools.bash as bashmod
+
+    captured: dict[str, object] = {}
+
+    async def fake_open_process(argv: list[str], **kw: object) -> object:
+        captured["argv"] = argv
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(bashmod.anyio, "open_process", fake_open_process)
+    # no sandbox_policy set on ctx — should use bare sh -c
+    with pytest.raises(RuntimeError):
+        _run_bash(_ctx(tmp_path), {"command": "echo hi"})
+    assert captured["argv"] == ["sh", "-c", "echo hi"]

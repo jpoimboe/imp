@@ -29,6 +29,7 @@ from imp.agents.tools.limits import (
     ToolAborted,
 )
 from imp.engine.env import engine_env, overlay_engine_env
+from imp.engine.sandbox import build_sandbox_argv
 
 
 @dataclass
@@ -71,8 +72,11 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
 
     # anyio.open_process accepts stdlib subprocess constants for stdin/stdout/
     # stderr; PIPE is the documented way to capture both streams.
+    policy = ctx.sandbox_policy
+    argv = (build_sandbox_argv(command, cwd=cwd_path, policy=policy)
+            if policy is not None else ["sh", "-c", command])
     proc = await anyio.open_process(
-        ["sh", "-c", command],
+        argv,
         stdin=None,
         stdout=PIPE,
         stderr=PIPE,
