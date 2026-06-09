@@ -108,7 +108,7 @@ def _ignore_for_copy(_dir: str, names: list[str]) -> set[str]:
                         ".mypy_cache", ".ruff_cache", ".coverage",
                         "htmlcov", ".tox", "__pycache__", "dist", "build"}
                or n.endswith(".egg-info")}
-    # The repo carries its own top-level imp/ dogfood control dir (config.yaml,
+    # The repo carries its own top-level imp/ dogfood control dir (project.yaml,
     # specs/, plans/, workflows/). Copying it into the seed collides with
     # run_init's fresh scaffold ("imp/ already exists; refusing to re-init").
     # Exclude it ONLY at the project root — never src/imp (matched by basename).
@@ -229,7 +229,9 @@ pytestmark = [
 
 
 def test_dogfood_imp_on_imp_default_workflow(
-    tmp_path: Path, request: pytest.FixtureRequest
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run the shipped default workflow against imp's own source.
 
@@ -239,6 +241,16 @@ def test_dogfood_imp_on_imp_default_workflow(
     asks use the EOF default. After completion, verifies the sentinel landed in
     the right file plus all the events.jsonl/imp-log invariants.
     """
+    # Isolate XDG_CONFIG_HOME to a tmp dir BEFORE anything reads/writes user
+    # config. _seed_dogfood_project() runs run_init() in-process, which now
+    # bootstraps the USER config (~/.config/imp/config.yaml) — without this the
+    # machine has none and run_init WOULD create the real one. The later
+    # subprocess inherits this via `env = dict(os.environ)`, so both the
+    # in-process init and the subprocess read the isolated user layer.
+    # user_config_path() reads XDG_CONFIG_HOME at call time, so setting it here
+    # (before run_init) takes effect.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".xdg"))
+
     provider = first_opted_in()
     assert provider is not None  # guaranteed by skipif
     model = _provider_model(provider)
@@ -279,9 +291,12 @@ def test_dogfood_imp_on_imp_default_workflow(
         f"superpowers workflow should declare no ask/options gates; got {expected_gates}"
     )
 
-    # Override config.yaml to pin the exact model string. run_init wrote
-    # provider-default models; we want determinism across run_init updates.
-    (tmp_path / "imp" / "config.yaml").write_text(
+    # Override imp/project.yaml (the project layer) to pin the exact model
+    # string. run_init wrote project.yaml with workflow+vars but NO model
+    # bindings (the floor owns provider-default models now); we replace it with a
+    # complete project layer for determinism across run_init updates.
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "workflow: default\n"
         f"providers: [{provider}]\n"
         "tiers:\n"
         f"  low:    {{{provider}: {model}}}\n"
@@ -289,8 +304,9 @@ def test_dogfood_imp_on_imp_default_workflow(
         f"  high:   {{{provider}: {model}}}\n"
         # Opt this run into the lint gate (off by default): exercises the
         # IMP_LINT_COMMAND pre-commit gate so the exemplar's deliberate F401
-        # unused import is caught (Acceptance #3/#6). Top-level keys, parsed into
-        # Config.lint_command / test_command — NOT workflow vars.
+        # unused import is caught (Acceptance #3/#6). Project-layer keys, parsed
+        # by parse_config_layer into Config.lint_command / test_command — NOT
+        # workflow vars.
         "lint_command: make lint\n"
         "test_command: make test\n"
         # Plan 1 config vars override: skip the interactive final gate so the
@@ -299,10 +315,10 @@ def test_dogfood_imp_on_imp_default_workflow(
         "vars:\n"
         "  final_review: false\n"
     )
-    # imp/config.yaml is tracked (run_init wrote it, the seed commit captured
+    # imp/project.yaml is tracked (run_init wrote it, the seed commit captured
     # it), so fold the model-pin override back into the seed commit — otherwise
     # it leaves the working tree dirty and trips the clean-tree gate below.
-    subprocess.run(["git", "add", "imp/config.yaml"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "imp/project.yaml"], cwd=tmp_path, check=True)
     subprocess.run(
         ["git",
          "-c", "user.email=test@imp",
