@@ -7,8 +7,7 @@ this module, so there is no providers→engine import edge.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import Any
+from collections.abc import Callable
 
 from imp.engine.types import OutputSchema
 
@@ -36,41 +35,19 @@ def completion_instruction(schema: OutputSchema) -> str:
 NUDGE_LIMIT = 2
 
 
-def build_continuation_fn(
-    *,
-    interactive: bool,
-    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
-    instruction: str,
-    log: Any,
-    agent_id: str | None,
-) -> Callable[[str], str | None | Awaitable[str | None]] | None:
-    """Build the end-of-turn continuation hook the provider calls when an
-    agent ends a turn without complete_step.
+def build_continuation_fn(*, instruction: str) -> Callable[[str], str | None]:
+    """End-of-turn backstop, uniform across every agent and mode.
 
-    interactive: wrap the user chat input — the human keeps the conversation
-    going, so it always returns a string (an interactive agent ends only by
-    calling complete_step). The closure emits `awaiting_user_input` BEFORE it
-    reads input, mirroring `human_prompt_pending`, so out-of-process drivers
-    know input is awaited (provider-native stop_reason can't carry this).
-
-    non-interactive: a fresh nudge counter per invocation. The first
-    NUDGE_LIMIT calls return the corrective instruction; after that, None —
-    which makes the provider emit agent_incomplete (-> Pause). This is the
-    backstop subagents never had (omission #2 / the dogfood bug).
+    Deliberate yielding is now the `wait_for_user` tool, so a bare turn-end is
+    always an omission (the dogfood bug). Nudge up to NUDGE_LIMIT times, then
+    return None — which makes the provider emit agent_incomplete (-> Pause). The
+    nudge names BOTH terminators (R1) so a forgot-to-yield agent is not steered
+    toward premature completion.
     """
-    if interactive:
-        if user_chat_input_fn is None:
-            return None
-
-        def _interactive(last_text: str) -> str | Awaitable[str]:
-            if log is not None:
-                log.append(agent_id=agent_id, type="awaiting_user_input",
-                           payload={"prompt": last_text})
-            return user_chat_input_fn("")
-
-        return _interactive
-
-    nudge = f"You ended your turn without calling `complete_step`. {instruction}"
+    nudge = (
+        "You ended your turn without calling `complete_step` (to finish the "
+        "step) or `wait_for_user` (to yield to the human). " + instruction
+    )
     count = 0
 
     def _nudge(_last_text: str) -> str | None:

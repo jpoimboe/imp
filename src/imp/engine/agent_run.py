@@ -184,13 +184,7 @@ def build_agent_invocation(
             body = f"{body}\n\n{_BASH_VIRTUAL_PATHS_NOTE}"
         body = f"{body}\n\n{_ENGINE_SEED_NOTE}"
         system_prompt = f"{body}\n\n{instruction}"
-    continuation_fn = build_continuation_fn(
-        interactive=interactive,
-        user_chat_input_fn=user_chat_input_fn,
-        instruction=instruction,
-        log=log,
-        agent_id=agent_id,
-    )
+    continuation_fn = build_continuation_fn(instruction=instruction)
     return AgentInvocation(
         agent_def=agent_def,
         provider_name=provider_name,

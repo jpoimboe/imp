@@ -63,9 +63,7 @@ def _instruction() -> str:
 
 
 def test_nudge_fn_returns_instruction_then_none() -> None:
-    fn = build_continuation_fn(
-        interactive=False, user_chat_input_fn=None,
-        instruction=_instruction(), log=None, agent_id="step:p/s")
+    fn = build_continuation_fn(instruction=_instruction())
     assert fn is not None
     # First NUDGE_LIMIT calls return the corrective text...
     for _ in range(NUDGE_LIMIT):
@@ -76,26 +74,11 @@ def test_nudge_fn_returns_instruction_then_none() -> None:
     assert fn("more prose") is None
 
 
-def test_interactive_fn_emits_awaiting_then_reads_input() -> None:
-    emitted: list[dict] = []
-
-    class _Log:
-        def append(self, *, agent_id, type, payload):
-            emitted.append({"agent_id": agent_id, "type": type, "payload": payload})
-
-    fn = build_continuation_fn(
-        interactive=True, user_chat_input_fn=lambda _p: "user reply",
-        instruction=_instruction(), log=_Log(), agent_id="step:p/s")
-    assert fn is not None
-    reply = fn("the agent's question")
-    assert reply == "user reply"
-    assert emitted == [{
-        "agent_id": "step:p/s", "type": "awaiting_user_input",
-        "payload": {"prompt": "the agent's question"}}]
-
-
-def test_interactive_without_input_fn_is_none() -> None:
-    fn = build_continuation_fn(
-        interactive=True, user_chat_input_fn=None,
-        instruction=_instruction(), log=None, agent_id="x")
-    assert fn is None
+def test_continuation_always_nudges_and_names_both_terminators() -> None:
+    fn = build_continuation_fn(instruction="CALL complete_step with: done (bool).")
+    first = fn("some text")
+    assert "complete_step" in first and "wait_for_user" in first
+    # exhausts after NUDGE_LIMIT, then None -> agent_incomplete -> pause
+    for _ in range(NUDGE_LIMIT - 1):
+        assert fn("x") is not None
+    assert fn("x") is None
