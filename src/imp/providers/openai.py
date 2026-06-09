@@ -540,6 +540,8 @@ class OpenAIAgentRunner:
                     reply = await reply
                 resolve_wait_for_user_on_resume(
                     messages, transcript, elog, aid, reply)
+                # Fall through (do NOT return): the now-balanced transcript
+                # drives the next LLM turn with the human's reply.
         else:
             messages = []
             for m in invocation.initial_messages:
