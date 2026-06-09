@@ -91,7 +91,7 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
 def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
     tmp_path: Path,
 ) -> None:
-    # An agent holding `bash` gets the `/project`-is-virtual note appended to its
+    # An agent holding `bash` gets the relative-paths note appended to its
     # body (between the rendered body and the completion contract), so every
     # bash-capable agent learns the rule without each prompt re-pasting it.
     from imp.engine.agent_run import build_agent_invocation
@@ -110,7 +110,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
 
     assert inv.system_prompt.startswith("RENDERED BODY")
     assert "IMP_PROJECT_ROOT" in inv.system_prompt
-    assert "`/project` is virtual" in inv.system_prompt
+    assert "relative to the project root" in inv.system_prompt
     # The note precedes the completion contract.
     assert inv.system_prompt.index("IMP_PROJECT_ROOT") < inv.system_prompt.index(
         "complete_step")
