@@ -77,13 +77,43 @@ def test_cap_cut_fragment_never_matched_and_sentinel_coexists_with_note(
 
 def test_walk_order_is_sorted_and_deterministic(tmp_path: Path) -> None:
     # Sorted dirnames/filenames in the walk. NOTE: topdown walks yield root
-    # files before subdir files — z.txt comes BEFORE b/c.txt (this is NOT
-    # sorted(all_paths)).
-    (tmp_path / "z.txt").write_text("needle\n")
+    # files before subdir files (this is NOT sorted(all_paths)).
+    #
+    # Discrimination strategy: create files in non-alphabetical inode order so
+    # an unsorted walk would return them in creation order (m, a, z, t, g, f).
+    # Also create two sibling subdirs in non-alphabetical creation order (y
+    # before b) each with a file, so an unsorted subdir walk would visit y/
+    # before b/. The test then asserts the full sorted ordering.
+    #
+    # Root files created in non-alpha order (m before a before z etc.):
+    for name in ["m.txt", "a.txt", "z.txt", "t.txt", "g.txt", "f.txt"]:
+        (tmp_path / name).write_text("needle\n")
+    # Subdirs created non-alphabetically: y before b
+    (tmp_path / "y").mkdir()
+    (tmp_path / "y" / "yw.txt").write_text("needle\n")
     (tmp_path / "b").mkdir()
-    (tmp_path / "b" / "c.txt").write_text("needle\n")
+    (tmp_path / "b" / "bc.txt").write_text("needle\n")
+
     out = _grep(_ctx(tmp_path), pattern="needle")
-    assert out.index("z.txt") < out.index("b/c.txt")
+
+    # Root files must appear before any subdir file (topdown property):
+    for root_file in ["a.txt", "f.txt", "g.txt", "m.txt", "t.txt", "z.txt"]:
+        assert out.index(root_file) < out.index("b/"), (
+            f"root file {root_file!r} should appear before subdir b/"
+        )
+        assert out.index(root_file) < out.index("y/"), (
+            f"root file {root_file!r} should appear before subdir y/"
+        )
+
+    # Root files must be in sorted (alphabetical) order among themselves:
+    assert out.index("a.txt") < out.index("f.txt"), "a.txt before f.txt"
+    assert out.index("f.txt") < out.index("g.txt"), "f.txt before g.txt"
+    assert out.index("g.txt") < out.index("m.txt"), "g.txt before m.txt"
+    assert out.index("m.txt") < out.index("t.txt"), "m.txt before t.txt"
+    assert out.index("t.txt") < out.index("z.txt"), "t.txt before z.txt"
+
+    # Subdirs must be visited in sorted (alphabetical) order: b/ before y/:
+    assert out.index("b/") < out.index("y/"), "subdir b/ before y/"
 
 
 def test_nonexistent_path_is_an_error_not_no_matches(tmp_path: Path) -> None:
