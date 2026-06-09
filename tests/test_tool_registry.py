@@ -1,6 +1,8 @@
 # tests/test_tool_registry.py
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 
 from imp.agents.tools import (
@@ -71,3 +73,37 @@ def test_registry_restored_after_fixture(isolated_registry) -> None:
     assert "ephemeral" in get_registry()
     # After this test exits, the fixture's teardown restores the prior snapshot,
     # so tests in other files don't see "ephemeral" or any clear-related fallout.
+
+
+def test_literal_annotation_exports_enum_under_pep563(isolated_registry) -> None:
+    # This module has `from __future__ import annotations`, so the annotation
+    # below reaches _build_input_schema as the STRING 'Literal["a", "b"]' —
+    # the production shape of nav.py/fs.py tools. Today this raises
+    # PydanticUserError ("not fully defined") at decoration time.
+    @imp_tool(name="modal", description="x")
+    def modal(ctx: object, mode: Literal["a", "b"] = "a") -> str:
+        return mode
+
+    props = get_registry()["modal"].input_schema["properties"]
+    assert props["mode"]["enum"] == ["a", "b"]
+
+
+def test_unannotated_param_defaults_to_str(isolated_registry) -> None:
+    # get_type_hints OMITS unannotated params; the resolver must keep today's
+    # unannotated -> str behavior, not silently change schema shape.
+    @imp_tool(name="untyped", description="x")
+    def untyped(ctx: object, q) -> str:  # q deliberately unannotated
+        return str(q)
+
+    props = get_registry()["untyped"].input_schema["properties"]
+    assert props["q"]["type"] == "string"
+
+
+def test_return_annotation_not_in_schema(isolated_registry) -> None:
+    # get_type_hints returns a "return" key; it must never become a property.
+    @imp_tool(name="ret", description="x")
+    def ret(ctx: object, a: int) -> int:
+        return a
+
+    props = get_registry()["ret"].input_schema["properties"]
+    assert set(props) == {"a"}

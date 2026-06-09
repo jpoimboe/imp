@@ -13,6 +13,7 @@ Schema derivation:
 from __future__ import annotations
 
 import inspect
+import typing
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -49,11 +50,20 @@ _REGISTRY: dict[str, Tool] = {}
 
 def _build_input_schema(fn: Callable[..., Any]) -> dict[str, Any]:
     sig = inspect.signature(fn)
+    # PEP 563: the tool modules use `from __future__ import annotations`, so
+    # param.annotation is a STRING forward ref. Resolve in fn's own module
+    # namespace so non-builtin annotations (Literal[...], ToolContext) export
+    # correctly. An unresolvable name (e.g. a TYPE_CHECKING-only import in an
+    # @imp_tool module) raises HERE — at import time, loudly — by design.
+    hints = typing.get_type_hints(fn)
     fields: dict[str, Any] = {}
     for i, (name, param) in enumerate(sig.parameters.items()):
         if i == 0 and name == "ctx":
             continue
-        annotation = param.annotation if param.annotation is not inspect.Parameter.empty else str
+        # Iterate sig.parameters (not hints) so get_type_hints' extra "return"
+        # key never becomes a property; .get(name, str) keeps the historical
+        # unannotated-param -> str default.
+        annotation = hints.get(name, str)
         default = ... if param.default is inspect.Parameter.empty else param.default
         fields[name] = (annotation, Field(default=default) if default is not ... else Field(...))
 
