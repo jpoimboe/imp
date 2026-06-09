@@ -51,7 +51,15 @@ def make_wait_for_user_tool() -> Tool:
         attended = ctx.user_input_fn is not None and not ctx.non_interactive
         if not attended:
             raise AwaitingUserInput(prompt)
-        reply = ctx.user_input_fn("")
+        # R6: a line the human typed WHILE the agent was running was routed to the
+        # interject queue at submit time. If one is pending now, it SATISFIES this
+        # wait — consume it instead of soliciting fresh input, so the human's
+        # already-typed message becomes the reply and we don't block for a second.
+        pending = None
+        coord = getattr(ctx, "coordinator", None)
+        if coord is not None:
+            pending = coord.drain_interject()
+        reply = pending if pending is not None else ctx.user_input_fn("")
         if inspect.isawaitable(reply):
             reply = await reply
         assert isinstance(reply, str)

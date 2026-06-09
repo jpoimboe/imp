@@ -38,6 +38,59 @@ from imp.engine.state import LockHeld, ProjectLock, State
 _DEFAULT_NONINTERACTIVE_REPLY = "Proceed using your best judgment."
 
 
+class ReplyInterjectRouter:
+    """Routes each human-typed line by the agent's state AT SUBMIT TIME (F7/R6).
+
+    `route(line)` is the pure decision:
+      - solicit ACTIVE (the engine is blocked in a human-gate / `wait_for_user`,
+        a prompt is up) → the line is the REPLY → delivered to `reply_sink`;
+      - solicit INACTIVE (the agent is running) → the line is an INTERJECT →
+        queued on the coordinator, delivered at the next agent turn boundary.
+
+    `begin_solicit()` / `end_solicit()` toggle the flag around the prompt read;
+    `solicit_active` exposes it. This object is the unit-testable routing CORE
+    (tests/test_cli_interject_routing.py) — it touches no TTY.
+
+    In the LIVE CLI the reply itself comes straight from the prompt_toolkit read
+    (so `reply_sink` is rarely exercised: while a solicit is active the ESC
+    reader is quiesced and never funnels a line in). The flag still guards the
+    race where a sink call lands during a prompt — that line is then a reply, not
+    a stray interject.
+
+    Slash interception is NOT this object's concern: it happens in the line
+    reader (`ask_line_with_slash`), so a `/help`/`/skills` line is consumed and
+    re-prompted before ever reaching `route`, and a `/<skill>` line arrives here
+    already resolved to its skill body (then routed by the same flag).
+    """
+
+    def __init__(
+        self, coordinator: Any, *, reply_sink: Callable[[str], None] | None = None,
+    ) -> None:
+        self._coord = coordinator
+        self._reply_sink = reply_sink
+        self._solicit_active = False
+
+    @property
+    def solicit_active(self) -> bool:
+        return self._solicit_active
+
+    def begin_solicit(self) -> None:
+        self._solicit_active = True
+
+    def end_solicit(self) -> None:
+        self._solicit_active = False
+
+    def route(self, line: str) -> None:
+        """Route ONE submitted line by the live solicit-active flag. Reply when a
+        solicit is in flight (deliver to reply_sink if set); otherwise enqueue an
+        interject. Pure dispatch — no TTY, no blocking; the unit-test authority."""
+        if self._solicit_active:
+            if self._reply_sink is not None:
+                self._reply_sink(line)
+        else:
+            self._coord.enqueue_interject(line)
+
+
 def make_stdin_reply_fn(default_reply: str) -> Callable[[], Awaitable[str]]:
     """A scripted reply channel for --non-interactive runs (§12): each call reads
     the next stdin line; on EOF it returns `default_reply`. Used for BOTH the
@@ -52,6 +105,59 @@ def make_stdin_reply_fn(default_reply: str) -> Callable[[], Awaitable[str]]:
             return default_reply
         return line.rstrip("\r\n")    # strip both CR and LF for Windows-style endings
     return _reply
+
+
+def _build_interactive_input(
+    change: Change, status: LiveStatus, coord: Any, esc_reader: Any,
+) -> tuple[ReplyInterjectRouter, Callable[[], Awaitable[str]]]:
+    """Build the interactive input plumbing shared by `new` and `resume` (Task 11).
+
+    Returns `(router, solicit_fn)`:
+      - `router` is the testable routing core (reply-vs-interject by submit-time
+        state, see ReplyInterjectRouter);
+      - `solicit_fn` is what the engine calls to SOLICIT a reply (human-gate and
+        wait_for_user): it marks the router's solicit flag active for the duration
+        of the prompt_toolkit read and returns the typed line. Same behavior as
+        the legacy `_ask_line` — the prompt owns the tty (ESC quiesced) and the
+        line is the REPLY.
+
+    Where do interject lines come from? NOT a competing prompt — that would steal
+    /dev/tty from the ESC reader during agent-thinking and break ESC-to-pause (the
+    landed invariant). Instead the ESC reader — the sole /dev/tty owner during
+    thinking — gets an `on_interject` sink: a line typed while the agent runs is
+    captured raw and handed to `router.route`, which (solicit inactive) enqueues
+    it as an interject. During a solicit the ESC reader is quiesced and silent, so
+    its sink never fires then; the prompt owns input and the line is a reply.
+
+    The solicit-active flag is thus realized two ways that agree: the router's
+    boolean (set around the prompt read) and, physically, the ESC reader's
+    quiesce state. `router.route` is the pure, unit-tested decision; this wiring
+    is the thin, TTY-fragile shell around it (the interject read path is the one
+    documented to CPR-degrade under impty — L4).
+    """
+    prompt = Prompt(skills_dir=change.workflow_dir / "skills",
+                    editing_mode=_editing_mode(change.control_root),
+                    color=should_use_color(sys.stdout))
+    router = ReplyInterjectRouter(coord)
+
+    # The ESC reader funnels a mid-run typed line here; route() enqueues it as an
+    # interject (no solicit active) — delivered at the next agent turn boundary.
+    esc_reader.set_interject_sink(router.route)
+
+    async def _solicit() -> str:
+        # Reply path: identical to the legacy _ask_line, but flag the router
+        # active for the prompt's duration so the reply-vs-interject model is
+        # explicit (and a stray sink call during a prompt would route as reply).
+        router.begin_solicit()
+        try:
+            return await ask_line_with_slash(
+                prompt, status, change,
+                color=should_use_color(sys.stdout), width=_term_width(),
+                coord=coord)
+        finally:
+            router.end_solicit()
+
+    return router, _solicit
 
 
 # -- end-of-run status lines ------------------------------------------------
@@ -216,18 +322,15 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
-                _ask_line = make_stdin_reply_fn(args.default_reply)
+                human_input_fn: Callable[[], Awaitable[str]] = make_stdin_reply_fn(
+                    args.default_reply)
             else:
-                prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                                editing_mode=_editing_mode(change.control_root),
-                                color=should_use_color(sys.stdout))
                 esc_reader = EscKeyReader(coord)
-
-                async def _ask_line() -> str:
-                    return await ask_line_with_slash(
-                        prompt, status, change,
-                        color=should_use_color(sys.stdout), width=_term_width(),
-                        coord=coord)
+                # Task 11: the ESC reader (sole /dev/tty owner during thinking)
+                # also captures interject lines; the solicit/reply prompt is the
+                # router-flagged human_input_fn. See _build_interactive_input.
+                _router, human_input_fn = _build_interactive_input(
+                    change, status, coord, esc_reader)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
@@ -243,9 +346,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                     result = await run_change(
                         change,
                         on_event=driver.on_event,
-                        human_input_fn=_ask_line,
+                        human_input_fn=human_input_fn,
                         human_output_fn=driver.print_chrome,
-                        user_chat_input_fn=lambda _q: _ask_line(),
+                        # chat solicit shares the human-gate reply channel.
+                        user_chat_input_fn=lambda _q: human_input_fn(),
                         coordinator=coord,
                         non_interactive=non_interactive,
                     )
@@ -411,18 +515,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
             esc_reader: EscKeyReader | None = None
             if non_interactive:
-                _ask_line = make_stdin_reply_fn(args.default_reply)
+                human_input_fn: Callable[[], Awaitable[str]] = make_stdin_reply_fn(
+                    args.default_reply)
             else:
-                prompt = Prompt(skills_dir=change.workflow_dir / "skills",
-                                editing_mode=_editing_mode(change.control_root),
-                                color=should_use_color(sys.stdout))
                 esc_reader = EscKeyReader(coord)
-
-                async def _ask_line() -> str:
-                    return await ask_line_with_slash(
-                        prompt, status, change,
-                        color=should_use_color(sys.stdout), width=_term_width(),
-                        coord=coord)
+                # Task 11: ESC reader captures interjects; router-flagged prompt is
+                # the reply channel (see _build_interactive_input).
+                _router, human_input_fn = _build_interactive_input(
+                    change, status, coord, esc_reader)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
@@ -438,9 +538,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     result = await run_change(
                         change,
                         on_event=driver.on_event,
-                        human_input_fn=_ask_line,
+                        human_input_fn=human_input_fn,
                         human_output_fn=driver.print_chrome,
-                        user_chat_input_fn=lambda _q: _ask_line(),
+                        user_chat_input_fn=lambda _q: human_input_fn(),
                         coordinator=coord,
                         non_interactive=non_interactive,
                     )

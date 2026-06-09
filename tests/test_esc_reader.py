@@ -74,6 +74,75 @@ async def test_esc_byte_triggers_signal_pause_with_esc_reason(
 
 
 @pytest.mark.anyio
+async def test_interject_sink_captures_typed_line_during_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Task 11: with an interject sink attached, a line typed during agent-thinking
+    # (no prompt up) is assembled from raw bytes and delivered on Enter — the live
+    # source of interject lines, coexisting with ESC on the one /dev/tty.
+    import pty
+    master, slave = pty.openpty()
+    try:
+        _patch_dev_tty(monkeypatch, slave)
+        coord = InterruptCoordinator()
+        captured: list[str] = []
+        reader = EscKeyReader(coord, on_interject=captured.append)
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(reader.run)
+            for _ in range(50):
+                if coord._esc_reader is not None:
+                    break
+                await anyio.sleep(0.02)
+            os.write(master, b"fix the typo\r")
+            for _ in range(50):
+                if captured:
+                    break
+                await anyio.sleep(0.02)
+            tg.cancel_scope.cancel()
+        assert captured == ["fix the typo"]
+        assert coord.should_pause is False     # a typed line is not a pause
+    finally:
+        os.close(master)
+        with contextlib.suppress(OSError):
+            os.close(slave)
+
+
+@pytest.mark.anyio
+async def test_esc_discards_partial_interject_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ESC mid-line pauses AND discards the partial buffer (never delivered).
+    import pty
+    master, slave = pty.openpty()
+    try:
+        _patch_dev_tty(monkeypatch, slave)
+        coord = InterruptCoordinator()
+        captured: list[str] = []
+        reader = EscKeyReader(coord, on_interject=captured.append)
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(reader.run)
+            for _ in range(50):
+                if coord._esc_reader is not None:
+                    break
+                await anyio.sleep(0.02)
+            os.write(master, b"partial")     # no Enter
+            await anyio.sleep(0.1)
+            os.write(master, b"\x1b")         # ESC before submitting
+            for _ in range(50):
+                if coord.should_pause:
+                    break
+                await anyio.sleep(0.02)
+            tg.cancel_scope.cancel()
+        assert coord.should_pause is True
+        assert coord.pause_reason == "esc"
+        assert captured == []                 # partial line never delivered
+    finally:
+        os.close(master)
+        with contextlib.suppress(OSError):
+            os.close(slave)
+
+
+@pytest.mark.anyio
 async def test_tty_quiesced_noop_before_run_starts() -> None:
     coord = InterruptCoordinator()
     reader = EscKeyReader(coord)

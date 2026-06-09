@@ -272,7 +272,10 @@ class EscKeyReader:
     off) — inherent to any raw-mode TUI; this always-on reader widens that
     window slightly."""
 
-    def __init__(self, coord: InterruptCoordinator) -> None:
+    def __init__(
+        self, coord: InterruptCoordinator,
+        *, on_interject: Any = None,
+    ) -> None:
         self._coord = coord
         self._fd: int | None = None
         self._orig_attrs: Any = None
@@ -280,6 +283,22 @@ class EscKeyReader:
         self._quiesce_depth = 0
         self._unquiesce_evt: Any = None        # anyio.Event | None — wakes parked reader
         self._parked_evt: Any = None           # anyio.Event — reader → quiescer ack
+        # Task 11: optional `(line: str) -> None` sink for interject lines typed
+        # during agent-thinking. None (default) = byte-identical legacy behavior:
+        # the reader fires ONLY on ESC and ignores every other keystroke. When a
+        # sink is set, printable bytes accumulate into a line that is delivered on
+        # Enter (routed to the interject queue by the CLI). ESC still pauses
+        # immediately and discards any partial line. This is the sole /dev/tty
+        # owner during thinking, so it cannot collide with the ESC watch (one
+        # reader, one terminal); during a solicit the reader is quiesced and
+        # prompt_toolkit owns input → the line is a reply, not an interject.
+        self._on_interject = on_interject
+        self._line_buf = bytearray()
+
+    def set_interject_sink(self, sink: Any) -> None:
+        """Attach (or replace) the `(line: str) -> None` interject sink after
+        construction. None restores legacy ESC-only behavior."""
+        self._on_interject = sink
 
     async def run(self, *, task_status: TaskStatus[None] = TASK_STATUS_IGNORED) -> None:
         # `task_status.started()` is signalled once the reader has either armed or
@@ -325,9 +344,12 @@ class EscKeyReader:
                 byte = await anyio.to_thread.run_sync(
                     self._read_one_byte, abandon_on_cancel=True)
                 if byte == b"\x1b":
+                    self._line_buf.clear()       # ESC discards any partial line
                     await self._coord.signal_pause(reason="esc")
                     return
                 # Empty bytes (select timeout / quiesce race) → loop.
+                if byte and self._on_interject is not None:
+                    self._feed_interject_byte(byte)
         finally:
             self._armed = False
             self._coord.detach_esc_reader()
@@ -372,6 +394,34 @@ class EscKeyReader:
             return os.read(fd, 1)
         except OSError:
             return b""
+
+    def _feed_interject_byte(self, byte: bytes) -> None:
+        """Accumulate a typed byte into the in-progress interject line; on Enter
+        deliver the line to `_on_interject` and reset. Minimal raw line editing
+        (backspace handling + echo) — the heavy prompt_toolkit editing stays on
+        the solicit/reply path. Only reached when an interject sink is attached
+        and the reader is actively reading (not quiesced)."""
+        if byte in (b"\r", b"\n"):
+            line = self._line_buf.decode("utf-8", errors="replace")
+            self._line_buf.clear()
+            with _suppress(OSError):
+                os.write(1, b"\r\n")            # echo the newline
+            sink = self._on_interject
+            if sink is not None:
+                sink(line)
+            return
+        if byte in (b"\x7f", b"\x08"):          # DEL / BS
+            if self._line_buf:
+                self._line_buf.pop()
+                with _suppress(OSError):
+                    os.write(1, b"\b \b")       # erase one echoed char
+            return
+        # Ignore other control bytes (e.g. a stray arrow-key tail); echo printable.
+        if byte < b"\x20":
+            return
+        self._line_buf.extend(byte)
+        with _suppress(OSError):
+            os.write(1, byte)                   # echo so the user sees their typing
 
     @contextlib.asynccontextmanager
     async def tty_quiesced(self) -> AsyncIterator[None]:

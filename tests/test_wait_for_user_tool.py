@@ -18,12 +18,24 @@ class _Log:
         return {"id": "e1"}
 
 
-def _ctx(tmp_path, *, user_input_fn, non_interactive):
+def _ctx(tmp_path, *, user_input_fn, non_interactive, coordinator=None):
     return ToolContext(
         project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e.jsonl",
         user_input_fn=user_input_fn, non_interactive=non_interactive,
         event_log=_Log(), agent_id="step:review/final-review",
+        coordinator=coordinator,
     )
+
+
+class _FakeCoordinator:
+    """Drains a single queued interject, then None — mirrors
+    InterruptCoordinator.drain_interject's pop semantics."""
+
+    def __init__(self, queued):
+        self._queue = list(queued)
+
+    def drain_interject(self):
+        return self._queue.pop(0) if self._queue else None
 
 
 @pytest.mark.anyio
@@ -43,6 +55,33 @@ async def test_headless_raises_awaiting_user_input(tmp_path):
     tool = make_wait_for_user_tool()
     with pytest.raises(AwaitingUserInput):
         await tool.async_invoke(ctx, {"prompt": "need help"})
+
+
+@pytest.mark.anyio
+async def test_pending_interject_satisfies_wait_for_user(tmp_path):
+    # R6: a line typed mid-run was queued as an interject; when the agent then
+    # calls wait_for_user, the queued interject SATISFIES the wait — it's returned
+    # as the reply and user_input_fn is NOT called (no second solicit).
+    def _must_not_solicit(_q):
+        raise AssertionError("user_input_fn must not be called when an interject is queued")
+
+    coord = _FakeCoordinator(["use the queued line"])
+    ctx = _ctx(tmp_path, user_input_fn=_must_not_solicit, non_interactive=False,
+               coordinator=coord)
+    tool = make_wait_for_user_tool()
+    result = await tool.async_invoke(ctx, {"prompt": "anything pending?"})
+    assert result == "use the queued line"
+
+
+@pytest.mark.anyio
+async def test_empty_interject_queue_falls_through_to_solicit(tmp_path):
+    # Coordinator present but queue empty → drain returns None → solicit normally.
+    coord = _FakeCoordinator([])
+    ctx = _ctx(tmp_path, user_input_fn=lambda _q: "solicited", non_interactive=False,
+               coordinator=coord)
+    tool = make_wait_for_user_tool()
+    result = await tool.async_invoke(ctx, {"prompt": "x"})
+    assert result == "solicited"
 
 
 @pytest.mark.anyio
