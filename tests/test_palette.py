@@ -130,7 +130,6 @@ def test_node_colors_calm_scheme() -> None:
     assert pal.NODE_COLORS["subagent"] == ("magenta",)     # unchanged
     assert pal.NODE_COLORS["workflow"] == ("bold", "magenta")  # lone bold anchor, unchanged
     # Semantic colors untouched.
-    assert pal.NODE_COLORS["gate"] == ("yellow",)
     assert pal.NODE_COLORS["error"] == ("bold", "red")
     assert pal.NODE_COLORS["warning"] == ("yellow",)
 

@@ -1,17 +1,15 @@
-"""Step-body helpers: run a script step, run a human step, evaluate a rules block."""
+"""Step-body helpers: run a script step, evaluate a rules block."""
 from __future__ import annotations
 
-import inspect
 import os
 import subprocess
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from imp.engine.env import overlay_engine_env
 from imp.engine.expr import EvalEnv, evaluate
-from imp.engine.types import Action, Continue, HumanOption, Rule, Step
+from imp.engine.types import Action, Continue, Rule, Step
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,11 +40,6 @@ def evaluate_rules(
     raise AssertionError("no rule matched and no else (validator should have caught this)")
 
 
-def apply_human_option(option: HumanOption, *, vars: dict[str, Any]) -> dict[str, object]:
-    env = EvalEnv(vars=vars, output=None)
-    return {name: evaluate(expr, env) for name, expr in option.mutations}
-
-
 def run_script(
     step: Step, *, cwd: Path, env_extra: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -75,51 +68,3 @@ def run_script(
         check=False, env=env,
     )
     return {"exit": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
-
-
-async def run_human(
-    step: Step, *, input_fn: Callable[[], str | Awaitable[str]],
-    output_fn: Callable[[str], None],
-) -> HumanOption:
-    """Prompt with the step's options; return the chosen HumanOption (carries
-    the action verb + set:)."""
-    while True:
-        output_fn("--- HUMAN ---------------------------------------------------")
-        output_fn(step.ask or "")
-        for i, opt in enumerate(step.options, start=1):
-            output_fn(f"  {i}) {opt.label}")
-        output_fn("")
-        result = input_fn()
-        if inspect.isawaitable(result):
-            result = await result
-        chosen = _match_option(result.strip(), step.options, output_fn)
-        if chosen is not None:
-            return chosen
-
-
-def _match_option(
-    raw: str, options: tuple[HumanOption, ...], output_fn: Callable[[str], None]
-) -> HumanOption | None:
-    if not raw:
-        output_fn("  (empty input; try again)")
-        return None
-    if raw.isdigit():
-        idx = int(raw) - 1
-        if 0 <= idx < len(options):
-            return options[idx]
-        output_fn(f"  (no option {raw}; try again)")
-        return None
-    needle = raw.lower()
-    # Exact match takes priority over prefix matches
-    exact = [o for o in options if o.label.lower() == needle]
-    if len(exact) == 1:
-        return exact[0]
-    candidates = [o for o in options if o.label.lower().startswith(needle)]
-    if len(candidates) == 1:
-        return candidates[0]
-    if len(candidates) > 1:
-        labels = ", ".join(c.label for c in candidates)
-        output_fn(f"  (ambiguous; matches: {labels})")
-        return None
-    output_fn(f"  (no match for {raw!r}; try again)")
-    return None

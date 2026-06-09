@@ -208,19 +208,6 @@ def test_full_mode_also_emits_subagent_outcome() -> None:
     assert "→ status=Success · summary=ok" in out   # outcome now present in full too
 
 
-def test_human_gate_and_error_lines() -> None:
-    out = "\n".join(_lines([
-        _ev("1", "step_started", step="merge", kind="human", phase="p"),
-        _ev("2", "human_prompt_pending", step="merge", phase="p",
-            ask="Approve?", options=[{"label": "yes"}]),
-        _ev("3", "step_completed", step="merge", kind="human",
-            action={"verb": "continue"}, var_mutations={}),
-        _ev("4", "error", category="auth", message="bad key"),
-    ]))
-    assert "human gate" in out and "continue" in out
-    assert "bad key" in out
-
-
 def test_full_mode_expands_tools_thinking_and_subagent() -> None:
     out = "\n".join(_lines([
         _ev("2", "step_started", step="s", kind="agent", phase="p",
@@ -490,11 +477,11 @@ def test_breadcrumb_and_fallback_recede_to_gray() -> None:
 def test_header_line_matches_render_for_phase_and_step() -> None:
     phase = nv.PhaseNode(name="design")
     step = nv.StepNode(name="spec", kind="agent", interactive=True)
-    human = nv.StepNode(name="approve", kind="human")
+    branch = nv.StepNode(name="route", kind="branch")
     assert rt.header_line(phase, depth=0, color=False) == "design"
     assert rt.header_line(step, depth=1, color=False) == "  spec"
     # Every kind renders as the bare step name (no special-case label).
-    assert rt.header_line(human, depth=2, color=False) == "    approve"
+    assert rt.header_line(branch, depth=2, color=False) == "    route"
 
 
 def test_agent_text_is_plain_when_color_enabled() -> None:
@@ -517,31 +504,6 @@ def test_nonempty_thinking_dropped_in_default_mode() -> None:
     assert list(rt._render(node, depth=1, full=False, color=False, width=80)) == []
 
 
-def test_render_gate_recap_false_is_header_only() -> None:
-    gate = nv.GateNode(kind="human", prompt="Approve?",
-                       options=[{"label": "yes"}, {"label": "no"}],
-                       action={"verb": "continue"})
-    header_only = list(rt._render_gate(gate, depth=1, color=False, width=80, recap=False))
-    assert header_only == ["  human gate → continue"]
-
-
-def test_render_gate_recap_true_includes_prompt_and_options() -> None:
-    gate = nv.GateNode(kind="human", prompt="Approve?",
-                       options=[{"label": "yes"}, {"label": "no"}],
-                       action={"verb": "continue"})
-    full = list(rt._render_gate(gate, depth=1, color=False, width=80))
-    assert full[0] == "  human gate → continue"
-    assert any("Approve?" in ln for ln in full)
-    assert any("yes" in ln for ln in full) and any("no" in ln for ln in full)
-
-
-def test_render_gate_colors_resolved_action() -> None:
-    gate = nv.GateNode(kind="human", action={"verb": "continue"})
-    out = list(rt._render_gate(gate, depth=0, color=True, width=80, recap=False))
-    # continue -> green accent (pal._ACCENT["continue"])
-    assert out[0].startswith("\x1b[32m")
-
-
 def test_snapshot_covers_every_node_type() -> None:
     # Guard: the fixture must exercise all node types (design §11).
     tree = nv.build_tree(_sample_events())
@@ -559,7 +521,7 @@ def test_snapshot_covers_every_node_type() -> None:
     walk(tree.root)
     required = {"WorkflowNode", "PhaseNode", "StepNode", "AgentTextNode",
                 "UserMessageNode", "ThinkingFold", "ToolBurstFold", "SubagentFold",
-                "GateNode", "ErrorNode", "StepContextNode", "OutcomeLine",
+                "ErrorNode", "StepContextNode", "OutcomeLine",
                 "FallbackLine", "BreadcrumbLine", "TiersResolvedNode"}
     assert required <= seen, f"fixture missing node types: {required - seen}"
 

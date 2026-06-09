@@ -217,53 +217,6 @@ def test_no_slug_title_header_emitted() -> None:
     assert not any("add auth" in ln or "Add OAuth" in ln for ln in body)
 
 
-from imp.cli.render_text import render_tree as _rt_full  # noqa: E402
-
-
-def test_human_gate_header_only_live_full_in_log() -> None:
-    events = [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="approve", kind="human", phase="design"),
-        ev("4", "human_prompt_pending", agent_id="a", step="approve",
-           phase="design", ask="Approve plan?",
-           options=[{"label": "yes"}, {"label": "no"}]),
-        ev("6", "step_completed", step="approve", kind="human",
-           action={"verb": "continue"}, var_mutations={}),
-    ]
-    drv, out = _driver()
-    for e in events:
-        drv.on_event(e)
-    drv.finish()
-    body = _body(out)
-    # The pending state must NEVER appear; the resolved header must.
-    assert not any("pending" in ln for ln in body)
-    assert any("human gate → continue" in ln for ln in body)
-    # Live trims the prompt/options recap...
-    assert not any("Approve plan?" in ln for ln in body)
-    # ...but imp log keeps the full node.
-    log_body = list(_rt_full(nv.build_tree(events), full=False, color=False, width=80))
-    assert any("Approve plan?" in ln for ln in log_body)
-
-
-def test_human_gate_blocks_following_nodes_until_resolved() -> None:
-    drv, out = _driver()
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="approve", kind="human", phase="design"),
-        ev("4", "human_prompt_pending", agent_id="a", step="approve",
-           phase="design", ask="ok?", options=[]),
-    ]:
-        drv.on_event(e)
-    # Gate unresolved -> nothing after it is emitted yet.
-    assert not any("human gate" in ln for ln in _body(out))
-    drv.on_event(ev("6", "step_completed", step="approve", kind="human",
-                    action={"verb": "continue"}, var_mutations={}))
-    body = _body(out)
-    gate_i = next(i for i, ln in enumerate(body) if "human gate → continue" in ln)
-    outcome_i = next(i for i, ln in enumerate(body) if ln.strip() == "approve complete")
-    assert gate_i < outcome_i                      # tree order preserved
-
-
 def test_open_burst_recap_emitted_at_finish() -> None:
     drv, out = _driver()
     for e in [
@@ -486,14 +439,6 @@ def test_live_subagent_collapses_to_status_row_byte_identical_to_log() -> None:
     assert not any("the finding" in ln for ln in body)
     assert not any("│" in ln for ln in body)
     assert body == _render_body(events)
-
-
-def test_print_chrome_renders_plain_and_carries_no_gutter() -> None:
-    drv, out = _driver_color()
-    drv.print_chrome("hello from the agent")
-    body = out.getvalue()
-    assert "hello from the agent" in body
-    assert "\x1b[" not in body   # agent = () → no codes; main-agent sink → no gutter
 
 
 def test_user_message_shown_in_live_on_tty_and_nontty() -> None:

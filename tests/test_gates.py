@@ -1,8 +1,6 @@
 # tests/test_gates.py — rewrite
 from pathlib import Path
 
-import pytest
-
 from imp.engine.expr import Binary, BoolLit, Name, StrLit
 from imp.engine.gates import evaluate_rules, run_script
 from imp.engine.types import Continue, Goto, Pause, Rule, SourceLoc, Step
@@ -43,7 +41,7 @@ def test_evaluate_rules_applies_set_to_returned_mutations() -> None:
 
 def test_run_script_builds_output_dict(tmp_path) -> None:
     step = Step(name="check", phase="p", kind="script",
-                rules=(_rule(None, Continue()),), options=(),
+                rules=(_rule(None, Continue()),),
                 on_max_retries=Pause(), max_loops=10, source=loc(),
                 command="echo hi; exit 3")
     out = run_script(step, cwd=tmp_path, env_extra=None)
@@ -65,50 +63,3 @@ def test_evaluate_rules_no_mutations_when_not_set() -> None:
     m = evaluate_rules(rules, vars={}, output=None)
     assert isinstance(m.action, Goto)
     assert m.var_mutations == {}
-
-
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.mark.anyio
-async def test_run_human_match_by_number() -> None:
-    """run_human returns the chosen HumanOption matched by 1-based index."""
-    from imp.engine.gates import run_human
-    from imp.engine.types import HumanOption
-
-    opts = (
-        HumanOption(label="Approve", action=Continue(), mutations=(), source=loc()),
-        HumanOption(label="Reject", action=Pause(), mutations=(), source=loc()),
-    )
-    step = Step(name="review", phase="p", kind="human",
-                rules=(), options=opts,
-                on_max_retries=Pause(), max_loops=10, source=loc(),
-                ask="What now?")
-    inputs = iter(["1"])
-    out: list[str] = []
-    chosen = await run_human(step, input_fn=lambda: next(inputs), output_fn=out.append)
-    assert isinstance(chosen.action, Continue)
-    assert chosen.label == "Approve"
-
-
-@pytest.mark.anyio
-async def test_run_human_reprompts_on_empty_then_matches() -> None:
-    """run_human re-prompts on empty input, then returns on valid selection."""
-    from imp.engine.gates import run_human
-    from imp.engine.types import HumanOption
-
-    opts = (
-        HumanOption(label="Yes", action=Continue(), mutations=(), source=loc()),
-        HumanOption(label="No", action=Pause(), mutations=(), source=loc()),
-    )
-    step = Step(name="confirm", phase="p", kind="human",
-                rules=(), options=opts,
-                on_max_retries=Pause(), max_loops=10, source=loc(),
-                ask="Proceed?")
-    inputs = iter(["", "2"])
-    out: list[str] = []
-    chosen = await run_human(step, input_fn=lambda: next(inputs), output_fn=out.append)
-    assert isinstance(chosen.action, Pause)
-    assert any("empty" in s.lower() for s in out)

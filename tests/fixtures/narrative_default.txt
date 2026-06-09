@@ -12,15 +12,6 @@ design
   > Please add a section on token expiry.
   
   spec complete
-  
-  approve
-  
-  human gate → continue
-    Approve the design spec?
-    - yes
-    - no
-  
-  approve complete
 
 implement
   

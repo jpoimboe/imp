@@ -214,7 +214,6 @@ NODE_COLORS: dict[str, tuple[str, ...]] = {
     "phase": ("bold", "blue"),         # structure stands out: bold blue
     "step": ("bold", "step"),          # a bold darker-blue "mini-phase" label
     "breadcrumb": ("gray",),           # per-step completion line — recede entirely
-    "gate": ("yellow",),               # semantic
     "tools": ("gray",),                # lean one-line recap + --full per-call dump
     "subagent": ("magenta",),          # header + gutter + outcome; never bold
     "thinking": ("dim",),              # --full only

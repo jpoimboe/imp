@@ -28,11 +28,11 @@ class GateBypassRequired(Exception):
 
 
 def _is_gate(workflow: Workflow, step: Step, idx: int) -> bool:
-    """True if step can block or send work back: any rule/option action that
+    """True if step can block or send work back: any rule action that
     pauses, or goes to an equal-or-lower flat index (backward/self). A
     forward-only goto (e.g. final-review-gate -> merge) is not a gate.
 
-    Scope is deliberately rules/options only — NOT on_max_retries. The spec
+    Scope is deliberately rules only — NOT on_max_retries. The spec
     defines a gate by its authored rules; the default workflow's pause-only
     steps (autosquash/stamp-trailers) use explicit `else: pause` rules. Do not
     fold on_max_retries in here without revisiting the spec definition."""
@@ -44,8 +44,7 @@ def _is_gate(workflow: Workflow, step: Step, idx: int) -> bool:
             return workflow.resolve_goto(action.target) <= idx
         return False
 
-    return (any(blocks(r.action) for r in step.rules)
-            or any(blocks(o.action) for o in step.options))
+    return any(blocks(r.action) for r in step.rules)
 
 
 def gate_steps_in_span(workflow: Workflow, lo: int, hi: int) -> tuple[str, ...]:

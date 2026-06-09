@@ -73,14 +73,6 @@ class Rule:
         return self.condition is None
 
 
-@dataclass(frozen=True, slots=True)
-class HumanOption:
-    label: str
-    action: Action
-    mutations: Mutation
-    source: SourceLoc
-
-
 # ── Variables ─────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True, slots=True)
@@ -161,7 +153,7 @@ class AgentDef:
 
 # ── Steps & phases ────────────────────────────────────────────────────────────
 
-Kind = Literal["agent", "script", "human", "branch"]
+Kind = Literal["agent", "script", "branch"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,8 +161,7 @@ class Step:
     name: str                       # globally unique; disjoint from phase names
     phase: str                      # owning container (set by loader from structure)
     kind: Kind
-    rules: tuple[Rule, ...]         # () for human; required for script/branch; optional for agent
-    options: tuple[HumanOption, ...]  # human only; () otherwise
+    rules: tuple[Rule, ...]         # required for script/branch; optional for agent
     on_max_retries: Action          # action on max_loops (and, for agents, max_retries) exhaustion
     max_loops: int
     source: SourceLoc
@@ -188,8 +179,6 @@ class Step:
     command: str | None = None
     cwd: str | None = None
     timeout_seconds: int | None = None
-    # human-only
-    ask: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

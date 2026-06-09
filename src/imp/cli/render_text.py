@@ -180,7 +180,7 @@ def spaces_after(node: Any, *, full: bool) -> bool:
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
-                             nv.ErrorNode, nv.PauseNode, nv.GateNode))
+                             nv.ErrorNode, nv.PauseNode))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
@@ -487,10 +487,6 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                                         gutters=gutters)
         return
 
-    if isinstance(node, nv.GateNode):
-        yield from _render_gate(node, depth=depth, color=color, width=width, gutters=gutters)
-        return
-
     if isinstance(node, nv.OutcomeLine):
         text = pal.action_text(node.action)
         ac = pal.accent_color(node.action)
@@ -674,24 +670,3 @@ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
         name = t.get("name", t) if isinstance(t, dict) else t
         yield _line(f"- {name}", depth + 2, color, *pal.NODE_COLORS["metadata"],
                     gutters=gutters)
-
-
-def _render_gate(gate: nv.GateNode, *, depth: int, color: bool, width: int,
-                 recap: bool = True, gutters: tuple[int, ...] = ()) -> Iterator[str]:
-    """Render a gate node. `recap=True` (imp log) emits header + prompt + every
-    option — the permanent record. `recap=False` (live driver) emits the header
-    line only, because run_human_gate already showed the prompt/options as live
-    chrome; re-rendering them would duplicate a multi-line block in scroll-back."""
-    action = pal.action_text(gate.action) if gate.action is not None else "pending"
-    accent = pal.accent_color(gate.action) if gate.action is not None else None
-    codes = (accent,) if accent else pal.NODE_COLORS["gate"]
-    header = f"{gate.kind} gate → {action}"
-    yield _line(header, depth, color, *codes, gutters=gutters)
-    if recap and gate.prompt:
-        yield from _wrap(gate.prompt, width, depth + 1, color, *pal.NODE_COLORS["gate"],
-                         gutters=gutters)
-        for opt in gate.options:
-            yield _line(f"- {opt.get('label', opt)}", depth + 1, color,
-                        *pal.NODE_COLORS["gate"], gutters=gutters)
-
-

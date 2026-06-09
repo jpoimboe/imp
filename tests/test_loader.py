@@ -307,25 +307,6 @@ def test_two_kind_signals_is_load_error(tmp_path: Path) -> None:
         load_workflow(wf)
 
 
-def test_human_option_set_type_mismatch_is_load_error(tmp_path: Path) -> None:
-    # A human option's set: is type-checked just like a rule's set:.
-    wf = _write(tmp_path, """\
-        name: t
-        description: t
-        vars:
-          round: {type: int, default: 0}
-        phases:
-          - name: only
-            steps:
-              - name: gate
-                ask: "Proceed?"
-                options:
-                  - {label: Go, continue: true, set: {round: true}}   # bool into int var
-        """)
-    with pytest.raises((LoadError, LoadErrors)):
-        load_workflow(wf)
-
-
 # ── Error path tests for inline surface ──────────────────────────────────
 
 

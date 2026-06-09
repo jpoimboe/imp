@@ -42,7 +42,6 @@ from imp.engine.types import (
     Continue,
     FsRule,
     Goto,
-    HumanOption,
     Mutation,
     Pause,
     Phase,
@@ -152,7 +151,7 @@ _SCRIPT_OUTPUT_TYPES: dict[str, ExprType] = {
 def _output_types_for_step(
     step_kind: str, agent: AgentDef | None
 ) -> dict[str, ExprType] | None:
-    """The expr output-env types for one step. None means branch/human (no output)."""
+    """The expr output-env types for one step. None means branch (no output)."""
     if step_kind == "agent" and agent is not None:
         out: dict[str, ExprType] = {}
         for f in agent.output_schema.fields:
@@ -162,7 +161,7 @@ def _output_types_for_step(
         return out
     if step_kind == "script":
         return dict(_SCRIPT_OUTPUT_TYPES)
-    return None  # branch, human
+    return None  # branch
 
 
 # ── Kind inference ────────────────────────────────────────────────────────────
@@ -170,7 +169,6 @@ def _output_types_for_step(
 _KIND_SIGNALS = {
     "agent": ("file", "prompt"),
     "script": ("command",),
-    "human": ("ask",),
 }
 
 
@@ -182,13 +180,13 @@ def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
     if len(present) > 1:
         raise LoadError(
             f"step has conflicting kind signals {sorted(present)}; "
-            "a node carries exactly one of file/prompt, command, ask",
+            "a node carries exactly one of file/prompt, command",
             source,
         )
     inferred = next(iter(present), None) or ("branch" if has_rules else None)
     if inferred is None:
         raise LoadError(
-            "step has no kind signal (need one of file/prompt, command, ask, or rules)",
+            "step has no kind signal (need one of file/prompt, command, or rules)",
             source,
         )
     explicit = raw.get("kind")
@@ -423,34 +421,6 @@ def _parse_on_max_retries(raw: Any, source: SourceLoc) -> Action:
     return _parse_verb(raw, source)
 
 
-# ── Human options parsing ─────────────────────────────────────────────────────
-
-
-def _parse_human_options(
-    raw_options: Any, source: SourceLoc, yaml_path: Path
-) -> tuple[HumanOption, ...]:
-    if raw_options is None:
-        return ()
-    if not isinstance(raw_options, list):
-        raise LoadError("options: must be a list", source)
-    options: list[HumanOption] = []
-    for o in raw_options:
-        if not isinstance(o, dict):
-            raise LoadError("each option must be a mapping", source)
-        osrc = loc(yaml_path, o)
-        if "label" not in o or not isinstance(o["label"], str):
-            raise LoadError("option missing a string 'label'", osrc)
-        action = _parse_verb(o, osrc)
-        mutations = _parse_set(o["set"], osrc) if "set" in o else ()
-        options.append(HumanOption(
-            label=str(o["label"]),
-            action=action,
-            mutations=mutations,
-            source=osrc,
-        ))
-    return tuple(options)
-
-
 # ── Type-checking ─────────────────────────────────────────────────────────────
 
 
@@ -471,13 +441,6 @@ def _typecheck_step_exprs(
                 if mut_name not in var_types:
                     raise LoadError(
                         f"set: target {mut_name!r} is not a declared var", rule.source
-                    )
-                require_type(mut_expr, env, var_types[mut_name])
-        for opt in step.options:
-            for mut_name, mut_expr in opt.mutations:
-                if mut_name not in var_types:
-                    raise LoadError(
-                        f"set: target {mut_name!r} is not a declared var", opt.source
                     )
                 require_type(mut_expr, env, var_types[mut_name])
     except LoadError:
@@ -545,18 +508,6 @@ def _parse_step(
     on_max = defaults.on_max_retries  # on_max_retries is not a per-step YAML knob
 
     rules: tuple[Rule, ...] = ()
-    options: tuple[HumanOption, ...] = ()
-
-    if kind == "human":
-        if "rules" in raw:
-            raise LoadError(f"human step {name!r} uses options:, not rules:", source)
-        options = _parse_human_options(raw.get("options"), source, yaml_path)
-        step = Step(name=name, phase=phase_name, kind="human", rules=(),
-                    options=options, on_max_retries=on_max, max_loops=max_loops,
-                    source=source, ask=str(raw.get("ask") or ""))
-        # Type-check human option set: mutations (output is None for a human step).
-        _typecheck_step_exprs(step, agents, var_types, source)
-        return step
 
     if "rules" in raw:
         rules = _parse_rules(raw["rules"], source, yaml_path)
@@ -567,7 +518,7 @@ def _parse_step(
     if kind == "agent":
         file = (workflow_dir / raw["file"]) if raw.get("file") else None
         step = Step(
-            name=name, phase=phase_name, kind="agent", rules=rules, options=(),
+            name=name, phase=phase_name, kind="agent", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
             file=file, prompt=(str(raw["prompt"]) if raw.get("prompt") else None),
             tier=str(raw.get("tier") or "medium"),
@@ -582,7 +533,7 @@ def _parse_step(
         )
     elif kind == "script":
         step = Step(
-            name=name, phase=phase_name, kind="script", rules=rules, options=(),
+            name=name, phase=phase_name, kind="script", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
             command=str(raw["command"]),
             cwd=str(raw["cwd"]) if raw.get("cwd") else None,
@@ -590,7 +541,7 @@ def _parse_step(
         )
     else:  # branch
         step = Step(
-            name=name, phase=phase_name, kind="branch", rules=rules, options=(),
+            name=name, phase=phase_name, kind="branch", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
         )
 

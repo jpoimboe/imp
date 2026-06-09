@@ -16,7 +16,6 @@ def test_node_dataclasses_construct_and_default_collapsible() -> None:
     assert nv.StepNode(name="s").collapsible is False
     assert nv.AgentTextNode(payload={}).collapsible is False
     assert nv.UserMessageNode(text="hi").collapsible is False
-    assert nv.GateNode(kind="human").collapsible is False
     assert nv.ErrorNode(message="boom").collapsible is False
     assert nv.OutcomeLine(action="continue").collapsible is False
     assert nv.FallbackLine(event_type="x", payload={}).collapsible is False
@@ -336,33 +335,6 @@ def test_subagent_running_until_task_result_arrives() -> None:
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
     assert sub.outcome is None
-
-
-def test_human_prompt_annotates_open_step_and_resolves_on_completed() -> None:
-    # A human step emits step_started(kind=human) FIRST (opening the phase +
-    # StepNode), then human_prompt_pending ANNOTATES that open step with a single
-    # GateNode (no second step node). The resolved route arrives via the step's
-    # step_completed.action (a dict) — there is no gate_evaluated event.
-    tree = nv.build_tree([
-        _ev("1", "step_started", step="merge", kind="human", phase="review"),
-        _ev("2", "human_prompt_pending", step="merge", phase="review",
-            ask="Merge?", options=[{"label": "Merge"}, {"label": "Back"}]),
-        _ev("3", "step_completed", step="merge", kind="human",
-            action={"verb": "goto", "target": "implement"}, var_mutations={}),
-    ])
-    phase = tree.root.children[0]
-    steps = [c for c in phase.children if isinstance(c, nv.StepNode)]
-    assert len(steps) == 1                            # NO duplicate node
-    step = steps[0]
-    assert step.kind == "human" and step.closed is True
-    gates = [c for c in step.children if isinstance(c, nv.GateNode)]
-    assert len(gates) == 1                            # one annotating gate
-    g = gates[0]
-    assert g.kind == "human"
-    assert g.prompt == "Merge?"
-    assert [o["label"] for o in g.options] == ["Merge", "Back"]
-    assert g.action == {"verb": "goto", "target": "implement"}   # resolved
-    assert step.outcome.action == {"verb": "goto", "target": "implement"}
 
 
 def test_error_event_becomes_error_node() -> None:

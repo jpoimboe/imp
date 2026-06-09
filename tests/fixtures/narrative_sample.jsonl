@@ -17,9 +17,6 @@
 {"id": "e15", "agent_id": "step:design/spec", "type": "user_message", "payload": {"content": [{"type": "text", "text": "Please add a section on token expiry."}]}}
 {"id": "e16", "agent_id": "step:design/spec", "type": "agent_output", "payload": {"status": "Success", "summary": "Spec drafted"}}
 {"id": "e17", "agent_id": null, "type": "step_completed", "payload": {"step": "spec", "kind": "agent", "action": {"verb": "continue"}, "var_mutations": {}}}
-{"id": "e18", "agent_id": null, "type": "step_started", "payload": {"step": "approve", "kind": "human", "phase": "design", "interactive": false}}
-{"id": "e19", "agent_id": null, "type": "human_prompt_pending", "payload": {"step": "approve", "phase": "design", "ask": "Approve the design spec?", "options": [{"label": "yes"}, {"label": "no"}]}}
-{"id": "e20", "agent_id": null, "type": "step_completed", "payload": {"step": "approve", "kind": "human", "action": {"verb": "continue"}, "var_mutations": {}}}
 {"id": "e21", "agent_id": null, "type": "step_started", "payload": {"step": "build", "kind": "agent", "phase": "implement", "model": "claude-sonnet-4-6", "provider": "anthropic", "tools": ["bash"], "interactive": false}}
 {"id": "e22", "agent_id": null, "type": "error", "payload": {"category": "provider", "message": "rate limited"}}
 {"id": "e23", "agent_id": null, "type": "runner_warning", "payload": {"message": "dropped block"}}

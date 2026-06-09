@@ -103,8 +103,6 @@ def _v_goto_targets_in_shared_namespace(
     for step in workflow.flat_steps():
         for rule in step.rules:
             check(rule.action, rule.source)
-        for opt in step.options:
-            check(opt.action, opt.source)
     check(workflow.defaults.on_max_retries, workflow.source)
 
 
@@ -143,8 +141,6 @@ def _v_resume_targets_are_agents(
     for step in flat:
         for rule in step.rules:
             check(rule.action, rule.source)
-        for opt in step.options:
-            check(opt.action, opt.source)
     check(workflow.defaults.on_max_retries, workflow.source)
 
 
@@ -165,8 +161,6 @@ def _v_unique_step_names_disjoint_from_phases(
 
 def _v_rules_end_in_else(workflow: Workflow, errors: list[LoadError]) -> None:
     for step in workflow.flat_steps():
-        if step.kind == "human":
-            continue
         if step.rules and not step.rules[-1].is_else:
             errors.append(LoadError(
                 f"rules: in step {step.name!r} must end with `else: true`",
@@ -178,9 +172,6 @@ def _v_required_blocks_per_kind(workflow: Workflow, errors: list[LoadError]) -> 
         if step.kind in ("script", "branch") and not step.rules:
             errors.append(LoadError(
                 f"{step.kind} step {step.name!r} requires a rules: block", step.source))
-        if step.kind == "human" and not step.options:
-            errors.append(LoadError(
-                f"human step {step.name!r} requires options:", step.source))
 
 
 def _v_empty_phase_is_last(workflow: Workflow, errors: list[LoadError]) -> None:

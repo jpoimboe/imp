@@ -3,11 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.expr import BoolLit, Name, StrLit, VarRef
+from imp.engine.expr import BoolLit, Name
 from imp.engine.types import (
     Continue,
     Goto,
-    HumanOption,
     Pause,
     Phase,
     Rule,
@@ -25,7 +24,7 @@ def loc(line: int = 1) -> SourceLoc:
 
 
 def _agent(name: str, phase: str, **kw) -> Step:
-    return Step(name=name, phase=phase, kind="agent", rules=(), options=(),
+    return Step(name=name, phase=phase, kind="agent", rules=(),
                 on_max_retries=Pause(), max_loops=10, source=loc(),
                 file=Path(f"agents/{name}.md"), **kw)
 
@@ -50,13 +49,6 @@ def test_rule_is_else_when_condition_none() -> None:
     assert r2.is_else is False
 
 
-def test_human_option_carries_action_and_mutations() -> None:
-    opt = HumanOption(label="Hold", action=Pause(),
-                      mutations=(("holds", VarRef("holds")),), source=loc())
-    assert opt.label == "Hold"
-    assert isinstance(opt.action, Pause)
-
-
 def test_vars_helpers() -> None:
     v = Vars(decls=(
         VarDecl(name="review_done", type="bool", default=False, source=loc()),
@@ -74,7 +66,7 @@ def test_workflow_flat_steps_and_goto_resolution() -> None:
              rules=(Rule(condition=Name("review_done"), action=Goto("implement"),
                          mutations=(), source=loc()),
                     Rule(condition=None, action=Continue(), mutations=(), source=loc())),
-             options=(), on_max_retries=Pause(), max_loops=10, source=loc()),
+             on_max_retries=Pause(), max_loops=10, source=loc()),
     ))
     implement = Phase(name="implement", source=loc(), steps=(
         _agent("coder", "implement"),

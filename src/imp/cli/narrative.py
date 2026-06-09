@@ -66,7 +66,7 @@ class PhaseNode:
 @dataclass
 class StepNode:
     name: str                          # step name
-    kind: str | None = None            # agent | script | human | branch
+    kind: str | None = None            # agent | script | branch
     interactive: bool = False
     model: str | None = None
     provider: str | None = None
@@ -180,16 +180,6 @@ class SubagentFold:
 
 
 @dataclass
-class GateNode:
-    kind: str                          # human | script | stub
-    prompt: str | None = None
-    options: list[Any] = field(default_factory=list)
-    action: Any = None                 # dict {kind, target?}
-    context: dict[str, Any] | None = None
-    collapsible = False
-
-
-@dataclass
 class ErrorNode:
     message: str
     category: str | None = None
@@ -288,7 +278,7 @@ class NarrativeBuilder:
         self._tokens = TokenTotals()
         self._current_phase: PhaseNode | None = None
         # Stack of open StepNode containers. step_started pushes one;
-        # step_completed pops it. Every kind (agent/script/human/branch) is a
+        # step_completed pops it. Every kind (agent/script/branch) is a
         # normal step — there is no nested gate container.
         self._step_stack: list[StepNode] = []
         self._current_burst: ToolBurstFold | None = None
@@ -297,7 +287,6 @@ class NarrativeBuilder:
         # open subagent folds keyed by tool_use block id (to close on the
         # parent's `task` tool_result, which carries the block id, not event id)
         self._open_sub_by_block: dict[str, SubagentFold] = {}
-        self._pending_human_gate: GateNode | None = None
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
@@ -534,11 +523,6 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
-    # A human step's resolved route arrives here (no separate gate_evaluated). If
-    # this step opened a human prompt, stamp its resolved action onto that gate.
-    if self._pending_human_gate is not None:
-        self._pending_human_gate.action = action
-        self._pending_human_gate = None
     node = self._pop_step(p.get("step"))
     if node is not None:
         # Preserve StepNode.outcome (existing tests assert on the field); the
@@ -584,21 +568,6 @@ NarrativeBuilder._HANDLERS["workflow_paused"] = _h_workflow_paused
 NarrativeBuilder._HANDLERS["workflow_resumed"] = _h_workflow_resumed
 
 
-def _h_human_prompt_pending(
-    self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any],
-) -> None:
-    # A human step already emitted step_started (kind=human), so _h_step_started
-    # opened its phase + StepNode. This event only ANNOTATES that open step with
-    # the prompt/options — it does NOT open a second node. The resolved route
-    # arrives via the step's step_completed.action (a dict), which both closes
-    # the StepNode and stamps the gate (see _h_step_completed).
-    self._flush_burst()
-    gate = GateNode(kind="human", prompt=str(p.get("ask", "")),
-                    options=list(p.get("options") or []))
-    self._append(gate)
-    self._pending_human_gate = gate
-
-
 def _h_awaiting_user_input(
     self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any],
 ) -> None:
@@ -634,7 +603,6 @@ def _h_user_interjected(
     return None
 
 
-NarrativeBuilder._HANDLERS["human_prompt_pending"] = _h_human_prompt_pending
 NarrativeBuilder._HANDLERS["awaiting_user_input"] = _h_awaiting_user_input
 NarrativeBuilder._HANDLERS["user_interjected"] = _h_user_interjected
 
@@ -1073,9 +1041,6 @@ def structural_repr(node: Any) -> Any:
                 "outcome": node.outcome, "is_error": node.is_error,
                 "event_count": node.event_count,
                 "nested": [structural_repr(c) for c in node.tree.root.children]}
-    if isinstance(node, GateNode):
-        return {"t": t, "kind": node.kind, "prompt": node.prompt,
-                "options": node.options, "action": node.action, "context": node.context}
     if isinstance(node, ErrorNode):
         return {"t": t, "message": node.message, "category": node.category,
                 "is_warning": node.is_warning}

@@ -401,20 +401,6 @@ def test_script_step_without_rules_is_error(tmp_path: Path) -> None:
         load_workflow(wf)
 
 
-def test_human_step_without_options_is_error(tmp_path: Path) -> None:
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: h
-                ask: "Proceed?"
-        """)
-    with pytest.raises((LoadError, LoadErrors)):
-        load_workflow(wf)
-
-
 # ── _v_resume_targets_are_agents ──────────────────────────────────────────────
 
 
@@ -524,7 +510,7 @@ def test_v_step_tier_configured_flags_subagent_role() -> None:
 
     agents = {"coder": _agent("coder", subagents=("rev",)),
               "rev": _agent("rev", tier="ghost")}
-    step = Step(name="coder", phase="p", kind="agent", rules=(), options=(),
+    step = Step(name="coder", phase="p", kind="agent", rules=(),
                 on_max_retries=Pause(), max_loops=6, source=src,
                 file=Path("agents/coder.md"), tier="medium")
     wf = Workflow(

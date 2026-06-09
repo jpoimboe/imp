@@ -62,7 +62,7 @@ def _agent(name: str, tier: str | None = None, subagents=()) -> AgentDef:
 def _step(name: str, tier: str, file_stem: str,
           differ_from: str | None = None) -> Step:
     return Step(
-        name=name, phase="p", kind="agent", rules=(), options=(),
+        name=name, phase="p", kind="agent", rules=(),
         on_max_retries=Pause(), max_loops=6, source=_SRC,
         file=Path(f"agents/{file_stem}.md"), tier=tier, differ_from=differ_from)
 

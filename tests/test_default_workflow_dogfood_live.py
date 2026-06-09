@@ -14,9 +14,8 @@ What this proves:
   3. The reviewer reviews a real diff.
   4. The driver decides when to act based on engine-emitted events,
      not by matching renderer output strings.
-  5. Every yaml-declared human gate gets answered exactly once.
-  6. `imp log` and `imp log --full` smoke-pass.
-  7. The coder's specific code change landed (sentinel grep).
+  5. `imp log` and `imp log --full` smoke-pass.
+  6. The coder's specific code change landed (sentinel grep).
 
 Skip predicates (all must pass):
   - first_opted_in() is not None  (IMP_LIVE_PROVIDERS opt-in)
@@ -42,7 +41,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from imp.engine import journal
 from tests._live import _await_worktree, build_isolated_venv, first_opted_in
@@ -84,22 +82,6 @@ def _provider_model(provider: str) -> str:
         # non-codex model. Auth is via the `codex` CLI's own ~/.codex/auth.json.
         "codex": "gpt-5.5",
     }[provider]
-
-
-def _walk_yaml_human_gates(wf_yaml: Path) -> list[tuple[str, str]]:
-    """Return [(phase_name, step_name), ...] for every human step (carrying
-    `ask:`/`options:`) declared in the unified-surface workflow.yaml. The driver
-    uses len(...) to know how many human prompts should fire end-to-end."""
-    data = yaml.safe_load(wf_yaml.read_text())
-    out: list[tuple[str, str]] = []
-    for phase in data.get("phases", []):
-        if not isinstance(phase, dict):
-            continue
-        pname = str(phase.get("name", ""))
-        for step in phase.get("steps") or []:
-            if isinstance(step, dict) and ("ask" in step or "options" in step):
-                out.append((pname, str(step.get("name", ""))))
-    return out
 
 
 def _ignore_for_copy(_dir: str, names: list[str]) -> set[str]:
@@ -282,15 +264,6 @@ def test_dogfood_imp_on_imp_default_workflow(
     # Seed the project: copy imp source, git init, run_init, isolated venv.
     venv_python = _seed_dogfood_project(tmp_path, provider)
 
-    wf_yaml = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
-    expected_gates = _walk_yaml_human_gates(wf_yaml)
-    # The superpowers workflow has NO ask/options human gates — the only gate
-    # (final-review) is an interactive AGENT, and it is disabled here via
-    # vars.final_review=false. So expected_gates is empty by design.
-    assert expected_gates == [], (
-        f"superpowers workflow should declare no ask/options gates; got {expected_gates}"
-    )
-
     # Override imp/project.yaml (the project layer) to pin the exact model
     # string. run_init wrote project.yaml with workflow+vars but NO model
     # bindings (the floor owns provider-default models now); we replace it with a
@@ -459,7 +432,6 @@ def test_dogfood_imp_on_imp_default_workflow(
     slug = change_wt.name
     events_file = change_wt / ".imp" / "change" / "events.jsonl"
 
-    gates_answered = 0
     events_seen_bytes = 0
     all_events_accum: list[dict[str, Any]] = []
     start_time = time.time()
@@ -468,7 +440,7 @@ def test_dogfood_imp_on_imp_default_workflow(
 
     print(
         f"\n[dogfood] provider={provider} model={model} starting; "
-        f"sentinel={sentinel} expected_gates={len(expected_gates)}",
+        f"sentinel={sentinel}",
         file=sys.stderr, flush=True,
     )
 
@@ -531,18 +503,7 @@ def test_dogfood_imp_on_imp_default_workflow(
                 all_events_accum.append(ev)
                 etype = ev.get("type")
                 payload = ev.get("payload") or {}
-                if etype == "human_prompt_pending":
-                    phase = payload.get("phase", "?")
-                    if not any(p == phase for p, _ in expected_gates):
-                        proc.kill()
-                        proc.wait()
-                        pytest.fail(
-                            f"engine emitted human_prompt_pending for phase "
-                            f"{phase!r} not in yaml-declared human gates "
-                            f"{expected_gates}; workflow.yaml/parse drift?"
-                        )
-                    gates_answered += 1
-                elif etype == "workflow_paused":
+                if etype == "workflow_paused":
                     # Pause fail-fast: the engine emits workflow_paused at
                     # executor.py:100/106 whenever it halts (including
                     # on_max_retries: pause). The driver has no resumer,
@@ -552,8 +513,7 @@ def test_dogfood_imp_on_imp_default_workflow(
                     proc.wait()
                     pytest.fail(
                         f"engine emitted workflow_paused (reason={reason!r}); "
-                        f"likely max_retries exhausted in a step or phase. "
-                        f"gates_answered={gates_answered}/{len(expected_gates)}"
+                        f"likely max_retries exhausted in a step or phase."
                     )
 
             if proc.poll() is not None:
@@ -566,16 +526,14 @@ def test_dogfood_imp_on_imp_default_workflow(
             pytest.fail(
                 f"dogfood workflow exceeded {TOTAL_TIMEOUT}s wall clock "
                 f"(may be reviewer flake or coder iteration storm; "
-                f"rerun once before investigating).\n"
-                f"gates_answered={gates_answered}/{len(expected_gates)}"
+                f"rerun once before investigating)."
             )
     finally:
         _teardown_proc()
 
     rc = proc.wait(timeout=10)
     assert rc == 0, (
-        f"expected exit 0, got {rc}; "
-        f"gates_answered={gates_answered}/{len(expected_gates)}"
+        f"expected exit 0, got {rc}"
     )
 
     # Resolve the change id from the journal. The id is immutable, so it equals
@@ -596,11 +554,6 @@ def test_dogfood_imp_on_imp_default_workflow(
     state = json.loads(state_raw)
     assert state["status"] == "completed", (
         f"expected status=completed, got {state['status']!r}"
-    )
-
-    assert gates_answered == 0, (
-        f"superpowers workflow has no ask/options gates; saw {gates_answered} "
-        f"human_prompt_pending events"
     )
 
     # ── Dogfood-specific verification ──────────────────────────────────

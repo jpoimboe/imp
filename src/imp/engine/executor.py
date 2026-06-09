@@ -1,5 +1,5 @@
 """Workflow executor (unified step model): a single flat cursor over the
-workflow's steps. Each step is dispatched by kind (agent/script/human/branch),
+workflow's steps. Each step is dispatched by kind (agent/script/branch),
 its rules block is evaluated, and the resulting Action moves (or terminates)
 the cursor.
 
@@ -41,9 +41,7 @@ from imp.engine.feedback import (
     render_output_fields,
 )
 from imp.engine.gates import (
-    apply_human_option,
     evaluate_rules,
-    run_human,
     run_script,
 )
 from imp.engine.loader import load_workflow
@@ -61,8 +59,6 @@ from imp.providers.effective import load_effective_config
 from imp.providers.resolve import provider_from_model, resolve_run
 
 EventCallback = Callable[[dict[str, Any]], None]
-HumanInputFn = Callable[[], str | Awaitable[str]]
-HumanOutputFn = Callable[[str], None]
 
 
 class RunResult(Enum):
@@ -119,8 +115,6 @@ async def run_change(
     change: Change,
     *,
     on_event: EventCallback | None = None,
-    human_input_fn: HumanInputFn = input,
-    human_output_fn: HumanOutputFn = print,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     non_interactive: bool = False,
@@ -172,7 +166,6 @@ async def run_change(
             # re-apply it (double-apply trap). The third element is otherwise unused.
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, change, state, log, is_resume=is_resume,
-                human_input_fn=human_input_fn, human_output_fn=human_output_fn,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 lint_command=config.lint_command,
                 test_command=config.test_command,
@@ -314,7 +307,6 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
 async def _dispatch_step(
     step: Step, workflow: Workflow, change: Change,
     state: State, log: EventLog, *, is_resume: bool,
-    human_input_fn: HumanInputFn, human_output_fn: HumanOutputFn,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, lint_command: str | None = None,
     test_command: str | None = None,
@@ -333,8 +325,6 @@ async def _dispatch_step(
     if step.kind == "script":
         return _route_script(step, change, state, log, lint_command=lint_command,
                              test_command=test_command)
-    if step.kind == "human":
-        return await _route_human(step, state, log, human_input_fn, human_output_fn)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -394,23 +384,6 @@ def _route_script(
     return action, feedback, muts
 
 
-async def _route_human(
-    step: Step, state: State, log: EventLog,
-    input_fn: HumanInputFn, output_fn: HumanOutputFn,
-) -> tuple[Action, str | None, dict[str, object]]:
-    _emit_started(log, step)          # step_started for ALL kinds — opens the phase node
-    _emit(log, "human_prompt_pending",
-          {"step": step.name, "phase": step.phase, "ask": step.ask,
-           "options": [{"label": o.label} for o in step.options]})
-    chosen = await run_human(step, input_fn=input_fn, output_fn=output_fn)
-    muts = apply_human_option(chosen, vars=state.vars)
-    state.vars.update(muts)
-    _emit(log, "step_completed", {
-        "step": step.name, "kind": "human",
-        "action": _action_payload(chosen.action), "var_mutations": muts})
-    return chosen.action, None, muts          # human goto carries NO feedback
-
-
 async def _route_agent(
     step: Step, workflow: Workflow, change: Change,
     state: State, log: EventLog, *,
@@ -457,7 +430,7 @@ async def _route_agent(
             transcript_dir=transcript_dir,
             # MUST include "step" — _run_agent_invocation builds step_started as
             # {model, provider, tools, **extras}; the narrative tree
-            # names/pairs the node on payload.step. Branch/script/human get it via
+            # names/pairs the node on payload.step. Branch/script get it via
             # _emit_started; the agent path must match.
             step_started_payload_extras={
                 "step": step.name, "kind": "agent", "phase": step.phase},

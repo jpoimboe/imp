@@ -42,7 +42,7 @@ class ReplyInterjectRouter:
     """Routes each human-typed line by the agent's state AT SUBMIT TIME (F7/R6).
 
     `route(line)` is the pure decision:
-      - solicit ACTIVE (the engine is blocked in a human-gate / `wait_for_user`,
+      - solicit ACTIVE (the engine is blocked in a `wait_for_user`,
         a prompt is up) → the line is the REPLY → delivered to `reply_sink`;
       - solicit INACTIVE (the agent is running) → the line is an INTERJECT →
         queued on the coordinator, delivered at the next agent turn boundary.
@@ -100,8 +100,9 @@ class ReplyInterjectRouter:
 
 def make_stdin_reply_fn(default_reply: str) -> Callable[[], Awaitable[str]]:
     """A scripted reply channel for --non-interactive runs (§12): each call reads
-    the next stdin line; on EOF it returns `default_reply`. Used for BOTH the
-    human-gate input and the interactive-agent ask. No TTY, no prompt_toolkit."""
+    the next stdin line; on EOF it returns `default_reply`. Used for the
+    wait_for_user reply channel and the interactive-agent ask. No TTY, no
+    prompt_toolkit."""
     async def _reply() -> str:
         # Blocking read: the default (non-cancellable) thread means a stalled read
         # blocks task-group cancellation; callers must close stdin (pipe/redirect
@@ -122,8 +123,8 @@ def _build_interactive_input(
     Returns `(router, solicit_fn)`:
       - `router` is the testable routing core (reply-vs-interject by submit-time
         state, see ReplyInterjectRouter);
-      - `solicit_fn` is what the engine calls to SOLICIT a reply (human-gate and
-        wait_for_user): it marks the router's solicit flag active for the duration
+      - `solicit_fn` is what the engine calls to SOLICIT a reply (wait_for_user):
+        it marks the router's solicit flag active for the duration
         of the prompt_toolkit read and returns the typed line. Same behavior as
         the legacy `_ask_line` — the prompt owns the tty (ESC quiesced) and the
         line is the REPLY.
@@ -329,14 +330,14 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
-                human_input_fn: Callable[[], Awaitable[str]] = make_stdin_reply_fn(
+                reply_input_fn: Callable[[], Awaitable[str]] = make_stdin_reply_fn(
                     args.default_reply)
             else:
                 esc_reader = EscKeyReader(coord)
                 # Task 11: the ESC reader (sole /dev/tty owner during thinking)
                 # also captures interject lines; the solicit/reply prompt is the
-                # router-flagged human_input_fn. See _build_interactive_input.
-                _router, human_input_fn = _build_interactive_input(
+                # router-flagged reply_input_fn. See _build_interactive_input.
+                _router, reply_input_fn = _build_interactive_input(
                     change, status, coord, esc_reader)
 
             async with anyio.create_task_group() as tg:
@@ -353,10 +354,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                     result = await run_change(
                         change,
                         on_event=driver.on_event,
-                        human_input_fn=human_input_fn,
-                        human_output_fn=driver.print_chrome,
-                        # chat solicit shares the human-gate reply channel.
-                        user_chat_input_fn=lambda _q: human_input_fn(),
+                        # the wait_for_user reply channel.
+                        user_chat_input_fn=lambda _q: reply_input_fn(),
                         coordinator=coord,
                         non_interactive=non_interactive,
                     )
@@ -522,13 +521,13 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
 
             esc_reader: EscKeyReader | None = None
             if non_interactive:
-                human_input_fn: Callable[[], Awaitable[str]] = make_stdin_reply_fn(
+                reply_input_fn: Callable[[], Awaitable[str]] = make_stdin_reply_fn(
                     args.default_reply)
             else:
                 esc_reader = EscKeyReader(coord)
                 # Task 11: ESC reader captures interjects; router-flagged prompt is
                 # the reply channel (see _build_interactive_input).
-                _router, human_input_fn = _build_interactive_input(
+                _router, reply_input_fn = _build_interactive_input(
                     change, status, coord, esc_reader)
 
             async with anyio.create_task_group() as tg:
@@ -545,9 +544,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     result = await run_change(
                         change,
                         on_event=driver.on_event,
-                        human_input_fn=human_input_fn,
-                        human_output_fn=driver.print_chrome,
-                        user_chat_input_fn=lambda _q: human_input_fn(),
+                        # the wait_for_user reply channel.
+                        user_chat_input_fn=lambda _q: reply_input_fn(),
                         coordinator=coord,
                         non_interactive=non_interactive,
                     )

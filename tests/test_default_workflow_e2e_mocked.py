@@ -1,14 +1,12 @@
 """End-to-end test of the shipped default workflow via mocked Anthropic.
 
 The shipped workflow.yaml has 5 phases (spec → plan → implement → review →
-merge); only review has a human gate ("Merge?"). The shipped script gates
-check that artifact files exist; we replace them with `exit 0` shims
-because the fake provider doesn't write real artifacts.
+merge). The shipped script gates check that artifact files exist; we replace
+them with `exit 0` shims because the fake provider doesn't write real artifacts.
 
 What this proves:
 - Multi-phase progression (spec → plan → implement → review → merge)
 - AgentGate retry/continue semantics through the executor
-- Human gate option-1 path through the single review gate
 - All shipped agent .md files parse and run via the executor
 - Step-level script-gate evaluation chains correctly with phase-level
   agent gates
@@ -233,31 +231,17 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
         ),
     )
 
-    # The superpowers workflow has no classic human-gate prompts (no steps with
-    # options:). The final-review agent uses wait_for_user to solicit the human,
-    # but the fake provider returns complete_step immediately (no wait_for_user
-    # call in the scripted response), so human_input_fn is never called.
-    answer_count = [0]
-    def _human_input() -> str:
-        answer_count[0] += 1
-        return "1"
-
+    # The final-review agent uses wait_for_user to solicit the human, but the fake
+    # provider returns complete_step immediately (no wait_for_user call in the
+    # scripted response), so the reply channel is never exercised.
     result = await run_change(
         change,
         on_event=lambda _e: None,
-        human_input_fn=_human_input,
-        human_output_fn=lambda _msg: None,
     )
 
     assert result is RunResult.COMPLETED, (
-        f"expected COMPLETED, got {result!r}; "
-        f"human gates answered: {answer_count[0]}"
+        f"expected COMPLETED, got {result!r}"
     )
-    # No classic human gate in the superpowers workflow (final-review uses
-    # wait_for_user, but the fake skips it and completes directly with
-    # decision=merge — the genuine solicit flow is covered by
-    # test_final_review_wait_for_user_solicit_then_merge).
-    assert answer_count[0] == 0
 
 
 @pytest.mark.anyio
@@ -305,12 +289,9 @@ async def test_full_default_workflow_completes_with_canned_openai(
         ),
     )
 
-    answer_count = [0]
     result = await run_change(
         change,
         on_event=lambda _e: None,
-        human_input_fn=lambda: (answer_count.__setitem__(0, answer_count[0] + 1), "1")[1],
-        human_output_fn=lambda _msg: None,
     )
     assert result is RunResult.COMPLETED
 
@@ -376,8 +357,6 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     result = await run_change(
         change,
         on_event=lambda _e: None,
-        human_input_fn=lambda: "1",
-        human_output_fn=lambda _msg: None,
     )
     assert result is RunResult.COMPLETED
 
@@ -414,7 +393,6 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
     result = await run_change(
         change, on_event=on_event,
-        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
     )
     assert result is RunResult.COMPLETED
 
@@ -467,7 +445,6 @@ async def test_fast_path_skips_both_reviewers_but_not_code_reviewer(
 
     result = await run_change(
         change, on_event=on_event,
-        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
     )
     assert result is RunResult.COMPLETED
     assert "spec-reviewer" not in started, started
@@ -533,7 +510,6 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
 
     result = await run_change(
         change, on_event=lambda _e: None,
-        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
     )
 
     assert result is RunResult.COMPLETED
@@ -600,9 +576,7 @@ async def test_final_review_wait_for_user_solicit_then_merge(tmp_path: Path) -> 
     events_seen: list[dict] = []
     result = await run_change(
         change, on_event=events_seen.append,
-        # human_input_fn is the classic gate (numeric choice); not exercised in this
-        # attended test — wait_for_user is routed through user_chat_input_fn instead.
-        human_input_fn=lambda: "1", human_output_fn=lambda _msg: None,
+        # wait_for_user is routed through user_chat_input_fn.
         user_chat_input_fn=_user_chat_input,
     )
 

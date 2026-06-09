@@ -7,17 +7,15 @@ folded render_text._render_* helpers. The live view and imp log therefore share
 one render path (design Part 2).
 
 Ordering, dedup, and depth come from a driver-owned STACK of frontier cursors —
-one per open container the driver is tracking (root -> phase -> step -> agent-gate
-step). Each cursor points at the next unemitted child of its container, advances
+one per open container the driver is tracking (root -> phase -> step). Each
+cursor points at the next unemitted child of its container, advances
 left-to-right, emits a child once when final, and blocks on a not-final child.
 Depth is read from the cursor stack, NOT the builder's mutable _step_stack /
 _current_phase (a scope-closer event pops those BEFORE this post-add() walk runs).
 
 Not-final children (the only things that block a cursor):
   - an open ToolBurstFold (still its owning builder's current_burst; for a
-    nested burst the owner is the subagent's nested builder, not the main one),
-  - an unresolved human GateNode (action is None) — deferred until the human
-    step's step_completed stamps the resolved route onto it.
+    nested burst the owner is the subagent's nested builder, not the main one).
 Everything else is final on append. A SubagentFold is a LEAF (Part D): it
 collapses to a single `↳ task → {name} ⟨status⟩` status row emitted once the
 subagent stops running — its streamed children and structured return value are
@@ -88,20 +86,9 @@ class LiveDriver:
         self._walk()
         self._refresh_status()
 
-    def print_chrome(self, text: str) -> None:
-        """human_output_fn sink: assistant->user chat text (and gate chrome).
-        Live-only — no event/node — so its emphasis lives here, styled to match
-        LLM prose. Clears the status line first; the next event re-shows it."""
-        self._status.hide()
-        for ln in str(text).split("\n"):
-            self._stream.write(
-                pal.ansi(ln, *pal.NODE_COLORS["agent"], enabled=self._color) + "\n")
-        self._stream.flush()
-
     def finish(self) -> None:
-        """Run end / pause / error: force-flush any still-open burst/subagent (and
-        any unresolved gate) so the final block is emitted, then clear the status
-        line."""
+        """Run end / pause / error: force-flush any still-open burst/subagent so
+        the final block is emitted, then clear the status line."""
         self._walk(force=True)
         self._status.reset()
 
@@ -199,8 +186,6 @@ class LiveDriver:
             # bursts reach the live walk, so the owning builder is always the main
             # one — no reliance on the A2 drop.
             return node is not self._builder.current_burst
-        if isinstance(node, nv.GateNode) and node.kind == "human":
-            return node.action is not None     # deferred until step_completed
         return True
 
     def _gutters(self) -> tuple[int, ...]:
@@ -245,18 +230,9 @@ class LiveDriver:
                 list(lines), prose=True,
                 separator_indent=rt._gutter_indent(depth, gutters, self._color))
             return
-        if isinstance(node, nv.GateNode) and node.kind == "human":
-            # Live renders the resolved header only; run_human_gate already showed
-            # the prompt/options as chrome (design "Human gates").
-            lines = rt._render_gate(node, depth=depth, color=self._color,
-                                    width=self._width, recap=False, gutters=gutters)
-            # Spaced like the batch walk (blank after the gate block) so the
-            # step-completion breadcrumb that follows stands clear of it.
-            prose = rt.spaces_after(node, full=False)
-        else:
-            lines = rt._render(node, depth=depth, full=False, color=self._color,
-                               width=self._width, gutters=gutters)
-            prose = rt.spaces_after(node, full=False)
+        lines = rt._render(node, depth=depth, full=False, color=self._color,
+                           width=self._width, gutters=gutters)
+        prose = rt.spaces_after(node, full=False)
         self._print_lines(
             list(lines), prose=prose,
             separator_indent=rt._gutter_indent(depth, gutters, self._color))
