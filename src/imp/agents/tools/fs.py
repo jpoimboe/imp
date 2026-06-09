@@ -11,11 +11,13 @@ import anyio
 from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import (
-    OUTPUT_TRUNCATION_MARKER,
+    FILE_READ_CAP_BYTES,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
     read_text_capped,
+    tool_checkpoint,
 )
+from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
 
 
 @imp_tool(
@@ -25,18 +27,80 @@ from imp.agents.tools.limits import (
         "Paths are relative to the project root (e.g. src/foo.py)."
     ),
 )
-async def read_file(ctx: ToolContext, path: str) -> str:
+async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int = 2000) -> str:
+    if type(offset) is not int or offset < 1:
+        raise ValueError(f"offset must be an integer >= 1, got {offset!r}")
+    if type(limit) is not int or limit < 1:
+        raise ValueError(f"limit must be an integer >= 1, got {limit!r}")
     ctx.check_fs_permission("read", path)
     resolved = ctx.resolve_path(path)
-    text, truncated = await read_text_capped(
-        resolved,
-        coordinator=getattr(ctx, "coordinator", None),
-        deadline=anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S,
-        cap_bytes=TOOL_OUTPUT_CAP_BYTES,   # 50 KB — same cap bash/grep apply
-    )
-    if truncated:
-        text += OUTPUT_TRUNCATION_MARKER
-    return text
+    coordinator = getattr(ctx, "coordinator", None)
+    deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
+    try:
+        text, read_truncated = await read_text_capped(
+            resolved,
+            coordinator=coordinator,
+            deadline=deadline,
+            cap_bytes=FILE_READ_CAP_BYTES,
+        )
+    except FileNotFoundError:
+        raise FileNotFoundError(f"no such file: {path}") from None
+    except IsADirectoryError:
+        raise IsADirectoryError(f"is a directory: {path}") from None
+    if not text:
+        return "[empty file]"  # wins regardless of offset — never past-EOF
+    # st_size sampled AFTER the read (growth during the read must classify as
+    # cap-truncated; a before-read sample would fabricate a final line).
+    cap_truncated = file_is_cap_truncated(read_truncated, resolved)
+    # Seam: the bounded read checkpoints per chunk, but the split/number/render
+    # of up to 5 MB below is one synchronous stretch — checkpoint once between.
+    await tool_checkpoint(coordinator, deadline)
+    lines = split_lines(text, cap_truncated=cap_truncated)
+    readable = len(lines)
+
+    if offset > readable:
+        if cap_truncated:
+            return (f"[offset {offset} is past the readable window "
+                    f"({readable} lines within the first 5 MB; total unknown)]")
+        return f"[offset {offset} is past the end of the file ({readable} lines)]"
+
+    rendered: list[str] = []
+    rendered_len = 0
+    last = offset - 1
+    for lineno in range(offset, min(offset + limit - 1, readable) + 1):
+        # Per-line cap applies to CONTENT only; the {lineno:>6}\t prefix does
+        # count toward the 50 KB budget below (it is rendered output).
+        entry = f"{lineno:>6}\t{truncate_line(lines[lineno - 1])}"
+        rendered.append(entry)
+        rendered_len += len(entry) + 1  # +1 = the join newline (grep's accounting)
+        last = lineno
+        if rendered_len >= TOOL_OUTPUT_CAP_BYTES:
+            break  # budget-crossing line stays rendered IN FULL (matches grep)
+
+    # Three cutoffs (limit lines / 50 KB budget / 5 MB read ceiling), one
+    # resumable notice. Skeleton strings are NORMATIVE — tests assert them
+    # verbatim; wording changes go through the spec.
+    notice: str | None = None
+    if cap_truncated:
+        # EVERY notice for a cap-truncated file uses readable-window
+        # vocabulary and never claims a total — regardless of which cutoff
+        # ended the window. A window ending at the readable edge must NOT end
+        # silently: quiet endings are the signature of a complete file.
+        if last < readable:
+            notice = (f"[showing lines {offset}-{last} of the first 5 MB "
+                      f"({readable} lines readable; total unknown); "
+                      f"continue with offset={last + 1}]")
+        else:
+            notice = (f"[showing lines {offset}-{last}; end of the readable window "
+                      f"(first 5 MB) — the file continues but is not readable via "
+                      f"read_file; total unknown]")
+    elif last < readable:
+        notice = (f"[showing lines {offset}-{last} of {readable}; "
+                  f"continue with offset={last + 1}]")
+    # else: a complete file's window reached (or overshot) EOF — ends silently.
+
+    body = "\n".join(rendered)
+    return f"{body}\n{notice}" if notice else body
 
 
 @imp_tool(name="write_file", description="Write (overwrite) a file. Creates parent dirs as needed.")

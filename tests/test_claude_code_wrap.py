@@ -85,7 +85,7 @@ async def test_wrap_regular_tool_returns_invoke_result(tmp_path: Path) -> None:
         "read_file", read, _ctx(tmp_path), state, _passthrough_decorator,
     )
     out = await wrapped({"path": "x.txt"})
-    assert out["content"][0]["text"] == "hello"
+    assert out["content"][0]["text"] == "     1\thello"
     assert state.runtime_errors == []
 
 

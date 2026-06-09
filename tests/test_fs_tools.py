@@ -42,26 +42,20 @@ def _read_file(ctx: ToolContext, **args: object) -> str:
     return anyio.run(get_registry()["read_file"].async_invoke, ctx, args)
 
 
-def test_read_file_returns_contents(tmp_path: Path) -> None:
+def test_read_file_returns_numbered_contents(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("hello")
     out = _read_file(_ctx(tmp_path, "read"), path="a.txt")
-    assert out == "hello"
+    assert out == "     1\thello"
 
 
-def test_read_file_truncates_huge_file_at_output_cap(tmp_path: Path) -> None:
-    from imp.agents.tools.limits import TOOL_OUTPUT_CAP_BYTES
+def test_read_file_giant_single_line_bounded(tmp_path: Path) -> None:
+    # The old head-cap test, re-pinned for the paging model: a 200 KB single
+    # line is bounded by the per-line 2000-char content cap, not delivered raw.
     big = tmp_path / "big.bin"
-    big.write_bytes(b"z" * (TOOL_OUTPUT_CAP_BYTES * 4))   # 200 KB
+    big.write_bytes(b"z" * 200_000)  # one line, no newline
     out = _read_file(_ctx(tmp_path, "read"), path="big.bin")
-    assert "[output truncated at 50 KB]" in out
-    # Bounded to the 50 KB head cap + the marker — NOT the whole 200 KB.
-    assert len(out) <= TOOL_OUTPUT_CAP_BYTES + 100
-
-
-def test_read_file_small_unchanged(tmp_path: Path) -> None:
-    (tmp_path / "s.txt").write_text("hello world")
-    out = _read_file(_ctx(tmp_path, "read"), path="s.txt")
-    assert out == "hello world"
+    assert out.endswith("…[truncated]")
+    assert len(out) < 3_000  # 2000-char content + prefix + marker, not 200 KB
 
 
 def test_read_file_aborts_on_pause(tmp_path: Path) -> None:
