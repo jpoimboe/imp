@@ -516,6 +516,28 @@ def test_dogfood_imp_on_imp_default_workflow(
         will exit cleanly (rc 0) and the driver loop resumes with --message.
         Enforces the GLOBAL wall-clock deadline across the whole new→resume loop.
         """
+
+        def _drain_and_check_pause() -> None:
+            # reason is None  -> awaiting-user pause (resumable): NOT a failure;
+            #                    keep draining until the proc exits.
+            # reason non-null -> real failure (max_loops / error category /
+            #                    max_retries exhaustion): fail-fast.
+            for ev in _tail_events():
+                all_events_accum.append(ev)
+                if ev.get("type") != "workflow_paused":
+                    continue
+                payload = ev.get("payload") or {}
+                if payload.get("reason") is not None:
+                    with contextlib.suppress(OSError, ProcessLookupError):
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    proc.kill()
+                    proc.wait()
+                    pytest.fail(
+                        f"engine emitted workflow_paused with non-null reason "
+                        f"({payload.get('reason')!r}); likely max_loops or "
+                        f"max_retries exhausted in a step or phase."
+                    )
+
         while proc.poll() is None:
             if (
                 startup_guard
@@ -532,25 +554,7 @@ def test_dogfood_imp_on_imp_default_workflow(
                     f"engine did not initialize."
                 )
 
-            for ev in _tail_events():
-                all_events_accum.append(ev)
-                if ev.get("type") != "workflow_paused":
-                    continue
-                payload = ev.get("payload") or {}
-                # reason is None  -> awaiting-user pause (resumable): NOT a
-                #                    failure; keep draining until the proc exits.
-                # reason non-null -> real failure (max_loops / error category /
-                #                    max_retries exhaustion): fail-fast.
-                if payload.get("reason") is not None:
-                    with contextlib.suppress(OSError, ProcessLookupError):
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    proc.kill()
-                    proc.wait()
-                    pytest.fail(
-                        f"engine emitted workflow_paused with non-null reason "
-                        f"({payload.get('reason')!r}); likely max_loops or "
-                        f"max_retries exhausted in a step or phase."
-                    )
+            _drain_and_check_pause()
 
             if time.time() >= deadline:
                 with contextlib.suppress(OSError, ProcessLookupError):
@@ -564,6 +568,12 @@ def test_dogfood_imp_on_imp_default_workflow(
                 )
 
             time.sleep(0.05)
+
+        # Final drain after exit: the terminal workflow_paused is written just
+        # before the proc exits, so the while-guard can miss it. Read it now so a
+        # real-failure pause fails fast here (precise diagnostic) instead of being
+        # misclassified as awaiting-user and burning resume cycles to the cap.
+        _drain_and_check_pause()
 
     change_id: str | None = None
     slug = "(unknown)"
