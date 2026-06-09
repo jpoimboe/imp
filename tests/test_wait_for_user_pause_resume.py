@@ -106,7 +106,9 @@ async def test_claude_code_headless_wait_for_user_unwinds_and_dangles(
         assistant,
         result,
         text,
+        tool_result,
         tool_use,
+        user,
     )
 
     scripted = [
@@ -114,8 +116,13 @@ async def test_claude_code_headless_wait_for_user_unwinds_and_dangles(
             text("I need a human decision"),
             tool_use("w1", "wait_for_user", {"prompt": "approve?"}),
         ),
-        # The SDK would normally follow with a UserMessage tool_result for w1.
-        # The headless pause must unwind BEFORE that is consumed/appended.
+        # Simulate the real SDK emitting a tool_result for the wait_for_user call.
+        # The runner MUST raise AwaitingUserInput in the iteration that processed
+        # the assistant message above — BEFORE consuming this UserMessage — so this
+        # tool_result must never reach the persisted transcript.  If the raise were
+        # misplaced (fired too late), this message would be consumed and appended,
+        # tripping the "no tool_result may resolve the dangling id" assertion below.
+        user(tool_result("w1", "user response", is_error=True)),
         result(),
     ]
 
