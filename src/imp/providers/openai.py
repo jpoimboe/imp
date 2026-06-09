@@ -42,7 +42,7 @@ from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
-from imp.agents.tools.wait_for_user import make_wait_for_user_tool
+from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
@@ -419,6 +419,8 @@ class OpenAIAgentRunner:
             except perr.ProviderError as exc:
                 yield perr.make_error_event(exc)
                 return
+            except AwaitingUserInput:
+                raise  # headless wait_for_user pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)
                 if self._cancel:
@@ -732,6 +734,12 @@ class OpenAIAgentRunner:
                         "message": str(fte),
                     }}
                     return
+                except AwaitingUserInput:
+                    # Headless wait_for_user pause: unwind out of run() (like
+                    # SubagentSuspended), not an is_error tool_result. The
+                    # assistant message bearing this tool_use is already appended,
+                    # so the transcript ends at the dangling wait_for_user tool_use.
+                    raise
                 except Exception as e:
                     err_text = f"{type(e).__name__}: {e}"
                     block = ToolResultBlock(tu.id, err_text, is_error=True)

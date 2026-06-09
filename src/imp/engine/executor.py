@@ -496,6 +496,13 @@ async def _route_agent(
             return Pause(), None, {}
 
     if result.paused:
+        if result.awaiting_user:
+            # Headless wait_for_user: mark THIS step resumable so the reload
+            # keeps the transcript (the dangling wait_for_user tool_use is what
+            # the AWAITING_USER resume resolves). Mirrors the resume: edge's
+            # marker; cleared on the next forward Continue.
+            state.resume_pending = state.step
+            state.save(change.state_dir)
         return Pause(), None, {}
     if result.fatal:
         # Defense in depth: reset the retry count when pausing fatally, matching

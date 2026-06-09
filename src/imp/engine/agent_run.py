@@ -30,6 +30,7 @@ import anyio
 
 from imp.agents.runner import AgentInvocation, ChangeContext, Message
 from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S
+from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.completion import build_continuation_fn, completion_instruction
 from imp.engine.types import AgentDef
 
@@ -89,6 +90,11 @@ class AgentRunResult:
     fatal: bool
     delay: float | None
     error: ErrorInfo | None = None
+    # Headless wait_for_user pause: paused=True drives normal pause handling;
+    # awaiting_user=True additionally tells the executor to mark THIS step
+    # resumable (Task 3 Step 5) so the dangling wait_for_user tool_use survives
+    # the reload. Stays False for every other pause (coordinator, subagent).
+    awaiting_user: bool = False
 
 
 class SubagentSuspended(Exception):
@@ -290,6 +296,12 @@ async def drive_invocation(
     except SubagentSuspended:
         # A nested subagent paused; unwind this drive as paused too.
         return AgentRunResult(None, False, True, False, None)
+    except AwaitingUserInput:
+        # A headless/subagent wait_for_user yielded with no human attached.
+        # paused=True drives normal pause handling; awaiting_user=True tells the
+        # executor to mark the step resumable (Step 5) so the dangling
+        # wait_for_user tool_use survives reload.
+        return AgentRunResult(None, False, True, False, None, awaiting_user=True)
 
     if stall["hit"]:
         # B.2: the watchdog tore the agent down. Surface as errored/'stalled'.

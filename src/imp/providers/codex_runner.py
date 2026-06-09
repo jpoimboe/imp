@@ -33,6 +33,7 @@ from imp.agents.runner import (
 )
 from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools.context import ToolContext, terminate_running_processes
+from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
 from imp.providers import errors as perr
@@ -191,6 +192,8 @@ class CodexAgentRunner:
         except perr.ProviderError as exc:
             yield perr.make_error_event(exc)
             return
+        except AwaitingUserInput:
+            raise  # headless wait_for_user pause unwinds, not classified
         except Exception as exc:
             raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
             if self._cancel:
@@ -531,6 +534,16 @@ class CodexAgentRunner:
                         with contextlib.suppress(Exception):
                             self._abort_controller.abort()
                     raise state.subagent_suspended
+
+                # A headless wait_for_user pause captured in the MCP handler must
+                # likewise unwind the whole codex run cleanly. Mirrors the
+                # subagent-suspend escalation, but raises AwaitingUserInput so
+                # drive_invocation marks the step resumable (awaiting_user=True).
+                if state.awaiting_user:
+                    if self._abort_controller is not None:
+                        with contextlib.suppress(Exception):
+                            self._abort_controller.abort()
+                    raise AwaitingUserInput(state.awaiting_prompt)
 
                 if state.fatal_tool_error is not None:
                     if self._abort_controller is not None:

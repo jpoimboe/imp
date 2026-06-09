@@ -28,6 +28,7 @@ from typing import Any
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
+from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.agent_run import SubagentSuspended
 
 
@@ -56,6 +57,11 @@ class RunState:
     agent_id: str = "step:unnamed"
     minted_task_ids: list[str] = field(default_factory=list)
     subagent_suspended: Any = None
+    # Headless wait_for_user pause captured in the MCP wrapper (it can't raise
+    # out of the in-process SDK handler). The runner detects awaiting_user after
+    # process_event and re-raises AwaitingUserInput(awaiting_prompt) to unwind.
+    awaiting_user: bool = False
+    awaiting_prompt: str = ""
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -141,6 +147,13 @@ async def dispatch_tool(
     except FatalToolError as fte:
         state.fatal_tool_error = (tool.name, str(fte))
         return f"fatal tool error: {fte}"
+    except AwaitingUserInput as au:
+        # Headless wait_for_user: capture onto state (the in-process MCP handler
+        # cannot raise out to the SDK). The runner re-raises AwaitingUserInput
+        # after process_event to unwind the codex run into a clean pause.
+        state.awaiting_user = True
+        state.awaiting_prompt = au.prompt
+        return "awaiting user; run will pause"
     except Exception as exc:
         text = f"{type(exc).__name__}: {exc}"
         state.runtime_errors.append(text)
