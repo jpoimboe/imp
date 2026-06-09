@@ -140,7 +140,8 @@ def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -
 def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) -> None:
     """The --force forward path through the real CLI seam: --from merge --force
     from a paused recheck emits gates_bypassed (after workflow_resumed),
-    sets ready_to_merge, and terminates the cursor (to_step None)."""
+    sets ready_to_merge, and lands the cursor at the merge phase entry
+    (base-fresh-check) so the engine-native merge step runs (B3 cutover)."""
     import argparse
 
     import anyio
@@ -176,9 +177,10 @@ def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) 
         "integration-review", "final-review",
     ]
 
-    # Persisted: terminal cursor + ready_to_merge set (land as-is).
+    # Persisted: cursor lands at the merge phase entry + ready_to_merge set
+    # (land as-is). The merge phase's engine-native steps run the merge (B3).
     final = State.load(ch.state_dir)
-    assert final.step is None
+    assert final.step == "base-fresh-check"
     assert final.vars["ready_to_merge"] is True
 
 

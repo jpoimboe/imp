@@ -26,8 +26,18 @@ def test_two_changes_isolated(tmp_path: Path) -> None:
 
 
 def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
-    """Two changes merge in sequence; the second picks up what the first committed."""
+    """Two changes merge in sequence; the second picks up what the first committed.
+    B3: the merge runs through the engine-native merge-to-base step (_route_merge),
+    then _complete finalizes."""
+    from imp.engine.executor import _route_merge
+    from imp.engine.loader import load_workflow
+
     _seed_control(tmp_path)
+    wf = load_workflow(
+        Path(__file__).resolve().parents[1]
+        / "src" / "imp" / "assets" / "workflows" / "default")
+    merge_step = next(s for s in wf.flat_steps() if s.name == "merge-to-base")
+
     a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
     b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
     for ch, fn in ((a, "a.txt"), (b, "b.txt")):
@@ -37,8 +47,10 @@ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
 
     for ch in (a, b):
         st = State.load(ch.state_dir)
-        st.vars["ready_to_merge"] = True
-        result = _complete(ch, st, JsonlEventLog(ch.events_path))
+        log = JsonlEventLog(ch.events_path)
+        _route_merge(merge_step, ch, st, log)
+        assert st.merge_commit is not None              # merged under the lock
+        result = _complete(ch, st, log)
         assert result is RunResult.COMPLETED
 
     assert (tmp_path / "a.txt").exists() and (tmp_path / "b.txt").exists()
@@ -71,20 +83,31 @@ def test_per_change_lock_is_exclusive_but_cross_change_is_not(tmp_path: Path) ->
 
 
 def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> None:
-    """Full run_change path: workflow completes, ready_to_merge=True, merges into
-    base, journals artifacts, removes worktree, keeps branch."""
+    """Full run_change path: workflow completes, the engine-native merge-to-base
+    step merges into base, _complete journals artifacts, removes worktree, keeps
+    branch (B3 cutover: the merge moved out of _complete into the merge step)."""
     from tests.test_executor_rename import _FakeProvider, _seed_two_step_control
 
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))  # type: ignore[call-arg]
     _seed_two_step_control(tmp_path)
+    # Append a merge phase so the run exercises the real engine-native merge.
+    src_wf = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
+    src_wf.write_text(
+        src_wf.read_text()
+        + "  - name: merge\n    steps:\n"
+        "      - name: merge-to-base\n"
+        "        kind: merge\n"
+        "        rules:\n"
+        "          - {if: {merge: STALE}, pause: true}\n"
+        "          - {if: {merge: MERGED}, continue: true}\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "add merge phase")
     ch = Change.create(tmp_path, title="x", change_id="spine", base_branch="main")
     (ch.project_root / "out.txt").write_text("done")
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "work")
-
-    st = State.load(ch.state_dir)
-    st.vars["ready_to_merge"] = True
-    st.save(ch.state_dir)
 
     cwd_before = os.getcwd()
     result = anyio.run(run_change, ch)

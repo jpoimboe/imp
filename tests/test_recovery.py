@@ -87,7 +87,7 @@ def test_plan_rewind_forward_to_merge_with_force() -> None:
     from imp.engine.recovery import plan_rewind
 
     plan = plan_rewind(_wf(), _state("recheck"), "merge", force=True)
-    assert plan.to_step is None                      # terminal
+    assert plan.to_step == "base-fresh-check"        # B3: merge phase entry
     assert plan.target_idx == 25
     assert plan.set_ready_to_merge is True
     assert plan.bypass_gates == (
@@ -102,9 +102,9 @@ def test_plan_rewind_merge_blocked_reentry_no_force_no_gates() -> None:
     # merge_blocked: cursor None (terminal), ready_to_merge already true.
     st = _state(None, vars={"ready_to_merge": True})
     plan = plan_rewind(_wf(), st, "merge", force=False)
-    assert plan.to_step is None
+    assert plan.to_step == "base-fresh-check"        # B3: re-enters the merge phase
     assert plan.from_step is None                    # nullable from a None cursor
-    assert plan.bypass_gates == ()                   # forward jump? no — equal index
+    assert plan.bypass_gates == ()                   # backward jump (target < terminal cursor)
     assert plan.set_ready_to_merge is False
 
 
@@ -140,7 +140,7 @@ def test_apply_rewind_force_sets_var_and_emits_gates_bypassed() -> None:
     plan = plan_rewind(wf, st, "merge", force=True)
     apply_rewind(plan, wf, st, log)
 
-    assert st.step is None
+    assert st.step == "base-fresh-check"             # B3: merge phase entry
     assert st.vars["ready_to_merge"] is True
     bypassed = next(e for e in log.read() if e["type"] == "gates_bypassed")
     assert bypassed["payload"]["gates"] == [

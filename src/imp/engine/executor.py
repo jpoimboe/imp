@@ -180,13 +180,13 @@ async def run_change(
                 sandbox_policy=sandbox_policy)
 
             if coordinator.should_pause or isinstance(action, Pause):
-                state.status = "paused"
-                state.save(change.state_dir)
                 # action may be Continue/Goto on a coordinator interrupt (no .reason).
                 reason, kind = (
                     (action.reason, action.kind) if isinstance(action, Pause)
                     else ("interrupt", None)
                 )
+                state.status = "merge_blocked" if reason == "merge_blocked" else "paused"
+                state.save(change.state_dir)
                 payload: dict[str, Any] = {"reason": reason}
                 if kind is not None:
                     payload["kind"] = kind
@@ -248,62 +248,34 @@ async def run_change(
 
 
 def _complete(change: Change, state: State, log: EventLog) -> RunResult:
-    """Terminal handler: marks the Change completed and, when ready_to_merge is
-    set in state.vars, performs the full merge phase: merge imp/<id> into
-    base, journal the final artifacts, then remove the worktree (branch kept).
+    """Terminal handler. Two paths:
+    - No merge happened (merge-to-base was never reached, or the gate never set
+      it): mark completed, drop steps/, COMPLETED — unchanged legacy behaviour.
+    - merge-to-base already merged under the lock (state.merge_commit set, base ref
+      durably advanced): finalize — mark completed, journal the final artifacts,
+      then remove the worktree (branch kept). Ordering is crash-safe: status is
+      written + saved BEFORE journal/remove, so a crash mid-finalize leaves the
+      merge durable and the worktree a harmless leftover. Recovery: a crash AFTER
+      status='completed' is already done; a crash in the window between _route_merge
+      recording merge_commit and this status write leaves status='running' — re-running
+      re-enters _route_merge, which short-circuits on state.merge_commit (idempotent,
+      no second merge) and completes cleanly.
 
-    Contract change from the original stub:
-    - When ready_to_merge is NOT set: behaviour is identical to before — mark
-      completed, drop steps/, return COMPLETED.
-    - When ready_to_merge IS set: does git I/O (merge→journal→remove — three
-      separate lock acquisitions) and CAN return PAUSED with
-      state.status="merge_blocked" on worktree_dirty, CONFLICT, or REFUSED.
-      Crash safety: merge→journal→remove are ordered so the worst-case mid-
-      sequence crash leaves the merge commit already on base (durable) but the
-      worktree still present (a harmless leftover); resume re-enters here, sees
-      status=completed and worktree gone on success, or re-tries from state on
-      block — never data loss, never a double-merge (resume rejects completed).
-    """
-    state.step = None  # terminal cursor (safe to persist early; status is NOT yet)
-
-    # CRITICAL ordering: never write status="completed" until the run has truly
-    # terminated successfully. A merge that blocks must leave a RESUMABLE status.
-    if not state.vars.get("ready_to_merge"):
-        # No merge gate: this is the terminal success — identical to old behaviour.
+    _complete no longer does `git merge` — the authoritative merge moved into the
+    routable merge-to-base step (B3/F1), and the H1 dirty net moved into
+    merge_to_base under the lock (R5)."""
+    state.step = None
+    if not state.merge_commit:
         state.status = "completed"
         state.save(change.state_dir)
         shutil.rmtree(change.change_dir / "steps", ignore_errors=True)
         return RunResult.COMPLETED
 
     from imp.engine import worktree
-
-    # H1 safety net: merge_to_base merges the committed branch tip only. Any
-    # uncommitted work would be SILENTLY LOST. Refuse so the user commits and
-    # `imp resume`s to retry.
-    if worktree.is_dirty(change.project_root):
-        state.status = "merge_blocked"
-        state.save(change.state_dir)
-        _emit(log, "merge_blocked",
-              {"reason": "worktree_dirty", "base": change.base_branch})
-        return RunResult.PAUSED
-
-    result = worktree.merge_to_base(
-        change.control_root, change.id, change.base_branch, title=change.title)
-    if result.status in ("CONFLICT", "REFUSED"):
-        state.status = "merge_blocked"
-        state.save(change.state_dir)
-        _emit(log, "merge_blocked",
-              {"reason": result.status.lower(), "base": change.base_branch,
-               "detail": result.detail})
-        return RunResult.PAUSED
-
-    # MERGED — only NOW terminal success. Base ref already advanced (durable).
-    # Mark completed, snapshot final state into the journal BEFORE removing the
-    # worktree, then drop the worktree (branch kept).
     state.status = "completed"
     state.save(change.state_dir)
     _emit(log, "change_merged",
-          {"base": change.base_branch, "commit": result.merge_commit})
+          {"base": change.base_branch, "commit": state.merge_commit})
     worktree.journal_commit(change.control_root, change.id, {
         "events.jsonl": change.events_path,
         "change.json": change.change_dir / "change.json",
@@ -332,6 +304,8 @@ async def _dispatch_step(
 
     if step.kind == "branch":
         return _route_branch(step, state, log)
+    if step.kind == "merge":
+        return _route_merge(step, change, state, log)
     if step.kind == "script":
         return _route_script(step, change, state, log, lint_command=lint_command,
                              test_command=test_command, sandbox_policy=sandbox_policy)
@@ -403,6 +377,69 @@ def _route_script(
             "step": step.name, "exit": out["exit"],
             "stdout": out["stdout"], "stderr": out["stderr"]})
     return action, feedback, muts
+
+
+def _route_merge(
+    step: Step, change: Change, state: State, log: EventLog,
+) -> tuple[Action, str | None, dict[str, object]]:
+    """Engine-native authoritative merge (B3/F1). Holds RepoGitLock (inside
+    merge_to_base), re-asserts a clean worktree (DIRTY) and base freshness
+    (STALE) under the lock, performs the merge, and routes on the result via the
+    step's rules. On MERGED it stashes the commit in State.merge_commit; the
+    actual finalize (journal + worktree removal + mark completed) happens when
+    the run falls through to _complete."""
+    from imp.engine import worktree
+    _emit_started(log, step)
+
+    # Idempotent resume (crash-safety): if a prior run already merged (the commit
+    # is durable on base) but crashed before _complete finalized, do NOT re-merge.
+    # Re-running merge_to_base would see base advanced past the recorded SHA — by
+    # OUR OWN merge commit — and return STALE, triggering a spurious re-integration
+    # and a second merge commit. The old _complete was idempotent here (git merge
+    # of an already-merged branch = "Already up to date"); preserve that.
+    if state.merge_commit:
+        match = evaluate_rules(step.rules, vars=state.vars, output={"merge": "MERGED"})
+        state.vars.update(match.var_mutations)
+        return _finish(log, step, match)
+
+    # Tolerate a missing SHA file -> None: merge_to_base then skips the freshness
+    # check. A genuinely missing file means integration never ran this run (a
+    # workflow without integration, or the mocked e2e harness that shims
+    # integrate-merge.sh to `exit 0` and never writes the file), or
+    # base-fresh-check already exited 10 -> goto integrate-merge (which records
+    # the SHA before merge-to-base re-runs). Either way, None is correct here.
+    sha_file = change.change_dir / "integrated_base_sha"
+    expected_sha = sha_file.read_text().strip() if sha_file.exists() else None
+
+    result = worktree.merge_to_base(
+        change.control_root, change.id, change.base_branch, title=change.title,
+        project_root=change.project_root, expected_base_sha=expected_sha)
+    if result.status == "MERGED":
+        state.merge_commit = result.merge_commit
+        state.save(change.state_dir)
+
+    # Preserve the pre-B3 merge_blocked surfacing (review finding #2). Before the
+    # cutover, _complete emitted a `merge_blocked` event and set
+    # status="merge_blocked"; the CLI keys remediation, resumability, and status
+    # color on BOTH. The declared `{else: pause: true}` rule would produce a
+    # reason-less pause -> status="paused" -> all of that goes dead. So for
+    # blocking outcomes, emit the event ourselves and return a *reasoned* Pause;
+    # run_change's pause handler maps reason=="merge_blocked" to the merge_blocked
+    # status (Step 4b). DIRTY reuses the worktree_dirty reason the old H1 net emitted.
+    if result.status in ("CONFLICT", "REFUSED", "DIRTY"):
+        reason = "worktree_dirty" if result.status == "DIRTY" else result.status.lower()
+        _emit(log, "merge_blocked",
+              {"reason": reason, "base": change.base_branch, "detail": result.detail})
+        pause = Pause(reason="merge_blocked", kind=reason)
+        _emit(log, "step_completed",
+              {"step": step.name, "kind": "merge",
+               "action": _action_payload(pause), "var_mutations": {}})
+        return pause, None, {}
+
+    # STALE -> goto integrate-merge; MERGED -> continue (falls through to finalize).
+    match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
+    state.vars.update(match.var_mutations)
+    return _finish(log, step, match)
 
 
 async def _route_agent(

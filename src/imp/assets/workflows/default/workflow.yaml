@@ -221,6 +221,7 @@ phases:
       - name: final-review-gate
         rules:
           - {if: {final_review: false}, set: {ready_to_merge: true}, goto: merge}
+          - {if: {ready_to_merge: true, integration_needs_review: false}, goto: merge}   # C2.1: approved + clean reviewed re-integration -> skip re-review
           - {else: true, continue: true}
 
       - name: final-review
@@ -234,4 +235,17 @@ phases:
 
   # ── merge ───────────────────────────────────────────────────────────
   - name: merge
-    steps: []
+    steps:
+      - name: base-fresh-check       # B3: cheap pre-lock freshness fast-path
+        command: ./scripts/base-fresh-check.sh
+        rules:
+          - {if: {exit: 0}, continue: true}          # base unchanged / not-integrated -> take the lock
+          - {if: {exit: 10}, goto: integrate-merge}  # base advanced -> re-integrate
+          - {else: true, pause: true}                # exit 1 preamble failure -> human
+
+      - name: merge-to-base          # B3: engine-native, lock-protected, routable
+        kind: merge
+        rules:
+          - {if: {merge: STALE}, goto: integrate-merge}   # base moved between check and lock -> re-integrate
+          - {if: {merge: MERGED}, continue: true}          # falls through to _complete finalize
+          - {else: true, pause: true}                      # defensive fallback; _route_merge intercepts CONFLICT/REFUSED/DIRTY first to emit merge_blocked + a reasoned pause

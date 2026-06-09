@@ -54,7 +54,10 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     # phase jumps clear (plain goto)
     assert by["recheck"].rules[1].action.resume is False    # rework -> plan-writer
     assert by["spec-verify-commit"].kind == "script"
-    assert wf.phases[-1].name == "merge" and wf.phases[-1].steps == ()
+    # B3: the merge phase is the engine-native authoritative merge.
+    assert wf.phases[-1].name == "merge"
+    assert [s.name for s in wf.phases[-1].steps] == ["base-fresh-check", "merge-to-base"]
+    assert by["merge-to-base"].kind == "merge"
 
 
 def test_review_phase_has_no_differ_from():

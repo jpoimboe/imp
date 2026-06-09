@@ -632,3 +632,92 @@ async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> No
             < steps.index("integrate-tests")
             < steps.index("integration-review")
             < steps.index("summarizer"))
+
+
+@pytest.mark.anyio
+async def test_merge_phase_runs_merge_to_base_step(tmp_path: Path) -> None:
+    change = _seed_default_workflow(tmp_path)
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic",
+        env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.COMPLETED
+    types_seen = [e.get("type") for e in change.event_log().read()]
+    steps = [e["payload"].get("step") for e in change.event_log().read()
+             if e.get("type") == "step_started"]
+    assert "base-fresh-check" in steps
+    assert "merge-to-base" in steps
+    assert "change_merged" in types_seen   # finalize still emits this
+
+
+@pytest.mark.anyio
+async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch) -> None:
+    """A blocking outcome at merge-to-base must preserve the pre-B3 surfacing
+    (review finding #2): status=='merge_blocked' AND a merge_blocked event, so the
+    CLI remediation path stays alive — NOT a generic 'paused'."""
+    change = _seed_default_workflow(tmp_path)
+    from imp.engine import worktree as _wt
+    from imp.engine.worktree import MergeResult
+    monkeypatch.setattr(_wt, "merge_to_base",
+                        lambda *a, **k: MergeResult("CONFLICT", detail="boom"))
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic",
+        env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.PAUSED
+    final = State.load(change.state_dir)
+    assert final.status == "merge_blocked"
+    types_seen = [e.get("type") for e in change.event_log().read()]
+    assert "merge_blocked" in types_seen
+
+
+@pytest.mark.anyio
+async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -> None:
+    """The re-integration EDGE (base advanced during review -> goto integrate-merge
+    -> re-integrate -> merge), driven deterministically. We do NOT try to provoke
+    the under-lock STALE status in the mocked harness — that is covered by Task 8's
+    worktree unit test, and forcing it here risks a max_loops-bounded re-STALE loop
+    because the shimmed integrate-merge.sh never refreshes integrated_base_sha.
+    Instead we make base-fresh-check report 'advanced' exactly once, then
+    'unchanged' — exercising `{else: goto integrate-merge}` and convergence."""
+    change = _seed_default_workflow(tmp_path)
+    # Overwrite the (shimmed) base-fresh-check with one that exits 10 on its first
+    # call and 0 thereafter, via a call-count file under the gitignored .imp/.
+    bfc = (change.project_root / "imp" / "workflows" / "default"
+           / "scripts" / "base-fresh-check.sh")
+    bfc.write_text(
+        "#!/usr/bin/env bash\n"
+        'f="${IMP_PROJECT_ROOT}/.imp/change/_bfc_calls"\n'
+        'n=$(( $(cat "$f" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$f"\n'
+        '[ "$n" -eq 1 ] && exit 10 || exit 0\n')
+    bfc.chmod(0o755)
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic",
+        env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.COMPLETED
+    started = [e["payload"].get("step") for e in change.event_log().read()
+               if e.get("type") == "step_started"]
+    types_seen = [e.get("type") for e in change.event_log().read()]
+    # integrate-merge ran twice: the initial integration + the re-integration the
+    # base-advance triggered. The run still converged to a merge.
+    assert started.count("integrate-merge") >= 2
+    assert "change_merged" in types_seen

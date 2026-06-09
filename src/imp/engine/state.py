@@ -56,6 +56,7 @@ class State:
     resume_pending: str | None = None
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None
+    merge_commit: str | None = None
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
@@ -111,6 +112,7 @@ class State:
                  for s, pm in self.resolved_steps.items()}
                 if self.resolved_steps is not None else None
             ),
+            "merge_commit": self.merge_commit,
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:
