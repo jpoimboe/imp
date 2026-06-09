@@ -131,7 +131,7 @@ def test_gate_timeout_kills_group_no_orphan() -> None:
     bwrap pid, causing a 30s hang instead of a quick TimeoutExpired.
     """
     from imp.engine.gates import run_script
-    from imp.engine.types import SourceLoc, Step
+    from imp.engine.types import Pause, SourceLoc, Step
 
     worktree = _sandbox_worktree()
     try:
@@ -142,7 +142,7 @@ def test_gate_timeout_kills_group_no_orphan() -> None:
             kind="script",
             rules=(),
             options=(),
-            on_max_retries=None,
+            on_max_retries=Pause(),
             max_loops=1,
             source=SourceLoc(file=Path(__file__), line=1),
             command="sleep 30",
