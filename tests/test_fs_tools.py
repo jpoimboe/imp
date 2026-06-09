@@ -17,7 +17,7 @@ from imp.engine.types import FsRule, SourceLoc
 def _allow_all(*ops: str) -> tuple[FsRule, ...]:
     return (FsRule(
         operations=tuple(ops),  # type: ignore[arg-type]
-        paths=("/project/**",),
+        paths=("**",),
         mode="allow",
         source=SourceLoc(file=Path("t.yaml"), line=1),
     ),)
@@ -44,22 +44,15 @@ def _read_file(ctx: ToolContext, **args: object) -> str:
 
 def test_read_file_returns_contents(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("hello")
-    out = _read_file(_ctx(tmp_path, "read"), path="/project/a.txt")
+    out = _read_file(_ctx(tmp_path, "read"), path="a.txt")
     assert out == "hello"
-
-
-def test_read_file_scratch_returns_dict_value(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path, "read")
-    ctx.scratch["/scratch/x"] = "from-memory"
-    out = _read_file(ctx, path="/scratch/x")
-    assert out == "from-memory"
 
 
 def test_read_file_truncates_huge_file_at_output_cap(tmp_path: Path) -> None:
     from imp.agents.tools.limits import TOOL_OUTPUT_CAP_BYTES
     big = tmp_path / "big.bin"
     big.write_bytes(b"z" * (TOOL_OUTPUT_CAP_BYTES * 4))   # 200 KB
-    out = _read_file(_ctx(tmp_path, "read"), path="/project/big.bin")
+    out = _read_file(_ctx(tmp_path, "read"), path="big.bin")
     assert "[output truncated at 50 KB]" in out
     # Bounded to the 50 KB head cap + the marker — NOT the whole 200 KB.
     assert len(out) <= TOOL_OUTPUT_CAP_BYTES + 100
@@ -67,7 +60,7 @@ def test_read_file_truncates_huge_file_at_output_cap(tmp_path: Path) -> None:
 
 def test_read_file_small_unchanged(tmp_path: Path) -> None:
     (tmp_path / "s.txt").write_text("hello world")
-    out = _read_file(_ctx(tmp_path, "read"), path="/project/s.txt")
+    out = _read_file(_ctx(tmp_path, "read"), path="s.txt")
     assert out == "hello world"
 
 
@@ -77,27 +70,33 @@ def test_read_file_aborts_on_pause(tmp_path: Path) -> None:
     big.write_bytes(b"z" * (TOOL_OUTPUT_CAP_BYTES * 4))
     ctx = _ctx(tmp_path, "read", coord=_Coord(should_pause=True))
     with pytest.raises(ToolAborted) as ei:
-        _read_file(ctx, path="/project/big.bin")
+        _read_file(ctx, path="big.bin")
     assert ei.value.reason == "interrupted"
 
 
 def test_write_file_creates_file_and_dirs(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, "write")
-    get_registry()["write_file"].invoke(ctx, {"path": "/project/deep/x.txt", "content": "ok"})
+    get_registry()["write_file"].invoke(ctx, {"path": "deep/x.txt", "content": "ok"})
     assert (tmp_path / "deep" / "x.txt").read_text() == "ok"
 
 
 def test_write_file_default_denied(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)  # no rules; default-deny on write
     with pytest.raises(PermissionDenied):
-        get_registry()["write_file"].invoke(ctx, {"path": "/project/x.txt", "content": "x"})
+        get_registry()["write_file"].invoke(ctx, {"path": "x.txt", "content": "x"})
+
+
+def test_write_file_rejects_escape(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, "write")
+    with pytest.raises(PermissionDenied):
+        get_registry()["write_file"].invoke(ctx, {"path": "../evil.txt", "content": "x"})
 
 
 def test_edit_file_unique_replacement(tmp_path: Path) -> None:
     (tmp_path / "x.py").write_text("def foo():\n    return 1\n")
     ctx = _ctx(tmp_path, "read", "write")
     get_registry()["edit_file"].invoke(ctx, {
-        "path": "/project/x.py", "old": "return 1", "new": "return 2",
+        "path": "x.py", "old": "return 1", "new": "return 2",
     })
     assert (tmp_path / "x.py").read_text() == "def foo():\n    return 2\n"
 
@@ -107,7 +106,7 @@ def test_edit_file_ambiguous_raises(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, "read", "write")
     with pytest.raises(ValueError, match="not unique"):
         get_registry()["edit_file"].invoke(ctx, {
-            "path": "/project/x.py", "old": "x = 1", "new": "y = 2",
+            "path": "x.py", "old": "x = 1", "new": "y = 2",
         })
 
 
@@ -116,5 +115,5 @@ def test_edit_file_missing_raises(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, "read", "write")
     with pytest.raises(ValueError, match="not found"):
         get_registry()["edit_file"].invoke(ctx, {
-            "path": "/project/x.py", "old": "missing", "new": "x",
+            "path": "x.py", "old": "missing", "new": "x",
         })

@@ -1,8 +1,10 @@
 """ToolContext (spec §6.6) — per-invocation state passed to every tool.
 
-Virtual path conventions:
-  /project/<rel>   → <project_root>/<rel>
-  /scratch/<rel>   → ToolContext.scratch dict (in-memory; lives for the step)
+Path model: files are addressed by paths RELATIVE to the worktree root. The
+shared `resolve_path` maps a relative path under `project_root` and enforces
+worktree containment (normalize-then-contain) for both read and write. There is
+no virtual `/project`/`/scratch` namespace and no in-memory scratch store; system
+paths are `bash`'s job, backstopped by the OS sandbox.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from imp.agents.permissions import check_permission
+from imp.agents.permissions import PermissionDenied, check_permission
 from imp.agents.tools.limits import PROCESS_KILL_GRACE_S
 from imp.engine.types import AgentDef, FsRule
 
@@ -24,7 +26,6 @@ class ToolContext:
     project_root: Path
     fs_permissions: tuple[FsRule, ...]
     events_path: Path
-    scratch: dict[str, str] = field(default_factory=dict)
     todos: list[dict[str, Any]] = field(default_factory=list)
     # Subagent dispatch fills these:
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
@@ -83,15 +84,25 @@ class ToolContext:
         self._subagent_counter += 1
         return self._subagent_counter
 
-    def resolve_path(self, virtual: str) -> Path | None:
-        """Returns a real Path or None for /scratch/* (caller uses self.scratch)."""
-        if virtual.startswith("/project/"):
-            return self.project_root / virtual[len("/project/"):]
-        if virtual.startswith("/scratch/") or virtual == "/scratch":
-            return None
-        raise ValueError(
-            f"virtual path must start with /project/ or /scratch/; got {virtual!r}"
-        )
+    def resolve_path(self, path: str) -> Path:
+        """Map a worktree-RELATIVE path under project_root, enforcing containment.
+
+        normalize-then-contain (spec A.3.1): `(project_root / path).resolve()` must
+        be under `project_root.resolve()`, else PermissionDenied. This is NOT
+        `..`-string detection — a permission glob can *match* a traversal string
+        (permissions.py:_glob_to_regex), so this realpath check is the load-bearing
+        escape guard and EVERY FS/nav tool must funnel through it.
+
+        Caveat: a symlink INSIDE the worktree pointing OUTSIDE it is followed by the
+        OS — FS-tool symlink escapes are caught only by the sandbox (spec §9).
+        """
+        root = self.project_root.resolve()
+        resolved = (self.project_root / path).resolve()
+        if resolved != root and not resolved.is_relative_to(root):
+            raise PermissionDenied(
+                f"path {path!r} escapes the worktree root {root}"
+            )
+        return resolved
 
     def check_fs_permission(self, op: Literal["read", "write"], virtual: str) -> None:
         check_permission(self.fs_permissions, op, virtual)
