@@ -89,7 +89,7 @@ def test_grep_bounds_a_single_giant_line(tmp_path: Path) -> None:
     # *read* ceiling itself is unit-tested separately in test_tool_limits.py.
     big = tmp_path / "huge.log"
     big.write_bytes(b"NEEDLE" + b"x" * 4_000_000)  # one line, 4 MB, no newline
-    out = _grep(_ctx(tmp_path), pattern="NEEDLE")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content")
     # The matched line is byte-truncated, not a 4 MB result.
     assert "NEEDLE" in out
     assert len(out) < 10_000
@@ -99,7 +99,7 @@ def test_grep_caps_total_output(tmp_path: Path) -> None:
     # Many matching lines -> output stops at the head cap with the marker.
     f = tmp_path / "many.txt"
     f.write_text("\n".join(f"match line {i}" for i in range(200_000)) + "\n")
-    out = _grep(_ctx(tmp_path), pattern="match")
+    out = _grep(_ctx(tmp_path), pattern="match", output_mode="content")
     assert "[output truncated at 50 KB]" in out
     assert len(out) < 60_000
 
@@ -116,7 +116,7 @@ def test_grep_aborts_promptly_on_pause(tmp_path: Path) -> None:
 
 def test_grep_still_finds_normal_matches(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("def foo():\n    pass\n")
-    out = _grep(_ctx(tmp_path), pattern=r"def foo")
+    out = _grep(_ctx(tmp_path), pattern=r"def foo", output_mode="content")
     assert "a.py:1:def foo():" in out
 
 
@@ -186,5 +186,5 @@ def test_grep_reports_relative_paths(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("needle here\n")
     ctx = _ctx(tmp_path)
     out = anyio.run(get_registry()["grep"].async_invoke, ctx,
-                    {"pattern": "needle", "path": "."})
+                    {"pattern": "needle", "path": ".", "output_mode": "content"})
     assert out.startswith("a.txt:")          # relative, no /project prefix

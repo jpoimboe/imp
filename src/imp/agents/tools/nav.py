@@ -12,6 +12,7 @@ import os
 import re
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Literal
 
 import anyio
 
@@ -78,6 +79,9 @@ async def glob(ctx: ToolContext, pattern: str) -> str:
     return "\n".join(out) if out else "(no matches)"
 
 
+_GREP_MODES = ("files_with_matches", "content", "count")
+
+
 @imp_tool(
     name="grep",
     description=(
@@ -86,7 +90,19 @@ async def glob(ctx: ToolContext, pattern: str) -> str:
         "output is capped at 50 KB."
     ),
 )
-async def grep(ctx: ToolContext, pattern: str, path: str = ".") -> str:
+async def grep(
+    ctx: ToolContext,
+    pattern: str,
+    path: str = ".",
+    *,
+    output_mode: Literal["files_with_matches", "content", "count"] = "files_with_matches",
+    case_insensitive: bool = False,
+) -> str:
+    # No validation layer sits between the JSON schema and this call — every
+    # constraint is enforced here in the body.
+    if output_mode not in _GREP_MODES:
+        raise ValueError(f"invalid output_mode {output_mode!r}; "
+                         f"valid modes: files_with_matches, content, count")
     ctx.check_fs_permission("read", path)
     target = ctx.resolve_path(path)
     # A typo'd/stale path — or a fifo/socket/device — must not read as
@@ -94,14 +110,26 @@ async def grep(ctx: ToolContext, pattern: str, path: str = ".") -> str:
     if not (target.is_file() or target.is_dir()):
         raise FileNotFoundError(f"no such path: {path}")
     root = ctx.project_root.resolve()
-    rgx = re.compile(pattern)
+    rgx = re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
 
     out: list[str] = []
     out_bytes = 0
-    result_rows = 0
+    capped = False      # the 50 KB backstop fired: stop scanning, marker appended
+    result_rows = 0     # what the sentinel (and head_limit, Task 12) key on
+    notes: list[str] = []  # trailing-mode scan notes (files_with_matches/count)
+
+    def emit(row: str) -> None:
+        nonlocal out_bytes, capped
+        out.append(row)
+        out_bytes += len(row) + 1  # +1 = the join newline
+        if out_bytes >= TOOL_OUTPUT_CAP_BYTES:
+            capped = True  # crossing row stays emitted (matches old behavior)
+
     for f in _iter_files(target):
+        if capped:
+            break
         await tool_checkpoint(coordinator, deadline)
         try:
             text, read_truncated = await read_text_capped(
@@ -110,29 +138,49 @@ async def grep(ctx: ToolContext, pattern: str, path: str = ".") -> str:
             continue
         cap_truncated = file_is_cap_truncated(read_truncated, f)
         rel_str = f.relative_to(root).as_posix()
-        for i, line in enumerate(split_lines(text, cap_truncated=cap_truncated),
-                                 start=1):
-            if rgx.search(line):
-                entry = f"{rel_str}:{i}:{truncate_line(line)}"
-                out.append(entry)
+        lines = split_lines(text, cap_truncated=cap_truncated)
+
+        if output_mode == "files_with_matches":
+            # Stop at the FIRST match — a regex-time win only (the bounded
+            # read is already paid). A LISTED truncated file resolved itself;
+            # an UNLISTED one is a potential false negative — note it.
+            if any(rgx.search(line) for line in lines):
+                emit(rel_str)
                 result_rows += 1
-                out_bytes += len(entry) + 1
-                if out_bytes >= TOOL_OUTPUT_CAP_BYTES:
-                    out.append(OUTPUT_TRUNCATION_MARKER.strip())
-                    return "\n".join(out)
-        if cap_truncated:
-            # One note format, all modes: bracketed own-line (the old
-            # 'path: [scanned...]' rendering is migrated here).
-            note = f"[{rel_str}: scanned first 5 MB only]"
-            out.append(note)
-            out_bytes += len(note) + 1
-            if out_bytes >= TOOL_OUTPUT_CAP_BYTES:
-                out.append(OUTPUT_TRUNCATION_MARKER.strip())
-                return "\n".join(out)
+            elif cap_truncated:
+                notes.append(f"[{rel_str}: scanned first 5 MB only]")
+        elif output_mode == "count":
+            n = sum(1 for line in lines if rgx.search(line))
+            if n:  # non-zero rows only (ripgrep -c, not GNU grep's path:0 flood)
+                emit(f"{rel_str}:{n}")
+                result_rows += 1
+            if cap_truncated:  # the count is a lower bound — always note
+                notes.append(f"[{rel_str}: scanned first 5 MB only]")
+        else:  # content
+            for i, line in enumerate(lines, start=1):
+                if rgx.search(line):
+                    emit(f"{rel_str}:{i}:{truncate_line(line)}")
+                    result_rows += 1
+                    if capped:
+                        break
+            if cap_truncated and not capped:
+                # Inline (as today), own bracketed line in every mode.
+                emit(f"[{rel_str}: scanned first 5 MB only]")
+
     if result_rows == 0:
         # Sentinel keys on zero RESULT rows, not on empty output — a note
         # line must never suppress it (agents pattern-match on the sentinel).
         out.insert(0, "(no matches)")
+    if not capped:
+        for note in notes:  # trailing modes: result rows, then notes
+            if capped:
+                break
+            emit(note)
+    if capped:
+        # Appended AFTER accounting stops. Remaining notes (if any) were
+        # dropped — acceptable only because this marker itself discloses
+        # that output was physically cut.
+        out.append(OUTPUT_TRUNCATION_MARKER.strip())
     return "\n".join(out)
 
 

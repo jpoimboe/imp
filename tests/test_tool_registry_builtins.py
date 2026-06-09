@@ -30,3 +30,11 @@ def test_full_builtin_set_schema_builds_under_resolver() -> None:
         schema = reg[name].input_schema
         assert schema.get("type") == "object", name
         assert "properties" in schema, name
+
+
+def test_grep_schema_exports_output_mode_enum() -> None:
+    # The exported JSON schema is what steers the model — the Literal enum
+    # must survive into it (the Task-1 resolver makes this possible).
+    schema = get_registry()["grep"].input_schema
+    assert schema["properties"]["output_mode"]["enum"] == [
+        "files_with_matches", "content", "count"]

@@ -13,7 +13,7 @@ import pytest
 import imp.agents.tools.nav  # noqa: F401  triggers registration
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.limits import FILE_READ_CAP_BYTES
+from imp.agents.tools.limits import FILE_READ_CAP_BYTES, TOOL_OUTPUT_CAP_BYTES
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
@@ -128,3 +128,110 @@ def test_fifo_path_is_an_error_not_no_matches(tmp_path: Path) -> None:
     os.mkfifo(tmp_path / "pipe")
     with pytest.raises(FileNotFoundError, match="no such path: pipe"):
         _grep(_ctx(tmp_path), pattern="x", path="pipe")
+
+
+# --- output modes ------------------------------------------------------------
+
+def test_default_mode_is_files_with_matches(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("hello\nhello\n")
+    (tmp_path / "b.py").write_text("nothing\n")
+    assert _grep(_ctx(tmp_path), pattern="hello") == "a.py"  # paths only, once
+
+
+def test_content_mode_rows(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("hay\nneedle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle", output_mode="content")
+    assert out == "a.py:2:needle"
+
+
+def test_count_mode_emits_only_nonzero_rows(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("x\nx\nx\n")
+    (tmp_path / "b.py").write_text("nothing\n")
+    out = _grep(_ctx(tmp_path), pattern="x", output_mode="count")
+    assert out == "a.py:3"  # no b.py:0 flood (ripgrep -c, not GNU grep)
+
+
+def test_count_mode_all_zero_is_no_matches_sentinel(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("nothing\n")
+    out = _grep(_ctx(tmp_path), pattern="absent", output_mode="count")
+    assert out == "(no matches)"
+
+
+def test_content_mode_zero_matches_sentinel(tmp_path: Path) -> None:
+    # The sentinel is pinned in ALL THREE modes (per-mode drift is a bug);
+    # files_with_matches and count are pinned elsewhere — this is content.
+    (tmp_path / "a.py").write_text("nothing\n")
+    out = _grep(_ctx(tmp_path), pattern="absent", output_mode="content")
+    assert out == "(no matches)"
+
+
+def test_case_insensitive_regex(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("HELLO World\n")
+    assert _grep(_ctx(tmp_path), pattern="hello") == "(no matches)"
+    assert _grep(_ctx(tmp_path), pattern="hello", case_insensitive=True) == "a.py"
+
+
+def test_invalid_output_mode_rejected(tmp_path: Path) -> None:
+    # The schema enum is only a suggestion to the model — the body rejects.
+    (tmp_path / "a.py").write_text("x\n")
+    with pytest.raises(ValueError, match="files_with_matches, content, count"):
+        _grep(_ctx(tmp_path), pattern="x", output_mode="paths")
+
+
+def test_files_with_matches_exact_walk_order(tmp_path: Path) -> None:
+    (tmp_path / "z.txt").write_text("needle\n")
+    (tmp_path / "b").mkdir()
+    (tmp_path / "b" / "c.txt").write_text("needle\n")
+    # Topdown walk: root files first — NOT sorted(all_paths).
+    assert _grep(_ctx(tmp_path), pattern="needle") == "z.txt\nb/c.txt"
+
+
+# --- scan notes per mode -----------------------------------------------------
+
+def _write_cap_cut_with_needle(tmp_path: Path, name: str) -> Path:
+    """Cap-truncated file whose scanned window CONTAINS a match."""
+    p = tmp_path / name
+    with p.open("wb") as f:
+        f.write(b"NEEDLE\n")
+        f.write(b"x\n" * 2_600_000)  # 5,200,000 bytes -> well past the cap
+    assert p.stat().st_size > FILE_READ_CAP_BYTES
+    return p
+
+
+def test_fwm_matched_truncated_file_gets_no_note(tmp_path: Path) -> None:
+    # A LISTED file resolved itself (stopped at its first match) — its note
+    # would be vacuous. An UNLISTED truncated file is a potential false
+    # negative — silence would hide it.
+    _write_cap_cut_with_needle(tmp_path, "matched.txt")
+    _write_cap_cut(tmp_path, "unmatched.txt")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE")
+    assert out == "matched.txt\n[unmatched.txt: scanned first 5 MB only]"
+
+
+def test_count_mode_truncated_file_always_noted(tmp_path: Path) -> None:
+    # In count mode the count is a lower bound — note every truncated file,
+    # matched or not. Notes trail the result rows.
+    _write_cap_cut_with_needle(tmp_path, "matched.txt")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="count")
+    assert out == "matched.txt:1\n[matched.txt: scanned first 5 MB only]"
+
+
+def test_byte_cap_during_trailing_notes_drops_remainder_with_marker(
+        tmp_path: Path) -> None:
+    # Notes count toward the 50 KB budget; when the byte cap fires DURING
+    # trailing-note emission the remaining notes are dropped — acceptable only
+    # because the marker then discloses the physical cut. Self-tuning fixture:
+    # size the result rows to sit just under the cap so the FIRST note crosses
+    # it and the second is dropped.
+    _write_cap_cut(tmp_path, "a_trunc1.txt")  # sorts first -> note buffered first
+    _write_cap_cut(tmp_path, "a_trunc2.txt")
+    note_len = len("[a_trunc1.txt: scanned first 5 MB only]") + 1
+    row_len = len("m0000.txt") + 1
+    n = (TOOL_OUTPUT_CAP_BYTES - note_len) // row_len + 1
+    for i in range(n):  # rows total < cap; rows + first note >= cap
+        (tmp_path / f"m{i:04d}.txt").write_text("needle\n")
+    out = _grep(_ctx(tmp_path), pattern="needle")
+    lines = out.split("\n")
+    assert lines[-1] == "... [output truncated at 50 KB] ..."
+    assert "[a_trunc1.txt: scanned first 5 MB only]" in out
+    assert "a_trunc2.txt" not in out  # its note was dropped under the cap
