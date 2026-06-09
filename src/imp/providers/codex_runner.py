@@ -697,6 +697,27 @@ class CodexAgentRunner:
                                 content=(TextBlock(text=str(nxt)),)))
             next_prompt = str(nxt)
 
+            # Turn boundary: this is the only point where THIS runner sets up
+            # codex's next turn prompt (the codex thread owns the in-turn tool
+            # loop). Codex has no message-list transcript and re-prompts with a
+            # STRING, so the shared agent_run.deliver_interject helper does not
+            # fit — implement the equivalent inline: drain a queued human
+            # interject, emit user_interjected + a user_message, and fold the
+            # text into next_prompt so codex actually receives it. Reached only
+            # after the turn completed (turn.completed), so no subagent is
+            # mid-dispatch — S4 holds.
+            coordinator = invocation.coordinator
+            if coordinator is not None:
+                interject_text = coordinator.drain_interject()
+                if interject_text is not None:
+                    elog.append_user_message(
+                        agent_id=aid,
+                        message=Message(role="user",
+                                        content=(TextBlock(text=interject_text),)))
+                    elog.append(agent_id=aid, type="user_interjected",
+                                payload={"text": interject_text})
+                    next_prompt = f"{next_prompt}\n\n{interject_text}"
+
     def _build_thread_options(self) -> Any:
         """ThreadOptions with the design's exact production flags. Lives in its
         own method so the test seam can replace it without touching

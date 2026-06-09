@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -304,4 +305,82 @@ async def test_claude_code_delivers_interject_at_requery_boundary(
     # The re-query (queries[1]) folded the interject text into the next prompt.
     requery = captured["client"].queries[1]
     assert "please also check the tests" in requery
+    assert coord.drain_interject() is None
+
+
+@pytest.mark.anyio
+async def test_codex_delivers_interject_at_turn_boundary(tmp_path: Path) -> None:
+    import subprocess
+
+    from imp.agents.runner import ChangeContext as _CC
+    from imp.engine.types import OutputField as _OF
+    from imp.engine.types import OutputSchema as _OS
+    from imp.providers.codex_runner import CodexAgentRunner
+    from tests.codex_fakes import (
+        FakeCodex,
+        agent_message,
+        mcp_call,
+        thread_started,
+        turn_completed,
+    )
+
+    # Seed a git repo + fake auth (codex run() preflight needs these).
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "t@t.t"],
+                   check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "T"],
+                   check=True)
+    (tmp_path / ".gitkeep").write_text("")
+    subprocess.run(["git", "-C", str(tmp_path), "add", ".gitkeep"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "i"], check=True)
+    auth = tmp_path / "auth.json"
+    auth.write_text('{"auth_mode": "chatgpt", "tokens": {}}')
+    (tmp_path / "tx").mkdir(exist_ok=True)
+
+    # Turn 1 ends without complete_step → nudge re-query (codex's only turn
+    # boundary). Turn 2 completes.
+    no_cs = [agent_message("incomplete"), turn_completed(output_tokens=1)]
+    done = [agent_message("done"),
+            mcp_call(name="complete_step", args={"answer": "42"},
+                     result="step complete", item_id="cs-1"),
+            turn_completed(output_tokens=1)]
+    scripted = [[thread_started("t"), *no_cs], list(done)]
+
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = auth
+
+    adef = AgentDef(
+        name="t", description="", tools=frozenset({"complete_step"}), subagents=(),
+        output_schema=_OS(
+            fields=(_OF(name="answer", type="string", required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1)),
+        prompt_template_source="", source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1))
+    log = InMemoryEventLog()
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("please also check the tests")
+    inv = AgentInvocation(
+        agent_def=adef, provider_name="codex", model_name="gpt-5.5",
+        system_prompt="sp", initial_messages=(),
+        change_context=_CC(slug="s", title="t", project_root=tmp_path,
+                           workflow_dir=tmp_path, id="c1"),
+        transcript_dir=tmp_path / "tx",
+        fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),
+                               mode="allow",
+                               source=SourceLoc(file=Path("w.yaml"), line=1)),),
+        events_path=tmp_path / "events.jsonl", agent_id="step:t",
+        event_log=log, coordinator=coord,
+        continuation_fn=lambda _last: "call complete_step now")
+
+    events = [ev async for ev in runner.run(inv)]
+
+    assert "agent_output" in [e["type"] for e in events], events
+    interjected = [e for e in log.read() if e["type"] == "user_interjected"]
+    assert len(interjected) == 1
+    assert interjected[0]["payload"]["text"] == "please also check the tests"
+    # The interject folded into turn 2's prompt (run_calls[1]).
+    second_prompt = fake.thread.run_calls[1][0]
+    assert "please also check the tests" in second_prompt
     assert coord.drain_interject() is None
