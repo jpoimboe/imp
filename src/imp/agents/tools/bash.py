@@ -14,7 +14,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import signal
 from dataclasses import dataclass
 from subprocess import PIPE
@@ -30,21 +29,6 @@ from imp.agents.tools.limits import (
     ToolAborted,
 )
 from imp.engine.env import engine_env, overlay_engine_env
-
-# Rewrite a LEADING `cd /project` (optionally `/subpath`, optionally single- or
-# double-quoted) to the real project root. `/project` is a virtual FS-tool
-# namespace; in bash the cwd already IS the root, so the reflexive `cd /project …`
-# would fail. Word-boundary match: `/project` followed by `/`, end, or a non-word
-# char — never `/projectfoo` or `/project_x`, and never a `/project` substring
-# later in the command. Group 1 includes the optional opening quote so the
-# substitution preserves it; the closing quote is never in the match (it lies
-# past `/project`), so it passes through untouched. Inside a regex char class,
-# `\'` is an escaped quote = literal `'`, so the class matches `"` or `'`.
-_LEADING_CD_PROJECT = re.compile(r'^(\s*cd\s+["\']?)/project(?![A-Za-z0-9_])')
-
-
-def _rewrite_leading_cd_project(command: str, project_root: str) -> str:
-    return _LEADING_CD_PROJECT.sub(lambda m: m.group(1) + project_root, command, count=1)
 
 
 @dataclass
@@ -68,7 +52,6 @@ class _Counter:
     ),
 )
 async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
-    command = _rewrite_leading_cd_project(command, str(ctx.project_root))
     cwd_path = cwd or str(ctx.project_root)
     env = overlay_engine_env(
         os.environ,

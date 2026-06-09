@@ -10,7 +10,6 @@ import pytest
 import imp.agents.tools.bash  # noqa: F401
 from imp.agents.runner import ChangeContext
 from imp.agents.tools import get_registry
-from imp.agents.tools.bash import _rewrite_leading_cd_project
 from imp.agents.tools.context import ToolContext
 
 
@@ -200,32 +199,9 @@ def test_bash_normal_output_uncapped(tmp_path: Path) -> None:
     assert out["returncode"] == 0
 
 
-@pytest.mark.parametrize("cmd,expected", [
-    ("cd /project && pwd",        "cd {root} && pwd"),
-    ("cd /project/src && pwd",    "cd {root}/src && pwd"),
-    ('cd "/project" && pwd',      'cd "{root}" && pwd'),
-    ("cd '/project' && pwd",      "cd '{root}' && pwd"),
-    ("cd /project; pwd",          "cd {root}; pwd"),
-    ("  cd /project && pwd",      "  cd {root} && pwd"),
-    # never rewritten:
-    ("cd /projectfoo && pwd",     "cd /projectfoo && pwd"),
-    ("cd /project_x && pwd",      "cd /project_x && pwd"),
-    ("echo /project/x",           "echo /project/x"),
-    ("pytest && cd /project",     "pytest && cd /project"),  # not leading
-])
-def test_rewrite_leading_cd_project(cmd: str, expected: str) -> None:
-    root = "/real/root"
-    assert _rewrite_leading_cd_project(cmd, root) == expected.format(root=root)
-
-
-def test_bash_cd_project_runs_in_root(tmp_path: Path) -> None:
-    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "cd /project && pwd"}))
+def test_bash_relative_cd_works(tmp_path: Path) -> None:
+    sub = tmp_path / "src"
+    sub.mkdir()
+    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "cd src && pwd"}))
     assert out["returncode"] == 0
-    assert str(tmp_path) in out["stdout"]
-
-
-def test_bash_cd_project_subdir(tmp_path: Path) -> None:
-    (tmp_path / "sub").mkdir()
-    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "cd /project/sub && pwd"}))
-    assert out["returncode"] == 0
-    assert str(tmp_path / "sub") in out["stdout"]
+    assert str(sub) in out["stdout"]
