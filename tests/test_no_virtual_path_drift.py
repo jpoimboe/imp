@@ -9,14 +9,15 @@ from pathlib import Path
 from imp.assets import default_workflow_dir
 
 # Match a ROOT-level virtual path `/project` or `/scratch`:
-#   - trailing edge: word-boundary (not followed by an alnum/underscore) — so a
-#     bare `/project` at the end of a sentence is caught, mirroring bash.py's
-#     _LEADING_CD_PROJECT logic; a plain substring list would miss it.
+#   - trailing edge: word-boundary (not followed by an alnum/underscore/hyphen) —
+#     so a bare `/project` at the end of a sentence is caught, while an unrelated
+#     path like `/project-backup/` is NOT (the hyphen exclusion prevents that
+#     false positive; a plain substring list would miss both distinctions).
 #   - leading edge: NOT preceded by `~` or a word char — so the legitimate
 #     home-relative example `~/project/...` in skills/systematic-debugging.md
 #     (an unrelated string the spec says to leave) does NOT false-positive, while
 #     `"/project`, `` `/project ``, ` /project`, and start-of-line `/project` do.
-_FORBIDDEN = re.compile(r"(?<![~\w])/(?:project|scratch)(?![A-Za-z0-9_])")
+_FORBIDDEN = re.compile(r"(?<![~\w])/(?:project|scratch)(?![A-Za-z0-9_-])")
 
 
 def test_no_virtual_paths_in_default_workflow_assets():
