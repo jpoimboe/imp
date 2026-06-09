@@ -684,6 +684,36 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
 
 
 @pytest.mark.anyio
+async def test_autonomous_mode_integrates_reviews_and_merges_without_human(tmp_path: Path) -> None:
+    change = _seed_default_workflow(tmp_path)
+    # Set final_review=false by DIRECT State mutation — the sibling idiom (see
+    # test_final_review_wait_for_user_solicit_then_merge). There is NO
+    # var-override config mechanism; `_rewrite_config` only does provider
+    # string-replacement in .imp/config.yaml.
+    st = State.load(change.state_dir)
+    st.vars["final_review"] = False
+    st.save(change.state_dir)
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic",
+        env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.COMPLETED
+    steps = [e["payload"].get("step") for e in change.event_log().read()
+             if e.get("type") == "step_started"]
+    # Integration + its review ran; final-review (human) did NOT.
+    assert "integrator" in steps and "integration-review" in steps
+    assert "final-review" not in steps
+    types_seen = [e.get("type") for e in change.event_log().read()]
+    assert "change_merged" in types_seen
+
+
+@pytest.mark.anyio
 async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -> None:
     """The re-integration EDGE (base advanced during review -> goto integrate-merge
     -> re-integrate -> merge), driven deterministically. We do NOT try to provoke
