@@ -13,7 +13,14 @@ interrupt grace (spec B.9); reaping is via the process group.
 
 from __future__ import annotations
 
+import os
+import platform
+import shutil
+import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,3 +86,160 @@ def build_sandbox_argv(command: str, *, cwd: str, policy: SandboxPolicy) -> list
     # 16. the command
     argv += ["sh", "-c", command]
     return argv
+
+
+# Code-default secret denylist (spec B.3). Paths are home-relative; resolve_policy
+# joins them onto the home dir and keeps only those that exist. /run/user/$UID is
+# added separately (it masks live agent sockets, H2). secret_files are masked with
+# --ro-bind /dev/null; everything else is a directory --tmpfs.
+_DEFAULT_SECRET_DIRS = (
+    ".ssh", ".aws", ".gnupg", ".kube", ".config/gcloud", ".config/gh",
+    ".config/containers", ".local/share/keyrings",
+)
+_DEFAULT_SECRET_FILES = (
+    ".docker/config.json", ".config/containers/auth.json", ".netrc",
+    ".git-credentials", ".npmrc", ".pypirc",
+)
+# Code-default writable toolchain caches (spec B.3a).
+_DEFAULT_CACHES = (
+    ".cache", ".cargo", ".rustup", ".npm", ".local/share", ".local/state",
+    ".m2", ".gradle", "go",
+)
+# Generic env names passed through verbatim from the ambient environment.
+_GENERIC_ENV = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "TERM", "TZ")
+
+
+class SandboxUnavailable(Exception):
+    """bwrap is required (sandbox.enabled, allow_unsandboxed=False) but absent."""
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxConfig:
+    enabled: bool = True
+    allow_unsandboxed: bool = False
+    network: bool = True
+    secret_paths: tuple[str, ...] = ()        # EXTENDS the code default dirs+files
+    writable_caches: tuple[str, ...] = ()     # OVERRIDES/extends the code default caches
+    extra_readable: tuple[str, ...] = ()
+    extra_writable: tuple[str, ...] = ()
+    extra_env: tuple[str, ...] = ()
+    # Injected for testability; default to the live host values.
+    home: Path | None = None
+    uid: int | None = None
+
+
+@lru_cache(maxsize=1)
+def sandbox_available() -> bool:
+    """Linux + bwrap on PATH + a one-shot userns probe succeeds. Cached."""
+    if platform.system() != "Linux" or shutil.which("bwrap") is None:
+        return False
+    try:
+        r = subprocess.run(
+            ["bwrap", "--unshare-user", "--ro-bind", "/", "/", "true"],
+            capture_output=True, timeout=10,
+        )
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _existing(paths: list[str]) -> tuple[str, ...]:
+    return tuple(p for p in paths if Path(p).exists())
+
+
+def resolve_policy(
+    *, worktree: Path, control_root: Path, change_id: str, cfg: SandboxConfig,
+    engine_env_result: Mapping[str, str], environ: Mapping[str, str],
+    available: bool,
+) -> SandboxPolicy:
+    """Stat once, bake a frozen SandboxPolicy. The ONE impure step (spec B.1).
+
+    Three-way posture (spec B.7): enabled+available → active; enabled+unavailable+
+    allow_unsandboxed → bare (note='unsandboxed_by_config'); enabled+unavailable+
+    !allow → raise SandboxUnavailable; !enabled → bare (note='sandbox_disabled').
+    """
+    if not cfg.enabled:
+        return _inactive(note="sandbox_disabled")
+    if not available:
+        if cfg.allow_unsandboxed:
+            return _inactive(note="unsandboxed_by_config")
+        raise SandboxUnavailable(
+            "bwrap unavailable; install bubblewrap (e.g. `dnf install bubblewrap` "
+            "/ `apt install bubblewrap`) or set sandbox.allow_unsandboxed in your "
+            "user/local config"
+        )
+
+    home = cfg.home or Path.home()
+    uid = cfg.uid if cfg.uid is not None else os.getuid()
+
+    git = control_root / ".git"
+    remask = [str(git / "hooks"), str(git / "config")]
+    # Every existing worktrees/*/config.worktree — incl. siblings (M1-r5).
+    wt_dir = git / "worktrees"
+    if wt_dir.is_dir():
+        remask += [str(p / "config.worktree") for p in sorted(wt_dir.iterdir())
+                   if (p / "config.worktree").exists()]
+
+    cache_names = cfg.writable_caches or _DEFAULT_CACHES
+    caches = _existing([str(home / c) for c in cache_names])
+
+    # Secret dirs/files: code defaults + config secret_paths (each classified
+    # dir-vs-file by an actual stat — p.is_dir() / p.exists()); + /run/user/$UID.
+    secret_dirs = list(_existing([str(home / d) for d in _DEFAULT_SECRET_DIRS]))
+    secret_files = list(_existing([str(home / f) for f in _DEFAULT_SECRET_FILES]))
+    for extra in cfg.secret_paths:
+        p = (home / extra) if not extra.startswith("/") else Path(extra)
+        if p.is_dir():
+            secret_dirs.append(str(p))
+        elif p.exists():
+            secret_files.append(str(p))
+    secret_dirs.append(f"/run/user/{uid}")   # H2 — agent sockets; mask even if abs
+
+    tmp_host = control_root / ".imp" / "tmp" / change_id
+
+    return SandboxPolicy(
+        active=True,
+        worktree=str(worktree),
+        git_common_dir=str(git),
+        git_ro_remask=tuple(remask),
+        writable_caches=caches,
+        extra_readable=tuple(cfg.extra_readable),
+        extra_writable=tuple(cfg.extra_writable),
+        tmp_host_dir=str(tmp_host),
+        secret_dirs=tuple(secret_dirs),
+        secret_files=tuple(secret_files),
+        setenv=_build_setenv(engine_env_result, environ, cfg.extra_env),
+        network=cfg.network,
+        note="",
+    )
+
+
+def _inactive(*, note: str) -> SandboxPolicy:
+    return SandboxPolicy(
+        active=False, worktree="", git_common_dir="", git_ro_remask=(),
+        writable_caches=(), extra_readable=(), extra_writable=(), tmp_host_dir="",
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note=note,
+    )
+
+
+def _build_setenv(
+    engine_env_result: Mapping[str, str], environ: Mapping[str, str],
+    extra_env: tuple[str, ...],
+) -> tuple[tuple[str, str], ...]:
+    """Env allowlist (spec B.4). IMP_* come from engine_env_result (authoritative,
+    M2-r5); generic + LC_* + extra_env pass through from `environ`; TMPDIR=/tmp."""
+    out: list[tuple[str, str]] = []
+    for k in _GENERIC_ENV:
+        if k in environ:
+            out.append((k, environ[k]))
+    for k, v in environ.items():
+        if k.startswith("LC_"):
+            out.append((k, v))
+    for k in extra_env:
+        if k in environ:
+            out.append((k, environ[k]))
+    for k, v in engine_env_result.items():
+        if k.startswith("IMP_"):
+            out.append((k, v))
+    out.append(("TMPDIR", "/tmp"))
+    return tuple(out)
