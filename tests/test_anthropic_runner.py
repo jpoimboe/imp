@@ -335,7 +335,7 @@ async def test_ceiling_trip_mid_batch_preserves_transcript_invariant(tmp_path: P
     # Transcript invariant: classify_resume should NOT report DANGLING_TOOL_USE.
     transcript_path = inv_lo.transcript_dir / "transcript.jsonl"
     msgs = Transcript(transcript_path).load()
-    state = classify_resume(msgs, interactive=False)
+    state = classify_resume(msgs)
     assert state is not ResumeState.DANGLING_TOOL_USE
 
 
@@ -447,14 +447,21 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path, provider_regi
 
 
 @pytest.mark.anyio
-async def test_interactive_resume_from_prompt_user_prompts_then_continues(
+async def test_awaiting_user_resume_fills_tool_result_then_continues(
     tmp_path: Path,
 ) -> None:
-    """Interactive resume: transcript ends with text-only assistant → runner
-    must prompt user, append the response, then drive the next LLM call."""
+    """AWAITING_USER resume: a paused transcript ends with an assistant message
+    whose last tool_use is `wait_for_user`. On resume the runner solicits the
+    human, appends a SUCCESS-shaped tool_result carrying the real reply against
+    the dangling id (NOT a TextBlock), then drives the next LLM call."""
     from dataclasses import replace
 
-    from imp.agents.runner import Message, TextBlock
+    from imp.agents.runner import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
     from imp.agents.transcript import Transcript
     from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
 
@@ -462,15 +469,19 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     inv = _inv(tmp_path, interactive=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pre-populate transcript: user said "go", assistant replied text-only.
+    # Pre-populate transcript: user said "go", assistant paused on wait_for_user.
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(
         role="assistant",
-        content=(TextBlock(text="what about X?"),),
+        content=(
+            TextBlock(text="need a decision"),
+            ToolUseBlock(id="wfu1", name="wait_for_user",
+                         input={"prompt": "merge?"}),
+        ),
     ))
 
-    # After the resume prompt, the user types "do X"; the runner sends one LLM
+    # After the resume solicit, the user replies "do X"; the runner sends one LLM
     # call which completes the step.
     fake = FakeAsyncAnthropic([
         response(
@@ -487,20 +498,27 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     )
     runner._user_input_fn = lambda _prompt: next(user_inputs)
 
-    async for _ in runner.run(replace(inv, event_log=log)):
+    # balance_on_resume=True mirrors the executor re-entry into a paused step.
+    async for _ in runner.run(
+        replace(inv, event_log=log, balance_on_resume=True)
+    ):
         pass
 
     types = [e["type"] for e in log.read()]
-    # user_message before llm_response in the log
+    # awaiting_user_input re-surfaced, then the reply, before the next LLM call.
+    assert "awaiting_user_input" in types
     assert types.index("user_message") < types.index("llm_response")
 
-    # Transcript now has 4 messages: user("go") / assistant("what about X?")
-    # / user("do X") / assistant(complete_step). Original two preserved.
+    # Transcript now has 4 messages: user("go") / assistant(wait_for_user)
+    # / user(tool_result "do X") / assistant(complete_step). Original two kept.
     loaded = t.load()
     assert len(loaded) == 4
     assert loaded[2].role == "user"
-    assert isinstance(loaded[2].content[0], TextBlock)
-    assert loaded[2].content[0].text == "do X"
+    block = loaded[2].content[0]
+    assert isinstance(block, ToolResultBlock)
+    assert block.tool_use_id == "wfu1"
+    assert block.content == "do X"
+    assert block.is_error is False
 
 
 @pytest.mark.anyio

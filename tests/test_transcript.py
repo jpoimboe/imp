@@ -72,10 +72,10 @@ def test_inject_after_complete_step_yields_single_nonerror_user_turn(
     assert results[0].is_error is False
     assert texts[-1].text == "the test failed"
     # classify_resume now routes onto the live SEND_TO_LLM turn.
-    assert classify_resume(msgs, interactive=False) is ResumeState.SEND_TO_LLM
+    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
     # Persisted to disk and audit-logged once.
-    assert classify_resume(Transcript(tmp_path / "transcript.jsonl").load(),
-                           interactive=False) is ResumeState.SEND_TO_LLM
+    reloaded = Transcript(tmp_path / "transcript.jsonl").load()
+    assert classify_resume(reloaded) is ResumeState.SEND_TO_LLM
     assert [e["type"] for e in elog.read()] == ["user_message"]
 
 
@@ -95,7 +95,7 @@ def test_inject_after_genuine_interrupt_uses_error_result(tmp_path: Path) -> Non
     results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
     assert len(results) == 1 and results[0].tool_use_id == "b1"
     assert results[0].is_error is True          # genuine interrupt -> error-flavored
-    assert classify_resume(msgs, interactive=False) is ResumeState.SEND_TO_LLM
+    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
 
 
 def _completed(tmp_path: Path) -> tuple[list[Message], Transcript]:

@@ -343,12 +343,20 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
 
 
 @pytest.mark.anyio
-async def test_interactive_resume_from_prompt_user_prompts_then_continues(
+async def test_awaiting_user_resume_fills_tool_result_then_continues(
     tmp_path: Path,
 ) -> None:
+    """AWAITING_USER resume: a paused transcript ends on a `wait_for_user`
+    tool_use; the runner solicits the human and fills a SUCCESS-shaped
+    tool_result (not a TextBlock) before driving the next LLM call."""
     from dataclasses import replace
 
-    from imp.agents.runner import Message, TextBlock
+    from imp.agents.runner import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
     from imp.agents.transcript import Transcript
 
     (tmp_path / "art").mkdir()
@@ -359,7 +367,11 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(
         role="assistant",
-        content=(TextBlock(text="anything else to clarify?"),),
+        content=(
+            TextBlock(text="need a decision"),
+            ToolUseBlock(id="wfu1", name="wait_for_user",
+                         input={"prompt": "merge?"}),
+        ),
     ))
 
     fake = FakeResponsesClient([
@@ -377,16 +389,23 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     )
 
     events = []
-    async for ev in runner.run(replace(inv, event_log=log)):
+    async for ev in runner.run(
+        replace(inv, event_log=log, balance_on_resume=True)
+    ):
         events.append(ev)
 
-    # user_message before llm_response in the log
     types = [e["type"] for e in log.read()]
+    assert "awaiting_user_input" in types
     assert types.index("user_message") < types.index("llm_response")
     assert events[-1]["type"] == "agent_output"
     loaded = t.load()
     assert len(loaded) == 4
     assert loaded[2].role == "user"
+    block = loaded[2].content[0]
+    assert isinstance(block, ToolResultBlock)
+    assert block.tool_use_id == "wfu1"
+    assert block.content == "nothing, proceed"
+    assert block.is_error is False
 
 
 @pytest.mark.anyio

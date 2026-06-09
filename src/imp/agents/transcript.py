@@ -102,7 +102,10 @@ def repair_dangling_tool_use_on_resume(
     """
     if not messages or messages[-1].role != "assistant":
         return None
-    tool_uses = [b for b in messages[-1].content if isinstance(b, ToolUseBlock)]
+    tool_uses = [
+        b for b in messages[-1].content
+        if isinstance(b, ToolUseBlock) and b.name != "wait_for_user"
+    ]
     if not tool_uses:
         return None
     blocks = tuple(
@@ -140,7 +143,8 @@ def balance_success_on_resume(
     """
     last = messages[-1] if messages else None
     tool_uses = (
-        [b for b in last.content if isinstance(b, ToolUseBlock)]
+        [b for b in last.content
+         if isinstance(b, ToolUseBlock) and b.name != "wait_for_user"]
         if last is not None and last.role == "assistant" else []
     )
     result_blocks: list[ToolResultBlock] = []
@@ -161,6 +165,33 @@ def balance_success_on_resume(
     if wrapper_text:
         blocks.append(TextBlock(text=wrapper_text))
     injected = Message(role="user", content=tuple(blocks))
+    messages.append(injected)
+    transcript.append(injected)
+    elog.append_user_message(agent_id=agent_id, message=injected)
+    return injected
+
+
+def resolve_wait_for_user_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str, reply: str,
+) -> Message | None:
+    """Resolve a paused wait_for_user with the REAL human reply (C1).
+
+    The transcript ends with an assistant message whose last tool_use is
+    `wait_for_user`. Append a user message with a SUCCESS-shaped tool_result
+    (is_error=False) carrying `reply` against that id — the inverse of the
+    placeholder repair, which is deliberately skipped for wait_for_user. Returns
+    the injected message, or None if there is no dangling wait_for_user.
+    """
+    last = messages[-1] if messages else None
+    if last is None or last.role != "assistant":
+        return None
+    wfu = next((b for b in last.content
+                if isinstance(b, ToolUseBlock) and b.name == "wait_for_user"), None)
+    if wfu is None:
+        return None
+    block = ToolResultBlock(tool_use_id=wfu.id, content=reply, is_error=False)
+    injected = Message(role="user", content=(block,))
     messages.append(injected)
     transcript.append(injected)
     elog.append_user_message(agent_id=agent_id, message=injected)

@@ -46,6 +46,7 @@ from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
     repair_dangling_tool_use_on_resume,
+    resolve_wait_for_user_on_resume,
 )
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
@@ -479,7 +480,7 @@ class AnthropicAgentRunner:
                     for b in repair.content:
                         if isinstance(b, ToolResultBlock):
                             elog.append_tool_result(agent_id=aid, block=b)
-            state = classify_resume(messages, interactive=invocation.interactive)
+            state = classify_resume(messages)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
                     "category": "config",
@@ -501,26 +502,28 @@ class AnthropicAgentRunner:
                     "detail": {"last_agent_text": last_text[:500]},
                 }}
                 return
-            if state is ResumeState.PROMPT_USER:
+            if state is ResumeState.AWAITING_USER:
                 if ctx.user_input_fn is None:
                     yield {"type": "error", "payload": {
                         "category": "config",
                         "kind": "no_user_input_fn",
                         "message": (
-                            "PROMPT_USER resume requires user_input_fn; "
+                            "AWAITING_USER resume requires user_input_fn; "
                             "none installed by runner"
                         ),
                     }}
                     return
-                user_text = ctx.user_input_fn("")
-                if inspect.isawaitable(user_text):
-                    user_text = await user_text
-                user_msg = Message(
-                    role="user", content=(TextBlock(text=user_text),),
-                )
-                messages.append(user_msg)
-                transcript.append(user_msg)
-                elog.append_user_message(agent_id=aid, message=user_msg)
+                wfu = next((b for b in messages[-1].content
+                            if isinstance(b, ToolUseBlock)
+                            and b.name == "wait_for_user"), None)
+                prompt = (wfu.input.get("prompt") if wfu else "") or ""
+                elog.append(agent_id=aid, type="awaiting_user_input",
+                            payload={"prompt": prompt})
+                reply = ctx.user_input_fn("")
+                if inspect.isawaitable(reply):
+                    reply = await reply
+                resolve_wait_for_user_on_resume(
+                    messages, transcript, elog, aid, reply)
         else:
             messages = []
             for m in invocation.initial_messages:

@@ -12,30 +12,32 @@ def _write_events(p: Path, records: list[dict]) -> None:
     p.write_text("\n".join(json.dumps(r) for r in records) + "\n")
 
 
-def test_prompt_user_when_tail_is_llm_response_and_interactive(tmp_path: Path) -> None:
+def test_awaiting_user_when_awaiting_event_present(tmp_path: Path) -> None:
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         {"agent_id": "step:t", "type": "llm_response",
          "payload": {"raw": {"content": [{"type": "text", "text": "a question?"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "a question?"}},
     ])
-    state, last_text = derive_codex_resume_state(ev, "step:t", interactive=True)
-    assert state is ResumeState.PROMPT_USER
+    state, last_text = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.AWAITING_USER
     assert last_text == "a question?"
 
 
-def test_missing_complete_step_when_not_interactive(tmp_path: Path) -> None:
+def test_missing_complete_step_without_awaiting(tmp_path: Path) -> None:
     ev = tmp_path / "events.jsonl"
     _write_events(ev, [
         {"agent_id": "step:t", "type": "llm_response",
          "payload": {"raw": {"content": [{"type": "text", "text": "done?"}]}}},
     ])
-    state, _ = derive_codex_resume_state(ev, "step:t", interactive=False)
+    state, _ = derive_codex_resume_state(ev, "step:t")
     assert state is ResumeState.MISSING_COMPLETE_STEP
 
 
 def test_fresh_when_events_file_missing(tmp_path: Path) -> None:
     state, last_text = derive_codex_resume_state(
-        tmp_path / "nope.jsonl", "step:t", interactive=True
+        tmp_path / "nope.jsonl", "step:t"
     )
     assert state is ResumeState.FRESH
     assert last_text == ""
@@ -47,7 +49,7 @@ def test_fresh_when_no_records_for_agent(tmp_path: Path) -> None:
         {"agent_id": "step:other", "type": "llm_response",
          "payload": {"raw": {"content": [{"type": "text", "text": "irrelevant"}]}}},
     ])
-    state, last_text = derive_codex_resume_state(ev, "step:t", interactive=True)
+    state, last_text = derive_codex_resume_state(ev, "step:t")
     assert state is ResumeState.FRESH
     assert last_text == ""
 
@@ -65,5 +67,5 @@ def test_normal_resume_when_complete_step_present(tmp_path: Path) -> None:
         {"agent_id": "step:t", "type": "llm_response",
          "payload": {"raw": {"content": [{"type": "text", "text": "answer"}]}}},
     ])
-    state, _ = derive_codex_resume_state(ev, "step:t", interactive=True)
+    state, _ = derive_codex_resume_state(ev, "step:t")
     assert state is ResumeState.SEND_TO_LLM  # nothing to prompt; resume normally

@@ -6,7 +6,7 @@ parsed message list and cannot run agents.classify.classify_resume. But imp owns
 events.jsonl, which carries the same signal: a turn ended awaiting the user iff
 the agent emitted an llm_response but NO complete_step tool_call (presence-based,
 position-independent — see the Unit F/G coupling note). Mirrors classify_resume's
-PROMPT_USER/MISSING split. DANGLING_TOOL_USE is omitted: codex always emits paired
+AWAITING_USER/MISSING split. DANGLING_TOOL_USE is omitted: codex always emits paired
 tool_call/tool_result events, so a dangling tool_call cannot appear in events.jsonl.
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from imp.agents.classify import ResumeState
 
 
 def derive_codex_resume_state(
-    events_path: Path, agent_id: str, *, interactive: bool,
+    events_path: Path, agent_id: str,
 ) -> tuple[ResumeState, str]:
     """Return (state, last_agent_text). last_agent_text is the tail
     agent_message text (needed by the resume seam, since proc_state is empty on
@@ -57,10 +57,11 @@ def derive_codex_resume_state(
             last_llm = rec
     if has_complete_step or last_llm is None:
         return ResumeState.SEND_TO_LLM, ""
-
+    has_awaiting = any(
+        rec.get("type") == "awaiting_user_input" for rec in records)
     last_text = _text_of(last_llm)
-    if interactive:
-        return ResumeState.PROMPT_USER, last_text
+    if has_awaiting:
+        return ResumeState.AWAITING_USER, last_text
     return ResumeState.MISSING_COMPLETE_STEP, last_text
 
 

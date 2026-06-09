@@ -14,29 +14,29 @@ from imp.agents.runner import Message, ToolUseBlock
 class ResumeState(Enum):
     FRESH = "fresh"                            # no history; yield initial_messages
     SEND_TO_LLM = "send_to_llm"                # last message is user; LLM responds next
-    PROMPT_USER = "prompt_user"                # last assistant text+interactive; read user input
+    AWAITING_USER = "awaiting_user"            # last tool_use is wait_for_user; solicit + fill
     MISSING_COMPLETE_STEP = "missing_complete" # autonomous agent stopped without complete_step
-    DANGLING_TOOL_USE = "dangling_tool_use"    # invalid; should not happen given append discipline
+    DANGLING_TOOL_USE = "dangling_tool_use"    # other dangling tool_use; repaired with placeholder
 
 
-def classify_resume(messages: list[Message], *, interactive: bool) -> ResumeState:
+def classify_resume(messages: list[Message]) -> ResumeState:
     if not messages:
         return ResumeState.FRESH
 
     last = messages[-1]
     if last.role == "system":
         # Replay artifact — recurse on the previous message.
-        return classify_resume(messages[:-1], interactive=interactive)
+        return classify_resume(messages[:-1])
 
     if last.role == "user":
         return ResumeState.SEND_TO_LLM
 
     # assistant
-    has_tool_use = any(isinstance(b, ToolUseBlock) for b in last.content)
-    if has_tool_use:
+    tool_uses = [b for b in last.content if isinstance(b, ToolUseBlock)]
+    if tool_uses:
+        if any(b.name == "wait_for_user" for b in tool_uses):
+            return ResumeState.AWAITING_USER
         return ResumeState.DANGLING_TOOL_USE
-    if interactive:
-        return ResumeState.PROMPT_USER
     return ResumeState.MISSING_COMPLETE_STEP
 
 

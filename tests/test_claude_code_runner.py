@@ -328,24 +328,36 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_interactive_resume_from_prompt_user_prompts_then_continues(
+async def test_awaiting_user_resume_fills_tool_result_then_continues(
     tmp_path: Path,
 ) -> None:
-    from imp.agents.runner import Message, TextBlock
+    """AWAITING_USER resume: a paused transcript ends on a `wait_for_user`
+    tool_use; the runner solicits the human and fills a SUCCESS-shaped
+    tool_result (not a TextBlock) before driving the next LLM call."""
+    from imp.agents.runner import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
     from imp.agents.transcript import Transcript
     from tests.cc_fakes import FakeClaudeSDKClient, assistant, result, text, tool_use
 
     (tmp_path / "art").mkdir()
     log = InMemoryEventLog()
     inv = _inv(tmp_path, event_log=log, agent_id="step:p/s")
-    inv = replace(inv, interactive=True)
+    inv = replace(inv, interactive=True, balance_on_resume=True)
     inv.transcript_dir.mkdir(parents=True, exist_ok=True)
 
     t = Transcript(inv.transcript_dir / "transcript.jsonl")
     t.append(Message(role="user", content=(TextBlock(text="go"),)))
     t.append(Message(
         role="assistant",
-        content=(TextBlock(text="confirm?"),),
+        content=(
+            TextBlock(text="need a decision"),
+            ToolUseBlock(id="wfu1", name="wait_for_user",
+                         input={"prompt": "merge?"}),
+        ),
     ))
 
     scripted = [
@@ -371,9 +383,11 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     kinds = [e["type"] for e in events]
     assert kinds[-1] == "agent_output"
 
-    # Verify ordering in the event log: user_message before llm_response
+    # Verify ordering in the event log: awaiting_user_input + user_message
+    # before llm_response.
     log_events = list(log.read())
     log_types = [e["type"] for e in log_events]
+    assert "awaiting_user_input" in log_types
     user_idx = log_types.index("user_message")
     llm_idx = log_types.index("llm_response")
     assert user_idx < llm_idx, (
@@ -383,8 +397,11 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
     loaded = t.load()
     assert len(loaded) >= 3
     assert loaded[2].role == "user"
-    assert isinstance(loaded[2].content[0], TextBlock)
-    assert loaded[2].content[0].text == "yes, proceed"
+    block = loaded[2].content[0]
+    assert isinstance(block, ToolResultBlock)
+    assert block.tool_use_id == "wfu1"
+    assert block.content == "yes, proceed"
+    assert block.is_error is False
 
 
 @pytest.mark.anyio

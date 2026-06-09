@@ -153,7 +153,7 @@ def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) -> 
 
     assert inv.interactive is True
     assert inv.continuation_fn is not None
-    assert inv.user_input_fn is not None  # interactive -> PROMPT_USER resume wired
+    assert inv.user_input_fn is not None  # interactive -> AWAITING_USER resume wired
 
 
 def test_build_agent_invocation_threads_lint_command(tmp_path: Path) -> None:

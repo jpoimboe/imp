@@ -45,7 +45,8 @@ def _agent_def() -> AgentDef:
 
 
 def _invocation(tmp_path: Path, *, event_log: object, interactive: bool = False,
-                continuation_fn: object = None) -> AgentInvocation:
+                continuation_fn: object = None,
+                user_input_fn: object = None) -> AgentInvocation:
     return AgentInvocation(
         agent_def=_agent_def(), provider_name="codex", model_name="gpt-5.5",
         system_prompt="you are a test agent", initial_messages=(),
@@ -55,7 +56,8 @@ def _invocation(tmp_path: Path, *, event_log: object, interactive: bool = False,
         fs_permissions=(FsRule(operations=("read", "write"), paths=("**",),
                                mode="allow", source=_SRC),),
         events_path=tmp_path / "events.jsonl", agent_id="step:t",
-        event_log=event_log, continuation_fn=continuation_fn)
+        event_log=event_log, continuation_fn=continuation_fn,
+        user_input_fn=user_input_fn)
 
 
 @pytest.mark.anyio
@@ -254,18 +256,27 @@ async def test_killed_tools_drained_to_tool_killed_events(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
-async def test_prompt_user_resume_injects_reply_not_system_prompt(
+async def test_awaiting_user_resume_injects_reply_not_system_prompt(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A paused codex wait_for_user (journaled awaiting_user_input, no
+    complete_step) derives AWAITING_USER; the runner solicits via user_input_fn
+    and injects the reply as the FIRST resumed prompt, not the system prompt."""
     import json
     auth = _seed_git_and_auth(tmp_path)
     # restore_rollout runs unconditionally on balance_on_resume and needs a real
     # persisted rollout; stub it so the test exercises the prompt-selection branch.
     monkeypatch.setattr(
         "imp.providers.codex_rollout.restore_rollout", lambda **k: "thr-1")
-    # Pre-seed events.jsonl with a tail llm_response (agent asked a question).
-    (tmp_path / "events.jsonl").write_text(json.dumps({
-        "agent_id": "step:t", "type": "llm_response",
-        "payload": {"raw": {"content": [{"type": "text", "text": "which file?"}]}}}) + "\n")
+    # Pre-seed events.jsonl: a tail llm_response (agent asked a question) plus the
+    # awaiting_user_input event the wait_for_user tool journals before pausing.
+    (tmp_path / "events.jsonl").write_text(
+        json.dumps({
+            "agent_id": "step:t", "type": "llm_response",
+            "payload": {"raw": {"content": [
+                {"type": "text", "text": "which file?"}]}}}) + "\n" +
+        json.dumps({
+            "agent_id": "step:t", "type": "awaiting_user_input",
+            "payload": {"prompt": "which file?"}}) + "\n")
     elog = InMemoryEventLog()
     from tests.codex_fakes import agent_message, mcp_call, thread_started, turn_completed
     scripted = [[thread_started("t"), agent_message("ok"),
@@ -278,11 +289,14 @@ async def test_prompt_user_resume_injects_reply_not_system_prompt(
                               client_factory=lambda options=None: captured)
     runner._canonical_auth_override = auth
 
-    def _cont(last_text: str) -> str:
-        assert last_text == "which file?"
+    def _solicit(prompt: str) -> str:
+        # user_input_fn is solicited with "" (the stored question is re-surfaced
+        # via the awaiting_user_input event, not passed here).
+        assert prompt == ""
         return "the README"
 
-    inv = _invocation(tmp_path, event_log=elog, interactive=True, continuation_fn=_cont)
+    inv = _invocation(tmp_path, event_log=elog, interactive=True,
+                      user_input_fn=_solicit)
     # Mark this as a resume.
     object.__setattr__(inv, "balance_on_resume", True)
     [ev async for ev in runner.run(inv)]

@@ -436,24 +436,26 @@ class CodexAgentRunner:
         next_prompt = self._build_prompt(invocation.system_prompt)
         # Resume seam (Unit G): on a balance_on_resume re-entry, codex holds no
         # parsed message list, so derive the resume state from imp's own
-        # events.jsonl. A PROMPT_USER turn (interactive, agent ended awaiting the
-        # user) injects the user's reply as the FIRST resumed prompt instead of
+        # events.jsonl. An AWAITING_USER turn (a paused wait_for_user, detected
+        # via the journaled awaiting_user_input event) solicits the human reply
+        # via user_input_fn and injects it as the FIRST resumed prompt instead of
         # the system prompt; MISSING_COMPLETE_STEP (autonomous, no complete_step)
         # is a terminal error.
         if invocation.balance_on_resume:
             from imp.agents.classify import ResumeState
             from imp.providers.codex_resume import derive_codex_resume_state
             rstate, last_text = derive_codex_resume_state(
-                invocation.events_path, aid, interactive=invocation.interactive)
-            if rstate is ResumeState.PROMPT_USER:
-                if invocation.continuation_fn is None:
+                invocation.events_path, aid)
+            if rstate is ResumeState.AWAITING_USER:
+                if invocation.user_input_fn is None:
                     yield {"type": "error", "payload": {
                         "category": "config", "kind": "no_user_input_fn",
-                        "message": "PROMPT_USER resume requires an interactive "
-                                   "continuation_fn; none installed"}}
+                        "message": "AWAITING_USER resume requires user_input_fn"}}
                     return
+                elog.append(agent_id=aid, type="awaiting_user_input",
+                            payload={"prompt": last_text})
                 import inspect as _inspect
-                reply = invocation.continuation_fn(last_text)
+                reply = invocation.user_input_fn("")
                 if _inspect.isawaitable(reply):
                     reply = await reply
                 user_msg = Message(

@@ -152,3 +152,58 @@ async def test_fresh_run_persists_rollout_to_transcript_dir(tmp_path: Path) -> N
     # the event log, so assert on the yielded stream, not elog.read().
     assert any(e.get("type") == "agent_output" for e in evs), \
         "run completed cleanly with persist wired into finally"
+
+
+# --- C1: event-derived AWAITING_USER for a paused wait_for_user -------------
+# Codex holds no parsed message list; it reconstructs resume state from imp's
+# events.jsonl. A wait_for_user pause journals an `awaiting_user_input` event
+# (emitted by the tool before the headless re-raise) with no following
+# `complete_step`, which derives ResumeState.AWAITING_USER.
+
+from imp.agents.classify import ResumeState  # noqa: E402
+from imp.providers.codex_resume import (  # noqa: E402
+    derive_codex_resume_state,
+)
+
+
+def _write_events(p: Path, records: list[dict]) -> None:
+    p.write_text("\n".join(json.dumps(r) for r in records) + "\n")
+
+
+def test_derive_awaiting_user_when_awaiting_event_present(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "merge?"}]}}},
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "merge?"}},
+    ])
+    state, last_text = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.AWAITING_USER
+    assert last_text == "merge?"
+
+
+def test_derive_missing_complete_step_without_awaiting(tmp_path: Path) -> None:
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "done?"}]}}},
+    ])
+    state, _ = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.MISSING_COMPLETE_STEP
+
+
+def test_derive_send_to_llm_when_complete_step_present(tmp_path: Path) -> None:
+    # complete_step present → the turn completed; resume normally even though an
+    # earlier awaiting_user_input exists (presence-of-complete wins).
+    ev = tmp_path / "events.jsonl"
+    _write_events(ev, [
+        {"agent_id": "step:t", "type": "awaiting_user_input",
+         "payload": {"prompt": "merge?"}},
+        {"agent_id": "step:t", "type": "tool_call",
+         "payload": {"name": "complete_step", "input": {}}},
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "answer"}]}}},
+    ])
+    state, _ = derive_codex_resume_state(ev, "step:t")
+    assert state is ResumeState.SEND_TO_LLM
