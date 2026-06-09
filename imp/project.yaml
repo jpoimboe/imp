@@ -1,0 +1,5 @@
+workflow: default
+
+# Optional lint-clean gate: a command the implementer runs before each
+# commit (separate from the test suite). Absent => no lint gate.
+# lint_command: "make lint"

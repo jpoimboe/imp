@@ -1281,6 +1281,10 @@ class ClaudeCodeProvider:
         )
 
 
+TIER_DEFAULTS: dict[str, str] = {"low": "haiku", "medium": "sonnet", "high": "opus"}
+ENV_VAR: str | None = None  # CLI-authenticated (claude login); no env var
+
+
 def _env_check() -> bool:
     return shutil.which("claude") is not None
 

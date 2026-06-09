@@ -49,7 +49,8 @@ def _seed_project(tmp_path: Path) -> None:
 
     imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
-    (Change.create copies imp/workflows/default; load_config reads imp/config.yaml).
+    (Change.create copies imp/workflows/default; the runtime reads the merged
+    config from imp/project.yaml — the project layer of load_effective_config).
     Committing them is the clean choice. _init_repo already commits a README +
     .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
     an extra gitignore commit.
@@ -78,7 +79,8 @@ def _seed_project(tmp_path: Path) -> None:
             steps:
               - {name: w, file: agents/writer.md, tier: medium}
     """))
-    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
+    (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+        workflow: default
         providers: [anthropic]
         tiers:
           low: {anthropic: claude-haiku-4-5-20251001}
@@ -145,7 +147,8 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes(tmp_path: Path) -> None
     env["PYTHONPATH"] = _WORKTREE_SRC + (os.pathsep + _pypath if _pypath else "")
 
     # cwd=tmp_path is what makes imp find the project root — find_project_root
-    # walks up from cwd looking for .imp/. No IMP_PROJECT_ROOT env var needed
+    # walks up from cwd looking for the imp/project.yaml marker. No
+    # IMP_PROJECT_ROOT env var needed
     # (the engine sets that internally for script gates, but it's not read at
     # CLI startup).
     proc = subprocess.Popen(
@@ -219,13 +222,23 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
         "OPENAI_API_KEY env var or ~/.openai-key file found"
     )
     _seed_project(tmp_path)
-    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
+    # Override the anthropic project.yaml _seed_project committed; re-commit so
+    # the subprocess `imp new` worktree (project layer read from the committed
+    # tree) carries the openai pin.
+    (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+        workflow: default
         providers: [openai]
         tiers:
           low: {openai: gpt-4o-mini}
           medium: {openai: gpt-4o-mini}
           high: {openai: gpt-4o-mini}
     """))
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-qm", "openai config"],
+        cwd=tmp_path, check=True,
+    )
     env = os.environ.copy()
     key = _openai_key()
     assert key is not None
@@ -283,13 +296,23 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
         "not found on PATH"
     )
     _seed_project(tmp_path)
-    (tmp_path / "imp" / "config.yaml").write_text(textwrap.dedent("""\
+    # Override the anthropic project.yaml _seed_project committed; re-commit so
+    # the subprocess `imp new` worktree (project layer read from the committed
+    # tree) carries the claude_code pin.
+    (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
+        workflow: default
         providers: [claude_code]
         tiers:
           low: {claude_code: claude-haiku-4-5-20251001}
           medium: {claude_code: claude-sonnet-4-5}
           high: {claude_code: claude-opus-4-5}
     """))
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "-qm", "claude_code config"],
+        cwd=tmp_path, check=True,
+    )
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
     _pypath = env.get("PYTHONPATH", "")

@@ -80,14 +80,17 @@ class Change:
         }, indent=2, sort_keys=True))
 
         from imp.engine.loader import load_workflow
-        from imp.providers.config import apply_var_overrides, load_config
+        from imp.providers.config import apply_var_overrides
+        from imp.providers.effective import load_effective_config
 
-        config = load_config(control_root)
+        config = load_effective_config(
+            project_root=wt_path, control_root=control_root,
+        ).config
         # The branch's own tracked workflow IS the source — read it directly from
         # the worktree, no snapshot copy. This seed load doubles as the single
         # validator: raises LoadError on an absent/malformed workflow, or
         # LoadErrors when the workflow parses but fails validation (e.g. a step
-        # references a model_tier not present in imp/config.yaml).
+        # references a model_tier not present in the merged config).
         try:
             workflow = load_workflow(
                 wt_path / "imp" / "workflows" / "default",

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,25 @@ def _stub_provider_api_keys(
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
 
+@pytest.fixture(autouse=True)
+def _reset_theme() -> Generator[None, None, None]:
+    """Pin the active color theme to `ansi` around every test. `palette` keeps
+    the active theme in module-global state, and any test that runs the CLI
+    in-process (e.g. `main(["status"])`) calls `_apply_theme` -> `set_theme(...)`,
+    which leaks the resolved theme into the next test. A test that asserts the
+    ansi-named SGR codes (e.g. gray `\\x1b[90m`) then fails under random ordering
+    if a prior test resolved a dark/light theme — most visibly when a non-ansi
+    `theme:` lives in the merged config (a real `~/.config/imp/config.yaml`, or
+    the dogfood's bootstrapped user config). Resetting on both sides makes the
+    SGR-literal tests order-independent. (test_palette.py defines an identically
+    named fixture; that local one overrides this for its own module — same
+    effect.)"""
+    from imp.cli import palette as pal
+    pal.set_theme("ansi")
+    yield
+    pal.set_theme("ansi")
+
+
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
     """An empty 'project' directory under tmp_path."""
@@ -62,7 +82,8 @@ def _init_repo(root: Path) -> None:
 
 
 def _seed_control(root: Path) -> None:
-    """A git repo with committed imp/config.yaml + imp/workflows/default."""
+    """A git repo with committed imp/project.yaml marker + imp/workflows/default
+    and a gitignored .imp/config.yaml local layer (read by load_effective_config)."""
     _init_repo(root)
     src = root / "imp" / "workflows" / "default"
     (src / "agents").mkdir(parents=True)
@@ -75,7 +96,10 @@ def _seed_control(root: Path) -> None:
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
-    (root / "imp" / "config.yaml").write_text(
+    # Config layers: committed marker + gitignored local layer.
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n"
         "  low: {anthropic: x}\n"

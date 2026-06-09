@@ -87,13 +87,17 @@ def _seed_two_step_control(root: Path) -> None:
         "      - {name: s1, file: agents/a.md}\n"
         "      - {name: s2, file: agents/b.md}\n"
     )
-    (root / "imp" / "config.yaml").write_text(
+    _cfg = (
         "providers: [anthropic]\n"
         "tiers:\n"
         "  low: {anthropic: x}\n"
         "  medium: {anthropic: x}\n"
         "  high: {anthropic: x}\n"
     )
+    # Config layers: committed marker + gitignored local layer.
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(_cfg)
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "imp setup")
 

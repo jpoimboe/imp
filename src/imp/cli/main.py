@@ -113,37 +113,27 @@ def _control_root() -> Path:
     return worktree.find_control_root(Path.cwd())
 
 
-def _config_divergence_notice(control: Path, launch_dir: Path) -> str | None:
-    """If `imp` was launched inside a *linked* worktree (not the control root) that
-    carries a committed `imp/config.yaml` differing from the control root's, return
-    a one-line notice that the launch worktree's config is NOT what routes the run.
-
-    imp always reads config from the control root (per-change-worktrees design
-    §5.3/§5.4) — the right precedence (config tracks the operator's live setup, not
-    a per-branch snapshot), but silent: a codex-only config sitting in the launch
-    worktree otherwise runs on whatever the main checkout lists with no signal.
-    Only warns when the two configs actually differ; identical configs stay quiet."""
-    top = worktree.worktree_toplevel(launch_dir)
-    if top is None or top == control.resolve():
-        return None
-    launch_cfg = top / "imp" / "config.yaml"
-    control_cfg = control / "imp" / "config.yaml"
+def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None:
+    """Return a clean 'run imp init first' message when no provider is
+    env-available (e.g. a never-init'd machine with empty user `providers`),
+    else None. Relocates+dresses the failure that per-step resolution would
+    otherwise raise as a raw ProviderUnavailable deep in a step (spec §4)."""
+    from imp.providers.effective import load_effective_config
+    from imp.providers.resolve import UnknownProvider, _first_available_provider
     try:
-        if not launch_cfg.exists() or launch_cfg.read_text() == control_cfg.read_text():
-            return None
-    except OSError:
+        config = load_effective_config(
+            project_root=project_root, control_root=control_root,
+        ).config
+        no_provider = _first_available_provider(config) is None
+    except (LoadError, LoadErrors, UnknownProvider):
+        # A malformed config (bad YAML, or a `providers:` entry that names an
+        # unregistered provider — _first_available_provider raises UnknownProvider,
+        # resolve.py:124-136) is reported downstream with full context. Don't dress
+        # it as "run imp init first" — that would mislead. Let resolution surface it.
         return None
-    return (f"note: routing config from {control_cfg} — this worktree's "
-            f"imp/config.yaml is not used (imp reads config from the main checkout)")
-
-
-def _emit_config_divergence_notice(control: Path) -> None:
-    """Surface the §5.4 config precedence at launch (cwd before any chdir) so a
-    differing worktree config isn't silently ignored. Best-effort; never fatal."""
-    notice = _config_divergence_notice(control, Path.cwd())
-    if notice:
-        print(ansi(notice, "yellow", enabled=should_use_color(sys.stderr)),
-              file=sys.stderr)
+    if no_provider:
+        return "no provider available — run `imp init` first"
+    return None
 
 
 def _apply_theme() -> None:
@@ -155,13 +145,13 @@ def _apply_theme() -> None:
     if override in pal.THEMES:
         pal.set_theme(override)
         return
-    from imp.providers.config import load_config
-    for root_fn in (_control_root, _project_root):
-        try:
-            pal.set_theme(load_config(root_fn()).theme)
-            return
-        except Exception:
-            continue
+    from imp.providers.effective import load_effective_config
+    try:
+        root = _project_root()
+        theme = load_effective_config(project_root=root, control_root=root).config.theme
+        pal.set_theme(theme)
+    except Exception:
+        pass
 
 
 def _cmd_init(args: argparse.Namespace) -> int:
@@ -189,7 +179,11 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     except worktree.PreconditionError as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
-    _emit_config_divergence_notice(control)
+
+    block = _preflight_imp_init(control_root=control, project_root=control)
+    if block is not None:
+        print(f"imp: {block}", file=sys.stderr)
+        return 2
 
     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
@@ -318,7 +312,6 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     control = _control_root()
-    _emit_config_divergence_notice(control)
     try:
         change_id = _resolve_id(control, args.token)
     except SystemExit:
@@ -369,9 +362,12 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             workflow = None
             if from_target is not None:
                 from imp.engine.loader import load_workflow
-                from imp.providers.config import load_config
+                from imp.providers.effective import load_effective_config
                 try:
-                    cfg = load_config(change.control_root)
+                    cfg = load_effective_config(
+                        project_root=change.project_root,
+                        control_root=change.control_root,
+                    ).config
                     workflow = load_workflow(
                         change.workflow_dir, configured_tiers=cfg.tier_names())
                 except (LoadError, LoadErrors) as e:
@@ -507,12 +503,14 @@ def _cmd_resume(args: argparse.Namespace) -> int:
 
 
 def _editing_mode(control_root: Path) -> str:
-    """Read editing_mode from config; default to emacs if config is absent or
-    invalid (run_change reports a bad config with full context — don't double-fail
-    here just to pick a prompt mode)."""
-    from imp.providers.config import load_config
+    """Read editing_mode from the merged config; default to emacs if config is
+    absent or invalid (run_change reports a bad config with full context — don't
+    double-fail here just to pick a prompt mode)."""
+    from imp.providers.effective import load_effective_config
     try:
-        return load_config(control_root).editing_mode
+        return load_effective_config(
+            project_root=control_root, control_root=control_root,
+        ).config.editing_mode
     except (LoadError, LoadErrors):
         return "emacs"
 
@@ -974,6 +972,26 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_config(args: argparse.Namespace) -> int:
+    from imp.cli.config_cmd import render_config, render_explain
+    from imp.providers.effective import load_effective_config
+    # _project_root() never raises (returns the resolved start dir when no marker
+    # is found); only _control_root()'s git resolution can fail (not in a work
+    # tree). Resolve project first, then guard only the control read.
+    root = _project_root()
+    try:
+        control = _control_root()
+    except Exception:
+        control = root  # no git work tree → local `.imp/config.yaml` layer is skipped
+    eff = load_effective_config(project_root=root, control_root=control)
+    explain = getattr(args, "explain", None)
+    if explain:
+        render_explain(eff, explain, sys.stdout, color=should_use_color(sys.stdout))
+    else:
+        render_config(eff, sys.stdout, color=should_use_color(sys.stdout))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(prog="imp")
@@ -1028,6 +1046,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Also list completed and abandoned Changes (default: in-flight only).",
     )
     p_status.set_defaults(func=_cmd_status)
+
+    p_config = sub.add_parser("config")
+    p_config.add_argument("--explain", metavar="TIER", default=None,
+                          help="trace one tier's bindings through the layers")
+    p_config.set_defaults(func=_cmd_config)
 
     p_abandon = sub.add_parser(
         "abandon",

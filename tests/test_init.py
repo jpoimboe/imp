@@ -1,4 +1,5 @@
-"""`imp init` scaffolding (post 2026-06-04-roles-to-tiers)."""
+"""`imp init` scaffolding: split committed imp/project.yaml + bootstrapped
+user config (spec §4)."""
 
 from __future__ import annotations
 
@@ -20,6 +21,13 @@ def _picks(*selected: str) -> object:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_user_config(monkeypatch, tmp_path):
+    # init bootstraps ~/.config/imp/config.yaml — pin XDG into the tmp tree so a
+    # test NEVER writes the developer's real machine config.
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+
+@pytest.fixture(autouse=True)
 def _stub_theme_detection(monkeypatch):
     # init tests must NOT fire a real OSC-11 query at the terminal — pin the
     # detector to a deterministic 'ansi'. Persistence of a detected theme is
@@ -27,29 +35,24 @@ def _stub_theme_detection(monkeypatch):
     monkeypatch.setattr("imp.cli.init._default_detect_theme", lambda: "ansi")
 
 
-def test_writes_config_workflows_gitignore(tmp_path: Path) -> None:
+def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
         picker_fn=_picks("anthropic"),
-        input_fn=_inputs("ANTHROPIC_API_KEY"),
+        input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
-    cfg = tmp_path / "imp" / "config.yaml"
-    assert cfg.is_file()
-    data = yaml.safe_load(cfg.read_text())
-    assert set(data) <= {
-        "providers", "tiers", "provider_envs",
-        "lint_command", "test_command", "editing_mode", "vars", "theme",
-    }
-    assert data["theme"] == "ansi"      # stubbed detector
+    proj = tmp_path / "imp" / "project.yaml"
+    assert proj.is_file()
+    data = yaml.safe_load(proj.read_text())
+    # The committed project file carries the workflow ref + project settings —
+    # NO bindings (the floor owns tiers), NO providers/theme (user-homed).
+    assert data["workflow"] == "default"
+    assert "tiers" not in data
+    assert "providers" not in data
+    assert "provider_envs" not in data
+    assert "theme" not in data
     assert "roles" not in data
-    assert "model_rules" not in data
-    assert "model_tiers" not in data
-    assert data["providers"] == ["anthropic"]
-    assert set(data["tiers"]) == {"low", "medium", "high"}
-    assert data["tiers"]["low"]["anthropic"] == "haiku"
-    assert data["tiers"]["medium"]["anthropic"] == "sonnet"
-    assert data["tiers"]["high"]["anthropic"] == "opus"
 
     wf = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
     assert wf.is_file()
@@ -57,14 +60,27 @@ def test_writes_config_workflows_gitignore(tmp_path: Path) -> None:
     assert not (tmp_path / ".imp").exists()
 
 
-def test_persists_detected_theme(tmp_path: Path) -> None:
-    # The detected theme is written to config.yaml so the runtime never re-queries.
+def test_bootstraps_user_config_with_providers(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
-        input_fn=_inputs("ANTHROPIC_API_KEY"), output_fn=lambda _msg: None,
+        input_fn=_inputs(), output_fn=lambda _msg: None,
+    )
+    user = tmp_path / "xdg" / "imp" / "config.yaml"
+    assert user.is_file()
+    data = yaml.safe_load(user.read_text())
+    assert data["providers"] == ["anthropic"]
+    assert data["editing_mode"] == "emacs"
+
+
+def test_persists_detected_theme(tmp_path: Path) -> None:
+    # The detected theme is written to the user config so the runtime never
+    # re-queries the terminal.
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _msg: None,
         detect_theme_fn=lambda: "dark",
     )
-    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "xdg" / "imp" / "config.yaml").read_text())
     assert data["theme"] == "dark"
 
 
@@ -72,42 +88,40 @@ def test_appends_to_project_gitignore(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text("# existing\nfoo/\n")
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
-        input_fn=_inputs("ANTHROPIC_API_KEY"),
+        input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
     text = (tmp_path / ".gitignore").read_text()
     assert "foo/" in text and ".imp/" in text
 
 
-def test_init_idempotent_refuses_existing(tmp_path: Path) -> None:
+def test_init_idempotent_on_existing_clone(tmp_path: Path) -> None:
+    # A clone that already carries the committed project file must NOT raise —
+    # init just bootstraps the machine's user config.
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "config.yaml").write_text("providers: [anthropic]\n")
-    with pytest.raises(FileExistsError):
-        run_init(
-            project_root=tmp_path, picker_fn=_picks("anthropic"),
-            input_fn=_inputs("ANTHROPIC_API_KEY"),
-            output_fn=lambda _msg: None,
-        )
+    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(),
+        output_fn=lambda _msg: None,
+    )
+    # Project file untouched; user config bootstrapped.
+    assert (tmp_path / "imp" / "project.yaml").read_text() == "workflow: default\n"
+    assert (tmp_path / "xdg" / "imp" / "config.yaml").exists()
 
 
-def test_supports_two_providers_writes_both_in_tier_table(tmp_path: Path) -> None:
+def test_supports_two_providers_recorded_in_user_config(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path,
         picker_fn=_picks("claude_code", "openai"),
-        input_fn=_inputs("OPENAI_API_KEY"),    # claude_code has no env prompt
+        input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
-    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "xdg" / "imp" / "config.yaml").read_text())
     assert data["providers"] == ["claude_code", "openai"]
-    medium = data["tiers"]["medium"]
-    assert medium["claude_code"] == "sonnet"
-    assert medium["openai"] == "gpt-5.3-codex"
-    high = data["tiers"]["high"]
-    assert high["claude_code"] == "opus"
-    assert high["openai"] == "gpt-5.5"
-    low = data["tiers"]["low"]
-    assert low["claude_code"] == "haiku"
-    assert low["openai"] == "gpt-5.4-mini"
+    # Bindings are NOT scaffolded — the provider-code floor owns tiers.
+    proj = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert "tiers" not in proj
 
 
 def test_supports_claude_code_no_env_prompt(tmp_path: Path) -> None:
@@ -118,10 +132,8 @@ def test_supports_claude_code_no_env_prompt(tmp_path: Path) -> None:
         project_root=tmp_path, picker_fn=_picks("claude_code"),
         input_fn=_no_input, output_fn=lambda _msg: None,
     )
-    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
+    data = yaml.safe_load((tmp_path / "xdg" / "imp" / "config.yaml").read_text())
     assert data["providers"] == ["claude_code"]
-    # provider_envs is omitted entirely when no env-driven provider was picked.
-    assert "provider_envs" not in data
 
 
 def test_picker_sees_all_providers(tmp_path: Path) -> None:
@@ -133,7 +145,7 @@ def test_picker_sees_all_providers(tmp_path: Path) -> None:
 
     run_init(
         project_root=tmp_path, picker_fn=_picker,
-        input_fn=_inputs("ANTHROPIC_API_KEY"),
+        input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
     assert seen == [["claude_code", "anthropic", "openai", "codex"]]
@@ -153,27 +165,5 @@ def test_init_scaffolds_commented_lint_command(tmp_path: Path) -> None:
         output_fn=lambda _m: None,
         picker_fn=lambda _avail: ["anthropic"],
     )
-    text = (tmp_path / "imp" / "config.yaml").read_text()
+    text = (tmp_path / "imp" / "project.yaml").read_text()
     assert "# lint_command:" in text
-
-
-def test_init_provider_envs_uses_default_when_blank(tmp_path: Path) -> None:
-    run_init(
-        tmp_path,
-        input_fn=lambda _p: "",            # accept default env name
-        output_fn=lambda _m: None,
-        picker_fn=lambda _avail: ["openai"],
-    )
-    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["provider_envs"] == {"openai": {"env": "OPENAI_API_KEY"}}
-
-
-def test_init_provider_envs_honors_custom_name(tmp_path: Path) -> None:
-    run_init(
-        tmp_path,
-        input_fn=lambda _p: "OAI_KEY",
-        output_fn=lambda _m: None,
-        picker_fn=lambda _avail: ["openai"],
-    )
-    data = yaml.safe_load((tmp_path / "imp" / "config.yaml").read_text())
-    assert data["provider_envs"] == {"openai": {"env": "OAI_KEY"}}

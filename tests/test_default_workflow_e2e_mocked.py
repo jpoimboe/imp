@@ -56,7 +56,7 @@ def _canned_anthropic(**overrides):
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
@@ -68,7 +68,8 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
 
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_tiers = load_config(root).tier_names()
+        configured_tiers = load_effective_config(
+            project_root=root, control_root=root).config.tier_names()
 
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
@@ -114,9 +115,10 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         shell.write_text("#!/bin/sh\nexit 0\n")
         shell.chmod(0o755)
 
-    # config.yaml: a single role for every tier used by the workflow.
+    # config: a single role for every tier used by the workflow. run_change reads
+    # via load_effective_config (project layer from imp/project.yaml + local layer
+    # from .imp/config.yaml). Tests 2/3 swap the provider via _rewrite_config.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    cfg = tmp_path / "imp" / "config.yaml"
     cfg_content = (
         "providers: [anthropic]\n"
         "tiers:\n"
@@ -124,15 +126,17 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
         "  medium: {anthropic: claude-sonnet-4-6}\n"
         "  high:   {anthropic: claude-sonnet-4-6}\n"
     )
-    cfg.write_text(cfg_content)
+    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
 
     # Initialize a minimal git repo so `git status --porcelain` and
     # merge_to_base work when the merge-gate sets ready_to_merge=true.
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
-    # Ignore both .imp/ (runtime state) and imp/ (test-only config) so that
-    # rewrites of imp/config.yaml in tests 2 and 3 don't dirty the worktree.
+    # Ignore both .imp/ (runtime state + local config layer) and imp/ (test-only
+    # workflow/marker) so config rewrites in tests 2 and 3 don't dirty the worktree.
     (tmp_path / ".gitignore").write_text(".imp/\nimp/\n")
     (tmp_path / "README.md").write_text("seed\n")
     _git(tmp_path, "add", "-A")
@@ -144,6 +148,17 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
          ".imp/worktrees/test-change", "main")
 
     return _make_change(tmp_path, title="e2e-default-workflow")
+
+
+def _rewrite_config(tmp_path: Path, *replacements: tuple[str, str]) -> None:
+    """Apply str replacements to the .imp/config.yaml local layer (the one
+    load_effective_config reads), so a provider swap in a test reaches the
+    runtime."""
+    p = tmp_path / ".imp" / "config.yaml"
+    text = p.read_text()
+    for old, new in replacements:
+        text = text.replace(old, new)
+    p.write_text(text)
 
 
 @pytest.mark.anyio
@@ -257,10 +272,10 @@ async def test_full_default_workflow_completes_with_canned_openai(
     )
 
     change = _seed_default_workflow(tmp_path)
-    # Rewrite config to OpenAI provider for every role.
-    cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(cfg.read_text().replace("anthropic", "openai")
-        .replace("claude-sonnet-4-6", "gpt-4o-mini"))
+    # Rewrite config to OpenAI provider for every role (both layers: the legacy
+    # imp/config.yaml and the .imp/config.yaml local layer the reader uses).
+    _rewrite_config(tmp_path, ("anthropic", "openai"),
+                    ("claude-sonnet-4-6", "gpt-4o-mini"))
 
     default_completion = resp_response(
         resp_function_call("c0", "complete_step", json.dumps({
@@ -318,9 +333,8 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
     )
 
     change = _seed_default_workflow(tmp_path)
-    cfg = tmp_path / "imp" / "config.yaml"
-    cfg.write_text(cfg.read_text().replace("anthropic", "claude_code")
-        .replace("claude-sonnet-4-6", "claude-sonnet-4-5"))
+    _rewrite_config(tmp_path, ("anthropic", "claude_code"),
+                    ("claude-sonnet-4-6", "claude-sonnet-4-5"))
 
     # The CC fake is per-step; each runner spawns a fresh client. Use a
     # factory that returns the same scripted reply for every new client.
@@ -463,7 +477,7 @@ async def test_fast_path_skips_both_reviewers_but_not_code_reviewer(
 async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     from imp.engine import recovery
     from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     change = _seed_default_workflow(tmp_path)
 
@@ -481,7 +495,9 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
     st.save(change.state_dir)
 
     wf = load_workflow(change.workflow_dir,
-                       configured_tiers=load_config(tmp_path).tier_names())
+                       configured_tiers=load_effective_config(
+                           project_root=tmp_path,
+                           control_root=tmp_path).config.tier_names())
     plan = recovery.plan_rewind(wf, st, "code-reviewer", force=False)
     recovery.apply_rewind(plan, wf, st, change.event_log())
     st.status = "running"

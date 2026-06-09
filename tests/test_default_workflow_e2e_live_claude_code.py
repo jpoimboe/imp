@@ -63,7 +63,8 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
-    (tmp_path / "imp" / "config.yaml").write_text(
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "workflow: default\n"
         "providers: [claude_code]\n"
         "tiers:\n"
         "  low:    {claude_code: claude-sonnet-4-5}\n"

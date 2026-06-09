@@ -12,12 +12,14 @@ from tests.conftest import _git, _init_repo, _seed_control
 
 def _seed_control_default(root: Path) -> None:
     """Like conftest._seed_control, but commits the REAL shipped default
-    workflow at imp/workflows/default plus a config.yaml defining every tier it
+    workflow at imp/workflows/default plus a config defining every tier it
     uses — so Change.create copies the real workflow (with code-reviewer, gates,
     a merge phase) into the worktree."""
     _init_repo(root)
     shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
-    (root / "imp" / "config.yaml").write_text(
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"
         "tiers:\n  low: {anthropic: m}\n  medium: {anthropic: m}\n  high: {anthropic: m}\n"
     )
@@ -73,7 +75,7 @@ def test_resume_from_noop_appends_event_without_rewriting_history(
 ) -> None:
     from imp.engine.loader import load_workflow
     from imp.engine.recovery import apply_rewind, plan_rewind
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
@@ -81,7 +83,9 @@ def test_resume_from_noop_appends_event_without_rewriting_history(
 
     st = State.load(ch.state_dir)            # stub workflow: cursor at step "s"
     wf = load_workflow(ch.workflow_dir,
-                       configured_tiers=load_config(tmp_path).tier_names())
+                       configured_tiers=load_effective_config(
+                           project_root=tmp_path,
+                           control_root=tmp_path).config.tier_names())
     plan = plan_rewind(wf, st, st.step, force=False)   # no-op: --from current step
     apply_rewind(plan, wf, st, ch.event_log())
     st.save(ch.state_dir)

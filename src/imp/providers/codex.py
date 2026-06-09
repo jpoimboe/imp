@@ -25,6 +25,11 @@ from typing import Any
 from imp.agents.runner import AgentInvocation, AgentRunner
 from imp.providers.base import Provider
 
+# codex refuses *-codex models (runner preflight M1); gpt-5.5 is the sanctioned
+# non-codex model at every tier.
+TIER_DEFAULTS: dict[str, str] = {"low": "gpt-5.5", "medium": "gpt-5.5", "high": "gpt-5.5"}
+ENV_VAR: str | None = None  # CLI-authenticated (codex login); no env var
+
 
 def _env_check() -> bool:
     """True iff both the codex CLI and the Python SDK are present."""

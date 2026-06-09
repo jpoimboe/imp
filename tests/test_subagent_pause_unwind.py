@@ -116,7 +116,7 @@ async def test_pause_propagates_through_dispatch_task_and_task_wrapper(tmp_path)
 
 def _seed_single_step(root: Path) -> Change:
     from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     wf = root / "imp" / "workflows" / "default"
     (wf / "agents").mkdir(parents=True)
@@ -128,9 +128,12 @@ def _seed_single_step(root: Path) -> Change:
         "defaults: {max_retries: 3, max_loops: 6, on_max_retries: {pause: true}}\n"
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: medium}\n")
+    _cfg = "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
+    # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(parents=True, exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(_cfg)
 
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
@@ -139,7 +142,8 @@ def _seed_single_step(root: Path) -> Change:
         {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
     configured: list[str] = []
     with contextlib.suppress(Exception):
-        configured = load_config(root).tier_names()
+        configured = load_effective_config(
+            project_root=root, control_root=root).config.tier_names()
     workflow = load_workflow(wf, configured_tiers=configured)
     flat = workflow.flat_steps()
     State(id="s", step=flat[0].name, step_attempt=0, status="running",

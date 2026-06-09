@@ -19,7 +19,7 @@ from imp.engine.types import Goto
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
@@ -31,7 +31,8 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
 
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_tiers = load_config(root).tier_names()
+        configured_tiers = load_effective_config(
+            project_root=root, control_root=root).config.tier_names()
 
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
@@ -137,8 +138,11 @@ def _seed_resume_loop_workflow(root: Path) -> Change:
         "  - name: done\n"
         "    steps: []\n"
     )
+    # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(parents=True, exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     return _make_change(root)
@@ -240,8 +244,11 @@ async def test_resumed_step_persistent_error_still_terminates(
         "          - {if: 'resumed', continue: true}\n"
         "          - {else: true, resume: checker, set: {resumed: true}}\n"
     )
+    # run_change reads via load_effective_config: project marker + local layer.
     (tmp_path / "imp").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "imp" / "config.yaml").write_text(
+    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
     )
     change = _make_change(tmp_path)

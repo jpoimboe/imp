@@ -24,10 +24,9 @@ def test_workflow_loads_with_scaffolded_roles() -> None:
 
 
 def test_referenced_roles_are_a_subset_of_init_scaffold() -> None:
-    # Every tier used must be one imp init writes (else change creation
-    # would LoadError). Reuse cli/init's tier map as the source of truth.
-    from imp.cli.init import _TIERS
-    scaffolded = set(_TIERS)
+    # Every tier used must be one the provider-code floor supplies (else change
+    # creation would LoadError). The floor's tier taxonomy is low/medium/high.
+    scaffolded = set(_TIERS_SET)
     used = {s.tier for p in _wf().phases for s in p.steps
             if s.kind == "agent" and s.tier}
     assert used <= scaffolded, f"roles not scaffolded by init: {used - scaffolded}"

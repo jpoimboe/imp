@@ -251,7 +251,7 @@ def _v_step_tier_configured(
         seen.add(key)
         errors.append(
             LoadError(
-                f"tier {tier!r} is not configured in imp/config.yaml",
+                f"tier {tier!r} is not a configured tier",
                 source,
                 hint=f"configured tiers: {sorted(configured)}",
             )

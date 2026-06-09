@@ -16,7 +16,7 @@ from imp.engine.state import State
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
-    from imp.providers.config import load_config
+    from imp.providers.effective import load_effective_config
 
     src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
@@ -28,7 +28,8 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
 
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
-        configured_tiers = load_config(root).tier_names()
+        configured_tiers = load_effective_config(
+            project_root=root, control_root=root).config.tier_names()
 
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
@@ -84,14 +85,18 @@ def _seed_workflow_with_max_retries_3(root: Path) -> Change:
         "    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: medium}\n"
     )
-    (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "config.yaml").write_text(
+    _cfg = (
         "providers: [fake]\n"
         "tiers:\n"
         "  low: {fake: m}\n"
         "  medium: {fake: m}\n"
         "  high: {fake: m}\n"
     )
+    # run_change reads via load_effective_config: project marker + local layer.
+    (root / "imp").mkdir(parents=True, exist_ok=True)
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(parents=True, exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(_cfg)
     return _make_change(root)
 
 
