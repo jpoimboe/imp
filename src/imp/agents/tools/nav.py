@@ -54,9 +54,10 @@ def _iter_files(target: Path) -> Iterator[Path]:
 async def glob(ctx: ToolContext, pattern: str) -> str:
     ctx.check_fs_permission("read", pattern)
     root = ctx.project_root.resolve()
-    # Validate containment of the pattern (rejects absolute + `..`); the magic
-    # chars `*`/`**` are treated as literal segments by resolve() — they contain
-    # no `..`, so a clean relative pattern passes (defense-in-depth, spec A.3.3).
+    # Reject patterns with `..` or an absolute prefix before the glob runs.
+    # Wildcards (`*`/`**`) have no `..` component, so clean relative patterns pass.
+    # Per-result p.resolve().is_relative_to(root) below is the second line of
+    # defense for any result glob() produces via symlinks or dotdot traversal.
     ctx.resolve_path(pattern)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S

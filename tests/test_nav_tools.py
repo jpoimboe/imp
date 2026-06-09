@@ -175,6 +175,13 @@ def test_glob_rejects_absolute_pattern(tmp_path: Path) -> None:
                   {"pattern": "/project/**/*.py"})
 
 
+def test_glob_rejects_dotdot_pattern(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    with pytest.raises(PermissionDenied):
+        anyio.run(get_registry()["glob"].async_invoke, ctx,
+                  {"pattern": "../../etc/**"})
+
+
 def test_grep_reports_relative_paths(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("needle here\n")
     ctx = _ctx(tmp_path)
