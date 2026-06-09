@@ -159,3 +159,27 @@ def test_forking_server_exited_leader_still_cap_killed(
         await anyio.sleep(0.5)
         assert os.stat(bp.out_path).st_size == size1
     anyio.run(main)
+
+
+def test_breach_kill_proceeds_when_warning_emit_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A raising event-log consumer must not skip the breach kill (the
+    kill_reason gate means a skipped kill would never be retried) nor crash
+    the sweep's host task group."""
+    async def main() -> None:
+        from imp.agents.tools import limits
+        monkeypatch.setattr(limits, "BG_STREAM_FILE_CAP_BYTES", 50_000)
+        ctx = _ctx(tmp_path)
+
+        class _BoomLog:
+            def append(self, **kw):
+                raise RuntimeError("hooked consumer blew up")
+
+        ctx.event_log = _BoomLog()
+        out = await _spawn(ctx, FLOODER)
+        await _sweep_until_killed(ctx, out["id"])
+        bp = ctx.background_processes[out["id"]]
+        assert bp.status == "killed"
+        assert bp.kill_reason == "output-cap"
+    anyio.run(main)

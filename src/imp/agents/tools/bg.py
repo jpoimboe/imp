@@ -347,15 +347,21 @@ def _emit_cap_warning(ctx: ToolContext, bp: BgProc) -> None:
     if ctx.event_log is None:
         return
     cmd = bp.command[:_CMD_TRUNC]
-    ctx.event_log.append(
-        agent_id=ctx.agent_id, type="runner_warning",
-        payload={
-            # message is REQUIRED: the only UI consumer renders
-            # payload.get("message", "?") (narrative.py:936).
-            "message": (f"background process {bp.id} ({cmd}) killed: "
-                        "output cap exceeded"),
-            "id": bp.id, "command": cmd, "reason": "output-cap",
-        })
+    # Never let a log-emit failure skip the breach kill or crash the sweep's
+    # host (the foreground-bash ticker runs sweeps inside an unrelated call's
+    # task group): the flip has already happened and the kill_reason gate
+    # means no later sweep would retry. The warning is best-effort; the kill
+    # is not.
+    with contextlib.suppress(Exception):
+        ctx.event_log.append(
+            agent_id=ctx.agent_id, type="runner_warning",
+            payload={
+                # message is REQUIRED: the only UI consumer renders
+                # payload.get("message", "?") (narrative.py:936).
+                "message": (f"background process {bp.id} ({cmd}) killed: "
+                            "output cap exceeded"),
+                "id": bp.id, "command": cmd, "reason": "output-cap",
+            })
 
 
 async def _sweep_bg(ctx: ToolContext) -> None:
