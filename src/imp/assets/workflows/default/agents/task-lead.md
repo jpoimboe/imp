@@ -65,17 +65,20 @@ progress.md is your guide.)
    too, so the revised plan accounts for the existing commit rather than orphaning
    it. Never hand a reviewer contradictory framing.
 
-   **State what you already verified.** In the reviewer's dispatch message, state
-   the verification you actually ran: always the test state (e.g. "`make test`
-   green at `<sha>`"), and **only when `$IMP_LINT_COMMAND` is configured**, "lint
-   clean." State only what you ran — do not claim lint-clean when no lint command
-   is configured.
+   **State what was already verified.** In the reviewer's dispatch message, state
+   what the implementer verified for this change — the focused tests it ran and,
+   **only when `$IMP_LINT_COMMAND` is configured**, "lint clean." Do **not** run
+   the project's full test suite yourself to produce this: the `run-tests` gate is
+   the authoritative full-suite check and runs once after the implement phase, so a
+   full run here only duplicates it. State only what was actually run — do not claim
+   lint-clean when no lint command is configured.
 
    {% if vars.fast_path %}
    **Fast-path: the spec waived tests.** When you dispatch the implementer for a
    fast-path task, state plainly in the dispatch message: "the spec waived **new**
-   tests — do **not** add or modify tests; make exactly the task's edits, run
-   `$IMP_TEST_COMMAND` if it is set to confirm nothing broke, then commit."
+   tests — do **not** add or modify tests; make exactly the task's edits, run the
+   lint gate if `$IMP_LINT_COMMAND` is set, then commit. Do **not** run the
+   project's full test suite — the `run-tests` gate runs it after this phase."
    **One reviewer.** Dispatch ONLY `quality-reviewer` at the **`medium` tier**:
    `task(subagent_name="quality-reviewer", tier="medium", …)`. (Trivial diffs
    waived new tests, so spec-conformance is least likely to be the failure mode;
