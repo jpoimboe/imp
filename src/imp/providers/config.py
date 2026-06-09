@@ -50,6 +50,7 @@ class Config:
     test_command: str | None = field(hash=False, default=None)
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
+    sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
 
     def tier_names(self) -> frozenset[str]:
         return frozenset(self.tiers)
@@ -108,6 +109,8 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         if v not in ("dark", "light", "ansi"):
             raise LoadError("'theme' must be 'dark', 'light', or 'ansi'", src)
         out["theme"] = v
+    if raw.get("sandbox") is not None:
+        out["sandbox"] = _parse_sandbox(raw["sandbox"], src)
     return out, src
 
 
@@ -177,6 +180,32 @@ def _parse_provider_envs(raw: Any, src: SourceLoc) -> dict[str, str]:
                 src,
             )
         out[str(prov)] = str(spec["env"])
+    return out
+
+
+_SANDBOX_BOOL_KEYS = ("enabled", "allow_unsandboxed", "network")
+_SANDBOX_LIST_KEYS = (
+    "secret_paths", "writable_caches", "extra_readable", "extra_writable", "extra_env",
+)
+
+
+def _parse_sandbox(raw: Any, src: SourceLoc) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise LoadError(f"{src.file.name} 'sandbox:' must be a mapping", src)
+    out: dict[str, Any] = {}
+    for k, v in items(raw):
+        if k in _SANDBOX_BOOL_KEYS:
+            if not isinstance(v, bool):
+                raise LoadError(f"sandbox.{k} must be a boolean", src)
+            out[k] = v
+        elif k in _SANDBOX_LIST_KEYS:
+            if not isinstance(v, list) or not all(isinstance(e, str) for e in v):
+                raise LoadError(f"sandbox.{k} must be a list of strings", src)
+            out[k] = list(v)
+        else:
+            raise LoadError(
+                f"sandbox.{k!r} is not a known sandbox setting "
+                f"(allowed: {list(_SANDBOX_BOOL_KEYS + _SANDBOX_LIST_KEYS)})", src)
     return out
 
 
