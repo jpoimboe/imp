@@ -103,6 +103,29 @@ async def test_exit_event_cancels_open_prompt(tmp_path: Path) -> None:
     with pytest.raises(KeyboardInterrupt):
         await ask_line_with_slash(
             _BlockingPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+    # The synthesized KBI routes through D2's catch → request_exit (the
+    # pause-and-exit handoff the CLI arm finalizes).
+    assert coord.exit_reason == "sigint"
+
+
+@pytest.mark.anyio
+async def test_ask_or_exit_unwraps_prompt_exception_to_bare() -> None:
+    # With the exit event set (post-C4) the read runs INSIDE _ask_or_exit's task
+    # group, so any exception the prompt raises (EOFError on Ctrl-D,
+    # KeyboardInterrupt on an out-of-band SIGINT) is wrapped by anyio in a
+    # BaseExceptionGroup. _ask_or_exit must unwrap a lone such exception to BARE
+    # so the call-site `except EOFError` / `except KeyboardInterrupt` arms keep
+    # working. EOFError exercises the unwrap; the KeyboardInterrupt path shares
+    # the IDENTICAL code (raising a real KBI from a coroutine is hostile to the
+    # asyncio test runner, so it is covered by the manual anyio.run check, not a
+    # live pytest case).
+    class _EofPrompt:
+        async def ask_async(self, *_a, **_k):
+            raise EOFError
+
+    exit_event = anyio.Event()  # never set; the prompt's own exception is the path
+    with pytest.raises(EOFError):
+        await _ask_or_exit(_EofPrompt(), exit_event)
 
 
 @pytest.mark.anyio

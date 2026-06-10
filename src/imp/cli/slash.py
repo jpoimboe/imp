@@ -95,21 +95,32 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any) -> str:
     solicit) observes a cancellation, it is the prompt's LOCAL scope unwinding,
     not an ancestor scope. We do NOT swallow CancelledError here — we let the
     scope unwind cleanly and synthesize KeyboardInterrupt only when the read
-    never produced a line."""
+    never produced a line.
+
+    The prompt's OWN exceptions (EOFError on Ctrl-D, KeyboardInterrupt on an
+    out-of-band SIGINT) are raised inside `_read`, so anyio wraps them in a
+    BaseExceptionGroup leaving the task group. We unwrap a lone such exception
+    and re-raise it BARE, so the caller's `except EOFError`/`except
+    KeyboardInterrupt` arms keep working (they'd miss a group)."""
     import anyio
 
     result: dict[str, str] = {}
-    async with anyio.create_task_group() as tg:
-        async def _watch() -> None:
-            await exit_evt.wait()
-            tg.cancel_scope.cancel()
+    try:
+        async with anyio.create_task_group() as tg:
+            async def _watch() -> None:
+                await exit_evt.wait()
+                tg.cancel_scope.cancel()
 
-        async def _read() -> None:
-            result["line"] = await prompt.ask_async()
-            tg.cancel_scope.cancel()
+            async def _read() -> None:
+                result["line"] = await prompt.ask_async()
+                tg.cancel_scope.cancel()
 
-        tg.start_soon(_watch)
-        tg.start_soon(_read)
+            tg.start_soon(_watch)
+            tg.start_soon(_read)
+    except BaseExceptionGroup as eg:
+        if len(eg.exceptions) == 1:
+            raise eg.exceptions[0] from None  # bare EOFError / KeyboardInterrupt
+        raise
     if "line" not in result:
         raise KeyboardInterrupt  # exit-event won the race
     return result["line"]
@@ -162,6 +173,8 @@ async def ask_line_with_slash(
                 # display must stay suspended while they do, or it interleaves/clobbers
                 # them before the loop re-prompts.
                 with status.suspend():
+                    # _exit_event is None until C4 wires it; getattr is defensive
+                    # for pre-C4 builds, where the read takes the unraced path.
                     exit_evt = getattr(coord, "_exit_event", None) if coord else None
                     try:
                         if exit_evt is None:
