@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-1c9144f",
+  "source": "mined",
+  "base_sha": "46d559f",
+  "head_sha": "1c9144f",
+  "task_context": "Code quality review of one commit in a git worktree.\n## Working directory\n/home/jpoimboe/imp/.claude/worktrees/codex-default-workflow (branch worktree-codex-default-workflow). Run from there.\n## What to review\n- DESCRIPTION: A debugging fix. In `codex_mcp.py` `dispatch_tool`, the `complete_step` capture branch changed from `state.complete_step_args = dict(args)` to a comprehension dropping None-valued keys. Rationale: the dynamic Pydantic arg-model defaults non-required output-schema fields to None, so an omitted optional field (spec_path) materialized as None and failed output validation; filtering None at capture makes complete_step_args reflect what the agent actually sent. Plus 2 regression tests.\n- PLAN_OR_REQUIREMENTS: systematic-debugging fix for codex complete_step None-injection (no formal plan task)\n## Focus\n- **Correctness of the filter:** Is dropping ALL None-valued keys correct for imp's output model? imp output field types are string/int/bool/enum (never nullable). Confirm there's no imp schema scenario where a None value is meaningful/required-to-be-preserved. Consider: if a REQUIRED field were None, dropping it changes the validation error from \"expected T got NoneType\" to \"missing required field\" \u2014 is that acceptable (both are agent_output_missing rejections)?\n- **Is this the right layer?** The fix is at the codex_mcp capture boundary (where the spurious None is born). An alternative is hardening validate_agent_output to treat None as absent for optional fields. Briefly assess whether the chosen layer is defensible (it should be: the wrapper fabricates the None; capturing faithfully is the root-cause fix). Note any residual risk that the None could still leak somewhere else (e.g. is complete_step_args the ONLY place these args are captured, or does the runner read defaulted args elsewhere?).\n- **Comment quality:** does the comment explain WHY clearly enough for a future maintainer (the Pydantic-default origin, the never-nullable invariant)?\n- **Test quality:** do the 2 tests exercise the real dispatch_tool with a real RunState and meaningfully assert drop-None + preserve-non-None? Any obvious missing case (e.g. a None-valued REQUIRED field)?\n- **Naming, dead code, scope.** Note: pre-existing lint errors in docs/superpowers/spikes/ are NOT this commit's concern.\n- Run `make typecheck` to confirm clean.\n## Report\n- **Strengths**\n- **Issues** Critical / Important / Minor (file:line)\n- **Assessment:** APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/codex_runner.py:872",
+      "symbol": "",
+      "description": "Comment claims 'idempotent' but secondary capture path is asymmetric; clarify that proc_state sees raw SDK args without Pydantic filtering but is overwritten by RunState mirror, to prevent future maintainers from unknowingly reintroducing None-injection bug.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_codex_mcp_dispatch.py:0",
+      "symbol": "",
+      "description": "Missing test case for required fields supplied as None to document behavior where dropping None changes error message from 'expected T got NoneType' to 'missing required field' but both route to same error category.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

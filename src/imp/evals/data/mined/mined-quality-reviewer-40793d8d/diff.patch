@@ -1,0 +1,64 @@
+diff --git a/src/imp/cli/narrative.py b/src/imp/cli/narrative.py
+index 2589faf..11ad586 100644
+--- a/src/imp/cli/narrative.py
++++ b/src/imp/cli/narrative.py
+@@ -593,12 +593,35 @@ def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
+         call_id=rid, name=str(p.get("name", "tool")), input={}, killed=True))
+ 
+ 
++def _flatten_block(b: Any) -> str:
++    # Read the block type with b["type"] / b.get("type") — `type` is the Python
++    # builtin; do not use a bare `type` name here.
++    if isinstance(b, dict):
++        if b.get("type") == "text":
++            # `or ""` hardens against a malformed {"type":"text","text":null}
++            # block: returning None here would make the "".join() below raise.
++            # Real text blocks always carry a str; this just preserves the old
++            # str() fallback's never-raise property.
++            return b.get("text") or ""
++        if "type" in b:
++            return f"[{b['type']}]"
++        return str(b)        # dict with no type: unknown shape, preserve info
++    return str(b)            # non-dict element: preserve info
++
++
+ def _summarize_result(content: Any) -> str:
+     """Full underlying result text, newlines preserved. The view decides how to
+-    wrap/elide; the model keeps the whole thing (the 'full messages' goal)."""
++    wrap/elide; the node keeps the whole thing (the 'full messages' goal)."""
+     if content is None:
+         return ""
+-    return content if isinstance(content, str) else str(content)
++    if isinstance(content, str):
++        return content
++    if isinstance(content, list):
++        # Flatten a provider content-block list. Join with "" (no separator),
++        # matching the text extractors but as a superset: non-text blocks are
++        # surfaced as [<type>] tags rather than silently dropped.
++        return "".join(_flatten_block(b) for b in content)
++    return str(content)      # safety net for any other shape (unchanged)
+ 
+ 
+ NarrativeBuilder._HANDLERS["tool_call"] = _h_tool_call
+diff --git a/tests/test_narrative.py b/tests/test_narrative.py
+index 887b156..e30661b 100644
+--- a/tests/test_narrative.py
++++ b/tests/test_narrative.py
+@@ -644,3 +644,17 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
+         b.add(e)
+     act = b.current_activity()
+     assert act is not None and "task → coder" in act and "executor.py" in act
++
++
++def test_summarize_result_flattens_text_block_list_in_burst() -> None:
++    # A tool_result whose content is a provider content-block list must render
++    # as the underlying text, never as a Python repr of the list.
++    tree = nv.build_tree(_step_events(
++        _ev("1", "tool_call", agent_id="step:p/s", id="b1", name="bash", input={}),
++        _ev("2", "tool_result", agent_id="step:p/s", id="b1",
++            content=[{"type": "text", "text": "ok, go ahead"}], error=False),
++    ))
++    step = _only_step(tree)
++    burst = next(c for c in step.children if isinstance(c, nv.ToolBurstFold))
++    assert burst.calls[0].result == "ok, go ahead"
++    assert "[{'" not in burst.calls[0].result

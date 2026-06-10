@@ -1,0 +1,138 @@
+diff --git a/src/imp/engine/completion.py b/src/imp/engine/completion.py
+index 95a5037..bde1aef 100644
+--- a/src/imp/engine/completion.py
++++ b/src/imp/engine/completion.py
+@@ -1,13 +1,15 @@
+ """Render an OutputSchema into a 'call complete_step' instruction.
+ 
+-Single source of truth, consumed only by the executor: it (1) appends the
+-text to every agent's system prompt and (2) seeds the non-interactive nudge
+-closure. No provider imports this module, so there is no providers→engine
+-import edge.
++Single source of truth, consumed by the shared `engine.agent_run` builder
++(and through it, both the executor and dispatch_task). No provider imports
++this module, so there is no providers→engine import edge.
+ """
+ 
+ from __future__ import annotations
+ 
++from collections.abc import Awaitable, Callable
++from typing import Any
++
+ from imp.engine.types import OutputSchema
+ 
+ 
+@@ -29,3 +31,53 @@ def completion_instruction(schema: OutputSchema) -> str:
+         "To finish this step you MUST call the `complete_step` tool with: "
+         f"{fields_text}. Do not answer in prose — call the tool."
+     )
++
++
++NUDGE_LIMIT = 2
++
++
++def build_continuation_fn(
++    *,
++    interactive: bool,
++    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
++    instruction: str,
++    log: Any,
++    agent_id: str | None,
++) -> Callable[[str], str | None | Awaitable[str | None]] | None:
++    """Build the end-of-turn continuation hook the provider calls when an
++    agent ends a turn without complete_step.
++
++    interactive: wrap the user chat input — the human keeps the conversation
++    going, so it always returns a string (an interactive agent ends only by
++    calling complete_step). The closure emits `awaiting_user_input` BEFORE it
++    reads input, mirroring `human_prompt_pending`, so out-of-process drivers
++    know input is awaited (provider-native stop_reason can't carry this).
++
++    non-interactive: a fresh nudge counter per invocation. The first
++    NUDGE_LIMIT calls return the corrective instruction; after that, None —
++    which makes the provider emit agent_incomplete (-> Pause). This is the
++    backstop subagents never had (omission #2 / the dogfood bug).
++    """
++    if interactive:
++        if user_chat_input_fn is None:
++            return None
++
++        def _interactive(last_text: str) -> str | Awaitable[str]:
++            if log is not None:
++                log.append(agent_id=agent_id, type="awaiting_user_input",
++                           payload={"prompt": last_text})
++            return user_chat_input_fn("")
++
++        return _interactive
++
++    nudge = f"You ended your turn without calling `complete_step`. {instruction}"
++    count = 0
++
++    def _nudge(_last_text: str) -> str | None:
++        nonlocal count
++        if count >= NUDGE_LIMIT:
++            return None
++        count += 1
++        return nudge
++
++    return _nudge
+diff --git a/tests/test_completion.py b/tests/test_completion.py
+index 987e6f4..810dc7c 100644
+--- a/tests/test_completion.py
++++ b/tests/test_completion.py
+@@ -2,7 +2,7 @@ from __future__ import annotations
+ 
+ from pathlib import Path
+ 
+-from imp.engine.completion import completion_instruction
++from imp.engine.completion import NUDGE_LIMIT, build_continuation_fn, completion_instruction
+ from imp.engine.types import OutputField, OutputSchema, SourceLoc
+ 
+ 
+@@ -56,3 +56,46 @@ def test_renders_non_enum_types() -> None:
+     assert "`found` (bool)" in text
+     assert "`payload` (object)" in text
+     assert "optional" in text.lower()  # payload is optional
++
++
++def _instruction() -> str:
++    return "To finish this step you MUST call the `complete_step` tool with X."
++
++
++def test_nudge_fn_returns_instruction_then_none() -> None:
++    fn = build_continuation_fn(
++        interactive=False, user_chat_input_fn=None,
++        instruction=_instruction(), log=None, agent_id="step:p/s")
++    assert fn is not None
++    # First NUDGE_LIMIT calls return the corrective text...
++    for _ in range(NUDGE_LIMIT):
++        out = fn("some prose")
++        assert out is not None
++        assert "complete_step" in out
++    # ...then None (which the provider turns into agent_incomplete).
++    assert fn("more prose") is None
++
++
++def test_interactive_fn_emits_awaiting_then_reads_input() -> None:
++    emitted: list[dict] = []
++
++    class _Log:
++        def append(self, *, agent_id, type, payload):
++            emitted.append({"agent_id": agent_id, "type": type, "payload": payload})
++
++    fn = build_continuation_fn(
++        interactive=True, user_chat_input_fn=lambda _p: "user reply",
++        instruction=_instruction(), log=_Log(), agent_id="step:p/s")
++    assert fn is not None
++    reply = fn("the agent's question")
++    assert reply == "user reply"
++    assert emitted == [{
++        "agent_id": "step:p/s", "type": "awaiting_user_input",
++        "payload": {"prompt": "the agent's question"}}]
++
++
++def test_interactive_without_input_fn_is_none() -> None:
++    fn = build_continuation_fn(
++        interactive=True, user_chat_input_fn=None,
++        instruction=_instruction(), log=None, agent_id="x")
++    assert fn is None

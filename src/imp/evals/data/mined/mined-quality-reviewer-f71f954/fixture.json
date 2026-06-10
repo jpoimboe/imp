@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-f71f954",
+  "source": "mined",
+  "base_sha": "d9d0141",
+  "head_sha": "f71f954",
+  "task_context": "You are a code quality reviewer. Work from: /home/jpoimboe/imp/.claude/worktrees/name-on-intent\nDESCRIPTION: Task 14 (a fix found in final review) \u2014 surface the settled Change name in the displays after `rename_change`. Adds a `change_renamed` handler to narrative.py (so `imp log` reflects the rename), makes live_driver re-emit the header on rename with an emit-once guard, and carries `new_slug` in the change_renamed event payload (symmetric with change_created). The narrative handler applies new_title+new_slug ATOMICALLY (ignores legacy/partial events). Goldens regenerated.\nPLAN_OR_REQUIREMENTS: Final-review gap; fix should make the unnamed\u2192renamed flow show the name in both `imp log` and the live view, without breaking the emit-once / live-streaming semantics.\n- `change.py`: is `\"new_slug\": self.slug` correct and is the payload now symmetric/sensible? Any consumer of the change_renamed payload that could be surprised by the new key (grep)?\n- `narrative.py` `_h_change_renamed`: is the atomic (both-or-nothing) update the right design? Is ignoring a partial/legacy event the right call vs deriving slug from title? Docstring accurate?\n- `live_driver.py`: the `_header_emitted` flag \u2014 trace the three scenarios (unnamed\u2192renamed: emit once at rename; named-from-start\u2192renamed: emit once at create, no dup; unnamed never renamed: never). Is the flag set in the right place (only after actual print, not on deferred early-return)? Is firing `_emit_header` on change_renamed in on_event clean?\n- IMPORTANT \u2014 live/log consistency: for a NAMED-from-start change later renamed, the LIVE view shows the FIRST name (header already printed, streaming can't retract) while the LOG replay shows the FINAL name. Is that an acceptable, inherent streaming limitation, or a defect this fix introduces? Judge and state clearly. (Consider: the common name-on-intent flow is unnamed\u2192renamed, where both views show the final name. The divergence only affects the rare --title-then-rename case.)\n- Test quality: do the narrative + live_driver tests meaningfully cover the scenarios (including the no-double-emit case)? \n- The golden regeneration: the log golden header is now coherent (`#2026-06-03-vine-salt-kelp  vine salt kelp`) because the fixture's legacy change_renamed event (no new_title) is ignored. Is it acceptable that this fixture's rename is now invisible in the log (the fixture is a stale capture of the old random_title+boundary-rename flow; real current-schema renames are covered by the unit test)? Judge.\n- Style/consistency; scope creep; YAGNI.\nRun `make test` (expect 0 failed), `python -m ruff check src/ tests/`, `python -m mypy src`.\nReturn:\n- Strengths\n- Issues (Critical / Important / Minor) with file:line refs\n- Assessment: APPROVED or CHANGES REQUESTED\nBe rigorous about the live/log consistency question \u2014 that's the subtle one.",
+  "expected_findings": [
+    {
+      "locus": "narrative.py:0",
+      "symbol": "_h_change_renamed",
+      "description": "When a change is created with a title and then renamed, the live view shows the original name (already printed to stdout) while `imp log` shows the final name after replaying events; this is an inherent limitation of append-only streaming and is acceptable as documented.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_narrative.py:0",
+      "symbol": "test_header_emitted_exactly_once_when_named_from_start_then_renamed",
+      "description": "This test asserts that exactly one header line is emitted but does not verify which name is displayed in it, making it impossible to detect a stale-name regression in the live path without further test enhancement.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_narrative.py:0",
+      "symbol": "",
+      "description": "There is no explicit test for the scenario where a change is created unnamed, receives step events, and is never renamed, to verify that no header is ever printed; this scenario is only implicitly covered by the mechanically-guaranteed title guard.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_narrative.py:0",
+      "symbol": "",
+      "description": "There is no unit test to verify that `_h_change_renamed` correctly ignores a legacy event payload missing the `new_title` key; golden files provide only indirect coverage of this behavior.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

@@ -1,0 +1,37 @@
+diff --git a/src/imp/cli/slash.py b/src/imp/cli/slash.py
+index 60cbb58..4cffa02 100644
+--- a/src/imp/cli/slash.py
++++ b/src/imp/cli/slash.py
+@@ -96,11 +96,14 @@ async def ask_line_with_slash(prompt: Any, status: Any, change: Any) -> str:
+         # display must stay suspended while they do, or it interleaves/clobbers
+         # them before the loop re-prompts.
+         with status.suspend():
++            print()                       # §3: separate the prompt from prior output
+             line: str = await prompt.ask_async("> ")
+             if not is_slash_command(line):
++                print()                   # §3: separate submitted input from next output
+                 return line
+             result = handle_slash_line(line, change=change, output_fn=print)
+             if result is REPROMPT:
+                 continue
+             assert isinstance(result, str)  # handle_slash_line returns str for skill body
++            print()                       # §3: skill-body submission separated too
+             return result
+diff --git a/tests/test_slash.py b/tests/test_slash.py
+index 0b25f4a..0ac4035 100644
+--- a/tests/test_slash.py
++++ b/tests/test_slash.py
+@@ -158,3 +158,13 @@ def test_skill_args_event_still_records_name_only(tmp_path: Path) -> None:
+     events = [json.loads(line) for line in change._events.read_text().splitlines()]
+     loads = [e for e in events if e["type"] == "skill_load"]
+     assert loads[0]["payload"] == {"name": "refactor", "source": "human"}
++
++
++def test_blank_lines_bracket_the_prompt(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
++    from imp.cli.slash import ask_line_with_slash
++    prompt = _FakePrompt(["hello"])
++    line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeChange(tmp_path))
++    assert line == "hello"
++    out = capsys.readouterr().out
++    # one blank line before the prompt, one after the submitted line
++    assert out.count("\n") >= 2

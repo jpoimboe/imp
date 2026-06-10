@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-fb059a2",
+  "source": "mined",
+  "base_sha": "caabb973efc2950cc862699f94c309107f39652a",
+  "head_sha": "fb059a2",
+  "task_context": "You are performing a code quality review. Work from: /home/jpoimboe/imp\nDESCRIPTION: Added the render branch for RolesResolvedNode in render_text.py (header + per-role \"role \u2192 provider/model\" line with an optional differ annotation), plus a _DIFFER_LABELS map and a renderer unit test.\nPLAN_OR_REQUIREMENTS: Task 7 from docs/superpowers/plans/2026-05-30-model-role-constraints-followups.md\n## Your job\nAssess code quality:\n- Does the render branch follow the structure/conventions of sibling branches in `_render` (how they yield `_line`, handle depth/color, return)?\n- Is the f-string formatting clean and readable? Any over-long line (the project uses ruff \u2014 check line length)?\n- Is `_DIFFER_LABELS` a reasonable module constant with a sensible `\"?\"` fallback for unknown tiers?\n- Any dead code or inconsistency? Is the unit test asserting semantics (not brittle exact-column alignment, which Task 8 golden locks)?\n- Run `ruff check src/imp/cli/render_text.py tests/test_render_text.py` and targeted `python -m mypy src/imp/cli/render_text.py` if feasible (mypy is part of the gate). Confirm no new type errors.\nDo NOT flag pre-existing issues outside this diff.\nReturn:\n- **Strengths**\n- **Issues** (Critical / Important / Minor)\n- **Assessment** (Approved / Changes needed)",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-34a83ab",
+  "source": "mined",
+  "base_sha": "7200cfb",
+  "head_sha": "34a83ab",
+  "task_context": "You are a Senior Code Reviewer. Work from: /home/jpoimboe/imp.\n## What Was Implemented\nTask 9 (\u00a79): finalized prose blocks (AgentTextNode, LiteralTextNode) in src/imp/cli/render_text.py now render through rich.markdown.Markdown to ANSI at inner width, then get the existing magenta gutter/indent prefixed per whole line (never slicing an SGR escape). New `_render_markdown_block` + `_visible_len` helpers; both prose branches in `_render` route through `_render_markdown_block`. color=False \u21d2 no ANSI. This affects BOTH imp log and the live view (both share `_render`).\n## Requirements / Plan\nTask 9 from docs/superpowers/plans/2026-06-03-imp-new-live-run-polish.md (\u00a79). Files: render_text.py, test_render_text.py. Gate: `make check`.\n## Git Range\n## What to Check\n- `_visible_len` is DEAD CODE (defined, never called). The plan listed it but the renderer prefixes whole lines so it's unused. Decide: is keeping an unused helper justified, or should it be removed (YAGNI)? Give a clear recommendation. (mypy/ruff won't flag an unused module-level function, so this won't fail the gate \u2014 it's a maintainability call.)\n- rich Console construction: is creating a fresh Console per prose block reasonable, or a perf concern for long transcripts (many prose blocks)? The live driver re-renders on every event \u2014 could re-rendering all prose through rich repeatedly be slow? Assess whether prose blocks are re-rendered per-event in the live path or only once when finalized.\n- The `inner = max(8, width - _INDENT_W*depth)` floor: at deep nesting with narrow terminals, is 8 cols sensible? Does overflow (content rich won't reflow, e.g. code fences) corrupt the gutter alignment, or just overflow the right edge harmlessly?\n- Whitespace handling: `raw.rstrip()` on each line \u2014 does that ever strip meaningful trailing content from rich output (e.g. code-block padding)? Acceptable?\n- soft_wrap=False / highlight=False choices \u2014 correct for this use?\n- Test quality; the two new tests; no scope creep.\n## Output Format\n### Strengths\n### Issues (#### Critical / #### Important / #### Minor \u2014 file:line, what, why, fix)\n### Assessment \u2014 **Ready to merge?** [Yes|No|With fixes] + reasoning.\nDO probe the per-event re-render perf question (live path) and the _visible_len dead-code call \u2014 those are the two substantive items.",
+  "expected_findings": [
+    {
+      "locus": "/home/jpoimboe/imp/src/imp/cli/render_text.py:78",
+      "symbol": "_visible_len",
+      "description": "_visible_len is dead code that is never called anywhere in the codebase and should be deleted.",
+      "severity": "Important",
+      "must_catch": true,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "/home/jpoimboe/imp/src/imp/cli/render_text.py:87",
+      "symbol": "_render_markdown_block",
+      "description": "import io and from rich.* imports are deferred inside the function, an unusual pattern for a CLI module but correct and safe; leave as-is.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "/home/jpoimboe/imp/src/imp/cli/render_text.py:105",
+      "symbol": "_render_markdown_block",
+      "description": "The or [indent] fallback is correct but would be cleaner if documented with a comment explaining when it triggers.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "/home/jpoimboe/imp/tests/test_render_text.py:660",
+      "symbol": "test_markdown_block_keeps_gutter_and_visible_width",
+      "description": "The gutter-assertion is too loose; a tighter check would strip the first two characters and assert the gutter bar is present in the next two.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

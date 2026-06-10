@@ -1,0 +1,64 @@
+{
+  "id": "mined-quality-reviewer-20ef60a",
+  "source": "mined",
+  "base_sha": "6a81170",
+  "head_sha": "20ef60a",
+  "task_context": "You are a Senior Code Reviewer reviewing a focused change. Work from /home/jpoimboe/imp.\n## What to review\nTask 3 of an implementation plan: add a journal-backed \"Completed Changes\" section to `imp status`.\n- PLAN_OR_REQUIREMENTS: Task 3 in `docs/superpowers/plans/2026-06-01-live-test-worktree-slug-port.md`\nThe change replaces `_status_rows`/`_cmd_status` in `src/imp/cli/main.py` and adds `_status_row` (pure extractor), `_completed_rows` (journal-backed), `_STATUS_HEADER`, `_print_status_section`. Tests appended to `tests/test_journal_read_cli.py`. Context: `journal.journal_slugs(control) -> list[str]`, `journal.journal_show(control, slug, name) -> bytes | None`, and helpers `_last_event_timestamp`/`_journal_last_activity`/`_list_change_worktrees`/`_INFLIGHT` already exist.\n## Your Job\nEvaluate code quality of the diff only (don't flag pre-existing code outside the change). Consider:\n- Correctness and edge cases: in-flight precedence vs journal overlap, KeyError risk in `_status_row` (`st[\"status\"]`, `meta[\"title\"]` on malformed/missing journal data), None handling, the empty/PreconditionError branch.\n- Single responsibility / clean interfaces / independent testability of the new functions.\n- Consistency with existing `_cmd_*`/helper patterns in main.py (read nearby code to judge \u2014 e.g. column widths, print style).\n- Test quality: real behavior vs mocks; do they cover the precedence edge case meaningfully?\n- Naming, clarity, maintainability, duplication.\n- Did the change grow main.py problematically?\nYou may run `.venv/bin/pytest tests/test_journal_read_cli.py tests/test_cli_status.py tests/test_cli_smoke.py -q`, `make lint`, and `make typecheck` to confirm.\nReturn:\n- **Strengths**\n- **Issues** classified Critical / Important / Minor (file:line references)\n- **Assessment**: Ready to merge? Yes/No\nNote: the project gates on `make lint` AND `make typecheck` (not just tests) \u2014 a failure in either is at least an Important issue.",
+  "expected_findings": [
+    {
+      "locus": "main.py:539-541",
+      "symbol": "_status_row",
+      "description": "_status_row performs json.loads and key access without exception handling, risking crashes on malformed JSON or missing required keys in the journal.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "main.py:572-573",
+      "symbol": "_completed_rows",
+      "description": "The guard comment stating 'journaled rows are completed' is imprecise; should clarify that only completed rows are actually journaled and not errored rows.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_journal_read_cli.py:115-119",
+      "symbol": "test_status_shows_completed_section_from_journal",
+      "description": "Test asserts presence of values but does not verify they appear under the correct section headers (in-flight vs completed).",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "main.py:584-591",
+      "symbol": "_print_status_section",
+      "description": "_print_status_section prints section titles even when rows is empty, resulting in verbose output when no Changes exist.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "main.py:0",
+      "symbol": "_completed_rows",
+      "description": "_completed_rows calls _journal_last_activity which spawns three separate git cat-file subprocess invocations per slug, potentially slow at scale.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

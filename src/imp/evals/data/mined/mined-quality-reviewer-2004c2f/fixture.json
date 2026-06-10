@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-2004c2f",
+  "source": "mined",
+  "base_sha": "7806b00",
+  "head_sha": "2004c2f",
+  "task_context": "CODE QUALITY review (spec compliance already passed). Work from: /home/jpoimboe/imp.\n## Change under review\n- Task summary: Rewrote `_render_subagent` in `src/imp/cli/render_text.py` so default mode expands a subagent (boundary header via shared `header_line` + recursed children via `_render` + structured return value via `subagent_outcome_lines`), and `--full` does the same but with the expanded `\u25be` fold header. The outcome line is now emitted in BOTH modes (deliberate: --full is a superset of default). Updated the module docstring's \"Default:\" line. Added/flipped tests in `tests/test_render_text.py`.\n## IMPORTANT CONTEXT \u2014 do not flag as a defect\nThis is part of ONE atomic render change deliberately split across commits. After this commit, `test_snapshot_default` and `test_snapshot_full` are EXPECTED to be RED \u2014 the golden fixtures are regenerated in the very next task. The red suite here is by design (documented in the plan's bisect note); do NOT treat it as a blocking quality issue.\n## Your job\n- **Correctness:** Does emitting `subagent_outcome_lines` at `depth+1` in BOTH branches read correctly? The recursion `for c in sub.tree.root.children: yield from _render(...)` \u2014 is depth handling right (children at depth+1, outcome also at depth+1, so outcome aligns with the prose column)? Any double-emit or ordering concern?\n- **Clarity:** Are the inline comments accurate and useful (esp. the deviation rationale)? Is the full-vs-lean header split clear?\n- **Consistency:** Does it match the file's idioms (`_line`, `pal.fold_glyph`, keyword-only args, generator `yield from`)?\n- **Docstring:** Is the updated \"Default:\" line accurate and terse? Does it now correctly describe ALL default-mode behaviors (thinking/tools dropped, subagents expand, context folds summarize)?\n- **Tests:** Do the new tests meaningfully verify behavior (recursion filters nested thinking/tools, outcome always present, error styling, --full superset)? Any gap? Is the no-sub-subagent NOTE comment a reasonable documentation of the out-of-scope limitation rather than a silent gap?\nRead the actual current `_render_subagent`, `header_line`, `subagent_outcome_lines`, and the module docstring in `src/imp/cli/render_text.py` for context.\nReturn: **Strengths**, **Issues** (Critical/Important/Minor with file:line), **Assessment** (APPROVED or CHANGES NEEDED). Note: a red snapshot fixture is expected here and is NOT grounds for CHANGES NEEDED.",
+  "expected_findings": [
+    {
+      "locus": "src/imp/cli/render_text.py:236",
+      "symbol": "_render_subagent",
+      "description": "The `--full` branch hand-builds the header string instead of reusing `header_line`, duplicating the `task \u2192 {name}` label and `NODE_COLORS['subagent']` lookup, risking silent divergence if the format changes.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/cli/render_text.py:245",
+      "symbol": "_render_subagent",
+      "description": "The DEVIATION comment is long and somewhat argumentative, reading more like a commit message than an inline comment, making it heavy for future readers skimming the function.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

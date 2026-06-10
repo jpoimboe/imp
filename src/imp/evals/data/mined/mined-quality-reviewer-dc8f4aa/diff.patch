@@ -1,0 +1,162 @@
+diff --git a/src/imp/engine/model_rules.py b/src/imp/engine/model_rules.py
+new file mode 100644
+index 0000000..b97e526
+--- /dev/null
++++ b/src/imp/engine/model_rules.py
+@@ -0,0 +1,90 @@
++"""Parse and validate cross-role model constraints (model_rules:).
++
++Shared by providers/config.py (config-level model_rules), engine/loader.py
++(workflow-level model_rules), and providers/resolve.py (cycle detection on the
++merged constraint graph). Kept in its own module so none of those three need to
++import each other (which would risk an import cycle).
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Any
++
++from imp.engine._yaml import items, loc
++from imp.engine.errors import LoadError
++from imp.engine.types import RoleConstraint, SourceLoc
++
++
++def parse_role_constraints(raw: Any, yaml_path: Path) -> dict[str, RoleConstraint]:
++    """Parse a `model_rules:` mapping into {role: RoleConstraint}.
++
++        model_rules:
++          code_review:
++            differ_provider_from: code
++
++    `differ_provider_from` is the only constraint key in this design. Absent or
++    null `model_rules:` parses to an empty dict.
++    """
++    if raw is None:
++        return {}
++    if not isinstance(raw, dict):
++        raise LoadError(
++            "model_rules: must be a mapping of role to constraints",
++            SourceLoc(file=yaml_path, line=1),
++        )
++    out: dict[str, RoleConstraint] = {}
++    for role, spec in items(raw):
++        rsrc = loc(yaml_path, spec) if isinstance(spec, dict) else SourceLoc(
++            file=yaml_path, line=1)
++        if not isinstance(spec, dict):
++            raise LoadError(f"model_rules[{role!r}] must be a mapping", rsrc)
++        differ = spec.get("differ_provider_from")
++        if differ is not None and not isinstance(differ, str):
++            raise LoadError(
++                f"model_rules[{role!r}].differ_provider_from must be a role "
++                f"name (string)",
++                rsrc,
++            )
++        out[str(role)] = RoleConstraint(differ_provider_from=differ, source=rsrc)
++    return out
++
++
++def find_constraint_cycle(
++    constraints: dict[str, RoleConstraint],
++) -> list[str] | None:
++    """Return a cycle (list of role names) in the role->differ-target graph, or
++    None if acyclic. A self-reference (a role that differs from itself) is a
++    length-1 cycle and is always reported. Each role has at most one outgoing
++    edge (its differ_provider_from target).
++    """
++    edges: dict[str, str] = {
++        role: c.differ_provider_from
++        for role, c in constraints.items()
++        if c.differ_provider_from is not None
++    }
++    WHITE, GRAY, BLACK = 0, 1, 2
++    color: dict[str, int] = {}
++
++    def visit(node: str, stack: list[str]) -> list[str] | None:
++        color[node] = GRAY
++        stack.append(node)
++        nxt = edges.get(node)
++        if nxt is not None:
++            if color.get(nxt, WHITE) == GRAY:
++                i = stack.index(nxt)
++                return stack[i:] + [nxt]
++            if color.get(nxt, WHITE) == WHITE:
++                found = visit(nxt, stack)
++                if found is not None:
++                    return found
++        stack.pop()
++        color[node] = BLACK
++        return None
++
++    for role in edges:
++        if color.get(role, WHITE) == WHITE:
++            found = visit(role, [])
++            if found is not None:
++                return found
++    return None
+diff --git a/tests/test_model_rules.py b/tests/test_model_rules.py
+new file mode 100644
+index 0000000..ff5d952
+--- /dev/null
++++ b/tests/test_model_rules.py
+@@ -0,0 +1,60 @@
++# tests/test_model_rules.py
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from imp.engine.errors import LoadError
++from imp.engine.model_rules import find_constraint_cycle, parse_role_constraints
++from imp.engine.types import RoleConstraint
++
++_P = Path("workflow.yaml")
++
++
++def test_parse_none_is_empty():
++    assert parse_role_constraints(None, _P) == {}
++
++
++def test_parse_single_constraint():
++    raw = {"code_review": {"differ_provider_from": "code"}}
++    out = parse_role_constraints(raw, _P)
++    assert out["code_review"].differ_provider_from == "code"
++    assert out["code_review"].source is not None
++
++
++def test_parse_skips_line_marker_keys():
++    raw = {"__line__": 3, "code_review": {"differ_provider_from": "code", "__line__": 4}}
++    out = parse_role_constraints(raw, _P)
++    assert set(out) == {"code_review"}
++
++
++def test_parse_rejects_non_mapping_root():
++    with pytest.raises(LoadError, match="must be a mapping"):
++        parse_role_constraints(["not", "a", "map"], _P)
++
++
++def test_parse_rejects_non_string_target():
++    with pytest.raises(LoadError, match="must be a role name"):
++        parse_role_constraints({"r": {"differ_provider_from": 5}}, _P)
++
++
++def test_cycle_none_when_acyclic():
++    cs = {"code_review": RoleConstraint(differ_provider_from="code")}
++    assert find_constraint_cycle(cs) is None
++
++
++def test_cycle_self_reference():
++    cs = {"a": RoleConstraint(differ_provider_from="a")}
++    cyc = find_constraint_cycle(cs)
++    assert cyc is not None and cyc[0] == "a"
++
++
++def test_cycle_two_node():
++    cs = {
++        "a": RoleConstraint(differ_provider_from="b"),
++        "b": RoleConstraint(differ_provider_from="a"),
++    }
++    cyc = find_constraint_cycle(cs)
++    assert cyc is not None
++    assert set(cyc) == {"a", "b"}

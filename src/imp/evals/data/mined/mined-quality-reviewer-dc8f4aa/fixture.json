@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-dc8f4aa",
+  "source": "mined",
+  "base_sha": "6b46017",
+  "head_sha": "dc8f4aa",
+  "task_context": "Code quality review of a focused change in the repo at /home/jpoimboe/imp.\nDESCRIPTION: New pure-helper module `src/imp/engine/model_rules.py` with `parse_role_constraints()` and `find_constraint_cycle()`, plus tests.\nPLAN_OR_REQUIREMENTS: Task 2 from docs/superpowers/plans/2026-05-30-model-role-constraints.md\nAssess standard code quality AND specifically:\n- Single clear responsibility per file/function?\n- Is the cycle-detection DFS correct and readable? Any edge cases it mishandles (disconnected components, self-loops, multi-node cycles)?\n- Are names clear and accurate?\n- Do tests verify real behavior (parsing + cycle detection across acyclic/self-ref/two-node)?\n- Does it follow existing patterns (module docstring style, `from __future__ import annotations`, error handling via LoadError)?\nThis is a new ~90-line module with complete specified code. Judge proportionally; don't invent issues.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Needs changes).",
+  "expected_findings": [
+    {
+      "locus": "src/imp/engine/model_rules.py:76",
+      "symbol": "find_constraint_cycle",
+      "description": "List concatenation `stack[i:] + [nxt]` violates RUF005 rule; should use `[*stack[i:], nxt]` instead.",
+      "severity": "Important",
+      "must_catch": true,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_model_rules.py:0",
+      "symbol": "",
+      "description": "All 8 test functions lack `-> None` return-type annotations, inconsistent with other test files in the project.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/engine/model_rules.py:0",
+      "symbol": "find_constraint_cycle",
+      "description": "One-line docstring uses ASCII `->` inconsistently with Unicode `\u2192` used elsewhere.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

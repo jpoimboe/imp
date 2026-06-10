@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-8ba93c1",
+  "source": "mined",
+  "base_sha": "1f6db98",
+  "head_sha": "8ba93c1",
+  "task_context": "You are a code quality reviewer. Work from: /home/jpoimboe/imp/.claude/worktrees/name-on-intent\nDESCRIPTION: Task 5 \u2014 delete the now-dead rename deferral machinery: `State.pending_rename` field + serialization; the executor step-boundary hook that did the `git mv` (`apply_pending_rename`); the `_complete` `rename_dropped` fallback; and the `apply_pending_rename` function. Rewrites tests/test_executor_rename.py to the immediate-rename path; updates test_state_id.py; fixes a stale comment in context.py.\nPLAN_OR_REQUIREMENTS: Task 5 from docs/superpowers/plans/2026-06-05-name-on-intent-immutable-prompts.md\nPOLICY CONTEXT (important \u2014 do not re-raise as blocking): This project is PRE-RELEASE with NO external users, and its stated policy is to SKIP backward-compatibility shims. A separate reviewer already noted that `State.load()` uses `cls(**data, ...)` and would TypeError on a stale `state.json` that still contains a `pending_rename` key. That has been CONSIDERED and intentionally NOT fixed (no-backcompat policy; tests/dogfood always create fresh state; the plan deliberately omitted a migration). Do NOT flag the stale-key/backcompat concern as an issue \u2014 it's a settled decision. Focus your review elsewhere.\n- Were the deletions clean \u2014 no orphaned/dangling code, dead variables, now-unreachable branches, or now-unused imports left behind in executor.py and state.py? (`PYTHONPATH=src python -c \"import imp.engine.executor, imp.engine.state\"` must be clean.)\n- Quality of the rewritten tests/test_executor_rename.py: do the tests verify REAL behavior (the `_RenamingRunner` actually drives rename through `run_change`; the content-only test checks disk + event + id/path invariants)? Are the fakes reasonable, not over-mocked to the point of testing nothing?\n- Is the test_state_id.py edit minimal and correct?\n- Is the context.py `change_state` comment now accurate and clear?\n- Style consistency; any scope creep beyond the deletions + test rewrite + comment fix (the removal of a dead `pending_rename` assert from test_rename_change_tool.py is in-scope and fine).\n- Any genuinely NEW correctness problem introduced by the deletions (other than the settled backcompat one).\nRun `PYTHONPATH=src python -m pytest tests/test_executor_rename.py tests/test_state_id.py tests/test_default_workflow_e2e_mocked.py -v` to confirm green.\nReturn:\n- Strengths\n- Issues (Critical / Important / Minor) with file:line refs\n- Assessment: APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "tests/fixtures/open_by_asking_live.txt:93",
+      "symbol": "",
+      "description": "Golden fixture file contains stale text in captured agent output that references the old state.pending_rename / apply_pending_rename design; developers reading the fixture will get stale information.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/fixtures/open_by_asking_log.txt:99",
+      "symbol": "",
+      "description": "Golden fixture file contains stale text in captured agent output that references the old state.pending_rename / apply_pending_rename design; developers reading the fixture will get stale information.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

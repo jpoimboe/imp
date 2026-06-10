@@ -1,0 +1,64 @@
+{
+  "id": "mined-quality-reviewer-b1e9562",
+  "source": "mined",
+  "base_sha": "c603239",
+  "head_sha": "b1e9562",
+  "task_context": "Code quality review of Task 13 (process-group tool-kill). Spec compliance verified \u2705.\nWorking directory: `/home/jpoimboe/imp`\n## What to do\n2. Read the full new functions in `src/imp/cli/signals.py` (install_process_group, tool_kill_escalation, _signal_pg_excluding_self)\n3. Look at the CLI integration in `src/imp/cli/main.py`\n4. Look at the two new tests in `tests/test_signals.py`\n## What to assess\n**Code quality (signals.py):**\n- `install_process_group()` calling `os.setpgrp()`: this changes the global process state \u2014 calling it inside _cmd_new affects the running pytest process if a test ever calls _cmd_new. Verify no test does that, or that pytest tolerates it.\n- `tool_kill_escalation`'s flow: SIGTERM \u2192 time.sleep(timeout) \u2192 SIGKILL. Time.sleep blocks the main thread for 2 seconds. Is this acceptable? (Yes: the user just hit Ctrl+C and is waiting for graceful exit.) Document this?\n- The `_signal_pg_excluding_self` walks every entry in /proc. On a busy system, this could be hundreds of entries. Acceptable for V0 (runs only on interrupt).\n- The /proc/stat parsing is fragile \u2014 what if the proc dies between listdir and open? Caught by the `FileNotFoundError` handler. What about race where pid is reused? Worst case: signal sent to wrong process, but only if it shares our pgid (unlikely race). Acceptable.\n- `_signal_pg_excluding_self` is private (underscore prefix). The kill_self=False mode is test-only. Documented?\n**Code quality (main.py integration):**\n- `install_process_group()` is the first statement in _cmd_new and _cmd_resume. If called from a test, this changes pytest's pgid. Risky? Look at the test_cli.py file briefly \u2014 do any tests invoke `_cmd_new()` directly? If yes, this could break those tests.\n- `print(\"\\n(interrupting...)\", file=sys.stderr)` is additive diagnostic. Fine.\n- The `tool_kill_escalation(timeout=2.0)` blocks 2s during shutdown. In a test that ever triggers KeyboardInterrupt, this would add 2s of latency. Worth noting.\n**Test quality:**\n- `test_install_process_group_makes_us_leader` may have ordering effects with other tests \u2014 if it runs FIRST, pytest's pgid changes for all subsequent tests. The autouse fixture or test ordering should be checked. Or the test should run in a subprocess via `subprocess.run` to isolate.\n- `test_tool_kill_escalation_terminates_child` is well-designed: child sleeps 30s, escalation kills it within ~0.5s, test polls 50x100ms = 5s budget.\n- Both POSIX-gated correctly.\n- macOS gated on the second test (kill_self=False path lacks /proc).\n**Integration concerns:**\n- Pytest itself is in the same process group after install_process_group. If a test calls `tool_kill_escalation(kill_self=True)` accidentally, pytest dies. This is why the test uses kill_self=False. The risk is: anyone reading the test code might assume kill_self=True is the test-safe default \u2014 it isn't. Worth a comment.\n## Output\n**Strengths:**\n**Issues:**\n- Critical:\n- Important:\n- Minor:\n**Assessment:** Approved / Approved with minor concerns / Changes required\nBe specific. Keep concise.",
+  "expected_findings": [
+    {
+      "locus": "test_signals.py:0",
+      "symbol": "test_install_process_group_makes_us_leader",
+      "description": "Mutates shared pytest process state by calling os.setpgrp() in-process, creating latent coupling with other tests like those in test_cli.py; should be moved to a subprocess.",
+      "severity": "Important",
+      "must_catch": true,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "main.py:0",
+      "symbol": "",
+      "description": "tool_kill_escalation() has a default 2.0-second blocking sleep during interrupt escalation that can slow tests unexpectedly; the call site needs a clear comment documenting that this sleep is intentional.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_signals.py:81",
+      "symbol": "",
+      "description": "Import statements (stdlib and pytest) appear mid-file after test functions instead of at the top, violating PEP 8.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_signals.py:115",
+      "symbol": "test_tool_kill_escalation_terminates_child",
+      "description": "Inline comment explaining kill_self=False should explicitly note that production uses kill_self=True as the default, making the asymmetry clear for future test authors.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "signals.py:0",
+      "symbol": "_signal_pg_excluding_self",
+      "description": "Function lacks a comment explaining that the O(n_procs) /proc walk is acceptable because it runs only on interrupt, not in hot paths.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

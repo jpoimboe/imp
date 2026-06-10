@@ -1,0 +1,28 @@
+{
+  "id": "mined-quality-reviewer-777269c",
+  "source": "mined",
+  "base_sha": "72b49d1",
+  "head_sha": "777269c",
+  "task_context": "You are a Senior Code Reviewer. Work from: /home/jpoimboe/imp.\n## What Was Implemented\nTask 6 (\u00a78 bug fix): in src/imp/cli/narrative.py, `_h_llm_response` now flushes the tool-burst + appends the AgentTextNode ONLY when the response has non-empty text (an empty-text tool_use carrier is a no-op); `_h_thinking` no longer flushes the burst (just appends the ThinkingFold). This stops consecutive tool_calls (separated by claude_code's empty-text llm_response carriers) from each starting a fresh burst, so the status \"N tools\" counter climbs correctly. Removed the xfail from the repro test + added two focused unit tests.\n## Requirements / Plan\nTask 6 from docs/superpowers/plans/2026-06-03-imp-new-live-run-polish.md (\u00a78). Files: narrative.py, test_bug_tool_counter.py, test_narrative.py. Gate: `make check`.\n## Git Range\n## What to Check\n- Correctness of the burst lifecycle after this change: with _h_thinking no longer flushing, is there any scenario where a burst that SHOULD close now stays open inappropriately (e.g. a standalone thinking turn followed by prose \u2014 does the prose still flush it)? The plan claims \"the next real prose / step boundary flushes the burst\" \u2014 VERIFY a step boundary (step_completed/step_started) and a real prose llm_response both still flush an open burst. Read the relevant handlers.\n- Could a burst now leak across step boundaries (tools from step A merging into step B's count)? Check the step_started/step_completed handlers flush or reset the burst.\n- Test quality: the unit tests + the fixture-driven repro verify real behavior.\n- Comments accurately describe the new invariant; no stale comments left.\n- No scope creep.\n## Output Format\n### Strengths\n### Issues (#### Critical / #### Important / #### Minor \u2014 file:line, what, why, fix)\n### Assessment \u2014 **Ready to merge?** [Yes|No|With fixes] + reasoning.\nThis is a bug fix touching burst-lifecycle state \u2014 DO probe the \"does the burst still close when it should\" question thoroughly, that's where a regression would hide.",
+  "expected_findings": [
+    {
+      "locus": "tests/test_bug_tool_counter.py:2",
+      "symbol": "",
+      "description": "Module docstring (lines 2\u201318) and inline comment (line 47) still describe pre-fix state; update docstring to past tense and remove xfail narrative since fix has landed.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

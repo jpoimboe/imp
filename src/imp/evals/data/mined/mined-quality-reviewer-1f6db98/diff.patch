@@ -1,0 +1,172 @@
+diff --git a/src/imp/agents/tools/rename_change.py b/src/imp/agents/tools/rename_change.py
+index cdaac82..4dfc1bf 100644
+--- a/src/imp/agents/tools/rename_change.py
++++ b/src/imp/agents/tools/rename_change.py
+@@ -1,27 +1,36 @@
+-"""rename_change tool (spec §3, §10). Records the requested rename; the
+-executor applies it at the next step boundary under the git-lock."""
++"""rename_change tool (spec §3, §10). Applies the rename IMMEDIATELY inside the
++tool call and returns the settled slug so the agent uses it in-band, same turn.
++Content-only: rewrites the gitignored change.json, touches no git. Top-level
++only — raises for subagents (no change_state)."""
+ 
+ from __future__ import annotations
+ 
+ from typing import Any
+ 
+ from imp.agents.tools import imp_tool
+-from imp.engine.slug import slugify
++from imp.engine.slug import dated_slug, slugify
++from imp.engine.state import JsonlEventLog
+ 
+ 
+ @imp_tool(
+     name="rename_change",
+     description=(
+         "Rename this Change to a meaningful name once you understand the work. "
+-        "Takes effect at the next step boundary; the run continues either way."
++        "Applies immediately and returns the new slug; use that slug to write "
++        "and commit imp/specs/<slug>.md this same turn."
+     ),
+ )
+ def rename_change(ctx: Any, name: str) -> str:
+     slugify(name)  # validate now (raises InvalidSlug -> ValueError) for fast feedback
+     if ctx.change_state is None:
+         raise RuntimeError("rename_change is only available to top-level Change steps")
+-    ctx.change_state.pending_rename = name
+-    return (
+-        f"Rename to {name!r} recorded; it will be applied at the next step "
+-        "boundary (slug derived automatically)."
+-    )
++    change = ctx.change
++    new_slug = dated_slug(name, date=change.id[:10])
++    # No-op short-circuit on SLUG equality, against the LIVE change.slug (not the
++    # frozen render-time snapshot) so a second rename this turn compares against
++    # the first call's result. Slug-equality (not title) is the cache-stability test.
++    if new_slug == change.slug:
++        return f"already named {new_slug}"
++    log = ctx.event_log or JsonlEventLog(ctx.events_path)
++    change.rename(name, log=log)
++    return (f"renamed to {new_slug}; use imp/specs/{new_slug}.md for the spec")
+diff --git a/src/imp/engine/change.py b/src/imp/engine/change.py
+index 95a5839..25c35c8 100644
+--- a/src/imp/engine/change.py
++++ b/src/imp/engine/change.py
+@@ -30,6 +30,21 @@ class Change:
+         from imp.engine.slug import dated_slug
+         return dated_slug(self.title, date=self.id[:10])
+ 
++    def rename(self, name: str, *, log: JsonlEventLog) -> str:
++        """Content-only rename (no git): set title, rewrite change.json under the
++        gitignored .imp/ (never dirties the tracked worktree), emit change_renamed.
++        Returns the new derived slug. The id is immutable, so nothing else moves."""
++        old_title = self.title
++        self.title = name                       # slug property now derives anew
++        meta_path = self.change_dir / "change.json"
++        meta = json.loads(meta_path.read_text())
++        meta["title"] = name
++        meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
++        log.append(agent_id=None, type="change_renamed",
++                   payload={"id": self.id, "old_title": old_title,
++                            "new_title": name})
++        return self.slug
++
+     @property
+     def workflow_dir(self) -> Path:
+         # The Change's own worktree carries the tracked workflow; the branch IS
+diff --git a/tests/test_rename_change_tool.py b/tests/test_rename_change_tool.py
+index 206140f..99fc517 100644
+--- a/tests/test_rename_change_tool.py
++++ b/tests/test_rename_change_tool.py
+@@ -1,26 +1,81 @@
++import json
++from pathlib import Path
++
+ import pytest
+ 
+ from imp.agents.tools import get_registry
+ from imp.agents.tools.context import ToolContext
++from imp.engine.change import Change
+ from imp.engine.state import State
++from tests.conftest import _seed_control
+ 
+ 
+-def _ctx(tmp_path, state):
+-    ctx = ToolContext(project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e")
++def _ctx(ch: Change, state: State) -> ToolContext:
++    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
++                      events_path=ch.events_path)
++    ctx.change = ch
+     ctx.change_state = state
++    ctx.event_log = ch.event_log()
+     return ctx
+ 
+ 
+-def test_rename_change_records_pending(tmp_path) -> None:
+-    state = State(id="old", step="s", step_attempt=0, status="running")
++def _make(tmp_path: Path, title: str = "") -> tuple[Change, State]:
++    _seed_control(tmp_path)
++    ch = Change.create(tmp_path, title=title,
++                       change_id="2026-06-05-bbb111", base_branch="main")
++    return ch, State.load(ch.state_dir)
++
++
++def test_rename_applies_immediately_and_returns_slug(tmp_path: Path) -> None:
++    ch, state = _make(tmp_path)
+     tool = get_registry()["rename_change"]
+-    msg = tool.invoke(_ctx(tmp_path, state), {"name": "Add OAuth"})
+-    assert state.pending_rename == "Add OAuth"
+-    assert "next step boundary" in msg.lower()
++    msg = tool.invoke(_ctx(ch, state), {"name": "Add OAuth"})
++
++    assert ch.title == "Add OAuth"
++    assert ch.slug == "2026-06-05-add-oauth"
++    assert "2026-06-05-add-oauth" in msg
++    assert "imp/specs/2026-06-05-add-oauth.md" in msg
++    meta = json.loads((ch.change_dir / "change.json").read_text())
++    assert meta["title"] == "Add OAuth"
++    assert state.pending_rename is None if hasattr(state, "pending_rename") else True
++    renamed = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
++    assert renamed and renamed[-1]["payload"]["new_title"] == "Add OAuth"
+ 
+ 
+-def test_rename_change_rejects_empty(tmp_path) -> None:
+-    state = State(id="old", step="s", step_attempt=0, status="running")
++def test_rename_noop_when_slug_unchanged(tmp_path: Path) -> None:
++    ch, state = _make(tmp_path, title="Add OAuth")
++    tool = get_registry()["rename_change"]
++    # A different title that slugifies identically must NOT churn (slug equality).
++    msg = tool.invoke(_ctx(ch, state), {"name": "add  oauth"})
++    assert "already named" in msg.lower()
++    assert [e for e in ch.event_log().read() if e["type"] == "change_renamed"] == []
++
++
++def test_double_rename_compares_against_live_slug(tmp_path: Path) -> None:
++    ch, state = _make(tmp_path)
++    ctx = _ctx(ch, state)
++    tool = get_registry()["rename_change"]
++    tool.invoke(ctx, {"name": "First Name"})
++    msg2 = tool.invoke(ctx, {"name": "first name"})   # same slug as the FIRST call
++    assert "already named" in msg2.lower()
++    assert ch.slug == "2026-06-05-first-name"
++    emitted = [e for e in ch.event_log().read() if e["type"] == "change_renamed"]
++    assert len(emitted) == 1                          # only the first applied
++
++
++def test_rename_rejects_empty(tmp_path: Path) -> None:
++    ch, state = _make(tmp_path)
+     tool = get_registry()["rename_change"]
+     with pytest.raises(ValueError):
+-        tool.invoke(_ctx(tmp_path, state), {"name": "!!!"})
++        tool.invoke(_ctx(ch, state), {"name": "!!!"})
++
++
++def test_rename_from_subagent_raises(tmp_path: Path) -> None:
++    ch, _ = _make(tmp_path)
++    ctx = ToolContext(project_root=ch.project_root, fs_permissions=(),
++                      events_path=ch.events_path)
++    ctx.change = ch
++    ctx.change_state = None              # subagent: no rename authority
++    tool = get_registry()["rename_change"]
++    with pytest.raises(RuntimeError):
++        tool.invoke(ctx, {"name": "Whatever"})

@@ -1,0 +1,28 @@
+{
+  "id": "mined-quality-reviewer-e0d35d5",
+  "source": "mined",
+  "base_sha": "c434fbe",
+  "head_sha": "e0d35d5",
+  "task_context": "You are a code quality reviewer. Work from: /home/jpoimboe/imp/.claude/worktrees/name-on-intent\nReview the code quality of a single commit in the imp codebase.\nDESCRIPTION: Task 1 \u2014 `dated_slug` returns `\"\"` for a blank/unsluggable name (the canonical \"unnamed\" signal), instead of raising InvalidSlug.\nPLAN_OR_REQUIREMENTS: Task 1 from docs/superpowers/plans/2026-06-05-name-on-intent-immutable-prompts.md\n- Correctness: does the try/except correctly catch only InvalidSlug? Could it swallow unintended errors?\n- Clarity: is the docstring accurate and is the intent clear?\n- Tests: do they actually verify behavior (not mocks)? Comprehensive enough?\n- Style: matches surrounding code? naming clear?\n- File responsibility: each file one clear responsibility?\n- Did this change create large new files or significantly grow existing files? (Only flag what THIS change contributed.)\n- Over-engineering / YAGNI?\nThis is a tiny, surgical change. Be proportionate \u2014 don't invent issues. Run `PYTHONPATH=src python -m pytest tests/test_slug.py -v` to confirm green.\nReturn:\n- Strengths\n- Issues (Critical / Important / Minor) \u2014 with file:line references\n- Assessment: APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/engine/slug.py:43",
+      "symbol": "",
+      "description": "The docstring phrase 'slugify itself still raises on empty' is ambiguous; clearer wording would distinguish whether it refers to empty strings or unsluggable inputs.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

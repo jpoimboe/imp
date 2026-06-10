@@ -1,0 +1,144 @@
+diff --git a/src/imp/agents/deepagent_runner.py b/src/imp/agents/deepagent_runner.py
+index 41b42fe..1b5b4d1 100644
+--- a/src/imp/agents/deepagent_runner.py
++++ b/src/imp/agents/deepagent_runner.py
+@@ -27,7 +27,7 @@ from collections.abc import Iterator
+ from typing import Any
+ 
+ from deepagents import create_deep_agent
+-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
++from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage, ToolMessage
+ from pydantic import BaseModel
+ 
+ from imp.agents.backends import build_backend
+@@ -139,6 +139,29 @@ def _translate_message(
+     return out
+ 
+ 
++def _process_stream_chunk(
++    mode: str, payload: Any, suppress: list[str],
++) -> Iterator[dict[str, Any]]:
++    """Translate one stream chunk (from dual-mode stream) to imp events.
++
++    mode='messages': payload is (AIMessageChunk, metadata) — emit agent_token
++    mode='updates': payload is a node-update dict — emit translated messages
++        (agent_message, tool_call, tool_result, user_input) and extract
++        structured_response if present.
++    """
++    if mode == "messages":
++        chunk, _meta = payload if isinstance(payload, tuple) else (payload, {})
++        if isinstance(chunk, AIMessageChunk):
++            text = chunk.content if isinstance(chunk.content, str) else ""
++            if text:
++                yield {"type": "agent_token", "payload": {"text": text}}
++        return
++    if mode == "updates" and isinstance(payload, dict):
++        for msg in _extract_messages(payload):
++            yield from _translate_message(msg, suppress)
++        return
++
++
+ class DeepAgentRunner:
+     def __init__(self, model_factory: Any = None) -> None:
+         """model_factory is a test escape hatch (review minor): if set,
+@@ -208,7 +231,7 @@ class DeepAgentRunner:
+         # langgraph requires a `thread_id` in the config whenever a
+         # checkpointer is attached. We derive a per-step thread id from
+         # change_id + agent name so each step gets its own checkpoint scope.
+-        stream_kwargs: dict[str, Any] = {"stream_mode": "updates"}
++        stream_kwargs: dict[str, Any] = {"stream_mode": ["updates", "messages"]}
+         if invocation.checkpointer is not None:
+             stream_kwargs["config"] = {
+                 "configurable": {
+@@ -219,15 +242,21 @@ class DeepAgentRunner:
+ 
+         structured: BaseModel | None = None
+         try:
+-            for chunk in agent.stream(  # type: ignore[call-overload]
++            for item in agent.stream(  # type: ignore[call-overload]
+                 {"messages": initial_messages},
+                 **stream_kwargs,
+             ):
+-                for msg in _extract_messages(chunk):
+-                    yield from _translate_message(msg, suppress)
+-                sr = _extract_structured_response(chunk)
+-                if sr is not None:
+-                    structured = sr
++                # In multi-mode the iterator yields (mode, payload) tuples
++                if isinstance(item, tuple) and len(item) == 2:
++                    mode, payload = item
++                else:
++                    mode, payload = "updates", item
++                for event in _process_stream_chunk(mode, payload, suppress):
++                    yield event
++                if mode == "updates" and isinstance(payload, dict):
++                    sr = _extract_structured_response(payload)
++                    if sr is not None:
++                        structured = sr
+         except Exception as e:
+             yield {"type": "error", "payload": {
+                 "message": f"runner crashed: {type(e).__name__}: {e}",
+diff --git a/src/imp/engine/executor.py b/src/imp/engine/executor.py
+index abc4bd4..c9880f2 100644
+--- a/src/imp/engine/executor.py
++++ b/src/imp/engine/executor.py
+@@ -157,7 +157,8 @@ def execute_step(
+     # Runner crashes become an `error` event + Retry instead of propagating up.
+     try:
+         for event in runner.run(invocation):
+-            log.append(event["type"], event["payload"])
++            if event["type"] != "agent_token":
++                log.append(event["type"], event["payload"])
+             if event["type"] == "agent_output":
+                 agent_output = event["payload"]
+             if event["type"] == "error":
+@@ -514,7 +515,8 @@ def _run_agent_gate(
+     output: dict[str, Any] | None = None
+     try:
+         for event in runner.run(invocation):
+-            log.append(event["type"], event["payload"])
++            if event["type"] != "agent_token":
++                log.append(event["type"], event["payload"])
+             if event["type"] == "agent_output":
+                 output = event["payload"]
+             if event["type"] == "error":
+diff --git a/tests/test_deepagent_runner.py b/tests/test_deepagent_runner.py
+index 1e91b80..0c21cf7 100644
+--- a/tests/test_deepagent_runner.py
++++ b/tests/test_deepagent_runner.py
+@@ -9,3 +9,35 @@ def test_module_imports_cleanly() -> None:
+     from imp.agents.deepagent_runner import DeepAgentRunner
+ 
+     assert DeepAgentRunner is not None
++
++
++def test_runner_emits_agent_token_events_in_order(monkeypatch) -> None:
++    """A fake stream that yields message-mode token chunks should produce
++    agent_token events in arrival order, with a final agent_message
++    aggregating them."""
++    from collections.abc import Iterator
++    from typing import Any
++
++    from langchain_core.messages import AIMessage, AIMessageChunk
++    from langchain_core.outputs import ChatGeneration, ChatResult
++
++    from imp.agents.deepagent_runner import _process_stream_chunk
++
++    # Simulate two updates-mode chunks (message accumulation) + final structured
++    tokens: list[str] = []
++    messages: list[str] = []
++
++    chunks = [
++        ("messages", (AIMessageChunk(content="hello "), {})),
++        ("messages", (AIMessageChunk(content="world"), {})),
++        ("updates", {"agent": {"messages": [AIMessage(content="hello world")]}}),
++    ]
++    for mode, payload in chunks:
++        events = list(_process_stream_chunk(mode, payload, suppress=[]))
++        for e in events:
++            if e["type"] == "agent_token":
++                tokens.append(e["payload"]["text"])
++            elif e["type"] == "agent_message":
++                messages.append(e["payload"]["text"])
++    assert tokens == ["hello ", "world"]
++    assert messages == ["hello world"]

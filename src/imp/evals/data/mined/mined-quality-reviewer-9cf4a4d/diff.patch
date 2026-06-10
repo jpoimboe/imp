@@ -1,0 +1,171 @@
+diff --git a/src/imp/providers/web_native.py b/src/imp/providers/web_native.py
+new file mode 100644
+index 0000000..6a372d6
+--- /dev/null
++++ b/src/imp/providers/web_native.py
+@@ -0,0 +1,96 @@
++"""Reserved provider-native web tool names, capability map, and spec builders
++(spec §3, §4, §5, §8).
++
++`web_search` / `web_fetch` are reserved capability names, NOT registry tools.
++Each runner's `_build_tools` skips them and routes here. The provider executes
++the call server-side (Anthropic/OpenAI) or CLI-side (Claude Code); imp only
++observes and logs the normalized events.
++"""
++
++from __future__ import annotations
++
++from typing import Any
++
++from imp.engine.types import AgentDef
++from imp.providers import errors as perr
++
++# The two reserved native-capability names. Skipped by every `_build_tools`.
++WEB_TOOL_NAMES = frozenset({"web_search", "web_fetch"})
++
++# Which normalized web tools each provider can fulfill natively. OpenAI's
++# Responses API has built-in web_search but no native web_fetch (a future
++# `http_get` escape hatch is out of scope), so declaring web_fetch on OpenAI is
++# a fail-loud misconfiguration.
++_PROVIDER_WEB_SUPPORT: dict[str, frozenset[str]] = {
++    "anthropic": frozenset({"web_search", "web_fetch"}),
++    "claude_code": frozenset({"web_search", "web_fetch"}),
++    "openai": frozenset({"web_search"}),
++}
++
++# Anthropic native server-tool type identifiers. VERIFY against the pinned SDK
++# during Task 6 (the web_fetch type string + its beta header are load-bearing).
++_ANTHROPIC_WEB_SEARCH_TYPE = "web_search_20250305"
++_ANTHROPIC_WEB_FETCH_TYPE = "web_fetch_20250910"
++
++# Claude Code builtin names that back each normalized web tool, and the
++# inverse used by the CC receive loop (Task 11) to normalize an observed
++# builtin tool_use. Single source of truth for both directions.
++_CC_BUILTIN_FOR = {"web_search": "WebSearch", "web_fetch": "WebFetch"}
++CC_WEB_BUILTIN_TO_NORM = {v: k for k, v in _CC_BUILTIN_FOR.items()}
++
++
++def declared_web_tools(agent_def: AgentDef) -> list[str]:
++    """The reserved web names this agent declared (subset of WEB_TOOL_NAMES).
++    Sorted so injected spec/event order is deterministic — `agent_def.tools`
++    is a frozenset with no stable iteration order."""
++    return sorted(n for n in agent_def.tools if n in WEB_TOOL_NAMES)
++
++
++def check_web_capability(provider_name: str, agent_def: AgentDef) -> None:
++    """Raise a clear ConfigError (§8) if the agent declares a web tool the
++    resolved provider cannot fulfill. No-op when everything is supported."""
++    declared = set(declared_web_tools(agent_def))
++    if not declared:
++        return
++    supported = _PROVIDER_WEB_SUPPORT.get(provider_name, frozenset())
++    unsupported = sorted(declared - supported)
++    if unsupported:
++        raise perr.ConfigError(
++            f"provider {provider_name!r} does not support native web tool(s): "
++            f"{unsupported}. Remove them from the agent's `tools:` or pin a "
++            f"provider/model that supports them.")
++
++
++def anthropic_web_tool_specs(agent_def: AgentDef) -> list[dict[str, Any]]:
++    """Native Anthropic server-tool specs for the declared web tools."""
++    specs: list[dict[str, Any]] = []
++    for n in declared_web_tools(agent_def):
++        if n == "web_search":
++            specs.append({"type": _ANTHROPIC_WEB_SEARCH_TYPE, "name": "web_search"})
++        elif n == "web_fetch":
++            specs.append({"type": _ANTHROPIC_WEB_FETCH_TYPE, "name": "web_fetch"})
++    return specs
++
++
++def anthropic_beta_headers(agent_def: AgentDef) -> dict[str, str]:
++    """Anthropic-beta opt-in header value(s) required by the declared web tools.
++    Returns {} when none are needed. VERIFY exact tokens in Task 6."""
++    betas: list[str] = []
++    if "web_fetch" in agent_def.tools:
++        betas.append("web-fetch-2025-09-10")
++    if betas:
++        return {"anthropic-beta": ",".join(betas)}
++    return {}
++
++
++def openai_web_tool_specs(agent_def: AgentDef) -> list[dict[str, Any]]:
++    """Built-in Responses web search tool entry, when declared."""
++    if "web_search" in agent_def.tools:
++        return [{"type": "web_search"}]
++    return []
++
++
++def cc_enabled_web_builtins(agent_def: AgentDef) -> list[str]:
++    """Claude Code builtin names to enable (de-deny + allowlist) for the
++    declared web tools."""
++    return [_CC_BUILTIN_FOR[n] for n in declared_web_tools(agent_def)]
+diff --git a/tests/test_web_native.py b/tests/test_web_native.py
+new file mode 100644
+index 0000000..8c71519
+--- /dev/null
++++ b/tests/test_web_native.py
+@@ -0,0 +1,63 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from imp.engine.types import AgentDef, OutputSchema, SourceLoc
++from imp.providers import errors as perr
++from imp.providers import web_native as wn
++
++
++def _agent(tools: frozenset[str]) -> AgentDef:
++    loc = SourceLoc(file=Path("a.md"), line=1)
++    return AgentDef(
++        name="t", description="", tools=tools, subagents=(),
++        output_schema=OutputSchema(fields=(), source=loc),
++        prompt_template_source="", source_path=Path("a.md"), source=loc)
++
++
++def test_reserved_names() -> None:
++    assert frozenset({"web_search", "web_fetch"}) == wn.WEB_TOOL_NAMES
++
++
++def test_declared_web_tools_filters_and_orders() -> None:
++    got = wn.declared_web_tools(_agent(frozenset({"bash", "web_search", "web_fetch"})))
++    assert sorted(got) == ["web_fetch", "web_search"]
++
++
++def test_capability_ok_for_anthropic_both() -> None:
++    # Should not raise.
++    wn.check_web_capability("anthropic", _agent(frozenset({"web_search", "web_fetch"})))
++
++
++def test_capability_openai_web_fetch_fails_loud() -> None:
++    with pytest.raises(perr.ConfigError) as ei:
++        wn.check_web_capability("openai", _agent(frozenset({"web_fetch"})))
++    assert "web_fetch" in str(ei.value)
++    assert "openai" in str(ei.value)
++
++
++def test_capability_openai_web_search_ok() -> None:
++    wn.check_web_capability("openai", _agent(frozenset({"web_search"})))
++
++
++def test_anthropic_specs() -> None:
++    specs = wn.anthropic_web_tool_specs(_agent(frozenset({"web_search", "web_fetch"})))
++    types = {s["type"] for s in specs}
++    assert "web_search_20250305" in types
++    assert any(t.startswith("web_fetch") for t in types)
++    assert all(s["name"] in {"web_search", "web_fetch"} for s in specs)
++
++
++def test_openai_specs_web_search_only() -> None:
++    assert wn.openai_web_tool_specs(_agent(frozenset({"web_search"}))) == [
++        {"type": "web_search"}]
++    assert wn.openai_web_tool_specs(_agent(frozenset({"bash"}))) == []
++
++
++def test_cc_enabled_builtins() -> None:
++    got = wn.cc_enabled_web_builtins(_agent(frozenset({"web_search"})))
++    assert got == ["WebSearch"]
++    got2 = wn.cc_enabled_web_builtins(_agent(frozenset({"web_search", "web_fetch"})))
++    assert sorted(got2) == ["WebFetch", "WebSearch"]

@@ -1,0 +1,80 @@
+diff --git a/src/imp/cli/render_text.py b/src/imp/cli/render_text.py
+index 06dc20a..d545b7e 100644
+--- a/src/imp/cli/render_text.py
++++ b/src/imp/cli/render_text.py
+@@ -144,9 +144,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
+                         *pal.NODE_COLORS["thinking"])
+             for line in _wrap(node.content, width, depth + 1):
+                 yield pal.ansi(line, *pal.NODE_COLORS["thinking"], enabled=color)
+-        else:
+-            summary = f"{pal.fold_glyph(expanded=False)} thinking · {len(node.content)} chars"
+-            yield _line(summary, depth, color, *pal.NODE_COLORS["thinking"])
++        # full=False: thinking is noise in the default view — render nothing.
++        # (A transient `· thinking` status cue lives in narrative.current_activity.)
+         return
+ 
+     if isinstance(node, nv.ToolBurstFold):
+@@ -212,22 +211,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
+         return
+ 
+ 
+-def _burst_counts(burst: nv.ToolBurstFold) -> str:
+-    counts: dict[str, int] = {}
+-    for c in burst.calls:
+-        counts[c.name] = counts.get(c.name, 0) + 1
+-    by_count = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+-    return " · ".join(f"{n} {name}" for name, n in by_count)
+-
+-
+ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
+                   color: bool, width: int) -> Iterator[str]:
+-    total = len(burst.calls)
+     if not full:
+-        glyph = pal.fold_glyph(expanded=False)
+-        yield _line(f"{glyph} {total} tools · {_burst_counts(burst)}", depth, color,
+-                    *pal.NODE_COLORS["tools"])
+-        return
++        return  # tool bursts are noise in the default view — render nothing.
+     yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
+                 *pal.NODE_COLORS["tools"])
+     for c in burst.calls:
+diff --git a/tests/test_render_text.py b/tests/test_render_text.py
+index d535bca..2a5fac4 100644
+--- a/tests/test_render_text.py
++++ b/tests/test_render_text.py
+@@ -50,7 +50,7 @@ def test_agent_text_rendered_in_full_not_truncated() -> None:
+     assert out.count("\n") >= 5
+ 
+ 
+-def test_collapsed_folds_show_one_line_summaries() -> None:
++def test_collapsed_folds_drop_thinking_and_tool_summaries() -> None:
+     out = "\n".join(_lines([
+         _ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"),
+@@ -62,10 +62,9 @@ def test_collapsed_folds_show_one_line_summaries() -> None:
+         _ev("8", "tool_call", agent_id="step:p/s", id="b3", name="ls", input={}),
+         _ev("9", "tool_result", agent_id="step:p/s", id="b3", content="ok", error=False),
+     ]))
+-    assert "▸ thinking · 120 chars" in out
+-    # burst summary sorted by count desc
+-    assert "▸ 3 tools · 2 bash · 1 ls" in out
+-    # no expanded tool lines in collapsed mode
++    # Default mode drops both the thinking line and the tool-burst summary line.
++    assert "thinking" not in out
++    assert "tools" not in out
+     assert "⏺" not in out
+ 
+ 
+@@ -198,10 +197,9 @@ def test_empty_thinking_is_suppressed_both_modes() -> None:
+         assert list(rt._render(node, depth=1, full=True, color=False, width=80)) == []
+ 
+ 
+-def test_nonempty_thinking_keeps_summary() -> None:
++def test_nonempty_thinking_dropped_in_default_mode() -> None:
+     node = nv.ThinkingFold(content="abcde")
+-    out = list(rt._render(node, depth=1, full=False, color=False, width=80))
+-    assert out == ["  ▸ thinking · 5 chars"]
++    assert list(rt._render(node, depth=1, full=False, color=False, width=80)) == []
+ 
+ 
+ def test_render_gate_recap_false_is_header_only() -> None:

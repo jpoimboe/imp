@@ -1,0 +1,76 @@
+diff --git a/src/imp/cli/palette.py b/src/imp/cli/palette.py
+index 5bcda89..c6e8f08 100644
+--- a/src/imp/cli/palette.py
++++ b/src/imp/cli/palette.py
+@@ -50,7 +50,10 @@ def action_text(action: Any) -> str:
+     if isinstance(action, dict):
+         verb = str(action.get("verb", "unknown"))
+         if verb == "goto" and action.get("target"):
+-            return f"goto({action['target']})"
++            text = f"goto({action['target']})"
++            if action.get("resume"):
++                text += " [resume]"
++            return text
+         return verb
+     return str(action)
+ 
+diff --git a/src/imp/engine/executor.py b/src/imp/engine/executor.py
+index 4707072..8f137a8 100644
+--- a/src/imp/engine/executor.py
++++ b/src/imp/engine/executor.py
+@@ -331,7 +331,7 @@ def _action_payload(action: Action) -> dict[str, Any]:
+     if isinstance(action, Pause):
+         return {"verb": "pause"}
+     if isinstance(action, Goto):
+-        return {"verb": "goto", "target": action.target}
++        return {"verb": "goto", "target": action.target, "resume": action.resume}
+     return {"verb": "unknown"}
+ 
+ 
+diff --git a/tests/test_executor.py b/tests/test_executor.py
+index 775e327..3277978 100644
+--- a/tests/test_executor.py
++++ b/tests/test_executor.py
+@@ -859,6 +859,17 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
+     )
+ 
+ 
++def test_action_payload_goto_carries_resume_bool() -> None:
++    from imp.engine.executor import _action_payload
++    from imp.engine.types import Continue, Goto
++    assert _action_payload(Goto("coder", resume=True)) == {
++        "verb": "goto", "target": "coder", "resume": True}
++    assert _action_payload(Goto("coder")) == {
++        "verb": "goto", "target": "coder", "resume": False}
++    # non-goto actions are unchanged
++    assert _action_payload(Continue()) == {"verb": "continue"}
++
++
+ @pytest.fixture
+ def anyio_backend():
+     return "asyncio"
+diff --git a/tests/test_palette.py b/tests/test_palette.py
+index b69ed72..5461831 100644
+--- a/tests/test_palette.py
++++ b/tests/test_palette.py
+@@ -47,6 +47,20 @@ def test_action_display_text() -> None:
+     assert pal.action_text("continue") == "continue"     # bare string fallback
+ 
+ 
++def test_action_text_goto_resume_marker() -> None:
++    assert pal.action_text(
++        {"verb": "goto", "target": "coder", "resume": True}) == "goto(coder) [resume]"
++    # resume false (or absent) renders the plain goto
++    assert pal.action_text(
++        {"verb": "goto", "target": "coder", "resume": False}) == "goto(coder)"
++    assert pal.action_text({"verb": "goto", "target": "coder"}) == "goto(coder)"
++
++
++def test_action_text_resume_keeps_goto_color() -> None:
++    # the verb stays "goto", so accent coloring is unaffected by resume
++    assert pal.accent_color({"verb": "goto", "target": "coder", "resume": True}) == "cyan"
++
++
+ def test_fold_glyphs_default_unicode() -> None:
+     assert pal.fold_glyph(expanded=False) == "▸"
+     assert pal.fold_glyph(expanded=True) == "▾"

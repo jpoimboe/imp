@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-e29217e",
+  "source": "mined",
+  "base_sha": "4acadb9",
+  "head_sha": "e29217e",
+  "task_context": "CODE QUALITY review (spec compliance handled separately). Work from: /home/jpoimboe/imp.\n## Change under review\n- Task summary: In `src/imp/cli/live_driver.py`, made `SubagentFold` a descended container (not a blocking leaf): added `_container_children`/`_container_closed` accessors, added SubagentFold to `_is_container`, rewrote `_walk` to use the accessors and emit `rt.subagent_outcome_lines` on popping a closed subagent cursor, removed the SubagentFold branch from `_is_final`, and updated the module docstring + `_Cursor` comment. This makes nested subagent prose stream live and keeps live output byte-identical to `imp log` via shared render_text helpers. Tests updated in `tests/test_live_driver.py`.\n## Your job\n- **Correctness / edge cases:**\n  - On force-pop at `finish()` of a still-RUNNING subagent: `_container_closed` returns False but `force=True`, so it pops. `subagent_outcome_lines` is called with an empty outcome \u2192 yields nothing. Confirm this can't double-emit or crash. (Test: test_finish_force_pops_running_subagent_without_outcome.)\n  - The outcome is emitted at `cur.depth` on pop. The subagent's prose children render at `cur.depth` too (the cursor's depth is the children's render depth). Confirm the outcome column matches the prose column (this is the byte-parity claim vs imp log's `_render_subagent`, which emits the outcome at `depth+1` relative to the header). Trace the depth bookkeeping carefully: in `_walk`, when a SubagentFold child is encountered, the header prints at `cur.depth` and a new cursor is pushed with `depth=cur.depth+1`; that new cursor's `cur.depth` is what's passed to `subagent_outcome_lines` on pop. Does this match `_render_subagent` (header at depth, children + outcome at depth+1)? Verify they agree.\n  - Nested open burst inside a subagent: `_is_final` compares against the MAIN builder's `current_burst`, so a nested burst is \"final\" and walked past, but render_text drops it (renders nothing). The tech-debt comment documents this coupling. Assess whether the comment is accurate and whether the coupling is a latent bug risk worth more than a comment.\n- **Clarity:** Are `_container_children`/`_container_closed` well-named and clear? Is the `_walk` outcome-on-pop logic readable? Are the comments accurate?\n- **Consistency:** Do the accessors follow the file's style? Is the `isinstance(cur.container, nv.SubagentFold)` guard in `_walk` the cleanest way, or would polymorphism be better here (assess, but small-surface pragmatism is fine)?\n- **Byte-parity risk:** This is the load-bearing invariant. Is there any code path where live and imp log could diverge for a subagent (e.g. ordering of header vs prose vs outcome, depth, color)?\nNote two approved cosmetic deviations (not defects): a `lambda`\u2192`def indent` rewrite in a test (ruff E731) and an explicitly-typed `children: list[Any]` local in `_container_children` (mypy no-any-return).\nRead the actual current `_walk`, `_is_final`, `_is_container`, `_container_children`, `_container_closed` in `src/imp/cli/live_driver.py`, and compare against `_render_subagent` + `subagent_outcome_lines` in `src/imp/cli/render_text.py`.\nReturn: **Strengths**, **Issues** (Critical/Important/Minor with file:line), **Assessment** (APPROVED or CHANGES NEEDED).",
+  "expected_findings": [
+    {
+      "locus": "src/imp/cli/live_driver.py:48",
+      "symbol": "_container_children",
+      "description": "The children: list[Any] annotation appears only on the SubagentFold branch; the else branch reassigns children without re-annotation, creating asymmetric coverage.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/cli/live_driver.py:126",
+      "symbol": "",
+      "description": "Minor coupling: live_driver passes depth=cur.depth to subagent_outcome_lines while _render_subagent passes depth=depth+1, reaching the same final depth by different arithmetic paths.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

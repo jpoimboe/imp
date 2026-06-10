@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-28df3a2",
+  "source": "mined",
+  "base_sha": "921a01f",
+  "head_sha": "28df3a2",
+  "task_context": "You are performing a code quality review of a small, isolated change. Work from `/home/jpoimboe/imp/.claude/worktrees/stable-change-id`.\nDESCRIPTION: Task 1 \u2014 add `new_change_id(*, date)` (immutable Change identity helper) to `src/imp/engine/slug.py` plus a 3-test file.\nPLAN_OR_REQUIREMENTS: Task 1 from docs/superpowers/plans/2026-06-04-stable-change-id.md (additive only).\nAssess for code quality:\n- Correctness and clarity of `new_change_id` (naming, type hints, docstring).\n- Do the tests verify real behavior (format, uniqueness, date usage) rather than mocks?\n- Is the uniqueness test's N sane (\u2248100, avoiding a birthday-paradox flake)?\n- Does it follow the surrounding file's conventions (the module already has `slugify`/`dated_slug`)?\n- Did this change create bloat or touch anything outside its scope?\n- One clear responsibility per unit?\nReturn: **Strengths**, **Issues** (Critical / Important / Minor), and an overall **Assessment** (Approved / Changes needed). This is a tiny additive change \u2014 be proportionate; don't invent issues.",
+  "expected_findings": [
+    {
+      "locus": "tests/test_change_id_format.py:0",
+      "symbol": "test_new_change_id_format",
+      "description": "_ID_RE hardcodes the fixture date 2026-06-04; using a date-agnostic pattern like r\"^\\d{4}-\\d{2}-\\d{2}-[a-z0-9]{6}$\" would make the intent independent of the fixture date, though this is stylistic and carries no risk.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_slug.py:0",
+      "symbol": "",
+      "description": "test_slug.py does not import new_change_id; it will eventually need its import list updated when split_date_prefix is removed in Task 4, though this is not a Task 1 issue.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

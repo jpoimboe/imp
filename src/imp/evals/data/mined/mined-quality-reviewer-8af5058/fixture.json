@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-8af5058",
+  "source": "mined",
+  "base_sha": "cf2ece4",
+  "head_sha": "8af5058",
+  "task_context": "You are a code quality reviewer. Review the diff for Task 1 of an evals plan. Work from `/home/jpoimboe/imp/.claude/worktrees/eval-stage2-q1q4`.\nDESCRIPTION: Added `FeasibilityCount` frozen dataclass + pure `count_blocking_diffs()` feasibility-proxy counter to `src/imp/evals/mining.py`, plus 2 tests. Counts distinct blocking-bearing head_shas overall and per-question (with per-role exclusion).\nPLAN_OR_REQUIREMENTS: Task 1 from docs/superpowers/plans/2026-06-05-eval-stage2-q1q4.md\nAssess standard code quality concerns AND specifically:\n- Does the new code have one clear responsibility with a well-defined interface?\n- Are the new units understandable and testable independently?\n- Does it follow existing patterns/idioms already in `mining.py` (read surrounding code \u2014 dataclass style, naming, docstrings)?\n- Did this change introduce any lint/type issues? Run `make lint` and `make typecheck` if quick; otherwise at minimum eyeball for obvious type/ruff problems (unused imports, etc.). Note: this is pre-release, no backward-compat concerns apply.\n- Test quality: do the tests verify real behavior, not mocks?\nThis is a small, well-specified mechanical task \u2014 calibrate scrutiny accordingly. Don't invent issues.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Changes needed).",
+  "expected_findings": [
+    {
+      "locus": "src/imp/evals/mining.py:0",
+      "symbol": "_heads",
+      "description": "The function calls extract_shas on every non-excluded episode in a loop even when ep.blocking is false, though an if-guard prevents wasted computation in practice.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_mining.py:0",
+      "symbol": "",
+      "description": "Imports in the two new tests are placed inside test function bodies rather than at module level, inconsistent with the existing test file style.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/evals/mining.py:0",
+      "symbol": "",
+      "description": "Floor constants AGGREGATE_BLOCKING_FLOOR and PER_QUESTION_BLOCKING_FLOOR are uppercased module-level names, which is confirmed as an intentional and correct design choice.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

@@ -1,0 +1,232 @@
+diff --git a/src/imp/providers/claude_code.py b/src/imp/providers/claude_code.py
+index 3217d24..71ec6e5 100644
+--- a/src/imp/providers/claude_code.py
++++ b/src/imp/providers/claude_code.py
+@@ -61,6 +61,7 @@ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
+ from imp.providers.base import Provider
+ from imp.providers.resolve import spawn_subagent_via_registry
+ from imp.providers.web_native import (
++    CC_WEB_BUILTIN_TO_NORM,
+     WEB_TOOL_NAMES,
+     cc_enabled_web_builtins,
+     check_web_capability,
+@@ -528,6 +529,45 @@ def _extract_claude_code_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+     return Diagnostics(block_warnings=tuple(warnings), thinkings=tuple(thinkings))
+ 
+ 
++def _parse_cc_web_citations(
++    norm_name: str, call_input: dict[str, Any], content: Any,
++) -> list[dict[str, Any]]:
++    """Parse citations from a CC web builtin result.
++
++    web_search: content is a string ending in `Links: [{"title","url"}, …]`.
++    web_fetch:  citation URL comes from the call's `url` input; the content is
++                the CLI's extracted summary (no structured links).
++
++    Known soft-failure (acceptable for an audit-only footer): we take the LAST
++    `Links:` marker via rfind, so fetched page text that itself contains a later
++    `Links:` substring can mislead the parser into [] or garbage. The format is
++    verification-gated in Step 1; this is a documented limitation, not a bug."""
++    if norm_name == "web_fetch":
++        url = call_input.get("url")
++        return [{"url": url}] if url else []
++    text = content if isinstance(content, str) else ""
++    marker = "Links:"
++    idx = text.rfind(marker)
++    if idx == -1:
++        return []
++    try:
++        arr = json.loads(text[idx + len(marker):].strip())
++    except (json.JSONDecodeError, ValueError):
++        return []
++    cites: list[dict[str, Any]] = []
++    for item in arr if isinstance(arr, list) else []:
++        if not isinstance(item, dict):
++            continue
++        url = item.get("url")
++        if not url:
++            continue
++        c: dict[str, Any] = {"url": url}
++        if item.get("title"):
++            c["title"] = item["title"]
++        cites.append(c)
++    return cites
++
++
+ class _AsyncIter:
+     """Wrap a sync generator as an async iterator for SDK consumption."""
+ 
+@@ -816,6 +856,11 @@ class ClaudeCodeAgentRunner:
+         pending_text = ""
+         pending_tools: dict[str, ToolOutcome] = {}
+         pending_complete = False
++        # Web builtin call ids: id -> (norm_name, call_input). Populated when a
++        # WebSearch/WebFetch ToolUseBlock is observed; consumed when the matching
++        # ToolResultBlock arrives so citations can be parsed and the result
++        # normalized without incrementing tool_calls_used.
++        web_calls: dict[str, tuple[str, dict[str, Any]]] = {}
+ 
+         def _flush_pending() -> TurnRecord | None:
+             nonlocal pending_text, pending_tools, pending_complete
+@@ -878,6 +923,19 @@ class ClaudeCodeAgentRunner:
+                                     stop_reason=raw.get("stop_reason"))
+                             for b in imp_msg.content:
+                                 if isinstance(b, ToolUseBlock):
++                                    # Web builtins (§5.2): server/CLI-side, already
++                                    # executed. Short-circuit the ENTIRE ceiling
++                                    # block — emit a normalized tool_call, record
++                                    # the id for citation parsing, and do NOT
++                                    # increment tool_calls_used.
++                                    if b.name in CC_WEB_BUILTIN_TO_NORM:
++                                        norm = CC_WEB_BUILTIN_TO_NORM[b.name]
++                                        web_calls[b.id] = (norm, b.input)
++                                        elog.append_tool_call(
++                                            agent_id=aid,
++                                            block=ToolUseBlock(id=b.id, name=norm,
++                                                               input=b.input))
++                                        continue
+                                     # Dual-write `complete_step` state at the
+                                     # runner level so the test fakes don't need
+                                     # to drive the MCP wrapper. In production the
+@@ -926,6 +984,13 @@ class ClaudeCodeAgentRunner:
+                             # tools. Append the corresponding tool_result events.
+                             for b in imp_msg.content:
+                                 if isinstance(b, ToolResultBlock):
++                                    if b.tool_use_id in web_calls:
++                                        norm, call_input = web_calls[b.tool_use_id]
++                                        cites = _parse_cc_web_citations(
++                                            norm, call_input, b.content)
++                                        elog.append_tool_result(
++                                            agent_id=aid, block=b, citations=cites)
++                                        continue
+                                     elog.append_tool_result(agent_id=aid, block=b)
+                                     if b.tool_use_id in pending_tools:
+                                         pending_tools[b.tool_use_id].is_error = b.is_error
+diff --git a/tests/test_claude_code_web.py b/tests/test_claude_code_web.py
+index d0e402b..3749e51 100644
+--- a/tests/test_claude_code_web.py
++++ b/tests/test_claude_code_web.py
+@@ -2,9 +2,20 @@ from __future__ import annotations
+ 
+ from pathlib import Path
+ 
++import pytest
++
+ from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
++from imp.engine.state import InMemoryEventLog
+ from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+-from imp.providers.claude_code import ClaudeCodeAgentRunner
++from imp.providers.claude_code import ClaudeCodeAgentRunner, _parse_cc_web_citations
++from tests.cc_fakes import (
++    FakeClaudeSDKClient,
++    assistant,
++    result,
++    tool_result,
++    tool_use,
++    user,
++)
+ 
+ 
+ def _agent(tools: frozenset[str]) -> AgentDef:
+@@ -57,3 +68,101 @@ def test_toolsearch_still_exempt(tmp_path: Path) -> None:
+         _inv(tmp_path, frozenset({"complete_step", "web_search"})),
+         mcp_server=object(), tool_names=["bash"])
+     assert "ToolSearch" not in opts.disallowed_tools
++
++
++# ── Citation parsing unit tests ───────────────────────────────────────────────
++
++
++def test_parse_websearch_links_citations() -> None:
++    content = (
++        'Results for "imp agents":\n\n'
++        'Some prose.\n\n'
++        'Links: [{"title":"A","url":"https://a.test"},'
++        '{"title":"B","url":"https://b.test"}]')
++    cites = _parse_cc_web_citations("web_search", {"query": "imp agents"}, content)
++    assert cites == [
++        {"url": "https://a.test", "title": "A"},
++        {"url": "https://b.test", "title": "B"}]
++
++
++def test_parse_websearch_no_links_yields_empty() -> None:
++    assert _parse_cc_web_citations("web_search", {"query": "x"}, "no links here") == []
++
++
++def test_parse_webfetch_uses_input_url() -> None:
++    cites = _parse_cc_web_citations(
++        "web_fetch", {"url": "https://doc.test"}, "fetched summary text")
++    assert cites == [{"url": "https://doc.test"}]
++
++
++# ── End-to-end stream test ────────────────────────────────────────────────────
++
++
++@pytest.fixture
++def anyio_backend() -> str:
++    return "asyncio"
++
++
++def _web_agent() -> AgentDef:
++    loc = SourceLoc(file=Path("a.md"), line=1)
++    return AgentDef(
++        name="t", description="",
++        tools=frozenset({"complete_step", "web_search"}), subagents=(),
++        output_schema=OutputSchema(
++            fields=(OutputField(name="status", type="enum",
++                                values=("Success",), required=True),),
++            source=loc),
++        prompt_template_source="hi", source_path=Path("a.md"), source=loc)
++
++
++def _web_inv(tmp_path: Path, elog: InMemoryEventLog,
++             *, max_tool_calls: int | None = None) -> AgentInvocation:
++    return AgentInvocation(
++        agent_def=_web_agent(), provider_name="claude_code",
++        model_name="claude-sonnet-4-6", system_prompt="s",
++        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
++        change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
++                                     workflow_dir=tmp_path),
++        interactive=False, transcript_dir=tmp_path / "step",
++        fs_permissions=(), events_path=tmp_path / "events.jsonl",
++        agent_id="step:p/s", event_log=elog, max_tool_calls=max_tool_calls)
++
++
++async def _run_cc(scripted: list, inv: AgentInvocation) -> list:
++    runner = ClaudeCodeAgentRunner(
++        "claude-sonnet-4-6",
++        client_factory=lambda opts: FakeClaudeSDKClient(
++            opts, scripted_messages=scripted))
++    out = []
++    async for ev in runner.run(inv):
++        out.append(ev)
++    return out
++
++
++@pytest.mark.anyio
++async def test_cc_web_search_normalized_and_non_counting(tmp_path: Path) -> None:
++    scripted = [
++        assistant(tool_use("w1", "WebSearch", {"query": "imp agents"})),
++        user(tool_result(
++            "w1", 'Results.\n\nLinks: [{"title":"A","url":"https://a.test"}]')),
++        assistant(tool_use("c1", "complete_step", {"status": "Success"})),
++        result(),
++    ]
++    elog = InMemoryEventLog()
++    # ceiling=1: the web call must NOT consume budget, leaving the single
++    # allowed call for complete_step. If the web call counted, complete_step
++    # would be the 2nd call and trip the ceiling.
++    inv = _web_inv(tmp_path, elog, max_tool_calls=1)
++    events = await _run_cc(scripted, inv)
++
++    assert any(e["type"] == "agent_output" for e in events)
++    assert not any(e["type"] == "error" for e in events)
++
++    recs = list(elog.read())
++    calls = [e for e in recs if e["type"] == "tool_call"]
++    results = [e for e in recs if e["type"] == "tool_result"]
++    assert any(c["payload"]["name"] == "web_search" for c in calls)
++    assert not any(c["payload"]["name"] == "WebSearch" for c in calls)
++    web_res = [r for r in results if r["payload"].get("citations")]
++    assert web_res[0]["payload"]["citations"] == [
++        {"url": "https://a.test", "title": "A"}]

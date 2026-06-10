@@ -1,0 +1,87 @@
+diff --git a/tests/_live.py b/tests/_live.py
+index 7dcd68d..b326f29 100644
+--- a/tests/_live.py
++++ b/tests/_live.py
+@@ -8,6 +8,8 @@ asserted (not skipped) — opt-in implies the user has set up credentials.
+ from __future__ import annotations
+ 
+ import os
++import time
++from pathlib import Path
+ 
+ 
+ def _parse() -> list[str]:
+@@ -22,3 +24,26 @@ def opted_in(provider: str) -> bool:
+ def first_opted_in() -> str | None:
+     items = _parse()
+     return items[0] if items else None
++
++
++def _await_worktree(control_root: Path, timeout: float) -> Path:
++    """Poll .imp/worktrees/ for the single Change worktree dir and return it;
++    its .name is the slug. The real guard is the presence of
++    .imp/change/change.json in the candidate (scratch/.merge-* dirs lack it);
++    the leading-dot exclusion is redundant belt-and-suspenders for readability.
++
++    Replaces stdout-parsing of `imp new`'s "Created Change <slug>:" line:
++    sidesteps PTY/PIPE read-timing and yields the slug directly. Raises
++    TimeoutError if no Change worktree appears within `timeout` seconds."""
++    root = control_root / ".imp" / "worktrees"
++    deadline = time.time() + timeout
++    while time.time() < deadline:
++        if root.is_dir():
++            for p in sorted(root.iterdir()):
++                if (p.is_dir() and not p.name.startswith(".")
++                        and (p / ".imp" / "change" / "change.json").exists()):
++                    return p
++        time.sleep(0.1)
++    raise TimeoutError(
++        f"no Change worktree appeared under {root} within {timeout}s"
++    )
+diff --git a/tests/test_await_worktree.py b/tests/test_await_worktree.py
+new file mode 100644
+index 0000000..ecdc5f0
+--- /dev/null
++++ b/tests/test_await_worktree.py
+@@ -0,0 +1,41 @@
++"""Unit test for the shared _await_worktree helper in tests/_live.py.
++
++Uses a real Change worktree (cheap, no providers) so the helper's "find the
++single Change worktree dir, return its path; .name is the slug" contract is
++exercised against the actual on-disk layout — including ignoring the
++transient .merge-* scratch dirs.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from imp.engine.change import Change
++from tests._live import _await_worktree
++from tests.conftest import _seed_control
++
++
++def test_await_worktree_returns_the_change_dir(tmp_path: Path) -> None:
++    _seed_control(tmp_path)
++    Change.create(tmp_path, title="Hello There", slug="hello-there", base_branch="main")
++    wt = _await_worktree(tmp_path, timeout=5.0)
++    assert wt.name == "hello-there"
++    assert (wt / ".imp" / "change" / "change.json").exists()
++
++
++def test_await_worktree_ignores_merge_scratch(tmp_path: Path) -> None:
++    _seed_control(tmp_path)
++    Change.create(tmp_path, title="Real One", slug="real-one", base_branch="main")
++    # A scratch dir without change.json must be ignored even if it sorts first.
++    scratch = tmp_path / ".imp" / "worktrees" / ".merge-aaa"
++    scratch.mkdir(parents=True)
++    wt = _await_worktree(tmp_path, timeout=5.0)
++    assert wt.name == "real-one"
++
++
++def test_await_worktree_times_out(tmp_path: Path) -> None:
++    (tmp_path / ".imp" / "worktrees").mkdir(parents=True)
++    with pytest.raises(TimeoutError):
++        _await_worktree(tmp_path, timeout=0.5)

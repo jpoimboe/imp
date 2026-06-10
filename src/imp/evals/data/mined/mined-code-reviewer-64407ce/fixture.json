@@ -1,0 +1,37 @@
+{
+  "id": "mined-code-reviewer-64407ce",
+  "source": "mined",
+  "base_sha": "143e702",
+  "head_sha": "64407ce",
+  "task_context": "You are a Senior Code Reviewer doing a FINAL holistic review of a completed multi-task implementation in the `imp` Python project at /home/jpoimboe/imp. The per-task reviews already passed; your job is to catch cross-cutting issues, integration gaps, and consistency problems the per-task reviews couldn't see.\n## What Was Implemented (foundation primitives for a superpowers workflow port)\nSeven tasks landed as separate commits:\n1. `dated_slug()` + `split_date_prefix()` pure helpers in `src/imp/engine/slug.py`.\n2. `auto_titled: bool` field on `Change`, persisted in change.json, exposed to agent prompts as `{{ change.auto_titled }}` via `_ChangeNamespace` + a keyword-only `change_auto_titled` param on `build_context` (`src/imp/agents/prompts.py`), passed at the executor agent-step call site.\n3. `_select_slug` in `src/imp/cli/main.py` now emits a `YYYY-MM-DD-`-prefixed slug and returns `(slug, title, auto_titled)`; `_async_cmd_new` forwards `auto_titled` to `Change.create`.\n4. `apply_pending_rename` in `src/imp/engine/executor.py` preserves the date prefix across a rename (falls back to plain slugify for date-less slugs).\n5. New `commit` built-in tool (`src/imp/agents/tools/commit.py`, registered in `__init__.py`) that stages paths and commits with an idempotent `Change: <slug>` trailer; not fs-permission-gated.\n6. `config.yaml` `vars:` override layer: `Config.var_overrides`, `_parse_var_overrides`, `apply_var_overrides`, applied over workflow var defaults inside `Change.create`.\n7. Full-suite gate; also fixed a regression in `tests/test_human_gate_pty.py` (it hardcoded the now-dated `imp new` slug \u2014 changed to discover the worktree via `_await_worktree`).\n## Requirements / Plan\nFull plan: `docs/superpowers/plans/2026-06-01-superpowers-foundation.md`. Scope is primitives ONLY \u2014 no workflow-content/markdown changes. Backward-compatibility analysis is explicitly out of scope (pre-release, no external users).\n## Git Range to Review\nRun:\n```bash\ngit log --oneline 143e702..64407ce\n```\n## What to Check (focus on cross-cutting / integration concerns)\n- **Consistency across tasks:** Do the shared helpers (dated_slug/split_date_prefix) get used consistently at BOTH the creation site (Task 3) and the rename site (Task 4)? Same date-format assumptions? Any divergence?\n- **Integration coherence:** Does the data flow hang together end-to-end \u2014 `imp new` \u2192 dated slug + auto_titled \u2192 change.json \u2192 load \u2192 prompt namespace; rename preserving prefix; config vars \u2192 State? Any seam where one task's output doesn't match another's expectation?\n- **The dated-slug ripple:** Task 3 changed the `imp new` slug format. Are there OTHER places (tests, code, docs) that still assume a date-less slug and would silently break or mislead? (The PTY test was one; are there more? grep for hardcoded slug assumptions.) Be thorough here \u2014 this is the kind of thing only a holistic review catches.\n- **No scope creep:** Confirm no workflow markdown/yaml content was changed (scope is primitives only). Confirm the change set matches the plan's declared file list.\n- **Test quality holistically:** Do the new tests collectively cover the behaviors? Any integration-level gap (e.g. is there end-to-end coverage that `imp new` actually produces a dated worktree + auto_titled change.json, beyond the unit tests)?\n- **Correctness risks:** anything the per-task reviews might have rationalized away that's actually a problem when viewed together.\nRun `make lint`, `make typecheck`, and `env -u IMP_LIVE_PROVIDERS -u IMP_RUN_DOGFOOD -u CLAUDECODE .venv/bin/pytest -q` yourself and report the result.\nBe specific (file:line). Categorize by severity. Give a clear verdict.\n## Output Format\n### Strengths\n### Issues\n#### Critical (Must Fix)\n#### Important (Should Fix)\n#### Minor (Nice to Have)\n### Assessment\n**Ready to merge?** [Yes | No | With fixes]\n**Reasoning:**",
+  "expected_findings": [
+    {
+      "locus": "executor.py:319-327",
+      "symbol": "apply_pending_rename",
+      "description": "`auto_titled` is never reset to `False` after a rename, leaving the flag True both in memory and on disk even though the slug is no longer provisional.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_executor.py:0",
+      "symbol": "test_commit_surfaces_nothing_to_commit",
+      "description": "The `commit` tool's `paths=[]` plus clean-tree code path is only weakly covered; the realistic case where an agent passes real paths that are all already-committed/unchanged is not exercised.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "code-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

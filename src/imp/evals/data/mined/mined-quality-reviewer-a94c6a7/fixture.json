@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-a94c6a7",
+  "source": "mined",
+  "base_sha": "7275dff",
+  "head_sha": "a94c6a7",
+  "task_context": "You are a Senior Code Reviewer reviewing completed work in the `imp` Python project at /home/jpoimboe/imp.\n## What Was Implemented\n`apply_pending_rename` in `src/imp/engine/executor.py` now preserves the `YYYY-MM-DD-` creation-date prefix when re-deriving a slug from a renamed Change. Previously `new = slugify(name)` dropped the prefix; now it splits the old slug's prefix (`split_date_prefix(old)`) and uses `dated_slug(name, date=date)` when a date is present, falling back to plain `slugify` for date-less slugs. New tests in `tests/test_rename_date_prefix.py`.\n## Requirements / Plan\nTask 4 of docs/superpowers/plans/2026-06-01-superpowers-foundation.md. The creation-date prefix is part of the Change's identity and must survive a rename. Only the slug-derivation logic changes; worktree.rename / in-memory repoint / change.json rewrite are untouched.\n## Git Range to Review\nRun:\n```bash\n```\nRead the full `apply_pending_rename` function for context.\n## What to Check\n- **Plan alignment:** matches plan; only slug-derivation changed.\n- **Code quality:** the conditional `dated_slug(...) if date else slugify(...)` is clean and correct; the comment explains the why; imports are tidy. Type safety.\n- **Architecture:** reuses the Task 1 helpers (`split_date_prefix`, `dated_slug`) rather than re-implementing prefix logic \u2014 good consistency. Consider: is there any edge case where the rename could now collide or produce an unexpected slug (e.g. renaming a dated slug to a name that itself looks like a date)? Judge whether that's a real concern or out of scope.\n- **Testing:** tests genuinely drive the real rename path (Change.create \u2192 pending_rename \u2192 apply_pending_rename), both the prefix-preserving and date-less-fallback cases covered. All passing, no regressions in existing rename tests. Note any meaningful gaps.\n- **File responsibility/size.**\nBe specific (file:line). Categorize by severity (Critical/Important/Minor). Acknowledge strengths. Run the tests yourself (the new file + existing rename tests).\n## Output Format\n### Strengths\n### Issues\n#### Critical (Must Fix)\n#### Important (Should Fix)\n#### Minor (Nice to Have)\n### Assessment\n**Ready to merge?** [Yes | No | With fixes]\n**Reasoning:**",
+  "expected_findings": [
+    {
+      "locus": "executor.py:306",
+      "symbol": "",
+      "description": "Renaming to a name that looks like a date creates a slug that appears dated, but this is benign and handled correctly.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "executor.py:307",
+      "symbol": "",
+      "description": "No test asserting the no-op early return works when the re-derived dated slug equals the old slug.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_rename_date_prefix.py:0",
+      "symbol": "",
+      "description": "Test file imports private symbol _seed_control from conftest.py, following pre-existing house style.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

@@ -1,0 +1,137 @@
+diff --git a/src/imp/cli/prompt.py b/src/imp/cli/prompt.py
+index 4ee9d9e..6b53346 100644
+--- a/src/imp/cli/prompt.py
++++ b/src/imp/cli/prompt.py
+@@ -1,9 +1,9 @@
+ """Prompt abstraction backed by prompt_toolkit.
+ 
+-One Prompt per CLI invocation. ESC returns the ESC_SENTINEL string so
+-callers can distinguish chat-interrupt (Task 12) from normal text input.
+-Ctrl+C raises KeyboardInterrupt, Ctrl+D raises EOFError — the CLI's signal
+-handler (Task 11) catches both and triggers save-and-exit.
++One Prompt per CLI invocation. Ctrl+C raises KeyboardInterrupt, Ctrl+D raises
++EOFError — the CLI's signal handler catches both and triggers save-and-exit.
++ESC is left to prompt_toolkit's built-in handling (meta-prefix in emacs mode;
++leaves insert mode in vi mode — see editing_mode plumbing).
+ 
+ History is per-session in-memory; persisted history is a post-V0 feature.
+ """
+@@ -14,8 +14,6 @@ from collections.abc import AsyncIterator, Callable, Iterator
+ from pathlib import Path
+ from typing import Any
+ 
+-ESC_SENTINEL = "__IMP_ESC__"
+-
+ 
+ def _build_session(skills_dir: Any | None = None) -> Any:
+     from prompt_toolkit import PromptSession
+@@ -25,10 +23,6 @@ def _build_session(skills_dir: Any | None = None) -> Any:
+     history = InMemoryHistory()
+     kb = KeyBindings()
+ 
+-    @kb.add("escape", eager=True)
+-    def _esc(event: Any) -> None:
+-        event.app.exit(result=ESC_SENTINEL)
+-
+     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
+     return PromptSession(history=history, key_bindings=kb, completer=completer)  # type: ignore[arg-type]
+ 
+@@ -81,7 +75,7 @@ class Prompt:
+         self._session = self._session_factory()
+ 
+     def ask(self, prompt_text: str = "> ") -> str:
+-        """Read a single line. Returns user text, or ESC_SENTINEL.
++        """Read a single line. Returns the user's text.
+         Raises KeyboardInterrupt (Ctrl+C) or EOFError (Ctrl+D) up to caller."""
+         result = self._session.prompt(prompt_text)
+         return str(result) if result is not None else ""
+diff --git a/src/imp/cli/signals.py b/src/imp/cli/signals.py
+index a8205a2..f3b931c 100644
+--- a/src/imp/cli/signals.py
++++ b/src/imp/cli/signals.py
+@@ -58,8 +58,8 @@ class InterruptCoordinator:
+         receiver calls it during signal_pause.
+ 
+     Why no ESC: ESC is per-keystroke from prompt_toolkit (raw mode); it never
+-    travels through OS signals. The interactive prompt path in
+-    cli/prompt.py handles ESC directly via the ESC_SENTINEL.
++    travels through OS signals. ESC is handled entirely inside prompt_toolkit
++    (built-in behaviour) and never reaches this coordinator.
+     """
+ 
+     def __init__(self) -> None:
+diff --git a/src/imp/cli/slash.py b/src/imp/cli/slash.py
+index 23f75a4..29da1db 100644
+--- a/src/imp/cli/slash.py
++++ b/src/imp/cli/slash.py
+@@ -88,7 +88,7 @@ def _help(out: Callable[[str], None]) -> None:
+ async def ask_line_with_slash(prompt: Any, status: Any, change: Any) -> str:
+     """Read one interactive line, intercepting slash commands. /help, /skills,
+     unknown, and not-found commands print and re-prompt; /<name> returns the
+-    resolved skill body; anything else (incl. the ESC sentinel) returns as-is.
++    resolved skill body; anything else returns as-is.
+ 
+     Shared by the run and resume paths so the slash/skills logic exists once."""
+     while True:
+diff --git a/tests/test_prompt.py b/tests/test_prompt.py
+index 78bf708..736305d 100644
+--- a/tests/test_prompt.py
++++ b/tests/test_prompt.py
+@@ -4,7 +4,7 @@ from __future__ import annotations
+ 
+ import pytest
+ 
+-from imp.cli.prompt import ESC_SENTINEL, Prompt
++from imp.cli.prompt import Prompt
+ 
+ 
+ def test_prompt_returns_user_text() -> None:
+@@ -12,11 +12,6 @@ def test_prompt_returns_user_text() -> None:
+     assert p.ask("> ") == "hello"
+ 
+ 
+-def test_esc_returns_sentinel() -> None:
+-    p = Prompt(_session_factory=lambda: _FakeSession([ESC_SENTINEL]))
+-    assert p.ask("> ") == ESC_SENTINEL
+-
+-
+ def test_ctrl_c_raises_keyboardinterrupt() -> None:
+     p = Prompt(_session_factory=lambda: _FakeSession(raises=KeyboardInterrupt))
+     with pytest.raises(KeyboardInterrupt):
+diff --git a/tests/test_slash.py b/tests/test_slash.py
+index 43ae7f9..4409aeb 100644
+--- a/tests/test_slash.py
++++ b/tests/test_slash.py
+@@ -6,7 +6,6 @@ from pathlib import Path
+ 
+ import anyio
+ 
+-from imp.cli.prompt import ESC_SENTINEL
+ from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
+ 
+ 
+@@ -32,7 +31,6 @@ def test_is_slash_command() -> None:
+     assert is_slash_command("  /help")  # leading whitespace tolerated
+     assert not is_slash_command("hello")
+     assert not is_slash_command("")
+-    assert not is_slash_command(ESC_SENTINEL)  # ESC sentinel ("__IMP_ESC__") passes through
+ 
+ 
+ def test_name_loads_body_and_emits_event(tmp_path: Path) -> None:
+@@ -125,13 +123,12 @@ def test_ask_line_with_slash_returns_skill_body(tmp_path: Path) -> None:
+     assert line == "# Refactor\nstep one\n"
+ 
+ 
+-def test_ask_line_with_slash_passes_through_esc(tmp_path: Path) -> None:
+-    from imp.cli.prompt import ESC_SENTINEL
++def test_ask_line_with_slash_passes_through_plain_non_slash(tmp_path: Path) -> None:
+     from imp.cli.slash import ask_line_with_slash
+     change = _FakeChange(tmp_path)
+-    prompt = _FakePrompt([ESC_SENTINEL])
++    prompt = _FakePrompt(["just some text"])
+     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), change)
+-    assert line == ESC_SENTINEL
++    assert line == "just some text"
+ 
+ 
+ def test_skill_args_appended_after_body(tmp_path: Path) -> None:

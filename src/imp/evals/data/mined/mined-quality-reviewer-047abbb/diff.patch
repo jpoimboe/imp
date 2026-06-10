@@ -1,0 +1,80 @@
+diff --git a/src/imp/cli/init.py b/src/imp/cli/init.py
+index 69de258..4adf0d8 100644
+--- a/src/imp/cli/init.py
++++ b/src/imp/cli/init.py
+@@ -32,7 +32,7 @@ _PROVIDER_MODELS: dict[str, dict[str, str]] = {
+         "quick":     "claude-haiku-4-5-20251001",
+     },
+     "openai": {
+-        "thinking": "gpt-5",
++        "thinking": "gpt-5.2",
+         "coding":   "gpt-5",
+         "quick":    "gpt-5-mini",
+     },
+@@ -42,14 +42,14 @@ _PROVIDER_MODELS: dict[str, dict[str, str]] = {
+ # at init time, and omitted from the informational `providers:` block.
+ _PROVIDERS_WITHOUT_ENV: frozenset[str] = frozenset({"claude_code"})
+ 
+-_ROLE_TIERS = {
++_ROLE_TIERS: dict[str, str | dict[str, str]] = {
+     "default":       "coding",
+     "spec":          "thinking",
+     "spec_review":   "thinking",
+     "design":        "thinking",
+     "design_review": "thinking",
+-    "code":          "coding",
+-    "code_review":   "thinking",
++    "code":          "quick",
++    "code_review":   {"default": "coding", "openai": "thinking"},
+     "test":          "coding",
+     "review":        "thinking",
+     "quick":         "quick",
+@@ -65,7 +65,14 @@ def _build_role_map(
+     for role, tier in _ROLE_TIERS.items():
+         prefer = []
+         for prov in providers:
+-            model = _PROVIDER_MODELS[prov][tier]
++            # tier is either a plain tier string (uniform across providers) or a
++            # {provider: tier} mapping that MUST carry a 'default' for any
++            # enabled provider not named explicitly (e.g. claude_code).
++            if isinstance(tier, dict):
++                prov_tier = tier[prov] if prov in tier else tier["default"]
++            else:
++                prov_tier = tier
++            model = _PROVIDER_MODELS[prov][prov_tier]
+             prefer.append({"provider": prov, "model": model})
+         roles[role] = {"prefer": prefer}
+     return {
+diff --git a/tests/test_init.py b/tests/test_init.py
+index 738b5b5..a3e4298 100644
+--- a/tests/test_init.py
++++ b/tests/test_init.py
+@@ -124,3 +124,28 @@ def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
+             input_fn=_inputs(),
+             output_fn=lambda _msg: None,
+         )
++
++
++def test_init_code_and_code_review_prefer_heads(tmp_path: Path) -> None:
++    """Generated config: code prefer-head = haiku; code_review Anthropic entry =
++    sonnet; code_review OpenAI entry = gpt-5.2 (the 1-vendor column resolves as
++    specified; the constraint handles the 2-vendor column)."""
++    run_init(tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
++             picker_fn=lambda _a: ["anthropic", "openai"])
++    cfg = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
++    code = cfg["roles"]["code"]["prefer"]
++    review = cfg["roles"]["code_review"]["prefer"]
++    assert code[0] == {"provider": "anthropic", "model": "claude-haiku-4-5-20251001"}
++    assert review[0] == {"provider": "anthropic", "model": "claude-sonnet-4-6"}
++    assert {"provider": "openai", "model": "gpt-5.2"} in review
++
++
++def test_init_code_review_handles_claude_code_via_default_tier(tmp_path: Path) -> None:
++    """A {provider: tier} mapping must include a 'default' tier so providers not
++    named explicitly (e.g. claude_code) still resolve."""
++    run_init(tmp_path, input_fn=lambda _p: "", output_fn=lambda _m: None,
++             picker_fn=lambda _a: ["claude_code", "openai"])
++    cfg = yaml.safe_load((tmp_path / ".imp" / "config.yaml").read_text())
++    review = {e["provider"]: e["model"] for e in cfg["roles"]["code_review"]["prefer"]}
++    assert review["claude_code"] == "claude-sonnet-4-6"  # default tier = coding
++    assert review["openai"] == "gpt-5.2"                  # openai tier = thinking

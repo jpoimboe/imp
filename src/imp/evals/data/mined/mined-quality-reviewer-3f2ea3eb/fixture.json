@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-3f2ea3eb",
+  "source": "mined",
+  "base_sha": "464a10113e89c83ba92cde471d7d7b5b3a92110c",
+  "head_sha": "3f2ea3ebcf90c96972a70a3bc448985cd90f127e",
+  "task_context": "You are performing a code quality review of a single commit in the `imp` project.\n## Working directory\n`/home/jpoimboe/imp/.claude/worktrees/runaway-interrupt-hardening`\n## What to review\n- PLAN_OR_REQUIREMENTS: Task 1 (limits.py foundation) from docs/superpowers/plans/2026-06-05-runaway-and-interrupt-hardening.md\n- DESCRIPTION: New module `src/imp/agents/tools/limits.py` (bounded-output / cooperative-cancel primitives: constants, `ToolAborted`, `tool_checkpoint`, `read_text_capped`) + `tests/test_tool_limits.py`.\n## Focus areas\nStandard code quality concerns (correctness, clarity, naming, maintainability, test quality \u2014 do tests verify real behavior?), PLUS:\n- Does the file have one clear responsibility with a well-defined interface?\n- Is the no-cycle invariant real (imports only stdlib + anyio)?\n- Are the async primitives correct (`tool_checkpoint` yields before checking; `read_text_capped` enforces a byte ceiling mid-read and never buffers an unbounded line)?\n- Any concurrency/correctness pitfalls in the bounded reader (encoding, EOF handling, off-by-one on the cap)?\n- Did this change introduce anything not needed by the task (YAGNI)?\nThis is a foundation module other tasks depend on, so interface correctness matters most. Be concrete.\n## Return\n- Strengths\n- Issues (Critical / Important / Minor) with file:line references\n- Assessment: APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/agents/tools/limits.py:79-85",
+      "symbol": "read_text_capped",
+      "description": "Reports truncated=True for files whose size exactly equals cap_bytes, even though nothing was lost; this is a benign false-positive that only causes spurious truncation markers downstream.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_limits.py:0",
+      "symbol": "",
+      "description": "Missing test coverage for exact-cap boundary case, empty-file case, and timed-out path through read_text_capped; all three cases behave correctly but are unverified by tests.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/agents/tools/limits.py:48-57",
+      "symbol": "tool_checkpoint",
+      "description": "Coordinator is duck-typed with getattr default to avoid import cycles; a malformed coordinator silently becomes non-pausing, but this matches the documented no-coordinator contract.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

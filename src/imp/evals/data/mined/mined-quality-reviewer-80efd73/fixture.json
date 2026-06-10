@@ -1,0 +1,64 @@
+{
+  "id": "mined-quality-reviewer-80efd73",
+  "source": "mined",
+  "base_sha": "8f80df9",
+  "head_sha": "80efd73",
+  "task_context": "You are a code quality reviewer in `/home/jpoimboe/imp`. Review Task 6: the shared `drive_invocation` drain/error loop added to `src/imp/engine/agent_run.py`.\nDESCRIPTION: Extract the executor's drain/error loop into a shared async drive_invocation that consumes runner.run(), classifies errors via error_policy, captures agent_output, detects coordinator pause, catches SubagentSuspended, validates output. Returns AgentRunResult. Lazy provider-side imports to avoid an import cycle.\nPLAN_OR_REQUIREMENTS: Task 6 from docs/superpowers/plans/2026-06-01-agent-subagent-unification.md\nAssess code quality:\n- Clean control flow and clear docstring? Are the AgentRunResult positional constructions readable, or would they benefit from keyword args (the field order output/errored/paused/fatal/delay/error is easy to mis-read)? Note if so, but it matches the plan \u2014 judge severity.\n- Is the lazy-import pattern well-documented in-code (the WHY is critical to preserve)?\n- Do the tests exercise real behavior across the branches (success, fatal, backoff, pause, suspended)? Any meaningful branch left untested (e.g., the output-validation-failure path, or emit_events=True log emission)?\n- The `emit_events`/`coordinator is None` guards add branches \u2014 are they handled cleanly?\n- Run `make lint` and `make typecheck` to confirm clean.\nDon't flag pre-existing file sizes or the deliberate ~24-arg width of the sibling builder. Return: Strengths, Issues (Critical/Important/Minor), Assessment (approved or needs fixes).",
+  "expected_findings": [
+    {
+      "locus": "src/imp/engine/agent_run.py",
+      "symbol": "drive_invocation",
+      "description": "Positional construction of AgentRunResult with three consecutive booleans (errored, paused, fatal) is hard to read and risks silent corruption if field order changes; keyword arguments are recommended.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/engine/agent_run.py:0",
+      "symbol": "",
+      "description": "The emit_events=True branch and log.append() calls in error event emission and output validation failure are not exercised by any unit test.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/engine/agent_run.py:203",
+      "symbol": "drive_invocation",
+      "description": "The nullcontext() path when coordinator is None and the should_pause check being skipped lack dedicated test coverage.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/engine/agent_run.py:212",
+      "symbol": "drive_invocation",
+      "description": "The validate_agent_output exception handler that wraps exceptions into AgentRunResult with synthesized error events is not exercised by any unit test.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/engine/agent_run.py",
+      "symbol": "_SuspendingRunner",
+      "description": "The raise SubagentSuspended(); yield pattern required to create an async generator is fragile and odd, though documented with # pragma: no cover.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

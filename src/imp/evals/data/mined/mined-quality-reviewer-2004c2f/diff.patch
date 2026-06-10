@@ -1,0 +1,177 @@
+diff --git a/src/imp/cli/render_text.py b/src/imp/cli/render_text.py
+index d545b7e..ab560d4 100644
+--- a/src/imp/cli/render_text.py
++++ b/src/imp/cli/render_text.py
+@@ -2,7 +2,8 @@
+ """Plain-text narrative view (imp log / non-TTY). Walks a NarrativeTree and
+ yields wrapped ANSI lines. No rich — plain wrapped text only (design §3, §6).
+ 
+-Default: folds render as one-line summaries; agent/user prose in full.
++Default: thinking and tool bursts are dropped; subagents expand (their prose +
++structured return value); context folds still collapse to a one-line summary.
+ --full: every fold expanded inline (Task 13). Same content the TUI shows after
+ expand-all.
+ """
+@@ -230,16 +231,23 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
+ 
+ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
+                      color: bool, width: int) -> Iterator[str]:
+-    if not full:
+-        glyph = pal.fold_glyph(expanded=False)
+-        tail = "running" if sub.running else f"→ {(sub.outcome or '').strip()[:40]}"
+-        yield _line(f"{glyph} task → {sub.subagent_name} · {sub.event_count} events · {tail}",
++    # Header: lean uses the shared `task → {name}` boundary (no glyph, shared with
++    # the live driver); --full uses the expanded `▾ task → {name}` fold header.
++    if full:
++        yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
+                     depth, color, *pal.NODE_COLORS["subagent"])
+-        return
+-    yield _line(f"{pal.fold_glyph(expanded=True)} task → {sub.subagent_name}",
+-                depth, color, *pal.NODE_COLORS["subagent"])
++    else:
++        yield header_line(sub, depth=depth, color=color)
++    # The subagent's own narrative, recursed at the same `full` level (lean filters
++    # nested thinking/tools via A1/A2; --full expands them).
+     for c in sub.tree.root.children:
+         yield from _render(c, depth=depth + 1, full=full, color=color, width=width)
++    # The structured return value the parent consumed — emitted in BOTH modes so
++    # --full stays a superset of default (DEVIATION from spec, which left --full
++    # untouched: the spec's "--full unchanged" produced the backwards result of
++    # --full showing LESS than default; per maintainer decision, --full is now a
++    # superset again). Always emit when non-empty (decision ii).
++    yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width)
+ 
+ 
+ def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
+diff --git a/tests/test_render_text.py b/tests/test_render_text.py
+index 2a5fac4..f9b7881 100644
+--- a/tests/test_render_text.py
++++ b/tests/test_render_text.py
+@@ -68,8 +68,8 @@ def test_collapsed_folds_drop_thinking_and_tool_summaries() -> None:
+     assert "⏺" not in out
+ 
+ 
+-def test_collapsed_subagent_and_step_context_summaries() -> None:
+-    out = "\n".join(_lines([
++def test_collapsed_subagent_expands_with_outcome() -> None:
++    out = _lines([
+         _ev("2", "step_started", step="s", kind="agent", phase="p",
+             model="m", provider="anthropic"),
+         _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
+@@ -78,12 +78,113 @@ def test_collapsed_subagent_and_step_context_summaries() -> None:
+         _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+             input={"subagent_name": "reviewer", "task_description": "go"}),
+         _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
+-            stop_reason="end_turn", usage={}, raw={"content": []}),
++            stop_reason="end_turn", usage={},
++            raw={"content": [{"type": "text", "text": "looks good"}]}),
++        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
++            content='{"status":"Success","summary":"ok"}', error=False),
++    ])
++    joined = "\n".join(out)
++    # Step-context still collapses to its one-line summary (untouched).
++    assert "▸ context · anthropic/claude · 2 tools" in joined
++    # Subagent: boundary header (no glyph, no `· N events`), recursed prose, outcome.
++    assert any(ln.strip() == "task → reviewer" for ln in out)
++    assert "looks good" in joined
++    assert any(ln.strip() == "→ status=Success · summary=ok" for ln in out)
++    # The old one-liner shape is gone.
++    assert "▸ task → reviewer" not in joined
++    assert "events" not in joined
++
++
++def test_subagent_recurses_filters_nested_thinking_and_tools() -> None:
++    out = "\n".join(_lines([
++        _ev("2", "step_started", step="s", kind="agent", phase="p",
++            model="m", provider="anthropic"),
++        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
++            input={"subagent_name": "reviewer", "task_description": "go"}),
++        _ev("t1", "thinking", agent_id="sub:tk1", content="nested musings"),
++        _ev("c1", "tool_call", agent_id="sub:tk1", id="n1", name="bash", input={}),
++        _ev("c2", "tool_result", agent_id="sub:tk1", id="n1", content="ok", error=False),
++        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
++            stop_reason="end_turn", usage={},
++            raw={"content": [{"type": "text", "text": "nested prose"}]}),
+         _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+             content='{"status":"Success"}', error=False),
+     ]))
+-    assert "▸ context · anthropic/claude · 2 tools" in out
+-    assert "▸ task → reviewer · 1 events" in out
++    assert "nested prose" in out           # subagent prose recurses
++    assert "nested musings" not in out     # nested thinking filtered (A1)
++    assert "tools" not in out              # nested burst filtered (A2)
++    assert "→ status=Success" in out       # outcome present
++
++
++def test_subagent_outcome_present_even_with_prose() -> None:
++    # Outcome is ALWAYS emitted when non-empty, alongside prose (decision ii).
++    out = "\n".join(_lines([
++        _ev("2", "step_started", step="s", kind="agent", phase="p",
++            model="m", provider="anthropic"),
++        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
++            input={"subagent_name": "reviewer", "task_description": "go"}),
++        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
++            stop_reason="end_turn", usage={},
++            raw={"content": [{"type": "text", "text": "the prose"}]}),
++        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
++            content='{"status":"Success","summary":"done"}', error=False),
++    ]))
++    assert "the prose" in out
++    assert "→ status=Success · summary=done" in out
++
++
++# NOTE: there is intentionally NO doubly-nested (sub-subagent) test here.
++# Routing is single-level by exact membership (narrative.py:763-770): a
++# grandchild's `sub:<id>` events are NOT delegated into the child fold's nested
++# builder, and spawned subagents receive `subagent_defs={}` so they cannot spawn
++# subagents at all. A sub-subagent fixture would misroute (inner prose lands at
++# the step level, inner fold stays empty) and any substring-presence assertion
++# would pass for the wrong reason. The render code recurses correctly, but the
++# scenario is unreachable until the engine enables nesting and routing becomes
++# recursive/prefix-aware — out of scope for this plan.
++
++
++def test_subagent_error_outcome_is_error_styled() -> None:
++    out = list(_lines([
++        _ev("2", "step_started", step="s", kind="agent", phase="p",
++            model="m", provider="anthropic"),
++        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
++            input={"subagent_name": "reviewer", "task_description": "go"}),
++        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
++            content="dispatch failed: boom", error=True),
++    ], width=80))
++    # Non-JSON error outcome renders as prose; verify it is present.
++    assert any("dispatch failed: boom" in ln for ln in out)
++    # And it is error-styled when color is on.
++    color_out = list(render_tree(nv.build_tree([
++        _ev("2", "step_started", step="s", kind="agent", phase="p",
++            model="m", provider="anthropic"),
++        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
++            input={"subagent_name": "reviewer", "task_description": "go"}),
++        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
++            content="dispatch failed: boom", error=True),
++    ]), full=False, color=True, width=80))
++    assert any("dispatch failed: boom" in ln and "\x1b[31m" in ln for ln in color_out)
++
++
++def test_full_mode_also_emits_subagent_outcome() -> None:
++    # --full must stay a superset of default: it expands thinking/tools AND emits
++    # the structured return value (maintainer decision; deviation from the spec's
++    # original "--full unchanged").
++    out = "\n".join(_lines([
++        _ev("2", "step_started", step="s", kind="agent", phase="p",
++            model="m", provider="anthropic"),
++        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
++            input={"subagent_name": "reviewer", "task_description": "go"}),
++        _ev("su1", "llm_response", agent_id="sub:tk1", provider="anthropic", model="m",
++            stop_reason="end_turn", usage={},
++            raw={"content": [{"type": "text", "text": "verdict: approve"}]}),
++        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
++            content='{"status":"Success","summary":"ok"}', error=False),
++    ], full=True))
++    assert "▾ task → reviewer" in out      # expanded fold header (full shape)
++    assert "verdict: approve" in out        # recursed prose
++    assert "→ status=Success · summary=ok" in out   # outcome now present in full too
+ 
+ 
+ def test_human_gate_and_error_lines() -> None:

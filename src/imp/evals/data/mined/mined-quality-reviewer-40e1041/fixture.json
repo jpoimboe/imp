@@ -1,0 +1,28 @@
+{
+  "id": "mined-quality-reviewer-40e1041",
+  "source": "mined",
+  "base_sha": "93a065e05f73b784cec7aa2d73ad683dd05e39f2",
+  "head_sha": "40e1041",
+  "task_context": "Two-stage review of Tasks 5+6 commit (OpenAI strict-mode schema transform).\nWorking directory: /home/jpoimboe/imp\n## SHAs\n## What was requested\n`src/imp/providers/_openai_schema.py` \u2014 module exporting `to_openai_strict(schema) -> dict` that:\n- Applies recursively to nested objects\n- Sets `additionalProperties: false` on every object level\n- Makes every property appear in `required`\n- Widens optionals to nullable (either via `type: [T, \"null\"]` for bare-type schemas, or by leaving `anyOf: [..., {\"type\": \"null\"}]` alone for Pydantic's Optional[T] form)\n- Is idempotent\n`tests/test_openai_schema.py` \u2014 6 tests:\n1. test_required_property_unchanged\n2. test_optional_property_becomes_nullable_and_required\n3. test_nested_object_recursively_normalized\n4. test_enum_field_stays_enum\n5. test_idempotent\n6. test_complete_step_schema_round_trip (uses real make_complete_step_tool)\nConstraints:\n- Single commit with message `feat(providers): OpenAI strict-mode schema transform (spec \u00a76.14)`\n- Only `src/imp/providers/_openai_schema.py` and `tests/test_openai_schema.py` in the commit\nDEVIATION from plan text: `_nullable` had to be made idempotent over Pydantic's `anyOf: [..., {\"type\": \"null\"}]` shape (Pydantic emits Optional[T] as anyOf, not bare type). The round-trip test (test 6) uses a form-agnostic `_is_nullable` helper accordingly.\n## SPEC COMPLIANCE\n2. Read `src/imp/providers/_openai_schema.py`:\n   - Confirm `to_openai_strict` is exported and uses `deepcopy`.\n   - Confirm `_walk`, `_walk_object`, `_nullable` exist with the documented behavior.\n   - Confirm `_nullable` handles the anyOf-nullable idempotence (per the deviation).\n3. Read `tests/test_openai_schema.py`:\n   - Confirm all 6 test functions exist with the right names.\n   - Confirm test 6 uses a form-agnostic nullable check (either inline or via `_is_nullable` helper).\n4. Run `pytest tests/test_openai_schema.py -v` \u2014 confirm 6 passed.\n## CODE QUALITY\n1. Are the recursive walks readable? Any unnecessary branches?\n2. Is `_nullable`'s control flow clear? Are the early returns ordered sensibly (most-specific-first)?\n3. The `_is_nullable` test helper \u2014 is it a private utility (underscore-prefixed)? Does it cover both forms?\n4. Any lint or typing issues? Run `ruff check src/imp/providers/_openai_schema.py tests/test_openai_schema.py` and `mypy src/imp/providers/_openai_schema.py`.\nReport (under 250 words):\n- Spec verdict: \u2705 or \u274c\n- Quality verdict: APPROVED or NEEDS_FIX",
+  "expected_findings": [
+    {
+      "locus": "walk.py:36",
+      "symbol": "_walk",
+      "description": "The _walk function parameter is annotated as dict[str, Any] but should be Any because the function checks isinstance(node, dict) and receives non-dict values from recursive calls (lines 46, 49), causing mypy to report unreachable code.",
+      "severity": "Critical",
+      "must_catch": true,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

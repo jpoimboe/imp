@@ -1,0 +1,90 @@
+diff --git a/src/imp/engine/replay.py b/src/imp/engine/replay.py
+index facfaff..74bbb38 100644
+--- a/src/imp/engine/replay.py
++++ b/src/imp/engine/replay.py
+@@ -30,7 +30,10 @@ from imp.providers.claude_code import (
+     _extract_claude_code_diagnostics,
+     _parse_claude_code_message,
+ )
+-from imp.providers.codex_runner import _parse_codex_message
++from imp.providers.codex_runner import (
++    _extract_codex_diagnostics,
++    _parse_codex_message,
++)
+ from imp.providers.openai import (
+     _extract_responses_diagnostics,
+     _parse_responses_message,
+@@ -47,6 +50,7 @@ _DIAGNOSTICS_EXTRACTORS: dict[str, Callable[[dict[str, Any]], Diagnostics]] = {
+     "anthropic": _extract_anthropic_diagnostics,
+     "openai": _extract_responses_diagnostics,
+     "claude_code": _extract_claude_code_diagnostics,
++    "codex": _extract_codex_diagnostics,
+ }
+ 
+ 
+diff --git a/src/imp/providers/codex_runner.py b/src/imp/providers/codex_runner.py
+index 4c35a66..f294eae 100644
+--- a/src/imp/providers/codex_runner.py
++++ b/src/imp/providers/codex_runner.py
+@@ -23,6 +23,7 @@ from typing import Any
+ 
+ from imp.agents.runner import (
+     AgentInvocation,
++    Diagnostics,
+     Event,
+     Message,
+     TextBlock,
+@@ -744,6 +745,20 @@ def _parse_codex_message(raw: dict[str, Any]) -> Message:
+     return Message(role="assistant", content=tuple(content))
+ 
+ 
++def _extract_codex_diagnostics(raw: dict[str, Any]) -> Diagnostics:
++    """Render-only diagnostics for codex. text/tool_use are conversation
++    history (not warnings); any other block type is surfaced as a warning.
++    codex's reasoning is emitted as a separate `thinking` event, not in
++    `llm_response.raw`, so there are no inline thinkings to extract here."""
++    warnings: list[str] = []
++    for block in raw.get("content", []):
++        kind = block.get("type")
++        if kind in ("text", "tool_use"):
++            continue
++        warnings.append(f"skipped unknown block type {kind!r}")
++    return Diagnostics(block_warnings=tuple(warnings), thinkings=())
++
++
+ def process_event(
+     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
+     provider: str, model: str,
+diff --git a/tests/test_codex_replay_parser.py b/tests/test_codex_replay_parser.py
+index 3e1b17f..67f6f55 100644
+--- a/tests/test_codex_replay_parser.py
++++ b/tests/test_codex_replay_parser.py
+@@ -2,7 +2,7 @@
+ from __future__ import annotations
+ 
+ from imp.agents.runner import TextBlock, ToolUseBlock
+-from imp.engine.replay import parse_message
++from imp.engine.replay import extract_diagnostics, parse_message
+ 
+ 
+ def test_parse_codex_text_only_message() -> None:
+@@ -37,3 +37,19 @@ def test_parse_codex_web_search_block_is_query_only() -> None:
+         ToolUseBlock(id="ws-1", name="web_search",
+                      input={"query": "python asyncio"}),
+     )
++
++
++def test_codex_diagnostics_empty_for_known_blocks() -> None:
++    raw = {"content": [
++        {"type": "text", "text": "hi"},
++        {"type": "tool_use", "id": "c1", "name": "edit_file", "input": {}},
++    ]}
++    diag = extract_diagnostics("codex", raw)
++    assert diag.block_warnings == ()
++    assert diag.thinkings == ()
++
++
++def test_codex_diagnostics_warns_on_unknown_block() -> None:
++    raw = {"content": [{"type": "mystery_block", "data": 1}]}
++    diag = extract_diagnostics("codex", raw)
++    assert any("mystery_block" in w for w in diag.block_warnings)

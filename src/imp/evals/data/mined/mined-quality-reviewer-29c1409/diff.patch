@@ -1,0 +1,206 @@
+diff --git a/src/imp/evals/analysis.py b/src/imp/evals/analysis.py
+index f24e0b9..d7a0cea 100644
+--- a/src/imp/evals/analysis.py
++++ b/src/imp/evals/analysis.py
+@@ -66,18 +66,27 @@ def compute_q1(paired_by_fixture: Mapping[str, Mapping[str, RunResult]]) -> dict
+     }
+ 
+ 
+-def compute_q4(*, fastpath_recall: float, union_recall: float, n_diffs: int) -> dict[str, Any]:
++def compute_q4(
++    *, fast_c: int, fast_t: int, union_c: int, union_t: int, n_diffs: int
++) -> dict[str, Any]:
+     # NOTE (M3): unlike Q1 (Wilson CI on the per-diff unique-blocking proportion),
+     # Q4 compares POOLED POINT ESTIMATES within a fixed margin, guarded only by the
+     # minimum-diff-count gate — NOT a CI-separation test. This is intentional and
+-    # pre-registered, but it is a weaker guarantee than Q1's; a future version
+-    # should bootstrap a CI on (fastpath - union) and gate on that.
++    # pre-registered. We surface the RAW caught/total counts (not just the ratio)
++    # so a human can read 4/5-vs-5/5 as the noise it is on thin data — the
++    # substitute for the CI Q4 deliberately does not compute (spec Component 3).
++    fastpath_recall = (fast_c / fast_t) if fast_t else 0.0
++    union_recall = (union_c / union_t) if union_t else 0.0
+     return {
+         "verdict": q4_verdict(
+             fastpath_recall=fastpath_recall, union_recall=union_recall, n_diffs=n_diffs
+         ),
+         "fastpath_blocking_recall": fastpath_recall,
+         "union_blocking_recall": union_recall,
++        "fast_caught": fast_c,
++        "fast_total": fast_t,
++        "union_caught": union_c,
++        "union_total": union_t,
+         "n_diffs": n_diffs,
+         "min_diffs_required": min_diff_count(),
+     }
+@@ -114,35 +123,43 @@ def run_q1_q4(
+ 
+     paired_by_fixture: dict[str, dict[str, RunResult]] = {}
+     fast_c = fast_t = union_c = union_t = 0
++    q4_n_diffs = 0
+     for fx in fixtures:
+         res = run_paired(control_root, fx, model_map)
+-        paired_by_fixture[fx.id] = res
+-        cr = res.get("code-reviewer")
+-        if cr is not None:
++        # Q1 pool: exclude a mined fixture authored by spec-task-reviewer (the role
++        # Q1 evaluates dropping) — don't score it against a copy of its own output.
++        if not is_self_graded(fx, "spec-task-reviewer"):
++            paired_by_fixture[fx.id] = res
++        # Q4 pool: exclude a mined fixture authored by code-reviewer (Q4's fast-path
++        # role). Curated code-reviewer fixtures are NOT excluded (is_self_graded
++        # gates on source == "mined").
++        if not is_self_graded(fx, "code-reviewer"):
++            q4_n_diffs += 1
++            cr = res.get("code-reviewer")
++            if cr is not None:
++                c, t = _blocking_counts(
++                    grade(fx, cr, project_root=control_root,
++                          judge_provider=judge_provider, judge_model=judge_model)
++                )
++                fast_c += c
++                fast_t += t
++            union = dedup_findings(
++                f
++                for name in ("spec-task-reviewer", "quality-reviewer")
++                if name in res
++                for f in res[name].findings
++            )
++            union_rr = RunResult("union", fx.id, 0, "", union, Telemetry.zero())
+             c, t = _blocking_counts(
+-                grade(fx, cr, project_root=control_root,
++                grade(fx, union_rr, project_root=control_root,
+                       judge_provider=judge_provider, judge_model=judge_model)
+             )
+-            fast_c += c
+-            fast_t += t
+-        union = dedup_findings(
+-            f
+-            for name in ("spec-task-reviewer", "quality-reviewer")
+-            if name in res
+-            for f in res[name].findings
+-        )
+-        union_rr = RunResult("union", fx.id, 0, "", union, Telemetry.zero())
+-        c, t = _blocking_counts(
+-            grade(fx, union_rr, project_root=control_root,
+-                  judge_provider=judge_provider, judge_model=judge_model)
+-        )
+-        union_c += c
+-        union_t += t
++            union_c += c
++            union_t += t
+ 
+     q1 = compute_q1(paired_by_fixture)
+     q4 = compute_q4(
+-        fastpath_recall=(fast_c / fast_t) if fast_t else 0.0,
+-        union_recall=(union_c / union_t) if union_t else 0.0,
+-        n_diffs=len(fixtures),
++        fast_c=fast_c, fast_t=fast_t, union_c=union_c, union_t=union_t,
++        n_diffs=q4_n_diffs,
+     )
+     return q1, q4
+diff --git a/tests/evals/test_analysis.py b/tests/evals/test_analysis.py
+index 7c3475a..6f7bf65 100644
+--- a/tests/evals/test_analysis.py
++++ b/tests/evals/test_analysis.py
+@@ -37,12 +37,23 @@ def test_q1_drop_when_spec_reviewer_adds_no_unique_blocking_over_enough_diffs():
+     assert out["unique_blocking_mean"] == 0.0
+ 
+ 
+-def test_q4_insufficient_then_replace():
+-    assert (
+-        compute_q4(fastpath_recall=0.8, union_recall=0.82, n_diffs=3)["verdict"]
+-        == "insufficient-diffs"
+-    )
+-    assert compute_q4(fastpath_recall=0.8, union_recall=0.82, n_diffs=200)["verdict"] == "replace"
++def test_q4_insufficient_then_replace_and_surfaces_raw_counts():
++    thin = compute_q4(fast_c=4, fast_t=5, union_c=5, union_t=5, n_diffs=3)
++    assert thin["verdict"] == "insufficient-diffs"
++    # raw numerator/denominator are surfaced (spec: print 4/5 vs 5/5, not just 0.8/1.0)
++    assert thin["fast_caught"] == 4 and thin["fast_total"] == 5
++    assert thin["union_caught"] == 5 and thin["union_total"] == 5
++    assert thin["fastpath_blocking_recall"] == 0.8
++    assert thin["union_blocking_recall"] == 1.0
++
++    enough = compute_q4(fast_c=82, fast_t=100, union_c=84, union_t=100, n_diffs=200)
++    assert enough["verdict"] == "replace"  # 0.82 >= 0.84 - 0.05 margin
++
++
++def test_q4_zero_total_recall_is_zero_not_crash():
++    out = compute_q4(fast_c=0, fast_t=0, union_c=0, union_t=0, n_diffs=1)
++    assert out["fastpath_blocking_recall"] == 0.0
++    assert out["union_blocking_recall"] == 0.0
+ 
+ 
+ def test_is_self_graded_only_excludes_mined_matching_role():
+@@ -62,3 +73,70 @@ def test_is_self_graded_only_excludes_mined_matching_role():
+     # curated fixture is NEVER self-graded, even at the matching role (load-bearing:
+     # all 7 curated carry reviewer_type='code-reviewer'; Q4's role is code-reviewer)
+     assert is_self_graded(_fx("curated", "code-reviewer"), "code-reviewer") is False
++
++
++def test_run_q1_q4_excludes_self_graded_and_threads_raw_counts(monkeypatch, tmp_path):
++    """run_paired runs once per fixture; the Q1 pool drops a mined spec-task
++    fixture, the Q4 pool drops a mined code fixture, curated stays in both."""
++    from imp.evals import analysis
++    from imp.evals.models import (
++        ExpectedFinding,
++        Fixture,
++        FixtureMeta,
++        GradeResult,
++        ReviewFinding,
++        RunResult,
++        Telemetry,
++    )
++
++    def _fx(fid, source, role):
++        return Fixture(
++            fid, source, "a", "b", "", "",
++            (ExpectedFinding("x.py:1", "s", "d", "Major", True),), (),
++            FixtureMeta(role, None, True, False),
++        )
++
++    fixtures = [
++        _fx("mined-spec", "mined", "spec-task-reviewer"),  # excluded from Q1
++        _fx("mined-code", "mined", "code-reviewer"),        # excluded from Q4
++        _fx("curated-1", "curated", "code-reviewer"),       # in BOTH pools
++    ]
++
++    paired_calls = []
++
++    def _fake_run_paired(control_root, fx, model_map, **kw):
++        paired_calls.append(fx.id)
++        rf = ReviewFinding("s", "x.py:1", "d", "Major", True)
++        return {
++            "spec-task-reviewer": RunResult("p", fx.id, 0, "", (rf,), Telemetry.zero()),
++            "quality-reviewer": RunResult("p", fx.id, 0, "", (), Telemetry.zero()),
++            "code-reviewer": RunResult("p", fx.id, 0, "", (rf,), Telemetry.zero()),
++        }
++
++    def _fake_grade(fx, rr, **kw):
++        ef = fx.expected_findings[0]
++        from imp.evals.models import FindingMatch
++        caught = bool(rr.findings)
++        return GradeResult(
++            rr.variant_id, fx.id, 0,
++            (FindingMatch(ef, "exact" if caught else "none",
++                          rr.findings[0] if caught else None),),
++            (), (),
++        )
++
++    monkeypatch.setattr("imp.evals.paired.run_paired", _fake_run_paired)
++    monkeypatch.setattr("imp.evals.grader.grade", _fake_grade)
++
++    q1, q4 = analysis.run_q1_q4(
++        tmp_path, fixtures,
++        {r: ("fake", "m") for r in
++         ("spec-task-reviewer", "quality-reviewer", "code-reviewer")},
++        judge_provider="fake", judge_model="m",
++    )
++    # run_paired called once per fixture (expensive — never twice)
++    assert sorted(paired_calls) == ["curated-1", "mined-code", "mined-spec"]
++    # Q1 pool excludes the mined spec-task fixture -> 2 diffs
++    assert q1["n_diffs"] == 2
++    # Q4 pool excludes the mined code fixture -> 2 diffs, and raw counts are present
++    assert q4["n_diffs"] == 2
++    assert "fast_total" in q4 and "union_total" in q4

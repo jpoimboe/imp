@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-7b13174",
+  "source": "mined",
+  "base_sha": "31e8391",
+  "head_sha": "7b13174",
+  "task_context": "Code quality review of one commit in a git worktree.\n## Working directory\n/home/jpoimboe/imp/.claude/worktrees/codex-default-workflow (branch worktree-codex-default-workflow). Run from there.\n## What to review\n- DESCRIPTION: Task 4 \u2014 add codex-native resume to the runner: thread `codex_home` into `_drive_turns`, and branch on `invocation.balance_on_resume` to restore the persisted rollout and call `client.resume_thread(thread_id)` instead of `start_thread()`. This greens the previously-RED resume gate test.\n- PLAN_OR_REQUIREMENTS: Task 4 of docs/superpowers/plans/2026-06-05-codex-default-workflow-support.md\n## Focus\n- Is the resume branch clean and readable? The if/elif/else structure (resume / sdk-unavailable / start-with-options) \u2014 is it correct and not error-prone? Any duplication between resume and start branches worth extracting, or is the parallel structure clearer left inline?\n- The `restore_rollout` import is in-function \u2014 consistent with the codebase convention (codex_runner uses in-function imports widely)? \n- restore_rollout raises FileNotFoundError on missing rollout. In the resume branch this propagates out of _drive_turns \u2014 is that the intended fail-loud behavior (yes per plan), and does it land somewhere sane (run()'s try/finally still tears down CODEX_HOME)? Verify the finally still runs on this exception path.\n- The TypeError fallback pattern (`resume_thread(thread_id, thread_options)` then bare `resume_thread(thread_id)`) \u2014 is it a faithful mirror of the start_thread pattern? Any subtle bug (e.g. catching TypeError that could mask a real error)?\n- Comment quality, naming, dead code introduced by THIS change.\n- typecheck: run `make typecheck` to confirm clean.\nNote: pre-existing lint errors in docs/superpowers/spikes/ are NOT this commit's concern.\n## Report\n- **Strengths**\n- **Issues** Critical / Important / Minor (file:line)\n- **Assessment:** APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/codex_runner.py:396",
+      "symbol": "_drive_turns",
+      "description": "Resume-branch TypeError handler lacks explanatory comment; start-thread handler at line 404 has '# Fakes / older SDK: ignore the options arg.' for consistency.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/codex_runner.py:396",
+      "symbol": "_drive_turns",
+      "description": "Potential TypeError masking: both resume and start branches catch TypeError broadly, which could silently swallow TypeErrors from within the called functions; this is a pre-existing limitation not introduced by this task.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

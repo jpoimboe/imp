@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-5468d1c",
+  "source": "mined",
+  "base_sha": "b4f56b3",
+  "head_sha": "5468d1c",
+  "task_context": "Code quality review in repo /home/jpoimboe/imp.\nDESCRIPTION: `dispatch_task` now places a subagent on its own `model_role`'s resolved provider/model (from ctx.resolved_roles) when set, else inherits the parent; threads resolved_roles down.\nPLAN_OR_REQUIREMENTS: Task 11 from docs/superpowers/plans/2026-05-30-model-role-constraints.md\nAssess:\n- Correctness of the selection block: the `mr is not None and mr in resolved` gate \u2014 does it correctly fall through to parent inheritance when the role is set but NOT in the resolved map (a defensive case)? Is silently inheriting in that case the right behavior, or should it be an error? (Consider: resolve_roles is supposed to have collected every subagent model_role, so a set-but-absent role would indicate a resolver bug. Is silent inheritance masking that, or is it acceptable defensive coding? Judge against the plan's intent.)\n- Clarity/accuracy of the comment.\n- Consistency with how resolve_roles collects subagent roles (Task 7) \u2014 would a subagent whose model_role IS collected always be present in the map at dispatch time?\n- Tests meaningful (cross-vendor + inheritance both covered)? Is the role-set-but-absent-from-map case worth a test?\n- Naming (`mr`, `pm`, `sub_provider`, `sub_model`).\nruff + mypy clean, tests pass. Judge proportionally. Don't invent issues. Return: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Needs changes).",
+  "expected_findings": [
+    {
+      "locus": ":0",
+      "symbol": "",
+      "description": "The gate `mr is not None and mr in resolved` silently falls through to parent inheritance when model_role is set but absent from resolved_roles, masking resolver bugs instead of surfacing them.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": ":0",
+      "symbol": "",
+      "description": "No test covering the case where model_role is set but absent from resolved_roles (e.g., model_role='code_review' but resolved_roles={}).",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": ":0",
+      "symbol": "",
+      "description": "Variables mr and pm could be renamed to role and resolved_pm for clarity, matching vocabulary in resolve_roles.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": ":0",
+      "symbol": "",
+      "description": "Comment explains the frozen-dataclass reason for pre-computation but doesn't explain what happens when model_role is set but absent from resolved_roles.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

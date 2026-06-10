@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-31e8391",
+  "source": "mined",
+  "base_sha": "7dd1ea3",
+  "head_sha": "31e8391",
+  "task_context": "Code quality review of one commit in a git worktree.\n## Working directory\n/home/jpoimboe/imp/.claude/worktrees/codex-default-workflow (branch worktree-codex-default-workflow). Run from there.\n## What to review\n- DESCRIPTION: Task 3 \u2014 wire `persist_rollout` into the codex runner's `run()` finally block (best-effort, before teardown_codex_home), add module logger, and a regression test that a normal codex run still completes cleanly with persist wired in.\n- PLAN_OR_REQUIREMENTS: Task 3 of docs/superpowers/plans/2026-06-05-codex-default-workflow-support.md\n## Focus\n- Is the best-effort error handling correct and well-scoped? (try/except wraps ONLY persist, not teardown; broad `except Exception` is justified here because teardown must always run \u2014 is that the right call, and is it commented?)\n- Is the in-function import of persist_rollout reasonable (avoids import cycle / keeps it local), or should it be module-scope? Check whether codex_runner already imports other things at module scope from sibling provider modules vs in-function (does the codebase have a convention here?).\n- Logger placement: implementer put `_logger = logging.getLogger(__name__)` after all imports to avoid E402. Is that consistent with codex_config.py?\n- Is `proc_state.get(\"thread_id\")` the right access, and is the `if tid:` guard meaningful (skip persist when no thread was ever started)?\n- Comment quality \u2014 does the comment explain WHY (best-effort, teardown must run, resume fails loudly later)?\n- Test quality: does the regression test actually exercise the finally path, or could it pass trivially? Is the assertion meaningful?\n- Dead code / naming / magic values introduced by THIS change only.\nRun `make typecheck` to confirm clean. Note: pre-existing lint errors in docs/superpowers/spikes/ are NOT this commit's concern.\n## Report\n- **Strengths**\n- **Issues** Critical / Important / Minor (file:line)\n- **Assessment:** APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/codex_runner.py:315",
+      "symbol": "run",
+      "description": "In-function import of persist_rollout is placed inside the if tid: guard; could be module-scope without downside, but current approach is consistent with other local imports in the file.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_codex_runner.py:151",
+      "symbol": "",
+      "description": "Test assertion is indirect, using event type check rather than directly testing persist\u2192restore round-trip, but works because agent_output is only yielded after complete_step succeeds.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

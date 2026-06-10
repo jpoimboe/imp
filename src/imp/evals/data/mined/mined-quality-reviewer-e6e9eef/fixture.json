@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-e6e9eef",
+  "source": "mined",
+  "base_sha": "d2ce806",
+  "head_sha": "e6e9eef",
+  "task_context": "You are a code quality reviewer. Work from `/home/jpoimboe/imp`. Review Task 2: extraction of `NUDGE_LIMIT` + `build_continuation_fn` into `src/imp/engine/completion.py` (a verbatim move of the executor's `_build_continuation_fn` logic to a public function, ahead of a later task that wires it into a shared builder).\nDESCRIPTION: Add public build_continuation_fn + NUDGE_LIMIT to completion.py, extracted from executor's _build_continuation_fn.\nPLAN_OR_REQUIREMENTS: Task 2 from docs/superpowers/plans/2026-06-01-agent-subagent-unification.md\nAssess:\n- Clean function with clear responsibility and good docstring? Accurate names?\n- Type annotations correct and idiomatic (the signature uses keyword-only args, `Callable`/`Awaitable` unions)?\n- Tests verify real behavior (the nudge count exhaustion, the awaiting_user_input emission ordering, the None case)?\n- Any concern about the `log: Any` typing weakening type safety vs. the original? Is that justified here?\n- Run `make lint` and `make typecheck` to confirm clean.\n- Note: there is now temporary duplication (executor still has its private `_build_continuation_fn`); this is intentional \u2014 it's removed in a later task. Don't flag the duplication as a defect, but you may note it.\nDon't flag pre-existing file sizes. Return: Strengths, Issues (Critical/Important/Minor), Assessment (approved or needs fixes).",
+  "expected_findings": [
+    {
+      "locus": "completion.py:0",
+      "symbol": "build_continuation_fn",
+      "description": "`log: Any` weakens type safety instead of using the `EventLog` protocol; the new `None` guard expands behavior relative to the original executor where `log` was always non-None.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "completion.py:0",
+      "symbol": "build_continuation_fn",
+      "description": "The interactive docstring dropped the inline comment explaining why `stop_reason` cannot carry the signal; phrasing is less precise than the original.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "completion.py:0",
+      "symbol": "NUDGE_LIMIT",
+      "description": "Renamed from private `_NUDGE_LIMIT` to public; executor's `_NUDGE_LIMIT` and new `NUDGE_LIMIT` are now independent constants with identical value, risking silent drift until deduplication lands.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "completion.py:0",
+      "symbol": "build_continuation_fn",
+      "description": "`user_chat_input_fn('')` passes an empty string rather than the agent's last text, representing a pre-existing design choice verbatim from the original executor.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

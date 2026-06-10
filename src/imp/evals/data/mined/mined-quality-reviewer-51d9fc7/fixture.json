@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-51d9fc7",
+  "source": "mined",
+  "base_sha": "64ed553",
+  "head_sha": "51d9fc7",
+  "task_context": "Combined spec + code-quality review for a mechanical diff in `/home/jpoimboe/imp`.\n## Context\nTask 4 of the provider-error-taxonomy plan: add a `\"category\"` key to 8 existing error-event payloads in `src/imp/providers/openai.py`. Pure metadata; no behavior change.\n## Diff Under Review\n## Mapping Spec (same for all three providers)\n| `kind`                       | `category`             |\n|------------------------------|------------------------|\n| `transcript_invalid`         | `config`               |\n| `missing_complete_step`      | `agent_output_missing` |\n| `no_complete_step`           | `agent_output_missing` |\n| `no_user_input_fn`           | `config`               |\n| `fatal_tool_error`           | `config`               |\n| `output_validation`          | `agent_output_missing` |\n| `tool_call_ceiling_exceeded` | `config`               |\n| `interrupted`                | `config`               |\n## Verify\n1. **Exactly 8 emit sites updated.** `grep -c '\"category\":' src/imp/providers/openai.py` returns `8`.\n2. **Each kind\u2192category pair correct** per the table \u2014 walk through the 8 hunks and confirm.\n3. **No other key removed or altered** in any hunk.\n5. **Tests pass:** `pytest tests/test_openai_provider.py tests/test_openai_runner.py tests/test_openai_provider_protocol.py -v 2>&1 | tail -3`.\n6. **No new lint or typecheck regressions** in `providers/openai.py`.\n## Report\n**Verdict:** \u2705 Approved  \u2014OR\u2014  \u274c Issues found (list with site references)\nUnder 150 words.",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

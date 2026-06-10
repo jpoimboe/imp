@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-4bf2db4",
+  "source": "mined",
+  "base_sha": "8af5058",
+  "head_sha": "4bf2db4",
+  "task_context": "You are a code quality reviewer. Work from `/home/jpoimboe/imp/.claude/worktrees/eval-stage2-q1q4`.\nDESCRIPTION: Added `count_corpus_feasibility` corpus driver to mining.py and an `imp eval feasibility` CLI subcommand (`cmd_feasibility` + `_render_feasibility`) to cli.py, lifting `_DEFAULT_CORPUS_GLOB` to module scope. Free pre-count, never bills.\nPLAN_OR_REQUIREMENTS: Task 2 from docs/superpowers/plans/2026-06-05-eval-stage2-q1q4.md\nAssess standard code quality AND:\n- One clear responsibility per new unit; clean interfaces.\n- Follows existing cli.py / mining.py patterns (read surrounding code: how other cmd_* functions and subparsers are written, import placement, docstring style).\n- Run `make lint && make typecheck`; report results. (pre-release, no backward-compat concerns).\n- Test quality: real behavior, not mocks. Is the empty-corpus CLI test a real subprocess smoke test?\n- Any lurking issues: the `_AGG`/`_PERQ`/`FeasibilityCount` module imports \u2014 are they clean (no unused, no F811)? Is `import glob` inside the function reasonable vs the file's convention?\nSmall well-specified task \u2014 calibrate scrutiny, don't invent issues.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Changes needed).",
+  "expected_findings": [
+    {
+      "locus": "src/imp/evals/__main__.py",
+      "symbol": "cmd_feasibility",
+      "description": "import glob inside cmd_feasibility is consistent but slightly redundant; should import at module scope like Path, but cmd_mine does the same thing and ruff doesn't flag it.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/evals/mining.py",
+      "symbol": "",
+      "description": "The _DEFAULT_CORPUS_GLOB value is a hardcoded absolute path to the developer's home directory (/home/jpoimboe/...); pre-existing and not a regression, but will silently return 0 results for users other than the author.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

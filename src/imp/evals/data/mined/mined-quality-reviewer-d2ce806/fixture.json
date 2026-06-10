@@ -1,0 +1,28 @@
+{
+  "id": "mined-quality-reviewer-d2ce806",
+  "source": "mined",
+  "base_sha": "b1ae8de",
+  "head_sha": "d2ce806",
+  "task_context": "You are a code quality reviewer. Work from `/home/jpoimboe/imp`. Review the implementation of Task 1 (a pure relocation of `ErrorInfo`/`AgentRunResult` dataclasses + new `SubagentSuspended` exception into a new module `src/imp/engine/agent_run.py`).\nDESCRIPTION: Move ErrorInfo/AgentRunResult from executor.py into new engine/agent_run.py; add SubagentSuspended exception; executor imports them.\nPLAN_OR_REQUIREMENTS: Task 1 from docs/superpowers/plans/2026-06-01-agent-subagent-unification.md\nAssess code quality:\n- Is the new module clean, with one clear responsibility and good docstrings?\n- Are names accurate? Is the relocation faithful (no accidental behavior change)?\n- Does the new file follow the codebase's existing style/patterns?\n- Any import-order, typing, or dead-code concerns? (Run `make lint` and `make typecheck` to confirm.)\nThis is a small, low-risk change. Don't flag pre-existing file sizes or unrelated code.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (approved or needs fixes).",
+  "expected_findings": [
+    {
+      "locus": "imp/engine/agent_run.py:0",
+      "symbol": "",
+      "description": "The module docstring describes functions build_agent_invocation and drive_invocation that do not yet exist in the file, potentially misleading readers during mid-series bisects.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-54e825a",
+  "source": "mined",
+  "base_sha": "fd741d6",
+  "head_sha": "54e825a",
+  "task_context": "Code quality review in repo /home/jpoimboe/imp.\nDESCRIPTION: Task 2 \u2014 `engine_env` gains optional `lint_command: str | None = None` param; injects `IMP_LINT_COMMAND` only when truthy. Two tests added.\nPLAN: Task 2 from docs/superpowers/plans/2026-06-02-dogfood-cascade-hardening.md\nReview the diff: `git -C /home/jpoimboe/imp show 54e825a`.\nAssess: clean code, docstring accuracy (does it match the actual returned keys?), test quality/style consistency with the file, naming, YAGNI, single responsibility, no unrelated edits.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Changes needed). Concise.",
+  "expected_findings": [
+    {
+      "locus": ":0",
+      "symbol": "engine_env",
+      "description": "The if lint_command: check treats empty string as absent but the parameter type is str | None; should use if lint_command is not None: or document falsy-string handling in the docstring.",
+      "severity": "Important",
+      "must_catch": true,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": ":0",
+      "symbol": "",
+      "description": "The two new tests use abbreviated fixtures (change_slug='s', change_title='t') while the existing test uses realistic values ('add-oauth', 'Add OAuth'), creating a trivial inconsistency worth aligning for readability.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": ":0",
+      "symbol": "test_engine_env_omits_lint_command_when_none",
+      "description": "The test name suggests testing when lint_command is None, but actually tests the default-argument path; test_engine_env_omits_lint_command_when_not_configured would be clearer.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

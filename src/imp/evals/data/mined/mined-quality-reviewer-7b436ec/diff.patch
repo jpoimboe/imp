@@ -1,0 +1,208 @@
+diff --git a/src/imp/engine/change.py b/src/imp/engine/change.py
+index 1164ed3..7450130 100644
+--- a/src/imp/engine/change.py
++++ b/src/imp/engine/change.py
+@@ -65,14 +65,18 @@ class Change:
+         }, indent=2, sort_keys=True))
+ 
+         from imp.engine.loader import load_workflow
+-        from imp.providers.config import load_config
++        from imp.providers.config import apply_var_overrides, load_config
+ 
+-        configured_roles = load_config(control_root).role_names()
+-        workflow = load_workflow(change_dir / "workflow", configured_roles=configured_roles)
++        config = load_config(control_root)
++        workflow = load_workflow(
++            change_dir / "workflow", configured_roles=config.role_names()
++        )
+         flat = workflow.flat_steps()
+         State(
+             slug=slug, step=flat[0].name if flat else None, step_attempt=0,
+-            status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
++            status="running",
++            vars=apply_var_overrides(workflow.vars, config.var_overrides),
++            loop_counts={},
+         ).save(change_dir / "state")
+ 
+         change = cls(
+diff --git a/src/imp/providers/config.py b/src/imp/providers/config.py
+index 16b50e9..df11fd8 100644
+--- a/src/imp/providers/config.py
++++ b/src/imp/providers/config.py
+@@ -10,9 +10,10 @@ import yaml
+ 
+ from imp.engine._yaml import items
+ from imp.engine.errors import LoadError
++from imp.engine.expr import ExprType
+ from imp.engine.model_rules import parse_role_constraints
+ from imp.engine.model_tiers import parse_model_tiers
+-from imp.engine.types import RoleConstraint, SourceLoc
++from imp.engine.types import RoleConstraint, SourceLoc, Vars
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+@@ -37,6 +38,7 @@ class Config:
+     source: SourceLoc = field(hash=False)
+     model_rules: dict[str, RoleConstraint] = field(hash=False, default_factory=dict)
+     model_tiers: tuple[str, ...] | None = field(hash=False, default=None)
++    var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
+ 
+     def role_names(self) -> frozenset[str]:
+         return frozenset(self.roles)
+@@ -104,5 +106,60 @@ def load_config(project_root: Path) -> Config:
+     model_tiers = (
+         parse_model_tiers(raw["model_tiers"], src) if "model_tiers" in raw else None
+     )
++    var_overrides = _parse_var_overrides(raw.get("vars"), src)
+     return Config(roles=roles, source=src,
+-                  model_rules=model_rules, model_tiers=model_tiers)
++                  model_rules=model_rules, model_tiers=model_tiers,
++                  var_overrides=var_overrides)
++
++
++def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:
++    """Parse a top-level `vars:` mapping of scalar overrides. Validation against
++    the workflow's declarations happens later, in apply_var_overrides -- here we
++    only enforce the shape (a mapping of scalars)."""
++    if raw is None:
++        return {}
++    if not isinstance(raw, dict):
++        raise LoadError("config.yaml 'vars:' must be a mapping", src)
++    out: dict[str, object] = {}
++    for name, value in items(raw):
++        if not isinstance(value, (bool, int, str)):
++            raise LoadError(
++                f"config.yaml vars: {name!r} must be a bool, int, or string", src
++            )
++        out[str(name)] = value
++    return out
++
++
++def _matches_type(value: object, declared: ExprType) -> bool:
++    # bool is a subclass of int, so order the checks bool-before-int.
++    if declared == "bool":
++        return isinstance(value, bool)
++    if declared == "int":
++        return isinstance(value, int) and not isinstance(value, bool)
++    return isinstance(value, str)
++
++
++def apply_var_overrides(
++    workflow_vars: Vars, overrides: dict[str, object],
++) -> dict[str, object]:
++    """Workflow var defaults with config overrides applied on top. Every override
++    key must be declared by the workflow and type-match its declaration; an
++    unknown var or a type mismatch is a LoadError (spec §11)."""
++    result = dict(workflow_vars.defaults())
++    declared = workflow_vars.types()
++    decls = workflow_vars.decls
++    fallback = decls[0].source if decls else SourceLoc(file=Path("config.yaml"), line=1)
++    for name, value in overrides.items():
++        if name not in declared:
++            raise LoadError(
++                f"config.yaml vars: {name!r} is not declared by the workflow",
++                fallback,
++            )
++        if not _matches_type(value, declared[name]):
++            raise LoadError(
++                f"config.yaml vars: {name!r} expects {declared[name]}, "
++                f"got {type(value).__name__}",
++                next(d.source for d in decls if d.name == name),
++            )
++        result[name] = value
++    return result
+diff --git a/tests/test_config_vars.py b/tests/test_config_vars.py
+new file mode 100644
+index 0000000..f40c616
+--- /dev/null
++++ b/tests/test_config_vars.py
+@@ -0,0 +1,89 @@
++"""config.yaml `vars:` override layer (spec §10, §11, §14): parsed by
++load_config, validated + applied over the workflow's declared defaults at
++Change creation."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from imp.engine.change import Change
++from imp.engine.errors import LoadError
++from imp.engine.state import State
++from imp.engine.types import SourceLoc, VarDecl, Vars
++from imp.providers.config import apply_var_overrides, load_config
++from tests.conftest import _git, _seed_control
++
++_SRC = SourceLoc(file=Path("x"), line=1)
++
++
++def _vars() -> Vars:
++    return Vars((
++        VarDecl(name="final_review", type="bool", default=True, source=_SRC),
++        VarDecl(name="rounds", type="int", default=3, source=_SRC),
++    ))
++
++
++def test_apply_overrides_declared_var() -> None:
++    out = apply_var_overrides(_vars(), {"final_review": False})
++    assert out == {"final_review": False, "rounds": 3}
++
++
++def test_apply_overrides_unknown_var_raises() -> None:
++    with pytest.raises(LoadError, match="not declared"):
++        apply_var_overrides(_vars(), {"nope": True})
++
++
++def test_apply_overrides_type_mismatch_raises() -> None:
++    # bool is not int: an int var rejects a bool override.
++    with pytest.raises(LoadError, match="expects int"):
++        apply_var_overrides(_vars(), {"rounds": True})
++
++
++def test_apply_overrides_no_overrides_is_defaults() -> None:
++    assert apply_var_overrides(_vars(), {}) == {"final_review": True, "rounds": 3}
++
++
++def _write_config(root: Path, body: str) -> None:
++    (root / "imp" / "config.yaml").write_text(
++        "roles:\n  default: {prefer: [{provider: anthropic, model: x}]}\n" + body
++    )
++
++
++def test_load_config_parses_vars_block(tmp_path: Path) -> None:
++    _seed_control(tmp_path)
++    _write_config(tmp_path, "vars:\n  ready_to_merge: true\n")
++    cfg = load_config(tmp_path)
++    assert cfg.var_overrides == {"ready_to_merge": True}
++
++
++def test_load_config_no_vars_block_is_empty(tmp_path: Path) -> None:
++    _seed_control(tmp_path)
++    cfg = load_config(tmp_path)
++    assert cfg.var_overrides == {}
++
++
++def test_load_config_vars_must_be_mapping(tmp_path: Path) -> None:
++    _seed_control(tmp_path)
++    _write_config(tmp_path, "vars:\n  - nope\n")
++    with pytest.raises(LoadError, match="vars:"):
++        load_config(tmp_path)
++
++
++def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
++    _seed_control(tmp_path)
++    # Give the workflow a declared var, then override it in config.
++    wf = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
++    wf.write_text(
++        'name: t\ndescription: ""\n'
++        "vars:\n  final_review: {type: bool, default: true}\n"
++        "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
++    )
++    _write_config(tmp_path, "vars:\n  final_review: false\n")
++    _git(tmp_path, "add", "-A")
++    _git(tmp_path, "commit", "-qm", "vars")
++
++    ch = Change.create(tmp_path, title="X", slug="x", base_branch="main")
++    st = State.load(ch.state_dir)
++    assert st.vars["final_review"] is False

@@ -1,0 +1,64 @@
+{
+  "id": "mined-quality-reviewer-97e88eb",
+  "source": "mined",
+  "base_sha": "e17dee9",
+  "head_sha": "97e88eb",
+  "task_context": "Code quality review of the OpenAI Chat Completions \u2192 Responses API migration. Repo: /home/jpoimboe/imp. Committed as `97e88eb`.\nDESCRIPTION: Atomic flip of the OpenAI runner to `responses.create(store=False)`: wires in `_responses_*` helpers, updates `_usage_dict`, adds `_openai_stop_reason`, deletes 6 dead Chat helpers, repoints `replay.py` OpenAI dispatch entries to the Responses parsers, migrates OpenAI + cross-runner tests to the Responses fake, removes dead Chat fakes.\nAssess:\n- The new call site: clarity, correct param usage, `store=False` hardcoded (acceptable vs configurable?), prompt_cache_key construction.\n- `_openai_stop_reason` \u2014 minimal/correct; docstring honest about the fake omitting status.\n- `_usage_dict` \u2014 the model_dump()/dict/attr-fallback ladder is clean; Responses key tuple correct.\n- `replay.py` repoint \u2014 is the provider-scoped dispatch table edit clean and self-documenting?\n- The deletions leave no orphaned imports/helpers; openai_fakes.py Chat-fake removal is clean.\n- Test migrations: are the migrated tests clear and do they assert meaningful behavior (not just shape), or did migration introduce brittleness/over-mocking?\n- Any dead code, inconsistent naming (e.g. `openai_tools` var name for Responses tools), or comments now stale after the flip.\nReturn: Strengths; Issues tagged (Critical/Important/Minor); Assessment (APPROVED or CHANGES REQUESTED). Given spec is verified green, only Critical/Important issues should gate; Minor are notes. If clean, APPROVED.",
+  "expected_findings": [
+    {
+      "locus": "tests/test_three_runner_parity.py:133",
+      "symbol": "",
+      "description": "Redundant function-local import json; module-level import already exists.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_load_skill_parity.py:234",
+      "symbol": "",
+      "description": "Redundant function-local import json; module-level import already exists.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_default_workflow_e2e_mocked.py:197",
+      "symbol": "",
+      "description": "Redundant function-local import json; module-level import already exists.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "openai.py:202",
+      "symbol": "_serialize_responses_response",
+      "description": "Stale docstring claims fake path returns {output, usage} directly, but fake takes the first (SDK) branch instead; fallback branch is untested.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "openai.py:457",
+      "symbol": "",
+      "description": "New web-tool wiring appended to openai_tools is untested at runner level; no test asserts web specs reach the tools arg of responses.create.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

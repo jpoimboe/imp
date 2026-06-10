@@ -1,0 +1,164 @@
+diff --git a/src/imp/engine/worktree.py b/src/imp/engine/worktree.py
+index 1e63bec..e9e8456 100644
+--- a/src/imp/engine/worktree.py
++++ b/src/imp/engine/worktree.py
+@@ -8,7 +8,9 @@ from __future__ import annotations
+ import os
+ import subprocess
+ from contextlib import contextmanager
++from dataclasses import dataclass
+ from pathlib import Path
++from typing import Literal
+ 
+ import filelock
+ 
+@@ -152,3 +154,77 @@ class RepoGitLock:
+                 self.path.unlink(missing_ok=True)
+             finally:
+                 self._fl.release()
++
++
++@dataclass(frozen=True)
++class MergeResult:
++    status: Literal["MERGED", "CONFLICT", "BASE_DIRTY"]
++    merge_commit: str | None = None
++
++
++def _worktree_on_branch(control_root: Path, base: str) -> Path | None:
++    """Parse `git worktree list --porcelain`; return the worktree path checked
++    out on refs/heads/<base>, or None if base is checked out nowhere."""
++    out = _git_ok(control_root, "worktree", "list", "--porcelain")
++    cur: Path | None = None
++    for line in out.splitlines():
++        if line.startswith("worktree "):
++            cur = Path(line[len("worktree "):])
++        elif line == f"branch refs/heads/{base}" and cur is not None:
++            return cur
++    return None
++
++
++def is_dirty(worktree: Path) -> bool:
++    """True if the worktree has staged/unstaged/untracked changes. Public so
++    `_complete` can refuse to merge a Change with uncommitted work (spec relies
++    on agents committing incrementally — `.imp/` is gitignored, so this only
++    sees real tracked/untracked project files)."""
++    return bool(_git_ok(worktree, "status", "--porcelain").strip())
++
++
++def merge_to_base(control_root: Path, slug: str, base: str) -> MergeResult:
++    """Integrate imp/<slug> into <base> without ever desyncing a live checkout
++    (spec §4). Strategy branches on where <base> is checked out."""
++    branch = f"imp/{slug}"
++    with RepoGitLock(control_root).acquire():
++        live = _worktree_on_branch(control_root, base)
++        if live is not None:
++            if is_dirty(live):
++                return MergeResult("BASE_DIRTY")
++            return _merge_in_place(live, branch)
++        return _merge_detached(control_root, slug, branch, base)
++
++
++def _merge_in_place(worktree: Path, branch: str) -> MergeResult:
++    """Branch 1: advance ref + index + working tree atomically in the live
++    checkout. The up-front is_dirty(live) -> BASE_DIRTY check (in merge_to_base,
++    under the lock) is THE dirty-safety guard; `git merge` itself only partially
++    backstops the TOCTOU window (it refuses solely for files the merge would
++    touch, not for unrelated dirty files), so don't rely on the merge command
++    alone for dirty-safety."""
++    proc = _git(worktree, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
++    if proc.returncode != 0:
++        _git(worktree, "merge", "--abort")
++        return MergeResult("CONFLICT")
++    commit = _git_ok(worktree, "rev-parse", "HEAD").strip()
++    return MergeResult("MERGED", commit)
++
++
++def _merge_detached(control_root: Path, slug: str, branch: str, base: str) -> MergeResult:
++    """Branch 3: <base> is checked out nowhere. Merge in a detached scratch
++    worktree at base's tip, then update-ref (safe — no live checkout to
++    desync), then remove the scratch."""
++    scratch_rel = Path(".imp") / "worktrees" / f".merge-{slug}"
++    scratch = control_root / scratch_rel
++    _git_ok(control_root, "worktree", "add", "--detach", str(scratch_rel), base)
++    try:
++        proc = _git(scratch, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
++        if proc.returncode != 0:
++            _git(scratch, "merge", "--abort")
++            return MergeResult("CONFLICT")
++        commit = _git_ok(scratch, "rev-parse", "HEAD").strip()
++        _git_ok(control_root, "update-ref", f"refs/heads/{base}", commit)
++        return MergeResult("MERGED", commit)
++    finally:
++        _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
+diff --git a/tests/test_worktree.py b/tests/test_worktree.py
+index 44cb548..3b8646a 100644
+--- a/tests/test_worktree.py
++++ b/tests/test_worktree.py
+@@ -120,3 +120,67 @@ def test_rename_collision_returns_none(tmp_path: Path) -> None:
+     # imp/b already exists -> change nothing, return None (spec §4).
+     assert wt.rename(tmp_path, "a", "b") is None
+     assert (tmp_path / ".imp" / "worktrees" / "a").is_dir()
++
++
++def _commit_on_branch(root: Path, branch: str, name: str, body: str) -> None:
++    """Add+commit one file directly in the change worktree the test already
++    created for <branch>, so the control root's checkout stays untouched."""
++    wtpath = root / ".imp" / "worktrees" / branch.removeprefix("imp/")
++    (wtpath / name).write_text(body)
++    _git(wtpath, "add", "-A")
++    _git(wtpath, "commit", "-qm", f"add {name}")
++
++
++def test_merge_base_checked_out_clean(tmp_path: Path) -> None:
++    _init_repo(tmp_path)  # control root sits on clean main
++    wt.create_worktree(tmp_path, "feat", "main")
++    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
++
++    result = wt.merge_to_base(tmp_path, "feat", "main")
++    assert result.status == "MERGED"
++    # main's working tree advanced together with the ref (no desync).
++    assert (tmp_path / "feature.txt").read_text() == "hi"
++    # REGRESSION (spec §11): control-root status is NOT a staged reversal.
++    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
++
++
++def test_merge_base_dirty_backs_off(tmp_path: Path) -> None:
++    _init_repo(tmp_path)
++    wt.create_worktree(tmp_path, "feat", "main")
++    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
++    (tmp_path / "README.md").write_text("dirty edit")  # uncommitted on main
++
++    result = wt.merge_to_base(tmp_path, "feat", "main")
++    assert result.status == "BASE_DIRTY"
++    assert not (tmp_path / "feature.txt").exists()  # nothing advanced
++
++
++def test_merge_base_checked_out_nowhere(tmp_path: Path) -> None:
++    _init_repo(tmp_path)
++    wt.create_worktree(tmp_path, "feat", "main")
++    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
++    # Park the control root on another branch so `main` is checked out NOWHERE.
++    _git(tmp_path, "checkout", "-q", "-b", "parking")
++
++    base_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
++    result = wt.merge_to_base(tmp_path, "feat", "main")
++    assert result.status == "MERGED"
++    assert _git(tmp_path, "rev-parse", "main").stdout.strip() != base_before  # ref moved
++    # scratch worktree cleaned up
++    assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()
++
++
++def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
++    _init_repo(tmp_path)
++    # Conflict: both base and branch edit README.md differently.
++    wt.create_worktree(tmp_path, "feat", "main")
++    _commit_on_branch(tmp_path, "imp/feat", "README.md", "branch version")
++    # advance main (in place on the control root) with a conflicting edit
++    (tmp_path / "README.md").write_text("base version")
++    _git(tmp_path, "commit", "-qam", "base edit")
++
++    result = wt.merge_to_base(tmp_path, "feat", "main")
++    assert result.status == "CONFLICT"
++    # branch + change worktree untouched, no merge state lingering
++    assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()
++    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""

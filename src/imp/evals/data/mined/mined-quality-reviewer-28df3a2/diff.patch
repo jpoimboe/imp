@@ -1,0 +1,67 @@
+diff --git a/src/imp/engine/slug.py b/src/imp/engine/slug.py
+index 03587e8..ec523d1 100644
+--- a/src/imp/engine/slug.py
++++ b/src/imp/engine/slug.py
+@@ -4,6 +4,7 @@ repeats, trim. One name for Change <-> branch <-> worktree <-> state dir."""
+ from __future__ import annotations
+ 
+ import re
++import secrets
+ 
+ # Cap the slug length. The slug becomes a git branch (`imp/<slug>`), so an
+ # unbounded slug from a long title produces a ref path that overflows the
+@@ -44,6 +45,20 @@ def dated_slug(name: str, *, date: str) -> str:
+     return f"{date}-{slugify(name)}"
+ 
+ 
++# Immutable Change identity (spec §1): YYYY-MM-DD- + 6 chars from [a-z0-9] drawn
++# with secrets. Ref-safe, coordination-free, collision-free at this scale
++# (~2.2 billion/day). The date prefix gives ULID-style chronological sort of the
++# stable key; the suffix is unique within a day, not globally.
++_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
++
++
++def new_change_id(*, date: str) -> str:
++    """`<date>-<6 random ref-safe chars>`. `date` is a fixed-width YYYY-MM-DD
++    string (the caller passes today's date)."""
++    suffix = "".join(secrets.choice(_ID_ALPHABET) for _ in range(6))
++    return f"{date}-{suffix}"
++
++
+ def split_date_prefix(slug: str) -> tuple[str | None, str]:
+     """Split `YYYY-MM-DD-<rest>` into (date, rest); (None, slug) when there is
+     no date prefix (e.g. a legacy or test slug created before this convention)."""
+diff --git a/tests/test_change_id_format.py b/tests/test_change_id_format.py
+new file mode 100644
+index 0000000..03737da
+--- /dev/null
++++ b/tests/test_change_id_format.py
+@@ -0,0 +1,28 @@
++"""new_change_id: immutable Change identity YYYY-MM-DD-<6 ref-safe chars> (spec
++§1, AC 2). Format asserted over many draws; uniqueness asserted at a small N to
++avoid a latent birthday flake (secrets isn't seedable)."""
++
++from __future__ import annotations
++
++import re
++
++from imp.engine.slug import new_change_id
++
++_ID_RE = re.compile(r"^2026-06-04-[a-z0-9]{6}$")
++
++
++def test_new_change_id_format() -> None:
++    for _ in range(200):
++        assert _ID_RE.fullmatch(new_change_id(date="2026-06-04"))
++
++
++def test_new_change_id_unique_small_n() -> None:
++    # ~100 draws: collision prob ~2e-6. Do NOT raise to 1000 (~2e-4 ≈ a flake
++    # every ~4000 runs); secrets can't be seeded, so a large-N dedup can't be
++    # made deterministic.
++    ids = [new_change_id(date="2026-06-04") for _ in range(100)]
++    assert len(set(ids)) == len(ids)
++
++
++def test_new_change_id_uses_given_date() -> None:
++    assert new_change_id(date="2025-01-09").startswith("2025-01-09-")

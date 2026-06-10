@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-9cf4a4d",
+  "source": "mined",
+  "base_sha": "cf57381",
+  "head_sha": "9cf4a4d",
+  "task_context": "Code quality review of a focused change. Repo: /home/jpoimboe/imp.\nDESCRIPTION: Task 3 \u2014 new module `src/imp/providers/web_native.py`: single source of truth for reserved web tool names, per-provider capability map, fail-loud capability guard, and per-provider native-spec builders. Plus `tests/test_web_native.py`.\nAssess: correctness of the capability guard and spec builders; clarity of names/docstrings/comments; single responsibility & cohesion (does this module have one clear job?); whether it follows the surrounding `src/imp/providers/` style; tests verify real behavior and are comprehensive; nothing unnecessary added. The module is intentionally a small source-of-truth file \u2014 judge it as such.\nReturn: Strengths; Issues tagged (Critical/Important/Minor); Assessment (APPROVED or CHANGES REQUESTED). If clean, say APPROVED.",
+  "expected_findings": [
+    {
+      "locus": "tests/test_cc_web_builtins.py:0",
+      "symbol": "test_declared_web_tools_filters_and_orders",
+      "description": "Test wraps the result in `sorted()` before comparing, checking only membership not order, when the documented contract is that `declared_web_tools` returns a sorted list.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/_cc_web_builtins.py:0",
+      "symbol": "anthropic_beta_headers",
+      "description": "Function accesses `agent_def.tools` directly instead of routing through `declared_web_tools`, making it inconsistent with other functions and unable to inherit filtering logic if it grows.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_cc_web_builtins.py:0",
+      "symbol": "test_anthropic_specs",
+      "description": "Uses partial matching for the type string with `startswith()`, which could pass a typo, though this is an acceptable trade-off given the VERIFY annotation.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

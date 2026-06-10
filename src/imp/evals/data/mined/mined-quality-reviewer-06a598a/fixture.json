@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-06a598a",
+  "source": "mined",
+  "base_sha": "4ec58f38b0a417a7165023fd0bbbf1124748adfc",
+  "head_sha": "06a598a",
+  "task_context": "You are doing a code quality review of the Task 2 commit (subagent prompt rendering fix).\nWorking directory: /home/jpoimboe/imp\n## SHAs\n## Context\nSingle-bug fix: `dispatch_task` now renders the subagent's Jinja template via `build_context` + `render_prompt` (matching how the parent's prompt is rendered in `engine/executor.py::_execute_step`).\n## Your job\n1. **Pattern fit**: Does the rendering call match how the executor renders the parent prompt? Look at `src/imp/engine/executor.py::_execute_step` to compare \u2014 same args, same idioms.\n2. **Defensive code**: Does `dispatch_task` already validate `ctx.events_path` / `ctx.change_context` before this point, or does the new `EventLog(ctx.events_path)` introduce a None-deref risk?\n3. **Single responsibility**: Does the new block stay focused on rendering, or did it sprawl?\n4. **Comment hygiene**: The plan suggested a multi-line comment. CLAUDE-CODE-CRITICAL house style discourages WHAT comments. If the comment is multi-line and explains WHAT instead of WHY (where WHY is non-obvious), that's a Minor issue worth flagging.\n5. **Tests**: Is the new test self-contained (no hidden globals, no fragile path assumptions)?\nReport (under 200 words):\n- Strengths\n- Issues (Critical / Important / Minor)\n- Verdict: APPROVED or NEEDS_FIX",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

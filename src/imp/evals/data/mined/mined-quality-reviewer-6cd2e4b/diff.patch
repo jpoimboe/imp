@@ -1,0 +1,1899 @@
+diff --git a/src/imp/agents/prompts.py b/src/imp/agents/prompts.py
+index 2535d38..d0657f3 100644
+--- a/src/imp/agents/prompts.py
++++ b/src/imp/agents/prompts.py
+@@ -1,7 +1,7 @@
+ """Prompt template rendering for agent .md bodies.
+ 
+ Three namespaces (spec §7.5):
+-  change.slug / change.title — change identity
++  change.id — stable identity; change.slug / change.title — derived display name
+   events.<step-name>.<field> — validated agent_output of prior step;
+       missing steps render as empty (lenient-within)
+   vars.<name> — workflow vars from state.vars; a typo'd key raises at render
+@@ -68,9 +68,9 @@ class _EventsNamespace:
+ 
+ @dataclass(frozen=True, slots=True)
+ class _ChangeNamespace:
++    id: str
+     slug: str
+     title: str
+-    auto_titled: bool = False
+ 
+ 
+ @dataclass(frozen=True, slots=True)
+@@ -81,15 +81,11 @@ class PromptContext:
+ 
+ 
+ def build_context(
+-    change_slug: str, change_title: str,
+-    event_log: EventLog,
+-    *, change_auto_titled: bool = False,
+-    vars: dict[str, Any] | None = None,
++    change_slug: str, change_title: str, event_log: EventLog,
++    *, change_id: str = "", vars: dict[str, Any] | None = None,
+ ) -> PromptContext:
+     return PromptContext(
+-        change=_ChangeNamespace(
+-            slug=change_slug, title=change_title, auto_titled=change_auto_titled,
+-        ),
++        change=_ChangeNamespace(id=change_id, slug=change_slug, title=change_title),
+         events=_EventsNamespace(event_log),
+         vars=dict(vars or {}),
+     )
+diff --git a/src/imp/agents/subagents.py b/src/imp/agents/subagents.py
+index 41e3a19..3cad397 100644
+--- a/src/imp/agents/subagents.py
++++ b/src/imp/agents/subagents.py
+@@ -117,16 +117,16 @@ async def dispatch_task(
+     invocation_id = ctx.next_subagent_invocation_id()
+ 
+     cc = ctx.change_context or ChangeContext(
+-        slug="", title="", project_root=ctx.project_root,
++        id="", slug="", title="", project_root=ctx.project_root,
+         workflow_dir=ctx.project_root / ".imp" / "change" / "workflow",
+     )
+ 
+-    # Render the subagent's Jinja template (subagents don't see the parent
+-    # title). A SEPARATE read-only JsonlEventLog for {{ events.* }} — NOT
+-    # ctx.event_log, which is the shared WRITE instance.
++    # Render the subagent's Jinja template. A SEPARATE read-only JsonlEventLog
++    # for {{ events.* }} — NOT ctx.event_log, which is the shared WRITE instance.
+     prompt_ctx = build_context(
++        change_id=cc.id,
+         change_slug=cc.slug,
+-        change_title=f"Change {cc.slug}",
++        change_title=cc.title,   # dispatch label is the title now [item 11]
+         event_log=JsonlEventLog(ctx.events_path),
+         vars=ctx.change_state.vars if ctx.change_state is not None else {},
+     )
+diff --git a/src/imp/agents/tools/bash.py b/src/imp/agents/tools/bash.py
+index 5ad21ae..752bc3b 100644
+--- a/src/imp/agents/tools/bash.py
++++ b/src/imp/agents/tools/bash.py
+@@ -55,6 +55,7 @@ async def bash(ctx: ToolContext, command: str, cwd: str | None = None) -> str:
+     env = overlay_engine_env(
+         os.environ,
+         engine_env(project_root=ctx.project_root,
++                   change_id=ctx.change_context.id if ctx.change_context else "",
+                    change_slug=ctx.change_context.slug if ctx.change_context else "",
+                    change_title=ctx.change_context.title if ctx.change_context else "",
+                    lint_command=ctx.lint_command,
+diff --git a/src/imp/engine/change.py b/src/imp/engine/change.py
+index cbe9db1..4c97601 100644
+--- a/src/imp/engine/change.py
++++ b/src/imp/engine/change.py
+@@ -1,5 +1,5 @@
+-"""Change lifecycle (spec §3, §5): slug identity, worktree creation, state
+-home inside the worktree at <worktree>/.imp/change/."""
++"""Change lifecycle (spec §3, §5): immutable id identity, derived slug, worktree
++creation, state home inside the worktree at <worktree>/.imp/change/."""
+ 
+ from __future__ import annotations
+ 
+@@ -17,13 +17,19 @@ from imp.engine.types import SourceLoc
+ 
+ @dataclass
+ class Change:
+-    slug: str
+-    title: str
++    id: str                      # immutable identity (spec §1), minted at imp new
++    title: str                   # mutable human name
+     base_branch: str
+     control_root: Path
+     project_root: Path           # the worktree
+     change_dir: Path             # <worktree>/.imp/change
+-    auto_titled: bool = False    # provisional random slug (renamable in spec phase)
++
++    @property
++    def slug(self) -> str:
++        """Derived display name (spec filename + human output ONLY — never a path
++        or ref). `id[:10]` is the fixed-width YYYY-MM-DD prefix of the id."""
++        from imp.engine.slug import dated_slug
++        return dated_slug(self.title, date=self.id[:10])
+ 
+     @property
+     def workflow_dir(self) -> Path:
+@@ -42,13 +48,12 @@ class Change:
+ 
+     @classmethod
+     def create(
+-        cls, control_root: Path, *, title: str, slug: str, base_branch: str,
+-        auto_titled: bool = False,
++        cls, control_root: Path, *, title: str, change_id: str, base_branch: str,
+     ) -> Change:
+-        """Create branch+worktree (caller has already verified the slug is free
+-        and the gitignore precondition holds), then seed internal state inside
+-        the worktree. May raise worktree.BranchExists on a slug race."""
+-        wt_path = worktree.create_worktree(control_root, slug, base_branch)
++        """Create branch imp/<id> + worktree .imp/worktrees/<id>, then seed
++        internal state inside the worktree. Raises worktree.BranchExists on the
++        (effectively impossible) id collision — the caller reports a clean error."""
++        wt_path = worktree.create_worktree(control_root, change_id, base_branch)
+         change_dir = wt_path / ".imp" / "change"
+         change_dir.mkdir(parents=True)
+ 
+@@ -59,8 +64,7 @@ class Change:
+         (change_dir / "state").mkdir()
+ 
+         (change_dir / "change.json").write_text(json.dumps({
+-            "slug": slug, "title": title, "base_branch": base_branch,
+-            "auto_titled": auto_titled,
++            "id": change_id, "title": title, "base_branch": base_branch,
+             "created_at": datetime.now(UTC).isoformat(),
+         }, indent=2, sort_keys=True))
+ 
+@@ -73,35 +77,33 @@ class Change:
+         )
+         flat = workflow.flat_steps()
+         State(
+-            id=slug, step=flat[0].name if flat else None, step_attempt=0,
++            id=change_id, step=flat[0].name if flat else None, step_attempt=0,
+             status="running",
+             vars=apply_var_overrides(workflow.vars, config.var_overrides),
+             loop_counts={},
+         ).save(change_dir / "state")
+ 
+         change = cls(
+-            slug=slug, title=title, base_branch=base_branch,
++            id=change_id, title=title, base_branch=base_branch,
+             control_root=control_root, project_root=wt_path, change_dir=change_dir,
+-            auto_titled=auto_titled,
+         )
+         change.event_log().append(
+             agent_id=None, type="change_created",
+-            payload={"slug": slug, "title": title},
++            # Carries BOTH id (new canonical key) and the derived slug (the
++            # narrative renderers read payload["slug"] — keep emitting it). [item 12]
++            payload={"id": change_id, "slug": change.slug, "title": title},
+         )
+         return change
+ 
+     @classmethod
+-    def load(cls, control_root: Path, slug: str) -> Change:
+-        # .resolve() to match Change.create (create_worktree returns a resolved
+-        # path); otherwise a symlinked control_root yields differently-normalized
+-        # project_root between create and load.
+-        wt_path = (control_root / ".imp" / "worktrees" / slug).resolve()
++    def load(cls, control_root: Path, change_id: str) -> Change:
++        # .resolve() to match create (create_worktree returns a resolved path).
++        wt_path = (control_root / ".imp" / "worktrees" / change_id).resolve()
+         change_dir = wt_path / ".imp" / "change"
+         if not change_dir.is_dir():
+-            raise LoadError(f"no such Change {slug!r}", SourceLoc(file=change_dir, line=1))
++            raise LoadError(f"no such Change {change_id!r}", SourceLoc(file=change_dir, line=1))
+         meta = json.loads((change_dir / "change.json").read_text())
+         return cls(
+-            slug=meta["slug"], title=meta["title"], base_branch=meta["base_branch"],
++            id=meta["id"], title=meta["title"], base_branch=meta["base_branch"],
+             control_root=control_root, project_root=wt_path, change_dir=change_dir,
+-            auto_titled=meta.get("auto_titled", False),
+         )
+diff --git a/src/imp/engine/env.py b/src/imp/engine/env.py
+index 8b1f661..e48ae65 100644
+--- a/src/imp/engine/env.py
++++ b/src/imp/engine/env.py
+@@ -24,6 +24,7 @@ from pathlib import Path
+ # `overlay_engine_env` to merge, not a raw dict spread.
+ ENGINE_ENV_VARS = frozenset({
+     "IMP_PROJECT_ROOT",
++    "IMP_CHANGE_ID",
+     "IMP_CHANGE_SLUG",
+     "IMP_CHANGE_TITLE",
+     "IMP_LINT_COMMAND",
+@@ -61,7 +62,7 @@ def overlay_engine_env(
+ 
+ 
+ def engine_env(
+-    *, project_root: Path, change_slug: str, change_title: str,
++    *, project_root: Path, change_id: str, change_slug: str, change_title: str,
+     lint_command: str | None = None,
+     test_command: str | None = None,
+ ) -> dict[str, str]:
+@@ -69,7 +70,11 @@ def engine_env(
+ 
+     Variables:
+         IMP_PROJECT_ROOT  — absolute path of the project root on the host.
+-        IMP_CHANGE_SLUG   — URL-safe identifier for the change (e.g. "add-oauth").
++        IMP_CHANGE_ID     — the stable, immutable Change identity; hook authors
++                            MUST key on this.
++        IMP_CHANGE_SLUG   — display-only derived name; MAY change mid-session on a
++                            title rename. Do not key automation on it; use
++                            IMP_CHANGE_ID.
+         IMP_CHANGE_TITLE  — human-readable title for the change.
+         IMP_LINT_COMMAND  — optional lint-clean gate command, injected only when
+                             configured. A falsy command (None or empty string) is
+@@ -87,6 +92,7 @@ def engine_env(
+     """
+     env = {
+         "IMP_PROJECT_ROOT": str(project_root),
++        "IMP_CHANGE_ID": change_id,
+         "IMP_CHANGE_SLUG": change_slug,
+         "IMP_CHANGE_TITLE": change_title,
+     }
+diff --git a/src/imp/engine/executor.py b/src/imp/engine/executor.py
+index 58feb18..1286c40 100644
+--- a/src/imp/engine/executor.py
++++ b/src/imp/engine/executor.py
+@@ -204,7 +204,7 @@ async def run_change(
+ 
+ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
+     """Terminal handler: marks the Change completed and, when ready_to_merge is
+-    set in state.vars, performs the full merge phase: merge imp/<slug> into
++    set in state.vars, performs the full merge phase: merge imp/<id> into
+     base, journal the final artifacts, then remove the worktree (branch kept).
+ 
+     Contract change from the original stub:
+@@ -247,7 +247,8 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
+               {"reason": "worktree_dirty", "base": change.base_branch})
+         return RunResult.PAUSED
+ 
+-    result = worktree.merge_to_base(change.control_root, change.slug, change.base_branch)
++    result = worktree.merge_to_base(
++        change.control_root, change.id, change.base_branch, title=change.title)
+     if result.status in ("CONFLICT", "BASE_DIRTY"):
+         state.status = "merge_blocked"
+         state.save(change.state_dir)
+@@ -262,63 +263,63 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
+     state.save(change.state_dir)
+     _emit(log, "change_merged",
+           {"base": change.base_branch, "commit": result.merge_commit})
+-    worktree.journal_commit(change.control_root, change.slug, {
++    worktree.journal_commit(change.control_root, change.id, {
+         "events.jsonl": change.events_path,
+         "change.json": change.change_dir / "change.json",
+         "state.json": change.state_dir / "state.json",
+     })
+-    worktree.remove_worktree(change.control_root, change.slug)  # steps/ goes with it
++    worktree.remove_worktree(change.control_root, change.id)  # steps/ goes with it
+     return RunResult.COMPLETED
+ 
+ 
+ def apply_pending_rename(
+     change: Change, state: State, log: EventLog, *, on_event: EventCallback | None,
+ ) -> EventLog:
+-    """Apply state.pending_rename at a step boundary (spec §5.3). The worktree
+-    move is safe here: steps are sequential (no live tool subprocess), and the
+-    engine's cwd is the control root (set in run_change). Returns the event log
+-    to use going forward (re-opened at the possibly-new path)."""
++    """Apply state.pending_rename at a step boundary (spec §5.3). CONTENT-ONLY:
++    the id is immutable, so this never touches a git ref or worktree path. It (a)
++    rewrites `title` in change.json, (b) git-mv's the spec file old-slug -> new-slug
++    if it already exists, (c) emits change_renamed. The slug is derived, so there
++    is nothing to reassign on the Change beyond `title`."""
+     import json as _json
+ 
+-    from imp.engine import worktree
+-    from imp.engine.slug import dated_slug, slugify, split_date_prefix
+-
+     name = state.pending_rename
+     assert name is not None
+-    old = change.slug
+-    # Preserve the YYYY-MM-DD- creation-date prefix: it is part of the Change's
+-    # identity and must not be dropped when the slug is re-derived from the new
+-    # name (spec §12). A date-less slug (legacy/test) falls back to plain slugify.
+-    date, _ = split_date_prefix(old)
+-    new = dated_slug(name, date=date) if date else slugify(name)
+-    if new == old:
++    old_title = change.title
++    old_slug = change.slug
++    change.title = name          # slug property now derives from the new title
++    new_slug = change.slug
++    if name == old_title:
+         state.pending_rename = None
+         state.save(change.state_dir)
+         return log
+ 
+-    new_path = worktree.rename(change.control_root, old, new)
+-    if new_path is None:
+-        state.pending_rename = None
+-        state.save(change.state_dir)
+-        _emit(log, "rename_blocked", {"requested": new})
+-        return log
+-
+-    # Repoint in-memory paths onto the moved worktree.
+-    change.slug = new
+-    change.title = name
+-    change.auto_titled = False   # renamed → the slug is now intentional (spec §12)
+-    change.project_root = new_path
+-    change.change_dir = new_path / ".imp" / "change"
++    # Persist the new title (created_at + id preserved).
+     meta_path = change.change_dir / "change.json"
+-    meta = _json.loads(meta_path.read_text())          # preserves created_at
+-    meta["slug"], meta["title"] = new, name
+-    meta["auto_titled"] = False
++    meta = _json.loads(meta_path.read_text())
++    meta["title"] = name
+     meta_path.write_text(_json.dumps(meta, indent=2, sort_keys=True))
++
++    # If an early spec file exists under the old slug, move it so the filename
++    # tracks the settled name. `git mv` for a tracked/staged file; fall back to a
++    # filesystem rename for an UNTRACKED early draft (git mv fails "not under
++    # version control" on those). The fallback is essential: a lingering untracked
++    # imp/specs/<old-slug>.md is seen by is_dirty() and would later block the merge
++    # (the exact failure the deleted spec-writer warning guarded against).
++    old_spec = change.project_root / "imp" / "specs" / f"{old_slug}.md"
++    if old_spec.exists() and old_slug != new_slug:
++        from imp.engine import worktree
++        new_spec = change.project_root / "imp" / "specs" / f"{new_slug}.md"
++        proc = worktree._git(
++            change.project_root, "mv", f"imp/specs/{old_slug}.md",
++            f"imp/specs/{new_slug}.md")
++        if proc.returncode != 0:                 # untracked draft: plain rename
++            old_spec.rename(new_spec)
++
+     state.pending_rename = None
+     state.save(change.state_dir)
+-    new_log = JsonlEventLog(change.events_path, on_event=on_event)
+-    _emit(new_log, "change_renamed", {"old_slug": old, "new_slug": new, "title": name})
+-    return new_log
++    _emit(log, "change_renamed",
++          {"id": change.id, "old_title": old_title, "new_title": name})
++    return log
+ 
+ 
+ async def _dispatch_step(
+@@ -386,6 +387,7 @@ def _route_script(
+     _emit_started(log, step)
+     out = run_script(step, cwd=change.workflow_dir,
+                      env_extra=engine_env(project_root=change.project_root,
++                                          change_id=change.id,
+                                           change_slug=change.slug,
+                                           change_title=change.title,
+                                           lint_command=lint_command,
+@@ -595,9 +597,8 @@ async def _run_agent_invocation(
+ 
+     rendered = render_prompt(
+         agent_def.prompt_template_source, build_context(
+-            change_slug=change.slug, change_title=change.title,
+-            change_auto_titled=change.auto_titled, event_log=log,
+-            vars=state.vars,
++            change_id=change.id, change_slug=change.slug, change_title=change.title,
++            event_log=log, vars=state.vars,
+         ),
+     )
+ 
+@@ -632,7 +633,7 @@ async def _run_agent_invocation(
+         rendered_system_prompt=rendered,
+         initial_messages=initial_messages,
+         change_context=ChangeContext(
+-            slug=change.slug, title=change.title,
++            id=change.id, slug=change.slug, title=change.title,
+             project_root=change.project_root, workflow_dir=change.workflow_dir,
+         ),
+         interactive=interactive,
+diff --git a/src/imp/engine/journal.py b/src/imp/engine/journal.py
+index c3351eb..e4b1c23 100644
+--- a/src/imp/engine/journal.py
++++ b/src/imp/engine/journal.py
+@@ -17,9 +17,9 @@ def _git_bytes(cwd: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+     return subprocess.run(["git", *args], cwd=cwd, capture_output=True)
+ 
+ 
+-def journal_slugs(control_root: Path) -> list[str]:
+-    """Top-level entries of refs/imp/journal (each is a slug). Returns [] when
+-    the ref is absent or control_root is not a git repo — never raises."""
++def journal_ids(control_root: Path) -> list[str]:
++    """Top-level entries of refs/imp/journal (each is a Change id). Returns []
++    when the ref is absent or control_root is not a git repo — never raises."""
+     proc = _git_bytes(control_root, "ls-tree", "--name-only", _JOURNAL_REF)
+     if proc.returncode != 0:
+         return []
+@@ -30,10 +30,9 @@ def journal_slugs(control_root: Path) -> list[str]:
+     ]
+ 
+ 
+-def journal_show(control_root: Path, slug: str, name: str) -> bytes | None:
+-    """Bytes of refs/imp/journal:<slug>/<name>, or None if absent. Uses
+-    `git cat-file -p` (binary-safe; no text-mode newline mangling)."""
+-    proc = _git_bytes(control_root, "cat-file", "-p", f"{_JOURNAL_REF}:{slug}/{name}")
++def journal_show(control_root: Path, change_id: str, name: str) -> bytes | None:
++    """Bytes of refs/imp/journal:<id>/<name>, or None if absent."""
++    proc = _git_bytes(control_root, "cat-file", "-p", f"{_JOURNAL_REF}:{change_id}/{name}")
+     if proc.returncode != 0:
+         return None
+     return proc.stdout
+diff --git a/src/imp/engine/slug.py b/src/imp/engine/slug.py
+index ec523d1..4a17432 100644
+--- a/src/imp/engine/slug.py
++++ b/src/imp/engine/slug.py
+@@ -32,11 +32,6 @@ def slugify(text: str) -> str:
+     return s
+ 
+ 
+-# `YYYY-MM-DD-<name>` slug identity (spec §12). The date gives every Change a
+-# chronological, collision-resistant identity; doc filenames derive from the slug.
+-DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.*)$")
+-
+-
+ def dated_slug(name: str, *, date: str) -> str:
+     """`<date>-<slugified name>`. `date` is a fixed-width `YYYY-MM-DD` string.
+     The name keeps the MAX_SLUG_LEN cap (slugify), so the full slug is at most
+@@ -57,12 +52,3 @@ def new_change_id(*, date: str) -> str:
+     string (the caller passes today's date)."""
+     suffix = "".join(secrets.choice(_ID_ALPHABET) for _ in range(6))
+     return f"{date}-{suffix}"
+-
+-
+-def split_date_prefix(slug: str) -> tuple[str | None, str]:
+-    """Split `YYYY-MM-DD-<rest>` into (date, rest); (None, slug) when there is
+-    no date prefix (e.g. a legacy or test slug created before this convention)."""
+-    m = DATE_PREFIX_RE.match(slug)
+-    if m is None:
+-        return None, slug
+-    return m.group(1), m.group(2)
+diff --git a/src/imp/engine/worktree.py b/src/imp/engine/worktree.py
+index f220c43..b992b33 100644
+--- a/src/imp/engine/worktree.py
++++ b/src/imp/engine/worktree.py
+@@ -23,7 +23,7 @@ class PreconditionError(Exception):
+ 
+ 
+ class BranchExists(Exception):
+-    """The slug's branch imp/<slug> already exists (collision)."""
++    """The branch imp/<id> already exists (collision)."""
+ 
+ 
+ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+@@ -73,67 +73,37 @@ def current_branch(root: Path) -> str:
+ 
+ 
+ def branch_exists(control_root: Path, branch: str) -> bool:
+-    """Public so the CLI can pre-check slug availability (spec §3.1 — git
+-    branch-uniqueness IS the collision check)."""
++    """True if refs/heads/<branch> exists. The imp new collision-error guard
++    keys on this."""
+     return _git(
+         control_root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+     ).returncode == 0
+ 
+ 
+-def create_worktree(control_root: Path, slug: str, base: str) -> Path:
+-    """`git worktree add -b imp/<slug> .imp/worktrees/<slug> <base>` (spec §4).
+-    Branch collision surfaces as BranchExists so the caller can retry (random
+-    slug) or report a clean error (title-derived slug)."""
+-    rel = Path(".imp") / "worktrees" / slug
+-    branch = f"imp/{slug}"
++def create_worktree(control_root: Path, change_id: str, base: str) -> Path:
++    """`git worktree add -b imp/<id> .imp/worktrees/<id> <base>` (spec §4).
++    Branch collision surfaces as BranchExists — the caller reports a clean error
++    (there is no retry; the random id is the uniqueness guarantee)."""
++    rel = Path(".imp") / "worktrees" / change_id
++    branch = f"imp/{change_id}"
+     with RepoGitLock(control_root).acquire():
+         if branch_exists(control_root, branch):
+             raise BranchExists(branch)
+         proc = _git(control_root, "worktree", "add", "-b", branch, str(rel), base)
+         if proc.returncode != 0:
+-            # already-exists races collapse to BranchExists; anything else bubbles
+             if "already exists" in proc.stderr:
+                 raise BranchExists(branch)
+             raise RuntimeError(f"git worktree add failed: {proc.stderr.strip()}")
+     return (control_root / rel).resolve()
+ 
+ 
+-def remove_worktree(control_root: Path, slug: str) -> None:
+-    """`git worktree remove .imp/worktrees/<slug>`. Branch is KEPT (spec §4)."""
+-    rel = Path(".imp") / "worktrees" / slug
++def remove_worktree(control_root: Path, change_id: str) -> None:
++    """`git worktree remove .imp/worktrees/<id>`. Branch is KEPT (spec §4)."""
++    rel = Path(".imp") / "worktrees" / change_id
+     with RepoGitLock(control_root).acquire():
+         _git_ok(control_root, "worktree", "remove", str(rel))
+ 
+ 
+-def rename(control_root: Path, old: str, new: str) -> Path | None:
+-    """Rename branch + worktree dir (spec §4). Returns the new path, or None on
+-    collision (imp/<new> already exists) having changed nothing — the caller
+-    keeps running on the old slug."""
+-    new_rel = Path(".imp") / "worktrees" / new
+-    with RepoGitLock(control_root).acquire():
+-        if branch_exists(control_root, f"imp/{new}"):
+-            return None
+-        bm = _git(control_root, "branch", "-m", f"imp/{old}", f"imp/{new}")
+-        if bm.returncode != 0:
+-            return None
+-        mv = _git(
+-            control_root, "worktree", "move",
+-            str(Path(".imp") / "worktrees" / old), str(new_rel),
+-        )
+-        if mv.returncode != 0:
+-            # Roll the branch rename back so identity stays consistent.
+-            rb = _git(control_root, "branch", "-m", f"imp/{new}", f"imp/{old}")
+-            if rb.returncode != 0:
+-                # Extremely unlikely under the lock; surface it rather than leave
+-                # branch/worktree identity inconsistent and silent.
+-                raise RuntimeError(
+-                    f"rename rollback failed: branch is imp/{new} but worktree is "
+-                    f"still imp/{old}; reconcile manually ({rb.stderr.strip()})"
+-                )
+-            return None
+-    return (control_root / new_rel).resolve()
+-
+-
+ class RepoGitLock:
+     """Short-held file lock in the control root, acquired around every
+     shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""
+@@ -186,27 +156,25 @@ def is_dirty(worktree: Path) -> bool:
+     return bool(_git_ok(worktree, "status", "--porcelain").strip())
+ 
+ 
+-def merge_to_base(control_root: Path, slug: str, base: str) -> MergeResult:
+-    """Integrate imp/<slug> into <base> without ever desyncing a live checkout
+-    (spec §4). Strategy branches on where <base> is checked out."""
+-    branch = f"imp/{slug}"
++def merge_to_base(control_root: Path, change_id: str, base: str, *, title: str) -> MergeResult:
++    """Integrate imp/<id> into <base> without ever desyncing a live checkout
++    (spec §4). The merge subject uses the human title; the id appears in the body
++    for branch traceability."""
++    branch = f"imp/{change_id}"
+     with RepoGitLock(control_root).acquire():
+         live = _worktree_on_branch(control_root, base)
+         if live is not None:
+             if is_dirty(live):
+                 return MergeResult("BASE_DIRTY")
+-            return _merge_in_place(live, branch)
+-        return _merge_detached(control_root, slug, branch, base)
++            return _merge_in_place(live, branch, title, change_id)
++        return _merge_detached(control_root, change_id, branch, base, title)
+ 
+ 
+-def _merge_in_place(worktree: Path, branch: str) -> MergeResult:
++def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> MergeResult:
+     """Branch 1: advance ref + index + working tree atomically in the live
+-    checkout. The up-front is_dirty(live) -> BASE_DIRTY check (in merge_to_base,
+-    under the lock) is THE dirty-safety guard; `git merge` itself only partially
+-    backstops the TOCTOU window (it refuses solely for files the merge would
+-    touch, not for unrelated dirty files), so don't rely on the merge command
+-    alone for dirty-safety."""
+-    proc = _git(worktree, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
++    checkout. (See the dirty-safety note in merge_to_base.)"""
++    subject = f"Merge {title}\n\n(imp/{change_id})"
++    proc = _git(worktree, "merge", "--no-ff", "-m", subject, branch)
+     if proc.returncode != 0:
+         _git(worktree, "merge", "--abort")
+         return MergeResult("CONFLICT")
+@@ -214,19 +182,18 @@ def _merge_in_place(worktree: Path, branch: str) -> MergeResult:
+     return MergeResult("MERGED", commit)
+ 
+ 
+-def _merge_detached(control_root: Path, slug: str, branch: str, base: str) -> MergeResult:
+-    """Branch 3: <base> is checked out nowhere. Merge in a detached scratch
+-    worktree at base's tip, then update-ref (safe — no live checkout to
+-    desync), then remove the scratch."""
+-    scratch_rel = Path(".imp") / "worktrees" / f".merge-{slug}"
++def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
++                    title: str) -> MergeResult:
++    """Branch 3: <base> checked out nowhere. Merge in a detached scratch worktree,
++    update-ref, remove the scratch."""
++    scratch_rel = Path(".imp") / "worktrees" / f".merge-{change_id}"
+     scratch = control_root / scratch_rel
+-    # A prior crash can leave a stale scratch that would make `worktree add`
+-    # fail permanently; clear it first (best-effort) so retries can proceed.
+     _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
+     shutil.rmtree(scratch, ignore_errors=True)
+     _git_ok(control_root, "worktree", "add", "--detach", str(scratch_rel), base)
++    subject = f"Merge {title}\n\n(imp/{change_id})"
+     try:
+-        proc = _git(scratch, "merge", "--no-ff", "-m", f"Merge {branch}", branch)
++        proc = _git(scratch, "merge", "--no-ff", "-m", subject, branch)
+         if proc.returncode != 0:
+             _git(scratch, "merge", "--abort")
+             return MergeResult("CONFLICT")
+@@ -237,9 +204,9 @@ def _merge_detached(control_root: Path, slug: str, branch: str, base: str) -> Me
+         _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
+ 
+ 
+-def journal_commit(control_root: Path, slug: str, files: Mapping[str, Path]) -> None:
++def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]) -> None:
+     """Append one commit to refs/imp/journal (spec §4, §6) via plumbing — never
+-    checks out the ref. Files land under <slug>/ in the journal tree. On the
++    checks out the ref. Files land under <id>/ in the journal tree. On the
+     very first journaled Change the ref doesn't exist, so commit-tree runs with
+     no -p (a root commit, starting the orphan history)."""
+     with RepoGitLock(control_root).acquire():
+@@ -258,7 +225,7 @@ def journal_commit(control_root: Path, slug: str, files: Mapping[str, Path]) ->
+             parent = _git(control_root, "rev-parse", "--verify", "--quiet",
+                           "refs/imp/journal")
+             have_parent = parent.returncode == 0
+-            # Seed the temp index with the existing journal tree so prior slugs
++            # Seed the temp index with the existing journal tree so prior ids
+             # survive (read-tree is a no-op miss when the ref is absent).
+             if have_parent:
+                 subprocess.run(["git", "read-tree", "refs/imp/journal"],
+@@ -271,12 +238,12 @@ def journal_commit(control_root: Path, slug: str, files: Mapping[str, Path]) ->
+                 ).stdout.decode().strip()
+                 subprocess.run(
+                     ["git", "update-index", "--add", "--cacheinfo",
+-                     f"100644,{blob},{slug}/{name}"],
++                     f"100644,{blob},{change_id}/{name}"],
+                     cwd=control_root, env=env, check=True, capture_output=True, text=True,
+                 )
+             tree = subprocess.run(["git", "write-tree"], cwd=control_root, env=env,
+                                   check=True, capture_output=True, text=True).stdout.strip()
+-            args = ["git", "commit-tree", tree, "-m", f"journal: {slug}"]
++            args = ["git", "commit-tree", tree, "-m", f"journal: {change_id}"]
+             if have_parent:
+                 args += ["-p", "refs/imp/journal"]
+             commit = subprocess.run(args, cwd=control_root, env=env, check=True,
+diff --git a/src/imp/providers/openai.py b/src/imp/providers/openai.py
+index 7ae5abc..0ed3ac8 100644
+--- a/src/imp/providers/openai.py
++++ b/src/imp/providers/openai.py
+@@ -340,23 +340,23 @@ _CACHE_KEY_MAX = 64        # OpenAI's hard limit on prompt_cache_key
+ _CACHE_KEY_HASH_LEN = 8    # hex chars of disambiguating digest
+ 
+ 
+-def _prompt_cache_key(slug: str, aid: str) -> str:
++def _prompt_cache_key(change_id: str, aid: str) -> str:
+     """OpenAI routing/affinity hint, bounded to the 64-char API limit.
+ 
+     Stable per (change, agent) invocation; distinct per change and per
+     agent. Keys that fit are passed through verbatim. Over-long keys keep
+     the whole aid (the within-change discriminator one greps for) and the
+-    slug head (the cross-change discriminator), then append a hash of the
+-    *full* slug:aid so distinctness on both survives truncation.
++    change_id head (the cross-change discriminator), then append a hash of the
++    *full* change_id:aid so distinctness on both survives truncation.
+     """
+-    full = f"{slug}:{aid}"
++    full = f"{change_id}:{aid}"
+     if len(full) <= _CACHE_KEY_MAX:
+         return full
+     digest = hashlib.sha256(full.encode()).hexdigest()[:_CACHE_KEY_HASH_LEN]
+     budget = _CACHE_KEY_MAX - _CACHE_KEY_HASH_LEN - 1   # 55: readable, before "-{digest}"
+-    aid_keep = min(len(aid), budget - 1)                # keep >=1 char for slug + ":"
+-    slug_keep = budget - aid_keep - 1                   # -1 for the ":" separator
+-    return f"{slug[:slug_keep]}:{aid[-aid_keep:]}-{digest}"
++    aid_keep = min(len(aid), budget - 1)                # keep >=1 char for id + ":"
++    id_keep = budget - aid_keep - 1                     # -1 for the ":" separator
++    return f"{change_id[:id_keep]}:{aid[-aid_keep:]}-{digest}"
+ 
+ 
+ class OpenAIAgentRunner:
+@@ -543,10 +543,13 @@ class OpenAIAgentRunner:
+         openai_tools.extend(openai_web_tool_specs(invocation.agent_def))
+         # Stable routing/affinity hint for OpenAI's automatic prompt cache.
+         # Keyed to one growing conversation (one agent invocation within one
+-        # change) so the prefix stays cache-resident turn-over-turn. slug
++        # change) so the prefix stays cache-resident turn-over-turn. id
+         # is required: agent_id alone is change-agnostic, so concurrent changes
+         # running the same step would collide on one routing slot.
+-        prompt_cache_key = _prompt_cache_key(invocation.change_context.slug, aid)
++        # Keyed to the IMMUTABLE id, not the slug: a slug rotates at the
++        # spec->plan title rename and would bust the cache mid-conversation
++        # (spec §9). [AC 10]
++        prompt_cache_key = _prompt_cache_key(invocation.change_context.id, aid)
+         guard = LoopGuard()
+ 
+         while not self._cancel:
+diff --git a/tests/test_auto_titled.py b/tests/test_auto_titled.py
+deleted file mode 100644
+index 197f320..0000000
+--- a/tests/test_auto_titled.py
++++ /dev/null
+@@ -1,41 +0,0 @@
+-"""auto_titled flag (spec §12): persisted in change.json, reloaded by
+-Change.load, and exposed to agent prompts as {{ change.auto_titled }}."""
+-
+-from __future__ import annotations
+-
+-from pathlib import Path
+-
+-from imp.agents.prompts import build_context, render_prompt
+-from imp.engine.change import Change
+-from imp.engine.state import JsonlEventLog
+-from tests.conftest import _seed_control
+-
+-
+-def test_auto_titled_defaults_false_and_round_trips(tmp_path: Path) -> None:
+-    _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="Real Title", slug="real-title",
+-                       base_branch="main", auto_titled=True)
+-    assert ch.auto_titled is True
+-    reloaded = Change.load(tmp_path, "real-title")
+-    assert reloaded.auto_titled is True
+-
+-
+-def test_auto_titled_absent_in_json_loads_false(tmp_path: Path) -> None:
+-    _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="Plain", slug="plain", base_branch="main")
+-    assert ch.auto_titled is False
+-    reloaded = Change.load(tmp_path, "plain")
+-    assert reloaded.auto_titled is False
+-
+-
+-def test_change_namespace_exposes_auto_titled_to_prompts(tmp_path: Path) -> None:
+-    _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="Prov", slug="prov", base_branch="main",
+-                       auto_titled=True)
+-    log = JsonlEventLog(ch.events_path)
+-    ctx = build_context(change_slug=ch.slug, change_title=ch.title,
+-                        change_auto_titled=ch.auto_titled, event_log=log)
+-    rendered = render_prompt(
+-        "{% if change.auto_titled %}RENAME-ME{% else %}KEEP{% endif %}", ctx
+-    )
+-    assert rendered == "RENAME-ME"
+diff --git a/tests/test_await_worktree.py b/tests/test_await_worktree.py
+index ecdc5f0..8a0b7ea 100644
+--- a/tests/test_await_worktree.py
++++ b/tests/test_await_worktree.py
+@@ -19,7 +19,7 @@ from tests.conftest import _seed_control
+ 
+ def test_await_worktree_returns_the_change_dir(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    Change.create(tmp_path, title="Hello There", slug="hello-there", base_branch="main")
++    Change.create(tmp_path, title="Hello There", change_id="hello-there", base_branch="main")
+     wt = _await_worktree(tmp_path, timeout=5.0)
+     assert wt.name == "hello-there"
+     assert (wt / ".imp" / "change" / "change.json").exists()
+@@ -27,7 +27,7 @@ def test_await_worktree_returns_the_change_dir(tmp_path: Path) -> None:
+ 
+ def test_await_worktree_ignores_merge_scratch(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    Change.create(tmp_path, title="Real One", slug="real-one", base_branch="main")
++    Change.create(tmp_path, title="Real One", change_id="real-one", base_branch="main")
+     # A scratch dir without change.json must be ignored even if it sorts first.
+     scratch = tmp_path / ".imp" / "worktrees" / ".merge-aaa"
+     scratch.mkdir(parents=True)
+diff --git a/tests/test_cache_key_stable.py b/tests/test_cache_key_stable.py
+new file mode 100644
+index 0000000..ad7925e
+--- /dev/null
++++ b/tests/test_cache_key_stable.py
+@@ -0,0 +1,32 @@
++"""OpenAI prompt-cache key is keyed on the immutable id, so a mid-run title
++rename does NOT rotate the key (spec §9, AC 10). The test varies the title
++across two ChangeContexts sharing one id and shows the id-derived key is stable
++while a slug-derived key would NOT be — guarding the keying *choice*, not just
++the helper's purity."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++from imp.agents.runner import ChangeContext
++from imp.providers.openai import _prompt_cache_key
++
++
++def _cc(title: str, slug: str) -> ChangeContext:
++    return ChangeContext(
++        id="2026-06-04-fff666", slug=slug, title=title,
++        project_root=Path("/wt"), workflow_dir=Path("/wt/.imp/change/workflow"),
++    )
++
++
++def test_cache_key_stable_across_title_rename() -> None:
++    aid = "step:drafting/spec"
++    before = _cc("First Name", "2026-06-04-first-name")     # pre-rename
++    after = _cc("Second Name", "2026-06-04-second-name")    # post-rename (same id)
++
++    # Keyed on the immutable id: identical before/after the title rename.
++    assert _prompt_cache_key(before.id, aid) == _prompt_cache_key(after.id, aid)
++
++    # Guard the keying choice: had the call site keyed on the (rotating) slug,
++    # the key WOULD have changed — proving id-keying is what buys stability.
++    assert _prompt_cache_key(before.slug, aid) != _prompt_cache_key(after.slug, aid)
+diff --git a/tests/test_change.py b/tests/test_change.py
+index 4582527..0b3ded5 100644
+--- a/tests/test_change.py
++++ b/tests/test_change.py
+@@ -8,26 +8,36 @@ from tests.conftest import _seed_control
+ 
+ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="Add OAuth", slug="add-oauth", base_branch="main")
+-    assert ch.slug == "add-oauth"
++    ch = Change.create(tmp_path, title="Add OAuth",
++                       change_id="2026-06-04-abc123", base_branch="main")
++    assert ch.id == "2026-06-04-abc123"
++    assert ch.slug == "2026-06-04-add-oauth"     # derived from title + id's date
+     assert ch.base_branch == "main"
+-    wtpath = tmp_path / ".imp" / "worktrees" / "add-oauth"
++    wtpath = tmp_path / ".imp" / "worktrees" / "2026-06-04-abc123"
+     assert ch.project_root == wtpath
+     assert (wtpath / ".imp" / "change" / "change.json").exists()
+     assert (wtpath / ".imp" / "change" / "workflow" / "workflow.yaml").exists()
+     state = State.load(wtpath / ".imp" / "change" / "state")
+-    assert state.slug == "add-oauth" and state.step == "s" and state.status == "running"
++    assert state.id == "2026-06-04-abc123" and state.step == "s" and state.status == "running"
+ 
+ 
+-def test_load_change_by_slug(tmp_path: Path) -> None:
++def test_load_change_by_id(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    Change.create(tmp_path, title="X", slug="my-change", base_branch="main")
+-    b = Change.load(tmp_path, "my-change")
+-    assert b.slug == "my-change" and b.title == "X" and b.base_branch == "main"
++    Change.create(tmp_path, title="X", change_id="2026-06-04-mychng", base_branch="main")
++    b = Change.load(tmp_path, "2026-06-04-mychng")
++    assert b.id == "2026-06-04-mychng" and b.title == "X" and b.base_branch == "main"
++
++
++def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
++    import json
++    _seed_control(tmp_path)
++    ch = Change.create(tmp_path, title="X", change_id="2026-06-04-zzz999", base_branch="main")
++    meta = json.loads((ch.change_dir / "change.json").read_text())
++    assert set(meta) == {"id", "title", "base_branch", "created_at"}
+ 
+ 
+ def test_snapshot_is_isolated(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="X", slug="iso", base_branch="main")
++    ch = Change.create(tmp_path, title="X", change_id="2026-06-04-isolat", base_branch="main")
+     (tmp_path / "imp" / "workflows" / "default" / "workflow.yaml").write_text("BROKEN")
+     assert "phases:" in (ch.workflow_dir / "workflow.yaml").read_text()
+diff --git a/tests/test_change_identity.py b/tests/test_change_identity.py
+new file mode 100644
+index 0000000..f1a3870
+--- /dev/null
++++ b/tests/test_change_identity.py
+@@ -0,0 +1,28 @@
++"""Identity is immutable; slug derives from title (spec §1, AC 1)."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++from imp.engine.change import Change
++from tests.conftest import _seed_control
++
++
++def test_title_change_moves_slug_not_id_or_paths(tmp_path: Path) -> None:
++    _seed_control(tmp_path)
++    ch = Change.create(tmp_path, title="First Name",
++                       change_id="2026-06-04-k3f9qa", base_branch="main")
++    id_before = ch.id
++    root_before = ch.project_root
++    slug_before = ch.slug
++    assert slug_before == "2026-06-04-first-name"
++
++    ch.title = "Second Name"
++    assert ch.slug == "2026-06-04-second-name"     # slug follows title
++    assert ch.slug != slug_before
++    assert ch.id == id_before                       # id unchanged
++    assert ch.project_root == root_before           # worktree path unchanged
++    # Branch name is imp/<id>, independent of title.
++    from tests.conftest import _git
++    assert "imp/2026-06-04-k3f9qa" in _git(tmp_path, "branch", "--list",
++                                           "imp/2026-06-04-k3f9qa").stdout
+diff --git a/tests/test_cli_status.py b/tests/test_cli_status.py
+index bde0cd7..c77a8fe 100644
+--- a/tests/test_cli_status.py
++++ b/tests/test_cli_status.py
+@@ -7,8 +7,8 @@ from tests.conftest import _seed_control
+ 
+ def test_status_lists_inflight_worktrees(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    Change.create(tmp_path, title="A", slug="alpha", base_branch="main")
+-    Change.create(tmp_path, title="B", slug="beta", base_branch="main")
++    Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
++    Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+     rows = _status_rows(tmp_path)
+     slugs = {r[0] for r in rows}
+     assert slugs == {"alpha", "beta"}
+diff --git a/tests/test_concurrent_changes.py b/tests/test_concurrent_changes.py
+index ead353e..27e5d59 100644
+--- a/tests/test_concurrent_changes.py
++++ b/tests/test_concurrent_changes.py
+@@ -17,8 +17,8 @@ from tests.conftest import _git, _seed_control
+ def test_two_changes_isolated(tmp_path: Path) -> None:
+     """Two concurrent worktrees see only their own files."""
+     _seed_control(tmp_path)
+-    a = Change.create(tmp_path, title="A", slug="alpha", base_branch="main")
+-    b = Change.create(tmp_path, title="B", slug="beta", base_branch="main")
++    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
++    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+     (a.project_root / "a.txt").write_text("a")
+     (b.project_root / "b.txt").write_text("b")
+     assert not (a.project_root / "b.txt").exists()
+@@ -28,8 +28,8 @@ def test_two_changes_isolated(tmp_path: Path) -> None:
+ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
+     """Two changes merge in sequence; the second picks up what the first committed."""
+     _seed_control(tmp_path)
+-    a = Change.create(tmp_path, title="A", slug="alpha", base_branch="main")
+-    b = Change.create(tmp_path, title="B", slug="beta", base_branch="main")
++    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
++    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+     for ch, fn in ((a, "a.txt"), (b, "b.txt")):
+         (ch.project_root / fn).write_text(fn)
+         _git(ch.project_root, "add", "-A")
+@@ -47,7 +47,7 @@ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
+ def test_add_a_inside_worktree_ignores_imp_state(tmp_path: Path) -> None:
+     """git add -A inside a worktree must NOT stage .imp/ files."""
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="X", slug="iso", base_branch="main")
++    ch = Change.create(tmp_path, title="X", change_id="iso", base_branch="main")
+     (ch.project_root / "src.txt").write_text("code")
+     _git(ch.project_root, "add", "-A")
+     staged = _git(ch.project_root, "diff", "--cached", "--name-only").stdout
+@@ -59,8 +59,8 @@ def test_per_change_lock_is_exclusive_but_cross_change_is_not(tmp_path: Path) ->
+     from imp.engine.state import LockHeld, ProjectLock
+ 
+     _seed_control(tmp_path)
+-    a = Change.create(tmp_path, title="A", slug="alpha", base_branch="main")
+-    b = Change.create(tmp_path, title="B", slug="beta", base_branch="main")
++    a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
++    b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
+     with ProjectLock(a.change_dir / "lock").acquire():
+         # Same lock file: must raise LockHeld (timeout=0 → immediate)
+         with pytest.raises(LockHeld), ProjectLock(a.change_dir / "lock").acquire(timeout=0.2):
+@@ -77,7 +77,7 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
+ 
+     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))  # type: ignore[call-arg]
+     _seed_two_step_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="spine", base_branch="main")
++    ch = Change.create(tmp_path, title="x", change_id="spine", base_branch="main")
+     (ch.project_root / "out.txt").write_text("done")
+     _git(ch.project_root, "add", "-A")
+     _git(ch.project_root, "commit", "-qm", "work")
+diff --git a/tests/test_config_vars.py b/tests/test_config_vars.py
+index 4175f4a..af70343 100644
+--- a/tests/test_config_vars.py
++++ b/tests/test_config_vars.py
+@@ -93,6 +93,6 @@ def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
+     _git(tmp_path, "add", "-A")
+     _git(tmp_path, "commit", "-qm", "vars")
+ 
+-    ch = Change.create(tmp_path, title="X", slug="x", base_branch="main")
++    ch = Change.create(tmp_path, title="X", change_id="x", base_branch="main")
+     st = State.load(ch.state_dir)
+     assert st.vars["final_review"] is False
+diff --git a/tests/test_default_workflow_dogfood_live.py b/tests/test_default_workflow_dogfood_live.py
+index 6580552..d644504 100644
+--- a/tests/test_default_workflow_dogfood_live.py
++++ b/tests/test_default_workflow_dogfood_live.py
+@@ -501,17 +501,15 @@ def test_dogfood_imp_on_imp_default_workflow(tmp_path: Path) -> None:
+         f"gates_answered={gates_answered}/{len(expected_gates)}"
+     )
+ 
+-    # Resolve the FINAL slug from the journal. The spec-writer may RENAME the
+-    # change (a spec-phase self-resume edge), so `change_wt.name` captured at
+-    # startup is the PRE-rename slug and the live worktree (with events.jsonl)
+-    # was renamed/removed mid-run — the journal is keyed under the final slug.
+-    # Exactly one change ran here.
+-    journaled_slugs = journal.journal_slugs(tmp_path)
+-    assert len(journaled_slugs) == 1, (
+-        f"expected exactly one journaled change, got {journaled_slugs} "
+-        f"(startup slug was {slug!r})"
++    # Resolve the change id from the journal. The id is immutable, so it equals
++    # the startup worktree name, but read it back from the journal anyway to
++    # assert exactly one change ran here. The journal is keyed under the id.
++    journaled_ids = journal.journal_ids(tmp_path)
++    assert len(journaled_ids) == 1, (
++        f"expected exactly one journaled change, got {journaled_ids} "
++        f"(startup id was {slug!r})"
+     )
+-    slug = journaled_slugs[0]
++    slug = journaled_ids[0]
+ 
+     # The worktree was removed at merge; completion status lives in the journal.
+     state_raw = journal.journal_show(tmp_path, slug, "state.json")
+diff --git a/tests/test_default_workflow_e2e_live.py b/tests/test_default_workflow_e2e_live.py
+index f93a2e6..39a6794 100644
+--- a/tests/test_default_workflow_e2e_live.py
++++ b/tests/test_default_workflow_e2e_live.py
+@@ -76,7 +76,7 @@ async def test_live_minimal_change_completes_one_step(
+     _git(tmp_path, "add", "-A")
+     _git(tmp_path, "commit", "-qm", "seed")
+     change = Change.create(
+-        tmp_path, title="live-smoke", slug="live-smoke", base_branch="main")
++        tmp_path, title="live-smoke", change_id="live-smoke", base_branch="main")
+ 
+     result = await run_change(change)
+     assert result is RunResult.COMPLETED
+diff --git a/tests/test_default_workflow_e2e_live_claude_code.py b/tests/test_default_workflow_e2e_live_claude_code.py
+index 28db550..8fbe45e 100644
+--- a/tests/test_default_workflow_e2e_live_claude_code.py
++++ b/tests/test_default_workflow_e2e_live_claude_code.py
+@@ -69,7 +69,7 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
+     _git(tmp_path, "add", "-A")
+     _git(tmp_path, "commit", "-qm", "seed")
+     change = Change.create(
+-        tmp_path, title="live-cc", slug="live-cc", base_branch="main")
++        tmp_path, title="live-cc", change_id="live-cc", base_branch="main")
+ 
+     result = await run_change(change)
+     assert result is RunResult.COMPLETED
+diff --git a/tests/test_default_workflow_e2e_live_openai.py b/tests/test_default_workflow_e2e_live_openai.py
+index 6680b4c..5277078 100644
+--- a/tests/test_default_workflow_e2e_live_openai.py
++++ b/tests/test_default_workflow_e2e_live_openai.py
+@@ -83,7 +83,7 @@ async def test_one_step_walk_against_openai(
+     _git(tmp_path, "add", "-A")
+     _git(tmp_path, "commit", "-qm", "seed")
+     change = Change.create(
+-        tmp_path, title="live-openai", slug="live-openai", base_branch="main")
++        tmp_path, title="live-openai", change_id="live-openai", base_branch="main")
+ 
+     result = await run_change(change)
+     assert result is RunResult.COMPLETED
+diff --git a/tests/test_default_workflow_e2e_mocked.py b/tests/test_default_workflow_e2e_mocked.py
+index 8aa3805..de082e9 100644
+--- a/tests/test_default_workflow_e2e_mocked.py
++++ b/tests/test_default_workflow_e2e_mocked.py
+@@ -67,7 +67,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     shutil.copytree(src_wf, dest_wf)
+     (change_dir / "state").mkdir(exist_ok=True)
+     (change_dir / "change.json").write_text(json.dumps({
+-        "slug": slug, "title": title, "base_branch": "main",
++        "id": slug, "title": title, "base_branch": "main",
+     }, indent=2, sort_keys=True))
+ 
+     configured_roles: list[str] = []
+@@ -82,12 +82,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     ).save(change_dir / "state")
+ 
+     change = Change(
+-        slug=slug, title=title, base_branch="main",
++        id=slug, title=title, base_branch="main",
+         control_root=root, project_root=root, change_dir=change_dir,
+     )
+     change.event_log().append(
+         agent_id=None, type="change_created",
+-        payload={"slug": slug, "title": title},
++        payload={"id": slug, "slug": change.slug, "title": title},
+     )
+     return change
+ 
+diff --git a/tests/test_engine_env.py b/tests/test_engine_env.py
+index b792d4f..e05b212 100644
+--- a/tests/test_engine_env.py
++++ b/tests/test_engine_env.py
+@@ -5,24 +5,31 @@ from imp.engine.env import engine_env, overlay_engine_env
+ 
+ 
+ def test_engine_env_exposes_slug_and_title_no_artifacts() -> None:
+-    env = engine_env(project_root=Path("/wt"), change_slug="add-oauth",
+-                     change_title="Add OAuth")
++    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
++                     change_slug="add-oauth", change_title="Add OAuth")
+     assert env == {
+         "IMP_PROJECT_ROOT": "/wt",
++        "IMP_CHANGE_ID": "2026-06-04-eee555",
+         "IMP_CHANGE_SLUG": "add-oauth",
+         "IMP_CHANGE_TITLE": "Add OAuth",
+     }
+     assert "IMP_ARTIFACTS_DIR" not in env
+ 
+ 
++def test_engine_env_exposes_change_id() -> None:
++    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
++                     change_slug="s", change_title="t")
++    assert env["IMP_CHANGE_ID"] == "2026-06-04-eee555"
++
++
+ def test_engine_env_injects_lint_command_when_set() -> None:
+-    env = engine_env(project_root=Path("/wt"), change_slug="s",
++    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                      change_title="t", lint_command="make lint")
+     assert env["IMP_LINT_COMMAND"] == "make lint"
+ 
+ 
+ def test_engine_env_omits_lint_command_when_none() -> None:
+-    env = engine_env(project_root=Path("/wt"), change_slug="s",
++    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                      change_title="t")
+     assert "IMP_LINT_COMMAND" not in env
+ 
+@@ -31,7 +38,8 @@ def test_overlay_strips_inherited_lint_command_when_unset() -> None:
+     # engine_env is the authority: an inherited IMP_LINT_COMMAND must be dropped
+     # when the overlay (no lint_command) doesn't provide it — no ambient leak.
+     parent = {"IMP_LINT_COMMAND": "make stale", "PATH": "/usr/bin", "FOO": "bar"}
+-    overlay = engine_env(project_root=Path("/wt"), change_slug="s", change_title="t")
++    overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
++                         change_slug="s", change_title="t")
+     env = overlay_engine_env(parent, overlay)
+     assert "IMP_LINT_COMMAND" not in env      # inherited copy stripped
+     assert env["FOO"] == "bar"                # non-engine vars preserved
+@@ -40,20 +48,20 @@ def test_overlay_strips_inherited_lint_command_when_unset() -> None:
+ 
+ def test_overlay_configured_lint_command_overrides_inherited() -> None:
+     parent = {"IMP_LINT_COMMAND": "make stale"}
+-    overlay = engine_env(project_root=Path("/wt"), change_slug="s",
++    overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                          change_title="t", lint_command="make lint")
+     env = overlay_engine_env(parent, overlay)
+     assert env["IMP_LINT_COMMAND"] == "make lint"   # overlay wins over inherited
+ 
+ 
+ def test_engine_env_injects_test_command_when_set() -> None:
+-    env = engine_env(project_root=Path("/wt"), change_slug="s",
++    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                      change_title="t", test_command="make test")
+     assert env["IMP_TEST_COMMAND"] == "make test"
+ 
+ 
+ def test_engine_env_omits_test_command_when_none() -> None:
+-    env = engine_env(project_root=Path("/wt"), change_slug="s",
++    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                      change_title="t")
+     assert "IMP_TEST_COMMAND" not in env
+ 
+@@ -62,7 +70,8 @@ def test_overlay_strips_inherited_test_command_when_unset() -> None:
+     # engine_env is the authority: an inherited IMP_TEST_COMMAND must be dropped
+     # when the overlay (no test_command) doesn't provide it — no ambient leak.
+     parent = {"IMP_TEST_COMMAND": "make stale", "PATH": "/usr/bin", "FOO": "bar"}
+-    overlay = engine_env(project_root=Path("/wt"), change_slug="s", change_title="t")
++    overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
++                         change_slug="s", change_title="t")
+     env = overlay_engine_env(parent, overlay)
+     assert "IMP_TEST_COMMAND" not in env      # inherited copy stripped
+     assert env["FOO"] == "bar"                # non-engine vars preserved
+@@ -71,7 +80,7 @@ def test_overlay_strips_inherited_test_command_when_unset() -> None:
+ 
+ def test_overlay_configured_test_command_overrides_inherited() -> None:
+     parent = {"IMP_TEST_COMMAND": "make stale"}
+-    overlay = engine_env(project_root=Path("/wt"), change_slug="s",
++    overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                          change_title="t", test_command="make test")
+     env = overlay_engine_env(parent, overlay)
+     assert env["IMP_TEST_COMMAND"] == "make test"   # overlay wins over inherited
+@@ -83,12 +92,14 @@ def test_engine_env_injects_worktree_src_on_pythonpath_when_present(
+     # A src/ layout (imp's own) => PYTHONPATH prefix points at the worktree's src
+     # so an editable install can't resolve `import imp` to a sibling checkout.
+     (tmp_path / "src").mkdir()
+-    env = engine_env(project_root=tmp_path, change_slug="s", change_title="t")
++    env = engine_env(project_root=tmp_path, change_id="2026-06-04-eee555",
++                     change_slug="s", change_title="t")
+     assert env["PYTHONPATH"] == str(tmp_path / "src")
+ 
+ 
+ def test_engine_env_omits_pythonpath_without_src_layout(tmp_path: Path) -> None:
+-    env = engine_env(project_root=tmp_path, change_slug="s", change_title="t")
++    env = engine_env(project_root=tmp_path, change_id="2026-06-04-eee555",
++                     change_slug="s", change_title="t")
+     assert "PYTHONPATH" not in env
+ 
+ 
+@@ -97,7 +108,8 @@ def test_overlay_prepends_worktree_src_to_inherited_pythonpath(
+ ) -> None:
+     (tmp_path / "src").mkdir()
+     parent = {"PYTHONPATH": "/tmp/ambient"}
+-    overlay = engine_env(project_root=tmp_path, change_slug="s", change_title="t")
++    overlay = engine_env(project_root=tmp_path, change_id="2026-06-04-eee555",
++                     change_slug="s", change_title="t")
+     env = overlay_engine_env(parent, overlay)
+     # worktree src first (wins over the editable .pth), ambient preserved after.
+     assert env["PYTHONPATH"] == f"{tmp_path / 'src'}{os.pathsep}/tmp/ambient"
+@@ -105,6 +117,7 @@ def test_overlay_prepends_worktree_src_to_inherited_pythonpath(
+ 
+ def test_overlay_sets_pythonpath_alone_when_none_inherited(tmp_path: Path) -> None:
+     (tmp_path / "src").mkdir()
+-    overlay = engine_env(project_root=tmp_path, change_slug="s", change_title="t")
++    overlay = engine_env(project_root=tmp_path, change_id="2026-06-04-eee555",
++                     change_slug="s", change_title="t")
+     env = overlay_engine_env({}, overlay)
+     assert env["PYTHONPATH"] == str(tmp_path / "src")
+diff --git a/tests/test_event_logging_integration.py b/tests/test_event_logging_integration.py
+index 2311de7..b0dd201 100644
+--- a/tests/test_event_logging_integration.py
++++ b/tests/test_event_logging_integration.py
+@@ -52,7 +52,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     shutil.copytree(src_wf, dest_wf)
+     (change_dir / "state").mkdir(exist_ok=True)
+     (change_dir / "change.json").write_text(json.dumps({
+-        "slug": slug, "title": title, "base_branch": "main",
++        "id": slug, "title": title, "base_branch": "main",
+     }, indent=2, sort_keys=True))
+ 
+     configured_roles: list[str] = []
+@@ -67,12 +67,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     ).save(change_dir / "state")
+ 
+     change = Change(
+-        slug=slug, title=title, base_branch="main",
++        id=slug, title=title, base_branch="main",
+         control_root=root, project_root=root, change_dir=change_dir,
+     )
+     change.event_log().append(
+         agent_id=None, type="change_created",
+-        payload={"slug": slug, "title": title},
++        payload={"id": slug, "slug": change.slug, "title": title},
+     )
+     return change
+ 
+diff --git a/tests/test_executor.py b/tests/test_executor.py
+index 238b76d..b7bcb77 100644
+--- a/tests/test_executor.py
++++ b/tests/test_executor.py
+@@ -36,7 +36,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+ 
+     # Write change metadata
+     (change_dir / "change.json").write_text(json.dumps({
+-        "slug": slug, "title": title, "base_branch": "main",
++        "id": slug, "title": title, "base_branch": "main",
+     }, indent=2, sort_keys=True))
+ 
+     configured_roles: list[str] = []
+@@ -56,12 +56,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     ).save(change_dir / "state")
+ 
+     change = Change(
+-        slug=slug, title=title, base_branch="main",
++        id=slug, title=title, base_branch="main",
+         control_root=root, project_root=root, change_dir=change_dir,
+     )
+     change.event_log().append(
+         agent_id=None, type="change_created",
+-        payload={"slug": slug, "title": title},
++        payload={"id": slug, "slug": change.slug, "title": title},
+     )
+     return change
+ 
+diff --git a/tests/test_executor_merge.py b/tests/test_executor_merge.py
+index c797c90..6ac8f15 100644
+--- a/tests/test_executor_merge.py
++++ b/tests/test_executor_merge.py
+@@ -15,7 +15,7 @@ def _ready(ch) -> tuple:
+ 
+ def test_complete_merges_journals_and_removes(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
++    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+     (ch.project_root / "feature.txt").write_text("hi")
+     _git(ch.project_root, "add", "-A")
+     _git(ch.project_root, "commit", "-qm", "feat")
+@@ -38,7 +38,7 @@ def test_complete_merges_journals_and_removes(tmp_path: Path) -> None:
+ 
+ def test_complete_merge_blocked_on_conflict(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
++    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+     (ch.project_root / "README.md").write_text("branch")
+     _git(ch.project_root, "add", "-A")
+     _git(ch.project_root, "commit", "-qm", "b")
+@@ -55,7 +55,7 @@ def test_complete_merge_blocked_on_conflict(tmp_path: Path) -> None:
+ def test_complete_refuses_dirty_worktree(tmp_path: Path) -> None:
+     # H1: uncommitted work must NOT be silently dropped at merge.
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
++    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+     (ch.project_root / "uncommitted.txt").write_text("not committed")  # left dirty
+     state, log = _ready(ch)
+ 
+@@ -70,7 +70,7 @@ def test_merge_blocked_resumes_and_completes(tmp_path: Path) -> None:
+     # V8: after the user commits the leftover work, a resume re-enters _complete
+     # (ready_to_merge persisted in state.vars) and the merge succeeds.
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="feat", base_branch="main")
++    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+     (ch.project_root / "f.txt").write_text("v")  # dirty -> first attempt blocks
+     state, log = _ready(ch)
+     assert _complete(ch, state, log).value == "paused"
+diff --git a/tests/test_executor_pause_reason.py b/tests/test_executor_pause_reason.py
+index 51f5c7a..ca5ea77 100644
+--- a/tests/test_executor_pause_reason.py
++++ b/tests/test_executor_pause_reason.py
+@@ -31,7 +31,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     shutil.copytree(src_wf, dest_wf)
+     (change_dir / "state").mkdir(exist_ok=True)
+     (change_dir / "change.json").write_text(json.dumps({
+-        "slug": slug, "title": title, "base_branch": "main",
++        "id": slug, "title": title, "base_branch": "main",
+     }, indent=2, sort_keys=True))
+ 
+     configured_roles: list[str] = []
+@@ -46,12 +46,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     ).save(change_dir / "state")
+ 
+     change = Change(
+-        slug=slug, title=title, base_branch="main",
++        id=slug, title=title, base_branch="main",
+         control_root=root, project_root=root, change_dir=change_dir,
+     )
+     change.event_log().append(
+         agent_id=None, type="change_created",
+-        payload={"slug": slug, "title": title},
++        payload={"id": slug, "slug": change.slug, "title": title},
+     )
+     return change
+ 
+diff --git a/tests/test_executor_rename.py b/tests/test_executor_rename.py
+index c0abb94..43ecc9f 100644
+--- a/tests/test_executor_rename.py
++++ b/tests/test_executor_rename.py
+@@ -1,6 +1,7 @@
+ # tests/test_executor_rename.py
+ from __future__ import annotations
+ 
++import json
+ import os
+ from collections.abc import AsyncIterator
+ from pathlib import Path
+@@ -9,56 +10,81 @@ import anyio
+ import pytest
+ 
+ from imp.agents.runner import AgentInvocation, AgentRunner, Event
+-from imp.engine import worktree as wt
+ from imp.engine.change import Change
+ from imp.engine.errors import LoadError
+ from imp.engine.executor import RunResult, apply_pending_rename, run_change
+ from imp.engine.state import State
+ from tests.conftest import _git, _seed_control
+ 
+-# ── Unit tests: apply_pending_rename ────────────────────────────────────────
+ 
+-
+-def test_apply_pending_rename_repoints_paths(tmp_path: Path) -> None:
+-    import json
++def test_apply_pending_rename_is_content_only(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="old", base_branch="main")
++    ch = Change.create(tmp_path, title="orig",
++                       change_id="2026-06-04-aaa111", base_branch="main")
+     created_before = json.loads((ch.change_dir / "change.json").read_text())["created_at"]
+-    # H1: the rename rests on `git worktree move` relocating the gitignored
+-    # .imp/change/ intact. Write a sentinel event + state value BEFORE the move.
++    id_before, root_before = ch.id, ch.project_root
+     ch.event_log().append(agent_id=None, type="sentinel", payload={"k": "v"})
+     state = State.load(ch.state_dir)
+-    state.vars["marker"] = "keep-me"
+     state.pending_rename = "Add OAuth"
+     state.save(ch.state_dir)
+-    log = ch.event_log()
+ 
+-    new_log = apply_pending_rename(ch, state, log, on_event=None)
+-    assert ch.slug == "add-oauth"
+-    assert ch.project_root == (tmp_path / ".imp" / "worktrees" / "add-oauth").resolve()
+-    assert (ch.change_dir / "change.json").exists()
++    new_log = apply_pending_rename(ch, state, ch.event_log(), on_event=None)
++
++    assert ch.title == "Add OAuth"
++    assert ch.slug == "2026-06-04-add-oauth"
++    assert ch.id == id_before                       # id never changes
++    assert ch.project_root == root_before           # no worktree move
+     assert state.pending_rename is None
++    meta = json.loads((ch.change_dir / "change.json").read_text())
++    assert meta["title"] == "Add OAuth"
++    assert meta["created_at"] == created_before
++    assert "id" in meta and "slug" not in meta
+     types = [e["type"] for e in new_log.read()]
+     assert "sentinel" in types and "change_renamed" in types
+-    assert State.load(ch.state_dir).vars["marker"] == "keep-me"
+-    meta_after = json.loads((ch.change_dir / "change.json").read_text())
+-    assert meta_after["created_at"] == created_before
+-    assert meta_after["slug"] == "add-oauth" and meta_after["base_branch"] == "main"
++    renamed = [e for e in new_log.read() if e["type"] == "change_renamed"][-1]
++    assert renamed["payload"] == {
++        "id": id_before, "old_title": "orig", "new_title": "Add OAuth"}
+ 
+ 
+-def test_apply_pending_rename_collision_keeps_old(tmp_path: Path) -> None:
++def test_apply_pending_rename_moves_committed_spec(tmp_path: Path) -> None:
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="old", base_branch="main")
+-    wt.create_worktree(tmp_path, "taken", "main")  # imp/taken exists
++    ch = Change.create(tmp_path, title="orig",
++                       change_id="2026-06-04-bbb222", base_branch="main")
++    specs = ch.project_root / "imp" / "specs"
++    specs.mkdir(parents=True)
++    old = specs / f"{ch.slug}.md"
++    old.write_text("# spec")
++    _git(ch.project_root, "add", "-A")
++    _git(ch.project_root, "commit", "-qm", "early spec")
++    old_slug = ch.slug
++
+     state = State.load(ch.state_dir)
+-    state.pending_rename = "taken"
+-    returned = apply_pending_rename(ch, state, ch.event_log(), on_event=None)
+-    assert ch.slug == "old"  # unchanged
+-    assert state.pending_rename is None
+-    assert "rename_blocked" in [e["type"] for e in returned.read()]
++    state.pending_rename = "Renamed"
++    state.save(ch.state_dir)
++    apply_pending_rename(ch, state, ch.event_log(), on_event=None)
++
++    assert not (specs / f"{old_slug}.md").exists()
++    assert (specs / f"{ch.slug}.md").exists()
+ 
+ 
+-# ── Integration tests: run_change with rename + cwd restore ─────────────────
++def test_apply_pending_rename_moves_untracked_draft(tmp_path: Path) -> None:
++    # An UNTRACKED early draft must still be moved (filesystem fallback when
++    # `git mv` fails), or it lingers and blocks the merge. [review M2]
++    _seed_control(tmp_path)
++    ch = Change.create(tmp_path, title="orig",
++                       change_id="2026-06-04-ggg777", base_branch="main")
++    specs = ch.project_root / "imp" / "specs"
++    specs.mkdir(parents=True)
++    old_slug = ch.slug
++    (specs / f"{old_slug}.md").write_text("# draft")   # never git-added
++
++    state = State.load(ch.state_dir)
++    state.pending_rename = "Renamed"
++    state.save(ch.state_dir)
++    apply_pending_rename(ch, state, ch.event_log(), on_event=None)
++
++    assert not (specs / f"{old_slug}.md").exists()      # nothing lingers at old name
++    assert (specs / f"{ch.slug}.md").exists()           # moved to settled name
+ 
+ 
+ class _FakeRunner:
+@@ -83,10 +109,7 @@ class _FakeProvider:
+ 
+ 
+ def _seed_two_step_control(root: Path) -> None:
+-    """Like _seed_control but a TWO-step workflow so there's a boundary between
+-    step 1 and step 2 where a pending rename is applied mid-run."""
+     from tests.conftest import _init_repo, write_agent_md
+-
+     _init_repo(root)
+     src = root / "imp" / "workflows" / "default"
+     (src / "agents").mkdir(parents=True)
+@@ -111,12 +134,13 @@ def _seed_two_step_control(root: Path) -> None:
+     _git(root, "commit", "-qm", "imp setup")
+ 
+ 
+-def test_run_change_applies_rename_and_restores_cwd(
++def test_run_change_applies_rename_keeps_id_and_path(
+     tmp_path: Path, provider_registry
+ ) -> None:
+     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
+     _seed_two_step_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="old", base_branch="main")
++    ch = Change.create(tmp_path, title="x",
++                       change_id="2026-06-04-ccc333", base_branch="main")
+     st = State.load(ch.state_dir)
+     st.pending_rename = "Renamed Thing"
+     st.save(ch.state_dir)
+@@ -124,22 +148,23 @@ def test_run_change_applies_rename_and_restores_cwd(
+     cwd_before = os.getcwd()
+     result = anyio.run(run_change, ch)
+     assert result is RunResult.COMPLETED
+-    assert os.getcwd() == cwd_before                       # 4b: cwd restored
+-    assert ch.slug == "renamed-thing"                      # 4c: rename applied mid-run
+-    assert (tmp_path / ".imp" / "worktrees" / "renamed-thing").is_dir()
+-    assert not (tmp_path / ".imp" / "worktrees" / "old").exists()
++    assert os.getcwd() == cwd_before
++    assert ch.title == "Renamed Thing"
++    assert ch.id == "2026-06-04-ccc333"                          # id stable
++    assert (tmp_path / ".imp" / "worktrees" / "2026-06-04-ccc333").is_dir()
+ 
+ 
+ def test_run_change_restores_cwd_on_error(tmp_path: Path, provider_registry) -> None:
+     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))
+     _seed_two_step_control(tmp_path)
+-    ch = Change.create(tmp_path, title="x", slug="boom", base_branch="main")
+-    (ch.workflow_dir / "workflow.yaml").write_text("}{ not yaml")  # loader raises mid-run
++    ch = Change.create(tmp_path, title="x",
++                       change_id="2026-06-04-ddd444", base_branch="main")
++    (ch.workflow_dir / "workflow.yaml").write_text("}{ not yaml")
+ 
+     cwd_before = os.getcwd()
+     with pytest.raises(LoadError):
+         anyio.run(run_change, ch)
+-    assert os.getcwd() == cwd_before                       # restored on error path
++    assert os.getcwd() == cwd_before
+ 
+ 
+ @pytest.fixture
+diff --git a/tests/test_executor_resume_attempt_reset.py b/tests/test_executor_resume_attempt_reset.py
+index 5be5f0c..7df89f8 100644
+--- a/tests/test_executor_resume_attempt_reset.py
++++ b/tests/test_executor_resume_attempt_reset.py
+@@ -31,7 +31,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     shutil.copytree(src_wf, dest_wf)
+     (change_dir / "state").mkdir(exist_ok=True)
+     (change_dir / "change.json").write_text(json.dumps({
+-        "slug": slug, "title": title, "base_branch": "main",
++        "id": slug, "title": title, "base_branch": "main",
+     }, indent=2, sort_keys=True))
+ 
+     configured_roles: list[str] = []
+@@ -46,12 +46,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     ).save(change_dir / "state")
+ 
+     change = Change(
+-        slug=slug, title=title, base_branch="main",
++        id=slug, title=title, base_branch="main",
+         control_root=root, project_root=root, change_dir=change_dir,
+     )
+     change.event_log().append(
+         agent_id=None, type="change_created",
+-        payload={"slug": slug, "title": title},
++        payload={"id": slug, "slug": change.slug, "title": title},
+     )
+     return change
+ 
+diff --git a/tests/test_exhaustion_invariant.py b/tests/test_exhaustion_invariant.py
+index a875575..c4de37b 100644
+--- a/tests/test_exhaustion_invariant.py
++++ b/tests/test_exhaustion_invariant.py
+@@ -38,7 +38,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     shutil.copytree(src_wf, dest_wf)
+     (change_dir / "state").mkdir(exist_ok=True)
+     (change_dir / "change.json").write_text(json.dumps({
+-        "slug": slug, "title": title, "base_branch": "main",
++        "id": slug, "title": title, "base_branch": "main",
+     }, indent=2, sort_keys=True))
+ 
+     configured_roles: list[str] = []
+@@ -53,12 +53,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     ).save(change_dir / "state")
+ 
+     change = Change(
+-        slug=slug, title=title, base_branch="main",
++        id=slug, title=title, base_branch="main",
+         control_root=root, project_root=root, change_dir=change_dir,
+     )
+     change.event_log().append(
+         agent_id=None, type="change_created",
+-        payload={"slug": slug, "title": title},
++        payload={"id": slug, "slug": change.slug, "title": title},
+     )
+     return change
+ 
+diff --git a/tests/test_journal.py b/tests/test_journal.py
+index abaebe2..3071014 100644
+--- a/tests/test_journal.py
++++ b/tests/test_journal.py
+@@ -29,17 +29,17 @@ def _init_repo(root: Path) -> None:
+     _git(root, "commit", "-qm", "seed")
+ 
+ 
+-def test_journal_slugs_empty_when_ref_absent(tmp_path: Path) -> None:
++def test_journal_ids_empty_when_ref_absent(tmp_path: Path) -> None:
+     _init_repo(tmp_path)
+-    assert journal.journal_slugs(tmp_path) == []
++    assert journal.journal_ids(tmp_path) == []
+ 
+ 
+-def test_journal_slugs_not_a_repo_returns_empty(tmp_path: Path) -> None:
++def test_journal_ids_not_a_repo_returns_empty(tmp_path: Path) -> None:
+     # No git repo at all: must degrade to [] rather than raising.
+-    assert journal.journal_slugs(tmp_path) == []
++    assert journal.journal_ids(tmp_path) == []
+ 
+ 
+-def test_journal_slugs_and_show_roundtrip(tmp_path: Path) -> None:
++def test_journal_ids_and_show_roundtrip(tmp_path: Path) -> None:
+     _init_repo(tmp_path)
+     stage = tmp_path / ".imp"
+     stage.mkdir(exist_ok=True)
+@@ -49,7 +49,7 @@ def test_journal_slugs_and_show_roundtrip(tmp_path: Path) -> None:
+     cj.write_text('{"slug":"alpha","title":"Alpha"}')
+     wt.journal_commit(tmp_path, "alpha", {"events.jsonl": ev, "change.json": cj})
+ 
+-    assert journal.journal_slugs(tmp_path) == ["alpha"]
++    assert journal.journal_ids(tmp_path) == ["alpha"]
+     assert journal.journal_show(tmp_path, "alpha", "events.jsonl") == b'{"type":"change_created"}\n'
+     assert (
+         journal.journal_show(tmp_path, "alpha", "change.json")
+diff --git a/tests/test_journal_read_cli.py b/tests/test_journal_read_cli.py
+index 5afc401..882b5da 100644
+--- a/tests/test_journal_read_cli.py
++++ b/tests/test_journal_read_cli.py
+@@ -40,7 +40,7 @@ def test_log_falls_back_to_journal_after_merge(
+     import imp.cli.main as m
+ 
+     _seed_control(tmp_path)
+-    Change.create(tmp_path, title="Done Thing", slug="done-thing", base_branch="main")
++    Change.create(tmp_path, title="Done Thing", change_id="done-thing", base_branch="main")
+     _complete_and_journal(tmp_path, "done-thing")
+     # Worktree is gone: Change.load now raises; log must use the journal.
+     assert not (tmp_path / ".imp" / "worktrees" / "done-thing").exists()
+@@ -77,7 +77,7 @@ def test_log_no_slug_falls_through_to_journal(
+     import imp.cli.main as m
+ 
+     _seed_control(tmp_path)
+-    Change.create(tmp_path, title="Only One", slug="only-one", base_branch="main")
++    Change.create(tmp_path, title="Only One", change_id="only-one", base_branch="main")
+     _complete_and_journal(tmp_path, "only-one")
+ 
+     monkeypatch.chdir(tmp_path)
+@@ -99,8 +99,8 @@ def test_status_shows_completed_section_from_journal(
+ 
+     _seed_control(tmp_path)
+     # One in-flight, one merged-and-journaled.
+-    Change.create(tmp_path, title="Live One", slug="live-one", base_branch="main")
+-    Change.create(tmp_path, title="Gone One", slug="gone-one", base_branch="main")
++    Change.create(tmp_path, title="Live One", change_id="live-one", base_branch="main")
++    Change.create(tmp_path, title="Gone One", change_id="gone-one", base_branch="main")
+     _complete_and_journal(tmp_path, "gone-one")
+ 
+     monkeypatch.chdir(tmp_path)
+@@ -128,7 +128,7 @@ def test_status_inflight_takes_precedence_over_journal(
+     import imp.cli.main as m
+ 
+     _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="Both", slug="both", base_branch="main")
++    ch = Change.create(tmp_path, title="Both", change_id="both", base_branch="main")
+     # Journal it but DON'T remove the worktree (simulates the crash window).
+     worktree.journal_commit(tmp_path, "both", {
+         "events.jsonl": ch.events_path,
+@@ -156,7 +156,7 @@ def test_status_skips_malformed_journal_entry(
+     import imp.cli.main as m
+ 
+     _seed_control(tmp_path)
+-    Change.create(tmp_path, title="Good", slug="good", base_branch="main")
++    Change.create(tmp_path, title="Good", change_id="good", base_branch="main")
+     _complete_and_journal(tmp_path, "good")
+     # A second journaled slug whose state.json is not valid JSON.
+     bad = tmp_path / ".imp" / "bad-state.json"
+diff --git a/tests/test_openai_runner.py b/tests/test_openai_runner.py
+index 2a7ea14..37d41be 100644
+--- a/tests/test_openai_runner.py
++++ b/tests/test_openai_runner.py
+@@ -57,7 +57,7 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
+         system_prompt="be terse",
+         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+         change_context=ChangeContext(
+-            slug="test", title="Test", project_root=tmp_path,
++            id="test", slug="test", title="Test", project_root=tmp_path,
+             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+         ),
+         interactive=interactive, transcript_dir=tmp_path / "step",
+@@ -519,7 +519,7 @@ async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
+ 
+ @pytest.mark.anyio
+ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
+-    """A different change slug yields a different prompt_cache_key, so two
++    """A different change id yields a different prompt_cache_key, so two
+     concurrent changes running the same step don't share a routing slot."""
+     from dataclasses import replace
+ 
+@@ -534,7 +534,7 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
+     inv = replace(
+         inv,
+         change_context=ChangeContext(
+-            slug="test-2", title="Test 2", project_root=tmp_path,
++            id="test-2", slug="test-2", title="Test 2", project_root=tmp_path,
+             workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+         ),
+     )
+diff --git a/tests/test_provider_error_e2e.py b/tests/test_provider_error_e2e.py
+index 6abd1f6..54a5232 100644
+--- a/tests/test_provider_error_e2e.py
++++ b/tests/test_provider_error_e2e.py
+@@ -28,7 +28,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     shutil.copytree(src_wf, dest_wf)
+     (change_dir / "state").mkdir(exist_ok=True)
+     (change_dir / "change.json").write_text(json.dumps({
+-        "slug": slug, "title": title, "base_branch": "main",
++        "id": slug, "title": title, "base_branch": "main",
+     }, indent=2, sort_keys=True))
+ 
+     configured_roles: list[str] = []
+@@ -43,12 +43,12 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") ->
+     ).save(change_dir / "state")
+ 
+     change = Change(
+-        slug=slug, title=title, base_branch="main",
++        id=slug, title=title, base_branch="main",
+         control_root=root, project_root=root, change_dir=change_dir,
+     )
+     change.event_log().append(
+         agent_id=None, type="change_created",
+-        payload={"slug": slug, "title": title},
++        payload={"id": slug, "slug": change.slug, "title": title},
+     )
+     return change
+ 
+diff --git a/tests/test_rename_date_prefix.py b/tests/test_rename_date_prefix.py
+deleted file mode 100644
+index e32548c..0000000
+--- a/tests/test_rename_date_prefix.py
++++ /dev/null
+@@ -1,33 +0,0 @@
+-"""apply_pending_rename preserves the YYYY-MM-DD- date prefix across a rename
+-(spec §12). A bare (date-less) slug falls back to plain slugify."""
+-
+-from __future__ import annotations
+-
+-from pathlib import Path
+-
+-from imp.engine.change import Change
+-from imp.engine.executor import apply_pending_rename
+-from imp.engine.state import State
+-from tests.conftest import _seed_control
+-
+-
+-def _rename(tmp_path: Path, *, slug: str, new_name: str) -> Change:
+-    ch = Change.create(tmp_path, title="orig", slug=slug, base_branch="main")
+-    st = State.load(ch.state_dir)
+-    st.pending_rename = new_name
+-    st.save(ch.state_dir)
+-    apply_pending_rename(ch, st, ch.event_log(), on_event=None)
+-    return ch
+-
+-
+-def test_rename_preserves_date_prefix(tmp_path: Path) -> None:
+-    _seed_control(tmp_path)
+-    ch = _rename(tmp_path, slug="2026-06-01-old-name", new_name="Better Name")
+-    assert ch.slug == "2026-06-01-better-name"
+-    assert ch.title == "Better Name"
+-
+-
+-def test_rename_without_date_prefix_uses_plain_slugify(tmp_path: Path) -> None:
+-    _seed_control(tmp_path)
+-    ch = _rename(tmp_path, slug="old-name", new_name="Better Name")
+-    assert ch.slug == "better-name"
+diff --git a/tests/test_rename_resets_auto_titled.py b/tests/test_rename_resets_auto_titled.py
+deleted file mode 100644
+index 743f6a6..0000000
+--- a/tests/test_rename_resets_auto_titled.py
++++ /dev/null
+@@ -1,25 +0,0 @@
+-"""apply_pending_rename clears auto_titled (Plan 2, spec §12 / Plan 1 note):
+-once the spec phase has renamed a provisional slug, it is no longer auto-titled."""
+-
+-from __future__ import annotations
+-
+-from pathlib import Path
+-
+-from imp.engine.change import Change
+-from imp.engine.executor import apply_pending_rename
+-from imp.engine.state import State
+-from tests.conftest import _seed_control
+-
+-
+-def test_rename_clears_auto_titled(tmp_path: Path) -> None:
+-    _seed_control(tmp_path)
+-    ch = Change.create(tmp_path, title="orig", slug="2026-06-01-prov-name",
+-                       base_branch="main", auto_titled=True)
+-    assert ch.auto_titled is True
+-    st = State.load(ch.state_dir)
+-    st.pending_rename = "Better Name"
+-    st.save(ch.state_dir)
+-    apply_pending_rename(ch, st, ch.event_log(), on_event=None)
+-    assert ch.slug == "2026-06-01-better-name"
+-    assert ch.auto_titled is False                 # in-memory reset
+-    assert Change.load(tmp_path, ch.slug).auto_titled is False   # persisted
+diff --git a/tests/test_slug.py b/tests/test_slug.py
+index 991e02d..5dd89ae 100644
+--- a/tests/test_slug.py
++++ b/tests/test_slug.py
+@@ -7,7 +7,6 @@ from imp.engine.slug import (
+     InvalidSlug,
+     dated_slug,
+     slugify,
+-    split_date_prefix,
+ )
+ 
+ 
+@@ -69,11 +68,3 @@ def test_dated_slug_caps_name_not_date() -> None:
+ def test_dated_slug_empty_name_raises() -> None:
+     with pytest.raises(InvalidSlug):
+         dated_slug("!!!", date="2026-06-01")
+-
+-
+-def test_split_date_prefix_roundtrip() -> None:
+-    assert split_date_prefix("2026-06-01-add-oauth") == ("2026-06-01", "add-oauth")
+-
+-
+-def test_split_date_prefix_absent() -> None:
+-    assert split_date_prefix("add-oauth") == (None, "add-oauth")
+diff --git a/tests/test_subagent_pause_unwind.py b/tests/test_subagent_pause_unwind.py
+index 7ba2b75..079373d 100644
+--- a/tests/test_subagent_pause_unwind.py
++++ b/tests/test_subagent_pause_unwind.py
+@@ -141,7 +141,7 @@ def _seed_single_step(root: Path) -> Change:
+     shutil.copytree(wf, dest_wf)
+     (change_dir / "state").mkdir(exist_ok=True)
+     (change_dir / "change.json").write_text(json.dumps(
+-        {"slug": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
++        {"id": "s", "title": "t", "base_branch": "main"}, indent=2, sort_keys=True))
+     configured: list[str] = []
+     with contextlib.suppress(Exception):
+         configured = load_config(root).role_names()
+@@ -149,10 +149,10 @@ def _seed_single_step(root: Path) -> Change:
+     flat = workflow.flat_steps()
+     State(id="s", step=flat[0].name, step_attempt=0, status="running",
+           vars=dict(workflow.vars.defaults()), loop_counts={}).save(change_dir / "state")
+-    change = Change(slug="s", title="t", base_branch="main", control_root=root,
++    change = Change(id="s", title="t", base_branch="main", control_root=root,
+                     project_root=root, change_dir=change_dir)
+     change.event_log().append(agent_id=None, type="change_created",
+-                              payload={"slug": "s", "title": "t"})
++                              payload={"id": "s", "slug": change.slug, "title": "t"})
+     return change
+ 
+ 
+diff --git a/tests/test_worktree.py b/tests/test_worktree.py
+index e6540b3..b5cf6b1 100644
+--- a/tests/test_worktree.py
++++ b/tests/test_worktree.py
+@@ -103,26 +103,6 @@ def test_remove_worktree_keeps_branch(tmp_path: Path) -> None:
+     assert "imp/gone" in _git(tmp_path, "branch", "--list", "imp/gone").stdout
+ 
+ 
+-def test_rename_moves_branch_and_worktree(tmp_path: Path) -> None:
+-    _init_repo(tmp_path)
+-    wt.create_worktree(tmp_path, "old", "main")
+-    new_path = wt.rename(tmp_path, "old", "new")
+-    assert new_path == tmp_path / ".imp" / "worktrees" / "new"
+-    assert new_path.is_dir()
+-    assert not (tmp_path / ".imp" / "worktrees" / "old").exists()
+-    assert "imp/new" in _git(tmp_path, "branch", "--list", "imp/new").stdout
+-    assert "imp/old" not in _git(tmp_path, "branch", "--list", "imp/old").stdout
+-
+-
+-def test_rename_collision_returns_none(tmp_path: Path) -> None:
+-    _init_repo(tmp_path)
+-    wt.create_worktree(tmp_path, "a", "main")
+-    wt.create_worktree(tmp_path, "b", "main")
+-    # imp/b already exists -> change nothing, return None (spec §4).
+-    assert wt.rename(tmp_path, "a", "b") is None
+-    assert (tmp_path / ".imp" / "worktrees" / "a").is_dir()
+-
+-
+ def _commit_on_branch(root: Path, branch: str, name: str, body: str) -> None:
+     """Add+commit one file directly in the change worktree the test already
+     created for <branch>, so the control root's checkout stays untouched."""
+@@ -137,13 +117,17 @@ def test_merge_base_checked_out_clean(tmp_path: Path) -> None:
+     wt.create_worktree(tmp_path, "feat", "main")
+     _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+ 
+-    result = wt.merge_to_base(tmp_path, "feat", "main")
++    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature")
+     assert result.status == "MERGED"
+     assert result.merge_commit == _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
+     # main's working tree advanced together with the ref (no desync).
+     assert (tmp_path / "feature.txt").read_text() == "hi"
+     # REGRESSION (spec §11): control-root status is NOT a staged reversal.
+     assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
++    # Merge subject uses the human title; id appears in the body (AC 9).
++    subject = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout
++    assert "Merge My Feature" in subject
++    assert "(imp/feat)" in subject
+ 
+ 
+ def test_merge_base_dirty_backs_off(tmp_path: Path) -> None:
+@@ -152,7 +136,7 @@ def test_merge_base_dirty_backs_off(tmp_path: Path) -> None:
+     _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+     (tmp_path / "README.md").write_text("dirty edit")  # uncommitted on main
+ 
+-    result = wt.merge_to_base(tmp_path, "feat", "main")
++    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+     assert result.status == "BASE_DIRTY"
+     assert not (tmp_path / "feature.txt").exists()  # nothing advanced
+ 
+@@ -165,7 +149,7 @@ def test_merge_base_checked_out_nowhere(tmp_path: Path) -> None:
+     _git(tmp_path, "checkout", "-q", "-b", "parking")
+ 
+     base_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
+-    result = wt.merge_to_base(tmp_path, "feat", "main")
++    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+     assert result.status == "MERGED"
+     assert _git(tmp_path, "rev-parse", "main").stdout.strip() != base_before  # ref moved
+     assert result.merge_commit == _git(tmp_path, "rev-parse", "main").stdout.strip()
+@@ -184,7 +168,7 @@ def test_merge_detached_conflict_cleans_scratch(tmp_path: Path) -> None:
+     _git(tmp_path, "commit", "-qam", "base edit")
+     _git(tmp_path, "checkout", "-q", "-b", "parking")  # main now checked out nowhere
+ 
+-    result = wt.merge_to_base(tmp_path, "feat", "main")
++    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+     assert result.status == "CONFLICT"
+     assert not (tmp_path / ".imp" / "worktrees" / ".merge-feat").exists()  # scratch cleaned
+     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()             # branch worktree intact
+@@ -199,7 +183,7 @@ def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
+     (tmp_path / "README.md").write_text("base version")
+     _git(tmp_path, "commit", "-qam", "base edit")
+ 
+-    result = wt.merge_to_base(tmp_path, "feat", "main")
++    result = wt.merge_to_base(tmp_path, "feat", "main", title="Feature")
+     assert result.status == "CONFLICT"
+     # branch + change worktree untouched, no merge state lingering
+     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()

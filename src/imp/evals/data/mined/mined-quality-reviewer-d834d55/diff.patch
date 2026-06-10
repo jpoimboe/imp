@@ -1,0 +1,50 @@
+diff --git a/src/imp/engine/env.py b/src/imp/engine/env.py
+new file mode 100644
+index 0000000..3256aeb
+--- /dev/null
++++ b/src/imp/engine/env.py
+@@ -0,0 +1,21 @@
++"""Engine-provided environment variables.
++
++These are the variables the engine guarantees to every subprocess it spawns on
++behalf of a Change — script gates (`run_script_gate`) and the agent `bash` tool.
++Centralizing them here keeps the two execution paths consistent and gives future
++engine vars a single home.
++
++All paths are host paths. There is no sandbox: the `/project/` prefix used in
++`fs_permissions` is a virtual namespace only, never a real mount point.
++"""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++
++def engine_env(*, project_root: Path, artifacts_dir: Path) -> dict[str, str]:
++    return {
++        "IMP_PROJECT_ROOT": str(project_root),
++        "IMP_ARTIFACTS_DIR": str(artifacts_dir),
++    }
+diff --git a/tests/test_engine_env.py b/tests/test_engine_env.py
+new file mode 100644
+index 0000000..a72ff09
+--- /dev/null
++++ b/tests/test_engine_env.py
+@@ -0,0 +1,17 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++from imp.engine.env import engine_env
++
++
++def test_engine_env_returns_both_vars_as_strings() -> None:
++    env = engine_env(
++        project_root=Path("/home/u/proj"),
++        artifacts_dir=Path("/home/u/proj/.imp/changes/1/artifacts"),
++    )
++    assert env == {
++        "IMP_PROJECT_ROOT": "/home/u/proj",
++        "IMP_ARTIFACTS_DIR": "/home/u/proj/.imp/changes/1/artifacts",
++    }
++    assert all(isinstance(v, str) for v in env.values())

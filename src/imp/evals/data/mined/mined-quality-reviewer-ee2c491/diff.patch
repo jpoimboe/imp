@@ -1,0 +1,78 @@
+diff --git a/src/imp/engine/slug.py b/src/imp/engine/slug.py
+index 7de93d4..03587e8 100644
+--- a/src/imp/engine/slug.py
++++ b/src/imp/engine/slug.py
+@@ -29,3 +29,25 @@ def slugify(text: str) -> str:
+         cut = head.rfind("-")
+         s = (head[:cut] if cut > 0 else head).rstrip("-")
+     return s
++
++
++# `YYYY-MM-DD-<name>` slug identity (spec §12). The date gives every Change a
++# chronological, collision-resistant identity; doc filenames derive from the slug.
++DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-(.*)$")
++
++
++def dated_slug(name: str, *, date: str) -> str:
++    """`<date>-<slugified name>`. `date` is a fixed-width `YYYY-MM-DD` string.
++    The name keeps the MAX_SLUG_LEN cap (slugify), so the full slug is at most
++    11 + MAX_SLUG_LEN chars — the date prefix does not eat the name budget.
++    Raises InvalidSlug if `name` has no slug-able characters."""
++    return f"{date}-{slugify(name)}"
++
++
++def split_date_prefix(slug: str) -> tuple[str | None, str]:
++    """Split `YYYY-MM-DD-<rest>` into (date, rest); (None, slug) when there is
++    no date prefix (e.g. a legacy or test slug created before this convention)."""
++    m = DATE_PREFIX_RE.match(slug)
++    if m is None:
++        return None, slug
++    return m.group(1), m.group(2)
+diff --git a/tests/test_slug.py b/tests/test_slug.py
+index 8a70366..991e02d 100644
+--- a/tests/test_slug.py
++++ b/tests/test_slug.py
+@@ -2,7 +2,13 @@ import re
+ 
+ import pytest
+ 
+-from imp.engine.slug import MAX_SLUG_LEN, InvalidSlug, slugify
++from imp.engine.slug import (
++    MAX_SLUG_LEN,
++    InvalidSlug,
++    dated_slug,
++    slugify,
++    split_date_prefix,
++)
+ 
+ 
+ def test_basic() -> None:
+@@ -46,3 +52,28 @@ def test_three_word_phrase() -> None:
+ def test_empty_after_strip_raises() -> None:
+     with pytest.raises(InvalidSlug):
+         slugify("!!!")
++
++
++def test_dated_slug_prepends_date() -> None:
++    assert dated_slug("Add OAuth", date="2026-06-01") == "2026-06-01-add-oauth"
++
++
++def test_dated_slug_caps_name_not_date() -> None:
++    # The name keeps the MAX_SLUG_LEN cap; the 11-char date prefix is added on
++    # top, so a long title never silently loses name chars to the prefix.
++    s = dated_slug("x" * 200, date="2026-06-01")
++    assert s == "2026-06-01-" + "x" * MAX_SLUG_LEN
++    assert len(s) == 11 + MAX_SLUG_LEN
++
++
++def test_dated_slug_empty_name_raises() -> None:
++    with pytest.raises(InvalidSlug):
++        dated_slug("!!!", date="2026-06-01")
++
++
++def test_split_date_prefix_roundtrip() -> None:
++    assert split_date_prefix("2026-06-01-add-oauth") == ("2026-06-01", "add-oauth")
++
++
++def test_split_date_prefix_absent() -> None:
++    assert split_date_prefix("add-oauth") == (None, "add-oauth")

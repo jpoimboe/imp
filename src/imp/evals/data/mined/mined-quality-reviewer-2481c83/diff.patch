@@ -1,0 +1,74 @@
+diff --git a/src/imp/agents/runner.py b/src/imp/agents/runner.py
+index b63cd4c..c12b9ed 100644
+--- a/src/imp/agents/runner.py
++++ b/src/imp/agents/runner.py
+@@ -122,6 +122,11 @@ class AgentInvocation:
+     # is_resume (a `resume:` edge). retry_feedback (above) now means "optional
+     # wrapper text appended on that balancing user turn"; None = balance only.
+     balance_on_resume: bool = False
++    # role → ProviderModel, the run's global resolution map. Threaded by the
++    # executor into every AgentInvocation; copied onto ToolContext so
++    # dispatch_task can place a subagent on its model_role's resolved provider.
++    # Typed Any to avoid importing ProviderModel here.
++    resolved_roles: dict[str, Any] | None = None
+ 
+ 
+ Event = dict[str, Any]                     # {"type": str, "payload": dict}
+diff --git a/src/imp/agents/tools/context.py b/src/imp/agents/tools/context.py
+index 2bcc45d..c4891dd 100644
+--- a/src/imp/agents/tools/context.py
++++ b/src/imp/agents/tools/context.py
+@@ -45,6 +45,8 @@ class ToolContext:
+     event_log: Any = None
+     # Subagent dispatch hook (filled by runner; signature defined in subagents tool).
+     spawn_subagent: Any = None
++    # role → ProviderModel; copied from invocation.resolved_roles by the runner.
++    resolved_roles: dict[str, Any] | None = None
+     # invocation_id counter for disambiguating same-named subagent invocations
+     _subagent_counter: int = 0
+ 
+diff --git a/tests/test_runner_types.py b/tests/test_runner_types.py
+index 66e1ed8..1c61f3e 100644
+--- a/tests/test_runner_types.py
++++ b/tests/test_runner_types.py
+@@ -131,3 +131,24 @@ def test_diagnostics_holds_warnings_and_thinkings() -> None:
+     d = Diagnostics(block_warnings=("w1",), thinkings=("t1", "t2"))
+     assert d.block_warnings == ("w1",)
+     assert d.thinkings == ("t1", "t2")
++
++
++def test_agent_invocation_resolved_roles_defaults_none():
++    from pathlib import Path
++
++    from imp.agents.runner import AgentInvocation, ChangeContext
++    from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
++    a = AgentDef(
++        name="x", description="", tools=frozenset(), subagents=(),
++        output_schema=OutputSchema(
++            fields=(OutputField(name="status", type="enum",
++                                values=("Success", "Error")),),
++            source=SourceLoc(file=Path("a.md"), line=1)),
++        prompt_template_source="", source_path=Path("a.md"),
++        source=SourceLoc(file=Path("a.md"), line=1))
++    inv = AgentInvocation(
++        agent_def=a, provider_name="p", model_name="m", system_prompt="",
++        initial_messages=(), change_context=ChangeContext(1, Path("."), Path(".")),
++        interactive=False, transcript_dir=Path("."), fs_permissions=(),
++        events_path=Path("e.jsonl"))
++    assert inv.resolved_roles is None
+diff --git a/tests/test_tool_context.py b/tests/test_tool_context.py
+index cf0659e..3b17bf3 100644
+--- a/tests/test_tool_context.py
++++ b/tests/test_tool_context.py
+@@ -120,3 +120,11 @@ def test_tool_context_has_event_log_field(tmp_path) -> None:
+     sentinel = object()
+     ctx.event_log = sentinel
+     assert ctx.event_log is sentinel
++
++
++def test_tool_context_resolved_roles_defaults_none(tmp_path):
++    from imp.agents.tools.context import ToolContext
++    ctx = ToolContext(
++        project_root=tmp_path, artifacts_dir=tmp_path, fs_permissions=(),
++        events_path=tmp_path / "e.jsonl")
++    assert ctx.resolved_roles is None

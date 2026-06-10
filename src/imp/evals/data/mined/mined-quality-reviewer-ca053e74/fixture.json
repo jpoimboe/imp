@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-ca053e74",
+  "source": "mined",
+  "base_sha": "a6ae3bdd8478b799b6279a22bd078c0d0c4c2126",
+  "head_sha": "ca053e74b77ffaa0ced6c0efc807b5aec92347c7",
+  "task_context": "You are performing a code quality review. Work from: /home/jpoimboe/imp\nDESCRIPTION: Added a shared `provider_registry` pytest fixture to tests/conftest.py and converted the anthropic subagent-dispatch test to use it (removing inline reset/register/try-finally).\nPLAN_OR_REQUIREMENTS: Task 1 from docs/superpowers/plans/2026-05-30-model-role-constraints-followups.md\n## Your job\nThis is a test-only refactor. Assess for code quality:\n- Is the fixture cleanly written, with a clear single responsibility and well-defined interface?\n- Does the converted test read clearly? Any leftover dead code, unused imports, or broken references introduced by this change?\n- Does it follow existing patterns in the test suite (compare to the autouse `_providers` fixture in tests/test_subagent_spawn.py the docstring references)?\n- Did this change grow files inappropriately? (It's a small test refactor \u2014 don't flag pre-existing file size.)\nDo NOT flag pre-existing issues outside this diff. Focus on what the change contributed.\nRun `ruff check tests/conftest.py tests/test_anthropic_runner.py` if ruff is available, to catch lint/unused-import issues.\nReturn:\n- **Strengths**\n- **Issues** (Critical / Important / Minor)\n- **Assessment** (Approved / Changes needed)",
+  "expected_findings": [
+    {
+      "locus": "tests/test_runner.py:630",
+      "symbol": "test_runner_forwards_model_tier_to_subagent",
+      "description": "Still uses the old inline try/finally pattern with _resolve and was not converted to use the new provider_registry fixture, creating future inconsistency.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_runner.py:440",
+      "symbol": "",
+      "description": "Lazy local import json is pre-existing, unchanged by the diff, and consistent with style, but is a potential target for future import cleanup.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}
