@@ -432,6 +432,102 @@ async def _sweep_bg(ctx: ToolContext) -> None:
             bp.returncode = bp.proc.returncode
 
 
+async def terminate_background_processes(ctx: ToolContext) -> None:
+    """All-exits teardown (interrupt path AND run() finally — on a pause BOTH
+    fire; must be idempotent). Order is LOAD-BEARING: steps 2-4 await, and a
+    concurrent bash_output whose FileNotFoundError fallthrough runs
+    mid-teardown must always find a correct in-memory tombstone — marking
+    entries last would open a ValueError window.
+
+    (1) sync check-and-set flip of still-running entries (no awaits);
+    (2) SIGTERM every entry's group (regardless of status — forking-server
+        rule) -> grace -> SIGKILL survivors; record returncodes for entries
+        step 1 flipped (their status is already terminal, so a vanilla _reap
+        would no-op and every tombstone would carry returncode: null);
+    (3) read-merge-write the persisted tombstone file (registry wins per id);
+    (4) delete stream files; keep dir + tombstone file."""
+    procs = list(ctx.background_processes.values())
+    if not procs:
+        return
+    # (1) — entries already terminal KEEP their state: an exited proc keeps
+    # its real returncode; an output-cap kill keeps the reason the Decision-6
+    # warning promised.
+    flipped: list[BgProc] = []
+    for bp in procs:
+        _reap(bp)
+        if bp.status == "running":
+            bp.status = "killed"
+            bp.kill_reason = "interrupted"
+            flipped.append(bp)
+    # Steps 2-4 run SHIELDED (same rationale as _kill_group_escalate): a
+    # cancellation landing on the teardown task mid-grace (gen.aclose() from
+    # an already-cancelled task, racing interrupts) raises CancelledError — a
+    # BaseException that escapes every suppress(Exception) below — and would
+    # skip the unconditional SIGKILL pass and the tombstone write: exactly
+    # the two steps Decision 7 exists for. The body is bounded (~2x grace +
+    # tiny file I/O), so the shield cannot hang teardown.
+    with anyio.CancelScope(shield=True):
+        # (2) — signaling a fully-dead group is a silent no-op (ESRCH
+        # suppressed in kill_process_group), never an abort mid-registry.
+        for bp in procs:
+            await kill_process_group(bp.proc, signal.SIGTERM)
+
+        async def _wait_one(p: Any) -> None:
+            with contextlib.suppress(Exception):
+                await p.wait()
+
+        with anyio.move_on_after(PROCESS_KILL_GRACE_S):
+            async with anyio.create_task_group() as tg:
+                for bp in procs:
+                    tg.start_soon(_wait_one, bp.proc)
+        for bp in procs:
+            # UNCONDITIONAL SIGKILL after the grace window — same rationale
+            # as _kill_group_escalate: the leader's returncode tells us
+            # nothing about forked children that trapped SIGTERM (the
+            # forking-server case has returncode already set, yet its group
+            # may be alive). ESRCH-suppressed in kill_process_group, so a
+            # fully-dead group is a free no-op. Gating this on
+            # `bp.proc.returncode is None` would let a TERM-immune child of
+            # an exited leader outlive teardown — the leak Decision 7 exists
+            # to prevent.
+            await kill_process_group(bp.proc, signal.SIGKILL)
+            if bp.proc.returncode is None:
+                with contextlib.suppress(Exception):
+                    await bp.proc.wait()
+        for bp in flipped:
+            # step 1 already performed the terminal flip, so a vanilla _reap
+            # would no-op — record the reaped returncode directly (else every
+            # teardown tombstone carries returncode: null).
+            if bp.returncode is None:
+                bp.returncode = bp.proc.returncode
+        # (3) — SYNC stdlib I/O on purpose: the two same-runner teardown
+        # entrants racing this merge need the same no-await-critical-section
+        # discipline _reap mandates; anyio.open_file would reintroduce the
+        # await and the race. The file is tiny; blocking the loop momentarily
+        # is the point. merge = file U registry, REGISTRY WINS per id:
+        # counter seeding makes ids disjoint across attempts; same-id entries
+        # can only be the same runner's two entrants, which share BgProc
+        # objects and converge.
+        path = _tombstone_path(ctx)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        merged = _load_tombstones(path)
+        for bp in procs:
+            merged[bp.id] = {
+                "status": bp.status,
+                "kill_reason": bp.kill_reason,
+                "returncode": bp.returncode,
+                "command": bp.command[:_CMD_TRUNC],
+            }
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+        # (4)
+        for bp in procs:
+            for p in (bp.out_path, bp.err_path):
+                with contextlib.suppress(OSError):
+                    p.unlink()
+
+
 async def spawn_background(
     ctx: ToolContext, *, command: str, argv: list[str], cwd: str,
     env: dict[str, str],
