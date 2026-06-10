@@ -47,7 +47,15 @@ def _iter_files(target: Path) -> Iterator[Path]:
         dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDED_DIRS)
         base = Path(dirpath)
         for name in sorted(filenames):
-            yield base / name
+            p = base / name
+            # os.walk lists fifos/sockets/devices in filenames; opening a
+            # fifo read-only blocks until a writer appears — in a worker
+            # thread, before any tool_checkpoint and immune to cancellation —
+            # wedging the whole call. Walk only regular files. (An EXPLICIT
+            # non-regular path still errors loudly in grep — explicit path is
+            # explicit intent.)
+            if p.is_file():
+                yield p
 
 
 @imp_tool(

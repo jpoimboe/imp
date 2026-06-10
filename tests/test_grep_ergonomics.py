@@ -618,3 +618,25 @@ def test_grep_and_read_file_agree_on_formfeed_line_numbers(tmp_path: Path) -> No
     r = anyio.run(get_registry()["read_file"].async_invoke,
                   _read_ctx(tmp_path), {"path": "ff.txt"})
     assert r.split("\n")[1] == "     2\tNEEDLE"
+
+
+def test_fifo_inside_walked_tree_is_skipped_not_hung(tmp_path: Path) -> None:
+    # os.walk yields fifos in filenames; grep opening one read-only blocks
+    # until a writer appears — in a worker thread, BEFORE any tool_checkpoint
+    # and immune to cancellation (anyio to_thread does not abandon), so no
+    # in-process timeout can rescue it. The walk itself must skip non-regular
+    # files. Tested at the _iter_files level: a grep-level test would HANG
+    # the suite on regression instead of failing. (An EXPLICIT fifo path
+    # still errors loudly — pinned above.)
+    from imp.agents.tools.nav import _iter_files
+
+    (tmp_path / "sub").mkdir()
+    os.mkfifo(tmp_path / "sub" / "pipe")
+    (tmp_path / "sub" / "real.txt").write_text("needle\n")
+
+    assert [p.name for p in _iter_files(tmp_path)] == ["real.txt"]
+
+    # And end-to-end (safe once the walk skips it): the fifo neither hangs
+    # nor matches, the regular file is found.
+    out = _grep(_ctx(tmp_path), pattern="needle")
+    assert out == "sub/real.txt"
