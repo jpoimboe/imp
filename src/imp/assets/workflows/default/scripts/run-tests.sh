@@ -2,10 +2,19 @@
 # Run the project's test suite using the wired IMP_TEST_COMMAND.
 #
 # Contract (mirrors the lint gate):
-#   - IMP_TEST_COMMAND set and non-empty → run it via `bash -c` with a 300 s
-#     timeout; propagate its exit code.
+#   - IMP_TEST_COMMAND set and non-empty → run it via `bash -c` with a timeout
+#     (IMP_TEST_TIMEOUT seconds, default 1800); propagate its exit code. On
+#     timeout (exit 124) print an explicit diagnosis to stderr — the truncated
+#     output otherwise reads as a hang at whatever test happened to be printing,
+#     and sends the resumed task-lead hunting a phantom hanging test.
 #   - IMP_TEST_COMMAND unset or empty    → print an informational message and
 #     exit 0 (no test gate; project hasn't wired a test_command).
+#
+# The timeout is a wedge guard, not a suite budget: it exists so a truly hung
+# suite cannot wedge the workflow forever. Real suites routinely exceed 5
+# minutes (imp's own does), so the default is generous. IMP_TEST_TIMEOUT is an
+# ambient env override; note the gate sandbox allowlists only engine-injected
+# IMP_* vars, so under a sandbox policy the default applies.
 #
 # IMP_TEST_COMMAND is surfaced from the `test_command` project config key by
 # overlay_engine_env and injected into script-gate env by the engine.
@@ -16,7 +25,17 @@ set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 
 if [[ -n "${IMP_TEST_COMMAND:-}" ]]; then
-  exec timeout 300 bash -c "$IMP_TEST_COMMAND"
+  test_timeout="${IMP_TEST_TIMEOUT:-1800}"
+  rc=0
+  # -k 30: SIGKILL stragglers that ignore the TERM (pytest mid-teardown).
+  timeout -k 30 "$test_timeout" bash -c "$IMP_TEST_COMMAND" || rc=$?
+  if (( rc == 124 )); then
+    echo "imp: test command timed out after ${test_timeout}s and was killed." >&2
+    echo "imp: the output above is truncated mid-run — the suite did not fail" >&2
+    echo "imp: at the last printed test; it ran out of time. Do not hunt for a" >&2
+    echo "imp: hanging test. The suite is slower than the gate timeout." >&2
+  fi
+  exit "$rc"
 fi
 
 echo "no test_command configured; skipping test gate"

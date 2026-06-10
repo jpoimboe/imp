@@ -70,6 +70,30 @@ def test_run_tests_command_fails(tmp_path: Path) -> None:
     )
 
 
+def test_run_tests_timeout_exits_124_with_diagnosis(tmp_path: Path) -> None:
+    """A test command exceeding IMP_TEST_TIMEOUT → exit 124 plus an explicit
+    timed-out diagnosis on stderr. Without the diagnosis the gate feedback is
+    just output truncated mid-run, which reads as a hang at the last printed
+    test and sends the resumed task-lead hunting a phantom hanging test."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    proc = _run(
+        "run-tests.sh",
+        env_extra={
+            "IMP_PROJECT_ROOT": str(project),
+            "IMP_TEST_COMMAND": "sleep 5",
+            "IMP_TEST_TIMEOUT": "1",
+        },
+    )
+    assert proc.returncode == 124, (
+        f"expected exit 124 (timeout) ; got {proc.returncode}. "
+        f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    )
+    assert "timed out after 1s" in proc.stderr, (
+        f"expected timeout diagnosis on stderr; got {proc.stderr!r}"
+    )
+
+
 def test_run_tests_no_command_passes(tmp_path: Path) -> None:
     """IMP_TEST_COMMAND unset → script exits 0 (no-op) with informational message."""
     project = tmp_path / "proj"
