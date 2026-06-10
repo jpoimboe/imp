@@ -1,8 +1,8 @@
 """CodexAgentRunner — the heavy lifting for the `codex` provider.
 
-Implements: interrupt() with three effects, fail-fast preflight(),
+Implements: interrupt() with four effects, fail-fast preflight(),
 snapshot/restore mechanism (git stash create + untracked set), and
-process_event() for basic event types. The full run() is added in later tasks.
+process_event() for basic event types.
 """
 
 from __future__ import annotations
@@ -789,15 +789,19 @@ class CodexAgentRunner:
         Idempotent."""
         from imp.agents.tools.bg import terminate_background_processes
         self._cancel = True
-        if self._ctx is not None:
-            await terminate_running_processes(self._ctx)
-            # Decision 7: pause kills background processes too (leak
-            # resistance); the persisted tombstones give the resumed agent an
-            # explanation. Idempotent vs the run() finally (both fire on pause).
-            await terminate_background_processes(self._ctx)
-        if self._abort_controller is not None:
-            with contextlib.suppress(Exception):
-                self._abort_controller.abort()
+        try:
+            if self._ctx is not None:
+                await terminate_running_processes(self._ctx)
+                # Decision 7: pause kills background processes too (leak
+                # resistance); the persisted tombstones give the resumed agent an
+                # explanation. Idempotent vs the run() finally (both fire on pause).
+                await terminate_background_processes(self._ctx)
+        finally:
+            # abort() must fire even if a teardown raises (disk-full tombstone
+            # write): it is the only effect that stops a stalled SDK stream.
+            if self._abort_controller is not None:
+                with contextlib.suppress(Exception):
+                    self._abort_controller.abort()
 
     def _is_cancelled(self) -> bool:
         """Read the interrupt flag opaquely.

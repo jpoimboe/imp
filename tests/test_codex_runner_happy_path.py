@@ -332,6 +332,7 @@ async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
 
         # run()'s finally must have called terminate_background_processes.
         import os
+        assert ctx_seen is not None
         assert bg_pid is not None
         with pytest.raises(ProcessLookupError):
             os.killpg(bg_pid, 0)
