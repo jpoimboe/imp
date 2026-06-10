@@ -80,8 +80,8 @@ test-dogfood: ## Dogfood imp on imp via --non-interactive against the first opte
 	IMP_RUN_DOGFOOD=1 $(PYTEST_PYTHONPATH) $(PYTEST) -q tests/test_default_workflow_dogfood_live.py
 
 .PHONY: test-dogfood-verbose
-test-dogfood-verbose: ## test-dogfood with -v and verbose output.
-	IMP_RUN_DOGFOOD=1 $(PYTEST_PYTHONPATH) $(PYTEST) -v -s tests/test_default_workflow_dogfood_live.py
+test-dogfood-verbose: ## test-dogfood with -v and the imp new/resume output streamed live.
+	IMP_RUN_DOGFOOD=1 IMP_DOGFOOD_VERBOSE=1 $(PYTEST_PYTHONPATH) $(PYTEST) -v -s tests/test_default_workflow_dogfood_live.py
 
 .PHONY: test-eval
 test-eval: ## Run the eval harness live (costs real tokens; set IMP_RUN_EVALS=1).

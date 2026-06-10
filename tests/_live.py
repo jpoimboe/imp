@@ -57,15 +57,20 @@ def build_isolated_venv(
     )
 
     if shutil.which("uv"):
+        # uv's cache (~/.cache/uv) and the venv (often tmpfs /tmp) sit on
+        # different filesystems, so its default hardlink install can't work —
+        # it falls back to copying and prints a "Failed to hardlink files"
+        # warning on every seed. Ask for copy mode up front to silence it.
+        uv_env = {**os.environ, "UV_LINK_MODE": "copy"}
         subprocess.run(
             ["uv", "venv", "--python", base_python, str(venv_dir)],
-            check=True,
+            check=True, env=uv_env,
         )
         venv_python = venv_dir / "bin" / "python"
         subprocess.run(
             ["uv", "pip", "install", "--python", str(venv_python),
              "-e", target],
-            check=True,
+            check=True, env=uv_env,
         )
     else:
         subprocess.run([base_python, "-m", "venv", str(venv_dir)], check=True)

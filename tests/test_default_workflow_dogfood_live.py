@@ -391,7 +391,11 @@ def test_dogfood_imp_on_imp_default_workflow(
 
         request.addfinalizer(_dump_capture)
 
-    TOTAL_TIMEOUT = 1800.0
+    # 45 min: the run-tests gate alone legitimately runs imp's own full suite
+    # (~10 min in the seeded venv); 30 min left the wall-clock kill racing a
+    # healthy run. The gate's own wedge guard (run-tests.sh timeout, 30 min
+    # default) still bounds a truly hung suite inside this budget.
+    TOTAL_TIMEOUT = 2700.0
     EVENTS_FIRST_APPEAR_TIMEOUT = 30.0
     MAX_RESUMES = 8
 
@@ -432,8 +436,21 @@ def test_dogfood_imp_on_imp_default_workflow(
             p.kill()
             p.wait()
 
-    stdout_sink = cap_out if cap_out is not None else subprocess.DEVNULL
-    stderr_sink = subprocess.STDOUT if cap_out is not None else subprocess.DEVNULL
+    # Output routing: capture file > verbose passthrough > silent.
+    # IMP_DOGFOOD_VERBOSE=1 (set by `make test-dogfood-verbose`) inherits this
+    # pytest process's stdout/stderr — which under `-s` is the terminal — so the
+    # imp new/resume invocations stream their renderer output live instead of
+    # being swallowed by DEVNULL.
+    verbose = os.environ.get("IMP_DOGFOOD_VERBOSE") == "1"
+    if cap_out is not None:
+        stdout_sink: Any = cap_out
+        stderr_sink: Any = subprocess.STDOUT
+    elif verbose:
+        stdout_sink = None   # inherit -> stream live to the -s terminal
+        stderr_sink = None
+    else:
+        stdout_sink = subprocess.DEVNULL
+        stderr_sink = subprocess.DEVNULL
 
     def _launch(argv: list[str]) -> subprocess.Popen[bytes]:
         """Launch one headless invocation (new or resume) and record it as the
