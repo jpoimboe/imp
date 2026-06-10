@@ -640,3 +640,22 @@ def test_fifo_inside_walked_tree_is_skipped_not_hung(tmp_path: Path) -> None:
     # nor matches, the regular file is found.
     out = _grep(_ctx(tmp_path), pattern="needle")
     assert out == "sub/real.txt"
+
+
+def test_byte_cap_landing_on_block_separator_stops_before_next_row(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The -- separator is charged to the budget like any row; when the cap
+    # fires ON it, the next block's rows must not leak past the cap (every
+    # other emit site checks immediately — the separator must too). The
+    # crossing-row-stays convention is preserved: the separator IS the
+    # crossing row. Cap tuned so block1 (25 bytes) fits and the separator
+    # (+3) crosses: 28 >= 27.
+    import imp.agents.tools.nav as nav
+
+    monkeypatch.setattr(nav, "TOOL_OUTPUT_CAP_BYTES", 27)
+    (tmp_path / "a.txt").write_text("NEEDLE\nb\nc\nd\nNEEDLE\nf\n")
+    out = _grep(_ctx(tmp_path), pattern="NEEDLE", output_mode="content",
+                context=1)
+    assert out == ("a.txt:1:NEEDLE\na.txt-2-b\n--\n"
+                   "... [output truncated at 50 KB] ...")
+    assert "a.txt-4-d" not in out  # block2's first row must not leak

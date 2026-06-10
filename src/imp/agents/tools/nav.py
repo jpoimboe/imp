@@ -294,6 +294,12 @@ async def grep(
                         # across file boundaries (blocks never merge across
                         # files; the row prefixes differ by construction).
                         capped = emit("--")
+                        if capped:
+                            # Cap landed ON the separator: the separator is
+                            # the crossing row that stays; the next block's
+                            # rows must not leak past the budget (every other
+                            # emit site checks immediately).
+                            break
                     emitted_a_block = True
                     for ln in range(lo, hi + 1):
                         sep = ":" if ln in match_set else "-"
