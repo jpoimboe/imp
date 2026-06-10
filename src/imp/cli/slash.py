@@ -85,6 +85,36 @@ def _help(out: Callable[[str], None]) -> None:
     out("  Tab                Complete a /command or skill name")
 
 
+async def _ask_or_exit(prompt: Any, exit_evt: Any) -> str:
+    """Read a line, but cancel the prompt if the coordinator exit event fires
+    (SIGTERM / out-of-band SIGINT / escalation). On cancellation, raise
+    KeyboardInterrupt so the CLI's pause-and-exit arm finalizes status=paused.
+
+    The cancellation originates in THIS function's own inner task group, which
+    cancels itself; by the time anything downstream (e.g. a wait_for_user
+    solicit) observes a cancellation, it is the prompt's LOCAL scope unwinding,
+    not an ancestor scope. We do NOT swallow CancelledError here — we let the
+    scope unwind cleanly and synthesize KeyboardInterrupt only when the read
+    never produced a line."""
+    import anyio
+
+    result: dict[str, str] = {}
+    async with anyio.create_task_group() as tg:
+        async def _watch() -> None:
+            await exit_evt.wait()
+            tg.cancel_scope.cancel()
+
+        async def _read() -> None:
+            result["line"] = await prompt.ask_async()
+            tg.cancel_scope.cancel()
+
+        tg.start_soon(_watch)
+        tg.start_soon(_read)
+    if "line" not in result:
+        raise KeyboardInterrupt  # exit-event won the race
+    return result["line"]
+
+
 async def ask_line_with_slash(
     prompt: Any, status: Any, change: Any, *, color: bool = False, width: int = 80,
     coord: Any = None,
@@ -132,8 +162,12 @@ async def ask_line_with_slash(
                 # display must stay suspended while they do, or it interleaves/clobbers
                 # them before the loop re-prompts.
                 with status.suspend():
+                    exit_evt = getattr(coord, "_exit_event", None) if coord else None
                     try:
-                        line: str = await prompt.ask_async()
+                        if exit_evt is None:
+                            line: str = await prompt.ask_async()
+                        else:
+                            line = await _ask_or_exit(prompt, exit_evt)
                     except KeyboardInterrupt:
                         # Out-of-band SIGINT at a prompt (kill -INT): the c-c key
                         # binding handles typed Ctrl-C, so this is a real signal.
