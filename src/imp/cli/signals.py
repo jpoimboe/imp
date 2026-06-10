@@ -41,15 +41,22 @@ _suppress = contextlib.suppress
 _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 
 
-def pause_and_exit(change: Change, *, reason: str) -> None:
-    """Save state as paused; append workflow_paused with reason. Idempotent."""
+def pause_and_exit(
+    change: Change, *, reason: str, engine_pause_reason: str | None = None,
+) -> None:
+    """Save state as paused (ONLY transitioning from running — a missing or
+    merge_blocked status is preserved) and append workflow_paused unless the
+    engine already emitted an identical one (engine_pause_reason == reason)."""
     try:
         state = State.load(change.state_dir)
-        state.status = "paused"
-        state.save(change.state_dir)
+        if state.status == "running":
+            state.status = "paused"
+            state.save(change.state_dir)
     except FileNotFoundError:
         # State never reached the durable phase — nothing to update
         pass
+    if reason == engine_pause_reason:
+        return  # the engine's workflow_paused already carries this; no dup append
     change.event_log().append(agent_id=None, type="workflow_paused", payload={"reason": reason})
 
 
