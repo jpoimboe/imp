@@ -103,6 +103,21 @@ class InterruptCoordinator:
         self._trigger_escalation: Any = None
         self._trigger_exit: Any = None
         self._now = time.monotonic      # injectable for tests
+        self._ack_hook: Any = None
+
+    def set_ack_hook(self, fn: Any) -> None:
+        """fn(text: str) renders transient stop-acknowledgment chrome in the
+        status-line area (never journaled). None = no ack (tests/non-interactive)."""
+        self._ack_hook = fn
+
+    def _note_gesture_ack(self, *, force_quit_available: bool) -> None:
+        fn = self._ack_hook
+        if fn is None:
+            return
+        text = "stopping…"
+        if force_quit_available:
+            text += " (interrupt again to force-quit)"
+        fn(text)
 
     def enqueue_interject(self, text: str) -> None:
         """Queue a human-typed line for delivery at the next agent turn boundary."""
@@ -207,6 +222,7 @@ class InterruptCoordinator:
         fn = self._runner_interrupt
         if self.pause_reason is None:
             self.pause_reason = reason
+            self._note_gesture_ack(force_quit_available=False)
         self._should_pause = True
         if fn is not None:
             await fn()
@@ -252,6 +268,7 @@ class InterruptCoordinator:
         if self._should_pause:
             # A stop is already unwinding. Gate the repeat gesture synchronously.
             if self._register_gesture(kind="ctrl-c"):
+                self._note_gesture_ack(force_quit_available=True)
                 esc = self._trigger_escalation
                 if esc is not None:
                     esc()

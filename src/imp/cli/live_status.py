@@ -88,6 +88,25 @@ class LiveStatus:
             self._suspended = False
             self._draw()
 
+    def show_stop_ack(self, text: str) -> None:
+        """Render a transient dim stop-acknowledgment line in the status-line
+        area (console-only chrome: width-clipped, erased in place, never
+        journaled). Uses the same `_ERASE` + stream-write path as the normal
+        status line draw. No-op on non-TTY streams. Called by the ack hook
+        wired in E4 via `coord.set_ack_hook(status.show_stop_ack)`."""
+        if not self._enabled:
+            return
+        # DIM styling: SGR 2 (dim) … SGR 0 (reset). Width-clip to 120 cols so
+        # the line never wraps; the _ERASE at the start also erases any prior line.
+        _DIM = "\x1b[2m"
+        _RESET_SGR = "\x1b[0m"
+        max_width = 120
+        if len(text) > max_width:
+            text = text[:max_width]
+        self._stream.write(f"{_ERASE}{_DIM}{text}{_RESET_SGR}")
+        self._stream.flush()
+        self._visible = True
+
     # -- internals ------------------------------------------------------------
     def _draw(self) -> None:
         if not self._enabled or self._compose is None or self._suspended:
