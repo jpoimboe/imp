@@ -57,6 +57,8 @@ class State:
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None
     merge_commit: str | None = None
+    completion_pending: bool = False  # §3: navigation ran off the end under an
+    # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
 
     @classmethod
     def load(cls, state_dir: Path) -> State:
@@ -121,6 +123,7 @@ class State:
                 if self.resolved_steps is not None else None
             ),
             "merge_commit": self.merge_commit,
+            "completion_pending": self.completion_pending,
         }
         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
         try:
