@@ -461,7 +461,8 @@ class EscKeyReader:
                 continue                         # restart: check for trailing ESC
             return True                          # any other byte → real ESC, byte lost
 
-    _DRAIN_CAP = 4096  # bytes; a runaway sequence must not wedge the reader
+    _DRAIN_CAP = 4096  # bytes; generous vs any real sequence (~20-200B typical),
+    # small enough that a runaway/malicious sequence cannot wedge the reader
 
     async def _drain_until(self, is_final: Any) -> None:
         """Drain CSI bytes through the final byte, bounded by _DRAIN_CAP,
@@ -485,7 +486,7 @@ class EscKeyReader:
         prev = b""
         for _ in range(self._DRAIN_CAP):
             if self._quiesce_depth > 0:
-                return
+                return                            # yield pending bytes to the prompt
             b = await anyio.to_thread.run_sync(
                 lambda: self._poll_byte(self._seq_timeout_s),
                 abandon_on_cancel=True)
