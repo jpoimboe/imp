@@ -119,3 +119,28 @@ async def test_tty_quiesced_delegates_to_attached_reader() -> None:
     async with coord.tty_quiesced():
         pass
     assert enter_calls == [1]                     # back to no-op
+
+
+@pytest.mark.anyio
+async def test_reset_clears_pause_keeps_interjects_and_unparks() -> None:
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("keep me")
+    await coord.signal_pause(reason="esc")
+    assert coord.should_pause is True
+
+    unparked: list[int] = []
+
+    class _FakeReader:
+        def __init__(self) -> None:
+            self._parked_on_pause = True
+        def unpark_on_reset(self) -> None:
+            self._parked_on_pause = False
+            unparked.append(1)
+
+    coord.attach_esc_reader(_FakeReader())
+    coord.reset()
+
+    assert coord.should_pause is False
+    assert coord.pause_reason is None
+    assert coord.drain_interject() == "keep me"  # interjects preserved
+    assert unparked == [1]

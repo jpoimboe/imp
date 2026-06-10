@@ -93,6 +93,9 @@ class InterruptCoordinator:
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
         self._interjects: list[str] = []
+        self._first_gesture_at: float | None = None  # monotonic; suppression window
+        self.escalated = False
+        self._exit_event: Any = None    # set by SIGTERM/escalation routing (C3/C4)
 
     def enqueue_interject(self, text: str) -> None:
         """Queue a human-typed line for delivery at the next agent turn boundary."""
@@ -101,6 +104,18 @@ class InterruptCoordinator:
     def drain_interject(self) -> str | None:
         """Pop the oldest queued interject, or None. Called at the turn boundary."""
         return self._interjects.pop(0) if self._interjects else None
+
+    def reset(self) -> None:
+        """Clear interrupt state between session-loop rounds (§1). Runs right
+        after run_change returns, before the prompt. Does NOT clear queued
+        interjects. Un-parks the should_pause-parked ESC reader (Task B3)."""
+        self._should_pause = False
+        self.pause_reason = None
+        self._first_gesture_at = None
+        self.escalated = False
+        reader = self._esc_reader
+        if reader is not None and hasattr(reader, "unpark_on_reset"):
+            reader.unpark_on_reset()
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """interrupt_fn is an `async def () -> None` callable. All three V1
@@ -301,6 +316,10 @@ class EscKeyReader:
         # already set before we process a newly-returned byte). The reader stops
         # consuming /dev/tty so during-unwind typing surfaces as prompt type-ahead.
         # Cleared by coordinator.reset() (Task C1).
+        self._parked_on_pause = False
+
+    def unpark_on_reset(self) -> None:
+        """Coordinator.reset() calls this to release a should_pause park (Task B3)."""
         self._parked_on_pause = False
 
     def set_interject_sink(self, sink: Any) -> None:
