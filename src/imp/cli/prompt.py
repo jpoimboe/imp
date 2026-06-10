@@ -31,18 +31,23 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     kb = KeyBindings()
     mode = EditingMode.VI if editing_mode == "vi" else EditingMode.EMACS
 
-    hint_shown = {"v": False}
+    hint_shown = False
 
     @kb.add("c-c")
     def _(event: Any) -> None:  # noqa: ANN401
+        # Typed Ctrl-C must NEVER raise (the default binding does). Non-empty
+        # buffer → clear it; empty buffer → hint at Ctrl-D, once per session.
+        nonlocal hint_shown
         buf = event.app.current_buffer
         if buf.text:
             buf.reset()                    # clear the typed line in place
             return
-        if not hint_shown["v"]:
-            hint_shown["v"] = True
+        if not hint_shown:
+            hint_shown = True
             from prompt_toolkit.application import run_in_terminal
-            _ = run_in_terminal(lambda: print("press ctrl-d to exit"))
+            # Fire-and-forget: run_in_terminal schedules via ensure_future; the
+            # returned Future is intentionally not awaited from this sync handler.
+            run_in_terminal(lambda: print("press ctrl-d to exit"))
 
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
     # No style override: while the user types, the input region keeps the
