@@ -134,6 +134,10 @@ class InterruptCoordinator:
         """Pop the oldest queued interject, or None. Called at the turn boundary."""
         return self._interjects.pop(0) if self._interjects else None
 
+    def has_queued_interject(self) -> bool:
+        """True when an interject is queued for delivery (§2 resume decision)."""
+        return bool(self._interjects)
+
     def _register_gesture(self, *, kind: str) -> bool:
         """Record an interrupt gesture and decide whether it proceeds. SIGTERM is
         exempt (a supervisor shutdown must never be suppressed). For ESC/Ctrl-C: a

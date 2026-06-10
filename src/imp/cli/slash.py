@@ -48,6 +48,14 @@ def handle_slash_line(
     if cmd == "skills":
         _list(skills_dir, output_fn)
         return REPROMPT
+    if cmd == "continue":
+        # /continue is the §2 resume verb at the post-interrupt prompt. The
+        # session loop (cli/main) intercepts `/continue` BEFORE this dispatcher
+        # to map it to slash="continue" and resume the paused run. If it reaches
+        # here (typed at an ordinary wait_for_user solicit, where there is no run
+        # to resume), it is a no-op that re-prompts rather than a skill lookup.
+        output_fn("/continue resumes a paused run; there is nothing to resume here.")
+        return REPROMPT
 
     try:
         body = load_skill_body(skills_dir, cmd)
@@ -77,6 +85,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
+    out("  /continue          Resume a paused run (at the post-interrupt prompt)")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")

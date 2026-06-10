@@ -278,6 +278,21 @@ def _interactive_loop_predicate(
     return (not non_interactive) and reader_armed and stdin_tty and stdout_tty
 
 
+def _decide_resume_action(*, line: str, queued: bool, slash: str | None) -> str:
+    """Pure §2 resume-vs-re-prompt decision. Returns 'resume' or 'reprompt'.
+
+    Resume whenever there is text to deliver: a non-empty line, a queued
+    interject, or explicit /continue. A bare Enter with an empty queue
+    re-prompts (an accidental Enter must not relaunch a billable turn)."""
+    if slash == "continue":
+        return "resume"
+    if line.strip():
+        return "resume"
+    if queued:
+        return "resume"
+    return "reprompt"
+
+
 def _project_root() -> Path:
     return find_project_root()
 
