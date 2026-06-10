@@ -46,6 +46,7 @@ from imp.agents.runner import (
 )
 from imp.agents.subagents import dispatch_task, make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
+from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
@@ -339,6 +340,12 @@ def _wrap_one(
 
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
         try:
+            # Decision 10 sweep site: EVERY tool dispatch — the claude_code
+            # analog of agents/dispatch.py's first-statement sweep. Inside the
+            # try: a sweep raise must degrade to an is_error tool result, not
+            # crash the SDK handler. Module-attr call so tests monkeypatch
+            # bg._sweep_bg once for all sites.
+            await _bg._sweep_bg(ctx)
             if name == "task":
                 # Append the task tool_call event INSIDE _impl using the
                 # synchronously-available __tool_use_id__. This is race-free:
@@ -1006,6 +1013,12 @@ class ClaudeCodeAgentRunner:
                             "message": "runner cancelled by interrupt",
                         }}
                         return
+
+                    # Post-API-site analog (Decision 10): one sweep per
+                    # received SDK message — the model-API/CLI latency between
+                    # messages is the longest registry-blind gap under this
+                    # provider. Cancel check stays first (interrupt priority).
+                    await _bg._sweep_bg(ctx)
 
                     cls_name = type(sdk_msg).__name__
                     imp_msg, warns, thinkings = _sdk_message_to_imp(sdk_msg)

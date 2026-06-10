@@ -931,3 +931,39 @@ async def test_runner_outer_except_unknown_when_cancel_unset(
     error_events = [e for e in events if e.get("type") == "error"]
     assert len(error_events) == 1
     assert error_events[0]["payload"]["category"] == "unknown"
+
+
+@pytest.mark.anyio
+async def test_receive_loop_sweeps_bg_per_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Post-API-site analog: the runner sweeps once per received SDK message,
+    so a backgrounded flooder is cap-checked even on turns with no imp tool
+    dispatch (the CC-side web/builtin turns)."""
+    import imp.agents.tools.bg as bg_mod
+
+    calls = {"n": 0}
+    real = bg_mod._sweep_bg
+
+    async def counting(ctx):
+        calls["n"] += 1
+        await real(ctx)
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", counting)
+    # Mirror test_runs_to_complete_step: flat scripted list, factory takes opts.
+    # Adaptation from plan transcription: plan had nested list + lambda opts: fake;
+    # real FakeClaudeSDKClient takes opts as first positional, scripted_messages kw.
+    scripted = [
+        assistant(text("thinking...")),
+        assistant(tool_use("t1", "complete_step", {"status": "Success"})),
+        result(),
+    ]
+
+    def fake_client_factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=fake_client_factory)
+    events = [e async for e in runner.run(_inv(tmp_path))]
+    assert events[-1]["type"] == "agent_output"
+    assert calls["n"] >= 2          # at least one sweep per received message

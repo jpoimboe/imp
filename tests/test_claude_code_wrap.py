@@ -187,3 +187,31 @@ async def test_wrap_bash_killed_records_state(tmp_path: Path) -> None:
     assert len(state.killed_tool_uses) == 1
     assert state.killed_tool_uses[0]["name"] == "bash"
     assert state.killed_tool_uses[0]["signal"] == 15
+
+
+@pytest.mark.anyio
+async def test_wrapper_sweeps_bg_on_every_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 10 dispatch site, claude_code edition: every MCP tool dispatch
+    sweeps the background registry — module-attr call so one monkeypatch
+    covers all sites."""
+    import imp.agents.tools.bg as bg_mod
+    from imp.agents.tools import get_registry
+
+    calls = {"n": 0}
+    real = bg_mod._sweep_bg
+
+    async def counting(ctx):
+        calls["n"] += 1
+        await real(ctx)
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", counting)
+    ctx = _ctx(tmp_path)
+    state = _RunState()
+    (tmp_path / "f.txt").write_text("data")
+    wrapped = _wrap_one("read_file", get_registry()["read_file"], ctx, state,
+                        _passthrough_decorator)
+    out = await wrapped({"path": "f.txt"})
+    assert "data" in out["content"][0]["text"]
+    assert calls["n"] == 1
