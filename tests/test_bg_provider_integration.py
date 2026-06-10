@@ -195,12 +195,14 @@ async def test_post_api_sweep_runs_before_first_dispatch(
 
 @pytest.mark.anyio
 async def test_wired_providers_enable_background(tmp_path: Path) -> None:
-    """The two in-process providers construct their ToolContext with
-    background_enabled=True (the full surface is wired); the e2e spawn tests
-    above only pass because of this — this pins the flag explicitly."""
+    """All four providers construct their ToolContext with
+    background_enabled=True (anthropic/openai wired the full surface first;
+    claude_code/codex_runner gained parity wiring). This pins the flag against
+    a silent kwarg removal; runtime behavior is covered by the e2e spawn
+    tests in this file and tests/test_bg_cc_codex_parity.py."""
     import re
     from pathlib import Path as _P
-    for mod in ("anthropic", "openai"):
+    for mod in ("anthropic", "openai", "claude_code", "codex_runner"):
         src = _P(f"src/imp/providers/{mod}.py").read_text(encoding="utf-8")
         assert re.search(r"background_enabled=True", src), mod
 
