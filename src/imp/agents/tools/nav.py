@@ -348,15 +348,3 @@ async def grep(
         out.append(f"[further results omitted: head_limit={head_limit} reached "
                    f"— raise head_limit or narrow the pattern]")
     return "\n".join(out)
-
-
-@imp_tool(name="ls", description="List directory contents at a relative path.")
-def ls(ctx: ToolContext, path: str) -> str:
-    # NOTE: unlike grep/glob, ls does NOT exclude .imp/.git — it lists one level
-    # of NAMES only (no recursion, no reads), so it cannot reproduce the runaway
-    # and showing the control dirs as entries is intentional.
-    ctx.check_fs_permission("read", path)
-    target = ctx.resolve_path(path)
-    if not target.exists():
-        return f"(no such directory: {path})"
-    return "\n".join(sorted(p.name for p in target.iterdir()))

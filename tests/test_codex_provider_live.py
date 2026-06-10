@@ -143,8 +143,8 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
     agent (the round-trip echoer) can never trip it — its lone `complete_step`
     is that one allowed call. (Note `cap = max_tool_calls or 1000` also makes
     cap=0 unreachable.) So to exercise the ceiling we give the agent a second
-    read-only tool (`ls`) and instruct it to call that FIRST, then
-    `complete_step`: dispatch #1 (`ls`) is allowed, dispatch #2 (`complete_step`)
+    read-only tool (`glob`) and instruct it to call that FIRST, then
+    `complete_step`: dispatch #1 (`glob`) is allowed, dispatch #2 (`complete_step`)
     trips the cap. The runner then aborts the SDK and yields
     `tool_call_ceiling_exceeded` on its next event iteration — independent of
     what the model does next. The mechanism itself (RMW + abort flag) is
@@ -157,15 +157,15 @@ async def test_codex_live_cap_abort_terminates_within_budget(tmp_path: Path) -> 
     # Give the agent a second (read-only) tool so it can make two calls, and
     # order them so the SECOND call (complete_step) is the one that trips cap=1.
     agent_def = dataclasses.replace(
-        inv.agent_def, tools=frozenset({"complete_step", "ls"})
+        inv.agent_def, tools=frozenset({"complete_step", "glob"})
     )
     inv = dataclasses.replace(
         inv,
         agent_def=agent_def,
         max_tool_calls=1,
         system_prompt=(
-            "First call the `ls` tool with path \".\". After it returns, call "
-            'complete_step with word="banana". Call `ls` before complete_step. '
+            "First call the `glob` tool with pattern \"*\". After it returns, call "
+            'complete_step with word="banana". Call `glob` before complete_step. '
             "Do not call any other tools and do not write any files."
         ),
     )

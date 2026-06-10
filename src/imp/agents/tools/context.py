@@ -26,7 +26,6 @@ class ToolContext:
     project_root: Path
     fs_permissions: tuple[FsRule, ...]
     events_path: Path
-    todos: list[dict[str, Any]] = field(default_factory=list)
     # Subagent dispatch fills these:
     subagent_defs: dict[str, AgentDef] = field(default_factory=dict)
     provider_name: str = ""

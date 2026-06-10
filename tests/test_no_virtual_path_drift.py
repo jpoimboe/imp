@@ -39,7 +39,7 @@ def test_no_virtual_paths_in_tool_descriptions():
 
     reg = get_registry()
     offenders: list[str] = []
-    for name in ("read_file", "write_file", "edit_file", "glob", "grep", "ls"):
+    for name in ("read_file", "write_file", "edit_file", "glob", "grep"):
         desc = reg[name].description
         if "/project" in desc or "/scratch" in desc:
             offenders.append(f"{name} description: {desc!r}")

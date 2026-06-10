@@ -60,14 +60,6 @@ def test_grep_finds_match(tmp_path: Path) -> None:
     assert "b.py" not in out
 
 
-def test_ls_lists_dir(tmp_path: Path) -> None:
-    (tmp_path / "a.py").write_text("")
-    (tmp_path / "sub").mkdir()
-    out = get_registry()["ls"].invoke(_ctx(tmp_path), {"path": "."})
-    assert "a.py" in out
-    assert "sub" in out
-
-
 def test_grep_excludes_imp_and_git(tmp_path: Path) -> None:
     (tmp_path / "code.py").write_text("SECRET token here\n")
     (tmp_path / ".imp").mkdir()
@@ -160,12 +152,6 @@ def test_grep_rejects_absolute_project_escape(tmp_path: Path) -> None:
     with pytest.raises(PermissionDenied):
         anyio.run(get_registry()["grep"].async_invoke, ctx,
                   {"pattern": "root", "path": "/project/../../etc"})
-
-
-def test_ls_rejects_parent_escape(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        get_registry()["ls"].invoke(ctx, {"path": "../.."})
 
 
 def test_glob_rejects_absolute_pattern(tmp_path: Path) -> None:
