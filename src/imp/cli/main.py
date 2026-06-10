@@ -257,6 +257,15 @@ def _last_script_blocked(
     return matched
 
 
+def _should_respawn_reader(*, reader_exited: bool) -> bool:
+    """The ESC reader exits ONLY when ESC fired (run() returns); after a Ctrl-C
+    interrupt it is still alive (parked) and reset() un-parks it. So respawn iff
+    the previous round's reader exited. This reader-exit signal — NOT the
+    coordinator's is_running() — is the correct ESC-exit-vs-Ctrl-C-park
+    discriminator (review M1)."""
+    return reader_exited
+
+
 def _project_root() -> Path:
     return find_project_root()
 
