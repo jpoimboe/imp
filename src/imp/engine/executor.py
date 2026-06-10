@@ -179,21 +179,24 @@ async def run_change(
                 non_interactive=non_interactive,
                 sandbox_policy=sandbox_policy)
 
-            if coordinator.should_pause or isinstance(action, Pause):
-                # action may be Continue/Goto on a coordinator interrupt (no .reason).
-                reason, kind = (
-                    (action.reason, action.kind) if isinstance(action, Pause)
-                    else ("interrupt", None)
-                )
-                state.status = "merge_blocked" if reason == "merge_blocked" else "paused"
-                state.save(change.state_dir)
-                payload: dict[str, Any] = {"reason": reason}
-                if kind is not None:
-                    payload["kind"] = kind
-                _emit(log, "workflow_paused", payload)
-                return RunResult.PAUSED
             if isinstance(action, Retry):
                 raise AssertionError("Retry must not escape _dispatch_step")
+
+            # §3 case 1 — mid-flight Pause: pause BEFORE navigation (as today).
+            if isinstance(action, Pause):
+                if coordinator.should_pause and step.kind == "agent":
+                    # User interrupt mid-step → keep the transcript on re-entry,
+                    # regardless of the provider's error classification.
+                    state.resume_pending = state.step
+                reason = action.reason or "interrupt"
+                state.status = (
+                    "merge_blocked" if reason == "merge_blocked" else "paused")
+                state.save(change.state_dir)
+                _emit_paused_event(
+                    log, reason, kind=action.kind,
+                    interrupt_reason=(coordinator.pause_reason
+                                      if coordinator.should_pause else None))
+                return RunResult.PAUSED
 
             target_idx = None
             if isinstance(action, Continue):
@@ -717,6 +720,23 @@ async def _run_agent_invocation(
 def _emit(log: EventLog, type_: str, payload: dict[str, Any], *,
           agent_id: str | None = None) -> dict[str, Any]:
     return log.append(agent_id=agent_id, type=type_, payload=payload)
+
+
+def _emit_paused_event(
+    log: EventLog, reason: str, *, kind: str | None = None,
+    step: str | None = None, interrupt_reason: str | None = None,
+) -> None:
+    """Single workflow_paused emit point. `interrupt_reason` (coord.pause_reason)
+    rides alongside the engine-classified `reason` when a user interrupt drove
+    the pause — the live 'interrupted (esc)' marker renders from it (§2)."""
+    payload: dict[str, Any] = {"reason": reason}
+    if kind is not None:
+        payload["kind"] = kind
+    if step is not None:
+        payload["step"] = step
+    if interrupt_reason is not None:
+        payload["interrupt_reason"] = interrupt_reason
+    _emit(log, "workflow_paused", payload)
 
 
 def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
