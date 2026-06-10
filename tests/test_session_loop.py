@@ -258,6 +258,42 @@ async def test_interrupt_then_typed_line_resumes(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_ctrl_d_at_resume_prompt_pauses_and_exits(tmp_path: Path) -> None:
+    """Round 1 interrupts; the user presses Ctrl-D at the resume prompt (the
+    reply_input_fn raises EOFError). Per the plan, that must pause-and-exit with
+    rc 130 (reason ctrl-d), NOT crash with an uncaught EOFError."""
+    change = _seed_single_agent(tmp_path)
+    coord = InterruptCoordinator()
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            await coord.signal_pause(reason="esc")
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    _register_fake(lambda _m: _P())
+
+    # No replies → the resume prompt immediately raises EOFError (Ctrl-D).
+    rc, _driver, _status = await _drive_session(change, coord, replies=[])
+
+    assert rc == 130
+    assert State.load(change.state_dir).status == "paused"
+    paused = [e for e in change.event_log().read()
+              if e.get("type") == "workflow_paused"]
+    # One from the engine's interrupt pause, one from the ctrl-d finalize
+    # (different reasons → not suppressed).
+    assert any((e.get("payload") or {}).get("reason") == "ctrl-d" for e in paused)
+
+
+@pytest.mark.anyio
 async def test_two_interrupt_rounds_do_not_reuse_run_scope(tmp_path: Path) -> None:
     """Review B1: interrupt→prompt→resume TWICE. A reused single-use CancelScope
     would raise RuntimeError on round 2; assert a clean terminal outcome with no

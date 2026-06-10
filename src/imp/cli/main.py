@@ -437,8 +437,14 @@ async def _run_change_session(
                 reader_armed = bool(esc_reader._armed)
 
             at_completion = final_state.completion_pending
-            line, slash = await _collect_resume_input(
-                reply_input_fn, coord, at_completion=at_completion)
+            try:
+                line, slash = await _collect_resume_input(
+                    reply_input_fn, coord, at_completion=at_completion)
+            except EOFError:
+                # Ctrl-D at the resume prompt → pause-and-exit (rc 130), the same
+                # finalize as a Ctrl-D during the run (plan §2: the interrupted
+                # prompt's Ctrl-D pauses, it does not crash).
+                return _finalize_paused_exit(change, driver, coord, "ctrl-d")
             if slash != "continue" and line.strip():
                 coord.enqueue_interject(line)
             change.event_log().append(
@@ -475,9 +481,9 @@ async def _collect_resume_input(
     """Inner prompt loop for a paused interrupt round: re-prompt WITHOUT
     re-entering run_change until the user submits something that resumes. Returns
     (line, slash) at the resume decision. A bare Enter / empty-queue re-prompts;
-    at completion only /continue (or Ctrl-D → EOFError, propagated) finishes.
-    Ctrl-D raises EOFError out of reply_input_fn, propagating to the caller's
-    outer EOFError arm."""
+    at completion only /continue (or Ctrl-D) finishes. Ctrl-D raises EOFError out
+    of reply_input_fn; the caller wraps this call in `except EOFError` to
+    pause-and-exit (rc 130) — EOFError is propagated, never swallowed here."""
     reminder_shown = False
     while True:
         line = await reply_input_fn()  # Ctrl-D → EOFError (propagated to caller)
