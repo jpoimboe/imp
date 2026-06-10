@@ -145,3 +145,7 @@ def test_dispatch_sigterm_routes_to_exit_immediately() -> None:
     coord._trigger_exit = lambda reason: exited.__setitem__("v", reason)
     coord._dispatch_signal(_sig.SIGTERM)
     assert exited["v"] == "sigterm"       # bypasses receiver/signal_pause/interrupt()
+    # The SIGTERM branch sets pause state synchronously (the loop's
+    # post-cancellation path reads these to persist status=paused).
+    assert coord._should_pause is True
+    assert coord.pause_reason == "sigterm"

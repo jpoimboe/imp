@@ -247,7 +247,7 @@ class InterruptCoordinator:
             self._should_pause = True
             fn = self._trigger_exit
             if fn is not None:
-                fn("sigterm")
+                fn("sigterm")  # reason is always "sigterm" on this branch
             return
         if self._should_pause:
             # A stop is already unwinding. Gate the repeat gesture synchronously.
@@ -272,8 +272,10 @@ class InterruptCoordinator:
         self._install_loop_signal_handlers()
 
     async def run_signal_receiver(self) -> None:
-        """Long-running task: install SIGINT/SIGTERM loop handlers and turn each
-        delivered signal into `signal_pause` (tagged 'ctrl-c'/'sigterm').
+        """Long-running task: install SIGINT/SIGTERM loop handlers. SIGINT is
+        turned into `signal_pause(reason='ctrl-c')` via this receiver. SIGTERM is
+        intercepted in `_dispatch_signal` BEFORE the stream — it sets pause state
+        and fires the exit hook directly (wedge-proof) and never reaches this loop.
 
         Replaces `anyio.open_signal_receiver` with directly-managed loop handlers
         so they can be RE-ARMED (`rearm_signal_handlers`) after prompt_toolkit
