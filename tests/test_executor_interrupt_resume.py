@@ -267,3 +267,57 @@ async def test_genuine_fatal_no_interrupt_keeps_fresh_restart(tmp_path: Path) ->
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
     assert state.resume_pending is None  # fatal, not an interrupt → fresh restart
+
+
+@pytest.mark.anyio
+async def test_completion_pending_finalizes_without_redispatch(tmp_path: Path) -> None:
+    change = _seed_single_agent(tmp_path)  # single agent step
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    from imp.cli.signals import InterruptCoordinator
+
+    runs = {"n": 0}
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            runs["n"] += 1
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"; model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    # Round 1: the only step (named "w") completes cleanly; the on_event hook
+    # flips should_pause AT its completion, so navigation runs off the end under
+    # an in-flight interrupt → _complete_or_park parks at completion.
+    coord = InterruptCoordinator()
+    resolve.reset_providers_for_tests()
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    def _on_event(e: dict) -> None:
+        if (e.get("type") == "step_completed"
+                and (e.get("payload") or {}).get("step") == "w"):
+            coord._should_pause = True
+            coord.pause_reason = "ctrl-c"
+
+    r1 = await run_change(change, on_event=_on_event, coordinator=coord)
+    assert r1 is RunResult.PAUSED
+    s1 = State.load(change.state_dir)
+    assert s1.completion_pending is True
+    assert s1.step is not None  # NOT None (would auto-complete)
+    runs_after_round1 = runs["n"]
+
+    # Round 2 (re-entry, fresh coordinator = /continue): finalize via _complete
+    # with NO new agent turn.
+    resolve.reset_providers_for_tests()
+    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
+    r2 = await run_change(change)
+    assert r2 is RunResult.COMPLETED
+    assert runs["n"] == runs_after_round1  # no second agent turn ran
+    assert State.load(change.state_dir).status == "completed"

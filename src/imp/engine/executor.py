@@ -162,6 +162,11 @@ async def run_change(
         index_of = {s.name: i for i, s in enumerate(flat)}
 
         while True:
+            if state.completion_pending:
+                # §3: re-entry after an interrupt parked at the completion
+                # boundary. Finalize directly — no dispatch, no transcript wipe.
+                state.completion_pending = False
+                return _complete(change, state, log)
             if state.step is None or index_of.get(state.step) is None:
                 return _complete(change, state, log)            # terminal
             idx = index_of[state.step]
