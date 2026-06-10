@@ -12,6 +12,43 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def _pin_subprocess_imp_to_working_tree() -> None:
+    """Make subprocess `imp` resolution deterministic for the whole test run.
+
+    pyproject's `pythonpath=["src"]` only fixes the *in-process* interpreter.
+    Tests that spawn `python -m imp` / `python -c "import imp"` children
+    otherwise resolve `imp` from the GLOBAL editable install — shared, mutable
+    state that parallel worktrees/sessions repoint or tear down (a `pip install
+    -e` mid-reinstall removes the `.pth`, and `import imp` then falls onto the
+    repo's `imp/` data dir as a namespace package -> ModuleNotFoundError, or
+    onto a sibling worktree's stale code). That made bare-`pytest` subprocess
+    failures look like regressions when they were environmental.
+
+    Pinning PYTHONPATH here, at conftest import (before collection spawns
+    anything), shadows the global install for every child that inherits
+    os.environ — under `pytest`, `python -m pytest`, IDE runners, and `make`
+    alike. This supersedes the Makefile's `PYTEST_PYTHONPATH` pin, which only
+    covered `make test`. Absolute + prepend-safe + idempotent, mirroring
+    engine_env's per-subprocess injection. Scoped to an imp checkout so an
+    unrelated project's `src/` is never forced onto its subprocesses' path.
+
+    Relies on PYTHONPATH preceding site-packages on sys.path — true for imp's
+    path-style editable install. A strict PEP 660 editable that registers a
+    `sys.meta_path` finder would resolve first and defeat it; out of scope while
+    imp ships path-style (same caveat as engine_env).
+    """
+    src = Path(__file__).resolve().parent.parent / "src"
+    if not (src / "imp" / "__init__.py").is_file():
+        return
+    existing = [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]
+    if str(src) in existing:
+        return
+    os.environ["PYTHONPATH"] = os.pathsep.join([str(src), *existing])
+
+
+_pin_subprocess_imp_to_working_tree()
+
+
 @pytest.fixture(autouse=True)
 def _stub_provider_api_keys(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
