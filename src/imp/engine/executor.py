@@ -203,21 +203,20 @@ async def run_change(
                 state.loop_counts.pop(step.name, None)          # forward advance resets
                 nxt = idx + 1
                 if nxt >= len(flat):
-                    return _complete(change, state, log)
+                    return _complete_or_park(change, state, log, coordinator)
                 state.step = flat[nxt].name
                 state.resume_pending = None
             elif isinstance(action, Goto):
                 target_idx = workflow.resolve_goto(action.target)
                 if target_idx >= len(flat):                      # empty trailing phase
-                    return _complete(change, state, log)
+                    return _complete_or_park(change, state, log, coordinator)
                 if target_idx <= idx:                            # backward OR self → loop-counted
                     n = state.loop_counts.get(step.name, 0) + 1
                     state.loop_counts[step.name] = n
-                    if n > step.max_loops:
+                    if n > step.max_loops and not coordinator.should_pause:
                         state.status = "paused"
                         state.save(change.state_dir)
-                        _emit(log, "workflow_paused",
-                              {"reason": "max_loops", "step": step.name})
+                        _emit_paused_event(log, "max_loops", step=step.name)
                         return RunResult.PAUSED
                 else:
                     state.loop_counts.pop(step.name, None)       # forward goto resets
@@ -240,6 +239,17 @@ async def run_change(
                     and target_idx is not None and target_idx < len(flat)):
                 state.retry_feedback = {
                     "target_step": flat[target_idx].name, "text": feedback_text}
+
+            # §3 case 2 — an in-flight interrupt pauses AFTER navigation, so
+            # re-entry starts the navigated-to step and §2 pending texts reach it.
+            # Navigation already set resume_pending correctly (Goto(resume=True)
+            # kept the target; Continue/forward-Goto cleared it) — do NOT override.
+            if coordinator.should_pause:
+                state.status = "paused"
+                state.save(change.state_dir)
+                _emit_paused_event(
+                    log, "interrupt", interrupt_reason=coordinator.pause_reason)
+                return RunResult.PAUSED
             state.save(change.state_dir)
     finally:
         # prev_cwd may have been removed (e.g. resume from inside a worktree this
@@ -248,6 +258,24 @@ async def run_change(
             os.chdir(prev_cwd)
         except OSError:
             os.chdir(change.control_root)
+
+
+def _complete_or_park(
+    change: Change, state: State, log: EventLog, coordinator: Any,
+) -> RunResult:
+    """Navigation ran off the end. Normally finalize via _complete(); but an
+    in-flight interrupt parks at completion instead (§3): set completion_pending,
+    leave state.step on the last completed step's successor sentinel (None would
+    auto-complete on re-entry; we use completion_pending to distinguish), persist
+    paused, emit. Re-entry — only on a submitted /continue or Ctrl-D resume —
+    runs the real _complete with no dispatch and no transcript wipe."""
+    if coordinator.should_pause:
+        state.completion_pending = True
+        state.status = "paused"
+        state.save(change.state_dir)
+        _emit_paused_event(log, "interrupt", interrupt_reason=coordinator.pause_reason)
+        return RunResult.PAUSED
+    return _complete(change, state, log)
 
 
 def _complete(change: Change, state: State, log: EventLog) -> RunResult:
