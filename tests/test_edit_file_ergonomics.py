@@ -217,3 +217,37 @@ def test_readonly_directory_refused_with_curated_error(tmp_path: Path) -> None:
         assert p.read_text() == "a = 1\n"
     finally:
         d.chmod(0o755)  # let pytest clean tmp_path up
+
+
+def test_long_old_capped_in_not_found_message(tmp_path: Path) -> None:
+    # A multi-KB `old` must not be echoed in full into the transcript (the
+    # agent already has it in context as the call it just made): the repr is
+    # capped at 200 chars with the total length disclosed.
+    (tmp_path / "x.py").write_text("content\n")
+    with pytest.raises(ValueError) as exc:
+        _edit(_ctx(tmp_path), path="x.py", old="A" * 5000, new="y")
+    msg = str(exc.value)
+    assert "not found" in msg
+    assert "[5000 chars total]" in msg
+    assert "A" * 201 not in msg
+    assert len(msg) < 300
+
+
+def test_long_old_capped_in_not_unique_message(tmp_path: Path) -> None:
+    long_old = "B" * 1000
+    (tmp_path / "x.py").write_text(long_old + "x" + long_old)
+    with pytest.raises(ValueError) as exc:
+        _edit(_ctx(tmp_path), path="x.py", old=long_old, new="y")
+    msg = str(exc.value)
+    assert "not unique" in msg
+    assert "(found 2 occurrences)" in msg
+    assert "[1000 chars total]" in msg
+    assert len(msg) < 300
+
+
+def test_short_old_repr_stays_full_and_escaped(tmp_path: Path) -> None:
+    # The repr's escaping is the valuable part (whitespace mistakes are the
+    # top not-found cause) — short olds keep today's exact full-repr message.
+    (tmp_path / "x.py").write_text("content\n")
+    with pytest.raises(ValueError, match=r"'nope\\nx' not found in 'x\.py'"):
+        _edit(_ctx(tmp_path), path="x.py", old="nope\nx", new="y")

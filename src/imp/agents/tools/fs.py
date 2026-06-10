@@ -140,6 +140,17 @@ def write_file(ctx: ToolContext, path: str, content: str) -> str:
     return f"wrote {len(content)} bytes to {path}"
 
 
+def _short_repr(s: str, cap: int = 200) -> str:
+    """repr capped for error texts. A multi-KB `old` would otherwise be
+    echoed in full into the transcript — pure redundancy, since the failing
+    value is already in the agent's context as the call it just made. The
+    escaped HEAD is what identifies the edit (whitespace mistakes are the
+    top not-found cause); the disclosed length tells the rest."""
+    if len(s) <= cap:
+        return repr(s)
+    return f"{s[:cap]!r}… [{len(s)} chars total]"
+
+
 def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> None:
     """Atomic write-back: temp file + os.replace. Two load-bearing details:
     (1) the temp file is created in the TARGET's directory — os.replace
@@ -236,9 +247,10 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
         ) from None
     count = body.count(old)
     if count == 0:
-        raise ValueError(f"{old!r} not found in {path!r}")
+        raise ValueError(f"{_short_repr(old)} not found in {path!r}")
     if not replace_all and count > 1:
-        raise ValueError(f"{old!r} not unique in {path!r} (found {count} occurrences)")
+        raise ValueError(f"{_short_repr(old)} not unique in {path!r} "
+                         f"(found {count} occurrences)")
     edited = body.replace(old, new) if replace_all else body.replace(old, new, 1)
     # Bytes-faithful write-back: encode and write BYTES (no platform newline
     # translation — the old read_text() path mangled CRLF files).
