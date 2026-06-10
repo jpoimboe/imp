@@ -823,11 +823,12 @@ class ClaudeCodeAgentRunner:
         finally:
             if self._ctx is not None:
                 # None guard: _ctx is assigned mid-_run_loop; the finally runs
-                # with None when the generator is aclosed before its first
-                # pull or when _run_loop raises before the assignment. Lives
-                # in run()'s OWN finally (not _run_loop's): an abandoned inner
-                # generator only GC-finalizes (PEP 525), so _run_loop's
-                # finally is not aclose-deterministic.
+                # with None when _run_loop raises BEFORE the assignment (the
+                # error arm yields, then this fires). An aclose before the
+                # first pull never enters the body at all. Lives in run()'s
+                # OWN finally (not _run_loop's): an abandoned inner generator
+                # only GC-finalizes (PEP 525), so _run_loop's finally is not
+                # aclose-deterministic.
                 from imp.agents.tools.bg import terminate_background_processes
                 with contextlib.suppress(Exception):
                     await terminate_background_processes(self._ctx)
