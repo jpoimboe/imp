@@ -297,8 +297,6 @@ async def test_completion_pending_finalizes_without_redispatch(tmp_path: Path) -
     # flips should_pause AT its completion, so navigation runs off the end under
     # an in-flight interrupt → _complete_or_park parks at completion.
     coord = InterruptCoordinator()
-    resolve.reset_providers_for_tests()
-    resolve.register_provider("fake", env_check=lambda: True, factory=lambda _m: _P())
 
     def _on_event(e: dict) -> None:
         if (e.get("type") == "step_completed"
