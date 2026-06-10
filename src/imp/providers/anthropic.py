@@ -15,6 +15,7 @@ tool_result, thinking, runner_warning, tool_killed) are written via EventLog.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import os
 from collections.abc import AsyncGenerator
@@ -154,6 +155,13 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     out["load_skill"] = make_load_skill_tool()
     if "wait_for_user" in invocation.agent_def.tools:
         out["wait_for_user"] = make_wait_for_user_tool()
+    if "bash" in invocation.agent_def.tools:
+        # Auto-granted with bash (precedent: load_skill injection):
+        # run_in_background is a bash PARAMETER, so an agent with bash but no
+        # read/kill tool is a trap — a backgrounded process it can never see
+        # or stop. The capability set must be atomic.
+        out["bash_output"] = reg["bash_output"]
+        out["bash_kill"] = reg["bash_kill"]
     return out
 
 
@@ -424,6 +432,14 @@ class AnthropicAgentRunner:
                 yield perr.make_error_event(classified)
                 return
         finally:
+            if self._ctx is not None:
+                # None guard: self._ctx is None-initialized and assigned
+                # mid-_run_loop, AFTER the _build_tools/check_web_capability
+                # raise sites — the finally runs with None when the generator
+                # is aclosed before its first pull or those early raises fire.
+                from imp.agents.tools.bg import terminate_background_processes
+                with contextlib.suppress(Exception):
+                    await terminate_background_processes(self._ctx)
             await self._close_client()
 
     async def _run_loop(
@@ -722,6 +738,7 @@ class AnthropicAgentRunner:
         }}
 
     async def interrupt(self) -> None:
+        from imp.agents.tools.bg import terminate_background_processes
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
         # M5: the run loop's `finally` may have just set _cancel_scope to None and
@@ -732,6 +749,10 @@ class AnthropicAgentRunner:
             self._cancel_scope.cancel()
         if self._ctx is not None:
             await terminate_running_processes(self._ctx)
+            # Decision 7: pause kills background processes too (leak
+            # resistance); the persisted tombstones give the resumed agent an
+            # explanation. Idempotent vs the run() finally (both fire on pause).
+            await terminate_background_processes(self._ctx)
 
 
 class AnthropicProvider:
