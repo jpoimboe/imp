@@ -317,6 +317,32 @@ def _handle_terminal_outcome(
     return 1
 
 
+async def _run_actuator(
+    coord: Any, exit_event: Any, run_scope_holder: dict[str, Any],
+) -> None:
+    """Watch the escalation + exit events; on either, cancel ONLY the current
+    round's run scope (held in run_scope_holder) — never the task group, which
+    owns the signal receiver + status ticker the exit path still needs. On
+    escalation, also set coord.escalated so the loop routes to force-quit."""
+
+    async def _on_esc() -> None:
+        await coord.escalation_event.wait()
+        coord.escalated = True
+        sc = run_scope_holder["scope"]
+        if sc is not None:
+            sc.cancel()
+
+    async def _on_exit() -> None:
+        await exit_event.wait()
+        sc = run_scope_holder["scope"]
+        if sc is not None:
+            sc.cancel()
+
+    async with anyio.create_task_group() as wtg:
+        wtg.start_soon(_on_esc)
+        wtg.start_soon(_on_exit)
+
+
 async def _run_change_session(
     change: Change,
     *,
@@ -350,25 +376,7 @@ async def _run_change_session(
         coord.set_ack_hook(status.show_stop_ack)
     run_scope_holder: dict[str, Any] = {"scope": None}
 
-    async def _actuator() -> None:
-        async def _on_esc() -> None:
-            await coord.escalation_event.wait()
-            coord.escalated = True
-            sc = run_scope_holder["scope"]
-            if sc is not None:
-                sc.cancel()
-
-        async def _on_exit() -> None:
-            await exit_event.wait()
-            sc = run_scope_holder["scope"]
-            if sc is not None:
-                sc.cancel()
-
-        async with anyio.create_task_group() as wtg:
-            wtg.start_soon(_on_esc)
-            wtg.start_soon(_on_exit)
-
-    tg.start_soon(_actuator)
+    tg.start_soon(_run_actuator, coord, exit_event, run_scope_holder)
 
     try:
         reader_armed = (
