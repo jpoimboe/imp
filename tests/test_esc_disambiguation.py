@@ -181,3 +181,33 @@ async def test_drain_yields_buffered_bytes_to_prompt_on_quiesce() -> None:
         )
     finally:
         os.close(leader); os.close(follower)
+
+
+@pytest.mark.anyio
+async def test_reader_parks_when_should_pause_already_set() -> None:
+    reader, leader, follower = _reader_on_pty()
+    coord = reader._coord
+    fired: list[str] = []
+    orig = coord.signal_pause
+
+    async def _spy(*, reason: str = "ctrl-c") -> None:
+        fired.append(reason)
+        await orig(reason=reason)
+    coord.signal_pause = _spy  # type: ignore[assignment]
+
+    try:
+        await coord.signal_pause(reason="ctrl-c")  # SIGINT set should_pause first
+        fired.clear()
+        # A byte arrives after should_pause is set; the reader must NOT fire again
+        # nor capture it as an interject.
+        os.write(leader, b"x")
+        # _maybe_park_on_pause is the seam: with should_pause set it returns True
+        # (parked) without firing/capturing.
+        captured: list[bytes] = []
+        reader.set_interject_sink(lambda line: captured.append(line.encode()))
+        assert reader._maybe_park_on_pause() is True
+        assert reader._parked_on_pause is True
+        assert fired == []
+        assert captured == []
+    finally:
+        os.close(leader); os.close(follower)

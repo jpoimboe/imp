@@ -297,11 +297,26 @@ class EscKeyReader:
         # Spec §4: follow-up byte poll window for ESC disambiguation. Default
         # mirrors the loop's existing select timeout (~50 ms). Injectable by tests.
         self._seq_timeout_s: float = _READ_TIMEOUT_S
+        # Spec §4 unwind parking: set True when a stop is unwinding (should_pause
+        # already set before we process a newly-returned byte). The reader stops
+        # consuming /dev/tty so during-unwind typing surfaces as prompt type-ahead.
+        # Cleared by coordinator.reset() (Task C1).
+        self._parked_on_pause = False
 
     def set_interject_sink(self, sink: Any) -> None:
         """Attach (or replace) the `(line: str) -> None` interject sink after
         construction. None restores legacy ESC-only behavior."""
         self._on_interject = sink
+
+    def _maybe_park_on_pause(self) -> bool:
+        """Between read-return and fire: if a stop is unwinding (should_pause
+        set), park — stop consuming /dev/tty so during-unwind typing stays in the
+        kernel buffer and surfaces as prompt type-ahead. Returns True if parked.
+        coordinator.reset() (Task C1) clears _parked_on_pause to un-park."""
+        if self._coord.should_pause:
+            self._parked_on_pause = True
+            return True
+        return False
 
     async def run(self, *, task_status: TaskStatus[None] = TASK_STATUS_IGNORED) -> None:
         # `task_status.started()` is signalled once the reader has either armed or
@@ -344,8 +359,18 @@ class EscKeyReader:
                     await self._unquiesce_evt.wait()
                     self._unquiesce_evt = None
                     continue
+                if self._parked_on_pause:
+                    # Stop is unwinding: idle until coordinator.reset() (Task C1)
+                    # clears _parked_on_pause. Poll at the read-timeout interval so
+                    # we resume promptly once reset fires.
+                    await anyio.sleep(self._seq_timeout_s)
+                    continue
                 byte = await anyio.to_thread.run_sync(
                     self._read_one_byte, abandon_on_cancel=True)
+                if self._maybe_park_on_pause():
+                    # Stop unwinding: drop this byte, wait for reset() to un-park
+                    # (the §C reset triggers the same unpark machinery).
+                    continue
                 if byte == b"\x1b":
                     if not await self._disambiguate_esc():
                         continue                 # consumed an escape sequence
