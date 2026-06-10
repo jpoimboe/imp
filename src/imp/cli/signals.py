@@ -99,6 +99,9 @@ class InterruptCoordinator:
         self._first_gesture_at: float | None = None  # monotonic; suppression window
         self.escalated = False
         self._exit_event: Any = None    # set by SIGTERM/escalation routing (C3/C4)
+        self.escalation_event: Any = None   # anyio.Event set on escalation (C4)
+        self._trigger_escalation: Any = None
+        self._trigger_exit: Any = None
         self._now = time.monotonic      # injectable for tests
 
     def enqueue_interject(self, text: str) -> None:
@@ -150,6 +153,12 @@ class InterruptCoordinator:
 
     def detach_runner(self) -> None:
         self._runner_interrupt = None
+
+    def set_escalation_hook(self, fn: Any) -> None:
+        self._trigger_escalation = fn
+
+    def set_exit_hook(self, fn: Any) -> None:
+        self._trigger_exit = fn
 
     @contextlib.contextmanager
     def runner_attached(self, interrupt_fn: Any) -> Iterator[None]:
@@ -224,10 +233,31 @@ class InterruptCoordinator:
                 loop.add_signal_handler(sig, self._dispatch_signal, sig)
 
     def _dispatch_signal(self, sig: int) -> None:
-        """Loop-thread signal callback: enqueue the signal for the receiver task
-        (which awaits `signal_pause`). Keeping the await in the task — rather than
-        firing `signal_pause` as a bare task from here — preserves structured
-        concurrency and the first-wins reason semantics."""
+        """Loop-thread signal callback. SIGTERM routes straight to the exit path
+        (wedge-proof: bypasses the receiver, signal_pause, and interrupt()).
+        SIGINT: if a stop is already unwinding, apply the §1 suppression/escalation
+        gate HERE (signal_pause can wedge on the cancellation-immune interrupt());
+        otherwise enqueue for the receiver as before."""
+        if sig == signal.SIGTERM:
+            # Wedge-proof exit. Set pause state HERE so the loop's post-cancellation
+            # path persists status=paused with the right reason — the exit hook only
+            # signals the event. Bypasses the receiver/signal_pause/interrupt() chain.
+            if self.pause_reason is None:
+                self.pause_reason = "sigterm"
+            self._should_pause = True
+            fn = self._trigger_exit
+            if fn is not None:
+                fn("sigterm")
+            return
+        if self._should_pause:
+            # A stop is already unwinding. Gate the repeat gesture synchronously.
+            if self._register_gesture(kind="ctrl-c"):
+                esc = self._trigger_escalation
+                if esc is not None:
+                    esc()
+            return  # suppressed or escalated — never re-enter a wedged interrupt()
+        # First gesture: record it and enqueue for the receiver (await path).
+        self._register_gesture(kind="ctrl-c")
         send = self._sig_send
         if send is None:
             return

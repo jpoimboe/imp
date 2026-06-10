@@ -114,3 +114,34 @@ async def test_signal_receiver_survives_prompt_via_rearm() -> None:
             assert await _sigint() is True
 
             tg.cancel_scope.cancel()
+
+
+def test_dispatch_signal_escalates_after_window_with_wedged_signal_pause() -> None:
+    import signal as _sig
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+
+    # Simulate a wedged signal_pause: should_pause already set, interrupt never
+    # returns. _dispatch_signal must still detect escalation without awaiting it.
+    coord._should_pause = True
+    coord._first_gesture_at = 100.0
+    esc_fired = {"v": False}
+    coord._trigger_escalation = lambda: esc_fired.__setitem__("v", True)
+
+    t["now"] = 100.5
+    coord._dispatch_signal(_sig.SIGINT)   # within 1 s → suppressed, no escalation
+    assert esc_fired["v"] is False
+
+    t["now"] = 101.5
+    coord._dispatch_signal(_sig.SIGINT)   # >1 s, stop unwinding → escalate
+    assert esc_fired["v"] is True
+
+
+def test_dispatch_sigterm_routes_to_exit_immediately() -> None:
+    import signal as _sig
+    coord = InterruptCoordinator()
+    exited = {"v": False}
+    coord._trigger_exit = lambda reason: exited.__setitem__("v", reason)
+    coord._dispatch_signal(_sig.SIGTERM)
+    assert exited["v"] == "sigterm"       # bypasses receiver/signal_pause/interrupt()
