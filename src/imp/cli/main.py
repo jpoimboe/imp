@@ -394,31 +394,15 @@ async def _run_change_session(
                         user_chat_input_fn=_chat,
                         coordinator=coord, non_interactive=non_interactive)
             except EOFError:
-                driver.finish()
-                pause_and_exit(change, reason="ctrl-d",
-                               engine_pause_reason=coord.pause_reason)
-                _emit_paused(change, "ctrl-d")
-                return 130
+                return _finalize_paused_exit(change, driver, coord, "ctrl-d")
             except KeyboardInterrupt:
-                driver.finish()
-                pause_and_exit(change, reason="ctrl-c",
-                               engine_pause_reason=coord.pause_reason)
-                _emit_paused(change, "ctrl-c")
-                return 130
+                return _finalize_paused_exit(change, driver, coord, "ctrl-c")
 
             if coord.escalated:
-                driver.finish()
-                pause_and_exit(change, reason="force-quit",
-                               engine_pause_reason=coord.pause_reason)
-                _emit_paused(change, "force-quit")
-                return 130
+                return _finalize_paused_exit(change, driver, coord, "force-quit")
             if exit_event.is_set():
-                driver.finish()
-                reason = coord.pause_reason or "sigterm"
-                pause_and_exit(change, reason=reason,
-                               engine_pause_reason=coord.pause_reason)
-                _emit_paused(change, reason)
-                return 130
+                return _finalize_paused_exit(
+                    change, driver, coord, coord.pause_reason or "sigterm")
             assert result is not None
 
             final_state = State.load(change.state_dir)
@@ -439,12 +423,8 @@ async def _run_change_session(
                     # An interrupt paused the run but the session is not loopable
                     # (--non-interactive, or no controlling tty): exit paused,
                     # mirroring the legacy `coord.should_pause` arm (rc 130).
-                    driver.finish()
-                    reason = coord.pause_reason or "ctrl-c"
-                    pause_and_exit(change, reason=reason,
-                                   engine_pause_reason=coord.pause_reason)
-                    _emit_paused(change, reason)
-                    return 130
+                    return _finalize_paused_exit(
+                        change, driver, coord, coord.pause_reason or "ctrl-c")
                 break
 
             coord.reset()
@@ -457,31 +437,8 @@ async def _run_change_session(
                 reader_armed = bool(esc_reader._armed)
 
             at_completion = final_state.completion_pending
-            reminder_shown = False
-            line = ""
-            slash: str | None = None
-            while True:
-                line = await reply_input_fn()  # Ctrl-D → EOFError (outer arm)
-                slash = "continue" if line.strip() == "/continue" else None
-                if at_completion:
-                    if slash == "continue":
-                        break
-                    if sys.stdout.isatty():
-                        print("no step left to take input — "
-                              "/continue to finish or ctrl-d to exit"
-                              if line.strip()
-                              else "/continue to finish or ctrl-d to exit")
-                    continue
-                queued = coord.has_queued_interject()
-                if _decide_resume_action(
-                        line=line, queued=queued, slash=slash) == "reprompt":
-                    if not reminder_shown and sys.stdout.isatty():
-                        reminder_shown = True
-                        print("enter a message, /continue to resume, "
-                              "ctrl-d to exit")
-                    continue
-                break
-
+            line, slash = await _collect_resume_input(
+                reply_input_fn, coord, at_completion=at_completion)
             if slash != "continue" and line.strip():
                 coord.enqueue_interject(line)
             change.event_log().append(
@@ -494,6 +451,54 @@ async def _run_change_session(
     finally:
         status.reset()
         tg.cancel_scope.cancel()
+
+
+def _finalize_paused_exit(
+    change: Change, driver: Any, coord: Any, reason: str,
+) -> int:
+    """Finish the driver, persist the paused state (suppressing a duplicate
+    workflow_paused when the engine already emitted one), journal the pause, and
+    return rc 130. The single exit sequence shared by every interrupt/EOF/
+    SIGTERM/escalation path out of the session loop."""
+    driver.finish()
+    pause_and_exit(change, reason=reason, engine_pause_reason=coord.pause_reason)
+    _emit_paused(change, reason)
+    return 130
+
+
+async def _collect_resume_input(
+    reply_input_fn: Callable[[], Awaitable[str]],
+    coord: Any,
+    *,
+    at_completion: bool,
+) -> tuple[str, str | None]:
+    """Inner prompt loop for a paused interrupt round: re-prompt WITHOUT
+    re-entering run_change until the user submits something that resumes. Returns
+    (line, slash) at the resume decision. A bare Enter / empty-queue re-prompts;
+    at completion only /continue (or Ctrl-D → EOFError, propagated) finishes.
+    Ctrl-D raises EOFError out of reply_input_fn, propagating to the caller's
+    outer EOFError arm."""
+    reminder_shown = False
+    while True:
+        line = await reply_input_fn()  # Ctrl-D → EOFError (propagated to caller)
+        slash = "continue" if line.strip() == "/continue" else None
+        if at_completion:
+            if slash == "continue":
+                return line, slash
+            if sys.stdout.isatty():
+                print("no step left to take input — "
+                      "/continue to finish or ctrl-d to exit"
+                      if line.strip()
+                      else "/continue to finish or ctrl-d to exit")
+            continue
+        queued = coord.has_queued_interject()
+        if _decide_resume_action(line=line, queued=queued, slash=slash) == "reprompt":
+            if not reminder_shown and sys.stdout.isatty():
+                reminder_shown = True
+                print("enter a message, /continue to resume, "
+                      "ctrl-d to exit")
+            continue
+        return line, slash
 
 
 def _decide_resume_action(*, line: str, queued: bool, slash: str | None) -> str:
