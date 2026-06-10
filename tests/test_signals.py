@@ -19,12 +19,24 @@ import signal
 
 import pytest
 
-from imp.cli.signals import InterruptCoordinator
+from imp.cli.signals import InterruptCoordinator, install_process_group
 
 
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+def test_install_process_group_does_not_move_runner() -> None:
+    """install_process_group() must never relocate the *calling* process into a
+    new process group during tests. If it did, an in-process CLI test would rip
+    pytest out of make's foreground group and the runner's next tty write would
+    SIGTTOU-stop it (the intermittent `make test` hang). The autouse
+    `_no_inprocess_setpgrp` conftest fixture guarantees this; this is its canary.
+    """
+    before = os.getpgrp()
+    install_process_group()
+    assert os.getpgrp() == before
 
 
 @pytest.mark.anyio

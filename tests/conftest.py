@@ -120,6 +120,28 @@ def _sandbox_fallback_without_bwrap(
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_inprocess_setpgrp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop in-process CLI tests from backgrounding the pytest runner.
+
+    `_async_cmd_new`/`_async_cmd_resume` call `install_process_group()` ->
+    `os.setpgrp()` as their first act. In production that's a harmless no-op:
+    the shell already launched `imp` as the foreground process-group leader, so
+    setpgrp leaves it foreground. But many tests invoke those entrypoints
+    in-process (test_cli_interrupt, test_cli_view, test_cli_pause_reason,
+    test_cli_resume_from, test_esc_pty), and `make` runs pytest inside *make's*
+    foreground process group. There `os.setpgrp()` rips pytest into its own
+    BACKGROUND group; pytest's next read/write to the controlling terminal then
+    raises SIGTTIN/SIGTTOU and the kernel stops it (do_signal_stop) -- the
+    intermittent `make test` hang. CI never hit it because redirected (non-tty)
+    output can't raise SIGTTOU.
+
+    Neutralize the syscall for the whole suite. No test asserts setpgrp actually
+    runs (test_signals.py covers only the coordinator), so this is loss-free.
+    """
+    monkeypatch.setattr(os, "setpgrp", lambda: None, raising=False)
+
+
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
     """An empty 'project' directory under tmp_path."""
