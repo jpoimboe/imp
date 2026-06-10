@@ -265,9 +265,9 @@ def _complete_or_park(
 ) -> RunResult:
     """Navigation ran off the end. Normally finalize via _complete(); but an
     in-flight interrupt parks at completion instead (§3): set completion_pending,
-    leave state.step on the last completed step's successor sentinel (None would
-    auto-complete on re-entry; we use completion_pending to distinguish), persist
-    paused, emit. Re-entry — only on a submitted /continue or Ctrl-D resume —
+    leave state.step on the last completed step's name unchanged (setting it to
+    None would auto-complete on re-entry; completion_pending distinguishes the
+    two), persist paused, emit. Re-entry — only on a /continue or Ctrl-D resume —
     runs the real _complete with no dispatch and no transcript wipe."""
     if coordinator.should_pause:
         state.completion_pending = True
