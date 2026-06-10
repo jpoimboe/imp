@@ -236,3 +236,69 @@ def test_tombstone_write_is_atomic_no_temp_left(tmp_path: Path) -> None:
         names = {p.name for p in _bg_dir(ctx).iterdir()}
         assert names == {"tombstones.json"}              # streams gone, no .tmp
     anyio.run(main)
+
+
+def test_concurrent_reap_single_flip(tmp_path: Path) -> None:
+    """Two tasks entering _reap interleaved at an await point produce exactly
+    one status flip (the synchronous check-and-set holds)."""
+    async def main() -> None:
+        from imp.agents.tools.bg import _reap
+        ctx = _ctx(tmp_path)
+        out = await _spawn(ctx, "exit 9")
+        bp = ctx.background_processes[out["id"]]
+        with anyio.fail_after(10):
+            await bp.proc.wait()
+        flips: list[str] = []
+
+        async def reaper(name: str) -> None:
+            await anyio.sleep(0)            # force interleaving
+            before = bp.status
+            _reap(bp)
+            if before == "running" and bp.status == "exited":
+                flips.append(name)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(reaper, "a")
+            tg.start_soon(reaper, "b")
+        assert len(flips) == 1
+        assert bp.returncode == 9
+    anyio.run(main)
+
+
+def test_pause_during_wait_full_surface(tmp_path: Path) -> None:
+    """Double teardown around a preempted wait: interrupt-path teardown fires
+    while bash_output(wait=True) is blocked; the wait surfaces
+    ToolAborted('interrupted'), the entry is a clean tombstone, and a second
+    teardown pass is a no-op."""
+    async def main() -> None:
+        from imp.agents.tools.bg import terminate_background_processes
+        from imp.agents.tools.limits import ToolAborted
+        ctx = _ctx(tmp_path)
+
+        class _Coord:
+            should_pause = False
+        ctx.coordinator = _Coord()
+        out = await _spawn(ctx, "sleep 60")
+
+        async def _interrupt_path() -> None:
+            await anyio.sleep(0.3)
+            _Coord.should_pause = True
+            await terminate_background_processes(ctx)
+
+        # anyio wraps task-group body exceptions in ExceptionGroup; unwrap to
+        # verify the underlying ToolAborted with reason == "interrupted".
+        with pytest.raises(BaseExceptionGroup) as exc_info:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(_interrupt_path)
+                await get_registry()["bash_output"].async_invoke(
+                    ctx, {"id": out["id"], "wait": True})
+        aborted = [e for e in exc_info.value.exceptions
+                   if isinstance(e, ToolAborted)]
+        assert aborted and aborted[0].reason == "interrupted"
+        bp = ctx.background_processes[out["id"]]
+        assert bp.status == "killed" and bp.kill_reason == "interrupted"
+        # the run()-finally second pass — clean no-op
+        await terminate_background_processes(ctx)
+        r = await _read(ctx, out["id"])
+        assert r["status"] == "killed" and r["kill_reason"] == "interrupted"
+    anyio.run(main)

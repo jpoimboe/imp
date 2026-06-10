@@ -200,3 +200,21 @@ def test_teardown_race_returns_tombstone_not_read_error(tmp_path: Path) -> None:
         assert r["kill_reason"] == "interrupted"
         assert r["stdout"] == ""
     anyio.run(main)
+
+
+def test_err_stream_pages_independently_of_out(tmp_path: Path) -> None:
+    """Cursor independence: err data pages on its own cursor; out cursor
+    untouched (a which-keyed write-back regression would alias them)."""
+    async def main() -> None:
+        ctx = _ctx(tmp_path)
+        bp = _fake_bp(tmp_path, ctx, b"", status="exited", rc=0)
+        bp.err_path.write_bytes(b"e" * 60_000)
+        r1 = await _read(ctx)
+        assert r1["stderr"] == "e" * 50_000
+        assert r1["stdout"] == ""
+        assert bp.out_cursor == 0                    # untouched by err paging
+        assert bp.err_cursor == 50_000
+        r2 = await _read(ctx)
+        assert r2["stderr"] == "e" * 10_000
+        assert bp.err_cursor == 60_000
+    anyio.run(main)
