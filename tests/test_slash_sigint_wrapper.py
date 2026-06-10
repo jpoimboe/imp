@@ -70,3 +70,12 @@ async def test_out_of_band_sigint_routes_to_exit(tmp_path: Path) -> None:
         await ask_line_with_slash(
             _KbiPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
     assert coord.exit_reason == "sigint"
+
+
+@pytest.mark.anyio
+async def test_out_of_band_sigint_reraises_without_coord(tmp_path: Path) -> None:
+    # coord=None (non-interactive): the KBI must still propagate (the CLI arm
+    # finalizes), and the guard must not crash trying to call request_exit.
+    with pytest.raises(KeyboardInterrupt):
+        await ask_line_with_slash(
+            _KbiPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=None)
