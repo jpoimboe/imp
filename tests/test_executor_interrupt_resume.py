@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,26 +19,38 @@ def anyio_backend() -> str:
 
 
 def _make_change(root: Path, *, slug: str = "c", title: str = "t") -> Change:
-    import contextlib
+    """Construct a Change directly on disk without git worktrees."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
+
     src_wf = root / "imp" / "workflows" / "default"
     change_dir = root / ".imp" / "change"
-    (change_dir / "state").mkdir(parents=True, exist_ok=True)
-    (change_dir / "change.json").write_text(json.dumps(
-        {"id": slug, "title": title, "base_branch": "main"}))
+    change_dir.mkdir(parents=True, exist_ok=True)
+    (change_dir / "state").mkdir(exist_ok=True)
+    (change_dir / "change.json").write_text(json.dumps({
+        "id": slug, "title": title, "base_branch": "main",
+    }, indent=2, sort_keys=True))
+
     configured_tiers: list[str] = []
     with contextlib.suppress(Exception):
         configured_tiers = load_effective_config(
             project_root=root, control_root=root).config.tier_names()
+
     workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
     flat = workflow.flat_steps()
-    State(id=slug, step=flat[0].name if flat else None, step_attempt=0,
-          status="running", vars=dict(workflow.vars.defaults())).save(change_dir / "state")
-    change = Change(id=slug, title=title, base_branch="main",
-                    control_root=root, project_root=root, change_dir=change_dir)
-    change.event_log().append(agent_id=None, type="change_created",
-                              payload={"id": slug, "slug": change.slug, "title": title})
+    State(
+        id=slug, step=flat[0].name if flat else None, step_attempt=0,
+        status="running", vars=dict(workflow.vars.defaults()), loop_counts={},
+    ).save(change_dir / "state")
+
+    change = Change(
+        id=slug, title=title, base_branch="main",
+        control_root=root, project_root=root, change_dir=change_dir,
+    )
+    change.event_log().append(
+        agent_id=None, type="change_created",
+        payload={"id": slug, "slug": change.slug, "title": title},
+    )
     return change
 
 
@@ -46,17 +59,23 @@ def _seed_single_agent(root: Path) -> Change:
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
-        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n")
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\ngo\n"
+    )
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
         "defaults: {max_retries: 3, max_loops: 6, on_max_retries: {pause: true}}\n"
-        "phases:\n  - name: only\n    steps:\n"
-        "      - {name: w, file: agents/writer.md, tier: medium}\n")
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+    )
+    # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
     (root / "imp" / "project.yaml").write_text("workflow: default\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
-        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
+        "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
+    )
     return _make_change(root)
 
 

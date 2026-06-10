@@ -726,7 +726,7 @@ def _emit_paused_event(
     log: EventLog, reason: str, *, kind: str | None = None,
     step: str | None = None, interrupt_reason: str | None = None,
 ) -> None:
-    """Single workflow_paused emit point. `interrupt_reason` (coord.pause_reason)
+    """Central workflow_paused emit helper. `interrupt_reason` (coord.pause_reason)
     rides alongside the engine-classified `reason` when a user interrupt drove
     the pause — the live 'interrupted (esc)' marker renders from it (§2)."""
     payload: dict[str, Any] = {"reason": reason}
