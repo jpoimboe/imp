@@ -132,7 +132,17 @@ async def ask_line_with_slash(
                 # display must stay suspended while they do, or it interleaves/clobbers
                 # them before the loop re-prompts.
                 with status.suspend():
-                    line: str = await prompt.ask_async()
+                    try:
+                        line: str = await prompt.ask_async()
+                    except KeyboardInterrupt:
+                        # Out-of-band SIGINT at a prompt (kill -INT): the c-c key
+                        # binding handles typed Ctrl-C, so this is a real signal.
+                        # Route to the coordinator exit path (stop + exit paused),
+                        # then re-raise so the CLI's except-KeyboardInterrupt arm
+                        # runs pause_and_exit.
+                        if coord is not None:
+                            coord.request_exit("sigint")
+                        raise
                     if line.strip().lower() in ("exit", "quit"):
                         # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
                         # run loop's existing EOFError handler (cli/main.py) pauses.

@@ -175,6 +175,16 @@ class InterruptCoordinator:
     def set_exit_hook(self, fn: Any) -> None:
         self._trigger_exit = fn
 
+    def request_exit(self, reason: str) -> None:
+        """Route an out-of-band stop (prompt-level SIGINT, SIGTERM) to the exit
+        path — sets pause state + fires the exit event the actuator watches."""
+        if self.pause_reason is None:
+            self.pause_reason = reason
+        self._should_pause = True
+        fn = self._trigger_exit
+        if fn is not None:
+            fn(reason)
+
     @contextlib.contextmanager
     def runner_attached(self, interrupt_fn: Any) -> Iterator[None]:
         """Attach `interrupt_fn` for the duration of a single drive, then
