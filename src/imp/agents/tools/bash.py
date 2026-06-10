@@ -67,15 +67,21 @@ async def bash(
     *, run_in_background: bool = False,
 ) -> str:
     cwd_path = cwd or str(ctx.project_root)
-    env = overlay_engine_env(
-        os.environ,
-        engine_env(project_root=ctx.project_root,
-                   change_id=ctx.change_context.id if ctx.change_context else "",
-                   change_slug=ctx.change_context.slug if ctx.change_context else "",
-                   change_title=ctx.change_context.title if ctx.change_context else "",
-                   lint_command=ctx.lint_command,
-                   test_command=ctx.test_command),
+    # Engine vars come from the LIVE Change when available (top-level steps), so a
+    # mid-run rename_change is reflected immediately; subagents have no live Change
+    # (and no rename authority) and fall back to the frozen change_context snapshot.
+    # change_context is a render-time snapshot that rename_change never updates, so
+    # reading it here would leak a stale (empty name-on-intent) slug/title.
+    src = ctx.change or ctx.change_context
+    eng = engine_env(
+        project_root=ctx.project_root,
+        change_id=src.id if src else "",
+        change_slug=src.slug if src else "",
+        change_title=src.title if src else "",
+        lint_command=ctx.lint_command,
+        test_command=ctx.test_command,
     )
+    env = overlay_engine_env(os.environ, eng)
     # POSIX: start_new_session=True makes the child a new session leader so
     # SIGTERM to the PG affects the whole tree. Windows: this kwarg is ignored
     # and signal handling differs — out of V1 scope (we ship POSIX-first).
@@ -86,7 +92,7 @@ async def bash(
     # anyio.open_process accepts stdlib subprocess constants for stdin/stdout/
     # stderr; PIPE is the documented way to capture both streams.
     policy = ctx.sandbox_policy
-    argv = (build_sandbox_argv(command, cwd=cwd_path, policy=policy)
+    argv = (build_sandbox_argv(command, cwd=cwd_path, policy=policy, engine_env=eng)
             if policy is not None else ["sh", "-c", command])
     if run_in_background:
         if not ctx.background_enabled:

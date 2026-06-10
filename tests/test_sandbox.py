@@ -40,26 +40,26 @@ def _policy(**over) -> SandboxPolicy:
 
 def test_inactive_policy_returns_bare_argv():
     argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
-                              policy=_policy(active=False))
+                              policy=_policy(active=False), engine_env={})
     assert argv == ["sh", "-c", "echo hi"]
 
 
 def test_active_policy_wraps_with_bwrap():
     argv = build_sandbox_argv("echo hi", cwd="/ctl/.imp/worktrees/abc",
-                              policy=_policy())
+                              policy=_policy(), engine_env={})
     assert argv[0] == "bwrap"
     assert argv[-3:] == ["sh", "-c", "echo hi"]
     assert argv[1:4] == ["--ro-bind", "/", "/"]   # ro-floor first
 
 
 def test_worktree_and_git_are_rw_bound_at_real_path():
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy()))
+    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--bind /ctl/.imp/worktrees/abc /ctl/.imp/worktrees/abc" in argv
     assert "--bind /ctl/.git /ctl/.git" in argv
 
 
 def test_git_escape_vectors_are_remasked_ro_including_siblings():
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy()))
+    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--ro-bind /ctl/.git/hooks /ctl/.git/hooks" in argv
     assert "--ro-bind /ctl/.git/config /ctl/.git/config" in argv
     assert "--ro-bind /ctl/.git/worktrees/sib/config.worktree" in argv  # sibling (M1)
@@ -68,14 +68,14 @@ def test_git_escape_vectors_are_remasked_ro_including_siblings():
 def test_secret_masks_emitted_after_every_bind_even_overlapping_extra_writable():
     # L1-r5: a mask placed BEFORE an overlapping extra_writable would be clobbered.
     p = _policy(extra_writable=("/home/u",), secret_dirs=("/home/u/.ssh",))
-    flat = build_sandbox_argv("x", cwd="/wt", policy=p)
+    flat = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
     i_writable = flat.index("/home/u")                      # the extra_writable bind dest
     i_tmpfs = flat.index("--tmpfs")
     assert i_tmpfs > i_writable, "secret --tmpfs must come AFTER extra_writable bind"
 
 
 def test_real_tmp_is_bound_rw_early():
-    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy())
+    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={})
     flat = " ".join(argv)
     # Real /tmp is bound rw (identity bind).
     assert "--bind /tmp /tmp" in flat
@@ -96,14 +96,43 @@ def test_real_tmp_is_bound_rw_early():
 
 
 def test_clearenv_and_setenv_allowlist():
-    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy()))
+    argv = " ".join(build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={}))
     assert "--clearenv" in argv
     assert "--setenv IMP_PROJECT_ROOT /ctl/.imp/worktrees/abc" in argv
     assert "--setenv TMPDIR /tmp" in argv
 
 
+def test_live_engine_env_supersedes_frozen_imp_vars():
+    # Regression (name-on-intent + sandbox): a Change is created with an empty
+    # title, so the policy is frozen with IMP_CHANGE_SLUG="" at run start. After
+    # rename_change the live per-spawn engine_env carries the real slug;
+    # build_sandbox_argv sources IMP_* from it authoritatively, so a slug-dependent
+    # gate never sees the frozen "" (which would fire `${IMP_CHANGE_SLUG:?}`).
+    pol = _policy(setenv=(("PATH", "/usr/bin"),
+                          ("IMP_CHANGE_SLUG", ""),
+                          ("TMPDIR", "/tmp")))
+    argv = build_sandbox_argv(
+        "x", cwd="/wt", policy=pol,
+        engine_env={"IMP_CHANGE_SLUG": "2026-06-10-live-mode-log-polish",
+                    "PYTHONPATH": "/wt/src"})
+    assert argv.count("IMP_CHANGE_SLUG") == 1       # not duplicated
+    i = argv.index("IMP_CHANGE_SLUG")
+    assert argv[i + 1] == "2026-06-10-live-mode-log-polish"   # fresh value wins
+    assert "PYTHONPATH" not in argv                 # non-IMP_ key stays out (prefix allowlist)
+
+
+def test_new_imp_var_flows_through_without_code_change():
+    # Future-proofing: the IMP_ prefix is the allowlist, so a brand-new engine var
+    # reaches the sandbox with no edit to build_sandbox_argv.
+    argv = build_sandbox_argv(
+        "x", cwd="/wt", policy=_policy(),
+        engine_env={"IMP_FUTURE_VAR": "v", "SOME_OTHER": "no"})
+    assert "--setenv IMP_FUTURE_VAR v" in " ".join(argv)
+    assert "SOME_OTHER" not in argv
+
+
 def test_no_unshare_pid_and_no_die_with_parent():
-    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy())
+    argv = build_sandbox_argv("x", cwd="/wt", policy=_policy(), engine_env={})
     assert "--unshare-pid" not in argv      # B.9.1
     assert "--die-with-parent" not in argv  # B.9.2 (H-A)
     assert "--new-session" not in argv      # B.9.3 (F-8)
@@ -111,15 +140,15 @@ def test_no_unshare_pid_and_no_die_with_parent():
 
 
 def test_network_off_adds_unshare_net():
-    on = build_sandbox_argv("x", cwd="/wt", policy=_policy(network=True))
-    off = build_sandbox_argv("x", cwd="/wt", policy=_policy(network=False))
+    on = build_sandbox_argv("x", cwd="/wt", policy=_policy(network=True), engine_env={})
+    off = build_sandbox_argv("x", cwd="/wt", policy=_policy(network=False), engine_env={})
     assert "--unshare-net" not in on
     assert "--unshare-net" in off
 
 
 def test_chdir_is_cwd():
     argv = " ".join(build_sandbox_argv("x", cwd="/ctl/.imp/worktrees/abc/sub",
-                                       policy=_policy()))
+                                       policy=_policy(), engine_env={}))
     assert "--chdir /ctl/.imp/worktrees/abc/sub" in argv
 
 

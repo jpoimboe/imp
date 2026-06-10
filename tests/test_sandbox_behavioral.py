@@ -309,7 +309,8 @@ def test_network_off_adds_unshare_net() -> None:
         network=False,  # <-- network isolation
         note="",
     )
-    argv = build_sandbox_argv("curl example.com", cwd="/tmp/fake-wt", policy=pol)
+    argv = build_sandbox_argv("curl example.com", cwd="/tmp/fake-wt", policy=pol,
+                              engine_env={})
     assert "--unshare-net" in argv, (
         f"--unshare-net missing from argv when network=False: {argv}"
     )
@@ -347,6 +348,64 @@ def test_gate_writing_in_its_cwd_succeeds() -> None:
         assert (root / "gate_out.txt").exists(), (
             "gate_out.txt not found on host — rw bind did not persist write"
         )
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_gate_sees_post_rename_slug_not_frozen_empty() -> None:
+    """Regression: name-on-intent freezes the policy with IMP_CHANGE_SLUG="" at run
+    start; after rename_change the gate's fresh env_extra carries the real slug.
+    Reproduces the dogfood failure where spec-commit-verify.sh's
+    `${IMP_CHANGE_SLUG:?not set by engine}` fired inside the bwrap --clearenv jail.
+    """
+    import dataclasses
+
+    from imp.engine.gates import run_script
+    from imp.engine.types import Pause, SourceLoc, Step
+
+    root = _make_root("imp-test-slug-")
+    try:
+        # Policy frozen with an EMPTY slug, exactly as _build_sandbox_policy bakes it
+        # at run start before the agent has named the Change.
+        pol = _active_policy(root)
+        pol = dataclasses.replace(pol, setenv=(*pol.setenv, ("IMP_CHANGE_SLUG", "")))
+        step = Step(
+            name="g", phase="p", kind="script", rules=(), on_max_retries=Pause(),
+            max_loops=1, source=SourceLoc(file=Path(__file__), line=1),
+            command=': "${IMP_CHANGE_SLUG:?IMP_CHANGE_SLUG not set by engine}"; '
+                    'printf %s "$IMP_CHANGE_SLUG"',
+            timeout_seconds=30,
+        )
+        # The fresh per-spawn engine_env the executor builds from the renamed Change.
+        result = run_script(step, cwd=root, policy=pol,
+                            env_extra={"IMP_CHANGE_SLUG": "2026-06-10-live-mode-log-polish"})
+        assert result["exit"] == 0, f"gate exited {result['exit']}: {result}"
+        assert result["stdout"] == "2026-06-10-live-mode-log-polish"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_bash_tool_uses_live_change_slug_not_stale_snapshot() -> None:
+    """Regression: the bash tool must read IMP_CHANGE_SLUG from the LIVE Change, not
+    the frozen change_context snapshot that rename_change never updates. Without the
+    fix the agent's own bash sees the empty name-on-intent slug inside the sandbox.
+    """
+    import types as _t
+
+    root = _make_root("imp-test-bash-slug-")
+    try:
+        pol = _active_policy(root)
+        ctx = _ctx(root, pol)
+        # change_context = the pre-rename snapshot (empty slug); ctx.change = the
+        # live, renamed Change. The bash tool must prefer the live one.
+        ctx.change_context = ChangeContext(
+            id="2026-06-10-x", slug="", title="",
+            project_root=root, workflow_dir=root / ".imp" / "wf")
+        ctx.change = _t.SimpleNamespace(
+            id="2026-06-10-x", slug="2026-06-10-renamed", title="renamed")
+        out = _bash(ctx, 'printf %s "$IMP_CHANGE_SLUG"')
+        assert out["returncode"] == 0, out
+        assert out["stdout"] == "2026-06-10-renamed"
     finally:
         shutil.rmtree(root, ignore_errors=True)
 

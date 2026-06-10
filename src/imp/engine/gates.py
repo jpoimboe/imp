@@ -68,7 +68,11 @@ def run_script(
     assert step.command is not None, "script step must have a command"
     env = overlay_engine_env(os.environ, env_extra or {})
     run_cwd = step.cwd or str(cwd)
-    argv = (build_sandbox_argv(step.command, cwd=run_cwd, policy=policy)
+    # The policy's setenv was frozen at run start (possibly with an empty
+    # name-on-intent slug), so the live engine_env (env_extra) is the authoritative
+    # source that refreshes IMP_* inside the bwrap --clearenv jail.
+    argv = (build_sandbox_argv(step.command, cwd=run_cwd, policy=policy,
+                               engine_env=env_extra or {})
             if policy is not None else ["sh", "-c", step.command])
     proc = subprocess.Popen(
         argv, cwd=run_cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

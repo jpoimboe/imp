@@ -122,6 +122,48 @@ def test_run_script_wraps_with_active_policy(tmp_path, monkeypatch) -> None:
     assert captured["argv"][0] == "bwrap"
 
 
+def test_run_script_refreshes_stale_imp_slug_in_sandbox(tmp_path, monkeypatch) -> None:
+    # Regression: the sandbox policy is frozen once at run start with an empty
+    # name-on-intent slug; a post-rename gate passes a fresh env_extra. run_script
+    # must thread env_extra into the sandbox so the gate sees the real slug, not "".
+    import imp.engine.gates as gatesmod
+    from imp.engine.sandbox import SandboxPolicy
+
+    captured: dict[str, object] = {}
+    real_popen = gatesmod.subprocess.Popen
+
+    class FakePopen:
+        def __init__(self, argv, **kw):
+            captured["argv"] = argv
+            self._inner = real_popen(["true"], **{k: v for k, v in kw.items()
+                                                  if k in ("cwd", "env", "start_new_session",
+                                                           "stdout", "stderr", "text")})
+
+        def communicate(self, timeout=None):
+            return self._inner.communicate(timeout=timeout)
+
+        @property
+        def returncode(self):
+            return self._inner.returncode
+
+        @property
+        def pid(self):
+            return self._inner.pid
+
+    monkeypatch.setattr(gatesmod.subprocess, "Popen", FakePopen)
+    pol = SandboxPolicy(active=True, worktree=str(tmp_path),
+                        git_common_dir=str(tmp_path), git_ro_remask=(),
+                        writable_caches=(), extra_readable=(), extra_writable=(),
+                        secret_dirs=(), secret_files=(),
+                        setenv=(("IMP_CHANGE_SLUG", ""),), network=True, note="")
+    step = _script_step("echo hi")
+    run_script(step, cwd=tmp_path, policy=pol,
+               env_extra={"IMP_CHANGE_SLUG": "2026-06-10-real"})
+    argv = captured["argv"]
+    assert argv.count("IMP_CHANGE_SLUG") == 1
+    assert argv[argv.index("IMP_CHANGE_SLUG") + 1] == "2026-06-10-real"
+
+
 def test_run_script_timeout_kills_group(tmp_path) -> None:
     # A gate exceeding its timeout is killed; no orphan. Bare path (no policy).
     from imp.engine.gates import run_script

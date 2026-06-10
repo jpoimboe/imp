@@ -40,9 +40,27 @@ class SandboxPolicy:
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
 
 
-def build_sandbox_argv(command: str, *, cwd: str, policy: SandboxPolicy) -> list[str]:
+def build_sandbox_argv(
+    command: str, *, cwd: str, policy: SandboxPolicy,
+    engine_env: Mapping[str, str],
+) -> list[str]:
     """Return the argv to spawn `command`. When the policy is active, wrap with
-    bwrap per spec §B.2 (fixed flag order); otherwise the bare ["sh","-c",cmd]."""
+    bwrap per spec §B.2 (fixed flag order); otherwise the bare ["sh","-c",cmd].
+
+    `engine_env` is the LIVE, per-spawn engine_env (an `engine_env()` result) and
+    is the single source of truth for the sandbox's `IMP_*` vars: every IMP_*-
+    prefixed key it carries is emitted via --setenv, authoritatively superseding
+    whatever was baked into `policy.setenv` at run start. The policy is resolved
+    once per run (the stat-once design), but name-on-intent makes IMP_CHANGE_SLUG/
+    IMP_CHANGE_TITLE mutate mid-run on a rename — so a gate or tool spawned after
+    the rename MUST see the live values, not the empty ones frozen at run start.
+
+    Required (not optional) on purpose: a sandboxed spawn without its live engine
+    env is always a bug, so every call site — present and future — is forced to
+    supply it rather than silently inheriting a stale snapshot. The IMP_ PREFIX is
+    the allowlist: any new IMP_* var flows through with no edit here, while non-
+    IMP_ engine keys (e.g. PYTHONPATH) stay out of the sandbox, matching
+    `_build_setenv`'s IMP_-only engine allowlist."""
     if not policy.active:
         return ["sh", "-c", command]
 
@@ -77,9 +95,17 @@ def build_sandbox_argv(command: str, *, cwd: str, policy: SandboxPolicy) -> list
     argv += ["--proc", "/proc", "--dev", "/dev"]
     # 12. chdir
     argv += ["--chdir", cwd]
-    # 13. env allowlist
+    # 13. env allowlist. The IMP_* slice comes authoritatively from the live
+    # per-spawn engine_env (prefix allowlist) so a post-rename slug/title wins over
+    # the value frozen into policy.setenv at run start (name-on-intent). Dict
+    # preserves first-seen order; reassigning a key updates in place, so no
+    # duplicate --setenv is emitted.
+    setenv = dict(policy.setenv)
+    for k, v in engine_env.items():
+        if k.startswith("IMP_"):
+            setenv[k] = v
     argv += ["--clearenv"]
-    for k, v in policy.setenv:
+    for k, v in setenv.items():
         argv += ["--setenv", k, v]
     # 14. namespaces — NO --unshare-pid / --die-with-parent / --new-session (B.9)
     argv += ["--unshare-user", "--unshare-ipc", "--unshare-uts"]
