@@ -38,6 +38,13 @@ if TYPE_CHECKING:
 
 WRITE_CLASS_TOOLS = frozenset({"write_file", "edit_file", "bash"})
 READ_CLASS_TOOLS = frozenset({"read_file", "grep", "glob"})
+# Per-tool input fields that pick a window/rendering of the same underlying
+# source — excluded from the read-progress key (see observe()).
+_PRESENTATION_KNOBS = {
+    "read_file": frozenset({"offset", "limit"}),
+    "grep": frozenset({"output_mode", "head_limit", "before", "after",
+                       "context"}),
+}
 DEFAULT_REPEAT_K = 3
 DEFAULT_NOPROGRESS_N = 6
 
@@ -138,15 +145,17 @@ class LoopGuard:
                 # new information and must not count. Record every novel key this
                 # turn (don't early-return) so each is "seen" next turn; a stuck
                 # agent re-reading seen targets then accumulates no_progress.
-                # read_file has offset/limit (tool-ergonomics spec): different
-                # windows of the same file must not each count as novel
-                # information — a stuck agent could slide the window
-                # (offset 1, 2, 3, ...) forever. Key reads by path: drop the
-                # range fields before hashing.
+                # Presentation knobs are dropped from the key (tool-ergonomics
+                # spec): different windows/renderings of the SAME source must
+                # not each count as novel information — a stuck agent could
+                # slide read_file's window (offset 1, 2, 3, ...) or rotate
+                # grep's head_limit/context forever. Identity fields (path;
+                # pattern/glob/case_insensitive) stay: they change WHAT is
+                # read, not how much of it is shown.
                 inp = t.input
-                if t.name == "read_file":
-                    inp = {k: v for k, v in inp.items()
-                           if k not in ("offset", "limit")}
+                drop = _PRESENTATION_KNOBS.get(t.name)
+                if drop:
+                    inp = {k: v for k, v in inp.items() if k not in drop}
                 key = f"{t.name}|{json.dumps(inp, sort_keys=True, default=str)}"
                 if key not in self._seen_read_keys:
                     self._seen_read_keys.add(key)

@@ -214,3 +214,46 @@ def test_read_file_window_slide_is_not_progress() -> None:
             break
     assert last is not None
     assert getattr(last, "kind", "") == "no_progress"
+
+
+def test_grep_presentation_knob_rotation_is_not_progress() -> None:
+    # grep gained output_mode/head_limit/before/after/context (tool-ergonomics
+    # spec): rotating presentation knobs over the SAME search must not each
+    # count as novel information — the analog of read_file's window slide.
+    # Identity fields (pattern/path/glob/case_insensitive) stay in the key.
+    def turn(n: int) -> TurnRecord:
+        return TurnRecord(
+            assistant_text="", has_complete_step=False,
+            tools=[ToolOutcome(name="grep", tool_use_id=f"g{n}",
+                               input={"pattern": "needle", "path": ".",
+                                      "head_limit": n,
+                                      "context": n % 3,
+                                      "output_mode": "content"},
+                               is_error=False)])
+
+    g = LoopGuard()
+    assert g.observe(turn(1)) is None  # novel search -> progress
+    last = None
+    for i in range(2, DEFAULT_NOPROGRESS_N + 2):
+        last = g.observe(turn(i))      # same search, rotated knobs
+        if last is not None:
+            break
+    assert last is not None
+    assert getattr(last, "kind", "") == "no_progress"
+
+
+def test_grep_different_search_is_progress() -> None:
+    # The identity fields must SURVIVE normalization: a different pattern,
+    # path, glob, or case_insensitive is a genuinely different search.
+    def turn(n: int, **inp: object) -> TurnRecord:
+        return TurnRecord(
+            assistant_text="", has_complete_step=False,
+            tools=[ToolOutcome(name="grep", tool_use_id=f"g{n}",
+                               input=inp, is_error=False)])
+
+    g = LoopGuard()
+    assert g.observe(turn(1, pattern="a")) is None
+    assert g.observe(turn(2, pattern="b")) is None
+    assert g.observe(turn(3, pattern="a", glob="*.py")) is None
+    assert g.observe(turn(4, pattern="a", case_insensitive=True)) is None
+    assert g.observe(turn(5, pattern="a", path="src")) is None
