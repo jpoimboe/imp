@@ -29,8 +29,31 @@ OUTPUT_TRUNCATION_MARKER = "\n... [output truncated at 50 KB] ..."
 # --- Watchdog / teardown timing (distinct from HEADLESS_RETRY_CEILING_SECONDS,
 # backoff.py:17, which is also 1800s but a cumulative-backoff cap) -----------
 TOOL_WALLCLOCK_TIMEOUT_S = 1800.0        # B.1: per-tool-call deadline (30 min)
-AGENT_INACTIVITY_TIMEOUT_S = 1800.0      # B.2: per-agent no-events window (30 min)
+# F4 coupling: AGENT_INACTIVITY_TIMEOUT_S must stay > TOOL_WALLCLOCK_TIMEOUT_S
+# with >= 300 s margin. Post-heartbeat, a tool's watchdog window opens at the
+# PREVIOUS heartbeat; with the post-API heartbeat that is at worst the start
+# of the turn's tool phase, so the margin is scheduling/event-plumbing
+# headroom (without the post-API heartbeat it would have to absorb full
+# model-API latency). Either way, at zero margin a B.1-max foreground tool
+# trips the watchdog FIRST and dies as a `stalled` config error instead of
+# returning ToolAborted("timed-out").
+# Change together; tests/test_tool_limits.py pins the relationship.
+AGENT_INACTIVITY_TIMEOUT_S = 2100.0      # B.2: per-activity no-events window
 PROCESS_KILL_GRACE_S = 4.0               # C-ii: SIGTERM -> wait -> SIGKILL grace
+
+# --- Background execution (bg.py) -------------------------------------------
+# Per-stream FILE-SIZE ceiling for background process output. A breach is a
+# KILL-POLICY TRIGGER (the sweep kills the process group), NOT a disk ceiling:
+# worst-case disk = write rate x longest inter-sweep gap (the model-API call).
+# Deliberately NOT aliased to FILE_READ_CAP_BYTES — that is a *read* bound;
+# coupling them would let a future read-cap bump silently change kill policy.
+BG_STREAM_FILE_CAP_BYTES = 5_000_000
+# F4 coupling: BG_WAIT_MAX_S must stay WELL UNDER AGENT_INACTIVITY_TIMEOUT_S
+# (>= 300 s margin) — each completed bash_output(wait=True) is a tool
+# completion => heartbeat => window reset, so chained waits are safe, but the
+# budget must leave room for the same turn's remaining latency. Change
+# together; tests/test_tool_limits.py pins the relationship.
+BG_WAIT_MAX_S = 1200.0                   # 20 min wait budget per bash_output call
 
 # --- Control-dir + VCS exclusion (structured nav tools only) ----------------
 EXCLUDED_DIRS = frozenset({".imp", ".git"})

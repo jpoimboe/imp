@@ -32,6 +32,21 @@ class ToolContext:
     model_name: str = ""
     parent_transcript_dir: Path | None = None
     running_processes: list[Any] = field(default_factory=list)
+    # Background processes (bg.py): id -> BgProc, invocation-scoped. Registered
+    # ONLY here — never on running_processes: that registry is drained by
+    # terminate_running_processes on interrupt with the caller emitting
+    # tool_killed from the result; routing a background proc through it would
+    # produce the wrong kill_reason, no tombstone, and a spurious tool_killed.
+    background_processes: dict[str, Any] = field(default_factory=dict)
+    # Background-execution opt-in. Only providers that wire the FULL bg
+    # surface (bash_output/bash_kill injection, _sweep_bg sites, teardown in
+    # interrupt + run()-finally) may set this. claude_code/codex expose the
+    # registry bash through MCP wrapping without any of that wiring — an
+    # unguarded spawn there is a process the agent can never read, stop, or
+    # sweep, leaking past the invocation (the exact trap the atomic
+    # capability-set rationale in _build_tools names).
+    background_enabled: bool = False
+    _bg_counter: int = 0
     # The change being processed; used by subagent dispatch to propagate slug/title.
     change_context: Any = None
     # Live State of the running Change; used by the subagent-authority guard
@@ -89,6 +104,13 @@ class ToolContext:
     def next_subagent_invocation_id(self) -> int:
         self._subagent_counter += 1
         return self._subagent_counter
+
+    def next_bg_id(self) -> str:
+        """"bg1", "bg2", ... — per-invocation. bg.py seeds _bg_counter from the
+        scratch dir on resume so a post-resume spawn never shadows a persisted
+        tombstone (see bg._seed_counter)."""
+        self._bg_counter += 1
+        return f"bg{self._bg_counter}"
 
     def resolve_path(self, path: str) -> Path:
         """Map a worktree-RELATIVE path under project_root, enforcing containment.

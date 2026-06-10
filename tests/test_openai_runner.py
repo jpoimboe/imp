@@ -21,6 +21,7 @@ from imp.agents.transcript import Transcript
 from imp.engine.state import InMemoryEventLog
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
 from imp.providers.openai import OpenAIAgentRunner
+from tests._events import control_events
 from tests.openai_fakes import (
     FakeResponsesClient,
     resp_function_call,
@@ -99,7 +100,7 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
     assert "user_message" in log_types
     assert "llm_response" in log_types
     # audit events are NOT yielded any more — only control signals
-    assert [e["type"] for e in yielded] == ["agent_output"]
+    assert [e["type"] for e in control_events(yielded)] == ["agent_output"]
     resp = next(e for e in log.read() if e["type"] == "llm_response")
     assert "raw" in resp["payload"]
     assert resp["agent_id"] == "step:p/s"

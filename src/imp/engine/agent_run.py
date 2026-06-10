@@ -273,36 +273,58 @@ async def drive_invocation(
     stall = {"hit": False}
     attach = (coordinator.runner_attached(runner.interrupt)
               if coordinator is not None else contextlib.nullcontext())
+    gen = runner.run(invocation)
     try:
-        with attach:
-            gen = runner.run(invocation)
-            async for event in _pull_with_inactivity_watchdog(
-                    gen, runner=runner, stall=stall):
-                if emit_events and log is not None:
-                    log.append(agent_id=invocation.agent_id,
-                               type=event["type"], payload=event.get("payload", {}))
-                if event["type"] == "agent_output":
-                    agent_output = event["payload"]
-                if event["type"] == "error":
-                    payload = event.get("payload") or {}
-                    category = payload.get("category", "unknown")
-                    kind = payload.get("kind")
-                    retry_after = (payload.get("detail") or {}).get("retry_after_seconds")
-                    decision = error_policy.decide(
-                        category, prior_backoff_attempts=prior_backoff_attempts,
-                        hint_delay_seconds=retry_after)
-                    if isinstance(decision, error_policy.Pause):
-                        return AgentRunResult(None, True, False, True, None,
+        try:
+            with attach:
+                async for event in _pull_with_inactivity_watchdog(
+                        gen, runner=runner, stall=stall):
+                    if event["type"] == "tool_heartbeat":
+                        # Watchdog-only event: consumed-and-dropped BEFORE both
+                        # consumers. Not appended (one per tool call would bloat
+                        # the log and feed an unknown type to NarrativeBuilder
+                        # and replay readers); NOT a pause point (pausing here
+                        # would return mid-assistant-turn, abandoning the
+                        # generator between tools with a dangling tool_use in
+                        # the transcript).
+                        continue
+                    if emit_events and log is not None:
+                        log.append(agent_id=invocation.agent_id,
+                                   type=event["type"],
+                                   payload=event.get("payload", {}))
+                    if event["type"] == "agent_output":
+                        agent_output = event["payload"]
+                    if event["type"] == "error":
+                        payload = event.get("payload") or {}
+                        category = payload.get("category", "unknown")
+                        kind = payload.get("kind")
+                        retry_after = (payload.get("detail") or {}).get(
+                            "retry_after_seconds")
+                        decision = error_policy.decide(
+                            category, prior_backoff_attempts=prior_backoff_attempts,
+                            hint_delay_seconds=retry_after)
+                        if isinstance(decision, error_policy.Pause):
+                            return AgentRunResult(None, True, False, True, None,
+                                                  ErrorInfo(category, kind))
+                        if isinstance(decision, error_policy.RetryWithBackoff):
+                            return AgentRunResult(None, True, False, False,
+                                                  decision.delay_seconds,
+                                                  ErrorInfo(category, kind))
+                        # RetryNow (agent_output_missing today)
+                        return AgentRunResult(None, True, False, False, None,
                                               ErrorInfo(category, kind))
-                    if isinstance(decision, error_policy.RetryWithBackoff):
-                        return AgentRunResult(None, True, False, False,
-                                              decision.delay_seconds,
-                                              ErrorInfo(category, kind))
-                    # RetryNow (agent_output_missing today)
-                    return AgentRunResult(None, True, False, False, None,
-                                          ErrorInfo(category, kind))
-                if coordinator is not None and coordinator.should_pause:
-                    return AgentRunResult(None, False, True, False, None)
+                    if coordinator is not None and coordinator.should_pause:
+                        return AgentRunResult(None, False, True, False, None)
+        finally:
+            # Close the generator on EVERY exit — the error/retry return, the
+            # pause return, SubagentSuspended/AwaitingUserInput — so run()'s
+            # finally (SDK client close + background-process teardown) runs
+            # NOW, before any re-drive of the same invocation, not at
+            # nondeterministic GC finalization. The retried invocation's
+            # namespace-reuse safety (bg counter seeding) depends on attempt
+            # 1's teardown completing first.
+            with contextlib.suppress(Exception):
+                await gen.aclose()
     except SubagentSuspended:
         # A nested subagent paused; unwind this drive as paused too.
         return AgentRunResult(None, False, True, False, None)

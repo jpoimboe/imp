@@ -15,6 +15,7 @@ tool_result, runner_warning, tool_killed) are written via EventLog.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import inspect
 import json
@@ -25,6 +26,7 @@ from typing import Any, cast
 import anyio
 
 from imp.agents.classify import ResumeState, classify_resume
+from imp.agents.dispatch import TurnState, dispatch_one_tool_use
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
 from imp.agents.runner import (
     AgentInvocation,
@@ -36,11 +38,11 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import dispatch_task, make_task_tool, raise_if_suspended
+from imp.agents.subagents import make_task_tool, raise_if_suspended
 from imp.agents.tools import Tool, get_registry
-from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
+from imp.agents.tools import bg as _bg
+from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
-from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.load_skill import make_load_skill_tool
 from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user_tool
 from imp.agents.transcript import (
@@ -50,7 +52,6 @@ from imp.agents.transcript import (
     resolve_wait_for_user_on_resume,
 )
 from imp.engine.agent_run import deliver_interject
-from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
@@ -150,6 +151,13 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     out["load_skill"] = make_load_skill_tool()
     if "wait_for_user" in invocation.agent_def.tools:
         out["wait_for_user"] = make_wait_for_user_tool()
+    if "bash" in invocation.agent_def.tools:
+        # Auto-granted with bash (precedent: load_skill injection):
+        # run_in_background is a bash PARAMETER, so an agent with bash but no
+        # read/kill tool is a trap — a backgrounded process it can never see
+        # or stop. The capability set must be atomic.
+        out["bash_output"] = reg["bash_output"]
+        out["bash_kill"] = reg["bash_kill"]
     return out
 
 
@@ -440,6 +448,14 @@ class OpenAIAgentRunner:
                 yield perr.make_error_event(classified)
                 return
         finally:
+            if self._ctx is not None:
+                # None guard: self._ctx is None-initialized and assigned
+                # mid-_run_loop, AFTER the _build_tools/check_web_capability
+                # raise sites — the finally runs with None when the generator
+                # is aclosed before its first pull or those early raises fire.
+                from imp.agents.tools.bg import terminate_background_processes
+                with contextlib.suppress(Exception):
+                    await terminate_background_processes(self._ctx)
             await self._close_client()
 
     async def _run_loop(
@@ -461,6 +477,7 @@ class OpenAIAgentRunner:
             model_name=invocation.model_name,
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
+            background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
         )
         ctx.change_context = invocation.change_context
         ctx.change_state = invocation.change_state
@@ -617,6 +634,12 @@ class OpenAIAgentRunner:
                 raw=raw, usage=raw.get("usage") or {},
                 stop_reason=_openai_stop_reason(raw))
             _emit_openai_web_events(raw, elog, aid)
+            # Post-API sweep + heartbeat (Decision 10): the model-API call is
+            # the longest awaitable with no registry access — sweeping here
+            # narrows the cap's routine inter-sweep gap to API latency. The
+            # heartbeat decouples the watchdog margin from API latency.
+            await _bg._sweep_bg(ctx)
+            yield {"type": "tool_heartbeat", "payload": {}}
 
             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
             if not tool_uses:
@@ -665,100 +688,23 @@ class OpenAIAgentRunner:
                 return
 
             tool_results: list[ToolResultBlock] = []
-            ceiling_tripped = False
+            turn = TurnState(tool_calls_used=tool_calls_used)
             for tu in tool_uses:
-                if ceiling is not None and tool_calls_used >= ceiling:
-                    # Backfill error tool_results to preserve transcript invariant.
-                    err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
-                    block = ToolResultBlock(tu.id, err_text, is_error=True)
-                    tool_results.append(block)
-                    elog.append_tool_result(agent_id=aid, block=block)
-                    ceiling_tripped = True
-                    continue
-                tool_calls_used += 1
-
-                tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
-
-                # task special-case: bypasses the sync Tool.invoke path
-                # entirely — go straight to the async dispatcher.
-                # Use the persisted tool_call event id for durable parent link.
-                if tu.name == "task":
-                    try:
-                        result_str = await dispatch_task(
-                            ctx, tu.input["subagent_name"], tu.input["task_description"],
-                            tool_call_event_id=tc_ev["id"],
-                            tier=tu.input.get("tier"),
-                        )
-                    except Exception as e:
-                        raise_if_suspended(e)
-                        err_text = f"{type(e).__name__}: {e}"
-                        block = ToolResultBlock(tu.id, err_text, is_error=True)
-                        tool_results.append(block)
-                        elog.append_tool_result(agent_id=aid, block=block)
-                        continue
-                    block = ToolResultBlock(tu.id, result_str)
-                    tool_results.append(block)
-                    elog.append_tool_result(agent_id=aid, block=block)
-                    continue
-
-                tool = tools.get(tu.name)
-                if tool is None:
-                    msg = f"unknown tool {tu.name!r}"
-                    block = ToolResultBlock(tu.id, msg, is_error=True)
-                    tool_results.append(block)
-                    elog.append_tool_result(agent_id=aid, block=block)
-                    continue
-                try:
-                    raw_result = await tool.async_invoke(ctx, tu.input)
-                except StepComplete as sc:
-                    try:
-                        validate_agent_output(sc.args_payload, invocation.agent_def.output_schema)
-                    except Exception as ve:
-                        yield {"type": "error", "payload": {
-                            "category": "agent_output_missing",
-                            "kind": "output_validation",
-                            "message": str(ve),
-                        }}
-                        return
-                    yield {"type": "agent_output", "payload": sc.args_payload}
+                terminal = await dispatch_one_tool_use(
+                    ctx=ctx, elog=elog, aid=aid, invocation=invocation,
+                    tools=tools, tu=tu, tool_results=tool_results,
+                    state=turn, ceiling=ceiling)
+                if terminal is not None:
+                    yield terminal
                     return
-                except FatalToolError as fte:
-                    yield {"type": "error", "payload": {
-                        "category": "config",
-                        "kind": "fatal_tool_error",
-                        "tool": tu.name,
-                        "message": str(fte),
-                    }}
-                    return
-                except AwaitingUserInput:
-                    # Headless wait_for_user pause: unwind out of run() (like
-                    # SubagentSuspended), not an is_error tool_result. The
-                    # assistant message bearing this tool_use is already appended,
-                    # so the transcript ends at the dangling wait_for_user tool_use.
-                    raise
-                except Exception as e:
-                    err_text = f"{type(e).__name__}: {e}"
-                    block = ToolResultBlock(tu.id, err_text, is_error=True)
-                    tool_results.append(block)
-                    elog.append_tool_result(agent_id=aid, block=block)
-                    continue
-
-                content_str = (raw_result if isinstance(raw_result, str)
-                               else json.dumps(raw_result, default=str))
-                if tu.name == "bash":
-                    # Detect a kill so the log carries a tool_killed event.
-                    try:
-                        parsed = json.loads(content_str)
-                    except (TypeError, ValueError):
-                        parsed = {}
-                    rc = parsed.get("returncode")
-                    if isinstance(rc, int) and rc < 0:
-                        elog.append(agent_id=aid, type="tool_killed",
-                                    payload={"id": tu.id, "name": "bash",
-                                             "signal": -rc})
-                block = ToolResultBlock(tu.id, content_str)
-                tool_results.append(block)
-                elog.append_tool_result(agent_id=aid, block=block)
+                # Heartbeat contract (pinned): exactly one per tool_use
+                # processed that does not terminate the invocation — uniform
+                # across all arms (dispatch success, is_error, task, unknown
+                # tool, ceiling backfill). Terminal arms end the generator and
+                # never reach this yield.
+                yield {"type": "tool_heartbeat", "payload": {}}
+            tool_calls_used = turn.tool_calls_used
+            ceiling_tripped = turn.ceiling_tripped
 
             user_msg = Message(role="user", content=tuple(tool_results))
             messages.append(user_msg)
@@ -804,6 +750,7 @@ class OpenAIAgentRunner:
         }}
 
     async def interrupt(self) -> None:
+        from imp.agents.tools.bg import terminate_background_processes
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
         # M5: the run loop's `finally` may have just set _cancel_scope to None and
@@ -814,6 +761,10 @@ class OpenAIAgentRunner:
             self._cancel_scope.cancel()
         if self._ctx is not None:
             await terminate_running_processes(self._ctx)
+            # Decision 7: pause kills background processes too (leak
+            # resistance); the persisted tombstones give the resumed agent an
+            # explanation. Idempotent vs the run() finally (both fire on pause).
+            await terminate_background_processes(self._ctx)
 
 
 class OpenAIProvider:

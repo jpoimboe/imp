@@ -159,3 +159,43 @@ def test_read_bytes_capped_exactly_at_cap_reports_truncated(tmp_path: Path) -> N
     data, truncated = anyio.run(go)
     assert data == b"x" * 100
     assert truncated is True
+
+
+def test_watchdog_exceeds_tool_wallclock_with_margin() -> None:
+    """F4 coupling (spec: heartbeat prerequisite): a tool's watchdog window
+    opens at the PREVIOUS heartbeat — with the post-API heartbeat in place the
+    margin is scheduling headroom; without it the window would absorb full
+    model-API latency. Either way, at zero margin a foreground bash legally
+    approaching its B.1 wall clock dies as a `stalled` config error instead of
+    returning the ToolAborted("timed-out") is_error the agent can react to."""
+    from imp.agents.tools.limits import (
+        AGENT_INACTIVITY_TIMEOUT_S,
+        TOOL_WALLCLOCK_TIMEOUT_S,
+    )
+    assert AGENT_INACTIVITY_TIMEOUT_S > TOOL_WALLCLOCK_TIMEOUT_S
+    assert AGENT_INACTIVITY_TIMEOUT_S - TOOL_WALLCLOCK_TIMEOUT_S >= 300
+
+
+def test_bg_wait_budget_well_under_watchdog() -> None:
+    """F4 coupling: each completed bash_output(wait=...) heartbeats and resets
+    the watchdog window, but the budget must leave margin for the same turn's
+    remaining latency. A future watchdog reduction must not silently invert
+    this relationship."""
+    from imp.agents.tools.limits import AGENT_INACTIVITY_TIMEOUT_S, BG_WAIT_MAX_S
+    assert BG_WAIT_MAX_S <= AGENT_INACTIVITY_TIMEOUT_S - 300
+
+
+def test_bg_stream_cap_not_aliased_to_read_cap() -> None:
+    """BG_STREAM_FILE_CAP_BYTES is a KILL-POLICY trigger; FILE_READ_CAP_BYTES is
+    a READ bound. They happen to share a value today (both 5_000_000) — assert
+    the bg cap is defined as its OWN literal, not an alias, so a future
+    read-cap bump forces a conscious decision about kill policy."""
+    import inspect
+    import re
+
+    from imp.agents.tools import limits
+    assert limits.BG_STREAM_FILE_CAP_BYTES == 5_000_000
+    src = inspect.getsource(limits)
+    m = re.search(r"^BG_STREAM_FILE_CAP_BYTES = ([^#\n]+)", src, re.M)
+    assert m is not None
+    assert m.group(1).strip() == "5_000_000"     # a literal, not an alias
