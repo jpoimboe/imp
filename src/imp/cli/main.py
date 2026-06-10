@@ -278,6 +278,224 @@ def _interactive_loop_predicate(
     return (not non_interactive) and reader_armed and stdin_tty and stdout_tty
 
 
+def _handle_terminal_outcome(
+    change: Change, result: RunResult, coord: Any,
+) -> int:
+    """Render the terminal outcome of a settled run and return its rc.
+
+    COMPLETED → green completion line (rc 0). PAUSED → merge_blocked /
+    script-step remediation surfaced once, then the dim paused summary (rc 1).
+    Shared by `new`/`resume` (relocated verbatim from the post-run `else` arm)."""
+    if result is RunResult.COMPLETED:
+        # Worktree gone = the merge gate was exercised.
+        wt_path = change.control_root / ".imp" / "worktrees" / change.id
+        _emit_completed(change, result.value, merged=not wt_path.exists())
+        return 0
+    # PAUSED — surface merge_blocked or script-step remediation.
+    final_state = State.load(change.state_dir)
+    if final_state.status == "merge_blocked":
+        mb_reason: str | None = None
+        mb_detail: str | None = None
+        for ev in change.event_log().read():
+            if ev.get("type") == "merge_blocked":
+                payload = ev.get("payload") or {}
+                mb_reason = payload.get("reason")
+                mb_detail = payload.get("detail")
+        _emit_merge_blocked(change, mb_reason, mb_detail)
+    elif final_state.step is not None:
+        # Surface the LAST script_blocked for the paused step (keyed on step name
+        # to avoid stale events from earlier pauses that were subsequently
+        # resumed; emitted once).
+        matched = _last_script_blocked(
+            list(change.event_log().read()), final_state.step)
+        if matched is not None:
+            _emit_script_blocked(
+                final_state.step,
+                (matched.get("payload") or {}).get("stderr", ""),
+            )
+    _emit_paused_summary(change, result.value)
+    return 1
+
+
+async def _run_change_session(
+    change: Change,
+    *,
+    coord: Any,
+    driver: Any,
+    status: Any,
+    esc_reader: EscKeyReader | None,
+    reply_input_fn: Callable[[], Awaitable[str]],
+    non_interactive: bool,
+    tg: Any,
+) -> int:
+    """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
+    loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
+    exiting. Runs INSIDE the caller's task group (`tg`).
+
+    Each round runs `run_change` under a FRESH single-use CancelScope (published
+    to `run_scope_holder` so the C4 actuator can cancel the live run on escalation
+    / exit-event). On a loopable interrupt pause the coordinator is reset, the ESC
+    reader respawned if it exited, and a prompt collects the next message before
+    the next round; a bare Enter with an empty queue re-prompts. Out-of-band stops
+    (Ctrl-D, force-quit, SIGTERM/exit-event) finalize a paused exit (rc 130). On
+    every exit path the live status is reset and the task group cancelled."""
+    # C4 actuator scaffolding + ack hook (in scope for the whole session).
+    coord.escalation_event = anyio.Event()
+    exit_event = anyio.Event()
+    coord._exit_event = exit_event   # the D3 prompt-teardown race reads this
+    coord.set_escalation_hook(coord.escalation_event.set)
+    coord.set_exit_hook(lambda _r: exit_event.set())  # only signals; pause
+    # state is set on the signal paths themselves (review B2)
+    if not non_interactive:
+        coord.set_ack_hook(status.show_stop_ack)
+    run_scope_holder: dict[str, Any] = {"scope": None}
+
+    async def _actuator() -> None:
+        async def _on_esc() -> None:
+            await coord.escalation_event.wait()
+            coord.escalated = True
+            sc = run_scope_holder["scope"]
+            if sc is not None:
+                sc.cancel()
+
+        async def _on_exit() -> None:
+            await exit_event.wait()
+            sc = run_scope_holder["scope"]
+            if sc is not None:
+                sc.cancel()
+
+        async with anyio.create_task_group() as wtg:
+            wtg.start_soon(_on_esc)
+            wtg.start_soon(_on_exit)
+
+    tg.start_soon(_actuator)
+
+    try:
+        reader_armed = (
+            bool(esc_reader and esc_reader._armed) if not non_interactive else False)
+        result: RunResult | None = None
+        while True:
+            run_scope_holder["scope"] = anyio.CancelScope()
+            try:
+                with run_scope_holder["scope"]:
+                    # Bind the CURRENT reply_input_fn (it is rebound on reader
+                    # respawn each round) so the wait_for_user channel always
+                    # calls the live one.
+                    _reply: Callable[[], Awaitable[str]] = reply_input_fn
+
+                    def _chat(
+                        _q: object,
+                        _fn: Callable[[], Awaitable[str]] = _reply,
+                    ) -> Awaitable[str]:
+                        return _fn()
+
+                    result = await run_change(
+                        change, on_event=driver.on_event,
+                        user_chat_input_fn=_chat,
+                        coordinator=coord, non_interactive=non_interactive)
+            except EOFError:
+                driver.finish()
+                pause_and_exit(change, reason="ctrl-d",
+                               engine_pause_reason=coord.pause_reason)
+                _emit_paused(change, "ctrl-d")
+                return 130
+            except KeyboardInterrupt:
+                driver.finish()
+                pause_and_exit(change, reason="ctrl-c",
+                               engine_pause_reason=coord.pause_reason)
+                _emit_paused(change, "ctrl-c")
+                return 130
+
+            if coord.escalated:
+                driver.finish()
+                pause_and_exit(change, reason="force-quit",
+                               engine_pause_reason=coord.pause_reason)
+                _emit_paused(change, "force-quit")
+                return 130
+            if exit_event.is_set():
+                driver.finish()
+                reason = coord.pause_reason or "sigterm"
+                pause_and_exit(change, reason=reason,
+                               engine_pause_reason=coord.pause_reason)
+                _emit_paused(change, reason)
+                return 130
+            assert result is not None
+
+            final_state = State.load(change.state_dir)
+            interactive = _interactive_loop_predicate(
+                non_interactive=non_interactive, reader_armed=reader_armed,
+                stdin_tty=sys.stdin.isatty(), stdout_tty=sys.stdout.isatty())
+            interrupt_paused = (
+                result is RunResult.PAUSED
+                and coord.should_pause
+                and not coord.escalated)
+            loopable = (
+                interrupt_paused
+                and coord.pause_reason in ("esc", "ctrl-c")
+                and final_state.status == "paused"
+                and interactive)
+            if not loopable:
+                if interrupt_paused:
+                    # An interrupt paused the run but the session is not loopable
+                    # (--non-interactive, or no controlling tty): exit paused,
+                    # mirroring the legacy `coord.should_pause` arm (rc 130).
+                    driver.finish()
+                    reason = coord.pause_reason or "ctrl-c"
+                    pause_and_exit(change, reason=reason,
+                                   engine_pause_reason=coord.pause_reason)
+                    _emit_paused(change, reason)
+                    return 130
+                break
+
+            coord.reset()
+            if not non_interactive and _should_respawn_reader(
+                    reader_exited=(coord._esc_reader is None)):
+                esc_reader = EscKeyReader(coord)
+                _router, reply_input_fn = _build_interactive_input(
+                    change, status, coord, esc_reader)
+                await tg.start(esc_reader.run)
+                reader_armed = bool(esc_reader._armed)
+
+            at_completion = final_state.completion_pending
+            reminder_shown = False
+            line = ""
+            slash: str | None = None
+            while True:
+                line = await reply_input_fn()  # Ctrl-D → EOFError (outer arm)
+                slash = "continue" if line.strip() == "/continue" else None
+                if at_completion:
+                    if slash == "continue":
+                        break
+                    if sys.stdout.isatty():
+                        print("no step left to take input — "
+                              "/continue to finish or ctrl-d to exit"
+                              if line.strip()
+                              else "/continue to finish or ctrl-d to exit")
+                    continue
+                queued = coord.has_queued_interject()
+                if _decide_resume_action(
+                        line=line, queued=queued, slash=slash) == "reprompt":
+                    if not reminder_shown and sys.stdout.isatty():
+                        reminder_shown = True
+                        print("enter a message, /continue to resume, "
+                              "ctrl-d to exit")
+                    continue
+                break
+
+            if slash != "continue" and line.strip():
+                coord.enqueue_interject(line)
+            change.event_log().append(
+                agent_id=None, type="workflow_resumed", payload={})
+            running_state = State.load(change.state_dir)
+            running_state.status = "running"
+            running_state.save(change.state_dir)
+        driver.finish()
+        return _handle_terminal_outcome(change, result, coord)
+    finally:
+        status.reset()
+        tg.cancel_scope.cancel()
+
+
 def _decide_resume_action(*, line: str, queued: bool, slash: str | None) -> str:
     """Pure §2 resume-vs-re-prompt decision. Returns 'resume' or 'reprompt'.
 
@@ -414,86 +632,28 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 _router, reply_input_fn = _build_interactive_input(
                     change, status, coord, esc_reader)
 
-            async with anyio.create_task_group() as tg:
-                tg.start_soon(coord.run_signal_receiver)
-                if not non_interactive:
-                    tg.start_soon(status.tick)
-                    assert esc_reader is not None
-                    # Block until the reader has armed (or given up): a workflow
-                    # whose first step is interactive must not start its prompt
-                    # before the ESC reader holds /dev/tty, or the prompt and the
-                    # reader race for the terminal's termios.
-                    await tg.start(esc_reader.run)
-                try:
-                    result = await run_change(
-                        change,
-                        on_event=driver.on_event,
-                        # the wait_for_user reply channel.
-                        user_chat_input_fn=lambda _q: reply_input_fn(),
-                        coordinator=coord,
-                        non_interactive=non_interactive,
-                    )
-                except (LoadError, LoadErrors) as e:
-                    driver.finish()
-                    print(f"imp: {e}", file=sys.stderr)
-                    rc = 2
-                except EOFError:
-                    driver.finish()
-                    pause_and_exit(change, reason="ctrl-d")
-                    _emit_paused(change, "ctrl-d")
-                    rc = 130
-                except KeyboardInterrupt:
-                    # prompt_toolkit's prompt_async (handle_sigint=True) installs
-                    # its own SIGINT handler and raises KeyboardInterrupt while the
-                    # interactive prompt is active, bypassing InterruptCoordinator.
-                    # Catch it here, mirroring EOFError, so Ctrl-C at the prompt
-                    # pauses instead of escaping the task group as a crash.
-                    driver.finish()
-                    pause_and_exit(change, reason="ctrl-c")
-                    _emit_paused(change, "ctrl-c")
-                    rc = 130
-                else:
-                    driver.finish()
-                    if coord.should_pause:
-                        reason = coord.pause_reason or "ctrl-c"
-                        pause_and_exit(change, reason=reason)
-                        _emit_paused(change, reason)
-                        rc = 130
-                    else:
-                        if result is RunResult.COMPLETED:
-                            # Worktree gone = the merge gate was exercised.
-                            wt_path = change.control_root / ".imp" / "worktrees" / change.id
-                            _emit_completed(change, result.value,
-                                            merged=not wt_path.exists())
-                            rc = 0
-                        else:
-                            # PAUSED — surface merge_blocked or script-step remediation.
-                            final_state = State.load(change.state_dir)
-                            if final_state.status == "merge_blocked":
-                                mb_reason: str | None = None
-                                mb_detail: str | None = None
-                                for ev in change.event_log().read():
-                                    if ev.get("type") == "merge_blocked":
-                                        payload = ev.get("payload") or {}
-                                        mb_reason = payload.get("reason")
-                                        mb_detail = payload.get("detail")
-                                _emit_merge_blocked(change, mb_reason, mb_detail)
-                            elif final_state.step is not None:
-                                # Surface the LAST script_blocked for the paused step
-                                # (keyed on step name to avoid stale events from earlier
-                                # pauses that were subsequently resumed; emitted once).
-                                matched = _last_script_blocked(
-                                    list(change.event_log().read()), final_state.step)
-                                if matched is not None:
-                                    _emit_script_blocked(
-                                        final_state.step,
-                                        (matched.get("payload") or {}).get("stderr", ""),
-                                    )
-                            _emit_paused_summary(change, result.value)
-                            rc = 1
-                finally:
-                    status.reset()
-                    tg.cancel_scope.cancel()
+            try:
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(coord.run_signal_receiver)
+                    if not non_interactive:
+                        tg.start_soon(status.tick)
+                        assert esc_reader is not None
+                        # Block until the reader has armed (or given up): a
+                        # workflow whose first step is interactive must not start
+                        # its prompt before the ESC reader holds /dev/tty, or the
+                        # prompt and the reader race for the terminal's termios.
+                        await tg.start(esc_reader.run)
+                    rc = await _run_change_session(
+                        change, coord=coord, driver=driver, status=status,
+                        esc_reader=esc_reader, reply_input_fn=reply_input_fn,
+                        non_interactive=non_interactive, tg=tg)
+            except* (LoadError, LoadErrors) as eg:
+                # A bad workflow/config raised on the FIRST run_change (it never
+                # reaches the loop). _run_change_session has already cleaned up
+                # (status.reset) in its finally; surface the error as rc 2.
+                driver.finish()
+                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
+                rc = 2
             return rc
     except LockHeld as e:
         print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
@@ -618,86 +778,28 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 _router, reply_input_fn = _build_interactive_input(
                     change, status, coord, esc_reader)
 
-            async with anyio.create_task_group() as tg:
-                tg.start_soon(coord.run_signal_receiver)
-                if not non_interactive:
-                    tg.start_soon(status.tick)
-                    assert esc_reader is not None
-                    # Block until the reader has armed (or given up): a workflow
-                    # whose first step is interactive must not start its prompt
-                    # before the ESC reader holds /dev/tty, or the prompt and the
-                    # reader race for the terminal's termios.
-                    await tg.start(esc_reader.run)
-                try:
-                    result = await run_change(
-                        change,
-                        on_event=driver.on_event,
-                        # the wait_for_user reply channel.
-                        user_chat_input_fn=lambda _q: reply_input_fn(),
-                        coordinator=coord,
-                        non_interactive=non_interactive,
-                    )
-                except (LoadError, LoadErrors) as e:
-                    driver.finish()
-                    print(f"imp: {e}", file=sys.stderr)
-                    rc = 2
-                except EOFError:
-                    driver.finish()
-                    pause_and_exit(change, reason="ctrl-d")
-                    _emit_paused(change, "ctrl-d")
-                    rc = 130
-                except KeyboardInterrupt:
-                    # prompt_toolkit's prompt_async (handle_sigint=True) installs
-                    # its own SIGINT handler and raises KeyboardInterrupt while the
-                    # interactive prompt is active, bypassing InterruptCoordinator.
-                    # Catch it here, mirroring EOFError, so Ctrl-C at the prompt
-                    # pauses instead of escaping the task group as a crash.
-                    driver.finish()
-                    pause_and_exit(change, reason="ctrl-c")
-                    _emit_paused(change, "ctrl-c")
-                    rc = 130
-                else:
-                    driver.finish()
-                    if coord.should_pause:
-                        reason = coord.pause_reason or "ctrl-c"
-                        pause_and_exit(change, reason=reason)
-                        _emit_paused(change, reason)
-                        rc = 130
-                    else:
-                        if result is RunResult.COMPLETED:
-                            # Worktree gone = the merge gate was exercised.
-                            wt_path = change.control_root / ".imp" / "worktrees" / change.id
-                            _emit_completed(change, result.value,
-                                            merged=not wt_path.exists())
-                            rc = 0
-                        else:
-                            # PAUSED — surface merge_blocked or script-step remediation.
-                            final_state = State.load(change.state_dir)
-                            if final_state.status == "merge_blocked":
-                                mb_reason: str | None = None
-                                mb_detail: str | None = None
-                                for ev in change.event_log().read():
-                                    if ev.get("type") == "merge_blocked":
-                                        payload = ev.get("payload") or {}
-                                        mb_reason = payload.get("reason")
-                                        mb_detail = payload.get("detail")
-                                _emit_merge_blocked(change, mb_reason, mb_detail)
-                            elif final_state.step is not None:
-                                # Surface the LAST script_blocked for the paused step
-                                # (keyed on step name to avoid stale events from earlier
-                                # pauses that were subsequently resumed; emitted once).
-                                matched = _last_script_blocked(
-                                    list(change.event_log().read()), final_state.step)
-                                if matched is not None:
-                                    _emit_script_blocked(
-                                        final_state.step,
-                                        (matched.get("payload") or {}).get("stderr", ""),
-                                    )
-                            _emit_paused_summary(change, result.value)
-                            rc = 1
-                finally:
-                    status.reset()
-                    tg.cancel_scope.cancel()
+            try:
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(coord.run_signal_receiver)
+                    if not non_interactive:
+                        tg.start_soon(status.tick)
+                        assert esc_reader is not None
+                        # Block until the reader has armed (or given up): a
+                        # workflow whose first step is interactive must not start
+                        # its prompt before the ESC reader holds /dev/tty, or the
+                        # prompt and the reader race for the terminal's termios.
+                        await tg.start(esc_reader.run)
+                    rc = await _run_change_session(
+                        change, coord=coord, driver=driver, status=status,
+                        esc_reader=esc_reader, reply_input_fn=reply_input_fn,
+                        non_interactive=non_interactive, tg=tg)
+            except* (LoadError, LoadErrors) as eg:
+                # A bad workflow/config raised on the FIRST run_change (it never
+                # reaches the loop). _run_change_session has already cleaned up
+                # (status.reset) in its finally; surface the error as rc 2.
+                driver.finish()
+                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
+                rc = 2
             return rc
     except LockHeld as e:
         print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",

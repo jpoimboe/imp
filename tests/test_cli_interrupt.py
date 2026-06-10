@@ -39,7 +39,7 @@ def test_new_interrupt_at_prompt_pauses(
     monkeypatch.setattr(cli_main, "run_change", _raise)
     monkeypatch.setattr(
         cli_main, "pause_and_exit",
-        lambda _change, *, reason: reasons.append(reason),
+        lambda _change, *, reason, engine_pause_reason=None: reasons.append(reason),
     )
 
     args = argparse.Namespace(title="interrupt at prompt")
