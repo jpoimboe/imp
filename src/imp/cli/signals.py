@@ -294,6 +294,9 @@ class EscKeyReader:
         # prompt_toolkit owns input → the line is a reply, not an interject.
         self._on_interject = on_interject
         self._line_buf = bytearray()
+        # Spec §4: follow-up byte poll window for ESC disambiguation. Default
+        # mirrors the loop's existing select timeout (~50 ms). Injectable by tests.
+        self._seq_timeout_s: float = _READ_TIMEOUT_S
 
     def set_interject_sink(self, sink: Any) -> None:
         """Attach (or replace) the `(line: str) -> None` interject sink after
@@ -344,6 +347,8 @@ class EscKeyReader:
                 byte = await anyio.to_thread.run_sync(
                     self._read_one_byte, abandon_on_cancel=True)
                 if byte == b"\x1b":
+                    if not await self._disambiguate_esc():
+                        continue                 # consumed an escape sequence
                     self._line_buf.clear()       # ESC discards any partial line
                     await self._coord.signal_pause(reason="esc")
                     return
@@ -394,6 +399,85 @@ class EscKeyReader:
             return os.read(fd, 1)
         except OSError:
             return b""
+
+    def _poll_byte(self, timeout_s: float) -> bytes:
+        """Blocking read of one byte with `timeout_s`. b'' on timeout/error.
+        Mirrors _read_one_byte but with a caller-chosen window (the sequence
+        disambiguation timeout, not the loop's quiesce-poll timeout)."""
+        import select
+        fd = self._fd
+        if fd is None:
+            return b""
+        try:
+            ready, _, _ = select.select([fd], [], [], timeout_s)
+        except (OSError, ValueError):
+            return b""
+        if not ready:
+            return b""
+        try:
+            return os.read(fd, 1)
+        except OSError:
+            return b""
+
+    async def _disambiguate_esc(self) -> bool:
+        """Called after reading a 0x1b. Returns True if this is a real ESC press
+        that should fire an interrupt, False if it was (part of) an escape
+        sequence that has now been consumed and discarded. See spec §4.
+
+        After consuming a complete sequence, the loop continues: a trailing ESC
+        immediately following the sequence is treated as a deliberate keypress
+        (restart table) and a drained buffer (empty window) means the sequence
+        was all there was → return False."""
+        import anyio
+        consumed_sequence = False
+        while True:
+            nxt = await anyio.to_thread.run_sync(
+                lambda: self._poll_byte(self._seq_timeout_s),
+                abandon_on_cancel=True)
+            if nxt == b"":
+                # Window empty: if we consumed a sequence and nothing follows,
+                # it was purely a terminal escape sequence (no real ESC). If we
+                # have not consumed a sequence yet, the window expired with no
+                # follow-up byte → human ESC.
+                return not consumed_sequence
+            if nxt == b"\x1b":
+                consumed_sequence = False        # fresh ESC: reset, restart the table
+                continue
+            if nxt == b"[":                      # CSI: bytes through final 0x40-0x7e
+                await self._drain_until(lambda b: 0x40 <= b[0] <= 0x7e)
+                consumed_sequence = True
+                continue                         # restart: check for trailing ESC
+            if nxt == b"O":                      # SS3: exactly one byte
+                await anyio.to_thread.run_sync(
+                    lambda: self._poll_byte(self._seq_timeout_s),
+                    abandon_on_cancel=True)
+                consumed_sequence = True
+                continue                         # restart: check for trailing ESC
+            if nxt in (b"]", b"P", b"_", b"^", b"X"):  # string seqs: to terminator
+                await self._drain_string_sequence()
+                consumed_sequence = True
+                continue                         # restart: check for trailing ESC
+            return True                          # any other byte → real ESC, byte lost
+
+    async def _drain_until(self, is_final: Any) -> None:
+        import anyio
+        while True:
+            b = await anyio.to_thread.run_sync(
+                lambda: self._poll_byte(self._seq_timeout_s),
+                abandon_on_cancel=True)
+            if b == b"" or is_final(b):
+                return
+
+    async def _drain_string_sequence(self) -> None:
+        import anyio
+        prev = b""
+        while True:
+            b = await anyio.to_thread.run_sync(
+                lambda: self._poll_byte(self._seq_timeout_s),
+                abandon_on_cancel=True)
+            if b == b"" or b == b"\x07" or (prev == b"\x1b" and b == b"\\"):
+                return
+            prev = b
 
     def _feed_interject_byte(self, byte: bytes) -> None:
         """Accumulate a typed byte into the in-progress interject line; on Enter
