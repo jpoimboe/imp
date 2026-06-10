@@ -226,7 +226,9 @@ class _RunState:
 
 
 def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
-    """Same filtering as anthropic._build_tools; kept verbatim for parity."""
+    """Same filtering as anthropic._build_tools, including the bash ->
+    bash_output/bash_kill injection; kept in lockstep for parity (codex
+    reuses this builder verbatim)."""
     reg = get_registry()
     out: dict[str, Tool] = {}
     check_web_capability(invocation.provider_name, invocation.agent_def)
@@ -254,6 +256,15 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
     out["load_skill"] = make_load_skill_tool()
     if "wait_for_user" in invocation.agent_def.tools:
         out["wait_for_user"] = make_wait_for_user_tool()
+    if "bash" in invocation.agent_def.tools:
+        # Auto-granted with bash (same block as anthropic/openai
+        # _build_tools): run_in_background is a bash PARAMETER, so an agent
+        # with bash but no read/kill tool is a trap — a backgrounded process
+        # it can never see or stop. The capability set must be atomic.
+        # allowed_tools picks these up automatically (mcp__imp__ prefix is
+        # derived from this dict in _build_options).
+        out["bash_output"] = reg["bash_output"]
+        out["bash_kill"] = reg["bash_kill"]
     return out
 
 
