@@ -31,6 +31,19 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     kb = KeyBindings()
     mode = EditingMode.VI if editing_mode == "vi" else EditingMode.EMACS
 
+    hint_shown = {"v": False}
+
+    @kb.add("c-c")
+    def _(event: Any) -> None:  # noqa: ANN401
+        buf = event.app.current_buffer
+        if buf.text:
+            buf.reset()                    # clear the typed line in place
+            return
+        if not hint_shown["v"]:
+            hint_shown["v"] = True
+            from prompt_toolkit.application import run_in_terminal
+            _ = run_in_terminal(lambda: print("press ctrl-d to exit"))
+
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
     # No style override: while the user types, the input region keeps the
     # terminal's default fg/bg (a bright-blue caret is the only marker). On
