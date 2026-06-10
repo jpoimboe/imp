@@ -89,7 +89,15 @@ class State:
         )
 
     def save(self, state_dir: Path) -> None:
-        """Atomic write: tmp file in same dir, fsync, rename."""
+        """Atomic write: tmp file in same dir, fsync, rename.
+
+        Sibling implementation: agents/tools/fs.py _atomic_write_bytes
+        (edit_file's write-back). The differences are DELIBERATE, not drift:
+        this one fsyncs (state.json is the workflow's source of truth with no
+        git recovery; edit_file waives durability — the repo recovers) and
+        skips the mode copy (state.json has no exec bit to preserve). The
+        BaseException cleanup net is shared: a cancellation mid-save must not
+        leak a temp file."""
         state_dir.mkdir(parents=True, exist_ok=True)
         target = state_dir / "state.json"
         payload = {
@@ -121,7 +129,7 @@ class State:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_name, target)
-        except Exception:
+        except BaseException:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(tmp_name)
             raise

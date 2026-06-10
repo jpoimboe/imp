@@ -152,7 +152,13 @@ def _short_repr(s: str, cap: int = 200) -> str:
 
 
 def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> None:
-    """Atomic write-back: temp file + os.replace. Two load-bearing details:
+    """Atomic write-back: temp file + os.replace.
+
+    Sibling implementation: engine/state.py State.save. The differences are
+    DELIBERATE, not drift: state.save fsyncs (state.json has no git recovery;
+    here durability is waived — the repo recovers) and skips the mode copy
+    (no exec bit to preserve on state.json). The BaseException cleanup net is
+    shared. Two load-bearing details:
     (1) the temp file is created in the TARGET's directory — os.replace
     across filesystems raises EXDEV, and /tmp is routinely a different mount
     under the project's sandbox reality; (2) the original's permission bits

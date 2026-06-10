@@ -231,3 +231,27 @@ def test_state_roundtrips_abandoned_status(tmp_path: Path) -> None:
     State(id="s", step=None, step_attempt=0, status="abandoned").save(state_dir)
     loaded = State.load(state_dir)
     assert loaded.status == "abandoned"
+
+
+def test_state_save_cancellation_cleans_temp_file(tmp_path: Path, monkeypatch) -> None:
+    # A cancellation-shaped BaseException mid-save (anyio/asyncio cancel,
+    # KeyboardInterrupt) must not leak a .state-* temp file beside state.json
+    # — same cleanup net as edit_file's _atomic_write_bytes.
+    import imp.engine.state as state_mod
+
+    class FakeCancelled(BaseException):
+        pass
+
+    def boom(src: object, dst: object) -> None:
+        raise FakeCancelled
+
+    monkeypatch.setattr(state_mod.os, "replace", boom)
+    s = State(id="c1", step="x", step_attempt=0, status="running",
+              vars={}, loop_counts={})
+    try:
+        s.save(tmp_path)
+        raise AssertionError("save should have propagated FakeCancelled")
+    except FakeCancelled:
+        pass
+    leftovers = [f.name for f in tmp_path.iterdir() if f.name.startswith(".state-")]
+    assert leftovers == []
