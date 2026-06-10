@@ -185,3 +185,35 @@ async def test_cc_gen_close_runs_teardown(tmp_path: Path) -> None:
     finally:
         if runner._ctx is not None:
             await _cleanup(runner._ctx)
+
+
+# ---------------------------------------------------------------------------
+# codex teardown unit test
+# ---------------------------------------------------------------------------
+
+def test_codex_interrupt_tears_down_background(tmp_path: Path) -> None:
+    """Decision 7 site 1 under codex: interrupt() kills bg groups and persists
+    tombstones. Unit-level: _ctx is set directly (the runner sets it the same
+    way mid-_run_loop after preflight).
+
+    CodexAgentRunner construction adaptation: CodexAgentRunner.__init__ only
+    requires `model_name` (plus optional kwargs client_factory/user_input_fn);
+    no additional required kwargs vs ClaudeCodeAgentRunner. The _ctx is
+    injected directly as in the CC sibling — no preflight/server lifecycle
+    needed for this unit test.
+    """
+    async def main() -> None:
+        from imp.providers.codex_runner import CodexAgentRunner
+        runner = CodexAgentRunner(model_name="gpt-5.5")
+        ctx = _bg_ctx(tmp_path)
+        runner._ctx = ctx
+        out = await _spawn_bg(ctx)
+        try:
+            await runner.interrupt()
+            with pytest.raises(ProcessLookupError):
+                os.killpg(out["pid"], 0)
+            bp = ctx.background_processes[out["id"]]
+            assert bp.status == "killed" and bp.kill_reason == "interrupted"
+        finally:
+            await _cleanup(ctx)
+    anyio.run(main)

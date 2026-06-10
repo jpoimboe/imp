@@ -205,3 +205,139 @@ async def test_run_fails_fast_with_network_error_when_self_ping_fails(
     assert "ping failed" in err["payload"]["message"]
     # Codex was never started (fail-fast before SDK turn).
     assert fake.start_thread_calls == []
+
+
+@pytest.mark.anyio
+async def test_codex_gen_close_runs_teardown(tmp_path: Path) -> None:
+    """Teardown site 2 under codex: aclosing run() mid-stream kills the
+    backgrounded group via the new run()-finally (NOT _run_loop's existing
+    finally — that one only GC-finalizes on abandonment, PEP 525).
+
+    HARNESS APPROACH (cancellation; true-aclose not attempted):
+    FakeCodex.mcp_call is REPORT-ONLY (confirmed: codex_mcp.dispatch_tool is
+    invoked via the real MCP server, not via FakeCodex item scripting; mcp_call
+    items are decoded by process_event for audit logging only, not dispatched to
+    the registry bash). Therefore this test uses the same cancellation pattern
+    as CC's sibling:
+
+      (a) A stalling FakeCodex thread whose run_streamed() blocks via
+          anyio.sleep_forever(), preventing _drive_turns from progressing
+          past the first run_streamed() call.
+      (b) The generator is driven in a task group; the main task polls until
+          runner._ctx is set (set synchronously before provisioning), then
+          directly spawns a bg process via _spawn_bg.
+      (c) The task group is cancelled, propagating CancelledError through
+          run()'s async-for and firing the try/finally teardown block.
+
+    True aclose() was not pursued because the FakeCodex event loop exhausts
+    synchronously (no yield point in _AsyncIterEvents.__anext__), making it
+    impossible to break at a mid-stream yield and call gen.aclose() from the
+    same task. Cancellation is equivalent for the finally assertion.
+
+    Construction mirrored from test_run_yields_agent_output_when_complete_step_captured
+    (same file): _seed_git_and_auth, _canonical_auth_override, FakeCodex
+    client_factory, _build_invocation — adapted to add bash to agent_def.tools.
+    """
+    import anyio as _anyio
+
+    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+    from tests.test_bg_cc_codex_parity import _cleanup, _spawn_bg
+
+    _SRC_LOCAL = SourceLoc(file=Path("a.md"), line=1)
+
+    class _StallingThread:
+        """FakeThread whose run_streamed() stalls until cancelled — keeps the
+        runner alive in _drive_turns long enough for the main task to spawn a
+        bg process and then cancel the task group."""
+        async def run_streamed(self, prompt: object, options: object = None) -> object:
+            await _anyio.sleep_forever()  # stall until task group is cancelled
+
+    class _StallingFakeCodex:
+        """Client that returns a _StallingThread on start_thread()."""
+        def start_thread(self, options: object = None) -> _StallingThread:
+            return _StallingThread()
+
+    _seed_git_and_auth(tmp_path)
+    canonical = tmp_path / "auth.json"
+
+    # Build invocation with bash in tools so bg injection fires and
+    # _spawn_bg can be used to start a real background process.
+    bash_agent_def = AgentDef(
+        name="t",
+        description="",
+        tools=frozenset({"complete_step", "bash"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="answer", type="string", required=True),),
+            source=_SRC_LOCAL,
+        ),
+        prompt_template_source="",
+        source_path=Path("a.md"),
+        source=_SRC_LOCAL,
+        tier=None,
+    )
+
+    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.engine.state import InMemoryEventLog
+
+    elog = InMemoryEventLog()
+    inv = AgentInvocation(
+        agent_def=bash_agent_def,
+        provider_name="codex",
+        model_name="gpt-5.5",
+        system_prompt="you are a test agent",
+        initial_messages=(),
+        change_context=ChangeContext(
+            slug="s", title="t", project_root=tmp_path,
+            workflow_dir=tmp_path, id="c1"),
+        transcript_dir=tmp_path / "tx",
+        fs_permissions=(
+            FsRule(operations=("read", "write"), paths=("**",),
+                   mode="allow", source=_SRC_LOCAL),
+        ),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:t",
+        event_log=elog,
+    )
+
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: _StallingFakeCodex(),
+    )
+    runner._canonical_auth_override = canonical
+
+    gen = runner.run(inv)
+    bg_pid: int | None = None
+    bg_id: str | None = None
+    ctx_seen = None
+
+    try:
+        async with _anyio.create_task_group() as tg:
+            async def _drive() -> None:
+                async for _ev in gen:
+                    pass  # pragma: no cover
+
+            tg.start_soon(_drive)
+            # _ctx is set in _run_loop after preflight and ToolContext
+            # construction, before the MCP server ping; poll until it appears.
+            with _anyio.fail_after(10):
+                while runner._ctx is None:
+                    await _anyio.sleep(0)
+            ctx_seen = runner._ctx
+            out = await _spawn_bg(runner._ctx)
+            bg_pid = out["pid"]
+            bg_id = out["id"]
+            # Cancel the drive task — propagates through run()'s finally.
+            tg.cancel_scope.cancel()
+
+        # run()'s finally must have called terminate_background_processes.
+        import os
+        assert bg_pid is not None
+        with pytest.raises(ProcessLookupError):
+            os.killpg(bg_pid, 0)
+        assert bg_id is not None
+        bp = ctx_seen.background_processes[bg_id]
+        assert bp.status == "killed" and bp.kill_reason == "interrupted"
+    finally:
+        if ctx_seen is not None:
+            await _cleanup(ctx_seen)

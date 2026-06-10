@@ -183,27 +183,38 @@ class CodexAgentRunner:
 
     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         try:
-            async for ev in self._run_loop(invocation):
-                yield ev
-        except PreflightError as exc:
-            yield {"type": "error", "payload": {
-                "category": exc.category, "kind": "preflight",
-                "message": str(exc), "detail": {}}}
-            return
-        except perr.ProviderError as exc:
-            yield perr.make_error_event(exc)
-            return
-        except AwaitingUserInput:
-            raise  # headless wait_for_user pause unwinds, not classified
-        except Exception as exc:
-            raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
-            if self._cancel:
+            try:
+                async for ev in self._run_loop(invocation):
+                    yield ev
+            except PreflightError as exc:
                 yield {"type": "error", "payload": {
-                    "category": "config", "kind": "interrupted",
-                    "message": "runner cancelled by interrupt"}}
+                    "category": exc.category, "kind": "preflight",
+                    "message": str(exc), "detail": {}}}
                 return
-            yield perr.make_unknown_error_event(exc)
-            return
+            except perr.ProviderError as exc:
+                yield perr.make_error_event(exc)
+                return
+            except AwaitingUserInput:
+                raise  # headless wait_for_user pause unwinds, not classified
+            except Exception as exc:
+                raise_if_suspended(exc)  # subagent-origin pause must unwind, not classify
+                if self._cancel:
+                    yield {"type": "error", "payload": {
+                        "category": "config", "kind": "interrupted",
+                        "message": "runner cancelled by interrupt"}}
+                    return
+                yield perr.make_unknown_error_event(exc)
+                return
+        finally:
+            if self._ctx is not None:
+                # None guard: _ctx is assigned mid-_run_loop (after preflight).
+                # run()'s OWN finally, not _run_loop's existing one — an
+                # abandoned inner generator only GC-finalizes (PEP 525), so
+                # the MCP/CODEX_HOME finally there is not aclose-deterministic
+                # and bg teardown must not depend on it.
+                from imp.agents.tools.bg import terminate_background_processes
+                with contextlib.suppress(Exception):
+                    await terminate_background_processes(self._ctx)
 
     async def _run_loop(
         self, invocation: AgentInvocation,
@@ -769,14 +780,21 @@ class CodexAgentRunner:
         )
 
     async def interrupt(self) -> None:
-        """Cancel the run — three effects:
+        """Cancel the run — four effects:
           1. set `self._cancel = True`.
           2. `terminate_running_processes(ctx)`.
-          3. SDK `AbortController.abort()`.
+          3. `terminate_background_processes(ctx)` (Decision 7: pause kills
+             bg processes; persisted tombstones explain it on resume).
+          4. SDK `AbortController.abort()`.
         Idempotent."""
+        from imp.agents.tools.bg import terminate_background_processes
         self._cancel = True
         if self._ctx is not None:
             await terminate_running_processes(self._ctx)
+            # Decision 7: pause kills background processes too (leak
+            # resistance); the persisted tombstones give the resumed agent an
+            # explanation. Idempotent vs the run() finally (both fire on pause).
+            await terminate_background_processes(self._ctx)
         if self._abort_controller is not None:
             with contextlib.suppress(Exception):
                 self._abort_controller.abort()
