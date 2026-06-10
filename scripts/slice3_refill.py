@@ -75,7 +75,7 @@ full = {(v.id, fxid, r) for v in VARIANTS for fxid in fixtures for r in range(v.
 # of provenance, so a drift in the cache key can't hide a good cell from us.
 present = set()
 for f in glob.glob(str(cache_dir / "*.json")):
-    d = json.load(open(f))
+    d = json.loads(Path(f).read_text())
     vid = d.get("variant_id")
     if vid not in vmap or d.get("fixture_id") not in fixtures:
         continue
@@ -114,7 +114,7 @@ else:
 # re-grade ALL cells for these variants by content + re-render
 best = {}
 for f in glob.glob(str(cache_dir / "*.json")):
-    d = json.load(open(f))
+    d = json.loads(Path(f).read_text())
     if d.get("variant_id") not in vmap or d.get("fixture_id") not in fixtures:
         continue
     if d.get("failed") or (d.get("telemetry", {}).get("tool_calls") or 0) <= 0:

@@ -181,17 +181,17 @@ def run_q1_q4(
             records = list(ex.map(_process, fixtures))
     else:
         records = [_process(fx) for fx in fixtures]
-    records = [r for r in records if r is not None]
+    valid_records = [r for r in records if r is not None]
 
     paired_by_fixture: dict[str, dict[str, RunResult]] = {
-        r["id"]: r["res"] for r in records if r["in_q1"]
+        r["id"]: r["res"] for r in valid_records if r["in_q1"]
     }
     q1 = compute_q1(paired_by_fixture)
     q4 = compute_q4(
-        fast_c=sum(r["fast_c"] for r in records),
-        fast_t=sum(r["fast_t"] for r in records),
-        union_c=sum(r["union_c"] for r in records),
-        union_t=sum(r["union_t"] for r in records),
-        n_diffs=sum(1 for r in records if r["in_q4"]),
+        fast_c=sum(r["fast_c"] for r in valid_records),
+        fast_t=sum(r["fast_t"] for r in valid_records),
+        union_c=sum(r["union_c"] for r in valid_records),
+        union_t=sum(r["union_t"] for r in valid_records),
+        n_diffs=sum(1 for r in valid_records if r["in_q4"]),
     )
     return q1, q4

@@ -45,7 +45,7 @@ for f in glob.glob(str(cache_dir / "*.json")):
     mt = os.path.getmtime(f)
     if mt <= t0:
         continue
-    d = json.load(open(f))
+    d = json.loads(Path(f).read_text())
     vid = d.get("variant_id", "")
     if vid.startswith("paired:"):
         continue
