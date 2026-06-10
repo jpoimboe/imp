@@ -3,18 +3,18 @@
 #
 # Contract (mirrors the lint gate):
 #   - IMP_TEST_COMMAND set and non-empty → run it via `bash -c` with a timeout
-#     (IMP_TEST_TIMEOUT seconds, default 1800); propagate its exit code. On
+#     (IMP_TEST_TIMEOUT seconds, default 300); propagate its exit code. On
 #     timeout (exit 124) print an explicit diagnosis to stderr — the truncated
 #     output otherwise reads as a hang at whatever test happened to be printing,
 #     and sends the resumed task-lead hunting a phantom hanging test.
 #   - IMP_TEST_COMMAND unset or empty    → print an informational message and
 #     exit 0 (no test gate; project hasn't wired a test_command).
 #
-# The timeout is a wedge guard, not a suite budget: it exists so a truly hung
-# suite cannot wedge the workflow forever. Real suites routinely exceed 5
-# minutes (imp's own does), so the default is generous. IMP_TEST_TIMEOUT is an
-# ambient env override; note the gate sandbox allowlists only engine-injected
-# IMP_* vars, so under a sandbox policy the default applies.
+# The wired test_command should be a fast, scoped suite — the gate runs on
+# every implement loop, so 300 s is a budget, not just a wedge guard. A slower
+# suite needs IMP_TEST_TIMEOUT raised (ambient env override; note the gate
+# sandbox allowlists only engine-injected IMP_* vars, so under a sandbox
+# policy the default applies).
 #
 # IMP_TEST_COMMAND is surfaced from the `test_command` project config key by
 # overlay_engine_env and injected into script-gate env by the engine.
@@ -25,7 +25,7 @@ set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 
 if [[ -n "${IMP_TEST_COMMAND:-}" ]]; then
-  test_timeout="${IMP_TEST_TIMEOUT:-1800}"
+  test_timeout="${IMP_TEST_TIMEOUT:-300}"
   rc=0
   # -k 30: SIGKILL stragglers that ignore the TERM (pytest mid-teardown).
   timeout -k 30 "$test_timeout" bash -c "$IMP_TEST_COMMAND" || rc=$?
