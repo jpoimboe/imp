@@ -403,7 +403,9 @@ class EscKeyReader:
     def _poll_byte(self, timeout_s: float) -> bytes:
         """Blocking read of one byte with `timeout_s`. b'' on timeout/error.
         Mirrors _read_one_byte but with a caller-chosen window (the sequence
-        disambiguation timeout, not the loop's quiesce-poll timeout)."""
+        disambiguation timeout, not the loop's quiesce-poll timeout). Unlike
+        _read_one_byte, quiesce ownership is NOT checked here; Task B2 adds that
+        guard to the drain callers."""
         import select
         fd = self._fd
         if fd is None:
@@ -460,6 +462,8 @@ class EscKeyReader:
             return True                          # any other byte → real ESC, byte lost
 
     async def _drain_until(self, is_final: Any) -> None:
+        """Drain CSI bytes through the final byte. STUB: Task B2 hardens this
+        with a 4 KiB cap and a quiesce-ownership check."""
         import anyio
         while True:
             b = await anyio.to_thread.run_sync(
@@ -469,6 +473,8 @@ class EscKeyReader:
                 return
 
     async def _drain_string_sequence(self) -> None:
+        """Drain string-sequence bytes to the terminator (BEL or ST). STUB: Task
+        B2 hardens this with a 4 KiB cap and a quiesce-ownership check."""
         import anyio
         prev = b""
         while True:
@@ -476,7 +482,7 @@ class EscKeyReader:
                 lambda: self._poll_byte(self._seq_timeout_s),
                 abandon_on_cancel=True)
             if b == b"" or b == b"\x07" or (prev == b"\x1b" and b == b"\\"):
-                return
+                return  # b"\x07" = BEL; (ESC, "\\") = ST
             prev = b
 
     def _feed_interject_byte(self, byte: bytes) -> None:
