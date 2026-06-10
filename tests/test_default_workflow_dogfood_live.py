@@ -10,7 +10,10 @@ events fired correctly, and the sentinel landed in the expected file.
 What this proves:
   1. The shipped workflow tree (`workflow.yaml`, `scripts/`, agents) runs
      against real code, not an empty tmp_path.
-  2. `scripts/run-tests.sh` actually exercises a real `make test`.
+  2. `scripts/run-tests.sh` actually exercises a real test command — a
+     deliberately minimal scoped pytest run covering the file the coder edits
+     (the full `make test` suite blew the gate timeout under sandbox load and
+     proves nothing extra about the WIRING, which is what this test is for).
   3. The reviewer reviews a real diff.
   4. The driver decides when to act based on engine-emitted events,
      not by matching renderer output strings.
@@ -23,9 +26,11 @@ Skip predicates (all must pass):
   - first_opted_in() is not None  (IMP_LIVE_PROVIDERS opt-in)
   - IMP_RUN_DOGFOOD=1             (cost guard; set by `make test-dogfood`)
 
-Recursion guard: the coder runs `make test` -> `pytest -q` in the copied
-tree, which would re-collect this file. Scrubbing IMP_LIVE_PROVIDERS from
-the subprocess env causes all live tests to skip via opted_in().
+Recursion guard: the wired test_command is a scoped single-file pytest run
+that cannot re-collect this file, but an agent may still run broader
+commands (`make test`, bare `pytest`) on its own initiative. Scrubbing
+IMP_LIVE_PROVIDERS from the subprocess env causes all live tests to skip
+via opted_in() either way.
 """
 
 from __future__ import annotations
@@ -288,7 +293,16 @@ def test_dogfood_imp_on_imp_default_workflow(
         # by parse_config_layer into Config.lint_command / test_command — NOT
         # workflow vars.
         "lint_command: make lint\n"
-        "test_command: make test\n"
+        # Deliberately minimal test gate: the dogfood proves the run-tests
+        # WIRING (a real command runs real tests against the change), not imp's
+        # full suite — `make test` runs ~2100 tests and blew past the gate
+        # timeout under sandbox+engine load. test_bash_tool.py covers exactly
+        # the file the coder edits, so the gate still has semantic teeth. The
+        # PYTHONPATH pin is load-bearing: the gate runs in the Change WORKTREE,
+        # but the venv's editable install resolves `imp` to the seed checkout —
+        # without the pin the gate would silently test the unedited tree.
+        "test_command: PYTHONPATH=$PWD/src python3 -m pytest"
+        " tests/test_bash_tool.py -q\n"
         # Plan 1 config vars override: skip the interactive final gate so the
         # change auto-merges deterministically (the spec phase still drives one
         # interactive round). Exercises the final-review-gate branch -> merge.
@@ -336,9 +350,10 @@ def test_dogfood_imp_on_imp_default_workflow(
     )
 
     env = dict(os.environ)
-    # Recursion guard: the coder's `make test` re-collects this file;
-    # scrubbing IMP_LIVE_PROVIDERS makes all live tests skip in the
-    # subprocess pytest run.
+    # Recursion guard: the wired test_command is scoped to one file, but an
+    # agent may still run `make test`/bare `pytest` on its own initiative,
+    # which would re-collect this file; scrubbing IMP_LIVE_PROVIDERS makes
+    # all live tests skip in any such subprocess pytest run.
     env.pop("IMP_LIVE_PROVIDERS", None)
     env.pop("IMP_RUN_LIVE_TESTS", None)
     # Drop the host PYTHONPATH (`make test-dogfood` pins it to <checkout>/src):
@@ -391,11 +406,7 @@ def test_dogfood_imp_on_imp_default_workflow(
 
         request.addfinalizer(_dump_capture)
 
-    # 45 min: the run-tests gate alone legitimately runs imp's own full suite
-    # (~10 min in the seeded venv); 30 min left the wall-clock kill racing a
-    # healthy run. The gate's own wedge guard (run-tests.sh timeout, 30 min
-    # default) still bounds a truly hung suite inside this budget.
-    TOTAL_TIMEOUT = 2700.0
+    TOTAL_TIMEOUT = 1800.0
     EVENTS_FIRST_APPEAR_TIMEOUT = 30.0
     MAX_RESUMES = 8
 
