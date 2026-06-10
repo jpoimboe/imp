@@ -461,28 +461,38 @@ class EscKeyReader:
                 continue                         # restart: check for trailing ESC
             return True                          # any other byte → real ESC, byte lost
 
+    _DRAIN_CAP = 4096  # bytes; a runaway sequence must not wedge the reader
+
     async def _drain_until(self, is_final: Any) -> None:
-        """Drain CSI bytes through the final byte. STUB: Task B2 hardens this
-        with a 4 KiB cap and a quiesce-ownership check."""
+        """Drain CSI bytes through the final byte, bounded by _DRAIN_CAP,
+        yielding if a quiesce begins. On timeout or cap, abandon and return to
+        the table (a terminator that never arrives must not wedge the reader)."""
         import anyio
-        while True:
+        for _ in range(self._DRAIN_CAP):
+            if self._quiesce_depth > 0:
+                return                            # yield pending bytes to the prompt
             b = await anyio.to_thread.run_sync(
                 lambda: self._poll_byte(self._seq_timeout_s),
                 abandon_on_cancel=True)
             if b == b"" or is_final(b):
-                return
+                return                            # timeout, or final byte reached
 
     async def _drain_string_sequence(self) -> None:
-        """Drain string-sequence bytes to the terminator (BEL or ST). STUB: Task
-        B2 hardens this with a 4 KiB cap and a quiesce-ownership check."""
+        """Drain string-sequence bytes to the terminator (BEL or ST), bounded
+        by _DRAIN_CAP, yielding if a quiesce begins. On timeout or cap, abandon
+        (a terminator that never arrives must not wedge the reader)."""
         import anyio
         prev = b""
-        while True:
+        for _ in range(self._DRAIN_CAP):
+            if self._quiesce_depth > 0:
+                return
             b = await anyio.to_thread.run_sync(
                 lambda: self._poll_byte(self._seq_timeout_s),
                 abandon_on_cancel=True)
-            if b == b"" or b == b"\x07" or (prev == b"\x1b" and b == b"\\"):
-                return  # b"\x07" = BEL; (ESC, "\\") = ST
+            if b == b"":                          # terminator never arrived → abandon
+                return
+            if b == b"\x07" or (prev == b"\x1b" and b == b"\\"):
+                return                            # BEL or ST (ESC \)
             prev = b
 
     def _feed_interject_byte(self, byte: bytes) -> None:
