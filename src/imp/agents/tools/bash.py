@@ -90,10 +90,12 @@ async def bash(
             if policy is not None else ["sh", "-c", command])
     if run_in_background:
         if not ctx.background_enabled:
-            # Reachable from providers that expose registry bash without the
-            # bg wiring (claude_code/codex MCP wrapping): refuse loudly with
-            # the foreground alternative rather than spawn an unmanageable,
-            # unsweepable, leak-past-exit process.
+            # Future-provider defense: all four current providers wire the
+            # full bg surface and set the flag, so this is unreachable in
+            # production today. A NEW provider that exposes registry bash
+            # without the wiring (injection + sweeps + teardown) gets a loud
+            # refusal with the foreground alternative rather than spawning an
+            # unmanageable, unsweepable, leak-past-exit process.
             raise ValueError(
                 "run_in_background is not supported under this provider's "
                 "tool loop; run the command in the foreground instead")

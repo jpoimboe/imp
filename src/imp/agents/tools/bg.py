@@ -10,8 +10,10 @@ result instead of ValueError.
 
 No long-lived watcher task (hosting tasks across an async generator's yields
 is the anyio scope-corruption hazard): `_sweep_bg` runs at points that
-provably execute — every tool dispatch, every wait=True tick, a ~1 s ticker
-inside foreground bash's per-call task group, and post-API. The stream-file
+provably execute — every tool dispatch (in-process loop AND the MCP wrappers
+under claude_code/codex), every wait=True tick, a ~1 s ticker inside
+foreground bash's per-call task group, and post-API (per received SDK
+message/event under claude_code/codex). The stream-file
 cap is therefore a KILL-POLICY trigger bounded by sweep cadence, not a disk
 ceiling.
 """

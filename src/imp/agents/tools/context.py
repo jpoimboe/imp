@@ -40,11 +40,12 @@ class ToolContext:
     background_processes: dict[str, Any] = field(default_factory=dict)
     # Background-execution opt-in. Only providers that wire the FULL bg
     # surface (bash_output/bash_kill injection, _sweep_bg sites, teardown in
-    # interrupt + run()-finally) may set this. claude_code/codex expose the
-    # registry bash through MCP wrapping without any of that wiring — an
-    # unguarded spawn there is a process the agent can never read, stop, or
-    # sweep, leaking past the invocation (the exact trap the atomic
-    # capability-set rationale in _build_tools names).
+    # interrupt + run()-finally) may set this — all four current providers
+    # do. The default-False gate is future-provider defense: a new provider
+    # exposing registry bash without that wiring would otherwise hand the
+    # agent a process it can never read, stop, or sweep, leaking past the
+    # invocation (the trap the atomic capability-set rationale in
+    # _build_tools names).
     background_enabled: bool = False
     _bg_counter: int = 0
     # The change being processed; used by subagent dispatch to propagate slug/title.
