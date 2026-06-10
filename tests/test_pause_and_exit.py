@@ -43,3 +43,13 @@ def test_append_when_reason_differs(tmp_path: Path) -> None:
     events = [e for e in change.event_log().read() if e["type"] == "workflow_paused"]
     assert len(events) == 1
     assert events[0]["payload"]["reason"] == "ctrl-d"
+
+
+def test_append_when_engine_pause_reason_omitted(tmp_path: Path) -> None:
+    # Default-None contract (the common path for existing callers): with no
+    # engine_pause_reason, the workflow_paused append always fires exactly once.
+    change = _change(tmp_path, status="running")
+    pause_and_exit(change, reason="ctrl-d")
+    events = [e for e in change.event_log().read() if e["type"] == "workflow_paused"]
+    assert len(events) == 1
+    assert events[0]["payload"]["reason"] == "ctrl-d"
