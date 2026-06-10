@@ -473,6 +473,15 @@ def test_open_chrome_step_shows_running_line() -> None:
     hits = [ln for ln in out if "run-tests" in ln]
     assert len(hits) == 1
     assert hits[0].strip() == "run-tests · running"
+    # The running line carries the STEP color (it is the active step), not the
+    # receded breadcrumb gray.
+    colored = list(render_tree(nv.build_tree([
+        _ev("1", "change_created", slug="s", title="t"),
+        _ev("2", "step_started", step="run-tests", kind="script",
+            phase="implement"),
+    ]), full=False, color=True, width=80))
+    running_line = next(ln for ln in colored if "running" in ln)
+    assert pal._ANSI["step"] in running_line
     # Once the gate completes, the running line is gone — only the breadcrumb.
     out2 = _lines([
         _ev("1", "change_created", slug="s", title="t"),

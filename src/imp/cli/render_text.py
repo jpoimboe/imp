@@ -402,9 +402,10 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                 # run a project's full test suite for many minutes — so an open
                 # one must say so, or `imp log` on an in-flight change goes
                 # silent for the gate's whole duration (the breadcrumb only
-                # lands at step_completed).
+                # lands at step_completed). Step color (not breadcrumb gray):
+                # while running it IS the active step, same as any other.
                 yield _line(f"{node.name} · running", depth, color,
-                            *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+                            *pal.NODE_COLORS["step"], gutters=gutters)
             return
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         # One blank line between the step header and the agent's first words, so the
