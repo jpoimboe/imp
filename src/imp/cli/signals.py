@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -36,6 +37,8 @@ from imp.engine.change import Change
 from imp.engine.state import State
 
 _suppress = contextlib.suppress
+
+_SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 
 
 def pause_and_exit(change: Change, *, reason: str) -> None:
@@ -96,6 +99,7 @@ class InterruptCoordinator:
         self._first_gesture_at: float | None = None  # monotonic; suppression window
         self.escalated = False
         self._exit_event: Any = None    # set by SIGTERM/escalation routing (C3/C4)
+        self._now = time.monotonic      # injectable for tests
 
     def enqueue_interject(self, text: str) -> None:
         """Queue a human-typed line for delivery at the next agent turn boundary."""
@@ -104,6 +108,22 @@ class InterruptCoordinator:
     def drain_interject(self) -> str | None:
         """Pop the oldest queued interject, or None. Called at the turn boundary."""
         return self._interjects.pop(0) if self._interjects else None
+
+    def _register_gesture(self, *, kind: str) -> bool:
+        """Record an interrupt gesture and decide whether it proceeds. SIGTERM is
+        exempt (a supervisor shutdown must never be suppressed). For ESC/Ctrl-C: a
+        gesture within _SUPPRESS_WINDOW_S of the FIRST gesture is suppressed
+        (returns False); the window is measured from the first gesture and is NOT
+        restarted by suppressed presses. Returns True to proceed."""
+        if kind == "sigterm":
+            return True
+        now = self._now()
+        if self._first_gesture_at is None:
+            self._first_gesture_at = now
+            return True
+        if now - self._first_gesture_at < _SUPPRESS_WINDOW_S:
+            return False                          # suppressed (do not restart window)
+        return True                               # >1 s later → escalation (C3)
 
     def reset(self) -> None:
         """Clear interrupt state between session-loop rounds (§1). Runs right

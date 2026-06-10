@@ -144,3 +144,28 @@ async def test_reset_clears_pause_keeps_interjects_and_unparks() -> None:
     assert coord.pause_reason is None
     assert coord.drain_interject() == "keep me"  # interjects preserved
     assert unparked == [1]
+
+
+def test_suppression_window_from_first_gesture() -> None:
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]  # inject monotonic clock
+
+    assert coord._register_gesture(kind="ctrl-c") is True   # first → allowed
+    t["now"] = 100.5
+    assert coord._register_gesture(kind="esc") is False     # within 1 s → suppressed
+    t["now"] = 100.9
+    assert coord._register_gesture(kind="ctrl-c") is False  # window not restarted
+    t["now"] = 101.2
+    # >1 s from the FIRST gesture → escalation territory (allowed through).
+    assert coord._register_gesture(kind="ctrl-c") is True
+
+
+def test_sigterm_is_exempt_from_suppression() -> None:
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+    assert coord._register_gesture(kind="ctrl-c") is True
+    t["now"] = 100.3
+    # A supervisor SIGTERM 0.3 s later must NOT be suppressed.
+    assert coord._register_gesture(kind="sigterm") is True
