@@ -460,6 +460,7 @@ class AnthropicAgentRunner:
             model_name=invocation.model_name,
             parent_transcript_dir=invocation.transcript_dir,
             agent_id=aid,
+            background_enabled=True,  # full bg surface wired: injection + sweeps + teardown
         )
         ctx.change_context = invocation.change_context  # for subagent dispatch
         ctx.change_state = invocation.change_state

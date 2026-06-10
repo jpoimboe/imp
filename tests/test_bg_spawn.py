@@ -20,7 +20,8 @@ def _ctx(tmp_path: Path, agent_id: str = "step:t/coder") -> ToolContext:
     run_dir = tmp_path / ".imp" / "change"
     run_dir.mkdir(parents=True, exist_ok=True)
     ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
-                      events_path=run_dir / "events.jsonl", agent_id=agent_id)
+                      events_path=run_dir / "events.jsonl", agent_id=agent_id,
+                      background_enabled=True)
     ctx.change_context = ChangeContext(
         slug="t", title="T", project_root=tmp_path,
         workflow_dir=tmp_path / ".imp" / "change" / "workflow")
@@ -166,3 +167,19 @@ def test_bash_description_rewritten() -> None:
     assert "bash_output" in desc and "bash_kill" in desc
     assert "does NOT validate" in desc or "not validate" in desc
     assert "block-buffer" in desc
+
+
+def test_run_in_background_refused_when_not_enabled(tmp_path: Path) -> None:
+    """Providers that expose registry bash WITHOUT the bg wiring
+    (claude_code/codex MCP wrapping) must get a loud refusal, not an
+    unmanageable orphan process."""
+    async def main() -> None:
+        ctx = _ctx(tmp_path)
+        ctx.background_enabled = False
+        with pytest.raises(ValueError, match="not supported"):
+            await _spawn(ctx, "sleep 60")
+        assert ctx.background_processes == {}
+        # foreground bash is unaffected by the gate
+        raw = await get_registry()["bash"].async_invoke(ctx, {"command": "echo ok"})
+        assert json.loads(raw)["returncode"] == 0
+    anyio.run(main)

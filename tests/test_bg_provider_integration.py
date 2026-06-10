@@ -194,6 +194,18 @@ async def test_post_api_sweep_runs_before_first_dispatch(
 
 
 @pytest.mark.anyio
+async def test_wired_providers_enable_background(tmp_path: Path) -> None:
+    """The two in-process providers construct their ToolContext with
+    background_enabled=True (the full surface is wired); the e2e spawn tests
+    above only pass because of this — this pins the flag explicitly."""
+    import re
+    from pathlib import Path as _P
+    for mod in ("anthropic", "openai"):
+        src = _P(f"src/imp/providers/{mod}.py").read_text(encoding="utf-8")
+        assert re.search(r"background_enabled=True", src), mod
+
+
+@pytest.mark.anyio
 async def test_cap_warning_reaches_hooked_event_log_from_wait_tick(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

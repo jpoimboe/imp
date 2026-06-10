@@ -89,6 +89,14 @@ async def bash(
     argv = (build_sandbox_argv(command, cwd=cwd_path, policy=policy)
             if policy is not None else ["sh", "-c", command])
     if run_in_background:
+        if not ctx.background_enabled:
+            # Reachable from providers that expose registry bash without the
+            # bg wiring (claude_code/codex MCP wrapping): refuse loudly with
+            # the foreground alternative rather than spawn an unmanageable,
+            # unsweepable, leak-past-exit process.
+            raise ValueError(
+                "run_in_background is not supported under this provider's "
+                "tool loop; run the command in the foreground instead")
         # Same engine_env overlay and sandbox argv as foreground; only the
         # stdio plumbing differs. Lazy import: bg is a sibling tool module
         # registered by the same _register_builtins pass.
