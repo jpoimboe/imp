@@ -218,10 +218,12 @@ def test_cross_invocation_namespace_isolation(tmp_path: Path) -> None:
         assert p_out["id"] == s_out["id"] == "bg1"
         assert p_out["out_path"] != s_out["out_path"]
         await terminate_background_processes(parent)
-        assert (tmp_path / s_out["out_path"]).exists()   # sibling untouched
-        r = await _read(sub, "bg1")
-        assert r["status"] == "running"
-        await terminate_background_processes(sub)
+        try:
+            assert (tmp_path / s_out["out_path"]).exists()   # sibling untouched
+            r = await _read(sub, "bg1")
+            assert r["status"] == "running"
+        finally:
+            await terminate_background_processes(sub)
     anyio.run(main)
 
 

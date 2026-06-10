@@ -78,26 +78,29 @@ def test_cap_breach_kills_group_and_warns_once(
         log = _RecLog()
         ctx.event_log = log
         out = await _spawn(ctx, FLOODER)
-        await _sweep_until_killed(ctx, out["id"])
-        bp = ctx.background_processes[out["id"]]
-        assert bp.kill_reason == "output-cap"
-        [w] = log.warnings()
-        # Decision 6: human-readable message (narrative renders payload.message)
-        assert out["id"] in w["message"] and "output cap" in w["message"]
-        assert w["id"] == out["id"]
-        assert w["reason"] == "output-cap"
-        assert len(w["command"]) <= 200
-        # repeated-breach gate: files persist over-cap — later sweeps must NOT
-        # re-kill or re-emit
-        for _ in range(3):
-            await _sweep_bg(ctx)
-        assert len(log.warnings()) == 1
-        # prior output still pageable after the kill
-        raw = await get_registry()["bash_output"].async_invoke(
-            ctx, {"id": out["id"]})
-        r = json.loads(raw)
-        assert r["status"] == "killed" and r["kill_reason"] == "output-cap"
-        assert len(r["stdout"]) > 0
+        try:
+            await _sweep_until_killed(ctx, out["id"])
+            bp = ctx.background_processes[out["id"]]
+            assert bp.kill_reason == "output-cap"
+            [w] = log.warnings()
+            # Decision 6: human-readable message (narrative renders payload.message)
+            assert out["id"] in w["message"] and "output cap" in w["message"]
+            assert w["id"] == out["id"]
+            assert w["reason"] == "output-cap"
+            assert len(w["command"]) <= 200
+            # repeated-breach gate: files persist over-cap — later sweeps must NOT
+            # re-kill or re-emit
+            for _ in range(3):
+                await _sweep_bg(ctx)
+            assert len(log.warnings()) == 1
+            # prior output still pageable after the kill
+            raw = await get_registry()["bash_output"].async_invoke(
+                ctx, {"id": out["id"]})
+            r = json.loads(raw)
+            assert r["status"] == "killed" and r["kill_reason"] == "output-cap"
+            assert len(r["stdout"]) > 0
+        finally:
+            await _cleanup(ctx)
     anyio.run(main)
 
 
@@ -114,12 +117,15 @@ def test_agent_killed_flooder_not_relabeled(
         log = _RecLog()
         ctx.event_log = log
         out = await _spawn(ctx, "echo data; sleep 60")
-        await get_registry()["bash_kill"].async_invoke(ctx, {"id": out["id"]})
-        bp = ctx.background_processes[out["id"]]
-        assert bp.kill_reason == "agent"
-        await _sweep_bg(ctx)
-        assert bp.kill_reason == "agent"     # not relabeled "output-cap"
-        assert log.warnings() == []
+        try:
+            await get_registry()["bash_kill"].async_invoke(ctx, {"id": out["id"]})
+            bp = ctx.background_processes[out["id"]]
+            assert bp.kill_reason == "agent"
+            await _sweep_bg(ctx)
+            assert bp.kill_reason == "agent"     # not relabeled "output-cap"
+            assert log.warnings() == []
+        finally:
+            await _cleanup(ctx)
     anyio.run(main)
 
 
@@ -147,17 +153,20 @@ def test_forking_server_exited_leader_still_cap_killed(
         ctx = _ctx(tmp_path)
         ctx.event_log = _RecLog()
         out = await _spawn(ctx, f"( {FLOODER} ) & exit 0")
-        bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(10):
-            while bp.proc.returncode is None:
-                await anyio.sleep(0.05)
-        await _sweep_until_killed(ctx, out["id"])
-        assert bp.kill_reason == "output-cap"
-        assert bp.returncode == 0            # leader's REAL returncode retained
-        # the child stopped writing: file growth halts
-        size1 = os.stat(bp.out_path).st_size
-        await anyio.sleep(0.5)
-        assert os.stat(bp.out_path).st_size == size1
+        try:
+            bp = ctx.background_processes[out["id"]]
+            with anyio.fail_after(10):
+                while bp.proc.returncode is None:
+                    await anyio.sleep(0.05)
+            await _sweep_until_killed(ctx, out["id"])
+            assert bp.kill_reason == "output-cap"
+            assert bp.returncode == 0            # leader's REAL returncode retained
+            # the child stopped writing: file growth halts
+            size1 = os.stat(bp.out_path).st_size
+            await anyio.sleep(0.5)
+            assert os.stat(bp.out_path).st_size == size1
+        finally:
+            await _cleanup(ctx)
     anyio.run(main)
 
 
@@ -178,10 +187,13 @@ def test_breach_kill_proceeds_when_warning_emit_raises(
 
         ctx.event_log = _BoomLog()
         out = await _spawn(ctx, FLOODER)
-        await _sweep_until_killed(ctx, out["id"])
-        bp = ctx.background_processes[out["id"]]
-        assert bp.status == "killed"
-        assert bp.kill_reason == "output-cap"
+        try:
+            await _sweep_until_killed(ctx, out["id"])
+            bp = ctx.background_processes[out["id"]]
+            assert bp.status == "killed"
+            assert bp.kill_reason == "output-cap"
+        finally:
+            await _cleanup(ctx)
     anyio.run(main)
 
 
@@ -197,10 +209,13 @@ def test_quiet_foreground_bash_still_sweeps_via_ticker(
         ctx = _ctx(tmp_path)
         ctx.event_log = _RecLog()
         out = await _spawn(ctx, FLOODER)
-        await get_registry()["bash"].async_invoke(ctx, {"command": "sleep 2.5"})
-        bp = ctx.background_processes[out["id"]]
-        assert bp.status == "killed"
-        assert bp.kill_reason == "output-cap"
+        try:
+            await get_registry()["bash"].async_invoke(ctx, {"command": "sleep 2.5"})
+            bp = ctx.background_processes[out["id"]]
+            assert bp.status == "killed"
+            assert bp.kill_reason == "output-cap"
+        finally:
+            await _cleanup(ctx)
     anyio.run(main)
 
 
@@ -235,20 +250,22 @@ def test_sweep_fires_on_non_bash_tool_dispatch(
         ctx.event_log = _RecLog()
         (tmp_path / "f.txt").write_text("data")
         out = await _spawn(ctx, FLOODER)
-
-        class _Inv:
-            class agent_def:
-                output_schema = None
-        bp = ctx.background_processes[out["id"]]
-        with anyio.fail_after(30):
-            while bp.status != "killed":
-                await dispatch_one_tool_use(
-                    ctx=ctx, elog=ctx.event_log, aid="step:t", invocation=_Inv(),
-                    tools=get_registry(),
-                    tu=ToolUseBlock(id="u1", name="read_file",
-                                    input={"path": "f.txt"}),
-                    tool_results=[], state=TurnState(tool_calls_used=0),
-                    ceiling=None)
-                await anyio.sleep(0.1)
-        assert bp.kill_reason == "output-cap"
+        try:
+            class _Inv:
+                class agent_def:
+                    output_schema = None
+            bp = ctx.background_processes[out["id"]]
+            with anyio.fail_after(30):
+                while bp.status != "killed":
+                    await dispatch_one_tool_use(
+                        ctx=ctx, elog=ctx.event_log, aid="step:t", invocation=_Inv(),
+                        tools=get_registry(),
+                        tu=ToolUseBlock(id="u1", name="read_file",
+                                        input={"path": "f.txt"}),
+                        tool_results=[], state=TurnState(tool_calls_used=0),
+                        ceiling=None)
+                    await anyio.sleep(0.1)
+            assert bp.kill_reason == "output-cap"
+        finally:
+            await _cleanup(ctx)
     anyio.run(main)

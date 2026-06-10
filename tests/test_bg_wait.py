@@ -81,10 +81,13 @@ def test_cap_kill_during_wait_ends_wait_as_exit(
         ctx = _ctx(tmp_path)
         out = await _spawn(
             ctx, "while true; do echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; done")
-        r = await _read(ctx, out["id"], wait=True, timeout=30)
-        assert r["wait_ended"] == "exit"
-        assert r["status"] == "killed"
-        assert r["kill_reason"] == "output-cap"
+        try:
+            r = await _read(ctx, out["id"], wait=True, timeout=30)
+            assert r["wait_ended"] == "exit"
+            assert r["status"] == "killed"
+            assert r["kill_reason"] == "output-cap"
+        finally:
+            await _cleanup(ctx)
     anyio.run(main)
 
 

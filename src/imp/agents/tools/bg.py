@@ -452,13 +452,11 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
     # (1) — entries already terminal KEEP their state: an exited proc keeps
     # its real returncode; an output-cap kill keeps the reason the Decision-6
     # warning promised.
-    flipped: list[BgProc] = []
     for bp in procs:
         _reap(bp)
         if bp.status == "running":
             bp.status = "killed"
             bp.kill_reason = "interrupted"
-            flipped.append(bp)
     # Steps 2-4 run SHIELDED (same rationale as _kill_group_escalate): a
     # cancellation landing on the teardown task mid-grace (gen.aclose() from
     # an already-cancelled task, racing interrupts) raises CancelledError — a
@@ -492,13 +490,18 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
             # to prevent.
             await kill_process_group(bp.proc, signal.SIGKILL)
             if bp.proc.returncode is None:
-                with contextlib.suppress(Exception):
-                    await bp.proc.wait()
-        for bp in flipped:
-            # step 1 already performed the terminal flip, so a vanilla _reap
-            # would no-op — record the reaped returncode directly (else every
-            # teardown tombstone carries returncode: null).
-            if bp.returncode is None:
+                # Bounded like _kill_group_escalate's post-SIGKILL wait: a
+                # D-state straggler must not hang the (shielded, uncancellable)
+                # teardown — it tombstones returncode: null instead.
+                with anyio.move_on_after(PROCESS_KILL_GRACE_S):
+                    with contextlib.suppress(Exception):
+                        await bp.proc.wait()
+        for bp in procs:
+            # Terminal flips (step 1 here, or a sweep's flip mid-escalation)
+            # make a vanilla _reap no-op — record the reaped returncode
+            # directly (else the tombstone carries returncode: null). The
+            # None-guard preserves every already-recorded real returncode.
+            if bp.returncode is None and bp.proc.returncode is not None:
                 bp.returncode = bp.proc.returncode
         # (3) — SYNC stdlib I/O on purpose: the two same-runner teardown
         # entrants racing this merge need the same no-await-critical-section
