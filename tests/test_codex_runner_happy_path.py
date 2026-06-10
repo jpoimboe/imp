@@ -130,6 +130,50 @@ async def test_run_yields_agent_output_when_complete_step_captured(
 
 
 @pytest.mark.anyio
+async def test_drive_turns_sweeps_bg_per_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Post-API-site analog: one sweep per streamed SDK event, so a
+    backgrounded flooder is cap-checked across turns with no imp dispatch."""
+    import imp.agents.tools.bg as bg_mod
+
+    calls = {"n": 0}
+    real = bg_mod._sweep_bg
+
+    async def counting(ctx):
+        calls["n"] += 1
+        await real(ctx)
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", counting)
+    _seed_git_and_auth(tmp_path)
+    canonical = tmp_path / "auth.json"
+    elog = InMemoryEventLog()
+
+    scripted = [[
+        thread_started("thr-1"),
+        agent_message("ok, calling complete_step"),
+        mcp_call(
+            name="complete_step",
+            args={"answer": "42"},
+            result="step complete",
+            item_id="cs-1",
+        ),
+        turn_completed(input_tokens=100, output_tokens=50),
+    ]]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
+    )
+    runner._canonical_auth_override = canonical  # test seam
+
+    inv = _build_invocation(tmp_path, event_log=elog)
+
+    events = [e async for e in runner.run(inv)]
+    assert events[-1]["type"] == "agent_output"
+    assert calls["n"] >= 2
+
+
+@pytest.mark.anyio
 async def test_run_fails_fast_with_network_error_when_self_ping_fails(
     tmp_path: Path,
 ) -> None:

@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from imp.agents.tools import Tool
+from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -83,6 +84,11 @@ async def dispatch_tool(
     the decision (`> state.cap`). Future maintainers MUST keep these two lines
     adjacent and synchronous.
     """
+    # Decision 10 sweep site: EVERY MCP dispatch — the codex analog of
+    # agents/dispatch.py's first-statement sweep. Placed BEFORE the cap RMW;
+    # the RMW's two lines below stay adjacent and synchronous (their invariant
+    # is about each other, not about preceding awaits).
+    await _bg._sweep_bg(ctx)
     # ── cap RMW (no await between read and decision) ──────────────────────────
     state.dispatch_count += 1
     if state.dispatch_count > state.cap:

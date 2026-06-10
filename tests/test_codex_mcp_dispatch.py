@@ -392,3 +392,30 @@ def test_cap_rmw_literal_has_no_await_between_read_and_decision() -> None:
     window = "\n".join(lines[inc_idx:cmp_idx + 1])
     assert not re.search(r"\bawait\b", window), (
         f"cap RMW window contains an `await` between read and decision:\n{window}")
+
+
+def test_dispatch_sweeps_bg_before_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Decision 10 dispatch site, codex edition: every MCP dispatch sweeps —
+    including cap-exceeded dispatches (the sweep precedes the cap RMW)."""
+    import imp.agents.tools.bg as bg_mod
+
+    calls = {"n": 0}
+    real = bg_mod._sweep_bg
+
+    async def counting(ctx):
+        calls["n"] += 1
+        await real(ctx)
+
+    monkeypatch.setattr(bg_mod, "_sweep_bg", counting)
+    ctx = _ctx(tmp_path)
+    state = RunState(cap=1)
+    out = asyncio.run(dispatch_tool(
+        tool=_echo_tool(), args={"text": "hi"}, ctx=ctx, state=state))
+    assert out == "echo:hi"
+    assert calls["n"] == 1
+    # over-cap dispatch still sweeps (sweep precedes the RMW)
+    asyncio.run(dispatch_tool(
+        tool=_echo_tool(), args={"text": "hi"}, ctx=ctx, state=state))
+    assert calls["n"] == 2

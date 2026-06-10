@@ -32,6 +32,7 @@ from imp.agents.runner import (
     ToolUseBlock,
 )
 from imp.agents.subagents import raise_if_suspended
+from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.schema import validate_agent_output
@@ -510,6 +511,9 @@ class CodexAgentRunner:
                         "category": "config", "kind": "interrupted",
                         "message": "runner cancelled by interrupt"}}
                     return
+                # Post-API-site analog (Decision 10): one sweep per streamed
+                # SDK event. Dead-server/cancel checks stay first.
+                await _bg._sweep_bg(ctx)
                 etype = getattr(event, "type", None)
                 process_event(event, elog=elog, agent_id=aid, state=proc_state,
                               provider=invocation.provider_name,
