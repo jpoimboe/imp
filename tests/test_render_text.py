@@ -460,6 +460,32 @@ def test_chrome_step_collapses_to_single_breadcrumb() -> None:
     assert "complete" not in hits[0]            # no start line → no "complete"
 
 
+def test_open_chrome_step_shows_running_line() -> None:
+    # An OPEN script gate (step_started seen, no step_completed yet) renders a
+    # `name · running` line. A script gate is not instant chrome — run-tests can
+    # run a project's full suite for minutes — and without this line `imp log`
+    # on an in-flight change shows nothing at all for the gate's whole duration.
+    out = _lines([
+        _ev("1", "change_created", slug="s", title="t"),
+        _ev("2", "step_started", step="run-tests", kind="script",
+            phase="implement"),
+    ])
+    hits = [ln for ln in out if "run-tests" in ln]
+    assert len(hits) == 1
+    assert hits[0].strip() == "run-tests · running"
+    # Once the gate completes, the running line is gone — only the breadcrumb.
+    out2 = _lines([
+        _ev("1", "change_created", slug="s", title="t"),
+        _ev("2", "step_started", step="run-tests", kind="script",
+            phase="implement"),
+        _ev("3", "step_completed", step="run-tests", kind="script",
+            action={"verb": "continue"}),
+    ])
+    hits2 = [ln for ln in out2 if "run-tests" in ln]
+    assert len(hits2) == 1
+    assert "running" not in hits2[0]
+
+
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:
     # the per-step completion line carries the step color (ties open+close);
     # stray event (fallback) lines stay dark-gray chrome.

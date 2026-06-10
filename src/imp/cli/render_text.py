@@ -397,6 +397,14 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             # breadcrumb (`✓ name · 0s`); the name-only header above it is noise.
             yield from _render_children(node.children, depth=depth, full=full,
                                         color=color, width=width, gutters=gutters)
+            if not node.closed:
+                # Still executing. A script gate is not instant chrome — it can
+                # run a project's full test suite for many minutes — so an open
+                # one must say so, or `imp log` on an in-flight change goes
+                # silent for the gate's whole duration (the breadcrumb only
+                # lands at step_completed).
+                yield _line(f"{node.name} · running", depth, color,
+                            *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
             return
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         # One blank line between the step header and the agent's first words, so the
