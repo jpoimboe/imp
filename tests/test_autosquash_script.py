@@ -24,7 +24,15 @@ AUTOSQUASH = Path("src/imp/assets/workflows/default/scripts/autosquash.sh").reso
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
+    # GIT_EDITOR=true: setup commits like `commit --squash=<sha>` (no -m) open
+    # an interactive editor. Without this pin the test is environment-dependent:
+    # genuine on hosts that already export GIT_EDITOR=true, VACUOUS on hosts
+    # where the editor fails fast (the squash commit silently never lands), and
+    # a hard WEDGE in editor-less sandboxes — it hung the dogfood's run-tests
+    # gate under bwrap --clearenv (2026-06-09).
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                          text=True, check=False,
+                          env={**os.environ, "GIT_EDITOR": "true"})
 
 
 def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
@@ -297,6 +305,12 @@ def test_autosquash_folds_squash_only_no_fixup(tmp_path: Path) -> None:
     (pr / "g.txt").write_text("work (more)\n")
     _git(pr, "add", "g.txt")
     _git(pr, "commit", f"--squash={target}")
+    # Vacuous-pass guard: the squash! commit must actually exist before the
+    # script runs — if the editor-backed setup commit silently failed, the
+    # final "no squash! subjects" assert would pass without testing anything.
+    assert any(s.startswith("squash!") for s in _subjects(pr)), (
+        "setup failed to land the squash! commit (editor-dependent setup?)"
+    )
 
     assert _run(pr).returncode == 0
     assert not any(

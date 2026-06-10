@@ -139,7 +139,11 @@ MERGE=$(git rev-list --merges --max-count=1 "$FORK"..HEAD)
 if [ -n "$MERGE" ]; then
   BEFORE=$(git rev-parse HEAD)
   BEFORE_TREE=$(git rev-parse "HEAD^{tree}")
-  if GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash "$MERGE"; then
+  # GIT_EDITOR=true as well: a squash! fold opens the commit-MESSAGE editor
+  # (fixup! does not), which wedges editor-less environments (sandboxed gates,
+  # CI). `true` accepts the default concatenated message — correct for an
+  # unattended workflow step. Same pin fold_preserving_merges already uses.
+  if GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$MERGE"; then
     if ! git log --format='%s' "$FORK"..HEAD | grep -qE '^(fixup|squash|amend)!'; then
       echo "autosquash: folded post-merge fixups; integration merge preserved"
       exit 0
@@ -156,8 +160,9 @@ fi
 
 # No integration merge in range: ordinary autosquash from the fork point.
 # GIT_SEQUENCE_EDITOR=true accepts the todo list --autosquash has already reordered
-# (fixups placed under their targets).
-if GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash "$FORK"; then
+# (fixups placed under their targets); GIT_EDITOR=true accepts the concatenated
+# message a squash! fold opens the editor for (else editor-less envs wedge).
+if GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$FORK"; then
   if git log --format='%s' "$FORK"..HEAD | grep -qE '^(fixup|squash|amend)!'; then
     echo "fixup! commits remain after autosquash (unmatched target subject?)" >&2
     exit 1
