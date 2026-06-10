@@ -266,6 +266,18 @@ def _should_respawn_reader(*, reader_exited: bool) -> bool:
     return reader_exited
 
 
+def _interactive_loop_predicate(
+    *, non_interactive: bool, reader_armed: bool,
+    stdin_tty: bool, stdout_tty: bool,
+) -> bool:
+    """The §2 loop runs only for an attended session: not --non-interactive, the
+    ESC reader armed at startup (LATCHED — not a live is_running(), which reads
+    false right after an ESC interrupt), and both stdin/stdout are ttys (the
+    reader opens /dev/tty, so a piped stdin must not park a run at a prompt
+    consuming pipe content as replies)."""
+    return (not non_interactive) and reader_armed and stdin_tty and stdout_tty
+
+
 def _project_root() -> Path:
     return find_project_root()
 
