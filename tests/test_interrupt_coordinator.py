@@ -146,6 +146,18 @@ async def test_reset_clears_pause_keeps_interjects_and_unparks() -> None:
     assert unparked == [1]
 
 
+def test_reset_clears_suppression_window() -> None:
+    # A fresh session-loop round must start a NEW suppression window — reset()
+    # clears _first_gesture_at so a Ctrl-C after a reset is not permanently
+    # suppressed by a gesture from the prior round.
+    coord = InterruptCoordinator()
+    assert coord._register_gesture(kind="ctrl-c") is True
+    assert coord._first_gesture_at is not None
+    coord.reset()
+    assert coord._first_gesture_at is None
+    assert coord._register_gesture(kind="ctrl-c") is True  # new window opens
+
+
 def test_suppression_window_from_first_gesture() -> None:
     coord = InterruptCoordinator()
     t = {"now": 100.0}
