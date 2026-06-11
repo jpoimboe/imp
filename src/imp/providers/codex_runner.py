@@ -35,6 +35,7 @@ from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
 from imp.providers import errors as perr
@@ -46,7 +47,6 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
-from imp.engine.agent_run import _resolve_wait_reply
 from imp.providers.codex_mcp import RunState, start_server
 
 _logger = logging.getLogger(__name__)

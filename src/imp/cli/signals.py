@@ -150,9 +150,9 @@ class InterruptCoordinator:
         if self._first_gesture_at is None:
             self._first_gesture_at = now
             return True
-        if now - self._first_gesture_at < _SUPPRESS_WINDOW_S:
-            return False                          # suppressed (do not restart window)
-        return True                               # >1 s later → escalation (C3)
+        # Within the window → suppressed; after it → escalation territory (C3).
+        # The window is NOT restarted here (no write to _first_gesture_at).
+        return now - self._first_gesture_at >= _SUPPRESS_WINDOW_S
 
     def reset(self) -> None:
         """Clear interrupt state between session-loop rounds (§1). Runs right

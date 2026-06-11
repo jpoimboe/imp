@@ -34,7 +34,7 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     hint_shown = False
 
     @kb.add("c-c")
-    def _(event: Any) -> None:  # noqa: ANN401
+    def _(event: Any) -> None:
         # Typed Ctrl-C must NEVER raise (the default binding does). Non-empty
         # buffer → clear it; empty buffer → hint at Ctrl-D, once per session.
         nonlocal hint_shown

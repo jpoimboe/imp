@@ -16,13 +16,12 @@ def anyio_backend() -> str:
 
 @pytest.mark.anyio
 async def test_ctrl_c_with_text_clears_buffer_no_exception() -> None:
-    with create_pipe_input() as pipe:
-        with create_app_session(input=pipe, output=DummyOutput()):
-            session = _build_session()
-            pipe.send_text("hello")        # type text
-            pipe.send_text("\x03")         # Ctrl-C → must clear, NOT raise
-            pipe.send_text("world\r")      # type more, submit
-            result = await session.prompt_async("> ")
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        session = _build_session()
+        pipe.send_text("hello")        # type text
+        pipe.send_text("\x03")         # Ctrl-C → must clear, NOT raise
+        pipe.send_text("world\r")      # type more, submit
+        result = await session.prompt_async("> ")
     assert result == "world"               # 'hello' was cleared, no KeyboardInterrupt
 
 
@@ -30,10 +29,9 @@ async def test_ctrl_c_with_text_clears_buffer_no_exception() -> None:
 async def test_ctrl_c_on_empty_buffer_does_not_raise() -> None:
     # The spec-mandated crash-fix path: Ctrl-C on an EMPTY buffer must not raise
     # (the default binding raises KeyboardInterrupt); the prompt keeps going.
-    with create_pipe_input() as pipe:
-        with create_app_session(input=pipe, output=DummyOutput()):
-            session = _build_session()
-            pipe.send_text("\x03")         # Ctrl-C on empty → hint, NOT raise
-            pipe.send_text("world\r")      # prompt still alive → submit
-            result = await session.prompt_async("> ")
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        session = _build_session()
+        pipe.send_text("\x03")         # Ctrl-C on empty → hint, NOT raise
+        pipe.send_text("world\r")      # prompt still alive → submit
+        result = await session.prompt_async("> ")
     assert result == "world"

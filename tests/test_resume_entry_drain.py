@@ -334,7 +334,11 @@ async def test_claude_code_resume_entry_drain_before_first_query(
         FakeClaudeSDKClient,
         assistant,
         result,
+    )
+    from tests.cc_fakes import (
         text as cc_text,
+    )
+    from tests.cc_fakes import (
         tool_use as cc_tool_use,
     )
 
@@ -811,8 +815,8 @@ def test_subagent_suspended_resume_drains_via_parent_replay() -> None:
     test_executor_interrupt_resume.py), and (b) on resume the parent hits the
     SEND_TO_LLM drain path (F1-F4 tests above).
     """
-    from imp.engine.agent_run import drain_all_interjects_at_resume
     from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
+    from imp.engine.agent_run import drain_all_interjects_at_resume
 
     # Simulate parent transcript state AFTER SubagentSuspended unwind and
     # repair_dangling_tool_use_on_resume: assistant had a "task" tool_use (t1),
@@ -885,6 +889,7 @@ def test_script_step_route_does_not_drain_interjects() -> None:
     interjects would be silently lost before the next agent step sees them.
     """
     import inspect as _inspect
+
     from imp.engine import executor as _executor
 
     # _route_branch and _route_script are sync — cannot call any coordinator API.

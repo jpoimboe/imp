@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from imp.cli.signals import pause_and_exit
 from imp.engine.change import Change
 from imp.engine.state import State
-from imp.cli.signals import pause_and_exit
 
 
 def _change(tmp_path: Path, status: str) -> Change:

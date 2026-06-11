@@ -33,12 +33,11 @@ from typing import Any
 import anyio
 import pytest
 
+from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.cli.main import _interactive_loop_predicate, _run_change_session
 from imp.cli.signals import InterruptCoordinator
-from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.change import Change
 from imp.engine.state import State
-
 
 # ---------------------------------------------------------------------------
 # Step 1: Predicate-driven unit tests (a / b / c)

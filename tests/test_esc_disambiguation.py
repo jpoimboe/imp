@@ -33,7 +33,8 @@ async def test_lone_esc_fires() -> None:
         # No follow-up byte → window expires → real ESC.
         assert await reader._disambiguate_esc() is True
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -43,7 +44,8 @@ async def test_arrow_key_discarded() -> None:
         os.write(leader, b"\x1b[A")  # up-arrow: CSI + final byte 'A'
         assert await reader._disambiguate_esc() is False  # discarded, no fire
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -53,7 +55,8 @@ async def test_alt_letter_fires_and_discards_byte() -> None:
         os.write(leader, b"\x1bf")  # ESC then a printable, non-introducer byte
         assert await reader._disambiguate_esc() is True
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -63,7 +66,8 @@ async def test_esc_behind_arrow_still_fires() -> None:
         os.write(leader, b"\x1b[A\x1b")  # arrow, then a deliberate ESC
         assert await reader._disambiguate_esc() is True
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -78,7 +82,8 @@ async def test_unterminated_osc_abandons_then_later_esc_fires() -> None:
         os.write(leader, b"\x1b")
         assert await reader._disambiguate_esc() is True
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -88,7 +93,8 @@ async def test_osc_consumed_to_terminator() -> None:
         os.write(leader, b"\x1b]11;rgb:ff/ff/ff\x07")  # OSC + BEL terminator
         assert await reader._disambiguate_esc() is False
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -100,7 +106,8 @@ async def test_drain_stops_at_quiesce_boundary() -> None:
         # Drain must stop and yield to prompt_toolkit (treated as consumed).
         assert await reader._disambiguate_esc() is False
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -140,7 +147,8 @@ async def test_drain_cap_abandoned_without_wedging() -> None:
             f"expected 12 leftover bytes (20 written - 8 cap), got {len(leftover)}: {leftover!r}"
         )
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -180,7 +188,8 @@ async def test_drain_yields_buffered_bytes_to_prompt_on_quiesce() -> None:
             f"got {len(leftover)}: {leftover!r}"
         )
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)
 
 
 @pytest.mark.anyio
@@ -207,4 +216,5 @@ async def test_reader_parks_when_should_pause_already_set() -> None:
         assert reader._parked_on_pause is True
         assert fired == []  # parked → no second signal_pause fire
     finally:
-        os.close(leader); os.close(follower)
+        os.close(leader)
+        os.close(follower)

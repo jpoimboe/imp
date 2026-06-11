@@ -148,7 +148,8 @@ async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Pat
             pass
 
     class _P:
-        name = "fake"; model = "m"
+        name = "fake"
+        model = "m"
         def create_runner(self, _i: AgentInvocation) -> AgentRunner:
             return _Runner()
 
@@ -221,7 +222,8 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
             pass
 
     class _P:
-        name = "fake"; model = "m"
+        name = "fake"
+        model = "m"
         def create_runner(self, _i: AgentInvocation) -> AgentRunner:
             return _Runner()
 
@@ -287,7 +289,8 @@ async def test_completion_pending_finalizes_without_redispatch(tmp_path: Path) -
             pass
 
     class _P:
-        name = "fake"; model = "m"
+        name = "fake"
+        model = "m"
         def create_runner(self, _i: AgentInvocation) -> AgentRunner:
             return _Runner()
 
