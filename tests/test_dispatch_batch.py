@@ -568,3 +568,66 @@ async def test_inline_kill_switch_task_result_stamps_id_ns_block(tmp_path: Path)
     assert results[0]["payload"]["id"] == "t1"
     assert results[0]["payload"]["id_ns"] == "block"
     reset_parallelism_cache()
+
+
+class _NestingRunner:
+    """Holds a parent-level limiter slot while running its own nested dispatch_task_batch."""
+
+    def __init__(self, child_root: Path, completed: list, leaf_gate: dict) -> None:
+        self._root = child_root
+        self._completed = completed
+        self._gate = leaf_gate
+
+    async def run(self, _inv):
+        child_ctx = _ctx(self._root, spawn=_slow_spawn(self._gate, 0.03))
+        leaf_results: list = []
+        async for _ in dispatch_task_batch(
+                ctx=child_ctx, elog=InMemoryEventLog(), aid="step:c",
+                task_tus=[_task_tu("c1"), _task_tu("c2")],
+                tool_results=leaf_results, state=TurnState(tool_calls_used=0),
+                ceiling=None):
+            pass
+        self._completed.append(len(leaf_results))
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    async def interrupt(self) -> None: ...
+
+
+def _nesting_spawn(tmp_path: Path, completed: list, leaf_gate: dict):
+    counter = {"i": 0}
+
+    async def _spawn(_inv):
+        idx = counter["i"]
+        counter["i"] += 1
+        return _NestingRunner(tmp_path / f"child{idx}", completed, leaf_gate)
+
+    return _spawn
+
+
+@pytest.mark.anyio
+async def test_depth2_nested_dispatch_uses_fresh_limiters_no_deadlock(
+    tmp_path: Path,
+) -> None:
+    """AC15: depth-2 nested dispatch uses fresh per-invocation limiters; no deadlock."""
+    reset_parallelism_cache()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "2")
+    try:
+        completed: list = []
+        leaf_gate = {"active": 0, "peak": 0}
+        ctx = _ctx(tmp_path, spawn=_nesting_spawn(tmp_path, completed, leaf_gate))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        tus = [_task_tu("p1"), _task_tu("p2")]   # 2 == cap -> parent limiter full
+        with anyio.fail_after(5):
+            async for _ in dispatch_task_batch(
+                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
+                    tool_results=tool_results, state=state, ceiling=None):
+                pass
+        assert len(tool_results) == 2            # both parent tasks settled
+        assert len(completed) == 2               # both children ran a nested batch
+        assert sum(completed) == 4               # every nested leaf completed
+    finally:
+        monkeypatch.undo()
+        reset_parallelism_cache()
