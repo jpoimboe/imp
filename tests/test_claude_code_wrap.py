@@ -566,3 +566,30 @@ async def test_impl_refuses_task_when_membership_frozen(tmp_path: Path) -> None:
     assert results[0]["payload"]["error"] is True
     assert results[0]["payload"]["id_ns"] == "block"
     assert state.inflight_task_dispatches == 0                 # finally still ran
+
+
+@pytest.mark.anyio
+async def test_impl_raises_when_dispatched_off_the_runner_loop(
+        tmp_path: Path) -> None:
+    # AC34: _impl raises if it runs on a loop other than the one the runner
+    # recorded (state.runner_loop). A production check, exercised by setting a
+    # mismatched runner_loop.
+    import asyncio
+
+    from imp.agents.subagents import make_task_tool
+
+    foreign = asyncio.new_event_loop()
+    try:
+        ctx = _ctx(tmp_path)
+        ctx.subagent_defs = {"sub": _sub_def()}
+        ctx.parent_transcript_dir = tmp_path / "parent"
+        state = _RunState()
+        state.agent_id = "step:p/task-lead"
+        state.runner_loop = foreign      # not the loop this test runs on
+        wrapped = _wrap_one("task", make_task_tool(), ctx, state,
+                            _passthrough_decorator)
+        with pytest.raises(RuntimeError, match="runner loop"):
+            await wrapped({"subagent_name": "sub", "task_description": "do",
+                          "__tool_use_id__": ""})
+    finally:
+        foreign.close()

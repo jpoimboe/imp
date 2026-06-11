@@ -242,6 +242,9 @@ class _RunState:
     # before the dispatch await and decrements in finally on every exit; the
     # receive loop defers the awaiting_user re-raise until this is 0.
     inflight_task_dispatches: int = 0
+    # Runner's event loop, recorded at _run_loop entry. _impl raises on a foreign
+    # loop (same-loop topology pin). None disables the check.
+    runner_loop: Any = None
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -381,6 +384,11 @@ def _wrap_one(
     schema: Any = t.input_schema
 
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
+        if (state.runner_loop is not None
+                and asyncio.get_running_loop() is not state.runner_loop):
+            raise RuntimeError(
+                "claude_code MCP tool dispatched off the runner loop "
+                "(same-loop topology pin)")
         try:
             # Decision 10 sweep site: EVERY tool dispatch — the claude_code
             # analog of agents/dispatch.py's first-statement sweep. Inside the
@@ -968,6 +976,7 @@ class ClaudeCodeAgentRunner:
 
         state = _RunState()
         state.agent_id = aid
+        state.runner_loop = asyncio.get_running_loop()
         sdk_tools = _make_sdk_tools(tools, ctx, state)
 
         # In-process MCP server hosting imp tools. The real SDK call:
