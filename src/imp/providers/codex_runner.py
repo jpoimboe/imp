@@ -887,7 +887,9 @@ def _serialize_mcp_result(result: Any) -> str:
     return str(result)
 
 
-def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
+def reassemble_codex_turn(
+    items: list[Any], *, audit: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Reassemble one codex turn's ``item.completed`` items into a full-turn
     ``llm_response.raw`` (``{"content": [...]}``) carrying text + tool_use
     blocks.  This raw IS emitted live as the turn's single ``llm_response`` at
@@ -911,9 +913,15 @@ def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
         elif itype == "mcp_tool_call":
             name = (getattr(item, "tool", "")
                     or getattr(item, "name", "") or "")
+            sdk_id = getattr(item, "id", "") or ""
+            # Re-key a task block to its minted event id (design §2 audit re-key)
+            # so the reassembled tool_use pairs id-consistently with the live
+            # tool_result. Non-task calls and absent-from-audit task items keep
+            # the SDK id.
+            block_id = audit.get(sdk_id, sdk_id) if (name == "task" and audit) else sdk_id
             content.append({
                 "type": "tool_use",
-                "id": getattr(item, "id", "") or "",
+                "id": block_id,
                 "name": name,
                 "input": getattr(item, "arguments", None) or {},
             })
@@ -1160,7 +1168,9 @@ def process_event(
         # carrying the tool_use blocks paired with their tool_results.
         items = state.pop("turn_items", [])
         if items:
-            raw = reassemble_codex_turn(items)
+            raw = reassemble_codex_turn(
+                items,
+                audit=run_state.task_id_audit if run_state is not None else None)
             elog.append_llm_response(
                 agent_id=agent_id, provider=provider, model=model,
                 raw=raw, usage={}, stop_reason=None,
