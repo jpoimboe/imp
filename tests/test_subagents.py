@@ -827,6 +827,32 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
     assert capture["inv"].sandbox_policy is pol
 
 
+@pytest.mark.anyio
+async def test_dispatch_task_holds_limiter_during_drive(tmp_path: Path) -> None:
+    """The per-invocation CapacityLimiter is acquired AROUND the drive loop:
+    exactly one token is borrowed while the subagent runs, and it is released
+    when dispatch_task returns."""
+    from imp.agents.parallel import reset_parallelism_cache
+
+    reset_parallelism_cache()
+    ctx = _dispatch_ctx(tmp_path)
+    seen: dict = {}
+
+    def _capture_borrowed() -> None:
+        # Runs inside the spawned runner's body — i.e. inside the limiter scope.
+        seen["borrowed"] = ctx.parallel_limiter.borrowed_tokens
+
+    ctx.spawn_subagent = _spawn_yielding(
+        [{"type": "agent_output", "payload": {"status": "Success"}}],
+        on_run=_capture_borrowed)
+
+    out = await dispatch_task(ctx, "reviewer", "go")
+    assert json.loads(out) == {"status": "Success"}
+    assert seen["borrowed"] == 1                     # held during the drive
+    assert ctx.parallel_limiter.borrowed_tokens == 0  # released afterwards
+    reset_parallelism_cache()
+
+
 def test_make_task_tool_description_has_parallel_guidance() -> None:
     """§4/AC35: the single task description carries the parallel-dispatch
     guidance every provider advertises (concurrency for independent subtasks,
