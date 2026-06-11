@@ -129,7 +129,7 @@ def test_task_lead_gates_nits_on_fixability_not_severity() -> None:
         assert defer in low, f"missing defer property: {defer}"
 
 
-def test_task_lead_nit_fix_dispatch_has_overreach_guardrail() -> None:
+def test_task_lead_nit_fix_dispatch_has_overreach_guardrail_and_batches() -> None:
     low = TASK_LEAD.read_text().lower()
     # Over-reach guardrail on the nit-fix dispatch (AC 3).
     assert "apply only these named nits" in low
