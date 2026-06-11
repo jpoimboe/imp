@@ -813,6 +813,52 @@ async def test_forced_rewind_to_merge_with_no_integrated_sha_merges_directly(
 
 
 @pytest.mark.anyio
+async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
+    """The RENDERED transcript of a full real-workflow run must not leak quiet
+    plumbing: no `goto(...)` raw control-flow, and no quiet step rendered as its
+    own block. The other e2e tests assert step PROGRESSION (the event log); this
+    one renders the events the way `imp log` / the live driver do and checks what
+    a human actually sees. Catches the class of regression that the unit render
+    tests structurally can't — a quiet step REACHING a phase and emitting a
+    routing action the renderer must humanize (e.g. integrate-merge's
+    goto(summarizer) on its base-already-integrated no-op path)."""
+    from imp.cli import narrative as nv
+    from imp.cli.render_text import render_tree
+    from imp.engine.loader import load_workflow
+
+    change = _seed_default_workflow(tmp_path)
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic", env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.COMPLETED
+
+    events = list(change.event_log().read())          # the same source `imp log` renders
+    body = list(render_tree(nv.build_tree(events), full=False, color=False, width=100))
+
+    # Every quiet step is HIDDEN: it never renders its own block — neither a header
+    # line (`  <name>`) nor a completion breadcrumb (`  <name> complete · …`). That
+    # breadcrumb is exactly what the integrate-merge regression produced
+    # (`integrate-merge complete · goto(summarizer)`). We check the block, NOT bare
+    # name presence, because a LOUD step legitimately names a quiet step as a goto
+    # TARGET (`review-panel complete · goto(integrate-merge)`) — and a loud agent
+    # step showing its own routing breadcrumb is intended; humanize-routing is a
+    # plumbing rule.
+    quiet = {s.name for s in load_workflow(change.workflow_dir).flat_steps() if s.quiet}
+    assert quiet, "expected the default workflow to mark plumbing steps quiet"
+    for name in sorted(quiet):
+        assert not any(ln.strip() == name for ln in body), (
+            f"quiet step {name!r} rendered a header line:\n" + "\n".join(body))
+        assert not any(f"{name} complete" in ln for ln in body), (
+            f"quiet step {name!r} rendered a completion breadcrumb:\n" + "\n".join(body))
+
+
+@pytest.mark.anyio
 async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -> None:
     """The re-integration EDGE (base advanced during review -> goto integrate-merge
     -> re-integrate -> merge), driven deterministically. We do NOT try to provoke
