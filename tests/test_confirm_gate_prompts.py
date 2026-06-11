@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from imp.agents.transcript import RESUME_SUPERSEDED_NOTE
 from imp.assets import default_workflow_dir
+from imp.engine.feedback import _WRAPPER
 from imp.engine.loader import load_workflow
+from imp.engine.types import Goto
 
 AGENTS = Path("src/imp/assets/workflows/default/agents")
 
@@ -134,3 +137,48 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
         "previous step output recorded; superseded by the feedback below",
     ):
         assert s in text, f"plan-writer taxonomy missing: {s!r}"
+
+
+_WRITER_FILES = {
+    "spec-writer": AGENTS / "spec-writer.md",
+    "plan-writer": AGENTS / "plan-writer.md",
+}
+
+
+def _writer_targeting_goto_rules():
+    wf = load_workflow(default_workflow_dir())
+    for step in wf.flat_steps():
+        for rule in step.rules:
+            act = rule.action
+            if isinstance(act, Goto) and act.target in _WRITER_FILES:
+                yield step, rule, act
+
+
+def test_every_writer_feedback_string_appears_in_target_prompt() -> None:
+    # yaml is the source of truth: every feedback string on a writer-targeting
+    # rule must appear verbatim (plain substring) in the target prompt file.
+    for step, _rule, act in _writer_targeting_goto_rules():
+        if act.feedback:
+            prompt = _WRITER_FILES[act.target].read_text()
+            assert act.feedback in prompt, (
+                f"{step.name}->{act.target}: feedback string absent from prompt:\n"
+                f"  {act.feedback!r}")
+
+
+def test_every_writer_targeting_resume_carries_feedback_or_is_script_gate() -> None:
+    # A feedback-less resume would arrive with a different synthesized tool_result
+    # ("…resuming") than the prompts document — except script gates, where the
+    # engine supplies the _WRAPPER feedback instead of a rule feedback.
+    for step, _rule, act in _writer_targeting_goto_rules():
+        if act.resume and not act.feedback:
+            assert step.kind == "script", (
+                f"{step.name}->{act.target}: non-script resume with no feedback")
+
+
+def test_engine_sourced_taxonomy_strings_present_in_both_prompts() -> None:
+    wrapper_prefix = _WRAPPER.split("{detail}")[0].strip()
+    for path in _WRITER_FILES.values():
+        text = path.read_text()
+        assert wrapper_prefix in text, f"{path.name}: missing _WRAPPER prefix"
+        assert RESUME_SUPERSEDED_NOTE in text, (
+            f"{path.name}: missing synthesized tool_result note")
