@@ -334,6 +334,43 @@ async def test_two_interrupt_rounds_do_not_reuse_run_scope(tmp_path: Path) -> No
 
 
 @pytest.mark.anyio
+async def test_merge_completed_run_does_not_reload_removed_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A merge-completing run finalizes inside _complete by removing the worktree
+    (branch kept) — the change state dir, and its state.json, go with it. The
+    session loop must surface the COMPLETED outcome (rc 0) WITHOUT reloading State
+    from the now-absent dir.
+
+    Regression: _run_change_session eagerly called State.load(change.state_dir)
+    after EVERY round, before deciding loopability. On the merge path the state
+    dir was already gone, so the load raised FileNotFoundError and the run crashed
+    with an unhandled TaskGroup exception immediately after `change_merged`."""
+    import shutil
+
+    import imp.cli.main as main_mod
+    from imp.engine.executor import RunResult
+
+    change = _seed_single_agent(tmp_path)
+    coord = InterruptCoordinator()
+
+    async def _fake_run_change(ch: Change, **_kw: Any) -> RunResult:
+        # Mirror _complete's merge branch: by the time the run returns COMPLETED,
+        # remove_worktree has taken the worktree — state dir included — with it.
+        shutil.rmtree(ch.state_dir)
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(main_mod, "run_change", _fake_run_change)
+
+    rc, driver, _status = await _drive_session(change, coord, replies=[])
+
+    assert rc == 0
+    assert driver.finished >= 1
+    # The terminal handler treats an absent worktree as "merged".
+    assert not change.state_dir.exists()
+
+
+@pytest.mark.anyio
 async def test_sigterm_mid_run_exits_paused_no_unbound_result(tmp_path: Path) -> None:
     """Review B2: SIGTERM mid-run cancels the run scope → `result` is unbound that
     round; the loop must exit via the exit_event branch (status=paused, rc 130),
