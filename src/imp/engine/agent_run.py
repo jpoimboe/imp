@@ -105,17 +105,45 @@ class SubagentSuspended(Exception):
 
 
 async def _pull_with_inactivity_watchdog(
-    gen: Any, *, runner: Any, stall: dict[str, bool],
+    gen: Any, *, runner: Any, stall: dict[str, bool], coordinator: Any = None,
 ) -> AsyncIterator[Any]:
-    """Yield events from `gen`, racing each pull against AGENT_INACTIVITY_TIMEOUT_S
-    (B.2). On a stall, drive the agent's OWN teardown (its runner interrupt +
-    generator aclose) so the in-flight work actually dies — not just this await —
-    set stall['hit'], and end iteration. The caller observes the early end +
-    stall['hit'] and returns the stalled result."""
+    """Yield events from `gen`, tearing the agent down only after
+    AGENT_INACTIVITY_TIMEOUT_S of genuine inactivity (B.2).
+
+    Each pull is bounded by `anyio.fail_after(window)`, but the deadline is NOT
+    fixed at pull start: while we await the next yield, any append to the shared
+    event log by this agent OR a descendant fires `coordinator.note_activity()`,
+    which pushes this scope's deadline forward. So a parent parked in an
+    in-process subagent dispatch — and a busy claude_code leaf that appends to
+    elog without yielding (neither produces generator yields) — is kept alive by
+    its own activity instead of being falsely killed at start+window. A genuinely
+    hung agent (no self/subtree appends for the window) still times out: the pull
+    is cancelled, we drive the agent's OWN teardown (runner interrupt + generator
+    aclose) so the in-flight work actually dies, set stall['hit'], and end
+    iteration. `fail_after` raises TimeoutError only on ITS deadline, so an
+    OUTER cancellation (pause/interrupt) propagates untouched, not as a stall.
+
+    coordinator may be None, or a partial/legacy coordinator without the activity
+    API: the deadline then resets only on each generator yield — exactly the
+    pre-liveness behavior."""
+    add_listener = getattr(coordinator, "add_activity_listener", None)
+    remove_listener = getattr(coordinator, "remove_activity_listener", None)
     while True:
         try:
-            with anyio.fail_after(AGENT_INACTIVITY_TIMEOUT_S):
-                ev = await gen.__anext__()
+            with anyio.fail_after(AGENT_INACTIVITY_TIMEOUT_S) as scope:
+                bump = None
+                if add_listener is not None:
+                    def _bump(_scope: Any = scope) -> None:
+                        # Read the module global at call time so a monkeypatched
+                        # window (tests) and the live value agree.
+                        _scope.deadline = (
+                            anyio.current_time() + AGENT_INACTIVITY_TIMEOUT_S)
+                    bump = add_listener(_bump)
+                try:
+                    ev = await gen.__anext__()
+                finally:
+                    if bump is not None and remove_listener is not None:
+                        remove_listener(bump)
         except StopAsyncIteration:
             return
         except TimeoutError:
@@ -278,7 +306,8 @@ async def drive_invocation(
         try:
             with attach:
                 async for event in _pull_with_inactivity_watchdog(
-                        gen, runner=runner, stall=stall):
+                        gen, runner=runner, stall=stall,
+                        coordinator=coordinator):
                     if event["type"] == "tool_heartbeat":
                         # Watchdog-only event: consumed-and-dropped BEFORE both
                         # consumers. Not appended (one per tool call would bloat

@@ -93,6 +93,34 @@ class InterruptCoordinator:
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
         self._interjects: list[str] = []
+        # B.2 liveness: the inactivity watchdog registers a per-pull "bump"
+        # callback here; `note_activity()` fires them on every shared-event-log
+        # append by this agent OR any descendant. This is the ONLY liveness
+        # signal that keeps flowing while a parent agent is parked in an
+        # in-process subagent dispatch (claude_code yields nothing then), and it
+        # is why a busy subtree no longer trips the parent's watchdog. Shared
+        # subtree-wide (one coordinator per run), so a child's appends push every
+        # ancestor watchdog's deadline. Same-event-loop, single-threaded => no lock.
+        self._activity_listeners: list[Any] = []
+
+    def add_activity_listener(self, fn: Any) -> Any:
+        """Register a no-arg callback fired on each `note_activity()`. Returns
+        `fn` so the watchdog can pass it back to `remove_activity_listener`."""
+        self._activity_listeners.append(fn)
+        return fn
+
+    def remove_activity_listener(self, fn: Any) -> None:
+        with _suppress(ValueError):
+            self._activity_listeners.remove(fn)
+
+    def note_activity(self) -> None:
+        """Signal subtree liveness — wired to every shared-event-log append.
+        Fires each registered watchdog bump; a failing bump (e.g. no running loop
+        on some odd append path) must never break the append, so each is
+        suppressed individually."""
+        for fn in tuple(self._activity_listeners):
+            with _suppress(Exception):
+                fn()
 
     def enqueue_interject(self, text: str) -> None:
         """Queue a human-typed line for delivery at the next agent turn boundary."""
