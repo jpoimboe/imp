@@ -18,7 +18,7 @@ import os
 import subprocess
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import anyio
 
@@ -114,7 +114,7 @@ async def _channel_race_side(channel: Any) -> str:
     a dropped driver never wins the race — the local TTY remains authoritative."""
     from imp.agents.tools.wait_for_user import AwaitingUserInput
     try:
-        return await channel.next_reply()
+        return cast(str, await channel.next_reply())
     except AwaitingUserInput:
         await anyio.sleep_forever()
         raise AssertionError("unreachable") from None
@@ -134,7 +134,7 @@ def effective_reply_fn(
         return reply_input_fn
     if non_interactive:
         async def _phone() -> str:
-            return await channel.next_reply(timeout=channel.reply_timeout)
+            return cast(str, await channel.next_reply(timeout=channel.reply_timeout))
         return _phone
 
     async def _raced() -> str:
