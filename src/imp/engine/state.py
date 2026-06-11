@@ -187,6 +187,7 @@ class EventLog(Protocol):
     def append_tool_result(self, *, agent_id: str | None,
                            block: Any,
                            citations: list[dict[str, Any]] | None = None,
+                           id_ns: str | None = None,
                            ) -> dict[str, Any]: ...
     def append(self, *, agent_id: str | None, type: str,
                payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -310,6 +311,7 @@ class _BaseEventLog:
     def append_tool_result(self, *, agent_id: str | None,
                            block: Any,
                            citations: list[dict[str, Any]] | None = None,
+                           id_ns: str | None = None,
                            ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "id": block.tool_use_id, "content": block.content,
@@ -319,6 +321,10 @@ class _BaseEventLog:
         # treated as "no citations" — never write an empty array.
         if citations:
             payload["citations"] = citations
+        # §3 fold-probe namespace marker for task results ("block"/"event"); absent
+        # on legacy and non-task results so the ordered two-dict probe still fires.
+        if id_ns is not None:
+            payload["id_ns"] = id_ns
         return self._emit(agent_id=agent_id, type="tool_result", payload=payload)
 
     def append(self, *, agent_id: str | None, type: str,
