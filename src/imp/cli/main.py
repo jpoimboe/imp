@@ -1290,10 +1290,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
     if not rows:
         print("No Changes.")
         return 0
-    # Sort by Change creation date, oldest first. created_at (r[5]) is an
-    # ISO-8601 UTC timestamp from change.json; all entries share the +00:00
-    # offset, so lexicographic ascending == chronological oldest-first.
-    rows.sort(key=lambda r: r[5])
+    # Sort by last activity, oldest first. last_activity (r[3]) is a fixed-width
+    # "YYYY-MM-DD HH:MM:SS" local-time string (or "-" when there's no event), so
+    # lexicographic ascending == chronological oldest-first; activity-less "-"
+    # rows ("-" < any digit) sort to the top. created_at (r[5]) breaks ties
+    # deterministically (older Change first within the same activity second).
+    rows.sort(key=lambda r: (r[3], r[5]))
     color_enabled = should_use_color(sys.stdout)
     for line in _render_status_table(rows, color_enabled=color_enabled):
         print(line)
