@@ -1186,3 +1186,28 @@ def test_chrome_step_prints_header_and_complete_breadcrumb() -> None:
 def test_is_chrome_step_is_deleted() -> None:
     assert not hasattr(rt, "is_chrome_step")
     assert not hasattr(rt, "_CHROME_KINDS")
+
+
+def test_error_detail_block_renders_in_full_when_adds_info() -> None:
+    out = "\n".join(_lines([
+        _ev("e1", "error", category="loop", message="[loop] repeated failure x3: clip…",
+            detail={"full_summary": "the complete unclipped detail line"}),
+    ], full=True))
+    assert "the complete unclipped detail line" in out
+
+
+def test_error_detail_block_suppressed_when_substring_of_message() -> None:
+    out = "\n".join(_lines([
+        _ev("e1", "error", category="loop",
+            message="[loop] repeated failure x3: embedded detail",
+            detail={"full_summary": "embedded detail"}),
+    ], full=True))
+    assert out.count("embedded detail") == 1     # message only; no extra block
+
+
+def test_error_detail_block_absent_in_lean() -> None:
+    out = "\n".join(_lines([
+        _ev("e1", "error", category="loop", message="[loop] x3: clip…",
+            detail={"full_summary": "full detail here"}),
+    ], full=False))
+    assert "full detail here" not in out

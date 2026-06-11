@@ -1171,3 +1171,18 @@ def test_resume_unarmed_balance_injection_renders_nothing():         # [I1] nega
     # interactive=False (unarmed) → synthetic, and text stays empty (no text block)
     assert all(not u.interactive for u in users)
     assert all(u.text == "" for u in users)
+
+
+def test_error_node_threads_full_summary_absent_tolerantly() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("e1", "error", category="loop", message="[loop] repeated failure x3: y",
+             detail={"full_summary": "the full unclipped summary"}))
+    err = next(k for k in b.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert err.detail == "the full unclipped summary"
+    rep = nv.structural_repr(err)
+    assert rep["detail"] == "the full unclipped summary"
+
+    b2 = nv.NarrativeBuilder()
+    b2.add(ev("e2", "error", category="api", message="boom"))   # no detail key
+    err2 = next(k for k in b2.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert err2.detail == ""

@@ -218,6 +218,7 @@ class ErrorNode:
     message: str
     category: str | None = None
     is_warning: bool = False
+    detail: str = ""                   # §6: full_summary for the --full detail block
     collapsible = False
 
 
@@ -1051,9 +1052,13 @@ NarrativeBuilder._HANDLERS["skill_load"] = _h_skill_load
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    detail = ""
+    d = p.get("detail")
+    if isinstance(d, dict):
+        detail = str(d.get("full_summary") or "")
     self._append(ErrorNode(
         message=str(p.get("message", "?")), category=p.get("category"),
-        is_warning=False))
+        is_warning=False, detail=detail))
 
 
 def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1171,7 +1176,7 @@ def structural_repr(node: Any) -> Any:
                 "nested": [structural_repr(c) for c in node.tree.root.children]}
     if isinstance(node, ErrorNode):
         return {"t": t, "message": node.message, "category": node.category,
-                "is_warning": node.is_warning}
+                "is_warning": node.is_warning, "detail": node.detail}
     if isinstance(node, PauseNode):
         return {"t": t, "reason": node.reason}
     if isinstance(node, StepContextNode):

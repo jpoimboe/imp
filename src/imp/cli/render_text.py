@@ -512,6 +512,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             tag = f"[{node.category}] " if node.category else ""
             yield _line(f"error: {tag}{node.message}", depth, color,
                         *pal.NODE_COLORS["error"], gutters=gutters)
+            if full and node.detail and node.detail not in node.message:
+                yield from _wrap(node.detail, width, depth + 1, color,
+                                 *pal.NODE_COLORS["error"], gutters=gutters)
         return
 
     if isinstance(node, nv.SkillLoadNode):
