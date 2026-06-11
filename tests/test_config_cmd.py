@@ -57,3 +57,33 @@ def test_cli_authenticated_provider_skips_key_check(
     text = out.getvalue()
     assert "(CLI-authenticated)" in text
     assert "CLAUDE_CODE_API_KEY" not in text
+
+
+def test_render_lists_available_drivers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)            # no remote.driver configured
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    text = out.getvalue()
+    assert "available drivers:" in text
+    assert "telegram" in text
+    assert "IMP_TELEGRAM_TOKEN" in text and "IMP_TELEGRAM_CHAT_ID" in text
+    assert "(available)" in text                 # per-driver state marker, not enabled
+    assert "enabled" not in text
+
+
+def test_render_marks_enabled_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    (xdg / "config.yaml").write_text("providers: [openai]\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    (tmp_path / ".imp").mkdir()
+    (tmp_path / ".imp" / "config.yaml").write_text("remote:\n  driver: telegram\n")
+    eff = load_effective_config(project_root=None, control_root=tmp_path)
+    out = io.StringIO()
+    render_config(eff, out, color=False)
+    assert "telegram" in out.getvalue()
+    assert "enabled" in out.getvalue()           # the configured driver is flagged
