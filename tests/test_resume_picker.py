@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from imp.cli.resume_select import Candidate, ResumePicker
+import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+
+from imp.cli.resume_select import Candidate, ResumePicker, run_picker
 
 _NOW = datetime(2026, 6, 11, 12, 0, 0, tzinfo=UTC)
 
@@ -48,3 +53,49 @@ def test_render_marker_moves_after_navigation() -> None:
     lines = p.render().splitlines()
     assert lines[0].startswith("  ")             # first row no longer selected
     assert lines[1].startswith("▸ ")             # marker moved to second row
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_picker_enter_resumes_preselected_newest() -> None:
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("\r")                     # enter at once → newest (index 0)
+        chosen = await run_picker(_cands(), now=_NOW, color=False)
+    assert chosen == "2026-06-11-aaa111"
+
+
+@pytest.mark.anyio
+async def test_picker_down_then_enter_selects_second() -> None:
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("\x1b[B")                 # down arrow
+        pipe.send_text("\r")                     # enter
+        chosen = await run_picker(_cands(), now=_NOW, color=False)
+    assert chosen == "2026-06-10-bbb222"
+
+
+@pytest.mark.anyio
+async def test_picker_q_cancels_to_none() -> None:
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("q")
+        chosen = await run_picker(_cands(), now=_NOW, color=False)
+    assert chosen is None
+
+
+@pytest.mark.anyio
+async def test_picker_escape_cancels_to_none() -> None:
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("\x1b")                   # bare ESC
+        chosen = await run_picker(_cands(), now=_NOW, color=False)
+    assert chosen is None
+
+
+@pytest.mark.anyio
+async def test_picker_ctrl_c_cancels_to_none() -> None:
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("\x03")                   # ctrl-c (a key here, not an OS signal)
+        chosen = await run_picker(_cands(), now=_NOW, color=False)
+    assert chosen is None
