@@ -10,6 +10,8 @@ diagnostics go to stderr.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 # Curation map (spec Decisions §"Default curation"). Curation lives in the
@@ -28,3 +30,48 @@ def curate(event_type: Any) -> str | None:
     if event_type in _SILENT:
         return "silent"
     return None
+
+
+class ConfigError(Exception):
+    """Raised when required Telegram credentials / allowlist are missing."""
+
+
+@dataclass(frozen=True)
+class TelegramConfig:
+    token: str
+    chat_id: int
+
+
+def _parse_kv_file(text: str) -> dict[str, str]:
+    """Parse an out-of-tree KEY=VALUE credentials file (one pair per line; '#'
+    comments and blank lines ignored)."""
+    out: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip()
+    return out
+
+
+def load_config(env: Mapping[str, str], file_text: str | None = None) -> TelegramConfig:
+    """Resolve the bot token + allowlisted chat_id from the environment, falling
+    back to an out-of-tree KEY=VALUE file (env wins). The driver REFUSES to start
+    without an explicit chat_id allowlist (spec AC 11): only that chat may drive
+    the agent. Credentials never come from the repo."""
+    file_vals = _parse_kv_file(file_text) if file_text else {}
+    token = env.get("IMP_TELEGRAM_TOKEN") or file_vals.get("IMP_TELEGRAM_TOKEN")
+    chat_raw = env.get("IMP_TELEGRAM_CHAT_ID") or file_vals.get("IMP_TELEGRAM_CHAT_ID")
+    if not chat_raw:
+        raise ConfigError(
+            "IMP_TELEGRAM_CHAT_ID is required: the driver refuses to start "
+            "without an explicit chat allowlist")
+    try:
+        chat_id = int(chat_raw)
+    except ValueError as exc:
+        raise ConfigError(
+            f"IMP_TELEGRAM_CHAT_ID must be an integer, got {chat_raw!r}") from exc
+    if not token:
+        raise ConfigError("IMP_TELEGRAM_TOKEN is required")
+    return TelegramConfig(token=token, chat_id=chat_id)
