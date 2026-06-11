@@ -10,7 +10,7 @@ from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.agent_run import SubagentSuspended
-from imp.providers.codex_mcp import RunState, dispatch_tool
+from imp.providers.codex_mcp import RunState, _args_fingerprint, dispatch_tool
 
 
 @pytest.fixture
@@ -419,3 +419,29 @@ def test_dispatch_sweeps_bg_before_tool(
     asyncio.run(dispatch_tool(
         tool=_echo_tool(), args={"text": "hi"}, ctx=ctx, state=state))
     assert calls["n"] == 2
+
+
+def test_args_fingerprint_drops_none_so_tier_omitted_matches_tier_none() -> None:
+    """The mint side carries tier=None (FastMCP injects it for the omitted
+    optional); the item side omits tier entirely. Dropping None-valued keys makes
+    the two fingerprints equal — the load-bearing normalization for re-key (AC24)."""
+    mint_side = _args_fingerprint(
+        {"subagent_name": "impl", "task_description": "do it", "tier": None})
+    item_side = _args_fingerprint(
+        {"subagent_name": "impl", "task_description": "do it"})
+    assert mint_side == item_side
+
+
+def test_args_fingerprint_is_key_order_independent() -> None:
+    """Fingerprint must not depend on dict insertion order — sorted canonical form."""
+    a = _args_fingerprint({"subagent_name": "impl", "task_description": "x"})
+    b = _args_fingerprint({"task_description": "x", "subagent_name": "impl"})
+    assert a == b
+
+
+def test_args_fingerprint_distinguishes_different_args() -> None:
+    """Distinct task_description values yield distinct fingerprints — so two
+    concurrent same-subagent dispatches with different descriptions pair correctly."""
+    a = _args_fingerprint({"subagent_name": "impl", "task_description": "review A"})
+    b = _args_fingerprint({"subagent_name": "impl", "task_description": "review B"})
+    assert a != b

@@ -95,6 +95,13 @@ def _cap_error_text(cap: int) -> str:
     )
 
 
+def _args_fingerprint(args: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted(
+        (k, json.dumps(v, sort_keys=True, default=str))
+        for k, v in args.items() if v is not None
+    ))
+
+
 async def dispatch_tool(
     *, tool: Tool, args: dict[str, Any], ctx: ToolContext, state: RunState,
 ) -> str:
