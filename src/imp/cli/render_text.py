@@ -188,31 +188,16 @@ def spaces_after(node: Any, *, full: bool) -> bool:
 def spaces_before(node: Any) -> bool:
     """A node that wants a blank line ABOVE it regardless of what preceded it.
     An interactive step (the human's turn is a conversational beat), a phase
-    header (a new phase starts on its own), an error (it must stand clear of the
-    line before it), and a chrome step (a bare completion breadcrumb — it's
-    surrounded like a leaf, since nothing else inside it carries spacing) all
-    qualify. A regular step-completion breadcrumb is NOT here: it already trails a
-    spaced block (the step's final prose / the header gap), so it gets its
-    blank-above for free without risking a doubled separator. The batch walk and
-    the live driver both key off this so the lead-in blank lands identically in
-    `imp log` and the live view."""
+    header (a new phase starts on its own), and an error (it must stand clear of
+    the line before it) all qualify. A regular step-completion breadcrumb is NOT
+    here: it already trails a spaced block (the step's final prose / the header
+    gap), so it gets its blank-above for free without risking a doubled separator.
+    The batch walk and the live driver both key off this so the lead-in blank
+    lands identically in `imp log` and the live view."""
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
-        or is_chrome_step(node)
         or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode))
     )
-
-
-_CHROME_KINDS = ("script", "branch", "merge")
-
-
-def is_chrome_step(node: Any) -> bool:
-    """True for a no-op structural step (a script gate / branch) whose whole
-    contribution is a completion breadcrumb. These collapse to that single
-    dark-gray line — the redundant `name` header above the `name complete · 0s`
-    line is pure noise. Agent (and human) steps carry real content and keep their
-    header."""
-    return isinstance(node, nv.StepNode) and node.kind in _CHROME_KINDS
 
 
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
@@ -392,21 +377,6 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # indenting a further level and burying the agent's words. Phases still
         # indent their steps (the +1 lives in PhaseNode above); subagent folds add
         # their own level + gutter internally. (design: aligned indent)
-        if is_chrome_step(node):
-            # A no-op gate/script step collapses to its single dark-gray
-            # breadcrumb (`✓ name · 0s`); the name-only header above it is noise.
-            yield from _render_children(node.children, depth=depth, full=full,
-                                        color=color, width=width, gutters=gutters)
-            if not node.closed:
-                # Still executing. A script gate is not instant chrome — it can
-                # run a project's full test suite for many minutes — so an open
-                # one must say so, or `imp log` on an in-flight change goes
-                # silent for the gate's whole duration (the breadcrumb only
-                # lands at step_completed). Step color (not breadcrumb gray):
-                # while running it IS the active step, same as any other.
-                yield _line(f"{node.name} · running", depth, color,
-                            *pal.NODE_COLORS["step"], gutters=gutters)
-            return
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         # One blank line between the step header and the agent's first words, so the
         # speaker label and the speech don't bunch (design: §5.4 air). Priming the

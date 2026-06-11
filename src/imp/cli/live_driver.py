@@ -146,34 +146,14 @@ class LiveDriver:
                 # OWN depth (no +1) so prose aligns under the header instead of
                 # burying it — must match render_text._render. (aligned indent)
                 gutters = self._gutters()
-                if rt.is_chrome_step(child):
-                    # A no-op gate/script step has no header — it collapses to the
-                    # single dark-gray breadcrumb its step_completed appends. Skip
-                    # the header line; descend so that breadcrumb still streams. It's
-                    # surrounded like a leaf, so arm the blank-above here (its
-                    # breadcrumb provides the blank-below via spaces_after).
-                    if rt.spaces_before(child):
-                        self._prev_prose = True
-                else:
-                    if rt.spaces_before(child):
-                        # A phase header and an interactive step header get a blank
-                        # line above them (matching render_text._render_children).
-                        # Arming the prose-adjacency flag makes the next emission —
-                        # the header — carry the leading separator.
-                        self._prev_prose = True
-                    self._stream_or_hold(
-                        rt.header_line(child, depth=cur.depth, color=self._color,
-                                       gutters=gutters),
-                        depth=cur.depth, gutters=gutters)
-                    if isinstance(child, (nv.StepNode, nv.PhaseNode)):
-                        # One blank line below the header: between an agent step's
-                        # header and its first words, and between a phase's start
-                        # line and its first step (surrounding the phase start).
-                        # Arm the prose-adjacency flag so the next real emission
-                        # carries a leading separator; the dropped lean context
-                        # line is an empty emission that leaves this untouched, so
-                        # the blank lands before the real content.
-                        self._prev_prose = True
+                if rt.spaces_before(child):
+                    self._prev_prose = True
+                self._stream_or_hold(
+                    rt.header_line(child, depth=cur.depth, color=self._color,
+                                   gutters=gutters),
+                    depth=cur.depth, gutters=gutters)
+                if isinstance(child, (nv.StepNode, nv.PhaseNode)):
+                    self._prev_prose = True
                 child_depth = cur.depth + 1 if isinstance(child, nv.PhaseNode) else cur.depth
                 self._frontier.append(_Cursor(container=child, depth=child_depth))
             else:

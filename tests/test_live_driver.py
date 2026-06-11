@@ -637,9 +637,9 @@ def test_tty_chrome_steps_no_committed_status_no_double_blanks() -> None:
     rows = [ln.rstrip() for ln in screen.display]
     # The transient spinner line never gets committed to scroll-back.
     assert not any("working" in r for r in rows), f"committed status line: {rows}"
-    # Each chrome breadcrumb is present exactly once.
-    assert sum("spec-verify-commit" in r for r in rows) == 1
-    assert sum("fast-path-gate" in r for r in rows) == 1
+    # Each chrome step now prints both a header and a `complete` breadcrumb (§4).
+    assert sum("spec-verify-commit" in r for r in rows) == 2
+    assert sum("fast-path-gate" in r for r in rows) == 2
     # No two blank content rows in a row (trailing screen padding excluded).
     content = rows[:max(i for i, r in enumerate(rows) if r.strip()) + 1]
     assert not any(not content[i].strip() and not content[i + 1].strip()
@@ -727,3 +727,19 @@ def test_compose_status_colors_count_detail_label() -> None:
     assert "1 call" in line
     assert "bash ls" in line
     assert "\x1b[90m" in line          # detail painted gray
+
+
+def test_chrome_step_header_streams_live_and_matches_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("2", "step_started", step="gate", kind="script", phase="verify"),
+        ev("3", "step_completed", step="gate", kind="script",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("gate" in ln and "complete" not in ln for ln in body)   # start header
+    assert any("gate complete" in ln for ln in body)                    # breadcrumb
+    assert body == _render_body(events)                                 # live == imp log

@@ -68,11 +68,17 @@ spec
   
   spec-writer complete · 1m 44s
   
-  spec-verify-commit · 0s
+  spec-verify-commit
   
-  spec-final-review-gate · 0s
+  spec-verify-commit complete · 0s
   
-  fast-path-spec-gate · 0s
+  spec-final-review-gate
+  
+  spec-final-review-gate complete · 0s
+  
+  fast-path-spec-gate
+  
+  fast-path-spec-gate complete · 0s
   
   spec-reviewer · opus
   
@@ -176,9 +182,13 @@ spec
   
   spec-writer complete · 22s
   
-  spec-verify-commit · 0s
+  spec-verify-commit
   
-  spec-final-review-gate · goto(plan-writer) · 0s
+  spec-verify-commit complete · 0s
+  
+  spec-final-review-gate
+  
+  spec-final-review-gate complete · goto(plan-writer) · 0s
 
 spec complete · 3m 9s
 
@@ -212,11 +222,17 @@ plan
   
   plan-writer complete · 2m 16s
   
-  plan-verify-commit · 0s
+  plan-verify-commit
   
-  plan-final-review-gate · 0s
+  plan-verify-commit complete · 0s
   
-  fast-path-plan-gate · 0s
+  plan-final-review-gate
+  
+  plan-final-review-gate complete · 0s
+  
+  fast-path-plan-gate
+  
+  fast-path-plan-gate complete · 0s
   
   plan-review · opus
   
@@ -339,9 +355,13 @@ plan
   
   plan-writer complete · 39s
   
-  plan-verify-commit · 0s
+  plan-verify-commit
   
-  plan-final-review-gate · goto(task-lead) · 0s
+  plan-verify-commit complete · 0s
+  
+  plan-final-review-gate
+  
+  plan-final-review-gate complete · goto(task-lead) · 0s
 
 plan complete · 4m 7s
 
@@ -438,11 +458,17 @@ implement
   
   task-lead complete · 9m 36s
   
-  commit-check · 0s
+  commit-check
   
-  run-tests · 0s
+  commit-check complete · 0s
   
-  fast-path-cycle-gate · 0s
+  run-tests
+  
+  run-tests complete · 0s
+  
+  fast-path-cycle-gate
+  
+  fast-path-cycle-gate complete · 0s
   
   plan-cycle-check · sonnet
   
@@ -477,9 +503,13 @@ implement complete · 10m 17s
 
 review
   
-  autosquash · 0s
+  autosquash
   
-  stamp-trailers · 0s
+  autosquash complete · 0s
+  
+  stamp-trailers
+  
+  stamp-trailers complete · 0s
   
   code-reviewer · gpt-5.5
   
@@ -609,7 +639,9 @@ review
   
   summarizer complete · 1m 15s
   
-  final-review-gate · 0s
+  final-review-gate
+  
+  final-review-gate complete · 0s
   
   final-review · sonnet
   

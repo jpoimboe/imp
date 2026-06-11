@@ -263,11 +263,9 @@ class BreadcrumbLine:
     elapsed_s: float | None
     action: Any                        # dict {verb, target?} from step_completed
     extras: list[str] = field(default_factory=list)
-    show_complete: bool = True         # False for a chrome step (script/branch),
-                                       # whose start line is never printed — the
-                                       # `· 0s` alone reads as "done", so the word
-                                       # "complete" (which pairs with a start) is
-                                       # dropped to avoid a dangling half-bookend.
+    show_complete: bool = True         # always True (§4): chrome steps now print
+                                       # a start header, so the breadcrumb always
+                                       # carries the word "complete".
     collapsible = False
 
 
@@ -564,10 +562,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
         node.children.append(BreadcrumbLine(
             step_name=node.name, elapsed_s=elapsed, action=action,
-            extras=_breadcrumb_extras(node.agent_output),
-            # A chrome step (script/branch/merge gate) prints no start line, so its
-            # breadcrumb omits the word "complete" (see BreadcrumbLine).
-            show_complete=node.kind not in ("script", "branch", "merge")))
+            extras=_breadcrumb_extras(node.agent_output)))
         node.closed = True
 
 
