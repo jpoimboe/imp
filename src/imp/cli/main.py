@@ -440,7 +440,7 @@ async def _run_change_session(
                     reader_exited=(coord._esc_reader is None)):
                 esc_reader = EscKeyReader(coord)
                 _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader)
+                    change, status, coord, esc_reader, driver)
                 await tg.start(esc_reader.run)
                 reader_armed = bool(esc_reader._armed)
 
