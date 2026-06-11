@@ -644,3 +644,38 @@ def test_post_limiter_skip_moves_mint_to_refused_and_raises_sentinel(
     assert moved_id  # a real minted event id
     # The drain counter returned to 0 (finally) so the skip did not wedge it.
     assert state.inflight_task_dispatches == 0
+
+
+@pytest.mark.anyio
+async def test_run_wide_pause_freezes_task_membership(tmp_path: Path) -> None:
+    # AC31: a run-wide pause (coordinator.should_pause) freezes membership, so a
+    # NEW task is refused WITHOUT dispatch (raises TaskRefused with the sentinel).
+    from imp.agents.subagents import TASK_REFUSAL_SENTINEL, TaskRefused
+
+    class _Coord:
+        should_pause = True
+
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = _Coord()
+    state = RunState(cap=10)
+    with pytest.raises(TaskRefused) as ei:
+        await dispatch_tool(tool=make_task_tool(),
+                            args={"subagent_name": "s", "task_description": "x"},
+                            ctx=ctx, state=state)
+    assert str(ei.value) == TASK_REFUSAL_SENTINEL
+    assert state.dispatch_count == 0       # refused before the cap RMW
+
+
+@pytest.mark.anyio
+async def test_non_task_tool_runs_during_a_drain_window(tmp_path: Path) -> None:
+    # AC32: a captured suspension + an in-flight sibling (drain window) freezes only
+    # `task`; a NON-task tool still executes to completion (membership freeze is
+    # task-scoped).
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = None
+    state = RunState(cap=10)
+    state.subagent_suspended = SubagentSuspended("paused")
+    state.inflight_task_dispatches = 1     # a sibling task still draining
+    out = await dispatch_tool(tool=_echo_tool(), args={"text": "hi"},
+                              ctx=ctx, state=state)
+    assert out == "echo:hi"
