@@ -245,3 +245,111 @@ def test_reviewer_rule4_beats_5_clean_minors_armed_not_yet_integrated() -> None:
     assert m.action.feedback == ("No blocking issues — integrate these minor "
                                  "improvements; a final review follows:")
     assert m.var_mutations["spec_minors_integrated"] is True
+
+
+def _apply(state: dict, muts: dict) -> dict:
+    out = dict(state)
+    out.update(muts)
+    return out
+
+
+def test_trace_criterion2_rework_then_clean_reaches_gated_planning() -> None:
+    wf = _wf()
+    rules = _steps(wf)
+    v = dict(_BASE_VARS)
+
+    # 1) reviewer blocking -> rework
+    m = evaluate_rules(rules["spec-reviewer"].rules, vars=v,
+                       output={"blocking": True, "has_minor_findings": False})
+    v = _apply(v, m.var_mutations)
+    assert m.action.target == "spec-writer" and m.action.resume is True
+
+    # 2) writer reworks, undirected edits -> arms via else rule
+    m = evaluate_rules(rules["spec-writer"].rules, vars=v,
+                       output={"status": "Success", "phase": "written",
+                               "complexity": "standard", "unseen_changes": True})
+    v = _apply(v, m.var_mutations)
+    assert v["spec_unseen_changes"] is True
+
+    # 3) verify-commit ok -> continue (exit-gate else -> continue) -> re-review
+    m = evaluate_rules(rules["spec-verify-commit"].rules, vars=v, output={"exit": 0})
+    v = _apply(v, m.var_mutations)
+    m = evaluate_rules(rules["spec-exit-gate"].rules, vars=v, output=None)
+    v = _apply(v, m.var_mutations)
+    assert isinstance(m.action, Continue)
+
+    # 4) clean re-review, armed, no minors -> fires the gate (rule 5)
+    m = evaluate_rules(rules["spec-reviewer"].rules, vars=v,
+                       output={"blocking": False, "has_minor_findings": False})
+    v = _apply(v, m.var_mutations)
+    assert v["spec_gate_pending"] is True and v["spec_unseen_changes"] is False
+    assert m.action.target == "spec-writer" and m.action.resume is True
+
+    # 5) gated confirm, no further edits -> sets spec_gate_passed, continues
+    m = evaluate_rules(rules["spec-writer"].rules, vars=v,
+                       output={"status": "Success", "phase": "confirmed",
+                               "complexity": "standard", "unseen_changes": False})
+    v = _apply(v, m.var_mutations)
+    assert v["spec_gate_passed"] is True and v["spec_gate_pending"] is False
+    assert isinstance(m.action, Continue)
+
+    # 6) verify-commit ok -> exit-gate routes spec_gate_passed to plan, clears flag
+    m = evaluate_rules(rules["spec-verify-commit"].rules, vars=v, output={"exit": 0})
+    v = _apply(v, m.var_mutations)
+    m = evaluate_rules(rules["spec-exit-gate"].rules, vars=v, output=None)
+    v = _apply(v, m.var_mutations)
+    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert v["spec_gate_passed"] is False
+
+
+def test_trace_criterion3_postgate_edit_clean_rereview_no_second_confirm() -> None:
+    wf = _wf()
+    rules = _steps(wf)
+    # Enter the confirm turn already granted; user requests an edit at the gate.
+    v = {**_BASE_VARS, "spec_gate_pending": True}
+    # writer emits written + unseen_changes:false (user-directed edit) -> else rule
+    m = evaluate_rules(rules["spec-writer"].rules, vars=v,
+                       output={"status": "Success", "phase": "written",
+                               "complexity": "standard", "unseen_changes": False})
+    v = _apply(v, m.var_mutations)
+    assert v["spec_gate_pending"] is False and v["spec_unseen_changes"] is False
+    # verify ok -> exit-gate else -> continue -> clean re-review, NOT armed -> rule 6
+    m = evaluate_rules(rules["spec-verify-commit"].rules, vars=v, output={"exit": 0})
+    v = _apply(v, m.var_mutations)
+    m = evaluate_rules(rules["spec-exit-gate"].rules, vars=v, output=None)
+    v = _apply(v, m.var_mutations)
+    assert isinstance(m.action, Continue)
+    m = evaluate_rules(rules["spec-reviewer"].rules, vars=v,
+                       output={"blocking": False, "has_minor_findings": False})
+    v = _apply(v, m.var_mutations)
+    assert m.action.target == "plan-writer"          # no second confirm
+    assert v.get("spec_gate_pending", False) is False
+
+
+def test_trace_criterion5_gated_confirm_verifyfail_recovery_rereviews() -> None:
+    wf = _wf()
+    rules = _steps(wf)
+    # gated confirm that committed mis-staged edits: writer rule sets passed+continue
+    v = {**_BASE_VARS, "spec_gate_pending": True}
+    m = evaluate_rules(rules["spec-writer"].rules, vars=v,
+                       output={"status": "Success", "phase": "confirmed",
+                               "complexity": "standard", "unseen_changes": False})
+    v = _apply(v, m.var_mutations)
+    assert v["spec_gate_passed"] is True
+    # verify-commit FAILS (uncommitted spec edit) -> clears spec_gate_passed, resume
+    m = evaluate_rules(rules["spec-verify-commit"].rules, vars=v, output={"exit": 1})
+    v = _apply(v, m.var_mutations)
+    assert v["spec_gate_passed"] is False
+    assert m.action.target == "spec-writer" and m.action.resume is True
+    # recovery turn re-emits written -> else rule clears passed again, arms per report
+    m = evaluate_rules(rules["spec-writer"].rules, vars=v,
+                       output={"status": "Success", "phase": "written",
+                               "complexity": "standard", "unseen_changes": False})
+    v = _apply(v, m.var_mutations)
+    assert v["spec_gate_passed"] is False
+    # verify ok -> exit-gate: spec_gate_passed false, not fast_path -> else continue
+    m = evaluate_rules(rules["spec-verify-commit"].rules, vars=v, output={"exit": 0})
+    v = _apply(v, m.var_mutations)
+    m = evaluate_rules(rules["spec-exit-gate"].rules, vars=v, output=None)
+    v = _apply(v, m.var_mutations)
+    assert isinstance(m.action, Continue)   # the stale grant reached neither exit nor planning
