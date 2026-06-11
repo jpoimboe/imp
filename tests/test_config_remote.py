@@ -85,6 +85,9 @@ def test_effective_config_surfaces_remote_from_local_layer(tmp_path: Path) -> No
     }
 
 
-def test_effective_config_remote_empty_when_unset(tmp_path: Path) -> None:
+def test_effective_config_remote_empty_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # no user config
     cfg = load_effective_config(control_root=tmp_path).config
     assert cfg.remote == {}

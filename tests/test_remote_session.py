@@ -34,7 +34,10 @@ class _StubLiveDriver:
     def finish(self) -> None: ...
 
 
-def test_maybe_build_channel_none_without_config(tmp_path: Path) -> None:
+def test_maybe_build_channel_none_without_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # no user config
     change = _seed_single_agent(tmp_path)
     assert _maybe_build_channel(change) is None
 
