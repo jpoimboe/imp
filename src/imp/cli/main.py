@@ -188,18 +188,45 @@ def _emit_completed(change: Change, value: str, *, merged: bool) -> None:
         print(ansi(f"{mark}Change {change.id}: {value}", "green", enabled=color))
 
 
-def _emit_paused(change: Change, how: str) -> None:
+def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
+    """The current phase: the phase of the most recent step_started event."""
+    phase: str | None = None
+    for e in events:
+        if e.get("type") == "step_started":
+            phase = (e.get("payload") or {}).get("phase") or phase
+    return phase
+
+
+def _pause_lines(name: str, phase: str | None, token: str, *, color: bool) -> list[str]:
+    mark = "⏸  " if color else ""
+    at = f"  at {phase}" if phase else ""
+    return [
+        ansi(f"{mark}Paused  {name}{at}", "dim", enabled=color),
+        ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
+    ]
+
+
+def _pause_facts(change: Change) -> tuple[str, str | None, str]:
+    from imp.cli.change_row import resume_token
+    from imp.cli.narrative import _slug_descriptor
+    name = _slug_descriptor(change.slug) or change.id
+    phase = _phase_from_events(list(change.event_log().read()))
+    return name, phase, resume_token(change.id)
+
+
+def _emit_paused(change: Change) -> None:
     """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim, ⏸."""
     color = should_use_color(sys.stdout)
-    mark = "⏸ " if color else ""
-    print("\n" + ansi(f"{mark}Change {change.id}: paused ({how})", "dim", enabled=color))
+    name, phase, token = _pause_facts(change)
+    print("\n" + "\n".join(_pause_lines(name, phase, token, color=color)))
 
 
-def _emit_paused_summary(change: Change, value: str) -> None:
+def _emit_paused_summary(change: Change) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
-    mark = "⏸ " if color else ""
-    print(ansi(f"{mark}Change {change.id}: {value}", "dim", enabled=color))
+    name, phase, token = _pause_facts(change)
+    for ln in _pause_lines(name, phase, token, color=color):
+        print(ln)
 
 
 def _emit_merge_blocked(
@@ -315,7 +342,7 @@ def _handle_terminal_outcome(
                 final_state.step,
                 (matched.get("payload") or {}).get("stderr", ""),
             )
-    _emit_paused_summary(change, result.value)
+    _emit_paused_summary(change)
     return 1
 
 
@@ -485,7 +512,7 @@ def _finalize_paused_exit(
     SIGTERM/escalation path out of the session loop."""
     driver.finish()
     pause_and_exit(change, reason=reason, engine_pause_reason=coord.pause_reason)
-    _emit_paused(change, reason)
+    _emit_paused(change)
     return 130
 
 
