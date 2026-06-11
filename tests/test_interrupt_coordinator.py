@@ -181,3 +181,23 @@ def test_sigterm_is_exempt_from_suppression() -> None:
     t["now"] = 100.3
     # A supervisor SIGTERM 0.3 s later must NOT be suppressed.
     assert coord._register_gesture(kind="sigterm") is True
+
+
+def test_should_pause_is_latched_until_reset() -> None:
+    # should_pause is a one-way latch: once set it stays True across in-run ops,
+    # cleared only by reset() between session-loop rounds.
+    from imp.cli.signals import InterruptCoordinator
+
+    coord = InterruptCoordinator()
+    assert coord.should_pause is False
+    coord.request_exit("ctrl-c")
+    assert coord.should_pause is True
+    # In-run operations must not clear the latch.
+    coord.drain_interject()
+    _ = coord.pause_reason
+    coord.enqueue_interject("note")
+    coord.drain_interject()
+    assert coord.should_pause is True
+    # Only reset() (between rounds) clears it.
+    coord.reset()
+    assert coord.should_pause is False
