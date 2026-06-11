@@ -78,7 +78,15 @@ class RunState:
     runtime_errors: list[str] = field(default_factory=list)
     fatal_tool_error: tuple[str, str] | None = None
     agent_id: str = "step:unnamed"
-    minted_task_ids: list[str] = field(default_factory=list)
+    # Each entry is (minted tool_call event id, args fingerprint). On item
+    # arrival the runner match-and-removes the first entry whose fingerprint
+    # equals the item's args (design §2 re-key — replaces the old FIFO pop).
+    minted_task_ids: list[tuple[str, tuple[tuple[str, str], ...]]] = field(
+        default_factory=list)
+    # sdk_id -> minted event id, recorded when process_event fingerprint-matches.
+    # Audit reassembly re-keys the task tool_use block to the minted id so the
+    # tool_use/tool_result pair is id-consistent under out-of-order completion.
+    task_id_audit: dict[str, str] = field(default_factory=dict)
     subagent_suspended: Any = None
     # Headless wait_for_user pause captured in the MCP wrapper (it can't raise
     # out of the in-process SDK handler). The runner detects awaiting_user after
@@ -161,7 +169,8 @@ async def dispatch_tool(
             agent_id=state.agent_id,
             block=ToolUseBlock(id="", name="task", input=dict(args)),
         )
-        state.minted_task_ids.append(tc_ev["id"])
+        state.minted_task_ids.append(
+            (tc_ev["id"], _args_fingerprint(dict(args))))
         try:
             return await dispatch_task(
                 ctx,

@@ -310,7 +310,11 @@ def test_task_dispatch_mints_parent_tool_call_and_passes_id(
     assert len(calls) == 1
     minted_id = calls[0]["id"]
     assert seen["tool_call_event_id"] == minted_id
-    assert state.minted_task_ids == [minted_id]
+    # Mint now carries (event_id, fingerprint) so an out-of-order item can pair
+    # by args, not by FIFO position (AC24).
+    assert state.minted_task_ids == [
+        (minted_id, _args_fingerprint({"subagent_name": "impl",
+                                       "task_description": "do it"}))]
 
 
 def test_task_subagent_suspended_captured_on_state(
