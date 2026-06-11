@@ -21,6 +21,19 @@ from pathlib import Path
 from typing import Any
 
 
+def _prompt_message_text(question: str, *, color: bool) -> str:
+    from imp.cli import palette as pal
+    q = question.strip()
+    if not q:
+        return pal.caret(enabled=color)
+    return pal.ansi(q, "dim", enabled=color) + "\n" + pal.caret(enabled=color)
+
+
+def _placeholder_text(*, color: bool) -> str:
+    from imp.cli import palette as pal
+    return pal.ansi("type your reply", "dim", enabled=color)
+
+
 def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs") -> Any:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.enums import EditingMode
@@ -133,7 +146,8 @@ class Prompt:
         result = self._session.prompt(self._message(prompt_text), handle_sigint=False)
         return str(result) if result is not None else ""
 
-    async def ask_async(self, prompt_text: str | None = None) -> str:
+    async def ask_async(self, prompt_text: str | None = None, *,
+                        question: str = "") -> str:
         """Async version of ask() — uses prompt_toolkit's native prompt_async()
         so it shares the outer event loop instead of calling asyncio.run()
         internally (which would crash inside anyio.run()).
@@ -153,8 +167,16 @@ class Prompt:
         loop.remove_signal_handler(SIGINT) on prompt exit, so the handler-deletion
         problem (a88e96e) cannot recur — the rearm_signal_handlers call in
         ask_line_with_slash becomes a harmless defensive no-op (kept)."""
+        from prompt_toolkit.formatted_text import ANSI
+
+        if question.strip():
+            msg: Any = (ANSI(_prompt_message_text(question, color=True))
+                        if self._color else _prompt_message_text(question, color=False))
+        else:
+            msg = self._message(prompt_text)
+        placeholder = ANSI(_placeholder_text(color=True)) if self._color else None
         result = await self._session.prompt_async(
-            self._message(prompt_text), handle_sigint=False)
+            msg, handle_sigint=False, placeholder=placeholder)
         return str(result) if result is not None else ""
 
     def history_strings(self) -> list[str]:
