@@ -47,7 +47,7 @@ def test_maybe_build_channel_builds_from_config(tmp_path: Path) -> None:
     (change.control_root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\n"
         "tiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
-        "remote:\n  driver:\n    command: [imp-telegram]\n")
+        "remote:\n  driver: telegram\n")
     ch = _maybe_build_channel(change)
     assert isinstance(ch, RemoteChannel)
 

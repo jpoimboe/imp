@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
@@ -37,17 +38,19 @@ class DriverConfig:
 
 
 def driver_config_from(config: Any) -> DriverConfig | None:
-    """Build the typed DriverConfig from a merged Config's `remote` dict, or None
-    when no driver is configured. The dict is already validated + defaulted by
-    providers.config._parse_remote, so every key is present here."""
+    from imp.remote.drivers import REGISTRY
+
     raw = (getattr(config, "remote", None) or {}).get("driver")
     if not raw:
         return None
+    entry = REGISTRY.get(raw["name"])
+    if entry is None:
+        return None
     return DriverConfig(
-        command=tuple(raw["command"]),
-        events=tuple(raw["events"]),
-        startup_timeout=float(raw["startup_timeout"]),
-        reply_timeout=raw["reply_timeout"],
+        command=(sys.executable, "-m", entry.module),
+        events=tuple(raw.get("events", entry.default_events)),
+        startup_timeout=float(raw.get("startup_timeout", 10.0)),
+        reply_timeout=raw.get("reply_timeout", None),
     )
 
 
