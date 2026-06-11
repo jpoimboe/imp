@@ -99,6 +99,7 @@ def _to_config(merged: dict[str, Any]) -> Config:
         editing_mode=merged.get("editing_mode", "emacs"),
         theme=merged.get("theme", "ansi"),
         sandbox=merged.get("sandbox", {}),
+        remote=merged.get("remote", {}),
     )
 
 
