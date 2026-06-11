@@ -40,13 +40,12 @@ def handle_slash_line(
     tokens = text.lstrip().lstrip("/").split(None, 1)
     cmd = tokens[0] if tokens else ""
     args = tokens[1].strip() if len(tokens) > 1 else ""
-    skills_dir = change.workflow_dir / "skills"
 
     if cmd in ("", "help"):
         _help(output_fn)
         return REPROMPT
     if cmd == "skills":
-        _list(skills_dir, output_fn)
+        _list(change.workflow_dir / "skills", output_fn)
         return REPROMPT
     if cmd == "continue":
         # /continue is the §2 resume verb at the post-interrupt prompt. The
@@ -58,7 +57,7 @@ def handle_slash_line(
         return REPROMPT
 
     try:
-        body = load_skill_body(skills_dir, cmd)
+        body = load_skill_body(change.workflow_dir / "skills", cmd)
     except SkillError:
         output_fn(f"no such skill: /{cmd}")
         _help(output_fn)
@@ -94,7 +93,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  Tab                Complete a /command or skill name")
 
 
-async def _ask_or_exit(prompt: Any, exit_evt: Any) -> str:
+async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "") -> str:
     """Read a line, but cancel the prompt if the coordinator exit event fires
     (SIGTERM / out-of-band SIGINT / escalation). On cancellation, raise
     KeyboardInterrupt so the CLI's pause-and-exit arm finalizes status=paused.
@@ -121,7 +120,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any) -> str:
                 tg.cancel_scope.cancel()
 
             async def _read() -> None:
-                result["line"] = await prompt.ask_async()
+                result["line"] = await prompt.ask_async(question=question)
                 tg.cancel_scope.cancel()
 
             tg.start_soon(_watch)
@@ -193,6 +192,8 @@ async def ask_line_with_slash(
             # them before the loop re-prompts.
             with status.suspend():
                 try:
+                    question = (driver.take_pending_question()
+                                if driver is not None else "")
                     while True:
                         if driver is not None:
                             driver.prepare_for_prompt()
@@ -201,9 +202,11 @@ async def ask_line_with_slash(
                         exit_evt = getattr(coord, "_exit_event", None) if coord else None
                         try:
                             if exit_evt is None:
-                                line: str = await prompt.ask_async()
+                                line: str = await prompt.ask_async(question=question)
                             else:
-                                line = await _ask_or_exit(prompt, exit_evt)
+                                line = await _ask_or_exit(
+                                    prompt, exit_evt, question=question)
+                            question = ""  # only the first prompt shows the label
                         except KeyboardInterrupt:
                             # A KeyboardInterrupt reaching here is normally the
                             # exit-event-won synthesis from _ask_or_exit: an out-of-band

@@ -1,6 +1,6 @@
 """End-to-end ESC test: drives `_async_cmd_new` against a real pty.openpty()
-slave (substituted for /dev/tty) and asserts the `paused (esc)` headline on
-stdout. In-process; stubs run_change to sleep-until-cancel."""
+slave (substituted for /dev/tty) and asserts rc 130 on an ESC keystroke.
+In-process; stubs run_change to sleep-until-cancel."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def _can_pty() -> bool:
 pytestmark = pytest.mark.skipif(not _can_pty(), reason="pty not available")
 
 
-def test_esc_keystroke_mid_run_produces_paused_esc_headline(
+def test_esc_keystroke_mid_run_exits_with_rc_130(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -80,6 +80,5 @@ def test_esc_keystroke_mid_run_produces_paused_esc_headline(
 
     out = capsys.readouterr().out
     assert rc == 130
-    assert "paused (esc)" in out
     assert "unclassified provider error" not in out
     assert "Cannot write to terminated process" not in out

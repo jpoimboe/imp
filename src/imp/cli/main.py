@@ -20,7 +20,9 @@ from typing import Any, NoReturn
 import anyio
 
 from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.cli import change_row
 from imp.cli import palette as pal
+from imp.cli import resume_select
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
@@ -211,18 +213,45 @@ def _emit_completed(change: Change, value: str, *, merged: bool) -> None:
         print(ansi(f"{mark}Change {change.id}: {value}", "green", enabled=color))
 
 
-def _emit_paused(change: Change, how: str) -> None:
+def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
+    """The current phase: the phase of the most recent step_started event."""
+    phase: str | None = None
+    for e in events:
+        if e.get("type") == "step_started":
+            phase = (e.get("payload") or {}).get("phase") or phase
+    return phase
+
+
+def _pause_lines(name: str, phase: str | None, token: str, *, color: bool) -> list[str]:
+    mark = "⏸  " if color else ""
+    at = f"  at {phase}" if phase else ""
+    return [
+        ansi(f"{mark}Paused  {name}{at}", "dim", enabled=color),
+        ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
+    ]
+
+
+def _pause_facts(change: Change) -> tuple[str, str | None, str]:
+    from imp.cli.change_row import resume_token
+    from imp.cli.narrative import _slug_descriptor
+    name = _slug_descriptor(change.slug) or change.id
+    phase = _phase_from_events(list(change.event_log().read()))
+    return name, phase, resume_token(change.id)
+
+
+def _emit_paused(change: Change) -> None:
     """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim, ⏸."""
     color = should_use_color(sys.stdout)
-    mark = "⏸ " if color else ""
-    print("\n" + ansi(f"{mark}Change {change.id}: paused ({how})", "dim", enabled=color))
+    name, phase, token = _pause_facts(change)
+    print("\n" + "\n".join(_pause_lines(name, phase, token, color=color)))
 
 
-def _emit_paused_summary(change: Change, value: str) -> None:
+def _emit_paused_summary(change: Change) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
-    mark = "⏸ " if color else ""
-    print(ansi(f"{mark}Change {change.id}: {value}", "dim", enabled=color))
+    name, phase, token = _pause_facts(change)
+    for ln in _pause_lines(name, phase, token, color=color):
+        print(ln)
 
 
 def _emit_merge_blocked(
@@ -338,7 +367,7 @@ def _handle_terminal_outcome(
                 final_state.step,
                 (matched.get("payload") or {}).get("stderr", ""),
             )
-    _emit_paused_summary(change, result.value)
+    _emit_paused_summary(change)
     return 1
 
 
@@ -518,7 +547,7 @@ def _finalize_paused_exit(
     SIGTERM/escalation path out of the session loop."""
     driver.finish()
     pause_and_exit(change, reason=reason, engine_pause_reason=coord.pause_reason)
-    _emit_paused(change, reason)
+    _emit_paused(change)
     return 130
 
 
@@ -634,6 +663,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> str:
+    display = slug.strip() or change_id
+    return (ansi(display, *pal.NODE_COLORS["workflow"], enabled=color)
+            + ansi(f" · {marker}", "dim", enabled=color))
+
+
 def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
     if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
         print("imp: --tui needs an interactive terminal; streaming instead.",
@@ -728,9 +763,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            # No "Created Change …" line: the driver's `change_created` event
-            # prints the bold `#slug  title` workflow header as the opener, so a
-            # second headline here would just duplicate it.
+            print(_run_header_line(
+                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
             non_interactive = bool(getattr(args, "non_interactive", False))
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
@@ -792,15 +826,21 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     control = _control_root()
-    try:
-        change_id = _resolve_id(control, args.token)
-    except SystemExit:
-        return 2
+    if args.token is None:
+        target = await _pick_resume_target(
+            control, non_interactive=bool(getattr(args, "non_interactive", False)))
+        if isinstance(target, int):
+            return target
+        change_id = target
+    else:
+        try:
+            change_id = _resolve_id(control, args.token)
+        except SystemExit:
+            return 2
     try:
         change = Change.load(control, change_id)
-    except (LoadError, LoadErrors) as err:
-        print(f"imp: {err}", file=sys.stderr)
-        return 2
+    except (LoadError, LoadErrors):
+        return _resume_gone(control, change_id)
     state = State.load(change.state_dir)
     if state.status not in ("paused", "errored", "merge_blocked"):
         print(
@@ -828,10 +868,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # workflow header — emit a matching one here (bold `#slug  title`) with
             # a dim resuming marker, so a resumed run opens like a fresh one. A
             # title-less change defers its header too (Option B), matching new.
-            _color = should_use_color(sys.stdout)
-            if change.title and change.title.strip():
-                print(ansi(f"#{change.slug}  {change.title}", "bold", "magenta", enabled=_color)
-                      + ansi(" · resuming", "dim", enabled=_color))
+            print(_run_header_line(
+                change.slug, change.id, "resuming",
+                color=should_use_color(sys.stdout)))
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
             # + gate-check FIRST (plan_rewind raises before mutating/emitting) so
@@ -1016,7 +1055,7 @@ def _resolve_id(control: Path, token: str) -> str:
     if len(suffix_hits) == 1:                              # (2) unique suffix
         return suffix_hits[0]
     if len(suffix_hits) > 1:
-        _exit_ambiguous(token, suffix_hits)
+        _exit_ambiguous(token, suffix_hits, control)
 
     slug_hits = []
     for cid in ids:
@@ -1032,7 +1071,7 @@ def _resolve_id(control: Path, token: str) -> str:
     if len(slug_hits) == 1:                                 # (3) current slug
         return slug_hits[0]
     if len(slug_hits) > 1:
-        _exit_ambiguous(token, slug_hits)
+        _exit_ambiguous(token, slug_hits, control)
 
     # Not resolvable. A bare prefix shared by several ids (e.g. `2026-06-04`) is
     # rejected as AMBIGUOUS and lists the candidates (spec §5 / AC 5): prefixes
@@ -1040,16 +1079,25 @@ def _resolve_id(control: Path, token: str) -> str:
     # rather than a blank "no match", so the user can retype with a suffix.
     prefix_hits = [cid for cid in ids if cid.startswith(token)]
     if len(prefix_hits) > 1:
-        _exit_ambiguous(token, prefix_hits)
+        _exit_ambiguous(token, prefix_hits, control)
 
     print(f"imp: no Change matches {token!r}", file=sys.stderr)
     raise SystemExit(2)
 
 
-def _exit_ambiguous(token: str, candidates: list[str]) -> NoReturn:
+def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoReturn:
     print(f"imp: {token!r} is ambiguous; candidates:", file=sys.stderr)
+    color = should_use_color(sys.stderr)
+    now = datetime.now(UTC)
+    print(change_row.header_line(color=color), file=sys.stderr)
     for cid in sorted(candidates):
-        print(f"  {cid}", file=sys.stderr)
+        row = _row_for_id(control, cid)
+        if row is None:
+            print(f"  {cid}", file=sys.stderr)
+            continue
+        print(change_row.format_change_line(
+            change_id=row[0], title=row[4], status=row[1], step=row[2],
+            last_iso=row[3], now=now, color=color), file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -1097,7 +1145,7 @@ def _resolve_default_id(control: Path) -> str | None:
     journaled = journal.journal_ids(control)
     if not journaled:
         return None
-    return max(journaled, key=lambda s: _journal_last_activity(control, s))
+    return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
@@ -1173,46 +1221,67 @@ def _read_last_line(events_path: Path) -> bytes | None:
         return _last_nonempty_line(buf)
 
 
-def _format_last_timestamp(line: str) -> str:
-    """Local-time YYYY-MM-DD HH:MM:SS for a single already-extracted event line,
-    or '-' when the line is empty / malformed. Callers pass the last non-empty
-    line (see _read_last_line / _last_nonempty_line)."""
+
+def _iso_from_line(line: str) -> str | None:
     if not line.strip():
-        return "-"
+        return None
     try:
-        record = json.loads(line)
-        ts = datetime.fromisoformat(record["timestamp"]).astimezone()
-        return ts.strftime("%Y-%m-%d %H:%M:%S")
-    except (json.JSONDecodeError, KeyError, ValueError):
-        return "-"
+        return str(json.loads(line)["timestamp"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
 
 
-def _last_event_timestamp(events_path: Path) -> str:
+def _last_event_iso(events_path: Path) -> str | None:
     try:
         line = _read_last_line(events_path)
     except FileNotFoundError:
-        return "-"
+        return None
     if line is None:
-        return "-"
-    return _format_last_timestamp(line.decode("utf-8", errors="replace"))
+        return None
+    return _iso_from_line(line.decode("utf-8", errors="replace"))
 
 
-def _journal_last_activity(control: Path, change_id: str) -> str:
+def _journal_last_iso(control: Path, change_id: str) -> str | None:
     raw = journal.journal_show(control, change_id, "events.jsonl")
     if raw is None:
-        return "-"
+        return None
     line = _last_nonempty_line(raw)
     if line is None:
-        return "-"
-    return _format_last_timestamp(line.decode("utf-8", errors="replace"))
+        return None
+    return _iso_from_line(line.decode("utf-8", errors="replace"))
+
+
+def _journal_status(control: Path, change_id: str) -> str | None:
+    raw = journal.journal_show(control, change_id, "state.json")
+    if raw is None:
+        return None
+    try:
+        return str(json.loads(raw)["status"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def _resume_gone(control: Path, change_id: str) -> int:
+    status = _journal_status(control, change_id)
+    title = _title_for_id(control, change_id) or change_id
+    if status == "abandoned":
+        print(f"{title} was abandoned; nothing to resume.")
+        return 0
+    if status is not None:
+        print(f"{title} is already completed; nothing to resume.")
+        return 0
+    print(f"imp: no Change matches {change_id!r}", file=sys.stderr)
+    return 2
 
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.
-_INFLIGHT = ("running", "paused", "merge_blocked")
+_INFLIGHT = ("running", "paused", "errored", "merge_blocked")
+RESUMABLE = ("paused", "errored", "merge_blocked")
 
 
 # Row = (id, status, step, last_activity, title, created_at). created_at is the
-# trailing sort key only — the renderer never displays it (see _render_status_table).
+# trailing sort key only — the renderer never displays it (see _cmd_status, which
+# formats each row via change_row.format_change_line).
 _Row = tuple[str, str, str, str, str, str]
 
 
@@ -1233,13 +1302,28 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
         return None
 
 
+def _row_for_id(control: Path, change_id: str) -> _Row | None:
+    cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    if (cdir / "change.json").exists():
+        state_json = (cdir / "state" / "state.json").read_bytes()
+        change_json = (cdir / "change.json").read_bytes()
+        last = _last_event_iso(cdir / "events.jsonl") or ""
+    else:
+        state_json = journal.journal_show(control, change_id, "state.json")
+        change_json = journal.journal_show(control, change_id, "change.json")
+        if state_json is None or change_json is None:
+            return None
+        last = _journal_last_iso(control, change_id) or ""
+    return _status_row(change_id, state_json, change_json, last)
+
+
 def _status_rows(control: Path) -> list[_Row]:
     rows: list[_Row] = []
     for change_id in _list_change_worktrees(control):
         cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
         state_json = (cdir / "state" / "state.json").read_bytes()
         change_json = (cdir / "change.json").read_bytes()
-        last = _last_event_timestamp(cdir / "events.jsonl")
+        last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None or row[1] not in _INFLIGHT:
             continue
@@ -1259,7 +1343,7 @@ def _completed_rows(control: Path) -> list[_Row]:
         change_json = journal.journal_show(control, change_id, "change.json")
         if state_json is None or change_json is None:
             continue
-        last = _journal_last_activity(control, change_id)
+        last = _journal_last_iso(control, change_id) or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None or row[1] in _INFLIGHT:
             continue  # belt-and-suspenders; journaled rows are completed
@@ -1267,56 +1351,52 @@ def _completed_rows(control: Path) -> list[_Row]:
     return rows
 
 
-# STATUS cell colors mirror imp log's restraint — color only this cell,
-# leave the rest plain. Padding is computed against the un-colored status
-# text so the column edge holds when colors are on.
-_STATUS_COLORS: dict[str, tuple[str, ...]] = {
-    "running": ("green",),
-    "paused": ("cyan",),
-    "merge_blocked": ("yellow",),
-    "errored": ("bold", "red"),
-    "completed": ("gray",),
-    "abandoned": ("gray",),
-}
+def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
+    return sorted(rows, key=lambda r: (r[3], r[5]), reverse=True)
 
 
-def _render_status_table(
-    rows: list[_Row],
-    *,
-    color_enabled: bool,
-) -> list[str]:
-    """Format pre-sorted rows into aligned table lines. Per-column widths are
-    `max(len(header), max(len(cell) for cell in column))` over the un-colored
-    cell text; only the STATUS value (not its trailing pad) is wrapped in
-    ANSI, so later columns hold their offset whether color is on or off."""
-    headers = ("ID", "STATUS", "STEP", "LAST_ACTIVITY", "TITLE")
-    # Compute widths for columns 0-3 only; TITLE is the terminal column and
-    # needs no padding.
-    widths = [
-        max(len(headers[i]), max((len(r[i]) for r in rows), default=0))
-        for i in range(4)
-    ]
-    lines: list[str] = [
-        f"{headers[0]:<{widths[0]}} "
-        f"{headers[1]:<{widths[1]}} "
-        f"{headers[2]:<{widths[2]}} "
-        f"{headers[3]:<{widths[3]}} "
-        f"{headers[4]}"
-    ]
-    for slug, status, step, last, title, _created in rows:
-        status_cell = f"{status:<{widths[1]}}"
-        codes = _STATUS_COLORS.get(status, ())
-        if color_enabled and codes:
-            pad = " " * (widths[1] - len(status))
-            status_cell = ansi(status, *codes, enabled=True) + pad
-        lines.append(
-            f"{slug:<{widths[0]}} "
-            f"{status_cell} "
-            f"{step:<{widths[2]}} "
-            f"{last:<{widths[3]}} "
-            f"{title}"
-        )
-    return lines
+def _resumable_rows(control: Path) -> list[_Row]:
+    rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
+    return _sort_rows_newest_first(rows)
+
+
+def _past_change_count(control: Path) -> int:
+    return len(_completed_rows(control))
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
+    rows = _resumable_rows(control)
+    if not rows:
+        print("Nothing to resume.")
+        past = _past_change_count(control)
+        if past:
+            plural = "s" if past != 1 else ""
+            print(pal.ansi(
+                f"({past} past change{plural} — see `imp status --all`)",
+                "dim", enabled=should_use_color(sys.stdout)))
+        return 0
+    if len(rows) == 1:
+        return rows[0][0]
+    if non_interactive or not _interactive():
+        print("Multiple resumable Changes — pass a token:", file=sys.stderr)
+        color = should_use_color(sys.stderr)
+        now = datetime.now(UTC)
+        print(change_row.header_line(color=color), file=sys.stderr)
+        for r in rows:
+            print(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                last_iso=r[3], now=now, color=color), file=sys.stderr)
+        return 2
+    candidates = [resume_select.Candidate(
+        change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3])
+        for r in rows]
+    chosen = await resume_select.run_picker(
+        candidates, now=datetime.now(UTC), color=should_use_color(sys.stdout))
+    return chosen if chosen is not None else 2
 
 
 def _abandon(control: Path, change_id: str) -> int:
@@ -1390,23 +1470,25 @@ def _cmd_status(args: argparse.Namespace) -> int:
     except worktree.PreconditionError:
         print("No Changes.")
         return 0
-    # In-flight Changes show by default; completed/abandoned ones are journaled
-    # history and only listed with --all (they'd otherwise pile up indefinitely).
-    rows = _status_rows(control)
-    if args.all:
-        rows = rows + _completed_rows(control)
-    if not rows:
+    inflight = _sort_rows_newest_first(_status_rows(control))
+    past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
+    if not inflight and not past:
         print("No Changes.")
         return 0
-    # Sort by last activity, oldest first. last_activity (r[3]) is a fixed-width
-    # "YYYY-MM-DD HH:MM:SS" local-time string (or "-" when there's no event), so
-    # lexicographic ascending == chronological oldest-first; activity-less "-"
-    # rows ("-" < any digit) sort to the top. created_at (r[5]) breaks ties
-    # deterministically (older Change first within the same activity second).
-    rows.sort(key=lambda r: (r[3], r[5]))
-    color_enabled = should_use_color(sys.stdout)
-    for line in _render_status_table(rows, color_enabled=color_enabled):
-        print(line)
+    color = should_use_color(sys.stdout)
+    now = datetime.now(UTC)
+    print(change_row.header_line(color=color))
+    for r in inflight:
+        print(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            last_iso=r[3], now=now, color=color))
+    if past:
+        if inflight:
+            print()
+        for r in past:
+            print(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                last_iso=r[3], now=now, color=color, dim=True))
     return 0
 
 
@@ -1451,7 +1533,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
-    p_resume.add_argument("token")
+    p_resume.add_argument("token", nargs="?")
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,

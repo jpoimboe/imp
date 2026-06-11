@@ -36,9 +36,12 @@ def test_shared_date_prefix_is_ambiguous(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit):
         _resolve_id(tmp_path, "2026-06-04")     # prefix shared -> ambiguous, not resolved
     err = capsys.readouterr().err
-    # AC 5: rejected as ambiguous AND lists the candidates (not a blank no-match).
+    # AC 5: rejected as ambiguous AND lists the candidates via the shared formatter
+    # (TITLE header + each title + resume token), not a blank no-match.
     assert "ambiguous" in err
-    assert "2026-06-04-aaaaaa" in err and "2026-06-04-bbbbbb" in err
+    assert "TITLE" in err
+    assert "One" in err and "Two" in err
+    assert "aaaaaa" in err and "bbbbbb" in err
 
 
 def test_current_slug_resolves(tmp_path: Path) -> None:
@@ -62,4 +65,7 @@ def test_cross_day_shared_suffix_is_ambiguous(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit):
         _resolve_id(tmp_path, "zzzzzz")        # suffix shared across days -> ambiguous
     err = capsys.readouterr().err
-    assert "2026-06-04-zzzzzz" in err and "2026-06-05-zzzzzz" in err
+    # Both share the resume token zzzzzz; the titles disambiguate the rows.
+    assert "ambiguous" in err
+    assert "One" in err and "Two" in err
+    assert "zzzzzz" in err

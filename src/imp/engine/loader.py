@@ -497,6 +497,14 @@ def _parse_fs_rule(
 # ── Step parsing ──────────────────────────────────────────────────────────────
 
 
+def _parse_bool_flag(raw: dict[str, Any], key: str, source: SourceLoc) -> bool:
+    val = raw.get(key, False)
+    if not isinstance(val, bool):
+        raise LoadError(
+            f"{key!r} must be a boolean, got {type(val).__name__}", source)
+    return val
+
+
 def _parse_step(
     raw: dict[str, Any],
     phase_name: str,
@@ -514,6 +522,7 @@ def _parse_step(
         raise LoadError("step missing a string 'name'", source)
     name = raw["name"]
     kind = _infer_kind(raw, source)
+    quiet = _parse_bool_flag(raw, "quiet", source)
 
     max_loops_val = _resolve_int(raw, "max_loops", defaults.max_loops, source, name)
     max_loops = max_loops_val if max_loops_val is not None else defaults.max_loops
@@ -542,6 +551,7 @@ def _parse_step(
             ),
             max_tool_calls=raw.get("max_tool_calls"),
             max_retries=_resolve_max_retries(raw, defaults.max_retries, source, name),
+            quiet=quiet,
         )
     elif kind == "script":
         step = Step(
@@ -550,16 +560,19 @@ def _parse_step(
             command=str(raw["command"]),
             cwd=str(raw["cwd"]) if raw.get("cwd") else None,
             timeout_seconds=raw.get("timeout"),
+            quiet=quiet,
         )
     elif kind == "merge":
         step = Step(
             name=name, phase=phase_name, kind="merge", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
+            quiet=quiet,
         )
     else:  # branch
         step = Step(
             name=name, phase=phase_name, kind="branch", rules=rules,
             on_max_retries=on_max, max_loops=max_loops, source=source,
+            quiet=quiet,
         )
 
     # Type-check every if:/set: against this step's env (output and vars).

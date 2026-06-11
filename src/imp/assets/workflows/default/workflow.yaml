@@ -49,12 +49,14 @@ phases:
              continue: true}
 
       - name: spec-verify-commit
+        quiet: true
         command: ./scripts/spec-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, set: {spec_gate_passed: false}, resume: spec-writer}
 
       - name: spec-exit-gate           # spec-phase exit router: gated-confirm pass-through, trivial skip, else continue to review
+        quiet: true
         rules:
           - {if: {spec_gate_passed: true}, set: {spec_gate_passed: false}, goto: plan-writer}
           - {if: {fast_path: true}, set: {spec_unseen_changes: false}, goto: plan-writer}
@@ -98,12 +100,14 @@ phases:
           - {operations: [write], paths: ["imp/plans/**"], mode: allow}
 
       - name: plan-verify-commit
+        quiet: true
         command: ./scripts/plan-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
       - name: fast-path-plan-gate      # trivial change -> skip plan review entirely
+        quiet: true
         rules:
           - {if: {fast_path: true}, goto: task-lead}   # skip plan-review on fast-path
           - {else: true, continue: true}
@@ -139,6 +143,7 @@ phases:
           - {else: true, continue: true}                    # plan implemented
 
       - name: commit-check
+        quiet: true
         command: ./scripts/implement-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}

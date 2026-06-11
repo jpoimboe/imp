@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -203,50 +204,15 @@ def test_status_skips_malformed_journal_entry(
     assert "broken" not in out
 
 
-def _set_created_at(control: Path, slug: str, created_at: str) -> None:
-    """Overwrite change.json's created_at before journaling so the row's sort
-    key is deterministic (Change.create stamps wall-clock now())."""
-    meta_path = (control / ".imp" / "worktrees" / slug
-                 / ".imp" / "change" / "change.json")
-    meta = json.loads(meta_path.read_text())
-    meta["created_at"] = created_at
-    meta_path.write_text(json.dumps(meta))
-
-
-def test_status_sorts_rows_by_creation_date_oldest_first(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Rows sort by Change creation date, oldest first — independent of
-    last_activity (the 'middle' Change is journaled last but created in the
-    middle, so it must land between the others, not at an end)."""
+def test_sort_rows_newest_first() -> None:
     import imp.cli.main as m
-
-    _seed_control(tmp_path)
-    Change.create(tmp_path, title="Oldest", change_id="oldest", base_branch="main")
-    Change.create(tmp_path, title="Middle", change_id="middle", base_branch="main")
-    Change.create(tmp_path, title="Newest", change_id="newest", base_branch="main")
-    _set_created_at(tmp_path, "oldest", "2024-01-01T00:00:00+00:00")
-    _set_created_at(tmp_path, "middle", "2025-01-01T00:00:00+00:00")
-    _set_created_at(tmp_path, "newest", "2026-01-01T00:00:00+00:00")
-
-    # Journal in an order unrelated to creation date to prove the sort key is
-    # created_at, not journaling/activity order.
-    _complete_and_journal(tmp_path, "newest")
-    _complete_and_journal(tmp_path, "oldest")
-    _complete_and_journal(tmp_path, "middle")
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setenv("NO_COLOR", "1")
-
-    rc = m._cmd_status(type("NS", (), {"all": True})())
-    assert rc == 0
-    lines = capsys.readouterr().out.splitlines()
-    # Header is lines[0]; data rows follow. First whitespace-delimited token
-    # of each data row is the slug.
-    slugs_in_order = [line.split()[0] for line in lines[1:]]
-    assert slugs_in_order == ["oldest", "middle", "newest"]
+    # (id, status, step, last_iso, title, created_at)
+    rows = [
+        ("old", "completed", "-", "2024-01-01T00:00:00+00:00", "Old", "2024-01-01T00:00:00+00:00"),
+        ("new", "completed", "-", "2026-01-01T00:00:00+00:00", "New", "2026-01-01T00:00:00+00:00"),
+        ("mid", "completed", "-", "2025-01-01T00:00:00+00:00", "Mid", "2025-01-01T00:00:00+00:00"),
+    ]
+    assert [r[0] for r in m._sort_rows_newest_first(rows)] == ["new", "mid", "old"]
 
 
 def test_status_empty_prints_no_changes(
@@ -337,12 +303,12 @@ def test_status_no_ansi_when_NO_COLOR_set(
     assert "completed" in out
 
 
-def test_status_colors_completed_with_gray_when_FORCE_COLOR(
+def test_status_all_dims_completed_section(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """With FORCE_COLOR set, a completed row's STATUS cell is wrapped in the
-    gray SGR sequence around the literal text 'completed'."""
+    """With --all and color forced, the completed past section is rendered dim
+    (whole-row), so a completed row sits inside a dim SGR span."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -357,8 +323,8 @@ def test_status_colors_completed_with_gray_when_FORCE_COLOR(
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
-    # palette._ANSI["gray"] is "\x1b[90m"; reset is "\x1b[0m".
-    assert "\x1b[90mcompleted\x1b[0m" in out
+    row = next(ln for ln in out.splitlines() if "completed" in ln)
+    assert row.startswith("\x1b[2m") and row.endswith("\x1b[0m")
 
 
 def _abandon_and_journal(control: Path, slug: str) -> None:
@@ -405,12 +371,11 @@ def test_status_hides_completed_and_abandoned_by_default(
     assert "abandoned" not in out
 
 
-def test_status_all_shows_abandoned_in_gray(
+def test_status_all_dims_abandoned_section(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """With --all and color forced, an abandoned row's STATUS cell is wrapped in
-    the same gray SGR sequence as completed."""
+    """An abandoned row also lands in the dim past section under --all."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -425,4 +390,32 @@ def test_status_all_shows_abandoned_in_gray(
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
     out = capsys.readouterr().out
-    assert "\x1b[90mabandoned\x1b[0m" in out
+    row = next(ln for ln in out.splitlines() if "abandoned" in ln)
+    assert row.startswith("\x1b[2m") and row.endswith("\x1b[0m")
+
+
+def test_status_default_inflight_columns_and_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Default view: header + a running row with the TITLE-leading columns and a
+    green STATUS cell; the 6-char resume token trails as the ID."""
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Add version flag",
+                  change_id="2026-06-11-yaitd7", base_branch="main")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    rc = m._cmd_status(type("NS", (), {"all": False})())
+    assert rc == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    plain_header = re.sub(r"\x1b\[[0-9;]*m", "", lines[0])
+    assert "TITLE" in plain_header and plain_header.index("STATUS") == 26
+    assert "Add version flag" in out
+    assert "\x1b[32mrunning\x1b[0m" in out
+    assert lines[1].rstrip().endswith("yaitd7")

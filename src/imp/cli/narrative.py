@@ -14,6 +14,7 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -83,6 +84,9 @@ class StepNode:
     start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
     end_ts: str | None = None          # ISO-8601 from step_completed.timestamp (§7)
     agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
+    quiet: bool = False                # the step_started.payload.quiet flag
+    quiet_line: str | None = None      # resolved routing line (`→ reworking` /
+                                       # `→ <phase>`); None for a linear continue
     closed: bool = False
     collapsible = False
 
@@ -241,6 +245,12 @@ class PauseNode:
 
 
 @dataclass
+class RenameNode:
+    name: str
+    collapsible = False
+
+
+@dataclass
 class StepContextNode:
     payload: dict[str, Any]
     collapsible = True
@@ -330,6 +340,10 @@ class NarrativeBuilder:
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
         self._resuming = False
+        # A quiet step whose forward goto's target phase is not known until the
+        # target's step_started arrives (the arrow names the target PHASE). Holds
+        # (quiet_step_node, target_step_name) between the two events.
+        self._pending_quiet: tuple[StepNode, str] | None = None
         # True between an awaiting_user_input event and the user_message that
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
@@ -504,6 +518,13 @@ def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 
+_DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+
+
+def _slug_descriptor(slug: str) -> str:
+    return _DATE_PREFIX.sub("", slug)
+
+
 def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # A rename carries the new title + slug as a unit (current schema). Apply them
     # together; ignore a legacy/partial event missing either, rather than leaving
@@ -514,6 +535,7 @@ def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         return
     self._root.title = new_title
     self._root.slug = new_slug
+    self._append(RenameNode(name=_slug_descriptor(new_slug)))
 
 
 NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
@@ -540,6 +562,13 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
+    if self._pending_quiet is not None:
+        qnode, target = self._pending_quiet
+        # The forward goto runs its target next, so this step IS the target and
+        # its phase is the arrow's phase. Fall back to the raw target name if a
+        # different step somehow intervenes (defensive; never the shipped path).
+        qnode.quiet_line = f"→ {phase if name == target else target}"
+        self._pending_quiet = None
     # Retry re-entry: the executor's transient-error retry loop re-emits
     # step_started on every iteration WITHOUT a prior step_completed for that
     # step, so the same StepNode is still on the stack. Reuse it in place —
@@ -596,7 +625,8 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     # longer carries an interactive key.
     node = StepNode(name=name, kind=kind, model=p.get("model"),
                     provider=p.get("provider"),
-                    start_ts=event.get("timestamp"))
+                    start_ts=event.get("timestamp"),
+                    quiet=bool(p.get("quiet", False)))
     self._append(node)
     self._step_stack.append(node)
 
@@ -615,6 +645,13 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
             step_name=node.name, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output)))
         node.closed = True
+        if node.quiet and isinstance(action, dict) and action.get("verb") == "goto":
+            if action.get("resume"):
+                node.quiet_line = "→ reworking"      # backward rework edge
+            else:
+                # forward goto: the arrow names the TARGET phase, which is known
+                # only once the target's step_started arrives (resolved there).
+                self._pending_quiet = (node, str(action.get("target", "")))
 
 
 NarrativeBuilder._HANDLERS["step_started"] = _h_step_started
