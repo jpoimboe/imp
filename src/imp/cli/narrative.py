@@ -553,7 +553,7 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
     # both double up and mismatch the live view (the bug this fixes).
     self._flush_burst()
     self._root.status = "paused"
-    reason = p.get("reason")
+    reason = p.get("interrupt_reason") or p.get("reason")
     if reason:
         self._append(PauseNode(reason=reason))
 

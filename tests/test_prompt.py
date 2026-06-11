@@ -66,7 +66,10 @@ class _FakeSession:
         self.raises = raises
         self._history: list[str] = []
 
-    def prompt(self, _msg: str) -> str:
+    def prompt(self, _msg: str, *, handle_sigint: bool = True) -> str:
+        # ask() now passes handle_sigint=False so an OS SIGINT routes through
+        # imp's InterruptCoordinator, not a prompt_toolkit KeyboardInterrupt.
+        assert handle_sigint is False
         if self.raises:
             raise self.raises
         answer = self.answers.pop(0)

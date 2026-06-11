@@ -175,6 +175,64 @@ def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
     return True
 
 
+def _join_pending_interjects(coordinator: Any) -> str | None:
+    """Drain ALL queued interjects and join them newline-separated into ONE
+    string, or None if the queue is empty. Used to satisfy a dangling
+    wait_for_user on resume (§2 dangling-wait routing)."""
+    if coordinator is None:
+        return None
+    parts: list[str] = []
+    while True:
+        t = coordinator.drain_interject()
+        if t is None:
+            break
+        parts.append(t)
+    return "\n".join(parts) if parts else None
+
+
+async def _resolve_wait_reply(
+    coordinator: Any,
+    user_input_fn: Callable[[str], str | Awaitable[str]],
+) -> str:
+    """Satisfy a dangling wait_for_user on resume (§2 F5, R6 pending-satisfies-
+    solicit): if the interject queue is non-empty, drain+join it as the reply;
+    otherwise solicit via user_input_fn. Returns the reply string the caller
+    then journals + replays."""
+    import inspect
+    joined = _join_pending_interjects(coordinator)
+    if joined is not None:
+        return joined
+    raw = user_input_fn("")
+    if inspect.isawaitable(raw):
+        raw = await raw
+    return str(raw)
+
+
+def drain_all_interjects_at_resume(
+    coordinator: Any, messages: Any, transcript: Any, elog: Any, agent_id: str,
+) -> int:
+    """Resume-entry drain (§2): deliver EVERY queued interject in order as user
+    messages, folded into the first request, and CLEAR the queue so the
+    following turn-boundary drain is a no-op (no double-delivery). Returns the
+    count delivered. Mid-turn shape (messages-list providers: anthropic/openai).
+    The dangling-wait join is handled separately by the resume classifier (F5)."""
+    if coordinator is None:
+        return 0
+    from imp.agents.runner import Message, TextBlock
+    n = 0
+    while True:
+        text = coordinator.drain_interject()
+        if text is None:
+            break
+        msg = Message(role="user", content=(TextBlock(text=text),))
+        messages.append(msg)
+        transcript.append(msg)
+        elog.append_user_message(agent_id=agent_id, message=msg)
+        elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
+        n += 1
+    return n
+
+
 def build_agent_invocation(
     *,
     agent_def: AgentDef,
