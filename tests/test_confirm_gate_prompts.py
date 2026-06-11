@@ -42,3 +42,28 @@ def test_spec_writer_carries_ask_vs_decide_policy_and_markers() -> None:
     assert "wait_for_user" in text
     # the decide-and-record default phrasing is present
     assert "decide and record" in text.lower()
+
+
+def test_spec_writer_has_confirm_and_finalize_protocol() -> None:
+    text = _spec_writer()
+    assert "## Confirm and finalize" in text
+    # silent-confirm fast exit is spelled out
+    assert "phase=\"confirmed\"" in text or 'phase="confirmed"' in text
+    # the only exit-to-planning contract: confirmed carries no uncommitted edits
+    assert "must never carry uncommitted edits" in text
+    # edits at the gate flow back through review as written + unseen_changes:false
+    assert "unseen_changes=false" in text.lower().replace(" ", "") or \
+           "unseen_changes: false" in text
+
+
+def test_spec_writer_has_unseen_changes_emit_section() -> None:
+    text = _spec_writer()
+    assert "emit `unseen_changes` on every" in text
+    # the per-shape definition (the field's meaning) is documented
+    assert "without the user" in text and "direction" in text
+
+
+def test_spec_writer_has_amend_precondition_with_fixup_fallback() -> None:
+    text = _spec_writer()
+    assert "docs: add spec for <slug>" in text   # HEAD-is-spec-commit subject
+    assert "--fixup=\":/docs: add spec for <slug>\"" in text

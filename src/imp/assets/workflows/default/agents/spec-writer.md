@@ -125,8 +125,9 @@ HEAD on a spec rework, so `--amend` keeps it one clean commit):
 
 ```
 git add imp/specs/<slug>.md
+(Apply the amend precondition below first.)
 git commit --amend --no-edit
-complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=false)
+complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=<true|false>)
 ```
 
 The rework turn must be tool-terminal: end with the `git commit --amend` then the
@@ -187,8 +188,9 @@ On this pass:
 
    ```
    git add imp/specs/<slug>.md
+   (Apply the amend precondition below first.)
    git commit --amend --no-edit
-   complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=false)
+   complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=<true|false>)
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
@@ -206,6 +208,51 @@ not flip it.
 **not** ask the user anything, and end the turn tool-terminal with the
 `complete_step` call. This pass exists to incorporate the reviewer's advice, not to
 reopen the brainstorm.
+
+## Confirm and finalize
+
+Recognized by the confirm preamble (see the resume taxonomy): *"The review
+cycle is complete and the spec is accepted. Surface any significant decisions
+made during review to the user and confirm before finalizing:"*. The
+verification review's `findings:` (Minor/Nit) ride this resume but were
+already dropped by the one-pass protocol — do **not** integrate or present
+them.
+
+**Scope:** the decisions made since the last confirm turn (or since the
+brainstorm, on the first gate), **excluding** decisions the user already
+answered via escalation ("*(user-confirmed during review)*"). Repeated gates
+must not re-present confirmed items.
+
+- **Nothing in scope is significant?** Call
+  `complete_step(phase="confirmed", spec_path="imp/specs/<slug>.md",
+  complexity="<first-pass value>", unseen_changes=false)` immediately — do
+  **not** solicit. This silent confirm is the common minors-only case.
+- **Something is worth surfacing?** Call `wait_for_user` with ONE compact
+  message: a bulleted list of the in-scope decisions (each bullet the
+  decision plus its one-line why, mirroring the Decisions-summary entries),
+  ending with "proceed to planning, or should any of these change?". One
+  message, not one question per decision. The conversation may reopen the
+  brainstorm — multiple `wait_for_user` rounds are fine; apply brainstorm
+  discipline (one question at a time, narrow quickly, aim for ≤3 rounds).
+- **If the discussion produces spec edits:** edit and amend (subject to the
+  amend precondition below), then emit `phase: written`,
+  `unseen_changes: false` — the change flows back through
+  `spec-verify-commit` and re-review. `phase: confirmed` is the only exit to
+  planning from a confirm turn, and it **must never carry uncommitted edits**
+  (the verify gate's clean-spec-path check enforces this).
+
+Re-emit the SAME `complexity` you sent on the original `written` turn, and
+re-emit `spec_path`.
+
+**Amend precondition (all spec-writer amend sites — rework, minors, confirm).**
+Before any `git commit --amend`, verify HEAD is still the spec commit (its
+subject is `docs: add spec for <slug>`). The change worktree is private, so a
+foreign HEAD means your own earlier stray commit or a deliberate human edit.
+Respond **mechanically first**: if the spec commit still exists in history
+(find it by subject), commit the edit as
+`git commit --fixup=":/docs: add spec for <slug>"` (the review phase's
+autosquash folds it) and continue the turn normally. Escalate via
+`wait_for_user` **only** if the spec commit cannot be found at all.
 
 ## Classifying complexity (required on every completion)
 
@@ -241,6 +288,20 @@ record). Do NOT invent constraints the prompt did not state (e.g. import
 ordering), and do NOT drop a real constraint the prompt did state. On
 `standard`, write the full four-part spec (Goal, Scope, Decisions summary,
 Acceptance criteria) as described above.
+
+## emit `unseen_changes` on every `complete_step`
+
+`unseen_changes` is a required bool: **"did this turn change the committed
+spec content without the user's direction or approval?"** The predicate is
+*direction*, not visibility (watching a rework stream by is not approving).
+Per turn it is the OR over that turn's changes:
+
+| Turn shape | `unseen_changes` |
+|---|---|
+| Initial `written` turn | **false** — no committed spec exists yet to have changed (self-review fixes are part of producing the brainstorm's outcome, not changes *to* it) |
+| Rework / minors / verify-fix resume | **true iff** the turn amended spec content the user didn't direct; a no-op minors pass or a commit-mechanics-only fix is **false** |
+| Escalated-and-answered decision | **false for that change** (user-directed); if the same turn also fixed other findings autonomously, those are undirected → **true** |
+| Confirm turn | **false** — any edits there are user-requested, live |
 
 ## Output
 
