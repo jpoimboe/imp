@@ -160,7 +160,7 @@ spec
     from importlib.metadata import version; this is an implementation detail,
     not a spec defect.
   
-  spec-reviewer complete · goto(spec-writer) [resume] · 1m 2s
+  spec-reviewer complete · → reworking · 1m 2s
   
   spec-writer · opus
   
@@ -190,7 +190,7 @@ spec
   
   spec-final-review-gate
   
-  spec-final-review-gate complete · goto(plan-writer) · 0s
+  spec-final-review-gate complete · → plan · 0s
 
 spec complete · 3m 9s
 
@@ -327,7 +327,7 @@ plan
     instantiated with a single positional arg in the fallback tests; this works
     in 3.11, so no action needed.
   
-  plan-review complete · goto(plan-writer) [resume] · 1m 11s
+  plan-review complete · → reworking · 1m 11s
   
   plan-writer · opus
   
@@ -363,7 +363,7 @@ plan
   
   plan-final-review-gate
   
-  plan-final-review-gate complete · goto(task-lead) · 0s
+  plan-final-review-gate complete · → implement · 0s
 
 plan complete · 4m 7s
 

@@ -88,6 +88,7 @@ class StepNode:
     quiet_line: str | None = None      # resolved routing line (`→ reworking` /
                                        # `→ <phase>`); None for a linear continue
     closed: bool = False
+    interrupted: bool = False
     collapsible = False
 
 
@@ -279,10 +280,16 @@ class BreadcrumbLine:
     step_name: str
     elapsed_s: float | None
     action: Any                        # dict {verb, target?} from step_completed
+    route: str | None = None           # resolved routing suffix, same semantics as
+                                       # StepNode.quiet_line: None = unresolved,
+                                       # "" = resolved-but-silent (same-phase skip),
+                                       # "→ …" = a rendered arrow. Read by the loud
+                                       # render/live paths (the goto breadcrumb).
     extras: list[str] = field(default_factory=list)
     show_complete: bool = True         # always True (§4): chrome steps now print
                                        # a start header, so the breadcrumb always
                                        # carries the word "complete".
+    interrupted: bool = False
     collapsible = False
 
 
@@ -340,11 +347,12 @@ class NarrativeBuilder:
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
         self._resuming = False
-        # A quiet step whose forward goto's target phase is not known until the
+        # A step whose forward goto's target phase is not known until the
         # target's step_started arrives (the arrow names the target PHASE). Holds
-        # (quiet_step_node, target_step_name, gate_phase) between the two events;
-        # gate_phase lets a SAME-phase forward goto resolve to silence.
-        self._pending_quiet: tuple[StepNode, str, str | None] | None = None
+        # (step_node, breadcrumb, target_step_name, gate_phase) between the two
+        # events; gate_phase lets a SAME-phase forward goto resolve to silence.
+        # Serves loud steps (breadcrumb.route) and quiet steps (quiet_line) alike.
+        self._pending_quiet: tuple[StepNode, BreadcrumbLine, str, str | None] | None = None
         # True between an awaiting_user_input event and the user_message that
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
@@ -558,25 +566,31 @@ def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     self._step_stack.clear()
 
 
+def _apply_route(node: StepNode, breadcrumb: BreadcrumbLine, suffix: str) -> None:
+    if node.quiet:
+        node.quiet_line = suffix
+    breadcrumb.route = suffix
+
+
 def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     name = p.get("step", "?")
     kind = p.get("kind")
     phase = p.get("phase", "?")
     if self._pending_quiet is not None:
-        qnode, target, gate_phase = self._pending_quiet
+        qnode, breadcrumb, target, gate_phase = self._pending_quiet
         if phase == gate_phase:
             # SAME-phase forward goto (e.g. panel-gate → recheck, both in review):
             # an internal skip, not a phase transition — render nothing. "" is the
             # resolved-but-silent sentinel, distinct from None (= unresolved, which
             # holds the live cursor in live_driver._is_final).
-            qnode.quiet_line = ""
+            _apply_route(qnode, breadcrumb, "")
         else:
             # Cross-phase: the forward goto runs its target next, so this step IS
             # the target and its phase is the arrow's phase. Fall back to the raw
             # target name if a different step somehow intervenes (defensive; never
             # the shipped path).
-            qnode.quiet_line = f"→ {phase if name == target else target}"
+            _apply_route(qnode, breadcrumb, f"→ {phase if name == target else target}")
         self._pending_quiet = None
     # Retry re-entry: the executor's transient-error retry loop re-emits
     # step_started on every iteration WITHOUT a prior step_completed for that
@@ -616,6 +630,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.children.clear()
             existing.outcome = None
             existing.closed = False
+            existing.interrupted = False
             existing.kind = kind
             existing.model = p.get("model")
             existing.provider = p.get("provider")
@@ -650,19 +665,23 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         node.outcome = OutcomeLine(action=action)
         node.end_ts = event.get("timestamp")
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
-        node.children.append(BreadcrumbLine(
+        breadcrumb = BreadcrumbLine(
             step_name=node.name, elapsed_s=elapsed, action=action,
-            extras=_breadcrumb_extras(node.agent_output)))
+            extras=_breadcrumb_extras(node.agent_output),
+            interrupted=node.interrupted)
+        node.children.append(breadcrumb)
         node.closed = True
-        if node.quiet and isinstance(action, dict) and action.get("verb") == "goto":
-            if action.get("resume"):
-                node.quiet_line = "→ reworking"      # backward rework edge
+        if isinstance(action, dict) and action.get("verb") == "goto":
+            if action.get("resume") or action.get("rework"):
+                # resume edge OR a backward goto carrying feedback: a rejection.
+                _apply_route(node, breadcrumb, "→ reworking")
             else:
-                # forward goto: the arrow names the TARGET phase, which is known
-                # only once the target's step_started arrives (resolved there).
-                # Capture the gate's own phase so a same-phase skip resolves silent.
+                # forward goto: the arrow names the TARGET phase, known only once
+                # the target's step_started arrives (resolved there). Capture the
+                # gate's own phase so a same-phase skip resolves silent.
                 gate_phase = self._current_phase.name if self._current_phase else None
-                self._pending_quiet = (node, str(action.get("target", "")), gate_phase)
+                self._pending_quiet = (node, breadcrumb,
+                                       str(action.get("target", "")), gate_phase)
 
 
 NarrativeBuilder._HANDLERS["step_started"] = _h_step_started
@@ -1143,6 +1162,10 @@ NarrativeBuilder._HANDLERS["skill_load"] = _h_skill_load
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    if p.get("category") == "config" and p.get("kind") == "interrupted":
+        if self._step_stack:
+            self._step_stack[-1].interrupted = True
+        return
     detail = ""
     d = p.get("detail")
     if isinstance(d, dict):

@@ -659,17 +659,33 @@ def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
     line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
     assert line == "  spec complete · 12s"
     assert "→ continue" not in line
-    # non-continue action: extras and → suffix sit BEFORE elapsed (last field).
-    bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
-                            action={"verb": "goto", "target": "implement"},
-                            extras=["status=Success"])
+    # goto with a resolved route: the humanized arrow, NOT goto(...), before elapsed.
+    bc2 = nv.BreadcrumbLine(step_name="plan-review", elapsed_s=41.0,
+                            action={"verb": "goto", "target": "task-lead",
+                                    "resume": False, "rework": False},
+                            route="→ implement", extras=["status=Success"])
     line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert line2 == "  code-reviewer complete · goto(implement) · 41s"
-    # No elapsed (elapsed_s is None) → no trailing seconds field at all.
-    bc3 = nv.BreadcrumbLine(step_name="quick", elapsed_s=None,
-                            action={"verb": "continue"}, extras=[])
+    assert line2 == "  plan-review complete · → implement · 41s"
+    assert "goto(" not in line2
+    # goto with an UNRESOLVED route (None): no suffix at all.
+    bc3 = nv.BreadcrumbLine(step_name="held", elapsed_s=2.0,
+                            action={"verb": "goto", "target": "x",
+                                    "resume": False, "rework": False},
+                            route=None)
     line3 = "\n".join(rt._render(bc3, depth=1, full=False, color=False, width=80))
-    assert line3 == "  quick complete"
+    assert line3 == "  held complete · 2s"
+    # goto with a SILENT route (""): same-phase skip renders no suffix.
+    bc4 = nv.BreadcrumbLine(step_name="panel", elapsed_s=1.0,
+                            action={"verb": "goto", "target": "recheck",
+                                    "resume": False, "rework": False},
+                            route="")
+    line4 = "\n".join(rt._render(bc4, depth=1, full=False, color=False, width=80))
+    assert line4 == "  panel complete · 1s"
+    # a non-goto verb (pause) still renders its action_text.
+    bc5 = nv.BreadcrumbLine(step_name="autosquash", elapsed_s=None,
+                            action={"verb": "pause"}, extras=[])
+    line5 = "\n".join(rt._render(bc5, depth=1, full=False, color=False, width=80))
+    assert line5 == "  autosquash complete · pause"
 
 
 def _sub(outcome=None, *, is_error=False, name="reviewer"):
@@ -1211,3 +1227,31 @@ def test_error_detail_block_absent_in_lean() -> None:
             detail={"full_summary": "full detail here"}),
     ], full=False))
     assert "full detail here" not in out
+
+
+def test_interrupt_renders_interrupted_not_complete_pause() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="spec-writer", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("2", "error", category="config", kind="interrupted",
+            message="runner cancelled by interrupt"),
+        _ev("3", "step_completed", step="spec-writer", kind="agent",
+            action={"verb": "pause"}, var_mutations={}),
+        _ev("4", "workflow_paused", reason="interrupt", interrupt_reason="esc"),
+    ]))
+    assert "spec-writer interrupted" in out
+    assert "complete · pause" not in out
+    assert "error:" not in out
+    assert "runner cancelled by interrupt" not in out
+    assert "⏸ paused (esc)" in out
+
+
+def test_intentional_pause_still_renders_complete_pause() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="spec-writer", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("2", "step_completed", step="spec-writer", kind="agent",
+            action={"verb": "pause"}, var_mutations={}),
+    ]))
+    assert "spec-writer complete · pause" in out
+    assert "interrupted" not in out

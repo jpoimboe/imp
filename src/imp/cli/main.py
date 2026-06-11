@@ -7,12 +7,13 @@ no spinner. Plan 3 adds the polished UX layer.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
 import signal
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
@@ -679,22 +680,43 @@ def _tui_requested(args: argparse.Namespace) -> bool:
 
 
 def _is_benign_interrupt_teardown(exc: BaseException | None) -> bool:
-    """True for the detached-task exceptions a (process-group) interrupt leaves
-    behind when it kills a provider's CLI child mid-write: the SDK's
-    `CLIConnectionError: Cannot write to terminated process` and asyncio's
-    connection-lost `InvalidStateError`. Benign teardown noise — in `--tui` it must
-    not surface (prompt_toolkit would wedge on a "Press ENTER to continue" modal)."""
+    """True when exc is interrupt-teardown noise that must not surface in --tui (modal wedge)."""
     import asyncio
     if isinstance(exc, asyncio.InvalidStateError):
         return True
-    return (exc is not None
-            and type(exc).__name__ == "CLIConnectionError"
-            and "terminated process" in str(exc))
+    if exc is None:
+        return False
+    name = type(exc).__name__
+    if name == "CLIConnectionError" and "terminated process" in str(exc):
+        return True
+    if name == "ProcessError" and getattr(exc, "exit_code", None) == 143:
+        return True
+    return "(exit code: 143)" in str(exc)
+
+
+@contextlib.contextmanager
+def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
+    import asyncio
+    loop = asyncio.get_running_loop()
+    prev = loop.get_exception_handler()
+
+    def handler(lp: Any, context: dict[str, Any]) -> None:
+        if coord.should_pause or _is_benign_interrupt_teardown(
+                context.get("exception")):
+            return
+        if prev is not None:
+            prev(lp, context)
+        else:
+            lp.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+    try:
+        yield
+    finally:
+        loop.set_exception_handler(prev)
 
 
 async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
-    import asyncio
-
     from imp.cli.signals import InterruptCoordinator
 
     # No EscKeyReader — TuiApp owns the tty exclusively.
@@ -705,49 +727,31 @@ async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
     async def _chat(_prompt: object) -> str:
         return await app.solicit(change)
 
-    # The full-screen app runs with set_exception_handler=False, so loop-level
-    # exceptions reach the handler we install here instead of prompt_toolkit's
-    # "Press ENTER" modal. Swallow interrupt-teardown noise (a pause is in flight,
-    # or a benign killed-child write); surface anything else via the prior handler.
-    loop = asyncio.get_running_loop()
-    prev_exc_handler = loop.get_exception_handler()
-
-    def _tui_loop_exc_handler(lp: Any, context: dict[str, Any]) -> None:
-        if coord.should_pause or _is_benign_interrupt_teardown(
-                context.get("exception")):
-            return
-        if prev_exc_handler is not None:
-            prev_exc_handler(lp, context)
-        else:
-            lp.default_exception_handler(context)
-
     holder: dict[str, Any] = {}
     load_err: Exception | None = None
-    loop.set_exception_handler(_tui_loop_exc_handler)
-    try:
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(coord.run_signal_receiver)
-            if channel is not None and not await channel.start(tg):
-                channel = None
-            run_on_event = (
-                compose_on_event(app.on_event, channel.on_event)
-                if channel is not None else app.on_event)
+    with _benign_interrupt_loop_handler(coord):
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(coord.run_signal_receiver)
+                if channel is not None and not await channel.start(tg):
+                    channel = None
+                run_on_event = (
+                    compose_on_event(app.on_event, channel.on_event)
+                    if channel is not None else app.on_event)
 
-            async def _run() -> None:
-                try:
-                    holder["result"] = await run_change(
-                        change, on_event=run_on_event, user_chat_input_fn=_chat,
-                        coordinator=coord, non_interactive=False)
-                finally:
-                    app.exit()
+                async def _run() -> None:
+                    try:
+                        holder["result"] = await run_change(
+                            change, on_event=run_on_event, user_chat_input_fn=_chat,
+                            coordinator=coord, non_interactive=False)
+                    finally:
+                        app.exit()
 
-            tg.start_soon(_run)
-            await app.run_async()
-            tg.cancel_scope.cancel()
-    except* (LoadError, LoadErrors) as eg:
-        load_err = eg.exceptions[0]
-    finally:
-        loop.set_exception_handler(prev_exc_handler)
+                tg.start_soon(_run)
+                await app.run_async()
+                tg.cancel_scope.cancel()
+        except* (LoadError, LoadErrors) as eg:
+            load_err = eg.exceptions[0]
 
     app.print_collapsed_transcript(sys.stdout)
     if load_err is not None:
@@ -824,20 +828,21 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                     change, status, coord, esc_reader, driver)
 
             try:
-                async with anyio.create_task_group() as tg:
-                    tg.start_soon(coord.run_signal_receiver)
-                    if not non_interactive:
-                        tg.start_soon(status.tick)
-                        assert esc_reader is not None
-                        # Block until the reader has armed (or given up): a
-                        # workflow whose first step is interactive must not start
-                        # its prompt before the ESC reader holds /dev/tty, or the
-                        # prompt and the reader race for the terminal's termios.
-                        await tg.start(esc_reader.run)
-                    rc = await _run_change_session(
-                        change, coord=coord, driver=driver, status=status,
-                        esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                        non_interactive=non_interactive, tg=tg, channel=channel)
+                with _benign_interrupt_loop_handler(coord):
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(coord.run_signal_receiver)
+                        if not non_interactive:
+                            tg.start_soon(status.tick)
+                            assert esc_reader is not None
+                            # Block until the reader has armed (or given up): a
+                            # workflow whose first step is interactive must not start
+                            # its prompt before the ESC reader holds /dev/tty, or the
+                            # prompt and the reader race for the terminal's termios.
+                            await tg.start(esc_reader.run)
+                        rc = await _run_change_session(
+                            change, coord=coord, driver=driver, status=status,
+                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
+                            non_interactive=non_interactive, tg=tg, channel=channel)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -987,20 +992,21 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     change, status, coord, esc_reader, driver)
 
             try:
-                async with anyio.create_task_group() as tg:
-                    tg.start_soon(coord.run_signal_receiver)
-                    if not non_interactive:
-                        tg.start_soon(status.tick)
-                        assert esc_reader is not None
-                        # Block until the reader has armed (or given up): a
-                        # workflow whose first step is interactive must not start
-                        # its prompt before the ESC reader holds /dev/tty, or the
-                        # prompt and the reader race for the terminal's termios.
-                        await tg.start(esc_reader.run)
-                    rc = await _run_change_session(
-                        change, coord=coord, driver=driver, status=status,
-                        esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                        non_interactive=non_interactive, tg=tg, channel=channel)
+                with _benign_interrupt_loop_handler(coord):
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(coord.run_signal_receiver)
+                        if not non_interactive:
+                            tg.start_soon(status.tick)
+                            assert esc_reader is not None
+                            # Block until the reader has armed (or given up): a
+                            # workflow whose first step is interactive must not start
+                            # its prompt before the ESC reader holds /dev/tty, or the
+                            # prompt and the reader race for the terminal's termios.
+                            await tg.start(esc_reader.run)
+                        rc = await _run_change_session(
+                            change, coord=coord, driver=driver, status=status,
+                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
+                            non_interactive=non_interactive, tg=tg, channel=channel)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up

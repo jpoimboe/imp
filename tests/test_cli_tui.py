@@ -73,6 +73,32 @@ def test_is_benign_interrupt_teardown_matches_killed_child_writes() -> None:
     assert not m._is_benign_interrupt_teardown(None)
 
 
+def test_is_benign_interrupt_teardown_matches_exit_143_process_error() -> None:
+    # A stand-in matched by class NAME (like the CLIConnectionError test above),
+    # mirroring the real claude_agent_sdk ProcessError(message, exit_code=None).
+    class ProcessError(Exception):
+        def __init__(self, message: str, exit_code: int | None = None) -> None:
+            super().__init__(
+                f"{message} (exit code: {exit_code})" if exit_code is not None
+                else message)
+            self.exit_code = exit_code
+
+    assert m._is_benign_interrupt_teardown(
+        ProcessError("Command failed with exit code 143", exit_code=143))
+    assert m._is_benign_interrupt_teardown(
+        ProcessError("commande interrompue", exit_code=143))
+    assert m._is_benign_interrupt_teardown(
+        ProcessError("Command failed with exit code 143 (exit code: 143)"))
+
+    class NoAttrError(Exception):
+        pass
+
+    assert m._is_benign_interrupt_teardown(
+        NoAttrError("Command failed with exit code 143 (exit code: 143)"))
+    assert not m._is_benign_interrupt_teardown(
+        ProcessError("Command failed with exit code 1", exit_code=1))
+
+
 def test_new_tui_on_non_tty_warns_and_streams(tmp_path, monkeypatch, capsys) -> None:
     from imp.engine.executor import RunResult
     from tests.conftest import _seed_control
@@ -256,3 +282,69 @@ async def test_run_tui_session_composes_channel_on_event(monkeypatch, capsys) ->
 
     assert rc == 0
     assert any(e.get("type") == "change_created" for e in channel_events)
+
+
+@pytest.mark.anyio
+async def test_benign_loop_handler_swallows_paused_and_benign_then_restores() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    class ProcessError(Exception):
+        def __init__(self, message: str, exit_code: int | None = None) -> None:
+            super().__init__(message)
+            self.exit_code = exit_code
+
+    loop = asyncio.get_running_loop()
+    seen: list[dict] = []
+
+    def prior(lp, ctx):
+        seen.append(ctx)
+
+    loop.set_exception_handler(prior)
+    coord = SimpleNamespace(should_pause=False)
+
+    with m._benign_interrupt_loop_handler(coord):
+        # benign exit-143 teardown → swallowed (prior NOT invoked)
+        loop.call_exception_handler(
+            {"message": "x", "exception": ProcessError("boom", exit_code=143)})
+        assert seen == []
+        # a real error → routed to the prior handler
+        loop.call_exception_handler(
+            {"message": "y", "exception": RuntimeError("real")})
+        assert len(seen) == 1
+        # while a pause is in flight EVERYTHING is swallowed
+        coord.should_pause = True
+        loop.call_exception_handler(
+            {"message": "z", "exception": RuntimeError("during-pause")})
+        assert len(seen) == 1
+
+    # the prior handler is restored on context exit
+    assert loop.get_exception_handler() is prior
+
+
+def test_async_cmd_new_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
+    import contextlib
+
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    entered = {"n": 0}
+
+    @contextlib.contextmanager
+    def fake_handler(coord):
+        entered["n"] += 1
+        yield
+
+    async def fake_session(change, *, tg, **kwargs):
+        tg.cancel_scope.cancel()
+        return 0
+
+    monkeypatch.setattr(m, "_benign_interrupt_loop_handler", fake_handler)
+    monkeypatch.setattr(m, "_run_change_session", fake_session)
+
+    rc = anyio.run(m._async_cmd_new, argparse.Namespace(
+        title="demo", tui=False, non_interactive=True, message="go"))
+    assert rc == 0
+    assert entered["n"] == 1

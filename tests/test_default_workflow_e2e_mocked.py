@@ -857,6 +857,17 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
         assert not any(f"{name} complete" in ln for ln in body), (
             f"quiet step {name!r} rendered a completion breadcrumb:\n" + "\n".join(body))
 
+    # No raw control-flow leaks: humanize-routing replaces goto(<step>) / [resume]
+    # with the arrow forms on the loud breadcrumbs.
+    assert not any("goto(" in ln for ln in body), (
+        "raw goto(...) leaked into the transcript:\n" + "\n".join(body))
+    assert not any("[resume]" in ln for ln in body), (
+        "raw [resume] annotation leaked into the transcript:\n" + "\n".join(body))
+    # A loud clean forward goto renders the humanized target-phase arrow on its
+    # own breadcrumb: spec-reviewer -> plan-writer resolves to "→ plan".
+    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body), (
+        "expected the humanized spec-reviewer → plan breadcrumb:\n" + "\n".join(body))
+
 
 @pytest.mark.anyio
 async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -> None:
