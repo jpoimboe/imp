@@ -304,3 +304,17 @@ async def test_batch_child_body_bug_not_wrapped_in_group(tmp_path: Path) -> None
     finally:
         dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
     reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_dispatch_one_tool_use_rejects_task_tu(tmp_path: Path) -> None:
+    """AC16: a `task` tu reaching dispatch_one_tool_use raises RuntimeError (the
+    load-bearing raise-not-assert guard — tasks must route through the batch)."""
+    from imp.agents.dispatch import dispatch_one_tool_use
+
+    ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+    with pytest.raises(RuntimeError, match="dispatch_task_batch"):
+        await dispatch_one_tool_use(
+            ctx=ctx, elog=InMemoryEventLog(), aid="step:p/s", invocation=None,
+            tools={}, tu=_task_tu("t1"), tool_results=[],
+            state=TurnState(tool_calls_used=0), ceiling=None)

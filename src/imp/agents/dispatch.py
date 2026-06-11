@@ -67,6 +67,14 @@ async def dispatch_one_tool_use(
     subagent-suspension exceptions propagate (terminal — no heartbeat; the
     generator ends by raising).
     """
+    if tu.name == "task":
+        # §1: task tus route through dispatch_task_batch (concurrent path) or the
+        # kill-switch inline path, never here. raise (NOT assert) so a routing
+        # regression is caught even under `python -O`.
+        raise RuntimeError(
+            "task tu reached dispatch_one_tool_use; tasks must route through "
+            "dispatch_task_batch / the inline kill-switch path (dispatch.py)")
+
     # Decision 10 sweep site: EVERY tool dispatch — all tools, not just the
     # bash family. An agent that backgrounds a server and then spends the
     # invocation in read_file/grep/edit_file must still be swept. Module-attr
@@ -83,29 +91,7 @@ async def dispatch_one_tool_use(
         return None
     state.tool_calls_used += 1
 
-    tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
-
-    # task special-case: bypasses the sync Tool.invoke path entirely — go
-    # straight to the async dispatcher. Use the persisted tool_call event id
-    # for the durable parent link.
-    if tu.name == "task":
-        try:
-            result_str = await dispatch_task(
-                ctx, tu.input["subagent_name"], tu.input["task_description"],
-                tool_call_event_id=tc_ev["id"],
-                tier=tu.input.get("tier"),
-            )
-        except Exception as e:
-            raise_if_suspended(e)  # unwind a subagent-origin pause
-            err_text = f"{type(e).__name__}: {e}"
-            block = ToolResultBlock(tu.id, err_text, is_error=True)
-            tool_results.append(block)
-            elog.append_tool_result(agent_id=aid, block=block)
-            return None
-        block = ToolResultBlock(tu.id, result_str)
-        tool_results.append(block)
-        elog.append_tool_result(agent_id=aid, block=block)
-        return None
+    elog.append_tool_call(agent_id=aid, block=tu)
 
     tool = tools.get(tu.name)
     if tool is None:
