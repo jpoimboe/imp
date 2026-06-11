@@ -308,3 +308,180 @@ async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> No
     # Both interjects consumed (queue cleared).
     assert coord.drain_interject() is None
 
+
+@pytest.mark.anyio
+async def test_claude_code_resume_entry_drain_before_first_query(
+    tmp_path: Path,
+) -> None:
+    """Interjects queued before resume must appear in the FIRST client.query()
+    payload (the streamed history), not one turn late."""
+    from typing import Any
+
+    from imp.agents.runner import (
+        AgentInvocation,
+        ChangeContext,
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
+    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
+    from imp.agents.transcript import Transcript
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+    from imp.providers.claude_code import ClaudeCodeAgentRunner
+    from tests.cc_fakes import (
+        FakeClaudeSDKClient,
+        assistant,
+        result,
+        text as cc_text,
+        tool_use as cc_tool_use,
+    )
+
+    agent_def = AgentDef(
+        name="t", description="",
+        tools=frozenset({"complete_step", "read_file"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+
+    inv_dir = tmp_path / "step"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed a transcript ending with a user tool_result — RESUME_NORMAL state
+    # (not AWAITING_USER), so the provider should drain interjects before the
+    # first query.
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="resume me"),)))
+    transcript.append(Message(role="assistant", content=(
+        ToolUseBlock(id="u1", name="read_file", input={"path": "/project/x"}),
+    )))
+    transcript.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="u1", content="prior contents"),
+    )))
+
+    # Coordinator with two queued interjects.
+    class _FakeCoordinator:
+        def __init__(self) -> None:
+            self._q = ["interject-A", "interject-B"]
+
+        def drain_interject(self) -> str | None:
+            return self._q.pop(0) if self._q else None
+
+        def reset(self) -> None:
+            pass
+
+    coord = _FakeCoordinator()
+
+    # Scripted: complete on the first call.
+    scripted = [
+        assistant(
+            cc_text("done"),
+            cc_tool_use("c1", "complete_step", {"status": "Success"}),
+        ),
+        result(),
+    ]
+
+    created: list[FakeClaudeSDKClient] = []
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        c = FakeClaudeSDKClient(opts, scripted_messages=scripted)
+        created.append(c)
+        return c
+
+    log = InMemoryEventLog()
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=factory,
+    )
+
+    inv = AgentInvocation(
+        agent_def=agent_def,
+        provider_name="claude_code",
+        model_name="claude-sonnet-4-5",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(
+            slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        ),
+        transcript_dir=inv_dir,
+        fs_permissions=(FsRule(
+            operations=("read",), paths=("/project/**",),
+            mode="allow",
+            source=SourceLoc(file=Path("w.yaml"), line=1),
+        ),),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s",
+        event_log=log,
+        coordinator=coord,
+    )
+
+    events = [e async for e in runner.run(inv)]
+
+    # Run completed successfully.
+    assert events[-1]["type"] == "agent_output"
+
+    assert created, "client was never instantiated"
+    fake = created[0]
+
+    # The FIRST query is an async-iterable drain → list of stream-json dicts.
+    assert fake.queries, "no queries recorded"
+    first_query = fake.queries[0]
+    assert isinstance(first_query, list), (
+        f"expected drained list for first (history) query, got {type(first_query)}"
+    )
+
+    # Collect all text content from user-role dicts in the first query.
+    def _texts_in_query(q: list) -> list[str]:
+        texts: list[str] = []
+        for d in q:
+            if not isinstance(d, dict):
+                continue
+            if d.get("type") != "user":
+                continue
+            msg = d.get("message", {})
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                texts.append(content)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        texts.append(block.get("text", ""))
+        return texts
+
+    first_query_texts = _texts_in_query(first_query)
+
+    assert "interject-A" in first_query_texts, (
+        f"interject-A missing from first query user texts: {first_query_texts}"
+    )
+    assert "interject-B" in first_query_texts, (
+        f"interject-B missing from first query user texts: {first_query_texts}"
+    )
+
+    # No double-delivery: each interject text appears EXACTLY ONCE across all
+    # queries (entry drain cleared the queue; later turn-boundary drain is no-op).
+    all_texts: list[str] = []
+    for q in fake.queries:
+        if isinstance(q, list):
+            all_texts.extend(_texts_in_query(q))
+        elif isinstance(q, str):
+            all_texts.append(q)
+
+    assert all_texts.count("interject-A") == 1, (
+        f"interject-A delivered {all_texts.count('interject-A')} times (expected 1): {all_texts}"
+    )
+    assert all_texts.count("interject-B") == 1, (
+        f"interject-B delivered {all_texts.count('interject-B')} times (expected 1): {all_texts}"
+    )
+
+    # Both interjects consumed (queue cleared).
+    assert coord.drain_interject() is None
+

@@ -59,6 +59,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
+from imp.engine.agent_run import drain_all_interjects_at_resume
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
@@ -956,6 +957,14 @@ class ClaudeCodeAgentRunner:
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the now-balanced transcript
                 # drives the next LLM turn with the human's reply.
+            # §2 resume-entry drain: fold pending interjects into the history
+            # that feeds _stream_history(messages) on the first query. The SDK
+            # is queried with the WHOLE transcript as a stream, so appending
+            # user Messages here is sufficient — no separate string fold needed.
+            # Guarded for non-AWAITING_USER: the AWAITING_USER join is F5.
+            if resume_state is not ResumeState.AWAITING_USER:
+                drain_all_interjects_at_resume(
+                    invocation.coordinator, messages, transcript, elog, aid)
         else:
             messages = []
             for m in invocation.initial_messages:
