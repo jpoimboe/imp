@@ -1370,3 +1370,30 @@ def test_unstamped_legacy_result_closes_via_ordered_two_dict_probe() -> None:
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is False
     assert sub.outcome == '{"status":"Success"}'
+
+
+def test_current_activity_suffix_counts_extra_running_subagents() -> None:
+    # AC40: one running fold → no suffix; two → "(+1 more subagent)"; three →
+    # "(+2 more subagents)" (singular/plural). The named detail is the FIRST
+    # running fold's; the suffix counts the rest.
+    def _task(eid: str, bid: str, name: str) -> dict:
+        return _ev(eid, "tool_call", agent_id="step:p/s", id=bid, name="task",
+                   input={"subagent_name": name, "task_description": "go"})
+
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_task("tk1", "b1", "reviewer"))
+    one = nv.activity_to_text(b.current_activity())
+    assert "task → reviewer" in one
+    assert "more subagent" not in one                    # single fold: no suffix
+
+    b.add(_task("tk2", "b2", "tester"))
+    two = nv.activity_to_text(b.current_activity())
+    assert "task → reviewer" in two                      # first running fold's detail
+    assert "(+1 more subagent)" in two                   # singular
+    assert "(+1 more subagents)" not in two
+
+    b.add(_task("tk3", "b3", "researcher"))
+    three = nv.activity_to_text(b.current_activity())
+    assert "(+2 more subagents)" in three                # plural

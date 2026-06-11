@@ -358,9 +358,14 @@ class NarrativeBuilder:
 
     def current_activity(self) -> Activity | None:
         """Structured one-line description of current activity for the live status line (§3/§4); None when there is nothing to show."""
-        for fold in self._open_sub_by_event.values():
-            if fold.running:
-                return Activity(label=fold.current_activity())
+        running = [f for f in self._open_sub_by_event.values() if f.running]
+        if running:
+            label = running[0].current_activity()
+            extra = len(running) - 1
+            if extra:
+                noun = "subagent" if extra == 1 else "subagents"
+                label = f"{label} (+{extra} more {noun})"
+            return Activity(label=label)
         burst = self._current_burst
         if burst is not None:
             basis = visible_calls(burst)         # keeps killed (recap parity)
