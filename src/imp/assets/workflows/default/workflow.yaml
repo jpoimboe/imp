@@ -211,6 +211,7 @@ phases:
 
       # ── integrate base into the branch, before review folds into one decision ──
       - name: integrate-merge        # B2: merge base into the branch, uncommitted
+        quiet: true                  # mechanical; the integrator/integration-review agents narrate
         command: ./scripts/integrate-merge.sh
         rules:
           - {if: {exit: 2}, goto: summarizer}     # base already integrated -> skip integration
