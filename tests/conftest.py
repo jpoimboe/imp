@@ -95,6 +95,14 @@ def _reset_theme() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_user_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redirect XDG_CONFIG_HOME to an absent per-test dir so no test reads the real user config."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".xdg-isolated"))
+
+
+@pytest.fixture(autouse=True)
 def _sandbox_fallback_without_bwrap(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

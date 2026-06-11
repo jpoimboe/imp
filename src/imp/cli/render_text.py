@@ -514,9 +514,16 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                      else node.step_name]
         if full:
             parts.extend(node.extras)
-        verb_text = pal.action_text(node.action) if node.action is not None else None
-        if not node.interrupted and verb_text and verb_text != "continue":
-            parts.append(verb_text)
+        act = node.action if isinstance(node.action, dict) else None
+        if node.interrupted:
+            pass                          # an interrupted step carries no routing suffix
+        elif act is not None and act.get("verb") == "goto":
+            if node.route:                # skip "" (same-phase) and None (unresolved)
+                parts.append(node.route)
+        else:
+            verb_text = pal.action_text(node.action) if node.action is not None else None
+            if verb_text and verb_text != "continue":
+                parts.append(verb_text)
         if node.elapsed_s is not None:
             parts.append(fmt_seconds(node.elapsed_s))
         # A step's completion line carries the step color (the same bold darker-blue

@@ -84,10 +84,6 @@ async def test_gate_feedback_reaches_model_on_openai_resume(
         "OPENAI_API_KEY env var or ~/.openai-key file found"
     )
     monkeypatch.setenv("OPENAI_API_KEY", key)
-    # Isolate the user-config layer (~/.config/imp/config.yaml): a dogfood
-    # machine pins providers there, and the `providers` leaf replaces the
-    # project layer wholesale -- which would hijack this test's openai pin.
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdgcfg"))
 
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")

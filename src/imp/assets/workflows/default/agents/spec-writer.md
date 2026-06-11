@@ -242,6 +242,22 @@ brainstorm, on the first gate), **excluding** decisions the user already
 answered via escalation ("*(user-confirmed during review)*"). Repeated gates
 must not re-present confirmed items.
 
+**Significance bar — the same test as "Ask vs. decide."** "Significant" here is
+not a lower bar than escalation: surface a decision **only** if it would have
+qualified for `wait_for_user` during rework (drops/alters/adds a user-stated
+requirement, or a real fork in user intent the brainstorm/spec/codebase doesn't
+settle). Two reminders that catch the common over-trigger:
+
+- A **self-correcting factual fix** — a wrong call corrected to match what the
+  code/spec already demands, deliverable unchanged — stays silent. The source
+  settled it; don't spend the user's attention rubber-stamping it.
+- **A scope change is not itself significant** — only one that drops a stated
+  requirement or opens an intent fork is. Factual narrowing where the deliverable
+  holds steady (e.g. the cleanup list shrank by a file that turned out to need the
+  line) is the silent case.
+
+When nothing trips the bar, prefer the silent confirm.
+
 - **Nothing in scope is significant?** Call
   `complete_step(phase="confirmed", spec_path="imp/specs/<slug>.md",
   complexity="<first-pass value>", unseen_changes=false)` immediately — do

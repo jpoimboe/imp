@@ -971,3 +971,49 @@ def test_interrupt_breadcrumb_in_live_path() -> None:
     assert "spec-writer interrupted" in body
     assert "complete · pause" not in body
     assert "error:" not in body
+
+
+def test_loud_forward_goto_breadcrumb_held_until_phase_resolves() -> None:
+    # A loud step (spec-reviewer) clean-approves with a plain forward goto to
+    # plan-writer. Its breadcrumb route ("→ plan") is unknown until plan-writer's
+    # step_started arrives, so the live driver must HOLD the breadcrumb and emit it
+    # just before the new phase — matching imp log line-for-line.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
+           raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
+        ev("4", "step_completed", step="spec-reviewer", kind="agent",
+           action={"verb": "goto", "target": "plan-writer",
+                   "resume": False, "rework": False}, var_mutations={}),
+        ev("5", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("6", "llm_response", agent_id="step:plan/plan-writer",
+           raw={"content": [{"type": "text", "text": "planning"}]}, usage={}),
+        ev("7", "step_completed", step="plan-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    # Before plan-writer's step_started, the breadcrumb is held: no arrow yet.
+    for e in events[:4]:
+        drv.on_event(e)
+    assert not any("→ plan" in ln for ln in _body(out))
+    for e in events[4:]:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
+    assert not any("goto(" in ln for ln in body)
+    assert body == _render_body(events)   # live == imp log, line for line
+
+
+def test_is_final_loud_reworking_breadcrumb_is_emitted() -> None:
+    # A loud reviewer rework (goto + rework) is final immediately — the live cursor
+    # must not block on it the way it blocks an unresolved forward goto.
+    drv, _ = _driver()
+    bc = nv.BreadcrumbLine(step_name="plan-review", elapsed_s=1.0,
+                           action={"verb": "goto", "target": "plan-writer",
+                                   "resume": False, "rework": True},
+                           route=None)
+    assert drv._is_final(bc, container=None) is True
