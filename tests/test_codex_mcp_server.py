@@ -173,3 +173,25 @@ def test_codex_task_annotation_derived_from_bypass(
         assert mcp_tool.annotations is None
     finally:
         reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_fastmcp_roundtrip_refusal_is_error_suffix_sentinel(
+    tmp_path: Path,
+) -> None:
+    """AC27: a refused task, driven through the real FastMCP Tool.run, surfaces
+    as a ToolError whose wire text suffix-equals TASK_REFUSAL_SENTINEL (FastMCP
+    wraps the raise as 'Error executing tool task: <sentinel>')."""
+    from types import SimpleNamespace
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from imp.agents.subagents import TASK_REFUSAL_SENTINEL
+    ctx = _ctx(tmp_path)
+    ctx.coordinator = SimpleNamespace(should_pause=True)  # freeze membership
+    mcp_tool = _register(make_task_tool(), ctx)
+    with pytest.raises(ToolError) as ei:
+        await mcp_tool.run(
+            {"subagent_name": "impl", "task_description": "x"})
+    assert str(ei.value).endswith(TASK_REFUSAL_SENTINEL)
+    assert str(ei.value).startswith("Error executing tool task:")
