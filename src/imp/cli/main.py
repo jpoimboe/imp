@@ -20,9 +20,8 @@ from typing import Any, NoReturn
 import anyio
 
 from imp.agents.tools.wait_for_user import AwaitingUserInput
-from imp.cli import change_row
+from imp.cli import change_row, resume_select
 from imp.cli import palette as pal
-from imp.cli import resume_select
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
@@ -1304,6 +1303,10 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
 
 def _row_for_id(control: Path, change_id: str) -> _Row | None:
     cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    # journal_show returns bytes | None; the live-worktree branch always finds the
+    # files. Annotate so the None-guard below stays reachable (not dead code).
+    state_json: bytes | None
+    change_json: bytes | None
     if (cdir / "change.json").exists():
         state_json = (cdir / "state" / "state.json").read_bytes()
         change_json = (cdir / "change.json").read_bytes()

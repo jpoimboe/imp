@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from imp.cli import main as m
-from imp.cli.main import _iso_from_line, _last_event_iso, _journal_last_iso
+from imp.cli.main import _iso_from_line, _journal_last_iso, _last_event_iso
 
 
 @pytest.mark.parametrize(

@@ -91,4 +91,6 @@ async def run_picker(candidates: list[Candidate], *, now: datetime,
     body = Window(content=FormattedTextControl(lambda: ANSI(model.render())))
     app: Any = Application(
         layout=Layout(HSplit([head, body])), key_bindings=kb, full_screen=False)
-    return await app.run_async()
+    # _enter exits with a change_id (str); _cancel (q/esc/c-c) exits with None.
+    result: str | None = await app.run_async()
+    return result
