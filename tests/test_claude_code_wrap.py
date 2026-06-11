@@ -446,3 +446,75 @@ async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None
     assert len(results) == 1
     assert results[0]["payload"]["error"] is True
     assert results[0]["payload"]["id_ns"] == "block"
+
+
+@pytest.mark.anyio
+async def test_impl_inflight_counter_peaks_at_one_then_drains(tmp_path: Path) -> None:
+    # AC26: the inflight counter is 1 WHILE dispatch_task is awaiting and 0 after it
+    # returns. A slow fake spawn lets us observe the in-flight value mid-dispatch.
+    import anyio
+
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.event_log = InMemoryEventLog()
+
+    observed: dict[str, int] = {}
+
+    class _SlowRunner:
+        async def run(self, inv):
+            observed["during"] = state.inflight_task_dispatches
+            await anyio.sleep(0)
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _SlowRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    assert state.inflight_task_dispatches == 0      # before
+    await wrapped({"subagent_name": "sub", "task_description": "do",
+                  "__tool_use_id__": ""})
+    assert observed["during"] == 1                  # incremented around the await
+    assert state.inflight_task_dispatches == 0      # decremented in finally
+
+
+@pytest.mark.anyio
+async def test_impl_inflight_counter_decrements_on_dispatch_error(tmp_path: Path) -> None:
+    # AC26: a dispatch that raises an ordinary exception still decrements the counter
+    # (finally on the error path) — the degraded is_error response is returned.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.event_log = InMemoryEventLog()
+
+    class _BoomRunner:
+        async def run(self, inv):
+            raise ValueError("kaboom")
+            yield  # pragma: no cover
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _BoomRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                        "__tool_use_id__": ""})
+    assert out.get("isError") is True
+    assert state.inflight_task_dispatches == 0      # decremented despite the raise

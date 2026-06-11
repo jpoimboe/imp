@@ -224,6 +224,11 @@ class _RunState:
     # Set once at runner entry; read by the MCP wrapper to append the spawning
     # task tool_call on the parent's agent chain.
     agent_id: str = ""
+    # In-flight `task` dispatch count — the claude_code mirror of codex's
+    # RunState.inflight_task_dispatches (design §2 drain gate). _impl increments
+    # before the dispatch await and decrements in finally on every exit; the
+    # receive loop defers the awaiting_user re-raise until this is 0.
+    inflight_task_dispatches: int = 0
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -401,36 +406,41 @@ def _wrap_one(
                         agent_id=state.agent_id,
                         block=ToolUseBlock(id=minted, name="task", input=task_input))
                     tc_event_id = tc_ev["id"]
+                state.inflight_task_dispatches += 1
                 try:
-                    result = await dispatch_task(
-                        ctx, args["subagent_name"], args["task_description"],
-                        tool_call_event_id=tc_event_id,
-                        tier=args.get("tier"),
-                    )
-                except BaseException as exc:
-                    # Error / suspend path: still close the fold with the SAME
-                    # minted id so narrative's _h_tool_result gets a deterministic,
-                    # outcome-carrying close (running=False, is_error=True). Then
-                    # re-raise into the outer handlers (raise_if_suspended honesty
-                    # for a subagent-origin pause; otherwise the generic is_error
-                    # tool_result path below the task branch).
+                    try:
+                        result = await dispatch_task(
+                            ctx, args["subagent_name"], args["task_description"],
+                            tool_call_event_id=tc_event_id,
+                            tier=args.get("tier"),
+                        )
+                    except BaseException as exc:
+                        # Error / suspend path: still close the fold with the SAME
+                        # minted id so narrative's _h_tool_result gets a deterministic,
+                        # outcome-carrying close (running=False, is_error=True). Then
+                        # re-raise into the outer handlers (raise_if_suspended honesty
+                        # for a subagent-origin pause; otherwise the generic is_error
+                        # tool_result path below the task branch).
+                        if ctx.event_log is not None:
+                            err_text = f"{type(exc).__name__}: {exc}"
+                            ctx.event_log.append_tool_result(
+                                agent_id=state.agent_id,
+                                block=ToolResultBlock(minted, err_text, is_error=True),
+                                id_ns="block")
+                        raise
                     if ctx.event_log is not None:
-                        err_text = f"{type(exc).__name__}: {exc}"
+                        # Success close: the canonical, outcome-carrying tool_result
+                        # for this task, keyed on the SAME minted block id as the
+                        # call. The receive-loop user branch SUPPRESSES the SDK's
+                        # duplicate task result (the toolu_… one) so this minted one
+                        # stays canonical.
                         ctx.event_log.append_tool_result(
                             agent_id=state.agent_id,
-                            block=ToolResultBlock(minted, err_text, is_error=True),
+                            block=ToolResultBlock(minted, result, is_error=False),
                             id_ns="block")
-                    raise
-                if ctx.event_log is not None:
-                    # Success close: the canonical, outcome-carrying tool_result for
-                    # this task, keyed on the SAME minted block id as the call. The
-                    # receive-loop user branch SUPPRESSES the SDK's duplicate task
-                    # result (the toolu_… one) so this minted one stays canonical.
-                    ctx.event_log.append_tool_result(
-                        agent_id=state.agent_id,
-                        block=ToolResultBlock(minted, result, is_error=False),
-                        id_ns="block")
-                return _tool_response(result, is_error=False)
+                    return _tool_response(result, is_error=False)
+                finally:
+                    state.inflight_task_dispatches -= 1
             if name == "complete_step":
                 # Capture the args; return a "success" body so claude proceeds
                 # to ResultMessage cleanly. The runner sees the captured args
