@@ -77,6 +77,24 @@ def test_forward_goto_falls_back_to_raw_target_when_a_different_step_intervenes(
     assert _steps(tree)["fast-path-spec-gate"].quiet_line == "→ plan-writer"
 
 
+def test_same_phase_forward_goto_renders_nothing() -> None:
+    # A quiet gate that forward-gotos a step in its OWN phase (e.g. panel-gate →
+    # recheck, both in review) is an internal skip, not a phase transition: it
+    # resolves to the silent "" sentinel (not a redundant "→ review" arrow), so
+    # nothing renders.
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="panel-gate", kind="branch",
+           phase="review", quiet=True),
+        ev("3", "step_completed", step="panel-gate", kind="branch",
+           action={"verb": "goto", "target": "recheck", "resume": False},
+           var_mutations={}),
+        ev("4", "step_started", step="recheck", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+    ])
+    assert _steps(tree)["panel-gate"].quiet_line == ""
+
+
 def test_loud_step_has_no_quiet_line() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),

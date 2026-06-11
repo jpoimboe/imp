@@ -67,6 +67,24 @@ def test_quiet_pause_yields_to_full_block() -> None:
     assert any("merge conflict in foo.py" in ln for ln in body)    # error not swallowed
 
 
+def test_quiet_same_phase_goto_renders_nothing() -> None:
+    # panel-gate → recheck (both in review): a same-phase skip renders NOTHING —
+    # neither a loud block nor a redundant "→ review" arrow.
+    body = _body([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="panel-gate", kind="branch",
+           phase="review", quiet=True),
+        ev("3", "step_completed", step="panel-gate", kind="branch",
+           action={"verb": "goto", "target": "recheck", "resume": False},
+           var_mutations={}),
+        ev("4", "step_started", step="recheck", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+    ])
+    assert not any("panel-gate" in ln for ln in body)
+    assert not any("→ review" in ln for ln in body)
+    assert not any("goto(" in ln for ln in body)
+
+
 def test_quiet_arrow_is_dim_gray_chrome_in_color() -> None:
     body = _body([
         ev("1", "change_created", change_id=1, title="x"),
