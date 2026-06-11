@@ -815,3 +815,21 @@ async def test_runner_outer_except_unknown_when_cancel_unset(
     errors = [e for e in events if e.get("type") == "error"]
     assert len(errors) == 1
     assert errors[0]["payload"]["category"] == "unknown"
+
+
+@pytest.mark.anyio
+async def test_request_carries_disable_parallel_tool_use_false(tmp_path: Path) -> None:
+    """§4/AC41: every anthropic request explicitly permits parallel tool use."""
+    (tmp_path / "art").mkdir()
+    fake = FakeAsyncAnthropic([response(
+        tool_use("c1", "complete_step", {"status": "Success", "note": "ok"}),
+    )])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+    only_call = fake.messages.calls[0]
+    assert only_call["tool_choice"] == {
+        "type": "auto", "disable_parallel_tool_use": False,
+    }

@@ -595,6 +595,13 @@ class AnthropicAgentRunner:
                 messages=[_message_to_anthropic(m) for m in messages],
                 max_tokens=8192,
                 cache_control={"type": "ephemeral"},
+                # §4: explicitly PERMIT parallel tool calls per assistant message
+                # so multiple `task` tus can arrive in one turn. Unconditional and
+                # safe — every in-process request carries tools (complete_step is
+                # injected at :158), and Anthropic rejects tool_choice only on a
+                # tools-less request, which has no in-process path. A future forced
+                # tool_choice must compose disable_parallel_tool_use deliberately.
+                tool_choice={"type": "auto", "disable_parallel_tool_use": False},
             )
             if web_headers:
                 create_kwargs["extra_headers"] = web_headers
