@@ -2,64 +2,97 @@
 
 > **You are the test driver.** This file is your full instruction set. You drive `imp`
 > *through the impty MCP server* (`mcp__impty__start` / `send` / `send_signal` / `view` /
-> `wait` / `snapshot` / `stop`) — a real pty with a faithful pyte render — fire
-> interrupts (Ctrl-C, **ESC**, Ctrl-D) at well-defined points for a **single provider** and
-> several agent states (model thinking, **a tool running**, an in-turn prompt, a
-> subagent, resume), judge whether imp behaves and *speaks* correctly, and write every
-> defect to a bug report. Work in a throwaway standalone `git clone` and abandon everything
-> at the end.
+> `wait` / `snapshot` / `stop`) — a real pty with a faithful pyte render — fire interrupts
+> (Ctrl-C, **ESC**, Ctrl-D) at well-defined points for a **single provider** and several agent
+> states (model thinking, **a tool running**, an in-turn prompt, a subagent, resume), judge
+> whether imp behaves and *speaks* correctly, and write every defect to a bug report. This
+> playbook is **surface-selectable**: run it against the **CLI** (cooked-mode) interrupt paths
+> or the **TUI** (`--tui`, raw-mode) interrupt paths — the surface flips which keys are
+> faithful and what ESC does at a prompt (§0). Work in a throwaway standalone `git clone` and
+> abandon everything at the end.
 >
 > This is the acceptance test for the **esc-and-clean-interrupt** feature
-> (`imp/specs/2026-06-04-esc-and-clean-interrupt.md`), which is **on `master`**. The
-> "expected" behavior below is that feature's target. If you somehow run an older build
-> that predates it, the ESC / pause-reason / clean-classification checks are *expected* to
-> fail — record them as to-dos, not surprises.
+> (`imp/specs/2026-06-04-esc-and-clean-interrupt.md`); the TUI mode also covers the `--tui`
+> interrupt bindings from **tui-run-viewer** (`imp/specs/2026-06-11-tui-run-viewer.md`). Both
+> are **on `master`**. The "expected" behavior below is those features' target. If you somehow
+> run an older build that predates them, the ESC / pause-reason / clean-classification (and
+> `--tui`) checks are *expected* to fail — record them as to-dos, not surprises.
 >
-> **Scope: one provider per run (default `claude_code`).** Run this playbook against a
-> single provider — `claude_code` unless the operator names another (`anthropic`, `openai`,
-> or `codex`). The feature (and so the §0 "clean classification" bar) covers all four
+> **Scope: one provider per run (default `claude_code`).** Run this playbook against a single
+> provider — `claude_code` unless the operator names another (`anthropic`, `openai`, or
+> `codex`). The feature (and so the §0 "clean classification" bar) covers all four
 > identically, so testing one provider end-to-end is a complete pass for that provider; to
 > cover another, re-run the whole playbook with that one provider forced (§4). Pick the
 > provider **before** §3 and keep it fixed for the entire run.
 >
-> Read the whole file before you touch a tool.
+> Read the whole file before you touch a tool. The impty fidelity caveats and the
+> throwaway-clone rationale live once in `tests/playbooks/README.md`.
 
 ---
 
-## 0. The three interrupt triggers and how impty delivers them
+## 0. Mode select, the interrupt triggers, and the correctness bar
 
-impty claims its pty slave as the child's controlling terminal, so keystrokes you `send`
-are delivered to imp's controlling tty. **For Ctrl-C and ESC we send keystrokes on
-purpose** — to exercise imp's real tty paths (prompt_toolkit's `KeyboardInterrupt` at a
-prompt, the `EscKeyReader` on `/dev/tty`, the cooked-mode signal receiver). ESC has **no**
+### 0a. Surface mode — CLI or TUI
+
+Pick the surface **before** §3 and keep it fixed for the whole run:
+
+- **CLI mode** (the existing cooked-mode paths) — spawn `imp new` / `imp resume` (no `--tui`).
+  ESC while thinking is caught by the `EscKeyReader` on `/dev/tty`; **ESC at a prompt is a
+  negative** (prompt_toolkit eats it); a mid-run Ctrl-C keystroke is unreliable, so use
+  `send_signal(2)`. Use the **CLI spawn** (§5).
+- **TUI mode** (the `--tui` full-screen viewer, raw mode) — spawn `imp new --tui` /
+  `imp resume <id> --tui`. The app owns the tty in raw mode and binds the keys itself: there
+  is **no** `EscKeyReader` and **no** cooked-mode signal receiver in the loop. **ESC pauses at
+  a prompt too** (app binding), and the **Ctrl-C keystroke `\x03` is faithful**. Use the
+  **TUI spawn** (§5).
+
+The surface flips the interrupt semantics:
+
+| Aspect | CLI mode (existing) | TUI mode (new) |
+|---|---|---|
+| ESC while thinking | `EscKeyReader` → pause | app key binding → pause |
+| ESC at a prompt | **negative** (prompt_toolkit eats it) | app binding → **pause** |
+| Ctrl-C mid-run | `send_signal(2)` (keystroke unreliable) | keystroke `\x03` is faithful |
+| Reader path | cooked-mode signal receiver | app owns raw mode, no `EscKeyReader` |
+
+### 0b. The three interrupt triggers and how impty delivers them
+
+impty claims its pty slave as the child's controlling terminal, so keystrokes you `send` are
+delivered to imp's controlling tty. **For Ctrl-C and ESC we send keystrokes on purpose** — to
+exercise imp's real tty paths (prompt_toolkit's `KeyboardInterrupt` at a prompt, the
+`EscKeyReader` on `/dev/tty` in CLI mode, the app key bindings in TUI mode). ESC has **no**
 signal equivalent, so the keystroke is the only faithful test there. There is also an
-out-of-band signal tool, `send_signal(sig=…)` (SIGINT=2, SIGTERM=15), which bypasses the
-tty and signals imp's process group directly — exactly like a real Ctrl-C. Fire keystroke
+out-of-band signal tool, `send_signal(sig=…)` (SIGINT=2, SIGTERM=15), which bypasses the tty
+and signals imp's process group directly — exactly like a real Ctrl-C. Fire keystroke
 interrupts with `wait=False` so they go immediately, then read with `wait` / `view` /
 `view(full=True)` / `snapshot`.
 
-> **impty mid-run fidelity caveat.** `send("\x03")` only becomes a SIGINT when the tty line
-> discipline has ISIG on (cooked/cbreak); at a prompt_toolkit prompt it is just a raw byte.
-> impty also degrades prompt_toolkit's CPR (cursor-position) handshake, so **mid-run**
-> keystroke Ctrl-C/ESC delivery is unreliable to validate through the harness. For the
-> cooked-mode points (B thinking, C tool-running, E subagent) deliver Ctrl-C
-> deterministically with `send_signal(2)` (or `bash: kill -INT -<pgid>`); keep **keystroke**
-> `send` for the prompt-state tests (A Ctrl-C/Ctrl-D, the A/D ESC negatives) and **all** ESC
-> tests, where it is correct and the only faithful path. If a mid-run keystroke gives a
-> messy result, suspect an impty delivery artifact and re-confirm with `send_signal` before
-> filing an imp defect.
+> **impty mid-run fidelity caveat (mode-dependent).** `send("\x03")` only becomes a SIGINT when
+> the tty line discipline has ISIG on (cooked/cbreak); at a prompt_toolkit prompt it is just a
+> raw byte. impty also degrades prompt_toolkit's CPR (cursor-position) handshake.
+> - **CLI mode:** mid-run keystroke Ctrl-C/ESC delivery is unreliable to validate through the
+>   harness. For the cooked-mode points (B thinking, C tool-running, E subagent) deliver Ctrl-C
+>   deterministically with `send_signal(2)` (or `bash: kill -INT -<pgid>`); keep **keystroke**
+>   `send` for the prompt-state tests (A Ctrl-C/Ctrl-D, the A/D ESC negatives) and **all** ESC
+>   tests, where it is the only faithful path. If a mid-run keystroke gives a messy result,
+>   suspect an impty artifact and re-confirm with `send_signal` before filing an imp defect.
+> - **TUI mode:** the full-screen app owns the tty in **raw mode** and binds the keys itself,
+>   so `send("\x1b")` (ESC) and `send("\x03")` (Ctrl-C) are delivered as **keys** and are the
+>   correct test — **not** `send_signal`. Two caveats: a bare `ESC` is held by prompt_toolkit's
+>   escape-flush timeout (~0.5s) before it fires (`send("\x1b")` then `wait()`); and impty can
+>   drop the odd keystroke — re-send once, record only if it persists.
 
 | Trigger | `send` data | Path through imp |
 |---------|-------------|------------------|
-| **Ctrl-C** | `"\x03"` | Raw byte at a prompt → prompt_toolkit `KeyboardInterrupt`. Real SIGINT while an agent runs (cooked mode) → `anyio.open_signal_receiver` → `InterruptCoordinator.signal_pause("ctrl-c")`. |
-| **ESC** | `"\x1b"` | A bare ESC byte. While an agent is *thinking* (no prompt active) the `EscKeyReader` on `/dev/tty` catches it → `InterruptCoordinator.signal_pause("esc")`. At a prompt_toolkit prompt it is **not** intercepted (emacs meta-prefix / vi exit) — see the negative test in §6. |
-| **Ctrl-D** | `"\x04"` | EOF at a prompt → `EOFError` → `pause_and_exit(reason="ctrl-d")`. (Only meaningful at a prompt.) |
+| **Ctrl-C** | `"\x03"` | Raw byte at a prompt → prompt_toolkit `KeyboardInterrupt`. Real SIGINT while an agent runs (CLI/cooked mode) → `anyio.open_signal_receiver` → `InterruptCoordinator.signal_pause("ctrl-c")`. In TUI mode the app's key binding drives the same coordinator. |
+| **ESC** | `"\x1b"` | A bare ESC byte. While an agent is *thinking* (no prompt active) the `EscKeyReader` on `/dev/tty` (CLI) or the app binding (TUI) catches it → `InterruptCoordinator.signal_pause("esc")`. At a prompt_toolkit prompt it is **not** intercepted **in CLI mode** (emacs meta-prefix / vi exit — the negative in §6); **in TUI mode the app binding pauses even at a prompt**. |
+| **Ctrl-D** | `"\x04"` | EOF at a prompt → `EOFError` → `pause_and_exit(reason="ctrl-d")`. (Only meaningful at a prompt; CLI mode.) |
 
 > `SIGTERM` → `paused (sigterm)` is also part of the feature. Deliver it in one call with
 > `send_signal(sig=15)` — it signals imp's process group directly, no pid scraping. Run it
 > once where convenient during this run; it is no longer a skippable afterthought.
 
-### The bar for "correct" (every interrupt point, unless stated otherwise)
+### 0c. The bar for "correct" (every interrupt point, unless stated otherwise)
 
 A correct imp does **all** of:
 
@@ -70,30 +103,32 @@ A correct imp does **all** of:
   - ESC → `⏸ Change <id>: paused (esc)`
   - Ctrl-D → `⏸ Change <id>: paused (ctrl-d)`
   - (`⏸` shows only with color; otherwise the same text without the glyph.)
+  - In **TUI mode** the alt-screen also restores on the clean pause: `regime` goes
+    `screen` → `scroll`, and the `paused (…)` line lands in normal scrollback.
 - **No ugly internals leak.** The strings `unclassified provider error` and
-  `Cannot write to terminated process` and a `paused: unknown (CLIConnectionError)`
-  headline must **not** appear. The interrupt is a clean, expected stop — not an error.
+  `Cannot write to terminated process` and a `paused: unknown (CLIConnectionError)` headline
+  must **not** appear. The interrupt is a clean, expected stop — not an error.
 - **The event log records it as an interrupt, not an unknown error.** Two distinct records
   are written on an agent-phase interrupt — don't confuse them:
   - a **`workflow_paused`** event carrying `payload.reason` (`ctrl-c|esc|ctrl-d|sigterm`) —
     written by the pause itself;
   - an **`error`** event with `payload.category == "config"` and
-    `payload.kind == "interrupted"`, never `category == "unknown"` — written by the
-    provider runner when it was mid-flight.
+    `payload.kind == "interrupted"`, never `category == "unknown"` — written by the provider
+    runner when it was mid-flight.
 
-  §5's greps target the **`error`/`interrupted`** record (the classification check). It
-  only exists when a runner was actually running (so not at point A — see §6).
+  §5's greps target the **`error`/`interrupted`** record (the classification check). It only
+  exists when a runner was actually running (so not at point A — see §6).
 - **No orphaned subprocesses** — after interrupting a running tool, no leftover
   `claude` / `codex` / `bash` / `make` / model-transport process keeps running.
-- **Is resumable** — `imp resume <id>` continues the Change (same id), reaching a
-  prompt or running forward; never `nothing to resume`, never a from-scratch restart.
-- **Speaks clearly to the user.** Judge the human-visible text with fresh eyes; an
-  unclear, missing, or misleading message **is a bug** even when the exit code is right.
+- **Is resumable** — `imp resume <id>` continues the Change (same id), reaching a prompt or
+  running forward; never `nothing to resume`, never a from-scratch restart.
+- **Speaks clearly to the user.** Judge the human-visible text with fresh eyes; an unclear,
+  missing, or misleading message **is a bug** even when the exit code is right.
 
-> The interrupt **decision is Pause, not Cancel** (per the spec's "Out of scope"). imp
-> does *not* cancel just the current turn and drop you back at its live prompt — it pauses
-> the whole run and exits, resumable. If any provider/point does something else, record
-> exactly what it did.
+> The interrupt **decision is Pause, not Cancel** (per the spec's "Out of scope"). imp does
+> *not* cancel just the current turn and drop you back at its live prompt — it pauses the whole
+> run and exits, resumable. If any provider/point does something else, record exactly what it
+> did.
 
 ---
 
@@ -101,22 +136,23 @@ A correct imp does **all** of:
 
 - **Which `imp`:** the installed `imp` on PATH (a current build off `master`, which carries
   the feature). State the commit you tested in the report.
+- **Surface:** CLI or TUI per §0, fixed for the run. **TUI mode** additionally requires the
+  `--tui` flag present (`imp new -h | grep -- --tui`) and `TERM` exported in the spawn (§5).
 - **Where:** a fresh standalone `git clone` of this repo (created in §3) — **not** a
   `git worktree`. Provider-forcing (§4) writes the **local** config layer `.imp/config.yaml`,
   which imp reads from the **control root**; a linked worktree's `find_control_root` resolves
-  to the **main checkout** (`git rev-parse --git-common-dir` → parent), so the override would
-  land in — and pollute — the shared main tree. A standalone clone's control root is *itself*,
-  so `$WT/.imp/config.yaml` both wins and stays isolated. Every `imp new` / `imp resume` runs
-  with cwd inside the clone, so all Changes (branches, nested worktrees, journals) are
-  contained and discardable.
+  to the **main checkout**, so the override would pollute the shared main tree. A standalone
+  clone's control root is *itself*, so `$WT/.imp/config.yaml` both wins and stays isolated.
+  Every `imp new` / `imp resume` runs with cwd inside the clone, so all Changes (branches,
+  nested worktrees, journals) are contained and discardable.
 - **Config layout:** the `config-file-split` layout — a provider **code floor** (tier→model
   defaults) under three layers: committed `imp/project.yaml` (workflow/lint/test/vars, read
   from the worktree), user `~/.config/imp/config.yaml` (`providers`/`theme`, global), and
   gitignored `.imp/config.yaml` (local, control root, highest precedence). Precedence
   (low→high): `floor < project < user < local` — operator-wins among the config layers.
-- **Provider:** exactly one per run — `claude_code` by default, or whichever single
-  provider the operator names (`anthropic`, `openai`, or `codex`). That one provider is in
-  scope for the full §0 classification bar; the others are out of scope for this run.
+- **Provider:** exactly one per run — `claude_code` by default, or whichever single provider
+  the operator names (`anthropic`, `openai`, or `codex`). That one provider is in scope for the
+  full §0 classification bar; the others are out of scope for this run.
 - **Credentials:** `~/.anthropic-key` → `ANTHROPIC_API_KEY`, `~/.openai-key` →
   `OPENAI_API_KEY`. `claude_code` / `codex` use their own local auth.
 - **impty MCP server** is running from `.mcp.json` with controlling-terminal support.
@@ -133,6 +169,7 @@ which imp claude codex
 test -r ~/.anthropic-key && echo OK
 test -r ~/.openai-key && echo OK
 test -f ~/.codex/auth.json && echo OK   # codex auth
+imp new -h | grep -q -- --tui && echo "tui-flag present" || echo "NO --tui (old build)"  # TUI mode only
 ```
 
 Provider gating (mirrors imp's `_env_check`):
@@ -144,24 +181,28 @@ Provider gating (mirrors imp's `_env_check`):
 | `openai`      | `OPENAI_API_KEY` (from `~/.openai-key`) |
 | `codex`       | `codex` on PATH **and** the codex SDK importable in imp's venv **and** `~/.codex/auth.json` |
 
-For any provider missing a prerequisite: **skip and note it** — not a bug. imp's own
-startup env_check is the source of truth: if imp skips or errors a provider at launch,
-treat that as the skip signal and note it.
+For any provider missing a prerequisite: **skip and note it** — not a bug. imp's own startup
+env_check is the source of truth: if imp skips or errors a provider at launch, treat that as
+the skip signal and note it. **TUI mode:** if `--tui` is absent you're on a pre-feature build —
+record the TUI suite as expected-fail.
 
 > **`imp init` / user config.** This machine already has user config
 > (`~/.config/imp/config.yaml`) with detected `providers`/`theme`; the clone inherits it and
-> §4's local override forces the one under test. You should **not** need `imp init` — the
-> local override supplies `providers`. If `imp new` prints `✗ no provider available — run
-> `imp init` first`, run `imp init` once (idempotent; only bootstraps user config). Note that
-> same preflight also fires when a *forced* provider's env-check fails (e.g. forcing
-> `anthropic` with no key exported) — there it's a missing-credential **skip** (§2's gating
-> table), not an init problem, so don't chase `imp init` for it.
+> §4's local override forces the one under test. You should **not** need `imp init`. If
+> `imp new` prints `✗ no provider available — run `imp init` first`, run `imp init` once
+> (idempotent; only bootstraps user config). Note that same preflight also fires when a
+> *forced* provider's env-check fails — there it's a missing-credential **skip** (§2's gating
+> table), not an init problem.
+
+> **TUI mode — remote channels.** If your *user* config enables a `remote.driver`, the clone
+> inherits it and the channel subprocess's stderr corrupts the alternate screen. Add
+> `remote: {driver: null}` to the §4 config for the TUI run, and confirm `imp config` shows the
+> channel `(available)`, not `(enabled)`.
 
 > **Cost & time.** `anthropic` / `openai` / `codex` make **real, billable** calls;
-> `claude_code` uses the local `claude` session. Each interrupt point needs only a few
-> seconds of real work before you interrupt — never let a step finish. If a run looks
-> stuck/looping > ~60s, interrupt it (or `stop` the session) and record it; don't let
-> billable runs spin.
+> `claude_code` uses the local `claude` session. Each interrupt point needs only a few seconds
+> of real work before you interrupt — never let a step finish. If a run looks stuck/looping
+> > ~60s, interrupt it (or `stop` the session) and record it; don't let billable runs spin.
 
 ---
 
@@ -180,8 +221,8 @@ echo "$WT"                              # your cwd for every imp run
 ls "$WT"/imp/project.yaml               # the committed project marker → confirms $WT is an imp project
 ```
 
-(`git clone .` copies committed state at the current branch tip. If you need uncommitted
-local changes under test, commit them first or `rsync` them into `$WT` after cloning.)
+(`git clone .` copies committed state at the current branch tip. If you need uncommitted local
+changes under test, commit them first or `rsync` them into `$WT` after cloning.)
 
 You force the provider via `"$WT"/.imp/config.yaml` (the gitignored local layer) in §4.
 
@@ -195,20 +236,23 @@ local`), the layer that forces a provider is **local** — `$WT/.imp/config.yaml
 read from the control root). Because `$WT` is a standalone clone, its control root is `$WT`
 itself, so this file both **wins** (highest precedence) and **stays isolated**.
 
-Write the single-provider override (this run targets exactly one provider — `claude_code`
-by default; substitute another only if the operator named it):
+Write the single-provider override (this run targets exactly one provider — `claude_code` by
+default; substitute another only if the operator named it). The `remote: {driver: null}` line
+keeps inherited channels off — **required in TUI mode** to prevent alt-screen corruption;
+harmless in CLI mode:
 ```bash
 mkdir -p "$WT/.imp"
 cat > "$WT/.imp/config.yaml" <<'YAML'
 providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
 theme: ansi                # fixed theme so snapshots render predictably
+remote:
+  driver: null             # TUI mode: keep inherited channels off so the alt-screen stays clean
 YAML
 ```
 
 You do **not** need a `tiers:` block — tier→model bindings come from the provider **code
-floor** (current models, shipped with imp). (§1 homes `theme` in user config, but any layer
-may set it and local wins, so the `theme: ansi` above gives a predictable snapshot theme.)
-Confirm the override won — and on which layer — before testing:
+floor** (current models, shipped with imp). Confirm the override won — and on which layer —
+before testing:
 ```bash
 cd "$WT" && imp config                  # the `providers` row must resolve to the provider under test,
                                         # its arrow ending in `…/.imp/config.yaml (local)` — NOT `(user)`
@@ -217,11 +261,10 @@ cd "$WT" && imp config --explain high   # the high-tier model the forced provide
 `imp config`'s arrow prints the leaf's **full source path** + a `(layer)` tag. If the
 `providers` arrow ends in `(user)`, your file landed at the wrong path (`$WT/imp/config.yaml`,
 not `$WT/.imp/config.yaml`) and the user layer silently won — fix it before recording anything.
-The `--explain` line shows the floor model **before** you spend a billable call, so a stale
-model gets a local `tiers:` override up front instead of a mid-test 404.
+The `--explain` line shows the floor model **before** you spend a billable call.
 
-> Model names drift, but they live in the **code floor**, not this file. If a floor model
-> 404s / "unknown model"s at launch, add a single overriding leaf to `$WT/.imp/config.yaml`
+> Model names drift, but they live in the **code floor**, not this file. If a floor model 404s
+> / "unknown model"s at launch, add a single overriding leaf to `$WT/.imp/config.yaml`
 > (e.g. `tiers: {high: {openai: <current>}}`) and **note the substitution** — it's not an
 > interrupt bug. codex refuses `*-codex` models, so any codex tier override must be a plain
 > model (e.g. `gpt-5.5`).
@@ -230,7 +273,7 @@ model gets a local `tiers:` override up front instead of a mid-test 404.
 
 ## 5. Driving primitives (reusable procedures)
 
-### Spawn imp (keys + cwd injected; `exec` so imp leads the foreground group)
+### Spawn imp — CLI mode (keys + cwd injected; `exec` so imp leads the foreground group)
 
 New:
 ```
@@ -244,30 +287,55 @@ mcp__impty__start(argv=["bash","-lc",
   "export ANTHROPIC_API_KEY=$(cat ~/.anthropic-key); export OPENAI_API_KEY=$(cat ~/.openai-key); exec imp resume <id>"],
   cwd="<WT>", cols=100, rows=30)
 ```
-`exec` is required — without it bash, not imp, leads the foreground group and `\x03`/ESC
-would not reach imp.
+`exec` is required — without it bash, not imp, leads the foreground group and `\x03`/ESC would
+not reach imp.
+
+### Spawn imp — TUI mode (`--tui`; `TERM` + `exec` both mandatory)
+
+New:
+```
+mcp__impty__start(argv=["bash","-lc",
+  "export TERM=xterm-256color; export ANTHROPIC_API_KEY=$(cat ~/.anthropic-key); export OPENAI_API_KEY=$(cat ~/.openai-key); exec imp new --tui"],
+  cwd="<WT>", cols=100, rows=30)
+```
+Resume:
+```
+mcp__impty__start(argv=["bash","-lc",
+  "export TERM=xterm-256color; export ANTHROPIC_API_KEY=$(cat ~/.anthropic-key); export OPENAI_API_KEY=$(cat ~/.openai-key); exec imp resume <id> --tui"],
+  cwd="<WT>", cols=100, rows=30)
+```
+`TERM` is mandatory (without it the full-screen app renders wrong); `exec` is mandatory (else
+bash leads the group and keys never reach imp). In TUI mode the opening intent prompt **is** the
+in-app bottom buffer, so there is no separate cooked opening prompt. The `view()` header
+`regime` is `screen` while the viewer is live and `scroll` after the app restored the screen.
 
 ### Reading state
 
-- `view()` → header `[alive=… alt_screen=… cursor=(x,y)]` + grid. `alive=False` = imp
-  exited. Cursor parked right after a prompt = waiting for input.
+- `view()` → header `[alive=… regime=… alt_screen=… cursor=(x,y)]` + grid. `alive=False` = imp
+  exited; `regime=scroll` after a TUI clean pause = the alt-screen restored. Cursor parked
+  right after a prompt = waiting for input.
 - `view(full=True)` → the whole run so far (scrolled-off history + current screen); the
   `paused (…)` line and the change id live here.
 - `snapshot()` → PNG; use it to *see* the pause line's color/glyph when judging clarity.
 
 ### **`INTERRUPT-AND-VERIFY(trigger, expected_reason)`** — the core check
 
-1. Deliver one interrupt only. Keystroke `send(trigger, wait=False)` for prompt-state and
-   ESC tests; for a **mid-run** Ctrl-C (points B/C/E) use `send_signal(2)` for deterministic
-   delivery (see the §0 fidelity caveat).
+1. Deliver one interrupt only.
+   - **CLI mode:** keystroke `send(trigger, wait=False)` for prompt-state and ESC tests; for a
+     **mid-run** Ctrl-C (points B/C/E) use `send_signal(2)` for deterministic delivery (see the
+     §0 fidelity caveat).
+   - **TUI mode:** keystroke `send(trigger, wait=False)` for **all** triggers, including mid-run
+     Ctrl-C/ESC — the app's raw-mode bindings make keystrokes faithful. After an ESC, `wait()`
+     for the escape-flush timeout before reading.
 2. `wait()` then `view()` + `view(full=True)`.
 3. Assert the bar from §0: `alive=False`; final line `paused (<expected_reason>)`; no
-   `unclassified provider error` / `Cannot write to terminated process` /
-   `paused: unknown`; one interrupt sufficed.
+   `unclassified provider error` / `Cannot write to terminated process` / `paused: unknown`;
+   one interrupt sufficed. **TUI mode:** also confirm `regime` went `screen` → `scroll` (the
+   alt-screen restored on the clean pause).
 4. **Orphan check:** look for leftover *tool* subprocesses from this run —
-   `bash: pgrep -af 'claude|codex|make' | grep "$WT"` — scope to `$WT` so you don't match
-   the long-lived impty server, your own driver shells, or unrelated `imp`/`claude`
-   sessions. Nothing tied to `$WT` should remain after the pause.
+   `bash: pgrep -af 'claude|codex|make' | grep "$WT"` — scope to `$WT` so you don't match the
+   long-lived impty server, your own driver shells, or unrelated `imp`/`claude` sessions.
+   Nothing tied to `$WT` should remain after the pause.
 5. **Event-log check:** the Change's event log is at a deterministic path —
 
    ```bash
@@ -276,111 +344,95 @@ would not reach imp.
    grep -o '"kind":"interrupted"' "$ev" | head     # expect a hit after an agent-phase interrupt
    grep -o '"category":"unknown"'  "$ev" | tail     # expect NONE caused by the interrupt
    ```
-   (`change_dir` is `<worktree>/.imp/change` and `events_path` is `events.jsonl` within it;
-   `<worktree>` is `$WT/.imp/worktrees/<id>` because cwd is `$WT`. If you still can't
-   locate it, fall back to `bash: cd "$WT" && imp log <id>` and judge from what it
-   surfaces; note the limitation.)
+   (`change_dir` is `<worktree>/.imp/change` and `events_path` is `events.jsonl` within it. If
+   you still can't locate it, fall back to `bash: cd "$WT" && imp log <id>` and judge from what
+   it surfaces; note the limitation.)
 6. **Record the change id** for resume + abandon. The authoritative source is
    `bash: cd "$WT" && imp status` — its first column is the change **id** (the
-   `.imp/worktrees/<id>` dir name), which is what the event path and `imp resume`/`imp
-   abandon` key on. The `paused` headline should print that same id; if it ever shows a
-   slug or other display name instead, that's itself a bug (a slug is never a ref) — record
-   it and rely on `imp status` for the id.
+   `.imp/worktrees/<id>` dir name), which is what the event path and `imp resume`/`imp abandon`
+   key on. The `paused` headline should print that same id; if it ever shows a slug or other
+   display name instead, that's itself a bug — record it and rely on `imp status` for the id.
 
 ### **`RESUME-AND-VERIFY(id)`**
 
-1. `start` `imp resume <id>` (§5). 2. Confirm it continues the *same* Change (matching
-`#<slug>` / `· resuming` header), reaches a prompt or runs forward — not `nothing to
-resume`, not a restart. 3. Note message clarity. (The resume *banner* legitimately shows the
-`#<slug>` display name; only the *pause* line in §5.6 must carry the change **id** — a slug
-there is a bug. Different lines, no contradiction.)
+1. `start` `imp resume <id>` (§5 — add `--tui` in TUI mode). 2. Confirm it continues the *same*
+Change (matching `#<slug>` / `· resuming` header), reaches a prompt or runs forward — not
+`nothing to resume`, not a restart. 3. Note message clarity. (The resume *banner* legitimately
+shows the `#<slug>` display name; only the *pause* line in §5.6 must carry the change **id**.)
 
 ---
 
 ## 6. Test matrix
 
-For the **single provider under test**, run the points below. Use `INTERRUPT-AND-VERIFY` and
-`RESUME-AND-VERIFY`. You don't have to fire every trigger at every point — follow the
-**Trigger** column, which targets the meaningful combinations. Keep a tally
-(point × trigger → outcome) for the report.
+For the **single provider under test**, run the points below **for your selected surface**. Use
+`INTERRUPT-AND-VERIFY` and `RESUME-AND-VERIFY`. You don't have to fire every trigger at every
+point — follow the **Trigger** column. The **Mode** notes call out where CLI and TUI diverge;
+everything else is shared. Keep a tally (point × trigger → outcome) for the report.
 
-| # | Point (imp state) | How to reach it | Trigger(s) | Expected |
+| # | Point (imp state) | How to reach it | Trigger(s) | Expected (mode-aware) |
 |---|-------------------|-----------------|-----------|----------|
-| **A** | Opening interactive prompt (raw mode) | `imp new`; `wait()` until parked at the first prompt; type nothing | **Ctrl-C**, then in a fresh run **Ctrl-D** | A1: `paused (ctrl-c)`. A2: `paused (ctrl-d)`. **No `interrupted` event is expected here** — nothing was running to classify; the event-log check does not apply at A. The bar that *does* apply: clean `paused` line, `alive=False`, exit 130, resumable. |
-| **B** | Model thinking / streaming (cooked mode) | At the prompt, send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until you *see* output streaming (`view` shows no prompt) | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. In-flight model request torn down (orphan check). |
-| **C** | **A tool is running** (subprocess executing) | Drive the agent until it runs a tool that takes a few seconds — e.g. a shell/`make`/test tool. If the default workflow reaches a build/test step, interrupt during it; otherwise steer the intent toward something that triggers a shell command, and watch `view`/`view(full=True)` for tool activity | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. **The tool subprocess is killed** — orphan check must be clean (this is `runner.interrupt()` → `terminate_running_processes`). |
-| **D** | In-turn user-chat prompt (interactive agent asks *you* mid-turn) | Use an interactive step (e.g. the spec/open-by-asking turn) where the agent prompts you back; wait until parked at *that* prompt | **Ctrl-C**; separately **ESC** | Ctrl-C → `paused (ctrl-c)`. **ESC at this prompt is the negative test:** ESC must NOT pause — prompt_toolkit consumes it (emacs meta / no-op); imp stays at the prompt, `alive=True`. Verify by sending `\x1b` then `view()` — still at prompt — then a normal reply still submits. |
-| **E** | Subagent running (nested) | Drive until the workflow dispatches a subagent (a sub-step doing work); interrupt while the subagent is mid-flight | **Ctrl-C** or **ESC** | Pauses the whole run cleanly (`paused (…)`), unwinds the subagent (SubagentSuspended path), resumable. Orphan check clean. |
-| **F** | During resume | `RESUME-AND-VERIFY` a paused Change, then interrupt again at whichever of A/B/C you didn't already stress for this provider | **Ctrl-C** or **ESC** | Same bar; the *second* pause is still resumable (pause→resume is idempotent across cycles). |
+| **A** | Opening prompt | **CLI:** `imp new`; `wait()` until parked at the first prompt. **TUI:** `imp new --tui`; the opening intent is the in-app bottom buffer | **Ctrl-C**, then in a fresh run **Ctrl-D** (CLI); **Ctrl-C** (TUI) | `paused (ctrl-c)`; CLI also A2 `paused (ctrl-d)`. **No `interrupted` event here** — nothing was running to classify. Clean `paused` line, `alive=False`, exit 130, resumable. |
+| **B** | Model thinking / streaming | Send a trivial intent (`send("add a one-line comment to the README\r")`); `wait` until output streams (no prompt) | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. **CLI:** Ctrl-C via `send_signal(2)`; ESC via keystroke. **TUI:** both via keystroke. In-flight model request torn down (orphan check). |
+| **C** | **A tool is running** | Steer the agent until it runs a shell/`make`/test tool that takes a few seconds; interrupt during it | **Ctrl-C** in one run; **ESC** in another | `paused (ctrl-c)` / `paused (esc)`. **The tool subprocess is killed** — orphan check must be clean. CLI Ctrl-C via `send_signal(2)`; TUI via keystroke. |
+| **D** | In-turn user-chat prompt (agent asks *you* mid-turn) | Use an interactive step where the agent prompts you back; wait until parked at *that* prompt | **Ctrl-C**; separately **ESC** | Ctrl-C → `paused (ctrl-c)`. **ESC is mode-dependent: the ESC-at-prompt negative applies in CLI mode** (ESC must NOT pause — prompt_toolkit consumes it; `alive=True`, a normal reply still submits), **and becomes a pause in TUI mode** (the app binding fires → `paused (esc)`). |
+| **E** | Subagent running (nested) | Drive until the workflow dispatches a subagent; interrupt while it is mid-flight | **Ctrl-C** or **ESC** | Pauses the whole run cleanly (`paused (…)`), unwinds the subagent (SubagentSuspended path), resumable. Orphan check clean. CLI Ctrl-C via `send_signal(2)`; TUI via keystroke. |
 
-### Negative / clarity checks (run at least once across the suite)
-
-- **ESC at the opening prompt (A):** like D's negative test — ESC must be prompt_toolkit's,
-  not a pause. `alive=True` after `\x1b`; a normal reply still submits.
-- **Double / mashed Ctrl-C:** at point B, send `\x03` twice quickly. Expect a single clean
-  pause, not a traceback, double-pause, or hang.
-- **Very-early interrupt:** Ctrl-C in the brief window right after `imp new` before the
-  first prompt/agent appears. Record whatever happens (clean pause preferred; a crash or
-  unkillable state is a bug).
-- **Clean-resume positive control:** for ≥1 Change, after a pause do a clean
-  `RESUME-AND-VERIFY` and let it reach a prompt *without* interrupting — proves imp truly
-  recovered state, not just exited tidily.
+After the matrix: run `RESUME-AND-VERIFY` on the last paused change. Then deliver
+`send_signal(sig=15)` (SIGTERM) on a fresh `imp new` run mid-execution and verify
+`paused (sigterm)`.
 
 ---
 
-## 7. Bug report
+## 7. Report
 
-Write to the **main checkout** (survives clone deletion), in the bugs dir
-(`mkdir -p` it if absent):
+Write a report to the **main checkout** (not the clone):
 
 ```
 "$REPO"/docs/bugs/<YYYY-MM-DD>-interrupt-playbook-results.md
 ```
 
+For each point and trigger, record: the state reached, the trigger delivered, the full
+`view(full=True)` snippet (or `snapshot()` path), whether the §0 bar passed, and any
+deviation from expected behavior.
+
 Include:
+- **Build under test:** `git -C "$REPO" rev-parse --short HEAD`
+- **Surface:** CLI or TUI
+- **Provider:** which one and which tier/model resolved (`imp config --explain high`)
+- **Tally:** a per-point × per-trigger result table (PASS / FAIL / SKIP + one-line note)
+- **Defects:** for each failure, the exact sequence of events, the expected vs actual behavior,
+  and a reproduction recipe
 
-1. **Build under test** — which `imp` (branch/commit:
-   `git -C "$REPO" rev-parse --short HEAD`, plus whether the
-   esc-and-clean-interrupt feature is present), the **provider under test**, and the
-   impty commit.
-2. **Summary matrix** — one row for the provider under test; columns = A1/A2 / B-ctrlc /
-   B-esc / C-ctrlc / C-esc / D-ctrlc / D-esc(neg) / E / F / clean-resume; cells = ✅ /
-   ⚠️ issue / ⏭️ skipped (one-line reason).
-3. **One section per bug** — title + severity (blocker/major/minor/cosmetic); provider &
-   point & trigger; **expected** (cite §0); **what happened** (paste `view(full=True)`
-   excerpt and/or a `snapshot()` PNG path; include `alive`/exit, whether one interrupt
-   sufficed, orphan-check result, event-log classification); **repro** (exact `start`
-   argv, keystrokes/timing, config); **notes**.
-4. **Message-clarity findings** — any user-facing text that was unclear, missing, or
-   misleading even where the exit code was right (e.g. wrong/empty pause reason, leaked
-   internals, no resume hint).
-5. **Skips** — points/triggers skipped and why.
-
-Zero bugs is still a report: write the matrix and an explicit "no defects observed" note
-for the provider under test — a clean run is a recorded result.
+A **clean run still produces a report** — write "no defects observed" explicitly. A passing run
+with no artifact is the most likely failure of this convention.
 
 ---
 
-## 8. Cleanup — abandon everything
+## 8. Cleanup and wrap-up
 
 ```bash
-cd "$WT"
-imp log                      # or: imp status — enumerate change ids (optional; the clone is discarded wholesale)
-imp abandon <id>             # optional: exercise abandon inside the clone; the rm below discards everything regardless
-
-cd "$REPO"
-rm -rf "$WT"                 # the standalone clone holds every branch / nested worktree / journal — deleting it removes all churn
-git -C "$REPO" status --short   # only the report file should be new
+cd "$WT" && imp abandon <id>   # abandon any open Changes in the clone (get <id> from §5.6 / imp status)
+rm -rf "$WT"
+git -C "$REPO" status --short  # only the report file should be new
 ```
 
-If anything in the **main** checkout changed besides the report, flag it — the clone
-was supposed to contain all the churn.
+If anything in the main checkout is different from the report file, flag it.
+
+Stop with a one-paragraph summary: build tested, surface and provider, tally of PASS/FAIL/SKIP
+per point, headline defects (or "none"), report path.
 
 ---
 
-## 9. Done
+## 9. Quick reference
 
-Report a one-paragraph wrap-up: build tested (commit + whether the feature is present),
-the provider under test and which points/triggers ran, the headline findings (especially
-anything failing the bar in §0), the report path, and confirmation the clone and all test
-Changes were abandoned. Then stop.
+| Interrupt | `send` | Out-of-band | What fires |
+|-----------|--------|-------------|------------|
+| **Ctrl-C** (at prompt) | `"\x03"` | — | prompt_toolkit `KeyboardInterrupt` |
+| **Ctrl-C** (mid-run, CLI) | unreliable | `send_signal(2)` | `SIGINT` → coordinator |
+| **Ctrl-C** (mid-run, TUI) | `"\x03"` | — | app binding → coordinator |
+| **ESC** (thinking, CLI) | `"\x1b"` | — | `EscKeyReader` → coordinator |
+| **ESC** (thinking, TUI) | `"\x1b"` | — | app binding → coordinator |
+| **ESC** (at prompt, CLI) | `"\x1b"` | — | **negative** — prompt_toolkit eats it |
+| **ESC** (at prompt, TUI) | `"\x1b"` | — | app binding → coordinator (pauses) |
+| **Ctrl-D** (at prompt) | `"\x04"` | — | `EOFError` → `pause_and_exit` |
+| **SIGTERM** | — | `send_signal(15)` | coordinator |
