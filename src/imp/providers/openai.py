@@ -622,6 +622,11 @@ class OpenAIAgentRunner:
                         tools=openai_tools,
                         store=False,
                         prompt_cache_key=prompt_cache_key,
+                        # §4: enable parallel tool calls so multiple `task` tus can
+                        # arrive in one turn. Tools stay strict:True; the weakened
+                        # parallel-turn schema guarantee is backstopped by imp's
+                        # invoke-time arg validation (is_error on malformed input).
+                        parallel_tool_calls=True,
                     )
             finally:
                 # N3: reset even on a genuine API error so a later interrupt()
