@@ -24,6 +24,7 @@ from typing import Any
 
 import anyio
 
+from imp.agents.parallel import max_parallel_tasks  # noqa: F401  (used by Task 3)
 from imp.agents.runner import ToolResultBlock, ToolUseBlock
 from imp.agents.subagents import (
     SubagentSuspended,
@@ -257,3 +258,59 @@ async def dispatch_task_batch(
     # the group await, so they land together here.
     for _ in task_tus:
         yield {"type": "tool_heartbeat", "payload": {}}
+
+
+def _reorder_results_to_document_order(
+    tool_results: list[ToolResultBlock], tool_uses: list[ToolUseBlock],
+) -> None:
+    """Reorder the turn's tool_results in place to match tool_use DOCUMENT order
+    (design §1/§3). Batch execution is completion-ordered, but the turn's final
+    user message pairs results to tool_uses by id, and document order is the one
+    §3's reconstruction mirrors. Stable sort; an unknown id (defensive) sorts
+    last."""
+    order = {tu.id: i for i, tu in enumerate(tool_uses)}
+    tool_results.sort(key=lambda b: order.get(b.tool_use_id, len(order)))
+
+
+async def dispatch_turn_tool_uses(
+    *,
+    ctx: Any,
+    elog: Any,
+    aid: str,
+    invocation: Any,
+    tools: dict[str, Tool],
+    tool_uses: list[ToolUseBlock],
+    tool_results: list[ToolResultBlock],
+    state: TurnState,
+    ceiling: int | None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Dispatch one assistant turn's tool_use blocks (design §1). Partition: ALL
+    `task` tus run as one concurrent batch at the FIRST task tu's document
+    position; every non-task tu flows through `dispatch_one_tool_use` in document
+    order; the batch never overlaps a non-task tool. After all dispatch, the
+    turn's tool_results are reordered to document order. Yields one tool_heartbeat
+    per processed tu plus any terminal event dict (the caller yields it and
+    stops). SubagentSuspended / AwaitingUserInput propagate (terminal — no
+    heartbeat; the generator ends by raising)."""
+    task_tus = [tu for tu in tool_uses if tu.name == "task"]
+    batch_started = False
+    for tu in tool_uses:
+        if tu.name == "task":
+            if not batch_started:
+                batch_started = True
+                async for ev in dispatch_task_batch(
+                        ctx=ctx, elog=elog, aid=aid, task_tus=task_tus,
+                        tool_results=tool_results, state=state, ceiling=ceiling):
+                    yield ev
+            # later task tus are already handled by the single batch
+            continue
+        terminal = await dispatch_one_tool_use(
+            ctx=ctx, elog=elog, aid=aid, invocation=invocation,
+            tools=tools, tu=tu, tool_results=tool_results,
+            state=state, ceiling=ceiling)
+        if terminal is not None:
+            yield terminal
+            return
+        yield {"type": "tool_heartbeat", "payload": {}}
+
+    _reorder_results_to_document_order(tool_results, tool_uses)
