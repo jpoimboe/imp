@@ -51,7 +51,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
-from imp.engine.agent_run import deliver_interject
+from imp.engine.agent_run import deliver_interject, drain_all_interjects_at_resume
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
@@ -560,6 +560,11 @@ class OpenAIAgentRunner:
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the now-balanced transcript
                 # drives the next LLM turn with the human's reply.
+            # §2 resume-entry drain: mid-turn pending texts fold into the first
+            # request. (The AWAITING_USER dangling-wait join is handled in F5.)
+            if state is not ResumeState.AWAITING_USER:
+                drain_all_interjects_at_resume(
+                    invocation.coordinator, messages, transcript, elog, aid)
         else:
             messages = []
             for m in invocation.initial_messages:

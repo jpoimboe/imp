@@ -174,3 +174,137 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
     # Both interjects consumed (queue cleared).
     assert coord.drain_interject() is None
 
+
+@pytest.mark.anyio
+async def test_openai_resume_entry_drain_before_first_send(tmp_path: Path) -> None:
+    """Interjects queued before resume must appear in the FIRST responses.create
+    call, not one turn late."""
+    from imp.agents.runner import (
+        AgentInvocation,
+        ChangeContext,
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+    )
+    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
+    from imp.agents.transcript import Transcript
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+    from imp.providers.openai import OpenAIAgentRunner
+    from tests.openai_fakes import FakeResponsesClient, resp_function_call, resp_response
+
+    agent_def = AgentDef(
+        name="t", description="",
+        tools=frozenset({"complete_step", "read_file"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+
+    inv_dir = tmp_path / "step"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed a transcript that ends with a user tool_result (RESUME_NORMAL state)
+    # so the provider takes the resume branch without AWAITING_USER.
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="resume me"),)))
+    transcript.append(Message(role="assistant", content=(
+        ToolUseBlock(id="u1", name="read_file", input={"path": "/project/x"}),
+    )))
+    transcript.append(Message(role="user", content=(
+        ToolResultBlock(tool_use_id="u1", content="prior contents"),
+    )))
+
+    # Coordinator with two queued interjects.
+    class _FakeCoordinator:
+        def __init__(self) -> None:
+            self._q = ["interject-A", "interject-B"]
+
+        def drain_interject(self) -> str | None:
+            return self._q.pop(0) if self._q else None
+
+        def reset(self) -> None:
+            pass
+
+    coord = _FakeCoordinator()
+
+    # Fake client: complete on the first call (so we only need one response).
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
+        ),
+    ])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(
+        model_name="gpt-4o-mini",
+        client_factory=lambda: fake,
+    )
+
+    inv = AgentInvocation(
+        agent_def=agent_def,
+        provider_name="openai",
+        model_name="gpt-4o-mini",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(
+            slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        ),
+        transcript_dir=inv_dir,
+        fs_permissions=(FsRule(
+            operations=("read",), paths=("/project/**",),
+            mode="allow",
+            source=SourceLoc(file=Path("w.yaml"), line=1),
+        ),),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s",
+        event_log=log,
+        coordinator=coord,
+    )
+
+    events = [e async for e in runner.run(inv)]
+
+    # Run completed successfully.
+    assert events[-1]["type"] == "agent_output"
+
+    # The FIRST responses.create call must include BOTH interject texts
+    # (appended right after the 3 transcript messages).
+    first_call = fake.responses.calls[0]
+    first_call_input = first_call["input"]
+
+    # Extract text content from all user messages in the first call.
+    all_texts = []
+    for item in first_call_input:
+        if item.get("type") == "message" and item.get("role") == "user":
+            for part in item.get("content", []):
+                if isinstance(part, dict) and part.get("type") == "input_text":
+                    all_texts.append(part["text"])
+
+    assert "interject-A" in all_texts, (
+        f"interject-A missing from first request input: {first_call_input}"
+    )
+    assert "interject-B" in all_texts, (
+        f"interject-B missing from first request input: {first_call_input}"
+    )
+    # No double-delivery: each interject appears EXACTLY once across the whole
+    # conversation (the entry drain cleared the queue, so the later turn-boundary
+    # drain is a no-op).
+    all_request_texts: list[str] = []
+    for call in fake.responses.calls:
+        for item in call["input"]:
+            if item.get("type") == "message" and item.get("role") == "user":
+                for part in item.get("content", []):
+                    if isinstance(part, dict) and part.get("type") == "input_text":
+                        all_request_texts.append(part["text"])
+    assert all_request_texts.count("interject-A") == 1
+    assert all_request_texts.count("interject-B") == 1
+    # Both interjects consumed (queue cleared).
+    assert coord.drain_interject() is None
+
