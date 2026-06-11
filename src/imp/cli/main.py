@@ -1072,39 +1072,6 @@ def _read_last_line(events_path: Path) -> bytes | None:
         return _last_nonempty_line(buf)
 
 
-def _format_last_timestamp(line: str) -> str:
-    """Local-time YYYY-MM-DD HH:MM:SS for a single already-extracted event line,
-    or '-' when the line is empty / malformed. Callers pass the last non-empty
-    line (see _read_last_line / _last_nonempty_line)."""
-    if not line.strip():
-        return "-"
-    try:
-        record = json.loads(line)
-        ts = datetime.fromisoformat(record["timestamp"]).astimezone()
-        return ts.strftime("%Y-%m-%d %H:%M:%S")
-    except (json.JSONDecodeError, KeyError, ValueError):
-        return "-"
-
-
-def _last_event_timestamp(events_path: Path) -> str:
-    try:
-        line = _read_last_line(events_path)
-    except FileNotFoundError:
-        return "-"
-    if line is None:
-        return "-"
-    return _format_last_timestamp(line.decode("utf-8", errors="replace"))
-
-
-def _journal_last_activity(control: Path, change_id: str) -> str:
-    raw = journal.journal_show(control, change_id, "events.jsonl")
-    if raw is None:
-        return "-"
-    line = _last_nonempty_line(raw)
-    if line is None:
-        return "-"
-    return _format_last_timestamp(line.decode("utf-8", errors="replace"))
-
 
 def _iso_from_line(line: str) -> str | None:
     if not line.strip():
@@ -1136,7 +1103,7 @@ def _journal_last_iso(control: Path, change_id: str) -> str | None:
 
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.
-_INFLIGHT = ("running", "paused", "merge_blocked")
+_INFLIGHT = ("running", "paused", "errored", "merge_blocked")
 
 
 # Row = (id, status, step, last_activity, title, created_at). created_at is the
@@ -1167,7 +1134,7 @@ def _status_rows(control: Path) -> list[_Row]:
         cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
         state_json = (cdir / "state" / "state.json").read_bytes()
         change_json = (cdir / "change.json").read_bytes()
-        last = _last_event_timestamp(cdir / "events.jsonl")
+        last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None or row[1] not in _INFLIGHT:
             continue
@@ -1187,7 +1154,7 @@ def _completed_rows(control: Path) -> list[_Row]:
         change_json = journal.journal_show(control, change_id, "change.json")
         if state_json is None or change_json is None:
             continue
-        last = _journal_last_activity(control, change_id)
+        last = _journal_last_iso(control, change_id) or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None or row[1] in _INFLIGHT:
             continue  # belt-and-suspenders; journaled rows are completed
