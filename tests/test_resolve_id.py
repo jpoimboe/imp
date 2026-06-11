@@ -51,6 +51,28 @@ def test_current_slug_resolves(tmp_path: Path) -> None:
     assert _resolve_id(tmp_path, "2026-06-04-add-oauth") == "2026-06-04-aaaaaa"
 
 
+def test_bare_name_resolves(tmp_path: Path) -> None:
+    # The bare name a user naturally types (no date prefix) resolves via the slug
+    # tier — previously it only matched the dated slug and fell through to "no
+    # Change matches".
+    _seed_control(tmp_path)
+    _mk(tmp_path, "2026-06-04-aaaaaa", "Add version flag")
+    assert _resolve_id(tmp_path, "add-version-flag") == "2026-06-04-aaaaaa"
+
+
+def test_bare_name_collision_is_ambiguous(tmp_path: Path, capsys) -> None:
+    # Two changes sharing a name (different days) -> the bare name is ambiguous
+    # and lists candidates, rather than a blank no-match.
+    _seed_control(tmp_path)
+    _mk(tmp_path, "2026-06-04-aaaaaa", "Add version flag")
+    _mk(tmp_path, "2026-06-05-bbbbbb", "Add version flag")
+    with pytest.raises(SystemExit):
+        _resolve_id(tmp_path, "add-version-flag")
+    err = capsys.readouterr().err
+    assert "ambiguous" in err
+    assert "aaaaaa" in err and "bbbbbb" in err
+
+
 def test_no_match_exits(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     _mk(tmp_path, "2026-06-04-aaaaaa", "One")

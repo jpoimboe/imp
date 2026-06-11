@@ -41,7 +41,7 @@ from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.project_root import find_project_root
-from imp.engine.slug import dated_slug, new_change_id
+from imp.engine.slug import dated_slug, new_change_id, slugify
 from imp.engine.state import LockHeld, ProjectLock, State
 
 
@@ -1062,10 +1062,14 @@ def _resolve_id(control: Path, token: str) -> str:
         if title is None:
             continue
         try:
-            slug = dated_slug(title, date=cid[:10])
+            dated = dated_slug(title, date=cid[:10])         # 2026-06-11-add-version-flag
+            bare = slugify(title)                            # add-version-flag
         except Exception:
             continue
-        if slug == token:
+        # Match the human dated slug OR the bare name a user naturally types
+        # (`imp resume add-version-flag`); without the bare form this tier was
+        # dead for undated names and they fell through to "no Change matches".
+        if token in (dated, bare):
             slug_hits.append(cid)
     if len(slug_hits) == 1:                                 # (3) current slug
         return slug_hits[0]
