@@ -69,9 +69,9 @@ def test_collapsed_folds_drop_thinking_keep_burst_recap() -> None:
     assert "thinking" not in out
     # The tool burst now leaves ONE dark-gray recap line (point 8): distinct tool
     # names (first-seen order) + the call count — not the full per-call dump.
-    assert "bash · ls · 3 calls" in out
+    assert "3 calls · bash · ls" in out
     # one recap line, not one per call
-    assert out.count("bash · ls · 3 calls") == 1
+    assert out.count("3 calls · bash · ls") == 1
     assert "→ ok" not in out            # per-call results stay in --full only
 
 
@@ -1160,3 +1160,19 @@ def test_full_burst_empty_burst_renders_nothing() -> None:
     burst = nv.ToolBurstFold(calls=[])
     lines = list(rt._render_burst(burst, depth=1, full=True, color=False, width=80))
     assert lines == []
+
+
+def test_burst_recap_is_count_first() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="read_file",
+            input={"path": "x"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="ok"),
+        _ev("6", "tool_call", agent_id="step:p/s", id="b2", name="bash",
+            input={"command": "y"}),
+        _ev("7", "tool_result", agent_id="step:p/s", id="b2", content="ok"),
+        _ev("8", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ]))
+    assert "2 calls · read_file · bash" in out
+    assert "read_file · bash · 2 calls" not in out

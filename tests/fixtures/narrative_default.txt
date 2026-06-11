@@ -5,7 +5,7 @@ design
   
   • Drafting the spec.
   
-    read_file · bash · 2 calls
+    2 calls · read_file · bash
   
     reviewer · claude-sonnet-4-6
   

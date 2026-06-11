@@ -12,19 +12,19 @@ spec
   
   • Let me explore the CLI structure before proposing a design.
   
-    ToolSearch · 2 calls · 2s
+    2 calls · ToolSearch · 2s
   
   • Let me explore the CLI structure.
   
-    grep · glob · 2 calls · 0s
+    2 calls · grep · glob · 0s
   
   • Let me look at the main parser setup and how the package is named.
   
-    read_file · 1 call · 0s
+    1 call · read_file · 0s
   
   • Let me check the package metadata and any existing version handling/tests.
   
-    read_file · grep · 2 calls · 0s
+    2 calls · read_file · grep · 0s
   
   • The codebase is clear. The package is named imp (version 0.0.1 in
     pyproject.toml), and the CLI is a single argparse parser in
@@ -58,7 +58,7 @@ spec
   
   • Naming this add-version-flag.
   
-    rename_change · write_file · bash · complete_step · 4 calls · 22s
+    4 calls · rename_change · write_file · bash · complete_step · 22s
   
   • Spec written and committed as imp/specs/2026-06-06-add-version-flag.md. It
     captures the top-level --version/-V flag, version resolution via
@@ -76,12 +76,12 @@ spec
   
   spec-reviewer · opus
   
-    ToolSearch · read_file · glob · query_events · 7 calls · 31s
+    7 calls · ToolSearch · read_file · glob · query_events · 31s
   
   • The events file is large and the spec's factual claims are already verified
     against source. Let me check for the relevant brainstorm turn type.
   
-    query_events · 1 call · 0s
+    1 call · query_events · 0s
   
   • I have verified all of the spec's load-bearing claims against the actual
     source. Findings:
@@ -106,7 +106,7 @@ spec
     over-engineering (the PackageNotFoundError fallback is a justified
     robustness requirement, not smuggled scope).
   
-    complete_step · 1 call · 0s
+    1 call · complete_step · 0s
   
   • Spec review complete. The add-version-flag spec is approved (non-blocking).
   
@@ -161,12 +161,12 @@ spec
     version at call time so the fallback test's patch takes effect. Let me load
     tools and amend.
   
-    ToolSearch · read_file · 2 calls · 3s
+    2 calls · ToolSearch · read_file · 3s
   
   • I'll integrate the reviewer's nit by adding a call-time resolution note to
     the decisions summary.
   
-    edit_file · bash · complete_step · 3 calls · 4s
+    3 calls · edit_file · bash · complete_step · 4s
   
   • Polish pass complete. Integrated the reviewer's advisory nit — added a
     "Resolve the version at call time" decision so the helper calls
@@ -186,12 +186,12 @@ plan
   
   plan-writer · opus
   
-    ToolSearch · read_file · glob · bash · 14 calls · 1m 12s
+    14 calls · ToolSearch · read_file · glob · bash · 1m 12s
   
   • Now I have a clear picture. No prior plan files exist, so I'll author plan 1
     fresh. Let me write the plan.
   
-    write_file · bash · complete_step · 3 calls · 6s
+    3 calls · write_file · bash · complete_step · 6s
   
   • Plan 1 authored and committed. It delivers the --version / -V flag in two
     atomic tasks:
@@ -220,18 +220,18 @@ plan
   
   plan-review · opus
   
-    ToolSearch · glob · read_file · 4 calls · 7s
+    4 calls · ToolSearch · glob · read_file · 7s
   
   • Now let me verify the plan's claims against the actual source code.
   
-    read_file · glob · 4 calls · 5s
+    4 calls · read_file · glob · 5s
   
   • The plan's core claims about main.py check out: the main(argv: list[str] |
     None = None) -> int signature, the exact two-line parser/subparser block,
     the import order (argparse then json), and the subcommand set all match. Let
     me verify the regression test files and ruff config the plan references.
   
-    glob · read_file · 5 calls · 1s
+    5 calls · glob · read_file · 1s
   
   • All of the plan's load-bearing claims are verified against the actual
     source:
@@ -255,7 +255,7 @@ plan
   
     Recording findings.
   
-    complete_step · 1 call · 0s
+    1 call · complete_step · 0s
   
   • Plan review complete. The plan is approved (non-blocking).
   
@@ -317,18 +317,18 @@ plan
     adding an explicit mypy step given the project's --strict mypy config — is
     worth integrating. Let me load tools and revise.
   
-    ToolSearch · read_file · 2 calls · 3s
+    2 calls · ToolSearch · read_file · 3s
   
   • I'll integrate the Minor finding by adding an explicit mypy type-check to
     the verification steps of each task (the project uses --strict mypy).
   
-    edit_file · bash · 4 calls · 13s
+    4 calls · edit_file · bash · 13s
   
   • Integrated the Minor finding — added an explicit mypy --strict type-check
     step to both tasks (and updated Self-Review §5), then folded the edit into
     the plan commit via fixup.
   
-    complete_step · 1 call · 0s
+    1 call · complete_step · 0s
   
   • Final advisory polish pass complete. The plan was already approved
     (blocking: False); I integrated the single actionable Minor finding by
@@ -349,7 +349,7 @@ implement
   
   task-lead · sonnet
   
-    ToolSearch · glob · read_file · bash · 6 calls · 8s
+    6 calls · ToolSearch · glob · read_file · bash · 8s
   
   • No progress file yet — both tasks are unimplemented. Let me dispatch the
     implementer for Task 1: Version-resolution helper.
@@ -358,11 +358,11 @@ implement
   
   • Good. Now let me verify the state before dispatching reviewers.
   
-    bash · 2 calls · 1s
+    2 calls · bash · 1s
   
   • Tests are green at 0e1b4c2. Now dispatching both reviewers.
   
-    read_file · 2 calls · 0s
+    2 calls · read_file · 0s
   
   • Now dispatching both reviewers for Task 1.
   
@@ -379,7 +379,7 @@ implement
     (test doesn't verify the dist name argument) is deferred as a followup. Let
     me write progress.md and proceed to Task 2.
   
-    bash · write_file · 2 calls · 5s
+    2 calls · bash · write_file · 5s
   
   • Now dispatching the implementer for Task 2.
   
@@ -389,12 +389,12 @@ implement
   
   • Let me verify the state.
   
-    bash · 2 calls · 1s
+    2 calls · bash · 1s
   
   • All 5 tests green at 7dd20b8. Now reading the updated main.py diff for
     reviewers.
   
-    bash · 1 call · 0s
+    1 call · bash · 0s
   
     spec-task-reviewer · sonnet · 59s
   
@@ -406,18 +406,18 @@ implement
   
     Let me update progress.md and verify completeness.
   
-    write_file · 1 call · 0s
+    1 call · write_file · 0s
   
   • Now load the verification skill and confirm all tasks are done.
   
-    bash · 1 call · 3s
+    1 call · bash · 3s
   
     load skill verification-before-completion
   
   • All 5 tests pass. Both plan tasks are committed and verified. The plan is
     fully implemented.
   
-    complete_step · 1 call · 0s
+    1 call · complete_step · 0s
   
   • Both plan tasks implemented and verified.
   
@@ -446,7 +446,7 @@ implement
   
   plan-cycle-check · sonnet
   
-    ToolSearch · read_file · glob · grep · 10 calls · 18s
+    10 calls · ToolSearch · read_file · glob · grep · 18s
   
   • The implementation is complete. Both tasks from plan-1 are committed:
   
@@ -460,7 +460,7 @@ implement
     the success path (--version, -V) and the PackageNotFoundError fallback, and
     pyproject.toml is untouched. The spec scope is fully covered by plan-1.
   
-    complete_step · 1 call · 0s
+    1 call · complete_step · 0s
   
   • The single plan (plan-1) fully covers the entire spec. Both tasks are
     committed: Task 1 adds the _resolve_version() helper in src/imp/cli/main.py
@@ -483,7 +483,7 @@ review
   
   code-reviewer · gpt-5.5
   
-    read_file · glob · bash · grep +1 · 13 calls · 40s
+    13 calls · read_file · glob · bash · grep +1 · 40s
   
   • Strengths
   
@@ -534,20 +534,20 @@ review
   
   summarizer · opus
   
-    ToolSearch · glob · bash · read_file · 10 calls · 30s
+    10 calls · ToolSearch · glob · bash · read_file · 30s
   
   • Now let me inspect the actual diff and the test state.
   
-    bash · 2 calls · 0s
+    2 calls · bash · 0s
   
   • Now let me run the test suite for the version tests (cheap, no code
     changes).
   
-    bash · 4 calls · 11s
+    4 calls · bash · 11s
   
   • Everything verifies. Let me complete.
   
-    complete_step · 1 call · 0s
+    1 call · complete_step · 0s
   
   • Summary recorded. The change 2026-06-06-add-version-flag is complete: both
     planned tasks landed cleanly on HEAD, the --version/-V flag works end-to-end
@@ -613,7 +613,7 @@ review
   
   final-review · sonnet
   
-    ToolSearch · query_events · 2 calls · 2s
+    2 calls · ToolSearch · query_events · 2s
   
   • Change Summary: 2026-06-06-add-version-flag
   
@@ -670,7 +670,7 @@ review
   
   > Merge it. The two items are non-blocking nits and the change is clean.
   
-    complete_step · 1 call · 0s
+    1 call · complete_step · 0s
   
   • Merged! The 2026-06-06-add-version-flag change is done. 🎉
   
