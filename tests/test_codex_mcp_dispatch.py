@@ -544,3 +544,62 @@ def test_awaiting_capture_text_carries_stop_guidance(tmp_path: Path) -> None:
     assert out.endswith("; do not dispatch further tasks")
     assert state.awaiting_user is True
     assert state.awaiting_prompt == "answer me"
+
+
+def test_head_refusal_raises_sentinel_when_suspension_captured(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """AC25/AC29: a NEW task call while a suspension is captured is refused at the
+    dispatch head — TaskRefused(sentinel) is raised BEFORE any mint or cap slot,
+    and dispatch_task is never reached."""
+    from imp.agents.subagents import TASK_REFUSAL_SENTINEL, TaskRefused
+    from imp.engine.state import InMemoryEventLog
+    state = RunState(cap=10)
+    state.subagent_suspended = SubagentSuspended("a sibling already paused")
+    called = {"dispatch_task": False}
+
+    async def _stub(ctx: Any, subagent_name: str, task_description: str,
+                    **_kw: Any) -> str:
+        called["dispatch_task"] = True
+        return "should not run"
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    with pytest.raises(TaskRefused) as ei:
+        asyncio.run(dispatch_tool(
+            tool=make_task_tool(),
+            args={"subagent_name": "impl", "task_description": "new work"},
+            ctx=ctx, state=state))
+    assert str(ei.value) == TASK_REFUSAL_SENTINEL
+    assert called["dispatch_task"] is False
+    assert state.minted_task_ids == []          # nothing minted
+    assert state.dispatch_count == 0            # no cap slot burned
+
+
+def test_head_refusal_fires_on_should_pause_alone(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """AC29: an arm-entry refusal on should_pause alone burns no slot and mints
+    nothing — the predicate also reads ctx.coordinator.should_pause."""
+    from types import SimpleNamespace
+
+    from imp.agents.subagents import TaskRefused
+    from imp.engine.state import InMemoryEventLog
+    state = RunState(cap=10)
+
+    async def _stub(ctx: Any, subagent_name: str, task_description: str,
+                    **_kw: Any) -> str:
+        return "should not run"
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    ctx.coordinator = SimpleNamespace(should_pause=True)
+    with pytest.raises(TaskRefused):
+        asyncio.run(dispatch_tool(
+            tool=make_task_tool(),
+            args={"subagent_name": "impl", "task_description": "x"},
+            ctx=ctx, state=state))
+    assert state.minted_task_ids == []
+    assert state.dispatch_count == 0

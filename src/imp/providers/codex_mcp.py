@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from imp.agents.parallel import max_parallel_tasks
+from imp.agents.subagents import TASK_REFUSAL_SENTINEL, TaskRefused
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext
@@ -122,6 +123,17 @@ def _args_fingerprint(args: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     ))
 
 
+def _task_membership_frozen(state: RunState, ctx: ToolContext) -> bool:
+    """codex membership-freeze predicate (design Decision 4): a captured
+    suspension, a captured headless wait, or a run-wide pause freezes the turn's
+    task membership so a NEW task is refused without dispatch."""
+    return (
+        state.subagent_suspended is not None
+        or state.awaiting_user
+        or (ctx.coordinator is not None and ctx.coordinator.should_pause)
+    )
+
+
 async def dispatch_tool(
     *, tool: Tool, args: dict[str, Any], ctx: ToolContext, state: RunState,
 ) -> str:
@@ -138,6 +150,12 @@ async def dispatch_tool(
     # the RMW's two lines below stay adjacent and synchronous (their invariant
     # is about each other, not about preceding awaits).
     await _bg._sweep_bg(ctx)
+    # Task-refusal check (pinned dispatch-head order: sweep → task-refusal →
+    # cap RMW → arms). A frozen membership refuses a NEW task WITHOUT minting and
+    # WITHOUT burning a cap slot; FastMCP wraps the raise error-shaped and the
+    # runner matches it on the wire (design Decision 4 / §2).
+    if tool.name == "task" and _task_membership_frozen(state, ctx):
+        raise TaskRefused(TASK_REFUSAL_SENTINEL)
     # ── cap RMW (no await between read and decision) ──────────────────────────
     state.dispatch_count += 1
     if state.dispatch_count > state.cap:

@@ -59,6 +59,15 @@ class TaskDispatchSkipped(Exception):
     not "dispatched then paused"."""
 
 
+TASK_REFUSAL_SENTINEL = "imp: task refused — turn membership frozen"
+
+
+class TaskRefused(RuntimeError):
+    """Raised to refuse a task without dispatch; its message is
+    TASK_REFUSAL_SENTINEL so the codex bridge's FastMCP layer wraps it into an
+    error-shaped tool result the runner matches by is_error AND suffix-equals."""
+
+
 def raise_if_suspended(exc: BaseException) -> None:
     """The thinnest shared per-provider surface: each provider's `task`
     wrapper calls this as the first line of its generic `except`, so a
