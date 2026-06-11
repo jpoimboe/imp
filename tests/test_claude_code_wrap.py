@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import ChangeContext
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
@@ -40,7 +41,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     return ctx
 
 
-def _passthrough_decorator(name: str, description: str, schema):  # type: ignore[no-untyped-def]
+def _passthrough_decorator(name, description, schema, annotations=None):  # type: ignore[no-untyped-def]
     """Stub `claude_agent_sdk.tool` — returns the function unchanged."""
     def _inner(fn):  # type: ignore[no-untyped-def]
         fn.__sdk_tool_name__ = name  # marker for assertions
@@ -283,3 +284,78 @@ async def test_wrapper_sweeps_bg_on_every_dispatch(
     out = await wrapped({"path": "f.txt"})
     assert "data" in out["content"][0]["text"]
     assert calls["n"] == 1
+
+
+def test_cc_task_tool_annotated_readonly_when_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC23: claude_code wraps `task` with ToolAnnotations(readOnlyHint=True) via the
+    real claude_agent_sdk.tool annotations= parameter, at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is not None
+        assert wrapped.annotations.readOnlyHint is True
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_non_task_tool_not_annotated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC23: ONLY `task` is annotated — read_file wraps with annotations=None."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "read_file", get_registry()["read_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_task_annotation_dropped_by_kill_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC21 (bridge half): IMP_MAX_PARALLEL_TASKS=1 drops the readOnlyHint at the
+    claude_code registration site."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_task_annotation_derived_from_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC23: the annotation is DERIVED from the allowlist-mode flag, not hardcoded —
+    flip CLAUDE_CODE_ALLOWLIST_MODE off and the hint disappears even at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    monkeypatch.setattr(
+        "imp.providers.claude_code.CLAUDE_CODE_ALLOWLIST_MODE", False)
+    try:
+        wrapped = _wrap_one(
+            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()

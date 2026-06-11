@@ -35,6 +35,7 @@ from typing import Any
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
+from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -323,6 +324,27 @@ def _python_schema_for_tool(t: Tool) -> dict[str, Any]:
     return {name: _python_type_for_property(spec) for name, spec in props.items()}
 
 
+# Bypass posture for the claude_code provider: the imp tools are exposed through a
+# strict allowlist (allowed_tools=[mcp__imp__…], strict_mcp_config=True in
+# _build_options), so a task readOnlyHint cannot grant read-only auto-approval
+# beyond imp's own permission layer. The hint below is DERIVED from this flag so a
+# future interactive/approval mode that flips it drops the hint automatically
+# (design §2 honesty note); a test pins the derivation.
+CLAUDE_CODE_ALLOWLIST_MODE = True
+
+
+def _task_annotations() -> Any | None:
+    """ToolAnnotations(readOnlyHint=True) for the task tool ONLY, and only when the
+    allowlist posture is on AND the width knob permits parallelism. readOnlyHint is
+    not literally true; its only operative effect here is unlocking the CLI's MCP
+    parallel scheduling. Width gate: IMP_MAX_PARALLEL_TASKS=1 drops the hint
+    (Decision 5 kill switch)."""
+    from mcp.types import ToolAnnotations
+    if CLAUDE_CODE_ALLOWLIST_MODE and max_parallel_tasks() > 1:
+        return ToolAnnotations(readOnlyHint=True)
+    return None
+
+
 def _wrap_one(
     name: str, t: Tool, ctx: ToolContext, state: _RunState, sdk_tool: Any,
 ) -> Any:
@@ -454,7 +476,10 @@ def _wrap_one(
             state.runtime_errors.append(text)
             return _tool_response(text, is_error=True)
 
-    return sdk_tool(name, t.description, schema)(_impl)
+    # task ONLY — derived from the allowlist posture + width knob (Decision 5 /
+    # §2 annotation). Every other tool wraps unannotated.
+    annotations = _task_annotations() if name == "task" else None
+    return sdk_tool(name, t.description, schema, annotations=annotations)(_impl)
 
 
 def _tool_response(text: str, *, is_error: bool) -> dict[str, Any]:

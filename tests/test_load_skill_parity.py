@@ -307,7 +307,7 @@ async def test_claude_code_load_skill_parity(tmp_path: Path) -> None:
 # ── ClaudeCode in-process wrapper (assertion 2 for claude_code) ──────────────
 
 
-def _passthrough_decorator(name: str, description: str, schema):  # type: ignore[no-untyped-def]
+def _passthrough_decorator(name: str, description: str, schema, annotations=None):  # type: ignore[no-untyped-def]
     """Stub `claude_agent_sdk.tool` — returns the function unchanged (same as
     test_claude_code_wrap.py's idiom)."""
     def _inner(fn):  # type: ignore[no-untyped-def]
