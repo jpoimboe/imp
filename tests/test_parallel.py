@@ -4,10 +4,13 @@ import pytest
 
 from imp.agents.parallel import (
     DEFAULT_MAX_PARALLEL_TASKS,
+    ParallelismSetting,
     _resolve,
+    emit_parallelism_warning_once,
     max_parallel_tasks,
     reset_parallelism_cache,
 )
+from imp.engine.state import InMemoryEventLog
 
 
 def test_default_when_env_absent() -> None:
@@ -52,4 +55,37 @@ def test_accessor_reads_once_then_caches(monkeypatch: pytest.MonkeyPatch) -> Non
     assert max_parallel_tasks() == 3  # cached: not re-read
     reset_parallelism_cache()
     assert max_parallel_tasks() == 5  # seam reset -> re-resolved
+    reset_parallelism_cache()
+
+
+def test_emit_warning_once_appends_single_runner_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A clamp warning is emitted exactly once, as a runner_warning carrying the
+    clamp message."""
+    reset_parallelism_cache()
+    import imp.agents.parallel as parallel_mod
+    monkeypatch.setattr(
+        parallel_mod, "_resolved",
+        ParallelismSetting(1, "IMP_MAX_PARALLEL_TASKS=0 below minimum; clamped to 1"),
+    )
+    log = InMemoryEventLog()
+    emit_parallelism_warning_once(log, agent_id="step:plan/p")
+    emit_parallelism_warning_once(log, agent_id="step:plan/p")  # no-op second time
+    warnings = [e for e in log.read() if e["type"] == "runner_warning"]
+    assert len(warnings) == 1
+    assert "clamped to 1" in warnings[0]["payload"]["message"]
+    reset_parallelism_cache()
+
+
+def test_emit_warning_once_silent_when_no_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An in-range (or absent) knob produces no runner_warning event."""
+    reset_parallelism_cache()
+    import imp.agents.parallel as parallel_mod
+    monkeypatch.setattr(parallel_mod, "_resolved", ParallelismSetting(8, None))
+    log = InMemoryEventLog()
+    emit_parallelism_warning_once(log, agent_id="step:plan/p")
+    assert [e for e in log.read() if e["type"] == "runner_warning"] == []
     reset_parallelism_cache()

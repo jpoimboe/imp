@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Any
 
 DEFAULT_MAX_PARALLEL_TASKS = 8
 _MIN_PARALLEL_TASKS = 1
@@ -56,6 +57,7 @@ def _resolve(raw: str | None) -> ParallelismSetting:
 
 
 _resolved: ParallelismSetting | None = None
+_warning_emitted = False
 
 
 def resolve_parallelism() -> ParallelismSetting:
@@ -72,7 +74,29 @@ def max_parallel_tasks() -> int:
 
 
 def reset_parallelism_cache() -> None:
-    """Test seam: drop the cached resolution so the next accessor call re-reads
-    env. Never called in production."""
-    global _resolved
+    """Test seam: drop the cached resolution AND the emit-once flag so the next
+    accessor call re-reads env and the warning can fire again. Never called in
+    production."""
+    global _resolved, _warning_emitted
     _resolved = None
+    _warning_emitted = False
+
+
+def emit_parallelism_warning_once(event_log: Any, agent_id: str | None) -> None:
+    """Emit the clamp `runner_warning` at most once per process (design Decision
+    5 — warned ONCE at startup). The first dispatch to reach here drives the
+    emit; later dispatches anywhere in the process are no-ops. Best-effort: a
+    None event_log (e.g. a test/legacy context) drops the warning but still
+    latches the once-flag."""
+    global _warning_emitted
+    if _warning_emitted:
+        return
+    _warning_emitted = True
+    setting = resolve_parallelism()
+    if setting.warning is None:
+        return
+    if event_log is not None:
+        event_log.append(
+            agent_id=agent_id, type="runner_warning",
+            payload={"message": setting.warning},
+        )
