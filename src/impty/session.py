@@ -37,6 +37,16 @@ _GRACE = 0.1  # 100 ms — Phase-2 best-effort sweep margin (latency/flake knob,
 _DRAIN_YIELD = 0.002  # 2 ms — gap the background drainer leaves between reads so a
 # tool-call thread waiting on the io lock is never starved by the drainer.
 
+# The default settle policy — the SINGLE source of truth. The MCP tool layer is a
+# thin pass-through that inherits these (it sets no policy of its own). A settling
+# program returns from wait_idle as soon as it's quiet for `idle`, so `hard` is
+# only a max-patience CEILING: it bites only when the program never goes quiet (a
+# live TUI / spinner) or a reaction is slow to first appear. Kept short so driving
+# an animating app doesn't block; a caller expecting a long wait passes a larger
+# `hard` (or, for send, a numeric `wait` = fixed settle seconds).
+DEFAULT_SETTLE_IDLE = 0.3
+DEFAULT_SETTLE_HARD = 3.0
+
 
 def _select_slice(remaining: float) -> float:
     """A small, strictly-positive select() slice: poll at most every _POLL s,
@@ -286,7 +296,8 @@ class TerminalSession:
         return _StepResult.DATA
 
     def wait_idle(
-        self, idle: float = 0.2, hard: float = 10.0, *, since: float = 0.0
+        self, idle: float = DEFAULT_SETTLE_IDLE, hard: float = DEFAULT_SETTLE_HARD,
+        *, since: float = 0.0,
     ) -> bool:
         """Block until the child produces output and then goes quiet for `idle`
         seconds (or exits, or `hard` elapses), feeding everything to pyte.

@@ -124,6 +124,38 @@ def test_imp_to_responses_user_with_tool_results_fans_out() -> None:
     assert "bad" in out[1]["output"]
 
 
+def test_imp_to_responses_text_co_riding_with_tool_results_is_kept() -> None:
+    # On resume, balance_success_on_resume builds a single user message that
+    # carries the synthesized complete_step tool_result AND the reviewer/gate
+    # feedback (plus the resume-durability note) as co-riding TextBlocks. The
+    # function_call_output(s) must still be emitted, but the trailing text must
+    # NOT be dropped -- it has to reach the model as a follow-on user message.
+    msg = Message(
+        role="user",
+        content=(
+            ToolResultBlock(tool_use_id="c1", content="previous output recorded"),
+            TextBlock(text="GATE FAILED: re-run the linter"),
+        ),
+    )
+    out = _imp_to_responses_input([msg])
+    assert out[0] == {"type": "function_call_output",
+                      "call_id": "c1", "output": "previous output recorded"}
+    assert out[-1] == {"type": "message", "role": "user",
+                       "content": [{"type": "input_text",
+                                    "text": "GATE FAILED: re-run the linter"}]}
+
+
+def test_imp_to_responses_tool_results_without_text_emit_no_message() -> None:
+    # Guard the fix: a tool-result-only user message must NOT gain a spurious
+    # empty input_text message.
+    msg = Message(
+        role="user",
+        content=(ToolResultBlock(tool_use_id="c1", content="ok"),),
+    )
+    out = _imp_to_responses_input([msg])
+    assert out == [{"type": "function_call_output", "call_id": "c1", "output": "ok"}]
+
+
 def test_responses_tool_schema_is_flat() -> None:
     schema = OutputSchema(
         fields=(
