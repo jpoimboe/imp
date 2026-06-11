@@ -32,6 +32,27 @@ _SIGINT_CHILD = (
 )
 
 
+# A full-screen-ish child that NEVER goes quiet: after a brief READY pause (so
+# start()'s wait_idle settles), it repaints every 20ms forever. Reacts to 'x'
+# (-> GOT-X marker) and 'q' (exit). Drives the "animating app" settle behaviour.
+_ANIMATING_CHILD = (
+    "import os, sys, select, time, tty\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(0.4)\n"                       # let start() settle on READY
+    "hit = b''\n"
+    "end = time.time() + 30\n"
+    "while time.time() < end:\n"
+    "    r, _, _ = select.select([sys.stdin], [], [], 0)\n"
+    "    if r:\n"
+    "        c = os.read(sys.stdin.fileno(), 1)\n"
+    "        if c == b'x': hit = b'GOT-X'\n"
+    "        elif c == b'q': break\n"
+    "    os.write(1, b'\\rtick ' + hit + b'   ')\n"
+    "    time.sleep(0.02)\n"
+)
+
+
 def _can_pty() -> bool:
     try:
         import pty
@@ -122,34 +143,37 @@ def test_view_returns_current_screen_by_default_and_full_on_demand() -> None:
 
 @pytest.mark.skipif(not _can_pty(), reason="pty not available")
 def test_send_numeric_wait_settles_a_fixed_time_on_an_always_animating_app() -> None:
-    # An app that repaints every 20ms NEVER goes quiet, so wait=True would block
-    # the full ~15s settle cap on every keystroke (a live TUI / spinner). A
-    # numeric wait settles a FIXED duration instead — long enough for the reaction
-    # to render — and returns promptly. The child stays quiet briefly after READY
-    # so start()'s own wait_idle settles before the animation begins.
-    prog = (
-        "import os, sys, select, time, tty\n"
-        "tty.setraw(sys.stdin.fileno())\n"
-        "os.write(1, b'READY\\r\\n')\n"
-        "time.sleep(0.4)\n"                       # let start() settle on READY
-        "hit = b''\n"
-        "end = time.time() + 30\n"
-        "while time.time() < end:\n"
-        "    r, _, _ = select.select([sys.stdin], [], [], 0)\n"
-        "    if r:\n"
-        "        c = os.read(sys.stdin.fileno(), 1)\n"
-        "        if c == b'x': hit = b'GOT-X'\n"
-        "        elif c == b'q': break\n"
-        "    os.write(1, b'\\rtick ' + hit + b'   ')\n"
-        "    time.sleep(0.02)\n"
-    )
-    mcp_mod.start([sys.executable, "-c", prog])
+    # An app that repaints every 20ms NEVER goes quiet, so wait=True blocks the
+    # whole settle cap on every keystroke (a live TUI / spinner). A numeric wait
+    # settles a FIXED duration instead — long enough for the reaction to render —
+    # and returns promptly.
+    mcp_mod.start([sys.executable, "-c", _ANIMATING_CHILD])
     try:
         t = time.monotonic()
         screen = mcp_mod.send("x", wait=0.5)         # fixed 0.5s settle
         dt = time.monotonic() - t
         assert "GOT-X" in screen                     # the reaction rendered
-        assert dt < 5.0                              # NOT the ~15s wait=True cap
+        assert dt < 3.0                              # NOT a full settle-cap block
         assert mcp_mod.send("q", wait=False) == "[sent]"   # bool path unchanged
+    finally:
+        mcp_mod.stop()
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+def test_default_settle_cap_is_short_not_fifteen_seconds() -> None:
+    # The settle policy lives in TerminalSession (DEFAULT_SETTLE_HARD); the MCP
+    # tools inherit it, they don't set their own. On a never-quiet app the default
+    # wait() returns at the (short) hard ceiling — guards against the cap creeping
+    # back up to the old 15s, and against the MCP layer re-introducing its own.
+    from impty.session import DEFAULT_SETTLE_HARD
+
+    assert DEFAULT_SETTLE_HARD <= 5.0                # policy stays responsive
+    mcp_mod.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        t = time.monotonic()
+        mcp_mod.wait()                               # no args -> inherit the default cap
+        dt = time.monotonic() - t
+        assert dt < DEFAULT_SETTLE_HARD + 1.5        # capped near the default, not 15s
+        mcp_mod.send("q", wait=False)
     finally:
         mcp_mod.stop()

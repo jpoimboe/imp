@@ -21,7 +21,7 @@ with TerminalSession(["imp", "new", "myproj"], cols=80, rows=24) as s:
 
 ## API
 
-- `wait_idle(idle=0.2, hard=10.0) -> bool` — read until quiet; `False` on hard timeout.
+- `wait_idle(idle=0.3, hard=3.0) -> bool` — read until quiet; `False` on hard timeout. `hard` is a max-patience ceiling (a settling program returns at `idle`); it only bites on a never-quiet app. Defaults are `DEFAULT_SETTLE_IDLE`/`DEFAULT_SETTLE_HARD`, the single source of truth the MCP tools inherit.
 - `run_to_completion(hard=60.0) -> int` — drive the child to exit, draining ALL remaining output into pyte first; returns the exit code, raises `TimeoutExpired` on hard timeout (child still alive). Use this (not `wait()`) when the child floods after your last `send()`.
 - `send(bytes | str)` — raw keystrokes to the program. `\x03` (Ctrl-C) is faithful: a real `SIGINT` to the child's process group in cooked mode (the controlling terminal is set up at spawn), a raw byte in raw mode (the app makes its own `KeyboardInterrupt`), exactly like a real terminal.
 - `send_signal(sig=signal.SIGINT)` — deliver a real signal directly to the child's process group, regardless of tty mode (cooked or raw). The deterministic escape hatch when you don't want to depend on tty mode; a no-op once the child has exited. Reaches only the child's process group — a grandchild that `setsid()`'d into its own session is not signalled, exactly like a real Ctrl-C.
