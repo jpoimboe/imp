@@ -140,6 +140,48 @@ def test_resume_accepts_merge_blocked_status(tmp_path, monkeypatch) -> None:
     assert stub_called, "run_change was never invoked — merge_blocked was rejected early"
 
 
+def test_resume_accepts_crashed_running_status(tmp_path, monkeypatch) -> None:
+    """A hard-killed run leaves status='running' on disk with its ProjectLock
+    freed by the OS. _async_cmd_resume must let 'running' through the status
+    guard to the lock acquire (which adjudicates: a FREE lock = crashed =
+    recoverable; a live holder still trips LockHeld). Before the fix the guard
+    refused any 'running' outright with rc=2 'nothing to resume', stranding the
+    crashed run — even though `imp status`/the picker now offer it as errored."""
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.executor import RunResult
+
+    # No lock file written → ProjectLock acquires freely, i.e. the crashed case.
+    _make_change_worktree(tmp_path, "crashed", "crashed", status="running")
+
+    stub_called = []
+
+    async def fake_run_change(change, **kwargs):
+        stub_called.append(True)
+        kwargs["on_event"]({"id": "r1", "agent_id": None, "type": "step_started",
+                            "payload": {"step": "spec", "kind": "agent", "phase": "spec",
+                                        "model": "m", "provider": "anthropic"}})
+        return RunResult.COMPLETED
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_change", fake_run_change)
+
+    buf = io.StringIO()
+    args = argparse.Namespace(token="crashed")
+    with redirect_stdout(buf):
+        rc = anyio.run(m._async_cmd_resume, args)
+
+    assert rc == 0, (
+        f"a crashed 'running' run was refused by the status guard (rc={rc}); "
+        "it must be resumable"
+    )
+    assert stub_called, "run_change was never invoked — the 'running' guard refused it"
+
+
 # ── Task-18: CLI-integration tests migrated from test_cli_log_render.py ──────
 
 
