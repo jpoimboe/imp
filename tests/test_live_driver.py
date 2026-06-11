@@ -808,3 +808,50 @@ def test_driver_has_no_question_without_a_solicit() -> None:
     drv, out = _driver()
     drv.on_event(ev("1", "change_created", change_id=1, title="x"))
     assert drv.take_pending_question() == ""
+
+
+def test_quiet_continue_is_silent_live_and_matches_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="step:spec/spec",
+           raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
+        ev("4", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "step_started", step="spec-verify-commit", kind="script",
+           phase="spec", quiet=True),
+        ev("6", "step_completed", step="spec-verify-commit", kind="script",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert not any("spec-verify-commit" in ln for ln in _body(out))
+    assert _body(out) == _render_body(events)   # live == imp log, line for line
+
+
+def test_quiet_forward_goto_arrow_matches_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="fast-path-spec-gate", kind="branch",
+           phase="spec", quiet=True),
+        ev("3", "step_completed", step="fast-path-spec-gate", kind="branch",
+           action={"verb": "goto", "target": "plan-writer", "resume": False},
+           var_mutations={}),
+        ev("4", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("5", "llm_response", agent_id="step:plan/plan-writer",
+           raw={"content": [{"type": "text", "text": "planning"}]}, usage={}),
+        ev("6", "step_completed", step="plan-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any(ln.strip() == "→ plan" for ln in body)
+    assert not any("fast-path-spec-gate" in ln for ln in body)
+    assert body == _render_body(events)
