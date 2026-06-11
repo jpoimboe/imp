@@ -71,6 +71,13 @@ def test_subagent_prompt_forbids_turn_ending_question(name: str) -> None:
             f"{name}: subagents have no user channel — remove {banned!r}")
 
 
+def test_spec_writer_infers_intent_from_pasted_context() -> None:
+    text = _read("spec-writer.md")
+    assert "context instead of intent" in text
+    assert "wait_for_user" in text
+    assert "infer" in text.lower()
+
+
 @pytest.mark.parametrize("name", INTERACTIVE_STEP_FILES)
 def test_interactive_steps_exist_and_are_exempt(name: str) -> None:
     # Guard the exemption: if these files are renamed/removed, this test fails

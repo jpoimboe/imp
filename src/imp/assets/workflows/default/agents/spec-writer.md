@@ -28,6 +28,14 @@ read any files, do NOT explore the codebase, do NOT propose any design before
 the user has answered. The reply comes back as the tool result and carries the
 intent for the change.
 
+**If the user hands you context instead of intent.** Sometimes the opening reply
+is a pasted log, a design-doc path, an error, or other material rather than a
+sentence describing what to build. Don't blankly re-ask. Infer your best read of
+intent from what they gave you (a pasted `imp log` for a prior change usually
+means "write/continue the spec for that change"), state it in one sentence, and
+confirm via `wait_for_user` with a specific yes/no-able proposal — not "what do
+you want?".
+
 **Explore context once intent is in hand.** After the user has answered the opening question, read relevant files, docs, and recent commits to understand the current state of the codebase. This prevents asking follow-ups the code already answers.
 
 **One question at a time.** Do not stack multiple questions in a single message. If a topic needs more exploration, break it into multiple turns.
