@@ -94,6 +94,10 @@ class RunState:
     awaiting_user: bool = False
     awaiting_prompt: str = ""
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
+    # In-flight `task` dispatch count (design §2 drain gate). Incremented before
+    # the dispatch await and decremented in finally on every exit; the runner
+    # defers a captured suspension / awaiting_user re-raise until this is 0.
+    inflight_task_dispatches: int = 0
 
 
 def _cap_error_text(cap: int) -> str:
@@ -171,6 +175,9 @@ async def dispatch_tool(
         )
         state.minted_task_ids.append(
             (tc_ev["id"], _args_fingerprint(dict(args))))
+        # Drain counter: a capturing child decrements ITSELF in finally, so it is
+        # never counted as a draining sibling (design §2 drain gate).
+        state.inflight_task_dispatches += 1
         try:
             return await dispatch_task(
                 ctx,
@@ -186,6 +193,8 @@ async def dispatch_tool(
             text = f"{type(exc).__name__}: {exc}"
             state.runtime_errors.append(text)
             return text
+        finally:
+            state.inflight_task_dispatches -= 1
     try:
         raw = await tool.async_invoke(ctx, args)
     except FatalToolError as fte:

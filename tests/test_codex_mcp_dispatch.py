@@ -449,3 +449,52 @@ def test_args_fingerprint_distinguishes_different_args() -> None:
     a = _args_fingerprint({"subagent_name": "impl", "task_description": "review A"})
     b = _args_fingerprint({"subagent_name": "impl", "task_description": "review B"})
     assert a != b
+
+
+def test_task_dispatch_increments_inflight_during_and_clears_after(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """The in-flight counter reads 1 while the dispatch await is live and drops
+    back to 0 once it returns — the drain gate's settle signal (AC25)."""
+    from imp.engine.state import InMemoryEventLog
+    state = RunState(cap=10)
+    seen: dict[str, int] = {}
+
+    async def _stub(ctx: Any, subagent_name: str, task_description: str,
+                    **_kw: Any) -> str:
+        seen["during"] = state.inflight_task_dispatches
+        return "ok"
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    out = asyncio.run(dispatch_tool(
+        tool=make_task_tool(),
+        args={"subagent_name": "impl", "task_description": "do it"},
+        ctx=ctx, state=state))
+    assert out == "ok"
+    assert seen["during"] == 1
+    assert state.inflight_task_dispatches == 0
+
+
+def test_task_dispatch_decrements_inflight_on_suspension_capture(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """A child that captures a suspension decrements its own in-flight slot in
+    finally, so it is NOT counted as a draining sibling (AC25)."""
+    from imp.engine.state import InMemoryEventLog
+    state = RunState(cap=10)
+
+    async def _stub(ctx: Any, subagent_name: str, task_description: str,
+                    **_kw: Any) -> str:
+        raise SubagentSuspended("paused")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    asyncio.run(dispatch_tool(
+        tool=make_task_tool(),
+        args={"subagent_name": "impl", "task_description": "x"},
+        ctx=ctx, state=state))
+    assert state.subagent_suspended is not None
+    assert state.inflight_task_dispatches == 0
