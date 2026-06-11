@@ -18,11 +18,18 @@ Only the providers import this module.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
+
 from imp.agents.runner import ToolResultBlock, ToolUseBlock
-from imp.agents.subagents import dispatch_task, raise_if_suspended
+from imp.agents.subagents import (
+    SubagentSuspended,
+    dispatch_task,
+    raise_if_suspended,
+)
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import StepComplete
@@ -157,3 +164,96 @@ async def dispatch_one_tool_use(
     tool_results.append(block)
     elog.append_tool_result(agent_id=aid, block=block)
     return None
+
+
+async def dispatch_task_batch(
+    *,
+    ctx: Any,
+    elog: Any,
+    aid: str,
+    task_tus: list[ToolUseBlock],
+    tool_results: list[ToolResultBlock],
+    state: TurnState,
+    ceiling: int | None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Dispatch every `task` tu of one turn CONCURRENTLY in an anyio task group
+    (design §1). Sweep ONCE before the batch (children sweep their own
+    registries); claim ceiling slots synchronously in document order
+    (over-ceiling tus get the backfill is_error tool_result event with NO
+    tool_call event — today's result-without-call shape); append each dispatched
+    tu's tool_call event before the group starts; run the children; append each
+    child's tool_result at its own completion. Results are assembled into
+    tool_results in DOCUMENT order (keyed off task_tus, not completion arrival).
+    After the group settles, yield one tool_heartbeat per task tu (dispatched AND
+    backfilled).
+
+    Failure isolation (Decision 3): a child's ordinary exception becomes its own
+    is_error tool_result. A SubagentSuspended re-raises through the group and
+    unwinds the whole turn; the single-exception group anyio wraps it in is
+    unwrapped at the batch boundary so upstream consumers (drive_invocation
+    catches by bare type) see today's exception forms. (Part 4 replaces the
+    re-raise with capture-into-slot so siblings settle first.)
+    """
+    # Sweep once before the batch — the parent's registry, not the children's
+    # (each child sweeps its own fresh ToolContext inside its own drive loop).
+    await _bg._sweep_bg(ctx)
+
+    dispatched: list[tuple[ToolUseBlock, str]] = []
+    results: dict[str, ToolResultBlock] = {}
+    for tu in task_tus:
+        if ceiling is not None and state.tool_calls_used >= ceiling:
+            err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
+            block = ToolResultBlock(tu.id, err_text, is_error=True)
+            results[tu.id] = block
+            elog.append_tool_result(agent_id=aid, block=block)
+            state.ceiling_tripped = True
+        else:
+            state.tool_calls_used += 1
+            tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
+            dispatched.append((tu, tc_ev["id"]))
+
+    async def _run_child(tu: ToolUseBlock, tcid: str) -> None:
+        try:
+            result_str = await dispatch_task(
+                ctx, tu.input["subagent_name"], tu.input["task_description"],
+                tool_call_event_id=tcid, tier=tu.input.get("tier"),
+            )
+        except SubagentSuspended:
+            # A subagent-origin pause must unwind the whole turn (Decision 4).
+            raise
+        except Exception as e:
+            err_text = f"{type(e).__name__}: {e}"
+            block = ToolResultBlock(tu.id, err_text, is_error=True)
+            results[tu.id] = block
+            elog.append_tool_result(agent_id=aid, block=block)
+            return
+        block = ToolResultBlock(tu.id, result_str)
+        results[tu.id] = block
+        elog.append_tool_result(agent_id=aid, block=block)
+
+    try:
+        async with anyio.create_task_group() as tg:
+            for tu, tcid in dispatched:
+                tg.start_soon(_run_child, tu, tcid)
+    except BaseExceptionGroup as eg:
+        # anyio wraps even a single child failure in a group; no upstream
+        # consumer handles ExceptionGroup. Unwrap the single-exception case so
+        # the classifier sees today's exception forms; genuinely-multiple
+        # simultaneous failures re-raise as-is (a genuinely novel failure).
+        if len(eg.exceptions) == 1:
+            raise eg.exceptions[0] from None
+        raise
+
+    # Assemble in document order (NOT completion order): the API pairs by id, but
+    # the assembled message order is imp's to choose and document order is the one
+    # §3's reconstruction mirrors.
+    for tu in task_tus:
+        b = results.get(tu.id)
+        if b is not None:
+            tool_results.append(b)
+
+    # Heartbeat contract: exactly one per task tu, after the batch (including
+    # over-ceiling backfilled tus); the generator cannot yield while suspended in
+    # the group await, so they land together here.
+    for _ in task_tus:
+        yield {"type": "tool_heartbeat", "payload": {}}
