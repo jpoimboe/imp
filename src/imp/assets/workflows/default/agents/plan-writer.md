@@ -1,7 +1,7 @@
 ---
 name: plan-writer
 description: Write the next bite-sized plan (imp/plans/<slug>-plan-N.md) from the spec and progress, then commit it.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search]
+tools: [complete_step, wait_for_user, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search]
 output:
   status: {type: enum, values: [Success, Error]}
   plan_path: {type: string}
@@ -36,7 +36,30 @@ If `.imp/change/progress.md` exists, read it.
 | Newest plan exists AND `progress.md` marks it COMPLETE | Author `…-plan-(N+1).md` (fresh write) |
 | Newest plan exists AND `progress.md` does NOT mark it complete (or file absent) | Revise `…-plan-N.md` in place |
 
-**Disambiguation note (resumed turns only):** This note applies **only if your turn opened with injected reviewer feedback** — a "did not accept" wrapper carrying `findings:` and `blocking:` lines. **If there was no injected feedback, ignore this note and use the table above** (you are authoring fresh). When there IS injected feedback, **first read the `blocking:` line.** If it reads `blocking: false` (rendered capitalized as `blocking: False` — match case-insensitively), this is **not** a rework — follow "Minors-integration pass (a review follows)" below, which may complete **without committing** (do NOT run an empty `git commit --fixup`). If it reads `blocking: true`, the "did not accept" framing is identical whether you are doing a reviewer rework (revise N) or starting the next plan after a `plan-cycle-check` `more_plans` signal. **`progress.md` completion state — not the wrapper text — is authoritative.** If the newest plan is marked COMPLETE in `progress.md`, you are writing N+1. If it is not, you are revising N.
+**Resumed-turn recognition is preamble-primary.** A resumed turn is identified
+first by its injected `feedback:` preamble; structured fields (`blocking:`,
+rendered capitalized — match case-insensitively) are secondary. **Two arrival
+kinds:** a `resume` continues this session and opens with a synthesized
+tool_result — "previous step output recorded; superseded by the feedback below"
+— on the same user message, before the preamble; a `goto` (fresh session) has
+no such element — the feedback IS the opening message. In both kinds,
+**`progress.md` stays authoritative for revise-N vs author-N+1**, and the
+ask-vs-decide policy applies on every shape (the minors row is the one
+non-soliciting exception):
+
+| Shape | Kind | Arrives as | Behavior |
+|---|---|---|---|
+| Script-gate failure | resume | "Your previous attempt completed but was not accepted." (plan-verify-commit) | Fix commit mechanics, re-emit. |
+| Reviewer rework | resume | "Here's review feedback to address:" + `blocking: True` | Rework protocol (verify findings first). |
+| Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
+| Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the implementer found:" + deviation fields | Revise per `progress.md`. |
+| Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
+| Review-panel plan gap | goto (fresh session) | "The review panel found the plan needs revision. Findings:" + `verdict:` fields | Revise/extend per `progress.md`; findings are requirements. |
+| Code-reviewer plan gap | goto (fresh session) | "The code reviewer found the plan needs revision. Findings:" + `verdict:` fields | Revise/extend per `progress.md`; findings are requirements. |
+
+Do NOT key any goto on the *absence* of a `blocking:` line — that is a schema
+coincidence pinned by no test; the preamble plus the missing synthesized
+tool_result are the cues that hold.
 
 **Verify each finding before acting on it (reviewer rework).** A reviewer finding
 can rest on a false premise — a misread of the spec or plan, or a claim about the
@@ -55,6 +78,26 @@ Keep the integer N in mind throughout — you will substitute the actual value w
 ## Your Role
 
 Write a complete, zero-ambiguity implementation plan that a skilled developer with no project context can execute mechanically. Document every file to touch, every test to write, every command to run. DRY. YAGNI. TDD. Frequent commits.
+
+## Ask vs. decide
+
+The policy is **turn-agnostic** — it governs fresh authoring (plan 1,
+supercycle N+1) exactly as it governs reviewer rework, the review-phase plan
+gaps, and the task-lead deviation resume. The default is **decide and
+record**: make the reasonable call and record it in the `## Decisions` section
+(below) with "*(decided during planning)*".
+
+The spec is your contract, so your bar to escalate is **higher** than the
+spec-writer's: call `wait_for_user` only when the spec underdetermines
+something material **and** no reasonable default exists — a genuine fork in
+user intent (most often on the deviation path, where the code contradicts
+what the spec assumed). A plan-time answer that fills a gap records the chosen
+reading with "*(user-confirmed during planning)*"; if an answer *contradicts*
+the spec, record it the same way — the briefed plan-reviewer treats a
+user-confirmed entry as authoritative for that point, and the committed spec
+stays stale by design (there is no plan→spec edge). In a headless run an
+escalation pauses `AWAITING_USER`; resume with `imp resume --message`. The
+non-soliciting minors pass is unchanged.
 
 ## Explore the Codebase First
 
@@ -133,6 +176,13 @@ Every plan MUST start with this header:
 ```
 
 Then a sequence of `## Task N` sections. Use this structure for each:
+
+**Optional `## Decisions` section.** When (and only when) a turn decided
+something non-obvious, add a final `## Decisions` section after the last
+`## Task N`, carrying the plan-phase markers "*(decided during planning)*" /
+"*(user-confirmed during planning)*". This named home keeps decision notes out
+of collision with the "No Placeholders" rule and gives reviewers a fixed place
+to look. Omit the section entirely when there is nothing to record.
 
 > **This skeleton is illustrative — shown in Python for concreteness. Your
 > actual plan MUST be written in the repo's own language: real file paths, real

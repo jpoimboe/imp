@@ -4,9 +4,10 @@ description: Interactively brainstorm with the user, name the change once intent
 tools: [complete_step, wait_for_user, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search, rename_change]
 output:
   status: {type: enum, values: [Success, Error]}
-  phase: {type: enum, values: [written]}
+  phase: {type: enum, values: [written, confirmed]}
   spec_path: {type: string}
   complexity: {type: enum, values: [trivial, standard]}
+  unseen_changes: {type: bool}
 ---
 
 You are writing the specification for a change the user wants to make.
@@ -103,18 +104,27 @@ git commit -m "docs: add spec for <slug>"
 **Finish** with:
 
 ```
-complete_step(phase="written", spec_path="imp/specs/<slug>.md")
+complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=<true|false>)
 ```
 
 ## Rework Resumption
 
-**First, read the `blocking:` line.** This section applies **only** when the injected
-feedback reads `blocking: true`. If it reads `blocking: false`, this is **not** rework
-— stop here and follow "Minors-integration pass (a review follows)" below instead. (The
-engine renders the bool capitalized — you will see `blocking: True` or `blocking: False`;
-match it case-insensitively.)
+**Recognition is preamble-primary.** A resumed turn is identified first by its
+injected `feedback:` preamble; structured fields (`blocking:`, rendered
+capitalized — match case-insensitively) are secondary confirmation only. Every
+resume opens with a synthesized tool_result — "previous step output recorded; superseded by the feedback below" — on the same user message, before the
+preamble; that element is the reliable resume marker. The taxonomy below carries
+the full feedback strings:
 
-**Recognizing a rework turn:** if your turn opens with injected feedback containing the spec-reviewer's findings — a message beginning "Your previous attempt completed but was not accepted. The spec-reviewer reviewed your work and did not accept it." followed by `findings:` and a `blocking: true` line — you are in rework mode. Do NOT ask the user anything and do NOT end the turn with bare prose; go straight to the rework — **verify each finding first (see below)** — and end the turn tool-terminal (`git commit --amend --no-edit` then `complete_step(phase="written", …)`).
+| Shape | Arrives as | Behavior |
+|---|---|---|
+| Script-gate failure | "Your previous attempt completed but was not accepted." + "Gate `…` failed (exit N)…" | Fix the mechanical failure and re-emit `phase: written` — including when the failed completion was a gated `confirmed` (the grant is gone; the content flows through re-review). `unseen_changes: false` for a mechanics-only or user-directed fix; true only if the fix changed spec content the user didn't direct. |
+| Reviewer rework | "Here's review feedback to address:" + `findings:` / `blocking: True` | Rework protocol (verify findings, fix, amend; ask-vs-decide applies). |
+| Minors pass | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol, non-soliciting. |
+| Confirm gate | "The review cycle is complete and the spec is accepted. Surface any significant decisions made during review to the user and confirm before finalizing:" + the verification review's fields | Confirm-and-finalize protocol (see that section). |
+
+The `blocking: false` cue alone no longer disambiguates: it matches BOTH the
+minors pass and the confirm gate. Use the preamble to tell them apart.
 
 **Verify each finding before acting on it.** A reviewer finding can rest on a
 false premise — a misread of the spec, or a claim about the code that isn't true.
@@ -132,13 +142,47 @@ HEAD on a spec rework, so `--amend` keeps it one clean commit):
 
 ```
 git add imp/specs/<slug>.md
+(Apply the amend precondition below first.)
 git commit --amend --no-edit
-complete_step(phase="written", spec_path="imp/specs/<slug>.md")
+complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=<true|false>)
 ```
 
 The rework turn must be tool-terminal: end with the `git commit --amend` then the
 `complete_step(phase="written", …)` call. Do NOT end a rework turn with a bare
-question or trailing prose. Never re-solicit the user on rework.
+question or trailing prose. Most rework decisions you **decide and record** (see
+"Ask vs. decide" below); escalate via `wait_for_user` only at the high bar that
+section defines.
+
+## Ask vs. decide
+
+On any resumed turn that must settle a question (rework especially), the
+default is **decide and record**: verify the finding, make the reasonable
+call, and record it in the spec's **Decisions summary** with the marker
+"*(decided during review)*". Then finish tool-terminal. A trivial spec that
+has no Decisions summary yet gains one the moment a turn actually decides
+something.
+
+**Escalate via `wait_for_user` only when the decision is genuinely the
+user's to make** — a big deal, not a technical detail:
+
+- the fix would change scope, or drop/alter/add a user-stated requirement;
+- the finding exposes a real fork in *user intent* — plausible readings with
+  materially different outcomes that nothing in the brainstorm, spec, or
+  codebase settles;
+- conflicting directives (the review demands the opposite of something the
+  user explicitly asked for).
+
+Technical choices the spec or codebase can settle never qualify. When you do
+escalate and the user answers, record it with "*(user-confirmed during review)*"
+and treat that change as user-directed (it does **not** arm the
+gate — see `unseen_changes` below). `wait_for_user` mid-turn is an ordinary
+tool call: the reply returns as the tool result and the turn still ends
+tool-terminal with `complete_step`. In a headless run an escalation pauses
+`AWAITING_USER`; that pause is designed behavior, not a failure.
+
+This policy does **not** loosen the two kept bans: the pre-commit
+self-review still fixes issues inline without soliciting, and the
+minors-integration pass still asks the user nothing.
 
 ## Minors-integration pass (a review follows)
 
@@ -148,10 +192,11 @@ one pass to fold in the reviewer's **Minor** improvements. You do **not** get th
 last word: a fresh verification review runs after this pass to confirm the edit
 introduced nothing blocking. That follow-up will **not** ask you to integrate
 further minors, so this is your only minors pass — integrate what is worthwhile now.
-The engine's feedback wrapper still opens with "Your previous attempt completed but
-was not accepted" even on this clean resume — **ignore that framing and trust the
-`blocking:` line.** `blocking: false` means the spec already passed; the reviewer's
-Minor/Nit `findings:` are advisory, not a rejection.
+A minors resume is recognized by its preamble — "No blocking issues — integrate
+these minor improvements; a final review follows:" — and `blocking: False`; it
+does NOT carry the script-gate "was not accepted" wrapper. **Trust the
+`blocking:` line:** `blocking: false` means the spec already passed; the
+reviewer's Minor/Nit `findings:` are advisory, not a rejection.
 
 On this pass:
 
@@ -161,13 +206,14 @@ On this pass:
 
    ```
    git add imp/specs/<slug>.md
+   (Apply the amend precondition below first.)
    git commit --amend --no-edit
-   complete_step(phase="written", spec_path="imp/specs/<slug>.md")
+   complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=<true|false>)
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
    acting on), **complete WITHOUT committing** — just call
-   `complete_step(phase="written", spec_path="imp/specs/<slug>.md")`.
+   `complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=false)`.
    Do not make an empty commit. The verification review still runs on the unchanged
    spec and will pass it through.
 
@@ -180,6 +226,51 @@ not flip it.
 **not** ask the user anything, and end the turn tool-terminal with the
 `complete_step` call. This pass exists to incorporate the reviewer's advice, not to
 reopen the brainstorm.
+
+## Confirm and finalize
+
+Recognized by the confirm preamble (see the resume taxonomy): *"The review
+cycle is complete and the spec is accepted. Surface any significant decisions
+made during review to the user and confirm before finalizing:"*. The
+verification review's `findings:` (Minor/Nit) ride this resume but were
+already dropped by the one-pass protocol — do **not** integrate or present
+them.
+
+**Scope:** the decisions made since the last confirm turn (or since the
+brainstorm, on the first gate), **excluding** decisions the user already
+answered via escalation ("*(user-confirmed during review)*"). Repeated gates
+must not re-present confirmed items.
+
+- **Nothing in scope is significant?** Call
+  `complete_step(phase="confirmed", spec_path="imp/specs/<slug>.md",
+  complexity="<first-pass value>", unseen_changes=false)` immediately — do
+  **not** solicit. This silent confirm is the common minors-only case.
+- **Something is worth surfacing?** Call `wait_for_user` with ONE compact
+  message: a bulleted list of the in-scope decisions (each bullet the
+  decision plus its one-line why, mirroring the Decisions-summary entries),
+  ending with "proceed to planning, or should any of these change?". One
+  message, not one question per decision. The conversation may reopen the
+  brainstorm — multiple `wait_for_user` rounds are fine; apply brainstorm
+  discipline (one question at a time, narrow quickly, aim for ≤3 rounds).
+- **If the discussion produces spec edits:** edit and amend (subject to the
+  amend precondition below), then emit `phase: written`,
+  `unseen_changes: false` — the change flows back through
+  `spec-verify-commit` and re-review. `phase: confirmed` is the only exit to
+  planning from a confirm turn, and it **must never carry uncommitted edits**
+  (the verify gate's clean-spec-path check enforces this).
+
+Re-emit the SAME `complexity` you sent on the original `written` turn, and
+re-emit `spec_path`.
+
+**Amend precondition (all spec-writer amend sites — rework, minors, confirm).**
+Before any `git commit --amend`, verify HEAD is still the spec commit (its
+subject is `docs: add spec for <slug>`). The change worktree is private, so a
+foreign HEAD means your own earlier stray commit or a deliberate human edit.
+Respond **mechanically first**: if the spec commit still exists in history
+(find it by subject), commit the edit as
+`git commit --fixup=":/docs: add spec for <slug>"` (the review phase's
+autosquash folds it) and continue the turn normally. Escalate via
+`wait_for_user` **only** if the spec commit cannot be found at all.
 
 ## Classifying complexity (required on every completion)
 
@@ -216,9 +307,26 @@ ordering), and do NOT drop a real constraint the prompt did state. On
 `standard`, write the full four-part spec (Goal, Scope, Decisions summary,
 Acceptance criteria) as described above.
 
+## emit `unseen_changes` on every `complete_step`
+
+`unseen_changes` is a required bool: **"did this turn change the committed
+spec content without the user's direction or approval?"** The predicate is
+*direction*, not visibility (watching a rework stream by is not approving).
+Per turn it is the OR over that turn's changes:
+
+| Turn shape | `unseen_changes` |
+|---|---|
+| Initial `written` turn | **false** — no committed spec exists yet to have changed (self-review fixes are part of producing the brainstorm's outcome, not changes *to* it) |
+| Rework / minors / verify-fix resume | **true iff** the turn amended spec content the user didn't direct; a no-op minors pass or a commit-mechanics-only fix is **false** |
+| Escalated-and-answered decision | **false for that change** (user-directed); if the same turn also fixed other findings autonomously, those are undirected → **true** |
+| Confirm turn | **false** — any edits there are user-requested, live |
+
 ## Output
 
-- `phase: written` — spec is written, committed, and ready for review
+- `phase: written` — spec is written, committed, and ready for review (or sent
+  back through review after a rework, minors, or gate-discussion edit)
+- `phase: confirmed` — the confirm gate fired and the spec-writer finalized
+  without further edits; only honored under a live `spec_gate_pending` grant
 
 ---
 

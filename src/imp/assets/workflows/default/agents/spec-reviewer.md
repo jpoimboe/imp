@@ -57,6 +57,11 @@ A load-bearing claim about existing code (a file path, a current behavior, a fun
 
 Approve (non-blocking) unless there are serious gaps that would lead to a flawed implementation.
 
+The Decisions summary may carry review markers — "*(decided during review)*" and
+"*(user-confirmed during review)*". These are an **expected** part of the spec's
+format (the audit trail of decisions made during review), **not** placeholder or
+meta-commentary defects — do not flag them.
+
 ## Output
 
 Report `findings` as classified prose, grouped by severity. If there are no issues, state that explicitly (e.g., "No findings. Spec is complete and ready for planning.").

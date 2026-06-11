@@ -58,6 +58,12 @@ A load-bearing claim about existing code (a file path, a line number, a current 
 
 Approve (non-blocking) unless there are serious gaps that would lead to a flawed or incomplete implementation.
 
+The plan may carry a final `## Decisions` section with markers "*(decided during
+planning)*" / "*(user-confirmed during planning)*". This is an **expected** part
+of the plan format (the decision audit trail), **not** a "No Placeholders"
+defect — do not flag it. Treat a "*(user-confirmed during planning)*" entry as
+authoritative for the point it records, even where it diverges from the spec.
+
 ## Output
 
 Report `findings` as classified prose, grouped by severity. If there are no issues, state that explicitly (e.g., "No findings. Plan is complete and ready for implementation.").

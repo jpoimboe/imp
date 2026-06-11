@@ -17,6 +17,9 @@ def _steps(wf):
 _BASE_VARS = {
     "fast_path": False, "ready_to_merge": False, "final_review": True,
     "spec_minors_integrated": False, "plan_minors_integrated": False,
+    "panel_done": False, "integration_needs_review": False,
+    "spec_confirm": True, "spec_unseen_changes": False,
+    "spec_gate_pending": False, "spec_gate_passed": False,
 }
 
 
@@ -125,13 +128,13 @@ def test_spec_fast_path_gate_precedes_reviewer_in_order() -> None:
     # the separate final-review gate is gone (the reviewer now owns termination);
     # the fast-path gate still precedes the reviewer
     assert "spec-final-review-gate" not in names
-    assert names.index("fast-path-spec-gate") < names.index("spec-reviewer")
+    assert names.index("spec-exit-gate") < names.index("spec-reviewer")
 
 
 def test_fast_path_spec_gate_skips_to_plan_writer() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
-    gate = _steps(wf)["fast-path-spec-gate"].rules[0]
+    gate = _steps(wf)["spec-exit-gate"].rules[1]   # rule 0 is now spec_gate_passed
     assert isinstance(gate.action, Goto) and gate.action.target == "plan-writer"
 
 
@@ -195,19 +198,24 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is False
-    assert m.var_mutations == {}
+    assert m.var_mutations == {"spec_unseen_changes": False}
 
 
 def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     rules = _steps(wf)["spec-writer"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"phase": "written", "complexity": "trivial", "status": "Success"})
+    vars_ = {**_BASE_VARS, "spec_unseen_changes": False,
+             "spec_gate_pending": False, "spec_gate_passed": False,
+             "spec_confirm": True}
+    m = evaluate_rules(rules, vars=vars_,
+                       output={"phase": "written", "complexity": "trivial",
+                               "status": "Success", "unseen_changes": False})
     assert m.var_mutations["fast_path"] is True
 
-    m2 = evaluate_rules(rules, vars=_BASE_VARS,
-                        output={"phase": "written", "complexity": "standard", "status": "Success"})
+    m2 = evaluate_rules(rules, vars=vars_,
+                        output={"phase": "written", "complexity": "standard",
+                                "status": "Success", "unseen_changes": False})
     assert m2.var_mutations["fast_path"] is False
 
 
@@ -438,6 +446,12 @@ def test_no_goto_spec_writer_edge() -> None:
     # drop the transcript and reintroduce the dependency Part A removes.
     assert "goto: spec-writer" not in wf
     assert "goto: spec_writer" not in wf
+
+
+def test_plan_writer_declares_wait_for_user() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    assert "wait_for_user" in wf.agents["plan-writer"].tools
 
 
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
