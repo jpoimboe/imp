@@ -357,7 +357,7 @@ class NarrativeBuilder:
         return self._current_burst
 
     def current_activity(self) -> Activity | None:
-        """Structured one-line description of current activity for the live status line (§3/§4); None when there is nothing to show."""
+        """Current activity for the live status line; None when idle."""
         running = [f for f in self._open_sub_by_event.values() if f.running]
         if running:
             label = running[0].current_activity()
@@ -651,6 +651,14 @@ def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[st
 def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     self._root.status = "running"
+    # Finalize the prior attempt's dangling folds (the unsettled subset; settled
+    # siblings already closed via their logged tool_results) as interrupted so
+    # they stop accumulating events and stop shadowing current_activity().
+    for fold in self._open_sub_by_event.values():
+        fold.running = False
+        fold.terminal_state = "interrupted"
+    self._open_sub_by_block.clear()
+    self._open_sub_by_event.clear()
     self._resuming = True                # open the re-entry window
 
 
@@ -920,7 +928,7 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
 def _take_subagent_fold(
     self: NarrativeBuilder, rid: str, id_ns: Any,
 ) -> tuple[SubagentFold | None, str]:
-    """Probe the id_ns namespace for rid's fold, removing it from both dicts; returns (fold, "matched") | (None, "unstamped") | (None, "stamped_miss")."""
+    """Probe the id_ns namespace for rid; remove from both dicts. Returns (fold, status)."""
     if id_ns == "event":
         fold = self._open_sub_by_event.get(rid)
     elif id_ns == "block":

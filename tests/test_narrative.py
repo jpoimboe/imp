@@ -1372,6 +1372,38 @@ def test_unstamped_legacy_result_closes_via_ordered_two_dict_probe() -> None:
     assert sub.outcome == '{"status":"Success"}'
 
 
+def test_workflow_resumed_finalizes_dangling_folds_as_interrupted() -> None:
+    # AC37: a suspended batch leaves the unsettled subset's folds open. On
+    # workflow_resumed they finalize as interrupted (stop running, terminal_state
+    # set), current_activity() is no longer shadowed by them, and the resumed
+    # turn's fresh task tool_calls open new running folds.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    step = b._step_stack[-1]
+    dangling = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert dangling.running is True                       # open at suspend
+
+    b.add(_ev("p1", "workflow_paused", interrupt_reason="interrupt"))
+    b.add(_ev("r1", "workflow_resumed"))
+    # Dangling fold finalized as interrupted (master leaves it running).
+    assert dangling.running is False
+    assert dangling.terminal_state == "interrupted"
+    # current_activity no longer shadowed by the dangling fold.
+    assert "task → reviewer" not in nv.activity_to_text(b.current_activity())
+
+    # Resumed turn re-enters the step and opens a fresh running fold.
+    b.add(_ev("st2", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="b9", name="task",
+              input={"subagent_name": "reviewer", "task_description": "again"}))
+    fresh = [c for c in b._step_stack[-1].children
+             if isinstance(c, nv.SubagentFold) and c.block_id == "b9"]
+    assert len(fresh) == 1 and fresh[0].running is True
+
+
 def test_current_activity_suffix_counts_extra_running_subagents() -> None:
     # AC40: one running fold → no suffix; two → "(+1 more subagent)"; three →
     # "(+2 more subagents)" (singular/plural). The named detail is the FIRST
