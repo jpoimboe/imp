@@ -63,6 +63,10 @@ class _FakeCoord:
         self._exit_event = exit_event
         self._esc_reader = None
         self.exit_reason = None
+        self.at_prompt_calls: list[bool] = []
+
+    def set_at_prompt(self, value: bool) -> None:
+        self.at_prompt_calls.append(value)
 
     def tty_quiesced(self):
         @contextlib.asynccontextmanager
@@ -104,8 +108,10 @@ async def test_exit_event_cancels_open_prompt(tmp_path: Path) -> None:
         await ask_line_with_slash(
             _BlockingPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
     # The synthesized KBI routes through D2's catch → request_exit (the
-    # pause-and-exit handoff the CLI arm finalizes).
-    assert coord.exit_reason == "sigint"
+    # pause-and-exit handoff the CLI arm finalizes). The reason is "ctrl-c" to
+    # match _reason_for_signal(SIGINT) and the _dispatch_signal exit routing, so
+    # the final headline reads `paused (ctrl-c)` consistently.
+    assert coord.exit_reason == "ctrl-c"
 
 
 @pytest.mark.anyio

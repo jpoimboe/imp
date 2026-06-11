@@ -138,6 +138,91 @@ def test_dispatch_signal_escalates_after_window_with_wedged_signal_pause() -> No
     assert esc_fired["v"] is True
 
 
+def test_dispatch_sigint_at_prompt_routes_to_exit_not_receiver() -> None:
+    """An out-of-band SIGINT while AT a prompt (handle_sigint=False so it lands
+    in the coordinator's loop handler, not as a prompt_toolkit KBI) must take the
+    exit path — identical to SIGTERM — NOT the receiver/signal_pause/runner path
+    (that is the DURING-A-RUN behavior)."""
+    import signal as _sig
+    coord = InterruptCoordinator()
+    coord.set_at_prompt(True)
+
+    exited = {"reason": None}
+    coord.set_exit_hook(lambda reason: exited.__setitem__("reason", reason))
+
+    # A receiver send-stream is wired but must NOT be touched on this path.
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    coord._dispatch_signal(_sig.SIGINT)
+
+    assert exited["reason"] == "ctrl-c"          # exit hook fired with ctrl-c
+    assert coord.should_pause is True
+    assert coord.pause_reason == "ctrl-c"
+    assert sent == []                            # receiver path NOT taken
+
+
+def test_dispatch_sigint_during_run_takes_receiver_path_not_exit() -> None:
+    """Headline guard: a SIGINT during a RUN (_at_prompt False) must NOT fire the
+    exit hook — it enqueues to the receiver (→ signal_pause → runner interrupt →
+    pause-to-prompt). This is the headline mid-run Ctrl-C capability."""
+    import signal as _sig
+    coord = InterruptCoordinator()
+    assert coord._at_prompt is False             # default: during a run
+
+    exit_fired = {"v": False}
+    coord.set_exit_hook(lambda reason: exit_fired.__setitem__("v", True))
+
+    sent: list = []
+
+    class _Send:
+        def send_nowait(self, item):  # type: ignore[no-untyped-def]
+            sent.append(item)
+
+    coord._sig_send = _Send()
+
+    coord._dispatch_signal(_sig.SIGINT)
+
+    assert exit_fired["v"] is False              # exit path NOT taken
+    assert sent == [_sig.SIGINT]                 # receiver-enqueue path taken
+
+
+def test_dispatch_second_sigint_at_prompt_still_escalates_after_window() -> None:
+    """A SECOND out-of-band SIGINT while at a prompt AND already pausing still
+    hits the existing escalation/suppression gate (force-quit): suppressed within
+    the window, escalates after it."""
+    import signal as _sig
+    coord = InterruptCoordinator()
+    coord.set_at_prompt(True)
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+
+    exited = {"reason": None}
+    coord.set_exit_hook(lambda reason: exited.__setitem__("reason", reason))
+    esc_fired = {"v": False}
+    coord.set_escalation_hook(lambda: esc_fired.__setitem__("v", True))
+
+    # First at-prompt SIGINT → exit path, registers the gesture (first-wins).
+    coord._dispatch_signal(_sig.SIGINT)
+    assert exited["reason"] == "ctrl-c"
+    assert coord.should_pause is True
+
+    # Second within the suppression window → suppressed, no escalation.
+    t["now"] = 100.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert esc_fired["v"] is False
+
+    # After the window, the stop is unwinding (should_pause) → escalation fires.
+    t["now"] = 101.5
+    coord._dispatch_signal(_sig.SIGINT)
+    assert esc_fired["v"] is True
+
+
 def test_dispatch_sigterm_routes_to_exit_immediately() -> None:
     import signal as _sig
     coord = InterruptCoordinator()

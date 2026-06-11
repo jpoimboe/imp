@@ -174,6 +174,13 @@ async def ask_line_with_slash(
     # Ctrl-C, so a later interrupt is never seen by InterruptCoordinator (a
     # process-group Ctrl-C then surfaces as a codex `unknown` error). Runs on
     # every return/exception path, including the at-prompt KeyboardInterrupt.
+    # Mark "at an interactive prompt" for the whole turn so an out-of-band SIGINT
+    # (handle_sigint=False on the prompt → lands in InterruptCoordinator's loop
+    # handler, NOT as a prompt_toolkit KBI) is routed through the coordinator exit
+    # path instead of signal_pause/runner-interrupt. Reset in the finally on every
+    # exit path (return, EOFError on Ctrl-D, KeyboardInterrupt, cancellation).
+    if coord is not None:
+        coord.set_at_prompt(True)
     try:
         async with _quiesce():
             while True:
@@ -191,13 +198,19 @@ async def ask_line_with_slash(
                         else:
                             line = await _ask_or_exit(prompt, exit_evt)
                     except KeyboardInterrupt:
-                        # Out-of-band SIGINT at a prompt (kill -INT): the c-c key
-                        # binding handles typed Ctrl-C, so this is a real signal.
-                        # Route to the coordinator exit path (stop + exit paused),
-                        # then re-raise so the CLI's except-KeyboardInterrupt arm
-                        # runs pause_and_exit.
+                        # A KeyboardInterrupt reaching here is normally the
+                        # exit-event-won synthesis from _ask_or_exit: an out-of-band
+                        # SIGINT at the prompt now lands in the coordinator's loop
+                        # handler (handle_sigint=False), which (via _at_prompt) calls
+                        # request_exit("ctrl-c") → fires the exit event → _ask_or_exit
+                        # cancels the read and raises KeyboardInterrupt. The c-c key
+                        # binding handles TYPED Ctrl-C (no KBI). request_exit here is a
+                        # defensive idempotent re-assert (first-wins pause_reason keeps
+                        # "ctrl-c") covering any path that raises a bare KBI; we then
+                        # re-raise so the CLI's except-KeyboardInterrupt arm runs
+                        # pause_and_exit. The finally still resets _at_prompt.
                         if coord is not None:
-                            coord.request_exit("sigint")
+                            coord.request_exit("ctrl-c")
                         raise
                     if line.strip().lower() in ("exit", "quit"):
                         # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
@@ -211,7 +224,13 @@ async def ask_line_with_slash(
                     assert isinstance(result, str)  # handle_slash_line returns str (skill body)
                     return result
     finally:
-        # prompt_toolkit deleted SIGINT on prompt exit — restore it so a later
-        # mid-run Ctrl-C is still delivered to the coordinator (see above).
+        # Leave the at-prompt state so a SIGINT during a subsequent RUN takes the
+        # signal_pause path again (the headline mid-run Ctrl-C). Runs on every
+        # return/exception/cancellation path.
         if coord is not None:
+            coord.set_at_prompt(False)
+            # With handle_sigint=False prompt_toolkit no longer deletes the loop's
+            # SIGINT handler on prompt exit, so this is now a harmless defensive
+            # no-op — kept so a future provider that re-enables handle_sigint, or a
+            # nested prompt that does, still re-arms (see ask_async rationale).
             coord.rearm_signal_handlers()

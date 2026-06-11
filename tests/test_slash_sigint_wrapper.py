@@ -48,6 +48,10 @@ class _FakeCoord:
         self.exit_reason = None
         self._esc_reader = None
         self._exit_event = None
+        self.at_prompt_calls: list[bool] = []
+
+    def set_at_prompt(self, value: bool) -> None:
+        self.at_prompt_calls.append(value)
 
     def tty_quiesced(self):
         # Async context manager — mirrors InterruptCoordinator.tty_quiesced()
@@ -69,7 +73,7 @@ async def test_out_of_band_sigint_routes_to_exit(tmp_path: Path) -> None:
     with pytest.raises(KeyboardInterrupt):
         await ask_line_with_slash(
             _KbiPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
-    assert coord.exit_reason == "sigint"
+    assert coord.exit_reason == "ctrl-c"
 
 
 @pytest.mark.anyio
@@ -79,3 +83,36 @@ async def test_out_of_band_sigint_reraises_without_coord(tmp_path: Path) -> None
     with pytest.raises(KeyboardInterrupt):
         await ask_line_with_slash(
             _KbiPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=None)
+
+
+class _LinePrompt:
+    async def ask_async(self, prompt_text=None):
+        return "hello"
+
+
+class _EofPrompt:
+    async def ask_async(self, prompt_text=None):
+        raise EOFError
+
+
+@pytest.mark.anyio
+async def test_at_prompt_set_then_reset_on_normal_return(tmp_path: Path) -> None:
+    # _at_prompt must be True for the prompt turn and reset to False on a normal
+    # return so a SIGINT during a subsequent RUN takes the signal_pause path.
+    coord = _FakeCoord()
+    line = await ask_line_with_slash(
+        _LinePrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+    assert line == "hello"
+    assert coord.at_prompt_calls == [True, False]   # set entering, reset in finally
+
+
+@pytest.mark.anyio
+async def test_at_prompt_reset_on_exception_path(tmp_path: Path) -> None:
+    # Even when the prompt raises (EOFError on Ctrl-D), the finally must reset
+    # _at_prompt to False — otherwise a subsequent mid-run SIGINT would wrongly
+    # route to exit instead of pausing the run.
+    coord = _FakeCoord()
+    with pytest.raises(EOFError):
+        await ask_line_with_slash(
+            _EofPrompt(), _FakeStatus(), _fake_change(tmp_path), coord=coord)
+    assert coord.at_prompt_calls == [True, False]

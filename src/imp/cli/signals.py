@@ -111,6 +111,19 @@ class InterruptCoordinator:
         self._trigger_exit: Any = None
         self._now = time.monotonic      # injectable for tests
         self._ack_hook: Any = None
+        # True ONLY while an interactive prompt is being awaited (set/cleared by
+        # ask_line_with_slash). During a RUN (agent thinking) this is False so an
+        # in-band Ctrl-C → signal_pause → runner interrupt → pause-to-prompt is
+        # unchanged. With handle_sigint=False on the prompt, an out-of-band SIGINT
+        # at a prompt lands in _dispatch_signal (not as a prompt_toolkit KBI);
+        # this flag tells _dispatch_signal to route it through the exit path.
+        self._at_prompt = False
+
+    def set_at_prompt(self, value: bool) -> None:
+        """Mark whether an interactive prompt is currently being awaited.
+        Routes an out-of-band SIGINT through the exit path while True
+        (see _dispatch_signal)."""
+        self._at_prompt = value
 
     def set_ack_hook(self, fn: Any) -> None:
         """fn(text: str) renders transient stop-acknowledgment chrome in the
@@ -294,7 +307,17 @@ class InterruptCoordinator:
                 if esc is not None:
                     esc()
             return  # suppressed or escalated — never re-enter a wedged interrupt()
-        # First gesture: record it and enqueue for the receiver (await path).
+        if self._at_prompt:
+            # At an interactive prompt, prompt_toolkit no longer owns SIGINT
+            # (handle_sigint=False), so an out-of-band SIGINT lands here. Route it
+            # through the coordinator exit path — identical to SIGTERM — instead of
+            # signal_pause/runner-interrupt (which is the DURING-A-RUN behavior).
+            # Register the gesture first so a SECOND out-of-band SIGINT still hits
+            # the escalation/suppression gate above (force-quit).
+            self._register_gesture(kind="ctrl-c")
+            self.request_exit("ctrl-c")
+            return
+        # First gesture during a run: record it and enqueue for the receiver.
         self._register_gesture(kind="ctrl-c")
         send = self._sig_send
         if send is None:
