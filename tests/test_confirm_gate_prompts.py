@@ -88,3 +88,12 @@ def test_spec_writer_recognition_is_preamble_primary() -> None:
             "before finalizing:") in text
     # The synthesized tool_result note (resume-vs-goto discriminator) is present.
     assert "previous step output recorded; superseded by the feedback below" in text
+
+
+def test_spec_reviewer_briefed_on_decision_markers() -> None:
+    text = (AGENTS / "spec-reviewer.md").read_text()
+    assert "*(decided during review)*" in text
+    assert "*(user-confirmed during review)*" in text
+    assert "expected" in text.lower()
+    # must not be flagged as a placeholder/meta-commentary defect
+    assert "meta-commentary" in text.lower()
