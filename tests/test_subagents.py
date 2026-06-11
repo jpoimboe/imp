@@ -6,11 +6,13 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import (
     ChangeContext,
 )
 from imp.agents.subagents import (
     TASK_TOOL_SCHEMA,
+    TaskDispatchSkipped,
     TaskMustBeAwaited,
     dispatch_task,
     make_task_tool,
@@ -868,3 +870,64 @@ def test_make_task_tool_description_has_parallel_guidance() -> None:
     assert "unspecified" in desc
     # The tier-bearing variant shares the same description.
     assert make_task_tool(("low", "high")).description == desc
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_abort_on_entry_skips_before_spawn(tmp_path: Path) -> None:
+    """A truthy abort_dispatch at ENTRY raises TaskDispatchSkipped before the
+    subagent is ever spawned (membership freeze, pre-spawn point)."""
+    spawned: list = []
+    ctx = _dispatch_ctx(tmp_path)
+
+    async def _spawn(inv):
+        spawned.append(inv)
+        return _FakeRunner(
+            [{"type": "agent_output", "payload": {"status": "Success"}}])
+
+    ctx.spawn_subagent = _spawn  # type: ignore[assignment]
+    with pytest.raises(TaskDispatchSkipped):
+        await dispatch_task(ctx, "reviewer", "go", abort_dispatch=lambda: True)
+    assert spawned == []                       # never spawned
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_abort_after_limiter_skips_before_spawn(
+    tmp_path: Path,
+) -> None:
+    """abort_dispatch is re-checked AFTER acquiring the per-invocation limiter:
+    False at entry, True post-limiter -> TaskDispatchSkipped, still no spawn
+    (saves a child that queued on the limiter while a sibling captured a
+    suspension). Exactly two predicate calls: entry + post-limiter."""
+    reset_parallelism_cache()
+    calls: list = []
+
+    def _abort() -> bool:
+        calls.append(1)
+        return len(calls) > 1                  # entry -> False, post-limiter -> True
+
+    spawned: list = []
+    ctx = _dispatch_ctx(tmp_path)
+
+    async def _spawn(inv):
+        spawned.append(inv)
+        return _FakeRunner(
+            [{"type": "agent_output", "payload": {"status": "Success"}}])
+
+    ctx.spawn_subagent = _spawn  # type: ignore[assignment]
+    with pytest.raises(TaskDispatchSkipped):
+        await dispatch_task(ctx, "reviewer", "go", abort_dispatch=_abort)
+    assert spawned == []                       # never spawned
+    assert len(calls) == 2                     # entry + post-limiter
+    reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_dispatch_task_no_abort_dispatch_is_default_behavior(
+    tmp_path: Path,
+) -> None:
+    """Falsifiability anchor: with abort_dispatch omitted (None default),
+    dispatch_task dispatches normally and returns the subagent output — the new
+    hook never short-circuits the legacy path."""
+    ctx = _dispatch_ctx(tmp_path)
+    out = await dispatch_task(ctx, "reviewer", "go")
+    assert json.loads(out) == {"status": "Success"}

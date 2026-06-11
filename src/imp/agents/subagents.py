@@ -10,6 +10,7 @@ deadlock that would otherwise hit.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
 from imp.agents.parallel import emit_parallelism_warning_once
@@ -46,6 +47,16 @@ TASK_TOOL_SCHEMA: dict[str, Any] = {
 
 class TaskMustBeAwaited(Exception):
     """Sentinel raised if the runner forgets the special-case dispatch."""
+
+
+class TaskDispatchSkipped(Exception):
+    """Raised by dispatch_task when its abort_dispatch predicate reports the
+    turn's task membership has FROZEN — a sibling captured a suspension, or a
+    run-wide pause is unwinding (design Decision 4, membership-freeze section).
+    The child must NOT spawn and must NOT emit a tool_result; the caller
+    (dispatch_task_batch / the bridges) catches this and discards the tu
+    silently. Distinct from SubagentSuspended: a skip means "never dispatched",
+    not "dispatched then paused"."""
 
 
 def raise_if_suspended(exc: BaseException) -> None:
@@ -107,7 +118,12 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
 async def dispatch_task(
     ctx: ToolContext, subagent_name: str, task_description: str,
     *, tool_call_event_id: str = "", tier: str | None = None,
+    abort_dispatch: Callable[[], bool] | None = None,
 ) -> str:
+    if abort_dispatch is not None and abort_dispatch():
+        raise TaskDispatchSkipped(
+            f"task dispatch to {subagent_name!r} skipped on entry: "
+            "membership already frozen")
     if subagent_name not in ctx.subagent_defs:
         raise ValueError(
             f"subagent {subagent_name!r} not declared; available: "
@@ -237,6 +253,10 @@ async def dispatch_task(
     limiter = ctx.get_parallel_limiter()
     emit_parallelism_warning_once(ctx.event_log, ctx.agent_id)
     async with limiter:
+        if abort_dispatch is not None and abort_dispatch():
+            raise TaskDispatchSkipped(
+                f"task dispatch to {subagent_name!r} skipped after limiter "
+                "acquire: membership froze while queued")
         backoff = 0
         cumulative_backoff = 0.0
         while True:
