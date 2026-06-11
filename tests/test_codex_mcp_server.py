@@ -195,3 +195,22 @@ async def test_fastmcp_roundtrip_refusal_is_error_suffix_sentinel(
             {"subagent_name": "impl", "task_description": "x"})
     assert str(ei.value).endswith(TASK_REFUSAL_SENTINEL)
     assert str(ei.value).startswith("Error executing tool task:")
+
+
+@pytest.mark.anyio
+async def test_start_server_raises_off_the_runner_loop(tmp_path: Path) -> None:
+    # AC34: start_server refuses to run when state.runner_loop is a DIFFERENT loop
+    # than the one it is invoked on (the foreign-loop topology guard). A production
+    # check, exercised here by setting a mismatched runner_loop.
+    import asyncio
+
+    foreign = asyncio.new_event_loop()
+    try:
+        state = RunState(cap=10)
+        state.runner_loop = foreign   # not the loop this test runs on
+        with pytest.raises(RuntimeError, match="runner"):
+            await start_server(
+                tools={"echo": _echo_tool()}, ctx=_ctx(tmp_path), state=state,
+                bearer_token="secret-token-123", host="127.0.0.1")
+    finally:
+        foreign.close()

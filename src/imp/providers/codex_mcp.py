@@ -104,6 +104,9 @@ class RunState:
     # closing the minted tool_call as a failed task (design §2 / AC29).
     refused_task_mints: list[tuple[str, tuple[tuple[str, str], ...]]] = field(
         default_factory=list)
+    # Runner's event loop, recorded at runner entry. start_server raises on a
+    # foreign loop (same-loop topology pin). None disables the check.
+    runner_loop: Any = None
 
 
 def _cap_error_text(cap: int) -> str:
@@ -313,6 +316,12 @@ async def start_server(
     """
     import uvicorn
     from mcp.server.fastmcp import FastMCP
+
+    if (state.runner_loop is not None
+            and asyncio.get_running_loop() is not state.runner_loop):
+        raise RuntimeError(
+            "codex MCP server must start on the runner's event loop "
+            "(same-loop topology pin); refusing to start on a foreign loop")
 
     mcp_app = FastMCP("imp")
 

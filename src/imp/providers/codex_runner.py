@@ -269,6 +269,7 @@ class CodexAgentRunner:
         self._ctx = ctx
 
         state = RunState(cap=invocation.max_tool_calls or 1000, agent_id=aid)
+        state.runner_loop = asyncio.get_running_loop()
         # Shared event-processing state (process_event keys).
         proc_state: dict[str, Any] = {
             "thread_id": None, "complete_step_args": None,
