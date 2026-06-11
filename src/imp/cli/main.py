@@ -650,6 +650,7 @@ async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
     # No EscKeyReader — TuiApp owns the tty exclusively.
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
+    channel = _maybe_build_channel(change)
 
     async def _chat(_prompt: object) -> str:
         return await app.solicit(change)
@@ -659,11 +660,16 @@ async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
     try:
         async with anyio.create_task_group() as tg:
             tg.start_soon(coord.run_signal_receiver)
+            if channel is not None and not await channel.start(tg):
+                channel = None
+            run_on_event = (
+                compose_on_event(app.on_event, channel.on_event)
+                if channel is not None else app.on_event)
 
             async def _run() -> None:
                 try:
                     holder["result"] = await run_change(
-                        change, on_event=app.on_event, user_chat_input_fn=_chat,
+                        change, on_event=run_on_event, user_chat_input_fn=_chat,
                         coordinator=coord, non_interactive=False)
                 finally:
                     app.exit()

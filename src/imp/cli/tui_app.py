@@ -24,10 +24,11 @@ class TuiApp:
         self._viewport = ViewportState()
         self._driver = TuiDriver(
             color=color, width=width, on_invalidate=self._invalidate)
-        self._app: Any = None        # prompt_toolkit Application (Task 3)
-        self._body: Any = None       # the narrative Window (for render_info metrics)
-        self._buffer: Any = None     # the bottom prompt Buffer (Task 4)
-        self._change: Any = None     # set per-solicit, for slash dispatch
+        self._narrative_text: str | None = None
+        self._app: Any = None
+        self._body: Any = None
+        self._buffer: Any = None
+        self._change: Any = None
         self._prompt_visible = False
         self._prompt_future: Any = None
         self._slash_lines: list[str] = []
@@ -38,7 +39,9 @@ class TuiApp:
 
     # -- narrative / status / verbosity --------------------------------------
     def narrative(self) -> str:
-        return self._driver.render(full=self._full)
+        if self._narrative_text is None:
+            self._narrative_text = self._driver.render(full=self._full)
+        return self._narrative_text
 
     def toggle_verbosity(self) -> None:
         self._full = not self._full
@@ -52,6 +55,7 @@ class TuiApp:
         return f"{activity}   {HINT}" if activity else HINT
 
     def _invalidate(self) -> None:
+        self._narrative_text = None
         if self._app is not None:
             self._app.invalidate()
 
@@ -207,10 +211,22 @@ class TuiApp:
             layout=layout, key_bindings=self._key_bindings(),
             full_screen=True, mouse_support=True)
 
+    async def _refresh_loop(self) -> None:
+        while True:
+            await asyncio.sleep(0.1)
+            self._frame += 1
+            self._invalidate()
+
     async def run_async(self) -> None:
         if self._app is None:
             self._build_app()
-        await self._app.run_async(handle_sigint=False)
+        task = asyncio.ensure_future(self._refresh_loop())
+        try:
+            await self._app.run_async(handle_sigint=False)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
     # -- in-app prompt (wait_for_user) ---------------------------------------
     async def solicit(self, change: Any) -> str:

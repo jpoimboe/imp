@@ -104,16 +104,12 @@ def test_tui_requested_false_on_non_tty() -> None:
     assert m._tui_requested(argparse.Namespace(tui=True)) is False
 
 
-_created: list[object] = []
-
-
 class _FakeTuiApp:
-    def __init__(self, *, coord, color, width) -> None:
-        self.coord = coord
+    def __init__(self, **kwargs: object) -> None:
+        self.coord = kwargs.get("coord")
         self.events: list[object] = []
         self.transcript_written = False
         self._exit = False
-        _created.append(self)
 
     def on_event(self, event) -> None:
         self.events.append(event)
@@ -141,8 +137,13 @@ class _FakeTuiApp:
 async def test_run_tui_session_streams_no_esc_reader_then_handles_outcome(
     monkeypatch, capsys,
 ) -> None:
-    _created.clear()
+    captured: list[_FakeTuiApp] = []
     outcomes: list[RunResult] = []
+
+    class _CapturingApp(_FakeTuiApp):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)
+            captured.append(self)
 
     async def _fake_run_change(change, *, on_event, user_chat_input_fn,
                                coordinator, non_interactive):
@@ -153,9 +154,10 @@ async def test_run_tui_session_streams_no_esc_reader_then_handles_outcome(
     def _boom_esc_reader(*a, **k):
         raise AssertionError("EscKeyReader must not be started in --tui mode")
 
-    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
+    monkeypatch.setattr(m, "TuiApp", _CapturingApp)
     monkeypatch.setattr(m, "run_change", _fake_run_change)
     monkeypatch.setattr(m, "EscKeyReader", _boom_esc_reader)
+    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
     monkeypatch.setattr(m, "_handle_terminal_outcome",
                         lambda change, result, coord: outcomes.append(result) or 0)
 
@@ -163,6 +165,77 @@ async def test_run_tui_session_streams_no_esc_reader_then_handles_outcome(
 
     assert rc == 0
     assert outcomes == [RunResult.COMPLETED]
-    assert _created and _created[0].events            # events streamed via on_event
-    assert _created[0].transcript_written is True     # collapsed transcript printed
+    assert captured and captured[0].events
+    assert captured[0].transcript_written is True
     assert "COLLAPSED-TRANSCRIPT" in capsys.readouterr().out
+
+
+@pytest.mark.anyio
+async def test_run_tui_session_result_none_calls_finalize_paused(
+    monkeypatch, capsys,
+) -> None:
+    finalized: list[str] = []
+
+    class _QuickExitApp(_FakeTuiApp):
+        async def run_async(self) -> None:
+            pass  # exits immediately, before run_change completes
+
+    async def _slow_run_change(change, **kwargs):
+        import anyio as _anyio
+        await _anyio.sleep(100)  # never completes
+
+    monkeypatch.setattr(m, "TuiApp", _QuickExitApp)
+    monkeypatch.setattr(m, "run_change", _slow_run_change)
+    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
+    monkeypatch.setattr(m, "_finalize_paused_exit",
+                        lambda change, driver, coord, reason: finalized.append(reason) or 130)
+
+    rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
+
+    assert rc == 130
+    assert finalized
+
+
+@pytest.mark.anyio
+async def test_run_tui_session_load_error_returns_2(monkeypatch, capsys) -> None:
+    from imp.engine.errors import LoadError
+
+    async def _error_run_change(change, **kwargs):
+        raise LoadError("bad config")
+
+    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
+    monkeypatch.setattr(m, "run_change", _error_run_change)
+    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
+
+    rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
+
+    assert rc == 2
+    assert "bad config" in capsys.readouterr().err
+
+
+@pytest.mark.anyio
+async def test_run_tui_session_composes_channel_on_event(monkeypatch, capsys) -> None:
+    channel_events: list[object] = []
+
+    class _FakeChannel:
+        async def start(self, tg: object) -> bool:
+            return True
+
+        def on_event(self, event: object) -> None:
+            channel_events.append(event)
+
+    async def _fake_run_change(change, *, on_event, **kwargs):
+        on_event({"id": "1", "agent_id": None, "type": "change_created",
+                  "payload": {"slug": "s", "title": "t"}})
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
+    monkeypatch.setattr(m, "run_change", _fake_run_change)
+    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: _FakeChannel())
+    monkeypatch.setattr(m, "_handle_terminal_outcome",
+                        lambda change, result, coord: 0)
+
+    rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
+
+    assert rc == 0
+    assert any(e.get("type") == "change_created" for e in channel_events)

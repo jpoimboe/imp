@@ -30,12 +30,28 @@ def test_page_up_does_not_go_above_top() -> None:
 def test_page_down_moves_toward_bottom() -> None:
     vs = ViewportState(follow=False, scroll=40)
     vs.page_down(total_lines=100, height=20)
+    assert vs.follow is False
     assert vs.vertical_scroll(total_lines=100, height=20) == 60
 
 
 def test_page_down_clamps_at_bottom() -> None:
     vs = ViewportState(follow=False, scroll=75)
     vs.page_down(total_lines=100, height=20)
+    assert vs.follow is False
+    assert vs.vertical_scroll(total_lines=100, height=20) == 80
+
+
+def test_page_down_already_at_bottom_is_noop() -> None:
+    vs = ViewportState(follow=False, scroll=80)   # already at bottom (100-20=80)
+    vs.page_down(total_lines=100, height=20)
+    assert vs.follow is False
+    assert vs.vertical_scroll(total_lines=100, height=20) == 80
+
+
+def test_scroll_down_lines_when_following_stays_following() -> None:
+    vs = ViewportState()                          # follow=True
+    vs.scroll_down_lines(5, total_lines=100, height=20)
+    assert vs.follow is True
     assert vs.vertical_scroll(total_lines=100, height=20) == 80
 
 

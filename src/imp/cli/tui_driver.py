@@ -24,7 +24,6 @@ class TuiDriver:
             self._on_invalidate()
 
     def render(self, *, full: bool) -> str:
-        """Whole tree as one ANSI string (no trailing newline)."""
         return "\n".join(rt.render_tree(
             self._builder.tree, full=full, color=self._color, width=self._width))
 
@@ -33,7 +32,6 @@ class TuiDriver:
             self._builder, frame=frame, elapsed=elapsed, color=self._color)
 
     def print_collapsed_transcript(self, stream: Any) -> None:
-        """Write the collapsed transcript to a normal-scrollback stream."""
         for line in rt.render_tree(
                 self._builder.tree, full=False, color=self._color, width=self._width):
             stream.write(line + "\n")
