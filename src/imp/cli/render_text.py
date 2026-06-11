@@ -584,15 +584,39 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
 
+_ARG_VALUE_CLIP = 120        # §2: per-arg-value clip on the --full args line
+_OUTPUT_LINE_CLIP = 400      # §2: per-source-line clip in the --full output block
+_OUTPUT_MAX_LINES = 10       # §2: source lines shown before the "+N more" tail
+
+
+def _call_args_line(c: nv.ToolCall) -> str:
+    """`· {name}[ tag]  k=v …` with each value newline-collapsed and clipped."""
+    if c.killed:
+        tag = " [killed]"                 # killed wins; tags never stack
+    elif c.is_error:
+        tag = " [error]"
+    else:
+        tag = ""
+    parts = []
+    for k, v in (c.input or {}).items():
+        val = " ".join(str(v).split())    # collapse newlines/whitespace runs
+        if len(val) > _ARG_VALUE_CLIP:
+            val = val[:_ARG_VALUE_CLIP] + "…"
+        parts.append(f"{k}={val}")
+    head = f"· {c.name}{tag}"
+    return f"{head}  {'  '.join(parts)}".rstrip() if parts else head
+
+
 def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     """One-line recap of a finished tool burst for the lean view: the distinct
     tool names (first-seen order, capped), the call count, and the burst duration.
     Mirrors what the live status line showed WHILE the burst ran, left behind as a
     quiet marker so a `prose → tools → prose` turn shows the work happened without
-    expanding it. Two names are omitted: `load_skill` (it renders as its own
-    `load skill …` line, so counting it here would double up) and the bare
-    `tool` placeholder (the sentinel name for an orphan/unnamed result — no real
-    tool info). Returns None when nothing renderable remains."""
+    expanding it. Three names are omitted: `load_skill` (it renders as its own
+    `load skill …` line, so counting it here would double up), the bare `tool`
+    placeholder (the sentinel name for an orphan/unnamed result — no real tool
+    info), and `wait_for_user` (a gate call, not a user-visible tool action).
+    Returns None when nothing renderable remains."""
     calls = nv.visible_calls(burst)
     if not calls:
         return None
@@ -621,17 +645,39 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
             yield _line("  " + summary, depth, color,
                         *pal.NODE_COLORS["tools"], gutters=gutters)
         return
+    if not burst.calls:
+        return                            # §1 empty-burst guard (split may empty it)
     yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
                 *pal.NODE_COLORS["tools"], gutters=gutters)
     for c in burst.calls:
-        args = " ".join(f"{k}={v}" for k, v in (c.input or {}).items())
-        killed = " [killed]" if c.killed else ""
-        result = (c.result or "").replace("\n", " ")
-        if len(result) > 60:
-            result = result[:60] + "…"
-        line = f"· {c.name}  {args}  → {result}{killed}".rstrip()
-        yield from _wrap(line, width, depth + 1, color, *pal.NODE_COLORS["tools"],
-                         gutters=gutters)
+        yield from _hang_wrap(_call_args_line(c), "", width, depth + 1, color,
+                              *pal.NODE_COLORS["tools"], gutters=gutters)
+        result = c.result or ""
+        if result:
+            src = result.split("\n")
+            shown = src[:_OUTPUT_MAX_LINES]
+            clipped = [(ln[:_OUTPUT_LINE_CLIP] + "…") if len(ln) > _OUTPUT_LINE_CLIP
+                       else ln for ln in shown]
+            block = "\n".join(clipped)
+            yield from _hang_wrap(block, "→ ", width, depth + 1, color,
+                                  *pal.NODE_COLORS["tools"], gutters=gutters)
+            extra = len(src) - len(shown)
+            if extra > 0:
+                yield from _hang_wrap(f"… (+{extra:,} more lines)", "→ ", width,
+                                      depth + 1, color, *pal.NODE_COLORS["tools"],
+                                      gutters=gutters)
+        if c.citations_footer:
+            # Footer rides outside the clip; render whether or not an output block
+            # printed. When result is non-empty, align at the "→ " column; when
+            # empty (footer-only shape), render without the arrow anchor so the
+            # output reads cleanly without a stray "→ " prefix.
+            footer = c.citations_footer.lstrip("\n")
+            if result:
+                yield from _hang_wrap(footer, "→ ", width, depth + 1, color,
+                                      *pal.NODE_COLORS["tools"], gutters=gutters)
+            else:
+                yield from _wrap(footer, width, depth + 1, color,
+                                 *pal.NODE_COLORS["tools"], gutters=gutters)
 
 
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,

@@ -20,8 +20,12 @@ design
     I need to consider the auth requirements carefully before writing the spec.
     Let me think about OAuth2 vs API keys.
   ▾ tools
-    · read_file  path=README.md  → # Project Auth module needed. [killed]
-    · bash  command=ls src/  → auth.py main.py
+    · read_file [killed]  path=README.md
+    → # Project
+      Auth module needed.
+    · bash  command=ls src/
+    → auth.py
+      main.py
   ▾ reviewer
   │ ▾ context · anthropic/claude-sonnet-4-6 · max_tool_calls=10
   │   system_prompt:

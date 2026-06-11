@@ -1104,3 +1104,59 @@ def test_burst_recap_omits_wait_for_user() -> None:
             action={"verb": "continue"}, var_mutations={}),
     ]))
     assert "wait_for_user" not in out
+
+
+def test_full_burst_per_call_args_and_output_block() -> None:
+    body = "\n".join(f"line{i}" for i in range(1, 13))      # 12 source lines
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "make test\n&& echo done"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content=body),
+        _ev("7", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ], full=True))
+    # multi-line arg value collapsed to a single space:
+    assert "· bash  command=make test && echo done" in out
+    # output block: first source line under the "→ " column, 10 shown, tail count:
+    assert "→ line1" in out
+    assert "line10" in out
+    assert "line11" not in out
+    assert "… (+2 more lines)" in out
+
+
+def test_full_burst_killed_wins_over_error_tag() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "x"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="boom",
+            error=True),
+        _ev("k1", "tool_killed", agent_id="step:p/s", id="b1", name="bash"),
+        _ev("7", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ], full=True))
+    assert "· bash [killed]" in out
+    assert "[error]" not in out
+
+
+def test_full_burst_empty_result_no_arrow_but_footer_renders() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="web_search",
+            input={"query": "x"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="",
+            citations=[{"url": "https://a.test"}]),
+        _ev("7", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ], full=True))
+    assert "· web_search  query=x" in out
+    assert "→ " not in out                       # empty result: no arrow anchor
+    assert "Sources:" in out and "https://a.test" in out
+
+
+def test_full_burst_empty_burst_renders_nothing() -> None:
+    burst = nv.ToolBurstFold(calls=[])
+    lines = list(rt._render_burst(burst, depth=1, full=True, color=False, width=80))
+    assert lines == []
