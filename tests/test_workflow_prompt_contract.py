@@ -143,3 +143,14 @@ def test_task_lead_nit_only_fixup_skips_rereview_and_degraded() -> None:
     # A nit-only fixup is cheap and polish-only (AC 5).
     assert "does not re-trigger the quality-reviewer" in low
     assert "does not mark the run degraded" in low
+
+
+def test_task_lead_records_fixed_inline_nits_and_reserves_followups() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # Qualifying nits are recorded as fixed-inline (AC 6).
+    assert "fixed-inline" in low
+    # The Deferred Followups list is reserved for judgment/out-of-scope findings.
+    assert "deferred followups" in low
+    assert "reserved for the judgment-call" in low
+    # A bar-cleared nit is polish, not an open_items / degraded trigger.
+    assert "cleared the fixability bar" in low

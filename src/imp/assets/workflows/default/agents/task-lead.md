@@ -129,14 +129,17 @@ progress.md is your guide.)
    amend, or rebase yourself.
 5. Append to `.imp/change/progress.md` (create it if missing): the task
    completed, **its commit subject** (the ledger entry from step 2, so a buried
-   task can be re-found for a fixup), any carried followups (deferred Minor/Nit),
-   and any deviation note. **Record an `open_items` note whenever a round was NOT
-   clean on first pass** — any of: a reviewer raised a blocking finding; a gate
-   (`commit-check` / `run-tests`) failed and resumed you; a fixup had to be made
-   for **correctness** (not review polish); or any re-dispatch-for-fix occurred. A
+   task can be re-found for a fixup), and any deviation note. **Record qualifying
+   nits you fixed inline as fixed-inline** — they rode the task's fixup and need no
+   follow-up. The **Deferred Followups** list is reserved for the judgment-call /
+   out-of-scope findings the fixability bar deferred. **Record an `open_items` note
+   whenever a round was NOT clean on first pass** — any of: a reviewer raised a
+   blocking (Critical/Major) finding; a gate (`commit-check` / `run-tests`) failed
+   and resumed you; or a fixup had to be made for **correctness** (not polish). A
    degraded run must be self-reporting. The line between polish and correctness:
-   renaming a variable for clarity = polish (no note); fixing a wrong return value
-   or a lint error = correctness (record it).
+   renaming a variable for clarity, or a nit that cleared the fixability bar, =
+   polish (no `open_items` note); fixing a wrong return value or a lint error =
+   correctness (record it).
 6. **Deviation escape hatch.** If implementing this task reveals the plan is
    wrong (a task can't be done as written, an assumption is false), set
    `deviation: true` and return — the engine resumes plan-writer to revise this
