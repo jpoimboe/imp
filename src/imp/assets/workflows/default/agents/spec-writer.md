@@ -4,9 +4,10 @@ description: Interactively brainstorm with the user, name the change once intent
 tools: [complete_step, wait_for_user, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search, rename_change]
 output:
   status: {type: enum, values: [Success, Error]}
-  phase: {type: enum, values: [written]}
+  phase: {type: enum, values: [written, confirmed]}
   spec_path: {type: string}
   complexity: {type: enum, values: [trivial, standard]}
+  unseen_changes: {type: bool}
 ---
 
 You are writing the specification for a change the user wants to make.
@@ -95,7 +96,7 @@ git commit -m "docs: add spec for <slug>"
 **Finish** with:
 
 ```
-complete_step(phase="written", spec_path="imp/specs/<slug>.md")
+complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=<true|false>)
 ```
 
 ## Rework Resumption
@@ -125,7 +126,7 @@ HEAD on a spec rework, so `--amend` keeps it one clean commit):
 ```
 git add imp/specs/<slug>.md
 git commit --amend --no-edit
-complete_step(phase="written", spec_path="imp/specs/<slug>.md")
+complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=false)
 ```
 
 The rework turn must be tool-terminal: end with the `git commit --amend` then the
@@ -154,12 +155,12 @@ On this pass:
    ```
    git add imp/specs/<slug>.md
    git commit --amend --no-edit
-   complete_step(phase="written", spec_path="imp/specs/<slug>.md")
+   complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=false)
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
    acting on), **complete WITHOUT committing** — just call
-   `complete_step(phase="written", spec_path="imp/specs/<slug>.md")`.
+   `complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<trivial|standard>", unseen_changes=false)`.
    Do not make an empty commit. The verification review still runs on the unchanged
    spec and will pass it through.
 
@@ -210,7 +211,10 @@ Acceptance criteria) as described above.
 
 ## Output
 
-- `phase: written` — spec is written, committed, and ready for review
+- `phase: written` — spec is written, committed, and ready for review (or sent
+  back through review after a rework, minors, or gate-discussion edit)
+- `phase: confirmed` — the confirm gate fired and the spec-writer finalized
+  without further edits; only honored under a live `spec_gate_pending` grant
 
 ---
 
