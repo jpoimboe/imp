@@ -1140,3 +1140,58 @@ async def test_awaiting_user_reraise_deferred_until_inflight_drains(
     assert ei.value.prompt == "merge?"
     assert saw_result["v"] is True           # gate deferred past the assistant turn
     assert captured.inflight_task_dispatches == 0   # fallback drained before raising
+
+
+async def _run_events(tmp_path: Path, scripted: list, *, max_tool_calls: int,
+                      log: InMemoryEventLog) -> list:
+    inv0 = _inv(tmp_path, tools=frozenset({"complete_step", "task"}), event_log=log)
+    from dataclasses import replace as _replace
+    inv = _replace(inv0, max_tool_calls=max_tool_calls)
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory, user_input_fn=None)
+    return [ev async for ev in runner.run(inv)]
+
+
+@pytest.mark.anyio
+async def test_exact_sentinel_refusal_is_uncounted_below_ceiling(
+        tmp_path: Path) -> None:
+    # AC28: ceiling=1. The task tool_use bumps tool_calls_used to 1; the refusal
+    # result (is_error AND text == sentinel) un-counts it back to 0, so the turn
+    # ends with NO post-hoc tool_call_ceiling_exceeded fatal.
+    from imp.agents.subagents import TASK_REFUSAL_SENTINEL
+    from tests.cc_fakes import tool_result, user
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    scripted = [
+        assistant(tool_use("tk1", "task", {"subagent_name": "s",
+                                           "task_description": "x"})),
+        user(tool_result("tk1", TASK_REFUSAL_SENTINEL, is_error=True)),
+        result()]
+    events = await _run_events(tmp_path, scripted, max_tool_calls=1, log=log)
+    kinds = [e["payload"].get("kind") for e in events if e["type"] == "error"]
+    assert "tool_call_ceiling_exceeded" not in kinds
+
+
+@pytest.mark.anyio
+async def test_sentinel_suffix_or_success_is_not_uncounted(tmp_path: Path) -> None:
+    # AC28 (narrowness): a result that merely ENDS with the sentinel (is_error) is
+    # NOT un-counted — tool_calls_used stays 1 and the ceiling fatal fires.
+    from imp.agents.subagents import TASK_REFUSAL_SENTINEL
+    from tests.cc_fakes import tool_result, user
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    scripted = [
+        assistant(tool_use("tk1", "task", {"subagent_name": "s",
+                                           "task_description": "x"})),
+        user(tool_result("tk1", "subagent failed: " + TASK_REFUSAL_SENTINEL,
+                         is_error=True)),
+        result()]
+    events = await _run_events(tmp_path, scripted, max_tool_calls=1, log=log)
+    kinds = [e["payload"].get("kind") for e in events if e["type"] == "error"]
+    assert "tool_call_ceiling_exceeded" in kinds

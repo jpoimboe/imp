@@ -35,7 +35,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from imp.agents.classify import ResumeState, classify_resume
-from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
+from imp.agents.loop_guard import (
+    LoopGuard,
+    ToolOutcome,
+    TurnRecord,
+    _flatten_result_text,
+    _result_preview,
+)
 from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import (
     AgentInvocation,
@@ -1277,6 +1283,10 @@ class ClaudeCodeAgentRunner:
                                     is_task = pend is not None and pend.name == "task"
                                     if not is_task:
                                         elog.append_tool_result(agent_id=aid, block=b)
+                                    if (is_task and b.is_error
+                                            and _flatten_result_text(b.content)
+                                            == TASK_REFUSAL_SENTINEL):
+                                        tool_calls_used -= 1
                                     if pend is not None:
                                         pend.is_error = b.is_error
                                         pend.result_preview = \
