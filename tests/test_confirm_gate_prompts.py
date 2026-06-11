@@ -67,3 +67,24 @@ def test_spec_writer_has_amend_precondition_with_fixup_fallback() -> None:
     text = _spec_writer()
     assert "docs: add spec for <slug>" in text   # HEAD-is-spec-commit subject
     assert "--fixup=\":/docs: add spec for <slug>\"" in text
+
+
+def test_spec_writer_recognition_is_preamble_primary() -> None:
+    text = (AGENTS / "spec-writer.md").read_text()
+    # The reviewer-rework recognition no longer keys on the wrapper text.
+    # The wrapper phrase survives ONLY on the script-gate row, so it appears
+    # at most as a script-gate cue — assert the *old* mis-keyed sentence is gone.
+    assert ("a message beginning \"Your previous attempt completed but was not "
+            "accepted. The spec-reviewer reviewed your work") not in text
+    # This task rewrites the line-109 recognition paragraph, so its inline
+    # solicitation ban is gone (the policy now lives in "Ask vs. decide").
+    assert "Do NOT ask the user anything" not in text
+    # The taxonomy carries the full, untruncated feedback strings verbatim.
+    assert "Here's review feedback to address:" in text
+    assert ("No blocking issues — integrate these minor improvements; a final "
+            "review follows:") in text
+    assert ("The review cycle is complete and the spec is accepted. Surface any "
+            "significant decisions made during review to the user and confirm "
+            "before finalizing:") in text
+    # The synthesized tool_result note (resume-vs-goto discriminator) is present.
+    assert "previous step output recorded; superseded by the feedback below" in text

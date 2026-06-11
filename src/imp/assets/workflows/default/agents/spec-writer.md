@@ -101,13 +101,22 @@ complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<tri
 
 ## Rework Resumption
 
-**First, read the `blocking:` line.** This section applies **only** when the injected
-feedback reads `blocking: true`. If it reads `blocking: false`, this is **not** rework
-— stop here and follow "Minors-integration pass (a review follows)" below instead. (The
-engine renders the bool capitalized — you will see `blocking: True` or `blocking: False`;
-match it case-insensitively.)
+**Recognition is preamble-primary.** A resumed turn is identified first by its
+injected `feedback:` preamble; structured fields (`blocking:`, rendered
+capitalized — match case-insensitively) are secondary confirmation only. Every
+resume opens with a synthesized tool_result — "previous step output recorded; superseded by the feedback below" — on the same user message, before the
+preamble; that element is the reliable resume marker. The taxonomy below carries
+the full feedback strings:
 
-**Recognizing a rework turn:** if your turn opens with injected feedback containing the spec-reviewer's findings — a message beginning "Your previous attempt completed but was not accepted. The spec-reviewer reviewed your work and did not accept it." followed by `findings:` and a `blocking: true` line — you are in rework mode. Do NOT ask the user anything and do NOT end the turn with bare prose; go straight to the rework — **verify each finding first (see below)** — and end the turn tool-terminal (`git commit --amend --no-edit` then `complete_step(phase="written", …)`).
+| Shape | Arrives as | Behavior |
+|---|---|---|
+| Script-gate failure | "Your previous attempt completed but was not accepted." + "Gate `…` failed (exit N)…" | Fix the mechanical failure and re-emit `phase: written` — including when the failed completion was a gated `confirmed` (the grant is gone; the content flows through re-review). `unseen_changes: false` for a mechanics-only or user-directed fix; true only if the fix changed spec content the user didn't direct. |
+| Reviewer rework | "Here's review feedback to address:" + `findings:` / `blocking: True` | Rework protocol (verify findings, fix, amend; ask-vs-decide applies). |
+| Minors pass | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol, non-soliciting. |
+| Confirm gate | "The review cycle is complete and the spec is accepted. Surface any significant decisions made during review to the user and confirm before finalizing:" + the verification review's fields | Confirm-and-finalize protocol (see that section). |
+
+The `blocking: false` cue alone no longer disambiguates: it matches BOTH the
+minors pass and the confirm gate. Use the preamble to tell them apart.
 
 **Verify each finding before acting on it.** A reviewer finding can rest on a
 false premise — a misread of the spec, or a claim about the code that isn't true.
@@ -175,10 +184,11 @@ one pass to fold in the reviewer's **Minor** improvements. You do **not** get th
 last word: a fresh verification review runs after this pass to confirm the edit
 introduced nothing blocking. That follow-up will **not** ask you to integrate
 further minors, so this is your only minors pass — integrate what is worthwhile now.
-The engine's feedback wrapper still opens with "Your previous attempt completed but
-was not accepted" even on this clean resume — **ignore that framing and trust the
-`blocking:` line.** `blocking: false` means the spec already passed; the reviewer's
-Minor/Nit `findings:` are advisory, not a rejection.
+A minors resume is recognized by its preamble — "No blocking issues — integrate
+these minor improvements; a final review follows:" — and `blocking: False`; it
+does NOT carry the script-gate "was not accepted" wrapper. **Trust the
+`blocking:` line:** `blocking: false` means the spec already passed; the
+reviewer's Minor/Nit `findings:` are advisory, not a rejection.
 
 On this pass:
 
