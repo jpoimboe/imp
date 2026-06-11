@@ -51,6 +51,7 @@ import pytest
 
 from imp.engine import journal
 from tests._live import _await_worktree, build_isolated_venv, first_opted_in
+from tests._unattended import render_vars_yaml, unattended_vars
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -303,11 +304,14 @@ def test_dogfood_imp_on_imp_default_workflow(
         # without the pin the gate would silently test the unedited tree.
         "test_command: PYTHONPATH=$PWD/src python3 -m pytest"
         " tests/test_bash_tool.py -q\n"
-        # Plan 1 config vars override: skip the interactive final gate so the
-        # change auto-merges deterministically (the spec phase still drives one
-        # interactive round). Exercises the final-review-gate branch -> merge.
-        "vars:\n"
-        "  final_review: false\n"
+        # Unattended config (single definition site, tests/_unattended.py):
+        # spec_confirm:false disables the confirm gate so the spec phase never
+        # pauses to confirm; final_review:false auto-merges. The dogfood TASK is
+        # validated to present NO intent fork (a precise two-line edit with
+        # explicit "do not touch anything else" constraints — see the `title`
+        # below), so a Feature-2 escalation or any AWAITING_USER pause beyond the
+        # spec phase's opening intent solicit is a REAL failure, not flake.
+        + render_vars_yaml(unattended_vars(final_review=False))
     )
     # imp/project.yaml is tracked (run_init wrote it, the seed commit captured
     # it), so fold the model-pin override back into the seed commit — otherwise
