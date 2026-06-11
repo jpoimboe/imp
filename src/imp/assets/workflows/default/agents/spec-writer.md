@@ -186,17 +186,18 @@ minors-integration pass still asks the user nothing.
 
 ## Minors-integration pass (a review follows)
 
-A resumed turn whose injected feedback carries `blocking: false` is **not** a
+A minors resume is recognized by its preamble — "No blocking issues — integrate
+these minor improvements; a final review follows:" — carrying `blocking: False`;
+it does NOT carry the script-gate "was not accepted" wrapper. (The `blocking: false`
+cue alone no longer disambiguates — it also rides the confirm gate; the preamble is
+what tells them apart, per the resume taxonomy above.) Such a turn is **not** a
 rework — the spec already passed review (no Critical/Major findings). This is your
 one pass to fold in the reviewer's **Minor** improvements. You do **not** get the
 last word: a fresh verification review runs after this pass to confirm the edit
 introduced nothing blocking. That follow-up will **not** ask you to integrate
 further minors, so this is your only minors pass — integrate what is worthwhile now.
-A minors resume is recognized by its preamble — "No blocking issues — integrate
-these minor improvements; a final review follows:" — and `blocking: False`; it
-does NOT carry the script-gate "was not accepted" wrapper. **Trust the
-`blocking:` line:** `blocking: false` means the spec already passed; the
-reviewer's Minor/Nit `findings:` are advisory, not a rejection.
+On the minors preamble, **trust the `blocking:` line:** `blocking: false` means the
+spec already passed; the reviewer's Minor/Nit `findings:` are advisory, not a rejection.
 
 On this pass:
 

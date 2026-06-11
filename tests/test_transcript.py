@@ -140,7 +140,7 @@ def test_balance_noop_when_no_trailing_tool_use(tmp_path: Path) -> None:
     assert balance_success_on_resume(msgs, t, InMemoryEventLog(), "x", wrapper_text=None) is None
 
 
-def test_resume_superseded_note_constant_matches_emitted_text(tmp_path: Path) -> None:
+def test_balance_success_on_resume_emits_superseded_note_with_wrapper_text(tmp_path: Path) -> None:
     t = Transcript(tmp_path / "transcript.jsonl")
     msgs = [
         Message(role="user", content=(TextBlock(text="begin"),)),
@@ -153,5 +153,7 @@ def test_resume_superseded_note_constant_matches_emitted_text(tmp_path: Path) ->
         t.append(m)
     injected = balance_success_on_resume(msgs, t, InMemoryEventLog(), "step:x",
                                          wrapper_text="feedback")
+    assert injected is not None
     results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
+    assert len(results) >= 1
     assert results[0].content == RESUME_SUPERSEDED_NOTE

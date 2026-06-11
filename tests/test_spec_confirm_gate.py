@@ -49,6 +49,10 @@ def test_spec_writer_gated_confirm_sets_passed_and_continues() -> None:
     assert isinstance(m.action, Continue)
     assert m.var_mutations["spec_gate_pending"] is False
     assert m.var_mutations["spec_gate_passed"] is True
+    # Rule 1 is taken exclusively: it must NOT fall through to the else branch,
+    # which would also clear fast_path and arm spec_unseen_changes.
+    assert "fast_path" not in m.var_mutations
+    assert "spec_unseen_changes" not in m.var_mutations
 
 
 def test_spec_writer_else_consumes_pending_and_clears_passed_and_arms() -> None:
@@ -80,6 +84,7 @@ def test_spec_writer_confirmed_with_unseen_true_falls_to_else() -> None:
                 "complexity": "standard", "unseen_changes": True},
     )
     assert isinstance(m.action, Continue)
+    assert m.var_mutations["spec_gate_pending"] is False
     assert m.var_mutations["spec_gate_passed"] is False
     assert m.var_mutations["spec_unseen_changes"] is True
 

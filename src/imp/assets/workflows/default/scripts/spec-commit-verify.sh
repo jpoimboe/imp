@@ -14,8 +14,9 @@ if ! git diff-tree --root --no-commit-id --name-only -r HEAD | grep -qxF "$TARGE
 fi
 
 # Clean-spec-path check (private worktree): no uncommitted/staged/untracked spec
-# changes may survive. `--porcelain` omits gitignored files (ignored == declared
-# acceptable); it catches modified, staged, and untracked-unignored states.
+# changes may survive. Without `--ignored`, git status omits gitignored files
+# (ignored == declared acceptable); it catches modified, staged, and
+# untracked-unignored states. `--porcelain` just selects the stable output format.
 if [ -n "$(git status --porcelain -- imp/specs/)" ]; then
   echo "uncommitted or untracked changes under imp/specs/ (must be committed or removed):" >&2
   git status --porcelain -- imp/specs/ >&2
