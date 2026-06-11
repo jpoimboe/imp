@@ -743,3 +743,37 @@ def test_chrome_step_header_streams_live_and_matches_log() -> None:
     assert any("gate" in ln and "complete" not in ln for ln in body)   # start header
     assert any("gate complete" in ln for ln in body)                    # breadcrumb
     assert body == _render_body(events)                                 # live == imp log
+
+
+def test_prepare_for_prompt_flushes_separator_with_indent_bytes() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="design",
+                    model="m", provider="anthropic"))
+    # step header emitted, _prev_prose armed for the step body
+    drv.prepare_for_prompt()
+    # the armed separator is a blank carrying the step-children indent (depth 1 = 2 spaces)
+    assert out.getvalue().endswith("  \n")
+    assert drv._separator_emitted is True
+
+
+def test_deferred_print_lines_held_then_flushed_before_user_turn() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                    model="m", provider="anthropic"))
+    drv.prepare_for_prompt()
+    base = out.getvalue()
+    # a mid-prompt event (e.g. skill_load) must be DEFERRED while the prompt is active
+    drv.on_event(ev("sk", "skill_load", agent_id="a", name="refactor", source="human"))
+    assert out.getvalue() == base                       # nothing printed yet
+    drv.flush_deferred()
+    assert "load skill refactor" in out.getvalue()      # flushed at prompt exit
+
+
+def test_flush_deferred_clears_prompt_active_for_liveness() -> None:
+    drv, out = _driver()
+    drv.prepare_for_prompt()
+    drv.flush_deferred()
+    assert drv._prompt_active is False                  # never left muted
+    # subsequent events print normally
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p"))
+    assert "s" in out.getvalue()
