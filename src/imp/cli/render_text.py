@@ -180,7 +180,7 @@ def spaces_after(node: Any, *, full: bool) -> bool:
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
-                             nv.ErrorNode, nv.PauseNode))
+                             nv.ErrorNode, nv.PauseNode, nv.RenameNode))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
@@ -196,7 +196,7 @@ def spaces_before(node: Any) -> bool:
     lands identically in `imp log` and the live view."""
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
-        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode))
+        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode))
     )
 
 
@@ -502,6 +502,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # any, was already shown as its own `error:` event above.
         yield _line(f"⏸ paused ({node.reason})", depth, color,
                     *pal.NODE_COLORS["metadata"], gutters=gutters)
+        return
+
+    if isinstance(node, nv.RenameNode):
+        indent = _gutter_indent(depth, gutters, color)
+        marker = pal.ansi("→ named ", "dim", enabled=color)
+        name = pal.ansi(node.name, *pal.NODE_COLORS["workflow"], enabled=color)
+        yield indent + marker + name
         return
 
     if isinstance(node, nv.ErrorNode):

@@ -14,6 +14,7 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -237,6 +238,12 @@ class PauseNode:
     view agree. For an error-driven pause the underlying failure already appears as
     its own `error:` event just above this line."""
     reason: str
+    collapsible = False
+
+
+@dataclass
+class RenameNode:
+    name: str
     collapsible = False
 
 
@@ -504,6 +511,13 @@ def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
 
 
+_DATE_PREFIX = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+
+
+def _slug_descriptor(slug: str) -> str:
+    return _DATE_PREFIX.sub("", slug)
+
+
 def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # A rename carries the new title + slug as a unit (current schema). Apply them
     # together; ignore a legacy/partial event missing either, rather than leaving
@@ -514,6 +528,7 @@ def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         return
     self._root.title = new_title
     self._root.slug = new_slug
+    self._append(RenameNode(name=_slug_descriptor(new_slug)))
 
 
 NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
