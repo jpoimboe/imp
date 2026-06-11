@@ -671,6 +671,11 @@ class CodexAgentRunner:
                             return
                         yield {"type": "agent_output", "payload": args}
                         return
+                    # Suspension or user-wait captured while the in-loop raise
+                    # was gated by in-flight siblings — break to the stream-end
+                    # fallback which drains then re-raises.
+                    if state.subagent_suspended is not None or state.awaiting_user:
+                        break
                     # Not captured: classified provider-error text wins over
                     # both nudge and `no_complete_step`. Auth/quota substrings
                     # must short-circuit nudge attempts (a nudge to a quota'd
@@ -698,6 +703,19 @@ class CodexAgentRunner:
                                     "complete_step"),
                         "detail": {"last_agent_text": last_text[:500]}}}
                     return
+            # Stream-end drain-then-raise fallback: the stream ended with a
+            # capture pending and the gated in-loop raise never fired (e.g. a
+            # silent stream death with a sibling still in flight). Await the
+            # in-flight drain, then re-raise — suspension takes precedence.
+            if state.subagent_suspended is not None or state.awaiting_user:
+                while state.inflight_task_dispatches > 0:
+                    await asyncio.sleep(0)
+                if self._abort_controller is not None:
+                    with contextlib.suppress(Exception):
+                        self._abort_controller.abort()
+                if state.subagent_suspended is not None:
+                    raise state.subagent_suspended
+                raise AwaitingUserInput(state.awaiting_prompt)
             # Stream ended (possibly silently) after a cancel without the
             # in-loop check firing — classify it as a clean interrupt.
             if self._is_cancelled():

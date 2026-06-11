@@ -358,3 +358,50 @@ async def test_awaiting_user_resume_injects_reply_not_system_prompt(
     first_prompt = captured.thread.run_calls[0][0]
     assert "the README" in str(first_prompt)
     assert "you are a test agent" not in str(first_prompt)
+
+
+@pytest.mark.anyio
+async def test_stream_end_drains_then_reraises_suspension(
+    tmp_path: Path,
+) -> None:
+    """AC25: the stream ends with a suspension captured while a sibling is still
+    in flight (in-loop raise gated off). The fallback awaits the drain, then
+    re-raises — without it run() returns normally and pytest.raises fails."""
+    import asyncio
+
+    from imp.engine.agent_run import SubagentSuspended
+    auth = _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    from tests.codex_fakes import agent_message, thread_started, turn_completed
+
+    scripted = [[thread_started("t"), agent_message("x"),
+                 turn_completed(output_tokens=1)]]
+
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = auth
+
+    import imp.providers.codex_runner as cr
+    orig = cr.process_event
+
+    def _patched(*a: Any, **k: Any) -> None:
+        rs = k.get("run_state")
+        if rs is not None and getattr(a[0], "type", None) == "turn.completed":
+            rs.subagent_suspended = SubagentSuspended("paused")
+            rs.inflight_task_dispatches = 1  # sibling in flight at the gate
+
+            async def _settle() -> None:
+                await asyncio.sleep(0)
+                rs.inflight_task_dispatches = 0
+
+            asyncio.get_running_loop().create_task(_settle())
+        return orig(*a, **k)
+
+    cr.process_event = _patched
+    try:
+        with pytest.raises(SubagentSuspended):
+            async for _ev in runner.run(_invocation(tmp_path, event_log=elog)):
+                pass
+    finally:
+        cr.process_event = orig
