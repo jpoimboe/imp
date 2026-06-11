@@ -5,9 +5,11 @@ from pathlib import Path
 import httpx
 import pytest
 
+from imp.agents.parallel import reset_parallelism_cache
+from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
-from imp.providers.codex_mcp import RunState, start_server
+from imp.providers.codex_mcp import RunState, _register_tool, start_server
 
 
 @pytest.fixture
@@ -105,3 +107,69 @@ async def test_server_accepts_request_with_correct_bearer(tmp_path: Path) -> Non
             assert r.status_code != 401 and r.status_code != 403
     finally:
         await handle.shutdown()
+
+
+def _register(tool, ctx):
+    from mcp.server.fastmcp import FastMCP
+    app = FastMCP("imp")
+    _register_tool(app, tool, ctx=ctx, state=RunState(cap=10))
+    return app._tool_manager._tools[tool.name]
+
+
+def test_codex_task_tool_annotated_readonly_when_parallel(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """AC23: with the bypass posture on and width > 1 (default 8), the registered
+    `task` tool carries ToolAnnotations(readOnlyHint=True) — the CLI MCP-parallelism
+    unlock."""
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        mcp_tool = _register(make_task_tool(), _ctx(tmp_path))
+        assert mcp_tool.annotations is not None
+        assert mcp_tool.annotations.readOnlyHint is True
+    finally:
+        reset_parallelism_cache()
+
+
+def test_codex_non_task_tool_not_annotated(tmp_path: Path, monkeypatch) -> None:
+    """AC23: ONLY `task` is annotated — a non-task tool (echo) registers with
+    annotations=None even at width > 1."""
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        mcp_tool = _register(_echo_tool(), _ctx(tmp_path))
+        assert mcp_tool.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_codex_task_annotation_dropped_by_kill_switch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """AC21 (bridge half): IMP_MAX_PARALLEL_TASKS=1 drops the readOnlyHint at the
+    codex registration site, re-serializing dispatch end-to-end."""
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    reset_parallelism_cache()
+    try:
+        mcp_tool = _register(make_task_tool(), _ctx(tmp_path))
+        assert mcp_tool.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_codex_task_annotation_derived_from_bypass(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """AC23: the annotation is DERIVED from the bypass posture, not hardcoded — flip
+    CODEX_APPROVAL_POLICY off the bypass value and the hint disappears even at width
+    > 1 (the honesty-note derivation pin)."""
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    monkeypatch.setattr(
+        "imp.providers.codex_mcp.CODEX_APPROVAL_POLICY", "untrusted")
+    try:
+        mcp_tool = _register(make_task_tool(), _ctx(tmp_path))
+        assert mcp_tool.annotations is None
+    finally:
+        reset_parallelism_cache()

@@ -47,7 +47,7 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
-from imp.providers.codex_mcp import RunState, start_server
+from imp.providers.codex_mcp import CODEX_APPROVAL_POLICY, RunState, start_server
 
 _logger = logging.getLogger(__name__)
 
@@ -788,7 +788,7 @@ class CodexAgentRunner:
         return ThreadOptions(
             model=self.model,
             sandboxMode="danger-full-access",
-            approvalPolicy="never",
+            approvalPolicy=CODEX_APPROVAL_POLICY,
             networkAccessEnabled=False,
         )
 

@@ -23,14 +23,36 @@ import contextlib
 import json
 import socket
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
+from imp.agents.parallel import max_parallel_tasks
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.engine.agent_run import SubagentSuspended
+
+# Bypass posture for the codex provider. This is the SAME value the ThreadOptions
+# builder feeds to approvalPolicy (codex_runner._build_thread_options); the task
+# readOnlyHint below is DERIVED from it so a future approval mode that flips this
+# constant drops the hint automatically (design §2 honesty note). codex_runner
+# imports this name to keep the two sites in lockstep.
+CODEX_APPROVAL_POLICY: Literal["never"] = "never"
+
+
+def _task_annotations() -> Any | None:
+    """ToolAnnotations(readOnlyHint=True) for the task tool ONLY, and only when
+    the bypass posture is on AND the width knob permits parallelism. readOnlyHint
+    is not literally true (a subagent may edit files); its only operative effect
+    in our bypass-approval wiring is unlocking the CLI's MCP parallel scheduling.
+    Width gate: IMP_MAX_PARALLEL_TASKS=1 drops the hint, restoring serial dispatch
+    end-to-end (Decision 5 kill switch)."""
+    from mcp.types import ToolAnnotations
+    bypass = CODEX_APPROVAL_POLICY == "never"
+    if bypass and max_parallel_tasks() > 1:
+        return ToolAnnotations(readOnlyHint=True)
+    return None
 
 
 @dataclass
@@ -339,7 +361,9 @@ def _register_tool(
         fn_metadata=fn_meta,
         is_async=True,
         context_kwarg=None,
-        annotations=None,
+        # task ONLY — derived from the bypass posture + width knob (Decision 5 /
+        # §2 annotation). Every other tool stays unannotated.
+        annotations=(_task_annotations() if tool.name == "task" else None),
     )
     mcp_app._tool_manager._tools[tool.name] = mcp_tool
 
