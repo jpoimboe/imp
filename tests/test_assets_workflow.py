@@ -120,7 +120,7 @@ def test_minors_integrated_vars_declared_default_false() -> None:
     assert defaults["plan_minors_integrated"] is False
 
 
-def test_spec_fast_path_gate_precedes_reviewer_in_order() -> None:
+def test_spec_exit_gate_precedes_reviewer_in_order() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     spec = next(p for p in wf.phases if p.name == "spec")
@@ -131,7 +131,7 @@ def test_spec_fast_path_gate_precedes_reviewer_in_order() -> None:
     assert names.index("spec-exit-gate") < names.index("spec-reviewer")
 
 
-def test_fast_path_spec_gate_skips_to_plan_writer() -> None:
+def test_spec_exit_gate_fast_path_skips_to_plan_writer() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     gate = _steps(wf)["spec-exit-gate"].rules[1]   # rule 0 is now spec_gate_passed
@@ -205,15 +205,14 @@ def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     rules = _steps(wf)["spec-writer"].rules
-    vars_ = {**_BASE_VARS, "spec_unseen_changes": False,
-             "spec_gate_pending": False, "spec_gate_passed": False,
-             "spec_confirm": True}
-    m = evaluate_rules(rules, vars=vars_,
+    # _BASE_VARS already has spec_unseen_changes/gate flags False and spec_confirm
+    # True, which is exactly the trivial-written precondition — no overrides needed.
+    m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"phase": "written", "complexity": "trivial",
                                "status": "Success", "unseen_changes": False})
     assert m.var_mutations["fast_path"] is True
 
-    m2 = evaluate_rules(rules, vars=vars_,
+    m2 = evaluate_rules(rules, vars=_BASE_VARS,
                         output={"phase": "written", "complexity": "standard",
                                 "status": "Success", "unseen_changes": False})
     assert m2.var_mutations["fast_path"] is False
