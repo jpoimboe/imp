@@ -601,6 +601,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> str:
+    display = slug.strip() or change_id
+    return (ansi(display, *pal.NODE_COLORS["workflow"], enabled=color)
+            + ansi(f" · {marker}", "dim", enabled=color))
+
+
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -638,9 +644,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            # No "Created Change …" line: the driver's `change_created` event
-            # prints the bold `#slug  title` workflow header as the opener, so a
-            # second headline here would just duplicate it.
+            print(_run_header_line(
+                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
             non_interactive = bool(getattr(args, "non_interactive", False))
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
@@ -740,10 +745,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # workflow header — emit a matching one here (bold `#slug  title`) with
             # a dim resuming marker, so a resumed run opens like a fresh one. A
             # title-less change defers its header too (Option B), matching new.
-            _color = should_use_color(sys.stdout)
-            if change.title and change.title.strip():
-                print(ansi(f"#{change.slug}  {change.title}", "bold", "magenta", enabled=_color)
-                      + ansi(" · resuming", "dim", enabled=_color))
+            print(_run_header_line(
+                change.slug, change.id, "resuming",
+                color=should_use_color(sys.stdout)))
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
             # + gate-check FIRST (plan_rewind raises before mutating/emitting) so
