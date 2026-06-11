@@ -37,6 +37,21 @@ if TYPE_CHECKING:
 
 RESUME_SUPERSEDED_NOTE = "previous step output recorded; superseded by the feedback below"
 
+# Injected once onto every synthesized resume turn. On resume the transcript is
+# replayed to the provider, and reconstructed tool_results can surface to the
+# model as errors ("internal error") even when the original action succeeded —
+# observed under claude_code's stream-json replay, and a genuine shape under the
+# is_error placeholders this module writes for interrupted/superseded tool_uses.
+# The note keeps the model from redoing durable work it can simply verify.
+RESUME_DURABILITY_NOTE = (
+    "[resume] The tool results above were reconstructed from before this resume "
+    "and may display as errors even when the original action succeeded. Any files "
+    "you have already written and commits you have already made are durable on "
+    "disk — do not blindly redo them. Before re-running any write, edit, or "
+    "commit, verify the current state with a read-only check (read the file, or "
+    "run git log / git status)."
+)
+
 
 class Transcript:
     def __init__(self, path: Path) -> None:
@@ -110,13 +125,16 @@ def repair_dangling_tool_use_on_resume(
     ]
     if not tool_uses:
         return None
-    blocks = tuple(
-        ToolResultBlock(
-            tool_use_id=tu.id,
-            content=_synthetic_tool_result_content(tu.name),
-            is_error=True,
-        )
-        for tu in tool_uses
+    blocks: tuple[TextBlock | ToolResultBlock, ...] = (
+        *(
+            ToolResultBlock(
+                tool_use_id=tu.id,
+                content=_synthetic_tool_result_content(tu.name),
+                is_error=True,
+            )
+            for tu in tool_uses
+        ),
+        TextBlock(text=RESUME_DURABILITY_NOTE),
     )
     repair = Message(role="user", content=blocks)
     messages.append(repair)
@@ -164,6 +182,10 @@ def balance_success_on_resume(
     if not result_blocks and not wrapper_text:
         return None
     blocks: list[TextBlock | ToolResultBlock] = list(result_blocks)
+    # Resume-durability note frames the (possibly error-shaped) results above;
+    # the actionable wrapper feedback, if any, stays last so it reads as the
+    # most recent instruction.
+    blocks.append(TextBlock(text=RESUME_DURABILITY_NOTE))
     if wrapper_text:
         blocks.append(TextBlock(text=wrapper_text))
     injected = Message(role="user", content=tuple(blocks))
