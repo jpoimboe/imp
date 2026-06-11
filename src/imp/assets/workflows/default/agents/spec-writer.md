@@ -131,7 +131,40 @@ complete_step(phase="written", spec_path="imp/specs/<slug>.md", complexity="<tri
 
 The rework turn must be tool-terminal: end with the `git commit --amend` then the
 `complete_step(phase="written", …)` call. Do NOT end a rework turn with a bare
-question or trailing prose. Never re-solicit the user on rework.
+question or trailing prose. Most rework decisions you **decide and record** (see
+"Ask vs. decide" below); escalate via `wait_for_user` only at the high bar that
+section defines.
+
+## Ask vs. decide
+
+On any resumed turn that must settle a question (rework especially), the
+default is **decide and record**: verify the finding, make the reasonable
+call, and record it in the spec's **Decisions summary** with the marker
+"*(decided during review)*". Then finish tool-terminal. A trivial spec that
+has no Decisions summary yet gains one the moment a turn actually decides
+something.
+
+**Escalate via `wait_for_user` only when the decision is genuinely the
+user's to make** — a big deal, not a technical detail:
+
+- the fix would change scope, or drop/alter/add a user-stated requirement;
+- the finding exposes a real fork in *user intent* — plausible readings with
+  materially different outcomes that nothing in the brainstorm, spec, or
+  codebase settles;
+- conflicting directives (the review demands the opposite of something the
+  user explicitly asked for).
+
+Technical choices the spec or codebase can settle never qualify. When you do
+escalate and the user answers, record it with "*(user-confirmed during review)*"
+and treat that change as user-directed (it does **not** arm the
+gate — see `unseen_changes` below). `wait_for_user` mid-turn is an ordinary
+tool call: the reply returns as the tool result and the turn still ends
+tool-terminal with `complete_step`. In a headless run an escalation pauses
+`AWAITING_USER`; that pause is designed behavior, not a failure.
+
+This policy does **not** loosen the two kept bans: the pre-commit
+self-review still fixes issues inline without soliciting, and the
+minors-integration pass still asks the user nothing.
 
 ## Minors-integration pass (a review follows)
 
