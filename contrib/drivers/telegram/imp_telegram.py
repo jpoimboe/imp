@@ -10,7 +10,9 @@ diagnostics go to stderr.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+import urllib.request
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +21,10 @@ from typing import Any
 # silent / dropped.
 _LOUD = frozenset({"awaiting_user_input", "errored", "merge_blocked", "completed"})
 _SILENT = frozenset({"agent_output", "llm_response"})
+
+_API_BASE = "https://api.telegram.org"
+_LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
+_HTTP_TIMEOUT = 35        # seconds; urlopen ceiling, must exceed the long-poll
 
 
 def curate(event_type: Any) -> str | None:
@@ -123,3 +129,41 @@ def emit_reply(text: str, stream: Any) -> None:
     flat = text.replace("\r", " ").replace("\n", " ")
     stream.write(flat + "\n")
     stream.flush()
+
+
+def send_message_params(chat_id: int, text: str, *, silent: bool) -> dict[str, Any]:
+    """Build a sendMessage payload. silent → disable_notification (the quiet
+    running narrative); loud events pass silent=False so the phone buzzes."""
+    return {"chat_id": chat_id, "text": text, "disable_notification": silent}
+
+
+def get_updates_params(offset: int, timeout: int) -> dict[str, Any]:
+    """Build a getUpdates payload (long-poll, outbound only)."""
+    return {"offset": offset, "timeout": timeout}
+
+
+def api_call(token: str, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    """POST one Telegram Bot API call and return the parsed JSON. This is the
+    single HTTP seam — tests monkeypatch it (the 'mocked HTTP' of AC 12d)."""
+    url = f"{_API_BASE}/bot{token}/{method}"
+    data = json.dumps(dict(params)).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+        body = resp.read().decode("utf-8")
+    result: dict[str, Any] = json.loads(body)
+    return result
+
+
+def make_send(token: str) -> Callable[..., None]:
+    """Bind a sendMessage caller to the bot token."""
+    def send(chat_id: int, text: str, *, silent: bool) -> None:
+        api_call(token, "sendMessage", send_message_params(chat_id, text, silent=silent))
+    return send
+
+
+def make_get_updates(token: str) -> Callable[[int], dict[str, Any]]:
+    """Bind a getUpdates caller to the bot token."""
+    def get(offset: int) -> dict[str, Any]:
+        return api_call(token, "getUpdates", get_updates_params(offset, _LONG_POLL_TIMEOUT))
+    return get
