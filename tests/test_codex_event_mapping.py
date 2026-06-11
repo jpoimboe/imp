@@ -130,6 +130,32 @@ def test_unparseable_string_arguments_degrade_to_no_match() -> None:
     assert run_state.minted_task_ids == [("MINT-EMPTY", _args_fingerprint({}))]
 
 
+def test_turn_completed_clears_mint_structures() -> None:
+    """AC30 (first installment): a no-match item strands a mint orphan; the
+    turn.completed clear drops it so it cannot fingerprint-match a LATER turn's
+    identical-args dispatch and key it to a dead event id."""
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    orphan_args = {"subagent_name": "impl", "task_description": "stranded"}
+    run_state.minted_task_ids.append(("DEAD-MINT", _args_fingerprint(orphan_args)))
+    # A real pairing also records an audit entry this turn.
+    run_state.task_id_audit["sdk-x"] = "LIVE-EVENT"
+
+    # Seed a turn item so turn.completed emits an llm_response (needed for
+    # the usage-attach step to find a prior response).
+    msg = FakeItemEvent(type="item.completed", item=FakeAgentMessageItem(text="work"))
+    process_event(msg, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    done = FakeTurnCompletedEvent(usage=FakeUsage(input_tokens=1, output_tokens=1))
+    process_event(done, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    assert run_state.minted_task_ids == []
+    assert run_state.task_id_audit == {}
+
+
 def test_turn_completed_emits_reassembled_llm_response_before_usage() -> None:
     elog = InMemoryEventLog()
     state = {"web_search_enabled": False}

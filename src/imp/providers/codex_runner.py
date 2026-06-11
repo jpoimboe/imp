@@ -1176,6 +1176,9 @@ def process_event(
                 raw=raw, usage={}, stop_reason=None,
                 auth_mode=state.get("auth_mode"),
             )
+        if run_state is not None:
+            run_state.minted_task_ids.clear()
+            run_state.task_id_audit.clear()
         usage = getattr(event, "usage", None)
         if usage is None:
             return
