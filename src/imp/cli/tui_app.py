@@ -220,7 +220,7 @@ class TuiApp:
     async def run_async(self) -> None:
         if self._app is None:
             self._build_app()
-        task = asyncio.ensure_future(self._refresh_loop())
+        task = asyncio.create_task(self._refresh_loop())
         try:
             await self._app.run_async(handle_sigint=False)
         finally:

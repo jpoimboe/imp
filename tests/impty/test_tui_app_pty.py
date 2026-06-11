@@ -31,6 +31,17 @@ def _session(scenario: str, result: str = "") -> TerminalSession:
                            cols=80, rows=24)
 
 
+def _wait_alt_screen(s: TerminalSession, hard: float = 8.0) -> None:
+    # The run's status spinner repaints every 0.1s, so wait_idle never settles;
+    # poll the (live) regime until the app has entered the alternate screen.
+    deadline = time.monotonic() + hard
+    while time.monotonic() < deadline:
+        if s.regime() is Regime.SCREEN:
+            return
+        time.sleep(0.02)
+    raise AssertionError("alt-screen never entered")
+
+
 def test_expanded_render_and_pageup_scroll_and_ctrl_o_toggle() -> None:
     with _session("view") as s:
         s.wait_idle(idle=0.3, hard=8.0)
@@ -55,8 +66,9 @@ def test_expanded_render_and_pageup_scroll_and_ctrl_o_toggle() -> None:
 
 def test_exit_restores_screen_and_prints_collapsed_transcript() -> None:
     with _session("exit") as s:
-        s.wait_idle(idle=0.3, hard=8.0)
+        _wait_alt_screen(s)
         assert s.regime() is Regime.SCREEN                 # in alt-screen while running
+        s.send("q")                                        # gated exit (race-free vs a timer)
         s.run_to_completion(hard=8.0)                      # past app.exit() + transcript print
         assert s.regime() is Regime.SCROLL                 # alt screen restored (criterion 8)
         body = "\n".join(s.lines())
