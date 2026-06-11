@@ -118,14 +118,16 @@ progress.md is your guide.)
    **no extra work** — do not invent a fixup.
 
    **Over-reach guardrail for the nit-fix dispatch.** When you re-dispatch for
-   nits, name them explicitly and constrain the implementer: "apply ONLY these named nits;
-   each is bounded and mechanical; do not refactor beyond the named change, touch
-   unrelated code, or alter behavior."
+   nits, name them explicitly and constrain the implementer:
+   "apply ONLY these named nits; each is bounded and mechanical;
+   do not refactor beyond the named change, touch unrelated code, or alter
+   behavior."
 
-   A **nit-only** fixup (no blocking findings in the round) does not re-trigger the quality-reviewer
-   — the phase-level `run-tests` gate is the safety net — and does not mark the run degraded
-   (nit polish is not correctness; see step 5). When a round carries blocking findings,
-   re-review until none remain. All fixes go through the implementer — you never commit,
+   A **nit-only** fixup (no blocking findings in the round)
+   does not re-trigger the quality-reviewer — the phase-level `run-tests` gate
+   is the safety net — and does not mark the run degraded (nit polish is not
+   correctness; see step 5). When a round carries blocking findings, re-review
+   until none remain. All fixes go through the implementer — you never commit,
    amend, or rebase yourself.
 5. Append to `.imp/change/progress.md` (create it if missing): the task
    completed, **its commit subject** (the ledger entry from step 2, so a buried
