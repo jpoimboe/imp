@@ -91,6 +91,20 @@ def test_send_signal_tool_delivers_sigint_regardless_of_tty_mode() -> None:
 
 
 @pytest.mark.skipif(not _can_pty(), reason="pty not available")
+def test_start_passes_env_to_child() -> None:
+    # The env param lets a driver set variables (e.g. API keys) WITHOUT a
+    # `bash -lc "export …; exec …"` wrapper — which would otherwise put bash, not
+    # the target program, in the foreground process group. Spawn directly with
+    # env and confirm the child sees it.
+    prog = "import os, time\nprint('VAL=' + os.environ.get('IMPTY_TEST', 'MISSING'))\ntime.sleep(1)"
+    mcp_mod.start([sys.executable, "-c", prog], env={"IMPTY_TEST": "hello"})
+    try:
+        assert "VAL=hello" in mcp_mod.view(full=True)
+    finally:
+        mcp_mod.stop()
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
 def test_view_returns_current_screen_by_default_and_full_on_demand() -> None:
     prog = "import time\n[print('line', i) for i in range(40)]\ntime.sleep(1)"
     mcp_mod.start([sys.executable, "-c", prog])
