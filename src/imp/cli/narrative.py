@@ -132,6 +132,7 @@ class ToolCall:
     result: str | None = None
     is_error: bool = False
     killed: bool = False
+    call_ts: str | None = None         # the constructing event's timestamp (§1 burst clock)
 
 
 @dataclass
@@ -774,7 +775,7 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
         burst.start_ts = event.get("timestamp")  # burst clock starts at first call
     burst.calls.append(ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
-        input=p.get("input") or {}))
+        input=p.get("input") or {}, call_ts=event.get("timestamp")))
 
 
 def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
@@ -837,7 +838,8 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     burst.calls.append(ToolCall(
         call_id=rid, name="tool", input={},
         result=_summarize_result(p.get("content")) + footer,
-        is_error=bool(p.get("error", False))))
+        is_error=bool(p.get("error", False)),
+        call_ts=event.get("timestamp")))
 
 
 def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -851,7 +853,8 @@ def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # No matching open burst call → record a standalone killed marker.
     b = _ensure_burst(self)
     b.calls.append(ToolCall(
-        call_id=rid, name=str(p.get("name", "tool")), input={}, killed=True))
+        call_id=rid, name=str(p.get("name", "tool")), input={}, killed=True,
+        call_ts=event.get("timestamp")))
 
 
 def _flatten_block(b: Any) -> str:

@@ -950,3 +950,39 @@ def test_change_renamed_ignores_legacy_partial_event() -> None:
              title="renamed"))   # NO new_title — legacy/partial schema
     assert b.tree.root.title == "orig"          # unchanged (event ignored)
     assert b.tree.root.slug == "2026-06-05-orig"  # unchanged (no half-update)
+
+
+def test_toolcall_call_ts_stamped_by_all_three_constructors() -> None:
+    b = nv.NarrativeBuilder()
+    b.add({"id": "1", "type": "step_started", "agent_id": None,
+           "payload": {"step": "s", "kind": "agent", "phase": "p"}})
+    # normal tool_call constructor
+    b.add({"id": "e1", "type": "tool_call", "agent_id": "a",
+           "timestamp": "2026-06-10T00:00:01",
+           "payload": {"id": "c1", "name": "bash", "input": {"command": "ls"}}})
+    # tool_killed standalone-marker constructor (no matching open call)
+    b.add({"id": "e2", "type": "tool_killed", "agent_id": "a",
+           "timestamp": "2026-06-10T00:00:02",
+           "payload": {"id": "zz", "name": "sleep"}})
+    # tool_result orphan constructor (no matching open call; "c1" is open but id
+    # "orphan" doesn't match it, so a new orphan ToolCall is appended)
+    b.add({"id": "e3", "type": "tool_result", "agent_id": "a",
+           "timestamp": "2026-06-10T00:00:03",
+           "payload": {"id": "orphan", "content": "x"}})
+    burst = b.current_burst
+    assert burst is not None
+    by_id = {c.call_id: c for c in burst.calls}
+    assert by_id["c1"].call_ts == "2026-06-10T00:00:01"
+    assert by_id["zz"].call_ts == "2026-06-10T00:00:02"
+    assert by_id["orphan"].call_ts == "2026-06-10T00:00:03"
+
+
+def test_structural_repr_omits_call_ts() -> None:
+    b = nv.NarrativeBuilder()
+    b.add({"id": "1", "type": "step_started", "agent_id": None,
+           "payload": {"step": "s", "kind": "agent", "phase": "p"}})
+    b.add({"id": "e1", "type": "tool_call", "agent_id": "a",
+           "timestamp": "2026-06-10T00:00:01",
+           "payload": {"id": "c1", "name": "bash", "input": {"command": "ls"}}})
+    rep = nv.structural_repr(b.current_burst)
+    assert "call_ts" not in rep["calls"][0]
