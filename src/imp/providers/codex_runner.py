@@ -578,7 +578,8 @@ class CodexAgentRunner:
 
                 # A subagent-origin pause captured in the MCP handler must
                 # unwind the whole codex run cleanly (not classify as an error).
-                if state.subagent_suspended is not None:
+                if (state.subagent_suspended is not None
+                        and state.inflight_task_dispatches == 0):
                     if self._abort_controller is not None:
                         with contextlib.suppress(Exception):
                             self._abort_controller.abort()
@@ -588,7 +589,7 @@ class CodexAgentRunner:
                 # likewise unwind the whole codex run cleanly. Mirrors the
                 # subagent-suspend escalation, but raises AwaitingUserInput so
                 # drive_invocation marks the step resumable (awaiting_user=True).
-                if state.awaiting_user:
+                if state.awaiting_user and state.inflight_task_dispatches == 0:
                     if self._abort_controller is not None:
                         with contextlib.suppress(Exception):
                             self._abort_controller.abort()

@@ -256,6 +256,59 @@ async def test_killed_tools_drained_to_tool_killed_events(tmp_path: Path) -> Non
 
 
 @pytest.mark.anyio
+async def test_suspension_reraise_deferred_until_inflight_drains(
+    tmp_path: Path,
+) -> None:
+    """AC25: a suspension captured while a sibling is in flight is NOT re-raised
+    at that event; it is deferred until inflight drains to 0 (here at the next
+    event). Falsifiable: the turn.completed llm_response — emitted by process_event
+    BEFORE the deferred re-raise — is in the log; an ungated raise would fire at
+    the task item, before that response exists."""
+    from imp.engine.agent_run import SubagentSuspended
+    auth = _seed_git_and_auth(tmp_path)
+    elog = InMemoryEventLog()
+    from tests.codex_fakes import agent_message, mcp_call, thread_started, turn_completed
+
+    scripted = [[thread_started("t"), agent_message("dispatching"),
+                 mcp_call(name="task",
+                          args={"subagent_name": "impl",
+                                "task_description": "x"},
+                          result="ok", item_id="sdk-1"),
+                 turn_completed(output_tokens=1)]]
+
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
+    runner._canonical_auth_override = auth
+
+    import imp.providers.codex_runner as cr
+    orig = cr.process_event
+
+    def _patched(*a: Any, **k: Any) -> None:
+        rs = k.get("run_state")
+        ev = a[0]
+        if rs is not None:
+            item = getattr(ev, "item", None)
+            if getattr(item, "type", None) == "mcp_tool_call":
+                # Capture lands while a sibling is still in flight.
+                rs.subagent_suspended = SubagentSuspended("paused")
+                rs.inflight_task_dispatches = 1
+            if getattr(ev, "type", None) == "turn.completed":
+                rs.inflight_task_dispatches = 0  # sibling settles
+        return orig(*a, **k)
+
+    cr.process_event = _patched
+    try:
+        with pytest.raises(SubagentSuspended):
+            async for _ev in runner.run(_invocation(tmp_path, event_log=elog)):
+                pass
+    finally:
+        cr.process_event = orig
+
+    assert any(e.get("type") == "llm_response" for e in elog.read())
+
+
+@pytest.mark.anyio
 async def test_awaiting_user_resume_injects_reply_not_system_prompt(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A paused codex wait_for_user (journaled awaiting_user_input, no
