@@ -88,6 +88,7 @@ class StepNode:
     quiet_line: str | None = None      # resolved routing line (`→ reworking` /
                                        # `→ <phase>`); None for a linear continue
     closed: bool = False
+    interrupted: bool = False
     collapsible = False
 
 
@@ -288,6 +289,7 @@ class BreadcrumbLine:
     show_complete: bool = True         # always True (§4): chrome steps now print
                                        # a start header, so the breadcrumb always
                                        # carries the word "complete".
+    interrupted: bool = False
     collapsible = False
 
 
@@ -628,6 +630,7 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             existing.children.clear()
             existing.outcome = None
             existing.closed = False
+            existing.interrupted = False
             existing.kind = kind
             existing.model = p.get("model")
             existing.provider = p.get("provider")
@@ -664,7 +667,8 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
         breadcrumb = BreadcrumbLine(
             step_name=node.name, elapsed_s=elapsed, action=action,
-            extras=_breadcrumb_extras(node.agent_output))
+            extras=_breadcrumb_extras(node.agent_output),
+            interrupted=node.interrupted)
         node.children.append(breadcrumb)
         node.closed = True
         if isinstance(action, dict) and action.get("verb") == "goto":
@@ -1158,6 +1162,10 @@ NarrativeBuilder._HANDLERS["skill_load"] = _h_skill_load
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    if p.get("category") == "config" and p.get("kind") == "interrupted":
+        if self._step_stack:
+            self._step_stack[-1].interrupted = True
+        return
     detail = ""
     d = p.get("detail")
     if isinstance(d, dict):

@@ -228,3 +228,42 @@ def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> N
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 2
     assert ran["called"] is False    # never ran a Change abandon finalized
+
+
+def test_async_cmd_resume_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
+    import argparse
+    import contextlib
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.change import Change
+    from imp.engine.state import State
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.status = "paused"
+    st.save(ch.state_dir)
+
+    entered = {"n": 0}
+
+    @contextlib.contextmanager
+    def fake_handler(coord):
+        entered["n"] += 1
+        yield
+
+    async def fake_session(change, *, tg, **kwargs):
+        tg.cancel_scope.cancel()
+        return 0
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "_run_change_session", fake_session)
+    monkeypatch.setattr(m, "_benign_interrupt_loop_handler", fake_handler)
+
+    args = argparse.Namespace(
+        token="feat", from_target=None, force=False, tui=False,
+        non_interactive=True, message="go")
+    rc = anyio.run(m._async_cmd_resume, args)
+    assert rc == 0
+    assert entered["n"] == 1

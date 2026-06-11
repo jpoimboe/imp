@@ -1285,3 +1285,43 @@ def test_incremental_equals_batch_for_wfu_and_grown_repr() -> None:
     assert err["detail"] == "deep detail"                       # Task 12
     # Task 1: call_ts is excluded from call structural repr
     assert "call_ts" not in burst["calls"][0]                   # Task 1
+
+
+def test_interrupt_config_event_suppresses_error_and_marks_step() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="spec-writer", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("2", "error", category="config", kind="interrupted",
+            message="runner cancelled by interrupt"),
+        _ev("3", "step_completed", step="spec-writer", kind="agent",
+            action={"verb": "pause"}, var_mutations={}),
+    ])
+    step = tree.root.children[0].children[0]
+    assert step.interrupted is True
+
+    def _has_error(node: object) -> bool:
+        if isinstance(node, nv.ErrorNode):
+            return True
+        return any(_has_error(c) for c in getattr(node, "children", []))
+
+    assert not _has_error(tree.root)
+    crumbs = [c for c in step.children if isinstance(c, nv.BreadcrumbLine)]
+    assert len(crumbs) == 1
+    assert crumbs[0].interrupted is True
+
+
+def test_non_interrupt_config_error_still_renders() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="spec", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("2", "error", category="config", kind="transcript_invalid",
+            message="transcript ended with dangling tool_use"),
+    ])
+
+    def _errors(node: object) -> list[object]:
+        out = [node] if isinstance(node, nv.ErrorNode) else []
+        for c in getattr(node, "children", []):
+            out.extend(_errors(c))
+        return out
+
+    assert len(_errors(tree.root)) == 1

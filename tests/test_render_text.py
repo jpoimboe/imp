@@ -1227,3 +1227,31 @@ def test_error_detail_block_absent_in_lean() -> None:
             detail={"full_summary": "full detail here"}),
     ], full=False))
     assert "full detail here" not in out
+
+
+def test_interrupt_renders_interrupted_not_complete_pause() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="spec-writer", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("2", "error", category="config", kind="interrupted",
+            message="runner cancelled by interrupt"),
+        _ev("3", "step_completed", step="spec-writer", kind="agent",
+            action={"verb": "pause"}, var_mutations={}),
+        _ev("4", "workflow_paused", reason="interrupt", interrupt_reason="esc"),
+    ]))
+    assert "spec-writer interrupted" in out
+    assert "complete · pause" not in out
+    assert "error:" not in out
+    assert "runner cancelled by interrupt" not in out
+    assert "⏸ paused (esc)" in out
+
+
+def test_intentional_pause_still_renders_complete_pause() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="spec-writer", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("2", "step_completed", step="spec-writer", kind="agent",
+            action={"verb": "pause"}, var_mutations={}),
+    ]))
+    assert "spec-writer complete · pause" in out
+    assert "interrupted" not in out

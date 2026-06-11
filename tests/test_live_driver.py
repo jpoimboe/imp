@@ -954,6 +954,25 @@ def test_compose_status_returns_activity_content() -> None:
     assert "\x1b[90m" in result    # gray detail segment
 
 
+def test_interrupt_breadcrumb_in_live_path() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "error", category="config", kind="interrupted",
+           message="runner cancelled by interrupt"),
+        ev("4", "step_completed", step="spec-writer", kind="agent",
+           action={"verb": "pause"}, var_mutations={}),
+    ]:
+        drv.on_event(e)
+    drv.finish()
+    body = "\n".join(_body(out))
+    assert "spec-writer interrupted" in body
+    assert "complete · pause" not in body
+    assert "error:" not in body
+
+
 def test_loud_forward_goto_breadcrumb_held_until_phase_resolves() -> None:
     # A loud step (spec-reviewer) clean-approves with a plain forward goto to
     # plan-writer. Its breadcrumb route ("→ plan") is unknown until plan-writer's
