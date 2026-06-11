@@ -39,12 +39,14 @@ phases:
           - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
       - name: spec-verify-commit
+        quiet: true
         command: ./scripts/spec-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 
       - name: fast-path-spec-gate      # trivial change -> skip spec review entirely
+        quiet: true
         rules:
           - {if: {fast_path: true}, goto: plan-writer}
           - {else: true, continue: true}
@@ -76,12 +78,14 @@ phases:
           - {operations: [write], paths: ["imp/plans/**"], mode: allow}
 
       - name: plan-verify-commit
+        quiet: true
         command: ./scripts/plan-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
 
       - name: fast-path-plan-gate      # trivial change -> skip plan review entirely
+        quiet: true
         rules:
           - {if: {fast_path: true}, goto: task-lead}   # skip plan-review on fast-path
           - {else: true, continue: true}
@@ -117,6 +121,7 @@ phases:
           - {else: true, continue: true}                    # plan implemented
 
       - name: commit-check
+        quiet: true
         command: ./scripts/implement-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
