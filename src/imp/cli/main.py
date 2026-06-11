@@ -1105,6 +1105,7 @@ def _journal_last_iso(control: Path, change_id: str) -> str | None:
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.
 _INFLIGHT = ("running", "paused", "errored", "merge_blocked")
+RESUMABLE = ("paused", "errored", "merge_blocked")
 
 
 # Row = (id, status, step, last_activity, title, created_at). created_at is the
@@ -1166,6 +1167,15 @@ def _completed_rows(control: Path) -> list[_Row]:
 
 def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
     return sorted(rows, key=lambda r: (r[3], r[5]), reverse=True)
+
+
+def _resumable_rows(control: Path) -> list[_Row]:
+    rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
+    return _sort_rows_newest_first(rows)
+
+
+def _past_change_count(control: Path) -> int:
+    return len(_completed_rows(control))
 
 
 def _abandon(control: Path, change_id: str) -> int:
