@@ -1169,8 +1169,9 @@ class ClaudeCodeAgentRunner:
                                         input=b.input, is_error=True)
                                     if canon == "task":
                                         # tool_call for task is appended inside the
-                                        # MCP wrapper (_impl) using __tool_use_id__,
-                                        # race-free. Don't double-append here.
+                                        # MCP wrapper (_impl) keyed on a minted uuid
+                                        # block id (see :356-362), race-free. Don't
+                                        # double-append here.
                                         continue
                                     elog.append_tool_call(
                                         agent_id=aid,
