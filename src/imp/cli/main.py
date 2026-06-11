@@ -711,9 +711,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             return 2
     try:
         change = Change.load(control, change_id)
-    except (LoadError, LoadErrors) as err:
-        print(f"imp: {err}", file=sys.stderr)
-        return 2
+    except (LoadError, LoadErrors):
+        return _resume_gone(control, change_id)
     state = State.load(change.state_dir)
     if state.status not in ("paused", "errored", "merge_blocked"):
         print(
@@ -1109,6 +1108,29 @@ def _journal_last_iso(control: Path, change_id: str) -> str | None:
     if line is None:
         return None
     return _iso_from_line(line.decode("utf-8", errors="replace"))
+
+
+def _journal_status(control: Path, change_id: str) -> str | None:
+    raw = journal.journal_show(control, change_id, "state.json")
+    if raw is None:
+        return None
+    try:
+        return str(json.loads(raw)["status"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def _resume_gone(control: Path, change_id: str) -> int:
+    status = _journal_status(control, change_id)
+    title = _title_for_id(control, change_id) or change_id
+    if status == "abandoned":
+        print(f"{title} was abandoned; nothing to resume.")
+        return 0
+    if status is not None:
+        print(f"{title} is already completed; nothing to resume.")
+        return 0
+    print(f"imp: no Change matches {change_id!r}", file=sys.stderr)
+    return 2
 
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.
