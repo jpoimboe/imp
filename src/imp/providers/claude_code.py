@@ -47,7 +47,13 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import dispatch_task, make_task_tool, raise_if_suspended
+from imp.agents.subagents import (
+    TASK_REFUSAL_SENTINEL,
+    TaskDispatchSkipped,
+    dispatch_task,
+    make_task_tool,
+    raise_if_suspended,
+)
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
@@ -414,7 +420,23 @@ def _wrap_one(
                             ctx, args["subagent_name"], args["task_description"],
                             tool_call_event_id=tc_event_id,
                             tier=args.get("tier"),
+                            abort_dispatch=lambda: (
+                                state.awaiting_user
+                                or (ctx.coordinator is not None
+                                    and ctx.coordinator.should_pause)),
                         )
+                    except TaskDispatchSkipped:
+                        # Membership frozen (awaiting_user OR should_pause): refuse
+                        # WITHOUT dispatch. Close the minted fold with the BARE
+                        # sentinel (unwrapped — the runner's un-count matches it by
+                        # EXACT equality) and return it; no re-raise.
+                        if ctx.event_log is not None:
+                            ctx.event_log.append_tool_result(
+                                agent_id=state.agent_id,
+                                block=ToolResultBlock(
+                                    minted, TASK_REFUSAL_SENTINEL, is_error=True),
+                                id_ns="block")
+                        return _tool_response(TASK_REFUSAL_SENTINEL, is_error=True)
                     except BaseException as exc:
                         # Error / suspend path: still close the fold with the SAME
                         # minted id so narrative's _h_tool_result gets a deterministic,

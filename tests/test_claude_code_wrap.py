@@ -518,3 +518,51 @@ async def test_impl_inflight_counter_decrements_on_dispatch_error(tmp_path: Path
                         "__tool_use_id__": ""})
     assert out.get("isError") is True
     assert state.inflight_task_dispatches == 0      # decremented despite the raise
+
+
+@pytest.mark.anyio
+async def test_impl_refuses_task_when_membership_frozen(tmp_path: Path) -> None:
+    # AC29 (claude_code): with awaiting_user already set, a NEW task is refused
+    # WITHOUT dispatch — _impl emits the bare TASK_REFUSAL_SENTINEL as the minted
+    # fold-closing is_error result and returns it, producing exactly one
+    # tool_call + sentinel tool_result pair.
+    from imp.agents.subagents import TASK_REFUSAL_SENTINEL, make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    spawned = {"n": 0}
+
+    class _Runner:
+        async def run(self, inv):
+            spawned["n"] += 1
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _Runner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    state.awaiting_user = True       # membership frozen by a prior wait_for_user
+
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                        "__tool_use_id__": ""})
+
+    assert spawned["n"] == 0                                    # never dispatched
+    assert out.get("isError") is True
+    assert out["content"][0]["text"] == TASK_REFUSAL_SENTINEL   # bare, unwrapped
+    calls = [e for e in elog.read() if e["type"] == "tool_call"]
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(calls) == 1 and len(results) == 1               # one pair
+    assert results[0]["payload"]["content"] == TASK_REFUSAL_SENTINEL
+    assert results[0]["payload"]["error"] is True
+    assert results[0]["payload"]["id_ns"] == "block"
+    assert state.inflight_task_dispatches == 0                 # finally still ran
