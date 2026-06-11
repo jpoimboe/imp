@@ -114,6 +114,13 @@ def test_plan_writer_has_ask_vs_decide_and_decisions_section() -> None:
     assert "do not reopen planning" in text
 
 
+def test_plan_reviewer_briefed_on_decisions_section() -> None:
+    text = (AGENTS / "plan-reviewer.md").read_text()
+    assert "## Decisions" in text or "Decisions section" in text
+    assert "during planning" in text
+    assert "expected" in text.lower()
+
+
 def test_plan_writer_recognition_taxonomy_full_strings() -> None:
     text = _plan_writer()
     for s in (
