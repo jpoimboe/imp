@@ -923,7 +923,7 @@ def _resolve_id(control: Path, token: str) -> str:
     if len(suffix_hits) == 1:                              # (2) unique suffix
         return suffix_hits[0]
     if len(suffix_hits) > 1:
-        _exit_ambiguous(token, suffix_hits)
+        _exit_ambiguous(token, suffix_hits, control)
 
     slug_hits = []
     for cid in ids:
@@ -939,7 +939,7 @@ def _resolve_id(control: Path, token: str) -> str:
     if len(slug_hits) == 1:                                 # (3) current slug
         return slug_hits[0]
     if len(slug_hits) > 1:
-        _exit_ambiguous(token, slug_hits)
+        _exit_ambiguous(token, slug_hits, control)
 
     # Not resolvable. A bare prefix shared by several ids (e.g. `2026-06-04`) is
     # rejected as AMBIGUOUS and lists the candidates (spec §5 / AC 5): prefixes
@@ -947,16 +947,25 @@ def _resolve_id(control: Path, token: str) -> str:
     # rather than a blank "no match", so the user can retype with a suffix.
     prefix_hits = [cid for cid in ids if cid.startswith(token)]
     if len(prefix_hits) > 1:
-        _exit_ambiguous(token, prefix_hits)
+        _exit_ambiguous(token, prefix_hits, control)
 
     print(f"imp: no Change matches {token!r}", file=sys.stderr)
     raise SystemExit(2)
 
 
-def _exit_ambiguous(token: str, candidates: list[str]) -> NoReturn:
+def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoReturn:
     print(f"imp: {token!r} is ambiguous; candidates:", file=sys.stderr)
+    color = should_use_color(sys.stderr)
+    now = datetime.now(UTC)
+    print(change_row.header_line(color=color), file=sys.stderr)
     for cid in sorted(candidates):
-        print(f"  {cid}", file=sys.stderr)
+        row = _row_for_id(control, cid)
+        if row is None:
+            print(f"  {cid}", file=sys.stderr)
+            continue
+        print(change_row.format_change_line(
+            change_id=row[0], title=row[4], status=row[1], step=row[2],
+            last_iso=row[3], now=now, color=color), file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -1159,6 +1168,21 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
                 meta["title"], meta["created_at"])
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
+
+
+def _row_for_id(control: Path, change_id: str) -> _Row | None:
+    cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    if (cdir / "change.json").exists():
+        state_json = (cdir / "state" / "state.json").read_bytes()
+        change_json = (cdir / "change.json").read_bytes()
+        last = _last_event_iso(cdir / "events.jsonl") or ""
+    else:
+        state_json = journal.journal_show(control, change_id, "state.json")
+        change_json = journal.journal_show(control, change_id, "change.json")
+        if state_json is None or change_json is None:
+            return None
+        last = _journal_last_iso(control, change_id) or ""
+    return _status_row(change_id, state_json, change_json, last)
 
 
 def _status_rows(control: Path) -> list[_Row]:
