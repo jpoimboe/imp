@@ -323,9 +323,12 @@ class NarrativeBuilder:
         self._current_burst: ToolBurstFold | None = None
         # subagent routing: "sub:<event_id>" -> fold (for delegating sub events)
         self._sub_by_agent_id: dict[str, SubagentFold] = {}
-        # open subagent folds keyed by tool_use block id (to close on the
-        # parent's `task` tool_result, which carries the block id, not event id)
+        # Two-dict open-fold registry. By block id (NON-EMPTY block ids only)
+        # and by tool_call event id (always present, unique per mint). The close
+        # path probes the namespace named by the result's `id_ns`; codex keys by
+        # event id (empty block), in-process by block id.
         self._open_sub_by_block: dict[str, SubagentFold] = {}
+        self._open_sub_by_event: dict[str, SubagentFold] = {}
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
@@ -354,9 +357,8 @@ class NarrativeBuilder:
         return self._current_burst
 
     def current_activity(self) -> Activity | None:
-        """Structured one-line description of current activity for the live status
-        line (§3/§4). None when there is nothing to show."""
-        for fold in self._open_sub_by_block.values():
+        """Structured one-line description of current activity for the live status line (§3/§4); None when there is nothing to show."""
+        for fold in self._open_sub_by_event.values():
             if fold.running:
                 return Activity(label=fold.current_activity())
         burst = self._current_burst
@@ -388,11 +390,12 @@ class NarrativeBuilder:
         is at most one today, but the loop is robust to future nesting)."""
         ts = event.get("timestamp") if isinstance(event, dict) else None
         to_close = [
-            (key, fold) for key, fold in self._open_sub_by_block.items()
+            fold for fold in self._open_sub_by_event.values()
             if fold.running and fold.opener_agent_id == agent_id
         ]
-        for key, fold in to_close:
-            self._open_sub_by_block.pop(key, None)
+        for fold in to_close:
+            self._open_sub_by_block.pop(fold.block_id, None)
+            self._open_sub_by_event.pop(fold.event_id, None)
             _close_subagent_fold(fold, {}, ts)
 
     def add(self, event: Any) -> None:
@@ -440,11 +443,15 @@ class NarrativeBuilder:
         #     belong to any opener and must not close a sibling's fold. Run the
         #     close BEFORE the type dispatch so a back-to-back `task` dispatch
         #     closes the previous fold before opening the next.
-        if isinstance(agent_id, str) and self._open_sub_by_block:
-            matched_block = (
+        if isinstance(agent_id, str) and (self._open_sub_by_block or self._open_sub_by_event):
+            rid_ = str(payload.get("id", ""))
+            # A `task` tool_call is a concurrent sibling dispatch in a batch, not
+            # a signal that control returned — it must NOT resume-close siblings.
+            is_task_call = etype == "tool_call" and payload.get("name") == "task"
+            matched = (
                 etype == "tool_result"
-                and str(payload.get("id", "")) in self._open_sub_by_block)
-            if not matched_block:
+                and (rid_ in self._open_sub_by_block or rid_ in self._open_sub_by_event))
+            if not matched and not is_task_call:
                 self._resume_close_folds(agent_id, event)
 
         # 2. dispatch by type.
@@ -905,6 +912,25 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
         fold.terminal_state = kind
 
 
+def _take_subagent_fold(
+    self: NarrativeBuilder, rid: str, id_ns: Any,
+) -> tuple[SubagentFold | None, str]:
+    """Probe the id_ns namespace for rid's fold, removing it from both dicts; returns (fold, "matched") | (None, "unstamped") | (None, "stamped_miss")."""
+    if id_ns == "event":
+        fold = self._open_sub_by_event.get(rid)
+    elif id_ns == "block":
+        fold = self._open_sub_by_block.get(rid)
+    elif id_ns is None:
+        fold = self._open_sub_by_block.get(rid) or self._open_sub_by_event.get(rid)
+    else:
+        fold = None
+    if fold is not None:
+        self._open_sub_by_block.pop(fold.block_id, None)
+        self._open_sub_by_event.pop(fold.event_id, None)
+        return fold, "matched"
+    return (None, "unstamped") if id_ns is None else (None, "stamped_miss")
+
+
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
     ts = event.get("timestamp")
@@ -912,10 +938,17 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     footer = _format_citations_footer(p.get("citations"))
     summary = _summarize_result(p.get("content"))
 
-    # Closing a subagent? (parent `task` tool_result carries the block id.)
-    fold = self._open_sub_by_block.pop(rid, None)
+    # Closing a subagent? Probe the id_ns-named namespace (two-dict scheme). A
+    # stamped result that misses its namespace is a malformed-log warning, never
+    # an arbitrary fold close; unstamped legacy results take the ordered probe.
+    fold, status = _take_subagent_fold(self, rid, p.get("id_ns"))
     if fold is not None:
         _close_subagent_fold(fold, p, ts)
+        return
+    if status == "stamped_miss":
+        self._append(ErrorNode(
+            message=f"task result {rid!r} (id_ns={p.get('id_ns')!r}) matched no open fold",
+            is_warning=True))
         return
 
     pending_prompt = self._pending_wfu.get(rid)
@@ -1176,10 +1209,11 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         start_ts=event.get("timestamp"))
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold
-    # Key on block_id when present, else the (always-unique) event_id — so two
-    # empty-block-id folds (legacy claude_code logs) can't collide on "" and
-    # silently overwrite each other in the open-fold map.
-    self._open_sub_by_block[block_id or event_id] = fold
+    # Register in both dicts: always by event id (unique per mint), by block id
+    # only when non-empty (empty block ids would collide on "").
+    self._open_sub_by_event[event_id] = fold
+    if block_id:
+        self._open_sub_by_block[block_id] = fold
 
 
 def structural_repr(node: Any) -> Any:

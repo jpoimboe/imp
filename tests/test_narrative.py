@@ -1285,3 +1285,88 @@ def test_incremental_equals_batch_for_wfu_and_grown_repr() -> None:
     assert err["detail"] == "deep detail"                       # Task 12
     # Task 1: call_ts is excluded from call structural repr
     assert "call_ts" not in burst["calls"][0]                   # Task 1
+
+
+def test_concurrent_inprocess_folds_close_independently_by_block_ns() -> None:
+    # AC36: a batch logs two `task` tool_calls (non-empty block ids) BEFORE any
+    # result. Both folds must stay open concurrently — the second tool_call must
+    # NOT resume-close the first — and an id_ns="block" result closes only the
+    # matching fold.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="b2", name="task",
+              input={"subagent_name": "tester", "task_description": "go"}))
+    step = b._step_stack[-1]
+    folds = {f.subagent_name: f for f in step.children
+             if isinstance(f, nv.SubagentFold)}
+    # Both siblings open at once (master resume-closes the first → this fails).
+    assert folds["reviewer"].running is True
+    assert folds["tester"].running is True
+    # Close only task2 via its block id, stamped id_ns="block".
+    b.add(_ev("r2", "tool_result", agent_id="step:p/s", id="b2", id_ns="block",
+              content='{"status":"Success"}', error=False))
+    assert folds["tester"].running is False
+    assert folds["reviewer"].running is True
+
+
+def test_concurrent_codex_folds_close_by_event_ns_no_empty_block_collision() -> None:
+    # AC36: codex mints task tool_calls with an EMPTY block id and keys the
+    # tool_result by the minted EVENT id, stamped id_ns="event". Two such folds
+    # must not collide on "" and must each close by event id.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(_ev("tk2", "tool_call", agent_id="step:p/s", id="", name="task",
+              input={"subagent_name": "tester", "task_description": "go"}))
+    step = b._step_stack[-1]
+    folds = {f.subagent_name: f for f in step.children
+             if isinstance(f, nv.SubagentFold)}
+    assert folds["reviewer"].running is True and folds["tester"].running is True
+    # Close task1 by its EVENT id (codex result payload id == minted event id).
+    b.add(_ev("r1", "tool_result", agent_id="step:p/s", id="tk1", id_ns="event",
+              content='{"status":"Success"}', error=False))
+    assert folds["reviewer"].running is False
+    assert folds["tester"].running is True
+
+
+def test_stamped_result_missing_its_namespace_renders_warning_not_close() -> None:
+    # AC36/AC38: an id_ns-stamped result whose id matches no open fold in its
+    # named namespace renders a malformed-log WARNING and closes nothing — even
+    # with exactly one fold open.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    step = b._step_stack[-1]
+    fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    # id_ns="event" but id "b1" only lives in the block-id dict → namespace miss.
+    b.add(_ev("r1", "tool_result", agent_id="step:p/s", id="b1", id_ns="event",
+              content='{"status":"Success"}', error=False))
+    assert fold.running is True                      # not closed
+    warnings = [c for c in step.children
+                if isinstance(c, nv.ErrorNode) and c.is_warning]
+    assert len(warnings) == 1
+    # No orphan "tool" burst entry was created for the stamped miss.
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert all(call.name != "tool" for burst in bursts for call in burst.calls)
+
+
+def test_unstamped_legacy_result_closes_via_ordered_two_dict_probe() -> None:
+    # AC38: a legacy (id_ns absent) result still closes its fold via the ordered
+    # block-id-then-event-id probe — no regression for pre-upgrade logs.
+    tree = nv.build_tree(_step_events(
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status":"Success"}', error=False),
+    ))
+    step = _only_step(tree)
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert sub.running is False
+    assert sub.outcome == '{"status":"Success"}'
