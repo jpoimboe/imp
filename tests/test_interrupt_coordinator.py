@@ -181,3 +181,18 @@ def test_sigterm_is_exempt_from_suppression() -> None:
     t["now"] = 100.3
     # A supervisor SIGTERM 0.3 s later must NOT be suppressed.
     assert coord._register_gesture(kind="sigterm") is True
+
+
+def test_begin_end_solicit_watchdog_toggles_flag_and_fires_listeners() -> None:
+    coord = InterruptCoordinator()
+    assert coord.solicit_active is False  # default
+    fired = {"n": 0}
+    coord.add_activity_listener(lambda: fired.__setitem__("n", fired["n"] + 1))
+
+    coord.begin_solicit_watchdog()
+    assert coord.solicit_active is True
+    assert fired["n"] == 1  # note_activity fired the registered listener
+
+    coord.end_solicit_watchdog()
+    assert coord.solicit_active is False
+    assert fired["n"] == 2  # fired again on end
