@@ -887,6 +887,11 @@ def _serialize_mcp_result(result: Any) -> str:
     return str(result)
 
 
+TASK_TURN_BOUNDARY_CLOSE = (
+    "imp: task tool_call closed at turn boundary; no result observed"
+)
+
+
 def reassemble_codex_turn(
     items: list[Any], *, audit: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -1187,8 +1192,18 @@ def process_event(
                 raw=raw, usage={}, stop_reason=None,
                 auth_mode=state.get("auth_mode"),
             )
-        if run_state is not None:
+        if run_state is not None and run_state.inflight_task_dispatches == 0:
+            for ev_id, _fp in (
+                    list(run_state.minted_task_ids)
+                    + list(run_state.refused_task_mints)):
+                elog.append_tool_result(
+                    agent_id=agent_id,
+                    block=ToolResultBlock(
+                        tool_use_id=ev_id,
+                        content=TASK_TURN_BOUNDARY_CLOSE, is_error=True),
+                )
             run_state.minted_task_ids.clear()
+            run_state.refused_task_mints.clear()
             run_state.task_id_audit.clear()
         usage = getattr(event, "usage", None)
         if usage is None:

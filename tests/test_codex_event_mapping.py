@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import json
 
-from imp.engine.state import InMemoryEventLog
 from imp.agents.subagents import TASK_REFUSAL_SENTINEL
+from imp.engine.state import InMemoryEventLog
 from imp.providers.codex_mcp import RunState, _args_fingerprint
-from imp.providers.codex_runner import process_event
+from imp.providers.codex_runner import TASK_TURN_BOUNDARY_CLOSE, process_event
 from tests.codex_fakes import (
     FakeAgentMessageItem,
     FakeItemEvent,
@@ -261,3 +261,58 @@ def test_refused_then_same_args_retry_matches_live_mint() -> None:
 
     results = [e for e in list(elog.read()) if e.get("type") == "tool_result"]
     assert [r["payload"]["id"] for r in results] == ["REF", "LIVE-RETRY"]
+
+
+def test_turn_boundary_synthetic_close_and_clears_when_drained() -> None:
+    """AC30: at turn.completed with inflight==0, each outstanding minted AND
+    refused entry gets a synthetic is_error close (the named constant), then all
+    three structures clear so no orphan outlives the turn."""
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    run_state.minted_task_ids.append(
+        ("DANGLE-M", _args_fingerprint({"subagent_name": "a"})))
+    run_state.refused_task_mints.append(
+        ("DANGLE-R", _args_fingerprint({"subagent_name": "b"})))
+    run_state.task_id_audit["sdk"] = "LIVE"
+    run_state.inflight_task_dispatches = 0
+
+    msg = FakeItemEvent(type="item.completed", item=FakeAgentMessageItem(text="work"))
+    process_event(msg, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+    done = FakeTurnCompletedEvent(usage=FakeUsage(input_tokens=1, output_tokens=1))
+    process_event(done, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    results = [e for e in list(elog.read()) if e.get("type") == "tool_result"]
+    closed = {r["payload"]["id"]: r["payload"] for r in results
+              if r["payload"]["error"]}
+    assert {"DANGLE-M", "DANGLE-R"} <= set(closed)
+    assert closed["DANGLE-M"]["content"] == TASK_TURN_BOUNDARY_CLOSE
+    assert closed["DANGLE-R"]["content"] == TASK_TURN_BOUNDARY_CLOSE
+    assert run_state.minted_task_ids == []
+    assert run_state.refused_task_mints == []
+    assert run_state.task_id_audit == {}
+
+
+def test_turn_boundary_cleanup_deferred_while_inflight_nonzero() -> None:
+    """AC30: a turn that completes with a sibling still in flight defers the
+    cleanup — no synthetic close, structures intact — until a later (re-armed)
+    turn.completed sees inflight==0."""
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    keep = ("KEEP", _args_fingerprint({"subagent_name": "a"}))
+    run_state.minted_task_ids.append(keep)
+    run_state.inflight_task_dispatches = 1  # a sibling is still draining
+
+    msg = FakeItemEvent(type="item.completed", item=FakeAgentMessageItem(text="work"))
+    process_event(msg, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+    done = FakeTurnCompletedEvent(usage=FakeUsage(input_tokens=1, output_tokens=1))
+    process_event(done, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    results = [e for e in list(elog.read()) if e.get("type") == "tool_result"]
+    assert all(r["payload"]["id"] != "KEEP" for r in results)  # no close yet
+    assert run_state.minted_task_ids == [keep]  # not cleared
