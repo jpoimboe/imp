@@ -11,9 +11,11 @@ local TTY. The driver can never fail a Change.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
+import subprocess
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +23,8 @@ from typing import Any
 import anyio
 
 _log = logging.getLogger("imp.remote")
+
+_CRASH_PROBE_SECONDS = 0.2   # bound on the spawn-then-immediately-crash check
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +120,9 @@ class RemoteChannel:
         self._proc: Any = None
         self._step: str | None = None
         self._status = "running"
+        send, recv = anyio.create_memory_object_stream[str](max_buffer_size=256)
+        self._reply_send = send
+        self._reply_recv = recv
 
     @classmethod
     def from_driver_config(
@@ -175,3 +182,71 @@ class RemoteChannel:
             os.write(fd, line.encode("utf-8"))
         except (BlockingIOError, BrokenPipeError, OSError):
             pass
+
+    # -- lifecycle -----------------------------------------------------------
+    async def start(self, tg: Any) -> bool:
+        """Spawn the driver and start its reader task. Returns False (best-effort,
+        run continues) if the command can't spawn or the process exits during the
+        crash-probe grace (capped at startup_timeout). Healthy drivers return as
+        soon as the grace confirms the process is alive — never blocked for the
+        full timeout (there is no readiness handshake in the stdio contract)."""
+        try:
+            self._proc = subprocess.Popen(
+                list(self._command),
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        except OSError as exc:
+            self._on_error(f"driver failed to spawn ({self._command[0]!r}): {exc}")
+            self._proc = None
+            return False
+        os.set_blocking(self._proc.stdin.fileno(), False)
+        await anyio.sleep(min(self._startup_timeout, _CRASH_PROBE_SECONDS))
+        if self._proc.poll() is not None:
+            self._on_error(
+                f"driver exited during startup (rc {self._proc.returncode})")
+            self._proc = None
+            return False
+        tg.start_soon(self._reader_loop)
+        return True
+
+    async def _reader_loop(self) -> None:
+        """Read driver stdout lines for the channel's lifetime and push each onto
+        the reply stream. Outside a solicit window a buffered line simply waits in
+        the stream (spec: outside a window, driver stdout is buffered/ignored). The
+        blocking readline runs in a worker thread; teardown closes stdout (EOF) so
+        the thread ends. On EOF the send side closes so next_reply sees a dead
+        channel."""
+        proc = self._proc
+        if proc is None or proc.stdout is None:
+            return
+        try:
+            while True:
+                raw = await anyio.to_thread.run_sync(proc.stdout.readline)
+                if raw == b"":
+                    return
+                line = raw.decode("utf-8", "replace").rstrip("\r\n")
+                with contextlib.suppress(anyio.WouldBlock):
+                    self._reply_send.send_nowait(line)
+                    # buffer full → silently drop this (newest) incoming line
+        finally:
+            self._reply_send.close()
+
+    async def next_reply(self, *, timeout: float | None = None) -> str:
+        """Await one driver reply line. `timeout` (phone-only's reply_timeout) or a
+        dead/closed channel raises AwaitingUserInput, which the caller maps to a
+        normal pause (spec AC 8). With timeout=None and a live channel it waits
+        indefinitely, like a local prompt."""
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        try:
+            if timeout is None:
+                return await self._reply_recv.receive()
+            with anyio.fail_after(timeout):
+                return await self._reply_recv.receive()
+        except (TimeoutError, anyio.EndOfStream, anyio.ClosedResourceError):
+            raise AwaitingUserInput() from None
+
+    async def stop(self) -> None:
+        proc = self._proc
+        if proc is None or proc.poll() is not None:
+            return
+        proc.terminate()
+        await anyio.to_thread.run_sync(proc.wait)
