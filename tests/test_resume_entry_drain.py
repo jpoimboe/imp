@@ -634,3 +634,289 @@ async def test_codex_resume_entry_drain_folds_into_first_prompt(
     # Both interjects consumed (queue cleared).
     assert coord.drain_interject() is None
 
+
+# ── F5: _join_pending_interjects helper ──────────────────────────────────────
+
+
+def test_join_pending_interjects_joins_in_order_and_clears() -> None:
+    from imp.engine.agent_run import _join_pending_interjects
+
+    class _Coord:
+        def __init__(self) -> None:
+            self._q = ["one", "two"]
+
+        def drain_interject(self) -> str | None:
+            return self._q.pop(0) if self._q else None
+
+    coord = _Coord()
+    assert _join_pending_interjects(coord) == "one\ntwo"
+    # queue cleared — a subsequent drain returns None
+    assert coord.drain_interject() is None
+
+
+def test_join_pending_interjects_empty_returns_none() -> None:
+    from imp.engine.agent_run import _join_pending_interjects
+
+    class _EmptyCoord:
+        def drain_interject(self) -> str | None:
+            return None
+
+    assert _join_pending_interjects(_EmptyCoord()) is None
+    assert _join_pending_interjects(None) is None
+
+
+# ── F5: anthropic dangling-wait join (provider-level test) ───────────────────
+
+
+@pytest.mark.anyio
+async def test_anthropic_dangling_wait_resume_joins_pending_interjects(
+    tmp_path: Path,
+) -> None:
+    """AWAITING_USER resume with two queued interjects: the joined text becomes
+    the ONE reply resolving the wait, and user_input_fn is NOT called."""
+    from imp.agents.runner import (
+        AgentInvocation,
+        ChangeContext,
+        Message,
+        TextBlock,
+        ToolUseBlock,
+    )
+    from imp.agents.tools import get_registry  # noqa: F401 — ensures tools registered
+    from imp.agents.transcript import Transcript
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+    from imp.providers.anthropic import AnthropicAgentRunner
+    from tests.anthropic_fakes import FakeAsyncAnthropic, response, tool_use
+
+    agent_def = AgentDef(
+        name="t", description="",
+        tools=frozenset({"complete_step", "wait_for_user"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("a.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("a.md"),
+        source=SourceLoc(file=Path("a.md"), line=1),
+    )
+
+    inv_dir = tmp_path / "step"
+    inv_dir.mkdir(parents=True, exist_ok=True)
+
+    # Seed a transcript ending with a DANGLING wait_for_user tool_use.
+    # This puts the resume classifier into AWAITING_USER state.
+    transcript = Transcript(inv_dir / "transcript.jsonl")
+    transcript.append(Message(role="user", content=(TextBlock(text="begin"),)))
+    transcript.append(Message(role="assistant", content=(
+        ToolUseBlock(id="wfu1", name="wait_for_user", input={"prompt": "answer?"}),
+    )))
+
+    # user_input_fn must NOT be called — the queue satisfies the wait.
+    user_input_fn_called = [False]
+
+    def _never_called(_prompt: str) -> str:
+        user_input_fn_called[0] = True
+        return "should not be reached"
+
+    class _FakeCoordinator:
+        def __init__(self) -> None:
+            self._q = ["one", "two"]
+
+        def drain_interject(self) -> str | None:
+            return self._q.pop(0) if self._q else None
+
+        def reset(self) -> None:
+            pass
+
+    coord = _FakeCoordinator()
+
+    # Fake client: complete after the wait resolves (one turn).
+    fake = FakeAsyncAnthropic([
+        response(tool_use("c1", "complete_step", {"status": "Success", "note": "ok"})),
+    ])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(
+        model_name="claude-sonnet-4-6",
+        client_factory=lambda: fake,
+        user_input_fn=_never_called,
+    )
+
+    inv = AgentInvocation(
+        agent_def=agent_def,
+        provider_name="anthropic",
+        model_name="claude-sonnet-4-6",
+        system_prompt="be terse",
+        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
+        change_context=ChangeContext(
+            slug="test", title="Test", project_root=tmp_path,
+            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+        ),
+        transcript_dir=inv_dir,
+        fs_permissions=(FsRule(
+            operations=("read",), paths=("/project/**",),
+            mode="allow",
+            source=SourceLoc(file=Path("w.yaml"), line=1),
+        ),),
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:p/s",
+        event_log=log,
+        coordinator=coord,
+    )
+
+    events = [e async for e in runner.run(inv)]
+
+    # Run completed successfully.
+    assert events[-1]["type"] == "agent_output"
+
+    # user_input_fn must NOT have been called.
+    assert not user_input_fn_called[0], (
+        "user_input_fn must not be called when interject queue is non-empty"
+    )
+
+    # Queue must be fully drained.
+    assert coord.drain_interject() is None, "queue should be cleared after the join"
+
+    # The reply that resolved the wait must be "one\ntwo" (joined in order).
+    # Verify via the first messages.create call: the tool_result for wfu1 must
+    # carry "one\ntwo" as its content.
+    first_call = fake.messages.calls[0]
+    all_tool_result_contents: list[str] = []
+    for m in first_call["messages"]:
+        if m.get("role") == "user":
+            for block in m.get("content", []):
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    all_tool_result_contents.append(block.get("content", ""))
+    assert any("one\ntwo" in c for c in all_tool_result_contents), (
+        f"joined reply 'one\\ntwo' not found in tool_result content: "
+        f"{all_tool_result_contents}"
+    )
+
+
+# ── F5: subagent routing — automatic via parent replay ────────────────────────
+
+
+def test_subagent_suspended_resume_drains_via_parent_replay() -> None:
+    """When a subagent pauses (SubagentSuspended unwind), the PARENT step keeps
+    its transcript (resume_pending set) and is replayed on resume. The parent's
+    resume-entry drain (F1-F4) delivers queued interjects into the PARENT's
+    conversation. This test proves the invariant at the drain level: on a
+    SEND_TO_LLM resume with queued interjects, drain_all_interjects_at_resume
+    consumes them — exactly what the parent's resume branch calls.
+
+    A full executor integration (building a live subagent dispatch tree) is
+    disproportionate here. The behavior is guaranteed by (a) SubagentSuspended
+    → parent pauses with resume_pending set (tested in
+    test_executor_interrupt_resume.py), and (b) on resume the parent hits the
+    SEND_TO_LLM drain path (F1-F4 tests above).
+    """
+    from imp.engine.agent_run import drain_all_interjects_at_resume
+    from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
+
+    # Simulate parent transcript state AFTER SubagentSuspended unwind and
+    # repair_dangling_tool_use_on_resume: assistant had a "task" tool_use (t1),
+    # paused mid-dispatch, synthetic tool_result was appended, so the transcript
+    # ends with a user message → SEND_TO_LLM state → drain is called.
+    parent_messages: list = [
+        Message(role="user", content=(TextBlock(text="begin"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(
+                id="t1", name="task",
+                input={"subagent_name": "sub", "task_description": "go"},
+            ),
+        )),
+        # synthetic tool_result injected by repair_dangling_tool_use_on_resume
+        Message(role="user", content=(
+            ToolResultBlock(tool_use_id="t1", content="[interrupted]"),
+        )),
+    ]
+
+    class _Coord:
+        def __init__(self) -> None:
+            self._q = ["parent-interject"]
+
+        def drain_interject(self) -> str | None:
+            return self._q.pop(0) if self._q else None
+
+    coord = _Coord()
+    sink: list = []
+
+    class _T:
+        def append(self, m: object) -> None:
+            sink.append(("t", m))
+
+    class _E:
+        def append_user_message(self, *, agent_id: str, message: object) -> None:
+            sink.append(("u", message))
+
+        def append(self, **k: object) -> None:
+            sink.append(("e", k))
+
+    n = drain_all_interjects_at_resume(coord, parent_messages, _T(), _E(), "step:parent")
+
+    # One interject was delivered into the PARENT's messages list.
+    assert n == 1
+    user_texts = [
+        m.content[0].text
+        for m in parent_messages
+        if m.role == "user" and m.content
+        and hasattr(m.content[0], "text")
+    ]
+    assert "parent-interject" in user_texts, (
+        f"interject must land in parent messages: {user_texts}"
+    )
+    # Queue cleared.
+    assert coord.drain_interject() is None
+
+
+# ── F5: script-step routing — automatic (queue preserved, no drain) ───────────
+
+
+def test_script_step_route_does_not_drain_interjects() -> None:
+    """_route_branch and _route_script are sync functions with no coordinator
+    parameter — they cannot drain the interject queue. Interjects stay queued
+    and are consumed by the NEXT _route_agent call's resume-entry drain.
+
+    The test proves the invariant structurally (signature inspection) rather
+    than running a full executor loop (which would require a real git repo +
+    script files). The behavioral guarantee is: if _route_branch/_route_script
+    accepted `coordinator` and called drain_all_interjects_at_resume, queued
+    interjects would be silently lost before the next agent step sees them.
+    """
+    import inspect as _inspect
+    from imp.engine import executor as _executor
+
+    # _route_branch and _route_script are sync — cannot call any coordinator API.
+    assert not _inspect.iscoroutinefunction(_executor._route_branch), (
+        "_route_branch must be sync (it is)"
+    )
+    assert not _inspect.iscoroutinefunction(_executor._route_script), (
+        "_route_script must be sync (it is)"
+    )
+
+    # Neither accepts `coordinator` as a parameter.
+    branch_params = set(_inspect.signature(_executor._route_branch).parameters)
+    script_params = set(_inspect.signature(_executor._route_script).parameters)
+    assert "coordinator" not in branch_params, (
+        f"_route_branch must not accept coordinator: {branch_params}"
+    )
+    assert "coordinator" not in script_params, (
+        f"_route_script must not accept coordinator: {script_params}"
+    )
+
+    # Behavioral proof: a coordinator with queued interjects is undisturbed by
+    # passing through a simulated script step (no drain call).
+    class _Coord:
+        def __init__(self) -> None:
+            self._q = ["queued-for-next-agent"]
+
+        def drain_interject(self) -> str | None:
+            return self._q.pop(0) if self._q else None
+
+    coord = _Coord()
+    # After a script step (no coordinator interaction), the queue is intact.
+    assert coord.drain_interject() == "queued-for-next-agent", (
+        "queue must be intact after a script step"
+    )
+

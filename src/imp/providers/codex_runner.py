@@ -46,6 +46,7 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
+from imp.engine.agent_run import _join_pending_interjects
 from imp.providers.codex_mcp import RunState, start_server
 
 _logger = logging.getLogger(__name__)
@@ -470,14 +471,22 @@ class CodexAgentRunner:
                     return
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": last_text})
-                import inspect as _inspect
-                reply = invocation.user_input_fn("")
-                if _inspect.isawaitable(reply):
-                    reply = await reply
+                # §2 dangling-wait join (F5): queued interjects satisfy the wait
+                # directly (mirrors wait_for_user.py R6). Fall back to
+                # user_input_fn only when the queue is empty.
+                joined = _join_pending_interjects(invocation.coordinator)
+                if joined is not None:
+                    reply: str = joined
+                else:
+                    import inspect as _inspect
+                    _raw = invocation.user_input_fn("")
+                    if _inspect.isawaitable(_raw):
+                        _raw = await _raw
+                    reply = str(_raw)
                 user_msg = Message(
-                    role="user", content=(TextBlock(text=str(reply)),))
+                    role="user", content=(TextBlock(text=reply),))
                 elog.append_user_message(agent_id=aid, message=user_msg)
-                next_prompt = str(reply)
+                next_prompt = reply
             elif rstate is ResumeState.MISSING_COMPLETE_STEP:
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",

@@ -147,6 +147,21 @@ def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
     return True
 
 
+def _join_pending_interjects(coordinator: Any) -> str | None:
+    """Drain ALL queued interjects and join them newline-separated into ONE
+    string, or None if the queue is empty. Used to satisfy a dangling
+    wait_for_user on resume (§2 dangling-wait routing)."""
+    if coordinator is None:
+        return None
+    parts: list[str] = []
+    while True:
+        t = coordinator.drain_interject()
+        if t is None:
+            break
+        parts.append(t)
+    return "\n".join(parts) if parts else None
+
+
 def drain_all_interjects_at_resume(
     coordinator: Any, messages: Any, transcript: Any, elog: Any, agent_id: str,
 ) -> int:
