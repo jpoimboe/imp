@@ -226,11 +226,11 @@ async def dispatch_task_batch(
             err_text = f"{type(e).__name__}: {e}"
             block = ToolResultBlock(tu.id, err_text, is_error=True)
             results[tu.id] = block
-            elog.append_tool_result(agent_id=aid, block=block)
+            elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
             return
         block = ToolResultBlock(tu.id, result_str)
         results[tu.id] = block
-        elog.append_tool_result(agent_id=aid, block=block)
+        elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
 
     try:
         async with anyio.create_task_group() as tg:
@@ -315,11 +315,11 @@ async def _dispatch_one_task_inline(
         err_text = f"{type(e).__name__}: {e}"
         block = ToolResultBlock(tu.id, err_text, is_error=True)
         tool_results.append(block)
-        elog.append_tool_result(agent_id=aid, block=block)
+        elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
         return
     block = ToolResultBlock(tu.id, result_str)
     tool_results.append(block)
-    elog.append_tool_result(agent_id=aid, block=block)
+    elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
 
 
 async def dispatch_turn_tool_uses(

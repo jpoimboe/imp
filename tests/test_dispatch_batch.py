@@ -484,3 +484,87 @@ async def test_batch_cancellation_cancels_children_cleanly(tmp_path: Path) -> No
     assert finals["count"] == 2                     # both children cancelled cleanly
     assert tool_results == []                       # no results from cancelled children
     reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_batch_success_and_error_results_stamp_id_ns_block(tmp_path: Path) -> None:
+    # AC38 (production): a dispatched child's success result AND a child-error
+    # result each carry id_ns="block" (fold opened by a non-empty block id).
+    reset_parallelism_cache()
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+        if desc == "boom":
+            raise ValueError("kaboom")
+        return json.dumps({"status": "Success", "echo": desc})
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        tus = [_task_tu("t1", desc="ok"), _task_tu("t2", desc="boom")]
+        async for _ in dispatch_task_batch(
+                ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
+                tool_results=tool_results, state=state, ceiling=None):
+            pass
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    ns = {e["payload"]["id"]: e["payload"].get("id_ns") for e in results}
+    assert ns["t1"] == "block"          # success child
+    assert ns["t2"] == "block"          # error child
+    reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_batch_over_ceiling_backfill_result_is_unstamped(tmp_path: Path) -> None:
+    # AC11/AC38: an over-ceiling tu opens no fold, so its backfill is_error
+    # tool_result must NOT be stamped (an id_ns="block" stamp on a fold-less
+    # result would render a malformed-log warning in narrative). ceiling=0 → the
+    # first (and only) tu is backfilled, never dispatched.
+    reset_parallelism_cache()
+    ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+    elog = InMemoryEventLog()
+    tool_results: list = []
+    state = TurnState(tool_calls_used=0)
+    async for _ in dispatch_task_batch(
+            ctx=ctx, elog=elog, aid="step:p/s", task_tus=[_task_tu("t1")],
+            tool_results=tool_results, state=state, ceiling=0):
+        pass
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is True       # backfill is_error
+    assert "id_ns" not in results[0]["payload"]         # unstamped → orphan arm
+    reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_inline_kill_switch_task_result_stamps_id_ns_block(tmp_path: Path) -> None:
+    # AC21/AC38: the kill-switch inline single-task path also opens a fold by a
+    # non-empty block id, so its success result stamps id_ns="block".
+    from imp.agents.dispatch import _dispatch_one_task_inline
+    reset_parallelism_cache()
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        return json.dumps({"status": "Success"})
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        await _dispatch_one_task_inline(
+            ctx=ctx, elog=elog, aid="step:p/s", tu=_task_tu("t1"),
+            tool_results=tool_results, state=state, ceiling=None)
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["id"] == "t1"
+    assert results[0]["payload"]["id_ns"] == "block"
+    reset_parallelism_cache()
