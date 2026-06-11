@@ -50,6 +50,23 @@ def test_quiet_forward_goto_renders_only_the_phase_arrow() -> None:
     assert not any("fast-path-spec-gate" in ln for ln in body)
 
 
+def test_quiet_pause_yields_to_full_block() -> None:
+    # Spec §4.1: a quiet step "yields to any non-linear outcome". A pause
+    # (merge_blocked / retry_ceiling / max-retries — executor emits
+    # step_completed with verb="pause") must NOT be swallowed: the step renders
+    # its full block so the failure and its error children stay visible.
+    body = _body([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="merge-to-base", kind="script",
+           phase="merge", quiet=True),
+        ev("3", "error", message="merge conflict in foo.py"),
+        ev("4", "step_completed", step="merge-to-base", kind="script",
+           action={"verb": "pause"}, var_mutations={}),
+    ])
+    assert any("merge-to-base" in ln for ln in body)               # header surfaced
+    assert any("merge conflict in foo.py" in ln for ln in body)    # error not swallowed
+
+
 def test_quiet_arrow_is_dim_gray_chrome_in_color() -> None:
     body = _body([
         ev("1", "change_created", change_id=1, title="x"),

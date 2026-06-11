@@ -58,6 +58,25 @@ def test_forward_goto_resolves_to_the_target_phase() -> None:
     assert _steps(tree)["fast-path-spec-gate"].quiet_line == "→ plan"
 
 
+def test_forward_goto_falls_back_to_raw_target_when_a_different_step_intervenes() -> None:
+    # Defensive fallback (narrative.py): the forward goto normally resolves its
+    # arrow from the TARGET step's phase, since the target runs next. If some
+    # OTHER step's step_started arrives first (never the shipped path), fall back
+    # to the raw target name rather than mislabelling with the intervening phase.
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="fast-path-spec-gate", kind="branch",
+           phase="spec", quiet=True),
+        ev("3", "step_completed", step="fast-path-spec-gate", kind="branch",
+           action={"verb": "goto", "target": "plan-writer", "resume": False},
+           var_mutations={}),
+        # A different step runs next, in an unrelated phase — not the goto target.
+        ev("4", "step_started", step="interloper", kind="agent", phase="elsewhere",
+           model="m", provider="anthropic"),
+    ])
+    assert _steps(tree)["fast-path-spec-gate"].quiet_line == "→ plan-writer"
+
+
 def test_loud_step_has_no_quiet_line() -> None:
     tree = nv.build_tree([
         ev("1", "change_created", change_id=1, title="x"),
