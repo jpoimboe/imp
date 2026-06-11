@@ -99,3 +99,27 @@ def extract_replies(
         if isinstance(text, str) and text:
             replies.append(text)
     return replies, new_offset
+
+
+def format_event_message(event: Mapping[str, Any]) -> str:
+    """Render one imp event as Telegram message text: a '[title] type' header
+    plus any human-readable payload body. Title falls back to the change id, then
+    to 'imp'."""
+    change = event.get("change") or {}
+    title = change.get("title") or change.get("id") or "imp"
+    etype = event.get("type") or "event"
+    header = f"[{title}] {etype}"
+    payload = event.get("payload") or {}
+    body = payload.get("text") or payload.get("message") or ""
+    if isinstance(body, str) and body.strip():
+        return f"{header}\n{body.strip()}"
+    return header
+
+
+def emit_reply(text: str, stream: Any) -> None:
+    """Write one driver reply line to stdout. imp reads exactly one line per
+    reply (blocking readline + rstrip), so internal CR/LF collapse to spaces
+    before the single trailing newline; the stream is flushed immediately."""
+    flat = text.replace("\r", " ").replace("\n", " ")
+    stream.write(flat + "\n")
+    stream.flush()
