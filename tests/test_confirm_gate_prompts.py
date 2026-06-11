@@ -97,3 +97,33 @@ def test_spec_reviewer_briefed_on_decision_markers() -> None:
     assert "expected" in text.lower()
     # must not be flagged as a placeholder/meta-commentary defect
     assert "meta-commentary" in text.lower()
+
+
+def _plan_writer() -> str:
+    return (AGENTS / "plan-writer.md").read_text()
+
+
+def test_plan_writer_has_ask_vs_decide_and_decisions_section() -> None:
+    text = _plan_writer()
+    assert "*(decided during planning)*" in text
+    assert "*(user-confirmed during planning)*" in text
+    assert "## Decisions" in text
+    assert "wait_for_user" in text
+    # minors pass ban kept (the phrase wraps across a line break in the file;
+    # "do not reopen planning" is distinctive and sits on one line)
+    assert "do not reopen planning" in text
+
+
+def test_plan_writer_recognition_taxonomy_full_strings() -> None:
+    text = _plan_writer()
+    for s in (
+        "Here's review feedback to address:",
+        "No blocking issues — integrate these minor improvements; a final review follows:",
+        "The plan didn't match the codebase. Here's what the implementer found:",
+        "More plans are needed for this spec. Coverage assessment:",
+        "The review panel found the plan needs revision. Findings:",
+        "The code reviewer found the plan needs revision. Findings:",
+        "Your previous attempt completed but was not accepted",
+        "previous step output recorded; superseded by the feedback below",
+    ):
+        assert s in text, f"plan-writer taxonomy missing: {s!r}"

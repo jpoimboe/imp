@@ -448,6 +448,12 @@ def test_no_goto_spec_writer_edge() -> None:
     assert "goto: spec_writer" not in wf
 
 
+def test_plan_writer_declares_wait_for_user() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    assert "wait_for_user" in wf.agents["plan-writer"].tools
+
+
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     # Acceptance #1/#2/#6: in this repo, imp/workflows/default must be a
     # symlink whose resolved target equals src/imp/assets/workflows/default.
