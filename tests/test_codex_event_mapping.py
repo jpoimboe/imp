@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from imp.engine.state import InMemoryEventLog
+from imp.agents.subagents import TASK_REFUSAL_SENTINEL
 from imp.providers.codex_mcp import RunState, _args_fingerprint
 from imp.providers.codex_runner import process_event
 from tests.codex_fakes import (
@@ -178,3 +179,85 @@ def test_turn_completed_emits_reassembled_llm_response_before_usage() -> None:
     assert "text" in kinds and "tool_use" in kinds  # carries tool_use now
     # Usage attached to that same response.
     assert llm[0]["payload"]["usage"]  # non-empty
+
+
+def test_refused_task_item_closes_refused_mint_keyed_to_event_id() -> None:
+    """AC27/AC29: a refused dispatch's item (is_error AND text suffix-equals the
+    sentinel) resolves against refused_task_mints FIRST — the tool_result keys to
+    the refused mint's event id (no duplicate tool_call), and the entry clears."""
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    args = {"subagent_name": "impl", "task_description": "queued work"}
+    run_state.refused_task_mints.append(("REFUSED-1", _args_fingerprint(args)))
+    wrapped = f"Error executing tool task: {TASK_REFUSAL_SENTINEL}"
+
+    ev = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+        tool="task", arguments=args, result=wrapped, status="failed",
+        id="sdk-r"))
+    process_event(ev, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    events = list(elog.read())
+    calls = [e for e in events if e.get("type") == "tool_call"]
+    results = [e for e in events if e.get("type") == "tool_result"]
+    assert calls == []  # the minted tool_call already exists; no duplicate
+    assert len(results) == 1
+    assert results[0]["payload"]["id"] == "REFUSED-1"
+    assert results[0]["payload"]["error"] is True
+    assert run_state.refused_task_mints == []
+    assert run_state.task_id_audit == {"sdk-r": "REFUSED-1"}
+
+
+def test_successful_result_containing_sentinel_keeps_live_mint() -> None:
+    """AC27: a SUCCESSFUL task result whose CONTENT contains the sentinel is NOT
+    a refusal (is_error gate) — it pairs against the live mint, not refused."""
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    args = {"subagent_name": "impl", "task_description": "echo the sentinel"}
+    run_state.minted_task_ids.append(("LIVE-1", _args_fingerprint(args)))
+    run_state.refused_task_mints.append(
+        ("REFUSED-X", _args_fingerprint(args)))
+
+    ev = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+        tool="task", arguments=args,
+        result=f"the subagent printed {TASK_REFUSAL_SENTINEL}",
+        status="completed", id="sdk-ok"))
+    process_event(ev, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    results = [e for e in list(elog.read()) if e.get("type") == "tool_result"]
+    # Keyed to the LIVE mint (success), refused entry untouched.
+    assert results[0]["payload"]["id"] == "LIVE-1"
+    assert results[0]["payload"]["error"] is False
+    assert run_state.minted_task_ids == []
+    assert run_state.refused_task_mints == [
+        ("REFUSED-X", _args_fingerprint(args))]
+
+
+def test_refused_then_same_args_retry_matches_live_mint() -> None:
+    """AC29: after a refused item resolves (and clears refused_task_mints), a
+    same-args RETRY's successful item pairs against the freshly-minted LIVE
+    entry, not the now-empty refused list."""
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    args = {"subagent_name": "impl", "task_description": "retry me"}
+    run_state.refused_task_mints.append(("REF", _args_fingerprint(args)))
+    wrapped = f"Error executing tool task: {TASK_REFUSAL_SENTINEL}"
+    refused = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+        tool="task", arguments=args, result=wrapped, status="failed", id="s1"))
+    process_event(refused, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+    assert run_state.refused_task_mints == []
+
+    # Retry: a fresh live mint, then a successful item.
+    run_state.minted_task_ids.append(("LIVE-RETRY", _args_fingerprint(args)))
+    ok = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+        tool="task", arguments=args, result="done", status="completed", id="s2"))
+    process_event(ok, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    results = [e for e in list(elog.read()) if e.get("type") == "tool_result"]
+    assert [r["payload"]["id"] for r in results] == ["REF", "LIVE-RETRY"]

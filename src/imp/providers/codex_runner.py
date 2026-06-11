@@ -31,7 +31,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import raise_if_suspended
+from imp.agents.subagents import TASK_REFUSAL_SENTINEL, raise_if_suspended
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -1038,16 +1038,34 @@ def process_event(
                 match_args = args
             else:
                 match_args = None
+            err = getattr(item, "error", None)
+            status = getattr(item, "status", "completed")
+            is_error = err is not None or status not in ("completed", "succeeded")
+            if err is not None:
+                content = getattr(err, "message", "") or str(err)
+            else:
+                content = _serialize_mcp_result(getattr(item, "result", None))
             matched_id: str | None = None
             if (name == "task" and run_state is not None
-                    and match_args is not None and run_state.minted_task_ids):
+                    and match_args is not None):
                 fp = _args_fingerprint(match_args)
-                for idx, (ev_id, ent_fp) in enumerate(run_state.minted_task_ids):
-                    if ent_fp == fp:
-                        matched_id = ev_id
-                        del run_state.minted_task_ids[idx]
-                        run_state.task_id_audit[sdk_id] = ev_id
-                        break
+                if (is_error and content.endswith(TASK_REFUSAL_SENTINEL)
+                        and run_state.refused_task_mints):
+                    for idx, (ev_id, ent_fp) in enumerate(
+                            run_state.refused_task_mints):
+                        if ent_fp == fp:
+                            matched_id = ev_id
+                            del run_state.refused_task_mints[idx]
+                            run_state.task_id_audit[sdk_id] = ev_id
+                            break
+                if matched_id is None and run_state.minted_task_ids:
+                    for idx, (ev_id, ent_fp) in enumerate(
+                            run_state.minted_task_ids):
+                        if ent_fp == fp:
+                            matched_id = ev_id
+                            del run_state.minted_task_ids[idx]
+                            run_state.task_id_audit[sdk_id] = ev_id
+                            break
             if matched_id is not None:
                 call_id = matched_id
             else:
@@ -1058,13 +1076,6 @@ def process_event(
                     agent_id=agent_id,
                     block=ToolUseBlock(id=call_id, name=name, input=args),
                 )
-            err = getattr(item, "error", None)
-            status = getattr(item, "status", "completed")
-            is_error = err is not None or status not in ("completed", "succeeded")
-            if err is not None:
-                content = getattr(err, "message", "") or str(err)
-            else:
-                content = _serialize_mcp_result(getattr(item, "result", None))
             elog.append_tool_result(
                 agent_id=agent_id,
                 block=ToolResultBlock(
