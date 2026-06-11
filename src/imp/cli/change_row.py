@@ -38,6 +38,13 @@ TITLE_W = 24
 STATUS_W = 13   # widest status: len("merge_blocked")
 STEP_W = 20     # widest default-workflow step name
 AGE_W = 4
+# The ID column is last and holds the resume token. Modern ids yield a 6-char
+# token (resume_token), but legacy `YYYY-MM-DD-<slug>` ids have no short form, so
+# an untruncated token overflowed 80 cols in the dim past section. Cap it: the
+# fixed columns + separators sum to 69, so 11 keeps every row within 80 (hence
+# also 100). Truncating only ever touches non-actionable legacy past data — every
+# resumable change has a modern 6-char token that fits untouched.
+TOKEN_W = 11
 
 _STATUS_COLORS: dict[str, tuple[str, ...]] = {
     "running": ("green",),
@@ -68,7 +75,7 @@ def format_change_line(*, change_id: str, title: str, status: str, step: str,
     status_pad = f"{status:<{STATUS_W}}"
     step_pad = f"{(step or '-'):<{STEP_W}}"
     age_pad = f"{relative_age(last_iso, now=now):<{AGE_W}}"
-    token = resume_token(change_id)
+    token = _truncate(resume_token(change_id), TOKEN_W)
     if dim:
         line = f"{title_pad}  {status_pad}  {step_pad}  {age_pad}  {token}"
         return pal.ansi(line, "dim", enabled=color)
