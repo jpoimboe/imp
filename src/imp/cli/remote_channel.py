@@ -11,7 +11,9 @@ local TTY. The driver can never fail a Change.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -87,3 +89,89 @@ async def race_reply(
 
     assert result is not None
     return result
+
+
+def _default_on_error(message: str) -> None:
+    _log.warning("%s", message)
+
+
+class RemoteChannel:
+    """imp's host for one external driver process. on_event is the synchronous
+    event tap (allowlist -> augment -> one best-effort NDJSON line); start/next_reply/
+    stop own the subprocess + reply stream (Tasks 5-6)."""
+
+    def __init__(
+        self, *, command: tuple[str, ...], events: tuple[str, ...],
+        startup_timeout: float, reply_timeout: float | None,
+        id: str, title: str,
+        on_error: Callable[[str], None] = _default_on_error,
+    ) -> None:
+        self._command = command
+        self._events = events
+        self._startup_timeout = startup_timeout
+        self.reply_timeout = reply_timeout
+        self._id = id
+        self._title = title
+        self._on_error = on_error
+        self._proc: Any = None
+        self._step: str | None = None
+        self._status = "running"
+
+    @classmethod
+    def from_driver_config(
+        cls, dc: DriverConfig, *, id: str, title: str,
+        on_error: Callable[[str], None] = _default_on_error,
+    ) -> RemoteChannel:
+        return cls(
+            command=dc.command, events=dc.events,
+            startup_timeout=dc.startup_timeout, reply_timeout=dc.reply_timeout,
+            id=id, title=title, on_error=on_error)
+
+    # -- event tap (engine on_event port) ------------------------------------
+    def on_event(self, event: Any) -> None:
+        if not isinstance(event, dict):
+            return
+        etype = event.get("type")
+        self._track(event)
+        if not self._allowed(etype):
+            return
+        # Change context is namespaced under "change" so it never clobbers the
+        # event's OWN id/payload fields (events carry their own log id).
+        line = json.dumps({
+            **event,
+            "change": {
+                "id": self._id, "title": self._title,
+                "step": self._step, "status": self._status,
+            },
+        }) + "\n"
+        self._write_nonblocking(line)
+
+    def _allowed(self, etype: Any) -> bool:
+        return "all" in self._events or etype in self._events
+
+    def _track(self, event: dict[str, Any]) -> None:
+        etype = event.get("type")
+        payload = event.get("payload") or {}
+        if etype == "step_started" and payload.get("step") is not None:
+            self._step = payload["step"]
+        elif etype == "workflow_paused":
+            self._status = "paused"
+        elif etype == "merge_blocked":
+            self._status = "merge_blocked"
+        elif etype == "change_merged":
+            self._status = "completed"
+
+    def _write_nonblocking(self, line: str) -> None:
+        """Best-effort, never fatal: write one NDJSON line to the driver's stdin.
+        Sets O_NONBLOCK on the fd (idempotent) so a slow driver (full pipe →
+        BlockingIOError) or a dead one (BrokenPipeError) is dropped, not awaited —
+        on_event must never stall or fail the run (spec AC 3)."""
+        proc = self._proc
+        if proc is None or proc.stdin is None or proc.poll() is not None:
+            return
+        try:
+            fd = proc.stdin.fileno()
+            os.set_blocking(fd, False)
+            os.write(fd, line.encode("utf-8"))
+        except (BlockingIOError, BrokenPipeError, OSError):
+            pass
