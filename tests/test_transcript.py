@@ -5,7 +5,7 @@ from pathlib import Path
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from imp.agents.transcript import Transcript, balance_success_on_resume
+from imp.agents.transcript import RESUME_SUPERSEDED_NOTE, Transcript, balance_success_on_resume
 from imp.engine.state import InMemoryEventLog
 
 
@@ -138,3 +138,22 @@ def test_balance_noop_when_no_trailing_tool_use(tmp_path: Path) -> None:
     msgs = [Message(role="user", content=(TextBlock(text="hi"),))]
     t.append(msgs[0])
     assert balance_success_on_resume(msgs, t, InMemoryEventLog(), "x", wrapper_text=None) is None
+
+
+def test_balance_success_on_resume_emits_superseded_note_with_wrapper_text(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="begin"),)),
+        Message(role="assistant", content=(
+            TextBlock(text="done"),
+            ToolUseBlock(id="c9", name="complete_step", input={"status": "Success"}),
+        )),
+    ]
+    for m in msgs:
+        t.append(m)
+    injected = balance_success_on_resume(msgs, t, InMemoryEventLog(), "step:x",
+                                         wrapper_text="feedback")
+    assert injected is not None
+    results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
+    assert len(results) >= 1
+    assert results[0].content == RESUME_SUPERSEDED_NOTE
