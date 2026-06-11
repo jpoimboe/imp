@@ -216,6 +216,14 @@ class LiveDriver:
             # bursts reach the live walk, so the owning builder is always the main
             # one — no reliance on the A2 drop.
             return node is not self._builder.current_burst
+        if isinstance(node, nv.BreadcrumbLine):
+            act = node.action if isinstance(node.action, dict) else {}
+            if act.get("verb") == "goto" and not (act.get("resume") or act.get("rework")):
+                # forward goto: hold until the next step_started resolves the
+                # target phase (route). reworking / continue / other verbs are
+                # final immediately.
+                return node.route is not None
+            return True
         return True
 
     def _gutters(self) -> tuple[int, ...]:
