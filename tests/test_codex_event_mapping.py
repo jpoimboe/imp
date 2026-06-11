@@ -316,3 +316,57 @@ def test_turn_boundary_cleanup_deferred_while_inflight_nonzero() -> None:
     results = [e for e in list(elog.read()) if e.get("type") == "tool_result"]
     assert all(r["payload"]["id"] != "KEEP" for r in results)  # no close yet
     assert run_state.minted_task_ids == [keep]  # not cleared
+
+
+def test_matched_task_result_stamps_id_ns_event() -> None:
+    # AC38 (production): a task item paired to its mint by fingerprint emits its
+    # tool_result keyed to the minted EVENT id and stamped id_ns="event".
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    args = {"subagent_name": "impl", "task_description": "do it"}
+    run_state.minted_task_ids.append(("MINTED-1", _args_fingerprint(args)))
+
+    ev = FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+        tool="task", arguments=args, result='{"answer": "ok"}', id="sdk-9"))
+    process_event(ev, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    result = next(e for e in elog.read() if e["type"] == "tool_result")
+    assert result["payload"]["id"] == "MINTED-1"
+    assert result["payload"]["id_ns"] == "event"
+
+
+def test_non_task_mcp_result_is_unstamped() -> None:
+    # AC38: a non-task tool result must NOT be stamped (id_ns is task-only).
+    elog = InMemoryEventLog()
+    process_event(
+        FakeItemEvent(type="item.completed", item=FakeMcpToolCallItem(
+            tool="edit", arguments={"path": "a.txt"}, result="ok", id="sdk-edit")),
+        elog=elog, agent_id="step:t", state={"web_search_enabled": False},
+        provider="codex", model="gpt-5.5", run_state=RunState(cap=10, agent_id="step:t"))
+    result = next(e for e in elog.read() if e["type"] == "tool_result")
+    assert "id_ns" not in result["payload"]
+
+
+def test_turn_boundary_synthetic_close_stamps_id_ns_event() -> None:
+    # AC38: the turn-boundary synthetic close of a dangling mint stamps
+    # id_ns="event" (an unstamped synthetic close would be legacy-indistinguishable).
+    elog = InMemoryEventLog()
+    state = {"web_search_enabled": False}
+    run_state = RunState(cap=10, agent_id="step:t")
+    run_state.minted_task_ids.append(
+        ("DANGLE-M", _args_fingerprint({"subagent_name": "a"})))
+    run_state.inflight_task_dispatches = 0
+
+    msg = FakeItemEvent(type="item.completed", item=FakeAgentMessageItem(text="work"))
+    process_event(msg, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+    done = FakeTurnCompletedEvent(usage=FakeUsage(input_tokens=1, output_tokens=1))
+    process_event(done, elog=elog, agent_id="step:t", state=state,
+                  provider="codex", model="gpt-5.5", run_state=run_state)
+
+    close = next(e for e in elog.read()
+                 if e["type"] == "tool_result" and e["payload"]["id"] == "DANGLE-M")
+    assert close["payload"]["content"] == TASK_TURN_BOUNDARY_CLOSE
+    assert close["payload"]["id_ns"] == "event"

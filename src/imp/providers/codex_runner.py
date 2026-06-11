@@ -1100,11 +1100,13 @@ def process_event(
                     agent_id=agent_id,
                     block=ToolUseBlock(id=call_id, name=name, input=args),
                 )
+            task_id_ns = "event" if (name == "task" and matched_id is not None) else None
             elog.append_tool_result(
                 agent_id=agent_id,
                 block=ToolResultBlock(
                     tool_use_id=call_id, content=content, is_error=is_error,
                 ),
+                id_ns=task_id_ns,
             )
             if name == "complete_step":
                 # Fallback capture from the RAW SDK item args, which carry no
@@ -1220,6 +1222,7 @@ def process_event(
                     block=ToolResultBlock(
                         tool_use_id=ev_id,
                         content=TASK_TURN_BOUNDARY_CLOSE, is_error=True),
+                    id_ns="event",
                 )
             run_state.minted_task_ids.clear()
             run_state.refused_task_mints.clear()
