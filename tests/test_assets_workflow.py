@@ -128,13 +128,13 @@ def test_spec_fast_path_gate_precedes_reviewer_in_order() -> None:
     # the separate final-review gate is gone (the reviewer now owns termination);
     # the fast-path gate still precedes the reviewer
     assert "spec-final-review-gate" not in names
-    assert names.index("fast-path-spec-gate") < names.index("spec-reviewer")
+    assert names.index("spec-exit-gate") < names.index("spec-reviewer")
 
 
 def test_fast_path_spec_gate_skips_to_plan_writer() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
-    gate = _steps(wf)["fast-path-spec-gate"].rules[0]
+    gate = _steps(wf)["spec-exit-gate"].rules[1]   # rule 0 is now spec_gate_passed
     assert isinstance(gate.action, Goto) and gate.action.target == "plan-writer"
 
 

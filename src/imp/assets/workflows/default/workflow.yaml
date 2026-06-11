@@ -54,9 +54,10 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, set: {spec_gate_passed: false}, resume: spec-writer}
 
-      - name: fast-path-spec-gate      # trivial change -> skip spec review entirely
+      - name: spec-exit-gate           # spec-phase exit router: gated-confirm pass-through, trivial skip, else continue to review
         rules:
-          - {if: {fast_path: true}, goto: plan-writer}
+          - {if: {spec_gate_passed: true}, set: {spec_gate_passed: false}, goto: plan-writer}
+          - {if: {fast_path: true}, set: {spec_unseen_changes: false}, goto: plan-writer}
           - {else: true, continue: true}
 
       - name: spec-reviewer

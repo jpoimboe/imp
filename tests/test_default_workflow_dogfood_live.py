@@ -717,7 +717,7 @@ def test_dogfood_imp_on_imp_default_workflow(
     # NOT rework: task-lead's own `goto task-lead` self-loop (one per task) — it
     # targets task-lead but is ISSUED BY task-lead, so exclude that exact pair.
     # NOT rework: the three fast-path gates (Task 9), all FORWARD skips on a
-    # trivial change — `fast-path-spec-gate → plan-writer` skips spec-review,
+    # trivial change — `spec-exit-gate → plan-writer` skips spec-review,
     # `fast-path-plan-gate → task-lead` skips plan-review, and
     # `fast-path-cycle-gate → review` skips plan-cycle-check. A clean fast-path
     # run issues exactly these, so exclude them by their issuing step. (spec-gate
@@ -736,7 +736,7 @@ def test_dogfood_imp_on_imp_default_workflow(
         step, target = p.get("step"), act.get("target")
         if step == "task-lead" and target == "task-lead":
             return False  # normal per-task progress, not rework
-        if step in {"fast-path-spec-gate", "fast-path-plan-gate",
+        if step in {"spec-exit-gate", "fast-path-plan-gate",
                     "fast-path-cycle-gate"}:
             return False  # fast-path forward skips (Task 9), not rework
         # Deterministic spec-phase RENAME flow (fires on every clean run where the

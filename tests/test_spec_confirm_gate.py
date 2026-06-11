@@ -114,3 +114,27 @@ def test_spec_verify_commit_success_continues_no_mutation() -> None:
     m = evaluate_rules(rules, vars=_BASE_VARS, output={"exit": 0})
     assert isinstance(m.action, Continue)
     assert m.var_mutations == {}
+
+
+def test_spec_exit_gate_routes_gate_passed_to_plan_and_clears_flag() -> None:
+    rules = _steps(_wf())["spec-exit-gate"].rules
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "spec_gate_passed": True},
+                       output=None)
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.var_mutations["spec_gate_passed"] is False
+
+
+def test_spec_exit_gate_fast_path_clears_unseen_and_skips_to_plan() -> None:
+    rules = _steps(_wf())["spec-exit-gate"].rules
+    m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True,
+                                    "spec_unseen_changes": True}, output=None)
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer"
+    assert m.var_mutations["spec_unseen_changes"] is False
+
+
+def test_spec_exit_gate_else_continues_into_review() -> None:
+    rules = _steps(_wf())["spec-exit-gate"].rules
+    m = evaluate_rules(rules, vars=_BASE_VARS, output=None)
+    assert isinstance(m.action, Continue)
