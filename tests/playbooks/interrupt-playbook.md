@@ -167,9 +167,10 @@ Use a **standalone `git clone`**, not `git worktree add` — see §1. A clone's 
 isolated; a linked worktree's local layer would resolve to the shared main checkout.
 
 ```bash
-cd /home/jpoimboe/imp
+REPO=$(git rev-parse --show-toplevel)   # main checkout — report lands here, survives clone deletion
+cd "$REPO"
 WT=/tmp/imp-interrupt-$(date +%Y%m%d-%H%M%S)
-git clone . "$WT"                       # standalone clone of HEAD → control root resolves to $WT itself
+git clone "$REPO" "$WT"                 # standalone clone of HEAD → control root resolves to $WT itself
 echo "$WT"                              # your cwd for every imp run
 ls "$WT"/imp/project.yaml               # the committed project marker → confirms $WT is an imp project
 ```
@@ -327,13 +328,13 @@ Write to the **main checkout** (survives clone deletion), in the bugs dir
 (`mkdir -p` it if absent):
 
 ```
-/home/jpoimboe/imp/docs/bugs/<YYYY-MM-DD>-interrupt-playbook-results.md
+"$REPO"/docs/bugs/<YYYY-MM-DD>-interrupt-playbook-results.md
 ```
 
 Include:
 
 1. **Build under test** — which `imp` (branch/commit:
-   `git -C /home/jpoimboe/imp rev-parse --short HEAD`, plus whether the
+   `git -C "$REPO" rev-parse --short HEAD`, plus whether the
    esc-and-clean-interrupt feature is present) and the impty commit.
 2. **Summary matrix** — rows = providers; columns = A1/A2 / B-ctrlc / B-esc / C-ctrlc /
    C-esc / D-ctrlc / D-esc(neg) / E / F / clean-resume; cells = ✅ / ⚠️ issue / ⏭️ skipped
@@ -360,9 +361,9 @@ cd "$WT"
 imp log                      # or: imp status — enumerate change ids (optional; the clone is discarded wholesale)
 imp abandon <id>             # optional: exercise abandon inside the clone; the rm below discards everything regardless
 
-cd /home/jpoimboe/imp
+cd "$REPO"
 rm -rf "$WT"                 # the standalone clone holds every branch / nested worktree / journal — deleting it removes all churn
-git -C /home/jpoimboe/imp status --short   # only the report file should be new
+git -C "$REPO" status --short   # only the report file should be new
 ```
 
 If anything in the **main** checkout changed besides the report, flag it — the clone

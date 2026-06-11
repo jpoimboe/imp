@@ -91,19 +91,26 @@ def start(
     cwd: str | None = None,
     cols: int = 80,
     rows: int = 24,
+    env: dict[str, str] | None = None,
 ) -> str:
     """Spawn an interactive program on a fresh pty and return its first screen.
 
     Replaces any existing session. `argv` is the command + args, e.g.
-    ["imp", "new", "my-change"]. `cols`/`rows` set the terminal size (a real
-    test parameter — programs reflow by width). Waits for the program to settle
-    before returning, so the returned screen is the first thing to react to.
+    ["imp", "new", "my-change"] — spawned directly, so the program is the
+    foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No shell
+    wrapper is needed; pass `env` to set variables (e.g. API keys) instead of a
+    `bash -lc "export …; exec …"` wrapper, which would otherwise put bash — not
+    your program — in the foreground group. `env`, when given, REPLACES the
+    inherited environment (TERM is still defaulted); merge with the parent env
+    yourself if you want to extend it. `cols`/`rows` set the terminal size (a
+    real test parameter — programs reflow by width). Waits for the program to
+    settle before returning, so the returned screen is the first thing to react to.
     """
     global _session
     if _session is not None:
         _session.close()
         _session = None
-    session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows)
+    session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)
     session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD)
     _session = session
     return _render(session)
