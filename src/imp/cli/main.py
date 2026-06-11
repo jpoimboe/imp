@@ -413,34 +413,41 @@ async def _run_change_session(
                     change, driver, coord, coord.pause_reason or "sigterm")
             assert result is not None
 
-            final_state = State.load(change.state_dir)
-            interactive = _interactive_loop_predicate(
-                non_interactive=non_interactive, reader_armed=reader_armed,
-                stdin_tty=sys.stdin.isatty(), stdout_tty=sys.stdout.isatty())
             interrupt_paused = (
                 result is RunResult.PAUSED
                 and coord.should_pause
                 and not coord.escalated)
+            if not interrupt_paused:
+                # Terminal outcome (COMPLETED, or a non-interrupt PAUSE such as
+                # merge_blocked). Do NOT reload State here: a merge-completing run
+                # has already finalized in _complete by removing the worktree —
+                # the change state dir, and its state.json, went with it — so
+                # State.load(change.state_dir) would crash with FileNotFoundError.
+                # final_state is only ever consulted on the interrupt-paused
+                # loopable path below, so it is never needed here. The terminal
+                # handler reads the outcome from `result`, not from disk.
+                break
+            final_state = State.load(change.state_dir)
+            interactive = _interactive_loop_predicate(
+                non_interactive=non_interactive, reader_armed=reader_armed,
+                stdin_tty=sys.stdin.isatty(), stdout_tty=sys.stdout.isatty())
             loopable = (
-                interrupt_paused
-                and coord.pause_reason in ("esc", "ctrl-c")
+                coord.pause_reason in ("esc", "ctrl-c")
                 and final_state.status == "paused"
                 and interactive)
             if not loopable:
-                if interrupt_paused:
-                    # An interrupt paused the run but the session is not loopable
-                    # (--non-interactive, or no controlling tty): exit paused,
-                    # mirroring the legacy `coord.should_pause` arm (rc 130).
-                    return _finalize_paused_exit(
-                        change, driver, coord, coord.pause_reason or "ctrl-c")
-                break
+                # An interrupt paused the run but the session is not loopable
+                # (--non-interactive, or no controlling tty): exit paused,
+                # mirroring the legacy `coord.should_pause` arm (rc 130).
+                return _finalize_paused_exit(
+                    change, driver, coord, coord.pause_reason or "ctrl-c")
 
             coord.reset()
             if not non_interactive and _should_respawn_reader(
                     reader_exited=(coord._esc_reader is None)):
                 esc_reader = EscKeyReader(coord)
                 _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader)
+                    change, status, coord, esc_reader, driver)
                 await tg.start(esc_reader.run)
                 reader_armed = bool(esc_reader._armed)
 

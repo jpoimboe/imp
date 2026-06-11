@@ -71,6 +71,15 @@ def make_wait_for_user_tool() -> Tool:
             pending = coord.drain_interject()
         reply = pending if pending is not None else ctx.user_input_fn("")
         if inspect.isawaitable(reply):
+            # Attended agent is about to BLOCK on a human reply: freeze the
+            # inactivity watchdog for the duration of the await so it cannot
+            # falsely kill (and re-drive) this legitimately-parked run. The
+            # finally ALWAYS restores it — normal return, AwaitingUserInput, or
+            # SIGINT/cancel mid-solicit — so a torn-down prompt never leaves the
+            # watchdog frozen forever. (`coord` is fetched above; guard for tests/
+            # legacy with no coordinator and thus no watchdog to suspend.)
+            if coord is not None:
+                coord.begin_solicit_watchdog()
             try:
                 reply = await reply
             except (KeyboardInterrupt, _cancelled_exc()):
@@ -78,6 +87,9 @@ def make_wait_for_user_tool() -> Tool:
                 # the dangling-wait pause so no exception crosses the MCP boundary;
                 # the headless AwaitingUserInput path takes over from here.
                 raise AwaitingUserInput(prompt) from None
+            finally:
+                if coord is not None:
+                    coord.end_solicit_watchdog()
         assert isinstance(reply, str)
         return reply
 
