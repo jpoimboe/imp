@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -133,3 +135,92 @@ async def test_run_async_pageup_disengages_follow_and_ctrl_o_toggles() -> None:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+class _FakeBuffer:
+    def __init__(self) -> None:
+        self.text = ""
+        self.completer: object | None = None
+
+    def reset(self) -> None:
+        self.text = ""
+
+
+class _FakeChange:
+    def __init__(self, tmp_path: Any) -> None:
+        self.workflow_dir = tmp_path
+        (tmp_path / "skills").mkdir(exist_ok=True)
+
+
+class _FakeFuture:
+    """A loop-free stand-in for asyncio.Future for the sync _accept tests
+    (no running event loop in a plain test)."""
+
+    def __init__(self) -> None:
+        self._done = False
+        self._value: str | None = None
+
+    def done(self) -> bool:
+        return self._done
+
+    def set_result(self, value: str) -> None:
+        self._done = True
+        self._value = value
+
+    def result(self) -> str | None:
+        return self._value
+
+
+def test_accept_plain_line_resolves_solicit_future() -> None:
+    app = _app()
+    app._buffer = _FakeBuffer()
+    app._change = _FakeChange  # not used on the plain path
+    fut = _FakeFuture()
+    app._prompt_future = fut
+    app._buffer.text = "ship it"
+    keep = app._accept(app._buffer)
+    assert keep is False                       # buffer cleared on submit
+    assert fut.result() == "ship it"
+
+
+def test_accept_help_slash_reprompts_and_records_output(tmp_path: Path) -> None:
+    app = _app()
+    app._buffer = _FakeBuffer()
+    app._change = _FakeChange(tmp_path)
+    fut = _FakeFuture()
+    app._prompt_future = fut
+    app._buffer.text = "/help"
+    keep = app._accept(app._buffer)
+    assert keep is False
+    assert not fut.done()                       # /help re-prompts, does not resolve
+    assert any("slash command" in line.lower() for line in app._slash_lines)
+
+
+@pytest.mark.anyio
+async def test_solicit_shows_prompt_returns_submitted_line(tmp_path: Path) -> None:
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input.defaults import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    app = TuiApp(coord=_FakeCoord(), color=False, width=80)
+    app.on_event(SAMPLE[0])
+    change = _FakeChange(tmp_path)
+    result: dict[str, str] = {}
+
+    with create_pipe_input() as pin, create_app_session(input=pin, output=DummyOutput()):
+        app._build_app()
+
+        async def _ask() -> None:
+            result["line"] = await app.solicit(change)
+            app.exit()
+
+        async def _drive() -> None:
+            await asyncio.sleep(0.05)
+            assert app._prompt_visible is True
+            pin.send_text("go ahead\r")
+
+        asyncio.ensure_future(_ask())   # noqa: RUF006
+        asyncio.ensure_future(_drive())  # noqa: RUF006
+        await app.run_async()
+
+    assert result["line"] == "go ahead"

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import asyncio  # noqa: F401
+import asyncio
 import contextlib
 import time
-from typing import Any
+from typing import Any, cast
 
-from imp.cli.prompt import SlashCompleter  # noqa: F401
-from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command  # noqa: F401
+from imp.cli.prompt import SlashCompleter
+from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
 from imp.cli.tui_driver import TuiDriver
 from imp.cli.tui_viewport import ViewportState
 
@@ -173,7 +173,7 @@ class TuiApp:
             content=FormattedTextControl(text=lambda: ANSI(self.status_line())),
             height=1, style="reverse")
         self._buffer = Buffer(
-            accept_handler=lambda buf: self._accept(buf),  # type: ignore[attr-defined]
+            accept_handler=lambda buf: self._accept(buf),
             multiline=False)
         prompt_win = ConditionalContainer(
             Window(BufferControl(buffer=self._buffer), height=1),
@@ -193,3 +193,38 @@ class TuiApp:
         if self._app is None:
             self._build_app()
         await self._app.run_async(handle_sigint=False)
+
+    # -- in-app prompt (wait_for_user) ---------------------------------------
+    async def solicit(self, change: Any) -> str:
+        self._change = change
+        self._slash_lines = []
+        self._buffer.completer = SlashCompleter(change.workflow_dir / "skills")
+        self._prompt_future = asyncio.get_running_loop().create_future()
+        self._prompt_visible = True
+        self._app.layout.focus(self._buffer)
+        self._invalidate()
+        try:
+            return cast(str, await self._prompt_future)
+        finally:
+            self._prompt_visible = False
+            self._app.layout.focus(self._body)
+            self._invalidate()
+
+    def _resolve_prompt(self, value: str) -> None:
+        fut = self._prompt_future
+        if fut is not None and not fut.done():
+            fut.set_result(value)
+
+    def _accept(self, buffer: Any) -> bool:
+        text = buffer.text
+        if not is_slash_command(text):
+            self._resolve_prompt(text)
+            return False
+        result = handle_slash_line(
+            text, change=self._change, output_fn=self._slash_lines.append)
+        if result is REPROMPT:
+            self._invalidate()
+            return False
+        assert isinstance(result, str)
+        self._resolve_prompt(result)
+        return False
