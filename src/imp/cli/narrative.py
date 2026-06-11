@@ -141,6 +141,7 @@ class ToolCall:
     is_error: bool = False
     killed: bool = False
     call_ts: str | None = None         # the constructing event's timestamp (§1 burst clock)
+    citations_footer: str = ""          # §2: rendered as the block's final line, outside the clip
 
 
 @dataclass
@@ -831,7 +832,8 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
         burst.end_ts = event.get("timestamp")    # advance the burst clock
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
-                call.result = _summarize_result(p.get("content")) + footer
+                call.result = _summarize_result(p.get("content"))
+                call.citations_footer = footer
                 call.is_error = bool(p.get("error", False))
                 return
     # §11: an unmatched result with an open subagent fold is the `task` close whose
@@ -851,7 +853,8 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     burst = _ensure_burst(self)
     burst.calls.append(ToolCall(
         call_id=rid, name="tool", input={},
-        result=_summarize_result(p.get("content")) + footer,
+        result=_summarize_result(p.get("content")),
+        citations_footer=footer,
         is_error=bool(p.get("error", False)),
         call_ts=event.get("timestamp")))
 
@@ -1049,7 +1052,9 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, ToolBurstFold):
         return {"t": t, "calls": [
             {"name": c.name, "call_id": c.call_id, "result": c.result,
-             "is_error": c.is_error, "killed": c.killed} for c in node.calls]}
+             "is_error": c.is_error, "killed": c.killed,
+             "citations_footer": c.citations_footer, "input": c.input}
+            for c in node.calls]}
     if isinstance(node, SkillLoadNode):
         return {"t": t, "name": node.name, "source": node.source}
     if isinstance(node, SubagentFold):

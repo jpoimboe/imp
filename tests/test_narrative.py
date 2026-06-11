@@ -999,3 +999,18 @@ def test_visible_calls_omits_load_skill_tool_and_wait_for_user() -> None:
     assert [c.name for c in nv.visible_calls(burst)] == ["bash", "read_file"]
     assert frozenset({"load_skill", "tool", "wait_for_user"}) == nv._OMIT
     assert frozenset({"script", "branch", "merge"}) == nv.CHROME_KINDS
+
+
+def test_tool_result_citations_go_to_footer_not_result() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="web_search",
+             input={"query": "x"}))
+    b.add(ev("t2", "tool_result", agent_id="a", id="c1", content="body text",
+             citations=[{"url": "https://a.test"}]))
+    call = b.current_burst.calls[0]
+    assert call.result == "body text"          # footer NOT appended into result
+    assert call.citations_footer == "\n\nSources:\n- https://a.test"
+    rep = nv.structural_repr(b.current_burst)["calls"][0]
+    assert rep["citations_footer"] == "\n\nSources:\n- https://a.test"
+    assert rep["input"] == {"query": "x"}
