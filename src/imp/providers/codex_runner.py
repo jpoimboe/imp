@@ -47,7 +47,12 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
-from imp.providers.codex_mcp import CODEX_APPROVAL_POLICY, RunState, start_server
+from imp.providers.codex_mcp import (
+    CODEX_APPROVAL_POLICY,
+    RunState,
+    _args_fingerprint,
+    start_server,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -1007,16 +1012,39 @@ def process_event(
             name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
             args = getattr(item, "arguments", None) or {}
             sdk_id = getattr(item, "id", "") or ""
-            if name == "task" and run_state is not None and run_state.minted_task_ids:
-                # dispatch_tool already minted the parent tool_call; FIFO-pop the
-                # id (dispatch order == completion order) and key the result to it.
-                call_id = run_state.minted_task_ids.pop(0)
+            # Fingerprint match-and-remove (design §2 re-key — replaces FIFO pop).
+            # Concurrent task completions arrive in arbitrary order, so pair each
+            # item with the mint whose args fingerprint it matches. Parse a
+            # string-shaped `arguments` to a dict first; an unparseable string
+            # degrades to no-match (never an exception). NO FIFO fallback: an
+            # unminted item (e.g. a cap-tripped task) with no fingerprint match
+            # takes the sdk-keyed path and never steals a live sibling's mint.
+            match_args: dict[str, Any] | None
+            if isinstance(args, str):
+                try:
+                    parsed = json.loads(args)
+                except (ValueError, TypeError):
+                    parsed = None
+                match_args = parsed if isinstance(parsed, dict) else None
+            elif isinstance(args, dict):
+                match_args = args
             else:
-                # Fallback: either a non-`task` tool call, or a `task` item that
-                # arrived with no prior mint (a protocol-ordering violation that
-                # shouldn't happen — `dispatch_tool` always mints before the SDK
-                # emits the item). In either case, emit a tool_call/result pair
-                # keyed to the SDK item id directly.
+                match_args = None
+            matched_id: str | None = None
+            if (name == "task" and run_state is not None
+                    and match_args is not None and run_state.minted_task_ids):
+                fp = _args_fingerprint(match_args)
+                for idx, (ev_id, ent_fp) in enumerate(run_state.minted_task_ids):
+                    if ent_fp == fp:
+                        matched_id = ev_id
+                        del run_state.minted_task_ids[idx]
+                        run_state.task_id_audit[sdk_id] = ev_id
+                        break
+            if matched_id is not None:
+                call_id = matched_id
+            else:
+                # Non-task tool, or a task item with no minted match: emit a
+                # tool_call/result pair keyed to the SDK item id directly.
                 call_id = sdk_id
                 elog.append_tool_call(
                     agent_id=agent_id,
@@ -1042,13 +1070,14 @@ def process_event(
                 # RunState capture ran, the consume loop's mirror overwrites
                 # proc_state with its already-filtered args; this write is the
                 # fallback for when that path didn't run.
-                state["complete_step_args"] = dict(args)
+                state["complete_step_args"] = match_args if match_args is not None else {}
                 state["complete_step_called"] = True
             # Accumulate tool outcome for the per-turn LoopGuard record.
             # codex item tool names are already bare (no mcp__imp__ prefix),
             # so no stripping is needed.
             state.setdefault("turn_tool_outcomes", []).append(
-                ToolOutcome(name=name, tool_use_id=call_id, input=dict(args),
+                ToolOutcome(name=name, tool_use_id=call_id,
+                            input=match_args if match_args is not None else {},
                             is_error=is_error,
                             result_preview=_result_preview(content)))
             # Buffer for the full-turn llm_response reassembly (Unit F).
