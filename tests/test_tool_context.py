@@ -231,3 +231,24 @@ def test_background_registry_and_bg_ids(tmp_path) -> None:
     ctx2 = ToolContext(project_root=tmp_path, fs_permissions=(),
                        events_path=tmp_path / "events.jsonl")
     assert ctx2.next_bg_id() == "bg1"
+
+
+def test_get_parallel_limiter_is_lazy_and_per_invocation(tmp_path: Path) -> None:
+    """The limiter is created once on first call (identity stable across calls),
+    its width equals the resolved knob, and a SEPARATE ToolContext gets its OWN
+    limiter (non-inheritance / per-invocation isolation — the nested-pool
+    deadlock guard)."""
+    from imp.agents.parallel import max_parallel_tasks, reset_parallelism_cache
+    from imp.agents.tools.context import ToolContext
+
+    reset_parallelism_cache()
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "events.jsonl")
+    assert ctx.parallel_limiter is None        # not created until asked
+    lim = ctx.get_parallel_limiter()
+    assert lim is ctx.get_parallel_limiter()   # check-then-set, single object
+    assert lim.total_tokens == max_parallel_tasks()
+    other = ToolContext(project_root=tmp_path, fs_permissions=(),
+                        events_path=tmp_path / "events.jsonl")
+    assert other.get_parallel_limiter() is not lim  # fresh limiter per invocation
+    reset_parallelism_cache()
