@@ -20,6 +20,7 @@ from typing import Any, NoReturn
 import anyio
 
 from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.cli import change_row
 from imp.cli import palette as pal
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
@@ -1107,7 +1108,8 @@ _INFLIGHT = ("running", "paused", "errored", "merge_blocked")
 
 
 # Row = (id, status, step, last_activity, title, created_at). created_at is the
-# trailing sort key only — the renderer never displays it (see _render_status_table).
+# trailing sort key only — the renderer never displays it (see _cmd_status, which
+# formats each row via change_row.format_change_line).
 _Row = tuple[str, str, str, str, str, str]
 
 
@@ -1162,56 +1164,8 @@ def _completed_rows(control: Path) -> list[_Row]:
     return rows
 
 
-# STATUS cell colors mirror imp log's restraint — color only this cell,
-# leave the rest plain. Padding is computed against the un-colored status
-# text so the column edge holds when colors are on.
-_STATUS_COLORS: dict[str, tuple[str, ...]] = {
-    "running": ("green",),
-    "paused": ("cyan",),
-    "merge_blocked": ("yellow",),
-    "errored": ("bold", "red"),
-    "completed": ("gray",),
-    "abandoned": ("gray",),
-}
-
-
-def _render_status_table(
-    rows: list[_Row],
-    *,
-    color_enabled: bool,
-) -> list[str]:
-    """Format pre-sorted rows into aligned table lines. Per-column widths are
-    `max(len(header), max(len(cell) for cell in column))` over the un-colored
-    cell text; only the STATUS value (not its trailing pad) is wrapped in
-    ANSI, so later columns hold their offset whether color is on or off."""
-    headers = ("ID", "STATUS", "STEP", "LAST_ACTIVITY", "TITLE")
-    # Compute widths for columns 0-3 only; TITLE is the terminal column and
-    # needs no padding.
-    widths = [
-        max(len(headers[i]), max((len(r[i]) for r in rows), default=0))
-        for i in range(4)
-    ]
-    lines: list[str] = [
-        f"{headers[0]:<{widths[0]}} "
-        f"{headers[1]:<{widths[1]}} "
-        f"{headers[2]:<{widths[2]}} "
-        f"{headers[3]:<{widths[3]}} "
-        f"{headers[4]}"
-    ]
-    for slug, status, step, last, title, _created in rows:
-        status_cell = f"{status:<{widths[1]}}"
-        codes = _STATUS_COLORS.get(status, ())
-        if color_enabled and codes:
-            pad = " " * (widths[1] - len(status))
-            status_cell = ansi(status, *codes, enabled=True) + pad
-        lines.append(
-            f"{slug:<{widths[0]}} "
-            f"{status_cell} "
-            f"{step:<{widths[2]}} "
-            f"{last:<{widths[3]}} "
-            f"{title}"
-        )
-    return lines
+def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
+    return sorted(rows, key=lambda r: (r[3], r[5]), reverse=True)
 
 
 def _abandon(control: Path, change_id: str) -> int:
@@ -1285,23 +1239,25 @@ def _cmd_status(args: argparse.Namespace) -> int:
     except worktree.PreconditionError:
         print("No Changes.")
         return 0
-    # In-flight Changes show by default; completed/abandoned ones are journaled
-    # history and only listed with --all (they'd otherwise pile up indefinitely).
-    rows = _status_rows(control)
-    if args.all:
-        rows = rows + _completed_rows(control)
-    if not rows:
+    inflight = _sort_rows_newest_first(_status_rows(control))
+    past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
+    if not inflight and not past:
         print("No Changes.")
         return 0
-    # Sort by last activity, oldest first. last_activity (r[3]) is a fixed-width
-    # "YYYY-MM-DD HH:MM:SS" local-time string (or "-" when there's no event), so
-    # lexicographic ascending == chronological oldest-first; activity-less "-"
-    # rows ("-" < any digit) sort to the top. created_at (r[5]) breaks ties
-    # deterministically (older Change first within the same activity second).
-    rows.sort(key=lambda r: (r[3], r[5]))
-    color_enabled = should_use_color(sys.stdout)
-    for line in _render_status_table(rows, color_enabled=color_enabled):
-        print(line)
+    color = should_use_color(sys.stdout)
+    now = datetime.now(UTC)
+    print(change_row.header_line(color=color))
+    for r in inflight:
+        print(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            last_iso=r[3], now=now, color=color))
+    if past:
+        if inflight:
+            print()
+        for r in past:
+            print(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                last_iso=r[3], now=now, color=color, dim=True))
     return 0
 
 
