@@ -498,3 +498,49 @@ def test_task_dispatch_decrements_inflight_on_suspension_capture(
         ctx=ctx, state=state))
     assert state.subagent_suspended is not None
     assert state.inflight_task_dispatches == 0
+
+
+def test_suspension_capture_text_carries_stop_guidance(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """On a captured suspension the wrapper returns the named constant whose text
+    tells the model to stop dispatching (membership-freeze guidance, §2)."""
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.codex_mcp import CODEX_SUSPEND_CAPTURE_TEXT
+    state = RunState(cap=10)
+
+    async def _stub(ctx: Any, subagent_name: str, task_description: str,
+                    **_kw: Any) -> str:
+        raise SubagentSuspended("paused")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    out = asyncio.run(dispatch_tool(
+        tool=make_task_tool(),
+        args={"subagent_name": "impl", "task_description": "x"},
+        ctx=ctx, state=state))
+    assert out == CODEX_SUSPEND_CAPTURE_TEXT
+    assert out.endswith("; do not dispatch further tasks")
+
+
+def test_awaiting_capture_text_carries_stop_guidance(tmp_path: Path) -> None:
+    """A headless wait captured from a non-task tool returns the named awaiting
+    constant carrying the same stop guidance (§2)."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.codex_mcp import CODEX_AWAIT_CAPTURE_TEXT
+
+    async def _afn(ctx: Any) -> str:
+        raise AwaitingUserInput("answer me")
+
+    tool = Tool(name="wait_for_user", description="",
+                input_schema={"type": "object", "properties": {}}, fn=_afn)
+    state = RunState(cap=10)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    out = asyncio.run(dispatch_tool(tool=tool, args={}, ctx=ctx, state=state))
+    assert out == CODEX_AWAIT_CAPTURE_TEXT
+    assert out.endswith("; do not dispatch further tasks")
+    assert state.awaiting_user is True
+    assert state.awaiting_prompt == "answer me"

@@ -107,6 +107,14 @@ def _cap_error_text(cap: int) -> str:
     )
 
 
+CODEX_SUSPEND_CAPTURE_TEXT = (
+    "subagent paused; run will pause; do not dispatch further tasks"
+)
+CODEX_AWAIT_CAPTURE_TEXT = (
+    "awaiting user; run will pause; do not dispatch further tasks"
+)
+
+
 def _args_fingerprint(args: dict[str, Any]) -> tuple[tuple[str, str], ...]:
     return tuple(sorted(
         (k, json.dumps(v, sort_keys=True, default=str))
@@ -189,7 +197,7 @@ async def dispatch_tool(
         except Exception as exc:
             if isinstance(exc, SubagentSuspended):
                 state.subagent_suspended = exc  # runner re-raises to unwind cleanly
-                return "subagent paused; run will pause"
+                return CODEX_SUSPEND_CAPTURE_TEXT
             text = f"{type(exc).__name__}: {exc}"
             state.runtime_errors.append(text)
             return text
@@ -206,7 +214,7 @@ async def dispatch_tool(
         # after process_event to unwind the codex run into a clean pause.
         state.awaiting_user = True
         state.awaiting_prompt = au.prompt
-        return "awaiting user; run will pause"
+        return CODEX_AWAIT_CAPTURE_TEXT
     except Exception as exc:
         text = f"{type(exc).__name__}: {exc}"
         state.runtime_errors.append(text)
