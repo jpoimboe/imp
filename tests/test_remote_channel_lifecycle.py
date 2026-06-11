@@ -59,6 +59,19 @@ async def test_start_returns_false_when_driver_exits_immediately(
 
 
 @pytest.mark.anyio
+async def test_start_returns_false_when_command_missing(tmp_path: Path) -> None:
+    errors: list[str] = []
+    ch = RemoteChannel(
+        command=("/no/such/driver/binary",), events=("all",), startup_timeout=2.0,
+        reply_timeout=None, id="2026-06-11-abc", title="t",
+        on_error=errors.append)
+    async with anyio.create_task_group() as tg:
+        assert await ch.start(tg) is False
+        assert any("spawn" in m for m in errors)
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
 async def test_next_reply_timeout_raises_awaiting_user_input(tmp_path: Path) -> None:
     from imp.agents.tools.wait_for_user import AwaitingUserInput
     ch = _channel(fake_driver_command(tmp_path))  # no reply configured

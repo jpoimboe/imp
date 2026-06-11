@@ -12,10 +12,13 @@ from pathlib import Path
 
 _DRIVER_SRC = '''\
 import sys
+import signal
 
 args = dict(zip(sys.argv[1::2], sys.argv[2::2]))
 if args.get("--exit") == "1":
     sys.exit(1)
+if args.get("--ignore-sigterm") == "1":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 log = args.get("--log")
 reply = args.get("--reply")
 if reply:
@@ -30,11 +33,10 @@ for line in sys.stdin:
 
 def fake_driver_command(
     tmp_path: Path, *, log: Path | None = None, reply: str | None = None,
-    exit_immediately: bool = False,
+    exit_immediately: bool = False, ignore_sigterm: bool = False,
 ) -> list[str]:
     script = tmp_path / "fake_driver.py"
-    if not script.exists():
-        script.write_text(_DRIVER_SRC)
+    script.write_text(_DRIVER_SRC)
     cmd = [sys.executable, str(script)]
     if log is not None:
         cmd += ["--log", str(log)]
@@ -42,4 +44,6 @@ def fake_driver_command(
         cmd += ["--reply", reply]
     if exit_immediately:
         cmd += ["--exit", "1"]
+    if ignore_sigterm:
+        cmd += ["--ignore-sigterm", "1"]
     return cmd

@@ -25,6 +25,7 @@ import anyio
 _log = logging.getLogger("imp.remote")
 
 _CRASH_PROBE_SECONDS = 0.2   # bound on the spawn-then-immediately-crash check
+_TERM_GRACE_SECONDS = 2.0    # SIGTERM → grace → SIGKILL window at teardown
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,8 +246,18 @@ class RemoteChannel:
             raise AwaitingUserInput() from None
 
     async def stop(self) -> None:
+        """Tear the driver down: SIGTERM, a short grace, then SIGKILL (spec AC 9).
+        No-op when never spawned or already exited (idempotent). Closing stdout via
+        termination ends the reader thread's blocked readline.
+        Uses abandon_on_cancel=True so the grace window is honoured even if the
+        process ignores SIGTERM — the abandoned thread is safe; Popen.wait() is
+        internally locked."""
         proc = self._proc
         if proc is None or proc.poll() is not None:
             return
         proc.terminate()
-        await anyio.to_thread.run_sync(proc.wait)
+        with anyio.move_on_after(_TERM_GRACE_SECONDS):
+            await anyio.to_thread.run_sync(proc.wait, abandon_on_cancel=True)
+        if proc.poll() is None:
+            proc.kill()
+            await anyio.to_thread.run_sync(proc.wait)
