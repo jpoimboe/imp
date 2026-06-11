@@ -73,6 +73,32 @@ def test_is_benign_interrupt_teardown_matches_killed_child_writes() -> None:
     assert not m._is_benign_interrupt_teardown(None)
 
 
+def test_is_benign_interrupt_teardown_matches_exit_143_process_error() -> None:
+    # A stand-in matched by class NAME (like the CLIConnectionError test above),
+    # mirroring the real claude_agent_sdk ProcessError(message, exit_code=None).
+    class ProcessError(Exception):
+        def __init__(self, message: str, exit_code: int | None = None) -> None:
+            super().__init__(
+                f"{message} (exit code: {exit_code})" if exit_code is not None
+                else message)
+            self.exit_code = exit_code
+
+    assert m._is_benign_interrupt_teardown(
+        ProcessError("Command failed with exit code 143", exit_code=143))
+    assert m._is_benign_interrupt_teardown(
+        ProcessError("commande interrompue", exit_code=143))
+    assert m._is_benign_interrupt_teardown(
+        ProcessError("Command failed with exit code 143 (exit code: 143)"))
+
+    class NoAttrError(Exception):
+        pass
+
+    assert m._is_benign_interrupt_teardown(
+        NoAttrError("Command failed with exit code 143 (exit code: 143)"))
+    assert not m._is_benign_interrupt_teardown(
+        ProcessError("Command failed with exit code 1", exit_code=1))
+
+
 def test_new_tui_on_non_tty_warns_and_streams(tmp_path, monkeypatch, capsys) -> None:
     from imp.engine.executor import RunResult
     from tests.conftest import _seed_control

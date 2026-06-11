@@ -679,17 +679,18 @@ def _tui_requested(args: argparse.Namespace) -> bool:
 
 
 def _is_benign_interrupt_teardown(exc: BaseException | None) -> bool:
-    """True for the detached-task exceptions a (process-group) interrupt leaves
-    behind when it kills a provider's CLI child mid-write: the SDK's
-    `CLIConnectionError: Cannot write to terminated process` and asyncio's
-    connection-lost `InvalidStateError`. Benign teardown noise — in `--tui` it must
-    not surface (prompt_toolkit would wedge on a "Press ENTER to continue" modal)."""
+    """True when exc is interrupt-teardown noise that must not surface in --tui (modal wedge)."""
     import asyncio
     if isinstance(exc, asyncio.InvalidStateError):
         return True
-    return (exc is not None
-            and type(exc).__name__ == "CLIConnectionError"
-            and "terminated process" in str(exc))
+    if exc is None:
+        return False
+    name = type(exc).__name__
+    if name == "CLIConnectionError" and "terminated process" in str(exc):
+        return True
+    if name == "ProcessError" and getattr(exc, "exit_code", None) == 143:
+        return True
+    return "(exit code: 143)" in str(exc)
 
 
 async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
