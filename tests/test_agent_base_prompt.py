@@ -70,3 +70,20 @@ def test_base_uses_imp_identity_and_tool_names() -> None:
     for tool in ("read_file", "edit_file", "write_file", "grep", "glob",
                  "load_skill"):
         assert tool in _AGENT_BASE_PROMPT, tool
+
+
+def test_base_reaches_verbatim_provider_field(tmp_path: Path) -> None:
+    # claude_code/openai/anthropic forward invocation.system_prompt unchanged,
+    # so the base reaching that field is the base reaching all three.
+    inv = _build(tmp_path, name="rev", body="BODY")
+    assert _AGENT_BASE_PROMPT in inv.system_prompt
+
+
+def test_base_survives_codex_prompt_wrap(tmp_path: Path) -> None:
+    # codex builds its final prompt from invocation.system_prompt via _build_prompt
+    # (self is unused — it only transforms the string). The base must survive intact.
+    from imp.providers.codex_runner import CodexAgentRunner
+    inv = _build(tmp_path, name="rev", body="BODY")
+    built = CodexAgentRunner._build_prompt(None, inv.system_prompt)
+    assert built.startswith(inv.system_prompt)
+    assert _AGENT_BASE_PROMPT in built
