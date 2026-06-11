@@ -1329,8 +1329,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1345,6 +1344,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="Headless reply consumed by the first wait_for_user; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
+    p_new.add_argument("--tui", action="store_true",
+                       help="Render the run in a full-screen, scrollable viewer "
+                            "(expanded steps); falls back to streaming on a non-tty.")
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
@@ -1355,6 +1357,9 @@ def main(argv: list[str] | None = None) -> int:
                           help="Headless reply consumed by the first wait_for_user; "
                                "pause+resume with another --message. "
                                "Requires --non-interactive.")
+    p_resume.add_argument("--tui", action="store_true",
+                          help="Render the run in a full-screen, scrollable viewer "
+                               "(expanded steps); falls back to streaming on a non-tty.")
     p_resume.add_argument(
         "--from", dest="from_target", metavar="TARGET",
         help="Rewind/jump the step cursor to TARGET (a step or phase name) and "
@@ -1401,10 +1406,13 @@ def main(argv: list[str] | None = None) -> int:
     p_abandon.set_defaults(func=_cmd_abandon)
 
     from imp.evals.cli import add_eval_parser
-
     add_eval_parser(sub)
+    return parser
 
-    ns = parser.parse_args(args)
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    ns = _build_parser().parse_args(args)
     _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
         rc: int = ns.func(ns)
