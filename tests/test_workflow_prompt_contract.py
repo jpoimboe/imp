@@ -78,6 +78,30 @@ def test_spec_writer_infers_intent_from_pasted_context() -> None:
     assert "infer" in text.lower()
 
 
+TURN_TERMINAL_REVIEWERS = [
+    "code-reviewer.md", "quality-reviewer.md", "plan-reviewer.md",
+    "spec-reviewer.md", "integration-reviewer.md", "completeness-slice.md",
+    "boundaries-slice.md", "spec-compliance-slice.md", "plan-cycle-check.md",
+    "review-panel.md",
+]
+
+
+@pytest.mark.parametrize("name", TURN_TERMINAL_REVIEWERS)
+def test_reviewer_md_has_no_unreconciled_no_preamble_directive(name: str) -> None:
+    # The base persona tells every agent to "state in one sentence what you're
+    # about to do" before its first tool call. A reviewer that ALSO carried a
+    # "no preamble / output only the tool" directive would read ambiguously
+    # against that base (spec acceptance #5). The planning audit found none; this
+    # guard fails loudly if a future edit introduces one without reconciling it.
+    low = _read(name).lower()
+    for banned in ("no preamble", "without any preamble", "without preamble",
+                   "do not output any text", "output only the tool",
+                   "go straight to the tool"):
+        assert banned not in low, (
+            f"{name}: {banned!r} conflicts with the base persona's "
+            f"say-one-sentence-before-your-first-tool-call default — reconcile it")
+
+
 @pytest.mark.parametrize("name", INTERACTIVE_STEP_FILES)
 def test_interactive_steps_exist_and_are_exempt(name: str) -> None:
     # Guard the exemption: if these files are renamed/removed, this test fails
