@@ -1,7 +1,11 @@
-"""Helpers for live elicitation tests (IMP_RUN_LIVE_ELICIT gated)."""
+"""Helpers for live elicitation and concurrency tests (IMP_RUN_LIVE_ELICIT /
+IMP_RUN_CODEX / IMP_RUN_DOGFOOD gated)."""
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import tempfile
 from pathlib import Path
 
 from imp.agents.runner import ContentBlock
@@ -113,3 +117,131 @@ async def _call_openai(prompt: str, tool_description: str) -> list[ContentBlock]
         return list(msg.content)
     finally:
         await client.close()
+
+
+def _git_init_repo(p: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(p)], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "user.email", "t@t.t"], check=True)
+    subprocess.run(["git", "-C", str(p), "config", "user.name", "T"], check=True)
+    (p / "README.md").write_text("# t\n")
+    subprocess.run(["git", "-C", str(p), "add", "README.md"], check=True)
+    subprocess.run(["git", "-C", str(p), "commit", "-m", "init", "-q"], check=True)
+
+
+async def run_parallel_task_turn(provider: str) -> list[dict]:
+    """Drive ONE live turn through the named provider's production runner with a
+    task-capable parent and two stub subagents that call complete_step immediately.
+
+    Returns all event-log records from the run as a list of dicts. The events
+    include tool_call/tool_result for both task dispatches, which the caller
+    uses to assert concurrency shape (both calls precede either result).
+    """
+    from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
+    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+
+    _SRC = SourceLoc(file=Path("a.md"), line=1)
+    _FS = (FsRule(operations=("read", "write"), paths=("**",),
+                  mode="allow", source=_SRC),)
+
+    worker_schema = OutputSchema(
+        fields=(OutputField(name="status", type="enum",
+                            values=("Success",), required=True),),
+        source=_SRC,
+    )
+    _worker_prompt = (
+        "Call complete_step immediately with status='Success'. "
+        "To finish this step you MUST call the `complete_step` tool with: "
+        "`status` (Success). Do not answer in prose — call the tool."
+    )
+    worker_a = AgentDef(
+        name="worker_a", description="trivial stub worker",
+        tools=frozenset({"complete_step"}), subagents=(),
+        output_schema=worker_schema,
+        prompt_template_source=_worker_prompt,
+        source_path=Path("a.md"), source=_SRC,
+    )
+    worker_b = AgentDef(
+        name="worker_b", description="trivial stub worker",
+        tools=frozenset({"complete_step"}), subagents=(),
+        output_schema=worker_schema,
+        prompt_template_source=_worker_prompt,
+        source_path=Path("a.md"), source=_SRC,
+    )
+    parent_schema = OutputSchema(
+        fields=(OutputField(name="status", type="enum",
+                            values=("Success",), required=True),),
+        source=_SRC,
+    )
+    parent_def = AgentDef(
+        name="coordinator", description="dispatches two stub workers in parallel",
+        tools=frozenset({"complete_step", "task"}),
+        subagents=("worker_a", "worker_b"),
+        output_schema=parent_schema,
+        prompt_template_source="",
+        source_path=Path("a.md"), source=_SRC,
+    )
+
+    model_name = "gpt-5.5" if provider == "codex" else "claude-sonnet-4-5"
+
+    with tempfile.TemporaryDirectory() as _tmpdir:
+        tmp_path = Path(_tmpdir)
+        _git_init_repo(tmp_path)
+        (tmp_path / "tx").mkdir()
+
+        inv = AgentInvocation(
+            agent_def=parent_def,
+            provider_name=provider,
+            model_name=model_name,
+            system_prompt=(
+                "You have two independent workers: 'worker_a' and 'worker_b'. "
+                "Issue BOTH as parallel task calls in a SINGLE message right now. "
+                "Ask worker_a to 'do task A' and worker_b to 'do task B'. "
+                "After both complete, call complete_step with status='Success'. "
+                "To finish: MUST call `complete_step` with `status` (Success)."
+            ),
+            initial_messages=(Message(
+                role="user",
+                content=(TextBlock(
+                    text=(
+                        "Dispatch worker_a and worker_b in parallel now, "
+                        "in a single message."
+                    )),),
+            ),),
+            change_context=ChangeContext(
+                slug="s", title="parallel concurrency test",
+                project_root=tmp_path, workflow_dir=tmp_path, id="c1",
+            ),
+            transcript_dir=tmp_path / "tx",
+            fs_permissions=_FS,
+            events_path=tmp_path / "events.jsonl",
+            agent_id="step:coord",
+            subagent_defs={"worker_a": worker_a, "worker_b": worker_b},
+        )
+
+        if provider == "codex":
+            from imp.providers.codex_runner import (
+                CodexAgentRunner,
+            )
+            runner = CodexAgentRunner(model_name=model_name)
+        else:
+            from imp.providers.claude_code import (
+                ClaudeCodeAgentRunner,
+            )
+            runner = ClaudeCodeAgentRunner(model_name=model_name)
+
+        async for _ in runner.run(inv):
+            pass
+
+        events_file = tmp_path / "events.jsonl"
+        if not events_file.exists():
+            return []
+        events: list[dict] = []
+        for line in events_file.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                events.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return events
