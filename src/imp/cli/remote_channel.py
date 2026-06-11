@@ -96,6 +96,54 @@ async def race_reply(
     return result
 
 
+EventCallback = Callable[[Any], None]
+
+
+def compose_on_event(*callbacks: EventCallback) -> EventCallback:
+    """Fan one engine event out to several on_event consumers in order (the live
+    LiveDriver plus the RemoteChannel). The engine seam stays a single callback."""
+    def _fan(event: Any) -> None:
+        for cb in callbacks:
+            cb(event)
+    return _fan
+
+
+async def _channel_race_side(channel: Any) -> str:
+    """The driver branch of the attended race. A dead/empty channel raises
+    AwaitingUserInput; swallow it and yield to the local prompt (sleep forever) so
+    a dropped driver never wins the race — the local TTY remains authoritative."""
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+    try:
+        return await channel.next_reply()
+    except AwaitingUserInput:
+        await anyio.sleep_forever()
+        raise AssertionError("unreachable") from None
+
+
+def effective_reply_fn(
+    reply_input_fn: Callable[[], Awaitable[str]],
+    channel: Any,
+    *, non_interactive: bool,
+) -> Callable[[], Awaitable[str]]:
+    """Choose the reply source for a solicit window (spec §A):
+      - no channel        → the local reply fn unchanged (imp behaves as today);
+      - headless + channel → phone-only: the driver line alone, honoring
+        reply_timeout (a finite value falls back to a pause via AwaitingUserInput);
+      - attended + channel → race the local prompt against the driver line."""
+    if channel is None:
+        return reply_input_fn
+    if non_interactive:
+        async def _phone() -> str:
+            return await channel.next_reply(timeout=channel.reply_timeout)
+        return _phone
+
+    async def _raced() -> str:
+        result = await race_reply(
+            reply_input_fn, lambda: _channel_race_side(channel))
+        return result.value
+    return _raced
+
+
 def _default_on_error(message: str) -> None:
     _log.warning("%s", message)
 
