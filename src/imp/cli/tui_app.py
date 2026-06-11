@@ -156,6 +156,21 @@ class TuiApp:
         return self._viewport.vertical_scroll(
             total_lines=info.ui_content.line_count, height=info.window_height)
 
+    def _narrative_cursor_position(self) -> Any:
+        # prompt_toolkit's do_scroll forces vertical_scroll toward the cursor,
+        # overriding get_vertical_scroll when cursor is at line 0. Placing the
+        # cursor at the last content line makes do_scroll naturally tail-follow
+        # (scroll down to show it). When not following, placing the cursor in
+        # the middle of the desired viewport prevents do_scroll from overriding
+        # the explicit scroll set by get_vertical_scroll.
+        from prompt_toolkit.data_structures import Point
+        n = len(self.narrative().split("\n"))
+        if self._viewport.follow:
+            return Point(x=0, y=max(0, n - 1))
+        info = self._body.render_info if self._body else None
+        height = info.window_height if info else 22  # pre-first-render fallback
+        return Point(x=0, y=min(self._viewport.scroll + height // 2, max(0, n - 1)))
+
     def _build_app(self) -> None:
         from prompt_toolkit.application import Application
         from prompt_toolkit.buffer import Buffer
@@ -166,7 +181,10 @@ class TuiApp:
         from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 
         self._body = Window(
-            content=FormattedTextControl(text=lambda: ANSI(self.narrative())),
+            content=FormattedTextControl(
+                text=lambda: ANSI(self.narrative()),
+                get_cursor_position=self._narrative_cursor_position,
+            ),
             get_vertical_scroll=self._vertical_scroll,
             wrap_lines=False, always_hide_cursor=True)
         status = Window(
