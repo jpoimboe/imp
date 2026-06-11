@@ -1,0 +1,54 @@
+diff --git a/src/imp/engine/state.py b/src/imp/engine/state.py
+index e9e8c33..64cd6b3 100644
+--- a/src/imp/engine/state.py
++++ b/src/imp/engine/state.py
+@@ -50,6 +50,7 @@ class State:
+     loop_counts: dict[str, int] = field(default_factory=dict)
+     current_step: CurrentStep | None = None
+     retry_feedback: dict[str, Any] | None = None
++    resume_pending: str | None = None
+ 
+     @classmethod
+     def load(cls, state_dir: Path) -> State:
+@@ -70,6 +71,7 @@ class State:
+             "loop_counts": self.loop_counts,
+             "current_step": self.current_step.to_dict() if self.current_step else None,
+             "retry_feedback": self.retry_feedback,
++            "resume_pending": self.resume_pending,
+         }
+         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
+         try:
+diff --git a/tests/test_state.py b/tests/test_state.py
+index 9610f5f..1552c55 100644
+--- a/tests/test_state.py
++++ b/tests/test_state.py
+@@ -148,6 +148,29 @@ def test_state_round_trip_retry_feedback_defaults_none(tmp_path: Path) -> None:
+     assert State.load(tmp_path).retry_feedback is None
+ 
+ 
++def test_state_resume_pending_roundtrip(tmp_path: Path) -> None:
++    s = State(change_id=1, step="coder", step_attempt=0, status="running",
++              resume_pending="coder")
++    s.save(tmp_path)
++    back = State.load(tmp_path)
++    assert back.resume_pending == "coder"
++
++
++def test_state_resume_pending_defaults_none() -> None:
++    s = State(change_id=1, step=None, step_attempt=0, status="running")
++    assert s.resume_pending is None
++
++
++def test_state_load_forward_compatible_without_resume_pending(tmp_path: Path) -> None:
++    # An older state.json (written before this field existed) still loads.
++    (tmp_path / "state.json").write_text(json.dumps({
++        "change_id": 1, "step": "coder", "step_attempt": 0, "status": "running",
++        "vars": {}, "loop_counts": {}, "current_step": None, "retry_feedback": None,
++    }))
++    back = State.load(tmp_path)
++    assert back.resume_pending is None
++
++
+ def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
+     tmp_path: Path,
+ ) -> None:

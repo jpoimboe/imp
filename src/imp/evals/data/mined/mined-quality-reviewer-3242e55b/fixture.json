@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-3242e55b",
+  "source": "mined",
+  "base_sha": "a453f86",
+  "head_sha": "3242e55b4d88965011b64c7bdbc8958226186588",
+  "task_context": "You are performing a code quality review. Work from: /home/jpoimboe/imp\nDESCRIPTION: New cross-vendor subagent integration test (real AnthropicAgentRunner parent dispatches a task to an openai recording-runner child via resolved_roles + model_role). Uses the shared provider_registry fixture.\nPLAN_OR_REQUIREMENTS: Task 4 from docs/superpowers/plans/2026-05-30-model-role-constraints-followups.md\n## Your job\nAssess code quality:\n- Does the new test file have a clear single responsibility, read clearly, with an accurate module docstring?\n- Are the recording fakes (_RecordingRunner / _RecordingProvider) minimal and correct? Any dead code or unused imports? (Note: `get_registry` is imported with `# noqa: F401` to ensure tools register \u2014 confirm that's intentional/needed by checking how the sibling test tests/test_anthropic_runner.py does it.)\n- Does it follow the patterns of the sibling integration tests in tests/test_anthropic_runner.py?\n- Is there a local `anyio_backend` fixture defined in this file \u2014 is that redundant with conftest.py, or needed? Check whether tests/conftest.py already provides anyio_backend; if it does, flag the local one as redundant (Minor).\n- Run `ruff check tests/test_cross_vendor_subagent.py` if ruff available.\nDo NOT flag pre-existing issues outside this file.\nReturn:\n- **Strengths**\n- **Issues** (Critical / Important / Minor)\n- **Assessment** (Approved / Changes needed)",
+  "expected_findings": [
+    {
+      "locus": "test_file.py:0",
+      "symbol": "anyio_backend",
+      "description": "The anyio_backend fixture is defined locally in the test file, consistent with the per-file pattern throughout the codebase and not a regression, flagged only for awareness.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_file.py:0",
+      "symbol": "_RecordingRunner, _RecordingProvider",
+      "description": "_RecordingRunner and _RecordingProvider classes are duplicated from test_anthropic_runner.py; extraction to tests/recording_fakes.py would be worth considering if a third test needs these fakes, but is not a blocker for this PR.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

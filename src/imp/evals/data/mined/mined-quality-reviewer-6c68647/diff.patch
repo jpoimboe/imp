@@ -1,0 +1,117 @@
+diff --git a/src/imp/engine/feedback.py b/src/imp/engine/feedback.py
+new file mode 100644
+index 0000000..3a712bf
+--- /dev/null
++++ b/src/imp/engine/feedback.py
+@@ -0,0 +1,57 @@
++"""Format gate-failure detail into framed feedback prose for a productive retry.
++
++Pure functions: each gate runner's failure detail → a single string that the
++executor stashes in `State.retry_feedback` and a provider injects as a user
++turn on the targeted step's resume (design §6).
++"""
++
++from __future__ import annotations
++
++from typing import Any
++
++_WRAPPER = (
++    "Your previous attempt completed but was not accepted. {detail} "
++    "Address this, then call `complete_step` again."
++)
++
++_TRUNCATE_LIMIT = 4000
++
++
++def _coerce(value: Any) -> str:
++    if isinstance(value, bytes):
++        return value.decode("utf-8", errors="replace")
++    return str(value)
++
++
++def _truncate(text: str, limit: int = _TRUNCATE_LIMIT) -> str:
++    """Head+tail split: test failures put useful signal at both ends."""
++    if len(text) <= limit:
++        return text
++    half = limit // 2
++    head, tail = text[:half], text[-half:]
++    dropped = text[half:-half]
++    n_lines = dropped.count("\n") + 1
++    return f"{head}\n[… {n_lines} lines truncated …]\n{tail}"
++
++
++def format_script_feedback(
++    command: str, exit_code: int, stdout: Any, stderr: Any,
++) -> str:
++    body = _truncate(f"{_coerce(stdout)}{_coerce(stderr)}")
++    detail = f"Gate `{command}` failed (exit {exit_code}).\n{body}"
++    return _WRAPPER.format(detail=detail)
++
++
++def format_agent_feedback(reviewer: str, output: dict[str, Any]) -> str:
++    """Schema-agnostic: render every field of the reviewer's structured
++    output as `key: value` lines. The decide-matched verdict field (whatever
++    it is named) is surfaced among them — we make no assumption about a
++    specific field name."""
++    lines = [f"The {reviewer} reviewed your work and did not accept it."]
++    for key, value in output.items():
++        lines.append(f"{key}: {_coerce(value)}")
++    return _WRAPPER.format(detail="\n".join(lines))
++
++
++def format_human_feedback(label: str) -> str:
++    return _WRAPPER.format(detail=f"A reviewer sent this back: {label!r}.")
+diff --git a/tests/test_feedback.py b/tests/test_feedback.py
+new file mode 100644
+index 0000000..54a2c83
+--- /dev/null
++++ b/tests/test_feedback.py
+@@ -0,0 +1,48 @@
++from __future__ import annotations
++
++from imp.engine.feedback import (
++    format_agent_feedback,
++    format_human_feedback,
++    format_script_feedback,
++)
++
++_WRAPPER_HEAD = "Your previous attempt completed but was not accepted."
++_WRAPPER_TAIL = "Address this, then call `complete_step` again."
++
++
++def test_script_feedback_frames_command_and_output() -> None:
++    out = format_script_feedback("./scripts/test.sh", 1, "PASS a\n", "FAIL b\n")
++    assert out.startswith(_WRAPPER_HEAD)
++    assert out.endswith(_WRAPPER_TAIL)
++    assert "`./scripts/test.sh` failed (exit 1)" in out
++    assert "PASS a" in out
++    assert "FAIL b" in out
++
++
++def test_script_feedback_truncates_head_and_tail() -> None:
++    body = "\n".join(f"line {i}" for i in range(2000))  # well over 4000 chars
++    out = format_script_feedback("cmd", 1, body, "")
++    assert len(out) < len(body)
++    assert "line 0" in out          # head preserved
++    assert "line 1999" in out       # tail preserved
++    assert "truncated" in out       # marker present
++
++
++def test_script_feedback_coerces_bytes() -> None:
++    out = format_script_feedback("cmd", 2, b"\xff\xferaw", b"")
++    assert "raw" in out             # undecodable bytes replaced, not crashed
++
++
++def test_agent_feedback_names_reviewer_and_renders_fields() -> None:
++    out = format_agent_feedback(
++        "spec-reviewer", {"status": "Reject", "reason": "missing tests"})
++    assert "spec-reviewer" in out
++    assert "status: Reject" in out
++    assert "reason: missing tests" in out
++    assert out.startswith(_WRAPPER_HEAD)
++
++
++def test_human_feedback_quotes_label() -> None:
++    out = format_human_feedback("Send back for rework")
++    assert "'Send back for rework'" in out
++    assert out.startswith(_WRAPPER_HEAD)

@@ -1,0 +1,348 @@
+diff --git a/src/imp/agents/runner.py b/src/imp/agents/runner.py
+index ec3c463..1036704 100644
+--- a/src/imp/agents/runner.py
++++ b/src/imp/agents/runner.py
+@@ -135,6 +135,15 @@ class AgentInvocation:
+     # cheapest->strongest). Copied onto ToolContext by the provider; surfaced to
+     # the model as the `task` tool's optional `model_tier` enum. () = feature off.
+     model_tiers: tuple[str, ...] = ()
++    # Nesting bound's threading path: dispatch_task sets the child's depth to
++    # parent + 1 and refuses past MAX_SUBAGENT_DEPTH. A field WITHOUT this
++    # threading would read 0 forever and never trip. Each provider copies it
++    # onto the child ToolContext (alongside resolved_roles).
++    subagent_depth: int = 0
++    # The run's InterruptCoordinator. Copied onto ToolContext so dispatch_task
++    # can drive a subagent with pause detection + interrupt attachment. Any to
++    # avoid importing cli.signals here. None for legacy/test construction.
++    coordinator: Any = None
+ 
+ 
+ Event = dict[str, Any]                     # {"type": str, "payload": dict}
+diff --git a/src/imp/agents/tools/context.py b/src/imp/agents/tools/context.py
+index 553087b..a44850b 100644
+--- a/src/imp/agents/tools/context.py
++++ b/src/imp/agents/tools/context.py
+@@ -51,6 +51,14 @@ class ToolContext:
+     # The run's effective model-tier menu; copied from invocation.model_tiers by
+     # the provider. dispatch_task reads it only to name valid tiers on error.
+     model_tiers: tuple[str, ...] = ()
++    # Depth of THIS invocation in the subagent tree (0 = top-level step).
++    # Each provider copies it from invocation.subagent_depth; dispatch_task
++    # reads it to compute the child's depth and enforce MAX_SUBAGENT_DEPTH.
++    subagent_depth: int = 0
++    # The run's InterruptCoordinator, copied from invocation.coordinator by the
++    # provider. dispatch_task passes it to drive_invocation so a subagent gets
++    # pause detection + interrupt attachment. None for legacy/test contexts.
++    coordinator: Any = None
+     # invocation_id counter for disambiguating same-named subagent invocations
+     _subagent_counter: int = 0
+ 
+diff --git a/src/imp/cli/signals.py b/src/imp/cli/signals.py
+index 2dee538..0b908c9 100644
+--- a/src/imp/cli/signals.py
++++ b/src/imp/cli/signals.py
+@@ -17,6 +17,7 @@ from __future__ import annotations
+ import contextlib
+ import os
+ import signal
++from collections.abc import Iterator
+ from typing import Any
+ 
+ from imp.engine.change import Change
+@@ -77,6 +78,20 @@ class InterruptCoordinator:
+     def detach_runner(self) -> None:
+         self._runner_interrupt = None
+ 
++    @contextlib.contextmanager
++    def runner_attached(self, interrupt_fn: Any) -> Iterator[None]:
++        """Attach `interrupt_fn` for the duration of a single drive, then
++        RESTORE the previous attachment (not clear it). Nesting-safe: a nested
++        subagent drive saves the parent's interrupt and reinstates it on exit,
++        so ESC stays clean for the parent after a subagent returns, and ESC
++        mid-subagent cancels the subagent runner."""
++        prev = self._runner_interrupt
++        self._runner_interrupt = interrupt_fn
++        try:
++            yield
++        finally:
++            self._runner_interrupt = prev
++
+     @property
+     def should_pause(self) -> bool:
+         return self._should_pause
+diff --git a/src/imp/engine/agent_run.py b/src/imp/engine/agent_run.py
+index 935f551..ac97f33 100644
+--- a/src/imp/engine/agent_run.py
++++ b/src/imp/engine/agent_run.py
+@@ -20,9 +20,15 @@ import it.
+ 
+ from __future__ import annotations
+ 
++from collections.abc import Awaitable, Callable
+ from dataclasses import dataclass
++from pathlib import Path
+ from typing import Any
+ 
++from imp.agents.runner import AgentInvocation, ChangeContext, Message
++from imp.engine.completion import build_continuation_fn, completion_instruction
++from imp.engine.types import AgentDef
++
+ 
+ @dataclass(frozen=True)
+ class ErrorInfo:
+@@ -53,3 +59,76 @@ class SubagentSuspended(Exception):
+     run-loop (transcript left ending at the dangling `task` tool_use) ->
+     parent drive_invocation -> executor, which persists status="paused".
+     Resume re-enters the step fresh and re-dispatches the subagent subtree."""
++
++
++def build_agent_invocation(
++    *,
++    agent_def: AgentDef,
++    provider_name: str,
++    model_name: str,
++    rendered_system_prompt: str,
++    initial_messages: tuple[Message, ...],
++    change_context: ChangeContext,
++    interactive: bool,
++    user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
++    transcript_dir: Path,
++    fs_permissions: Any,
++    events_path: Path,
++    subagent_defs: dict[str, AgentDef],
++    model_tiers: tuple[str, ...],
++    max_tool_calls: int | None,
++    agent_id: str,
++    event_log: Any,
++    change_state: Any,
++    first_event_parent_id: str | None,
++    resolved_roles: dict[str, Any] | None,
++    coordinator: Any,
++    subagent_depth: int = 0,
++    retry_feedback: str | None = None,
++    balance_on_resume: bool = False,
++    log: Any = None,
++) -> AgentInvocation:
++    """Construct one AgentInvocation, owning the completion-contract invariant
++    that drifted between the two creation paths: append
++    `completion_instruction(schema)` to the system prompt AND build the
++    continuation_fn (interactive wrap vs. nudge) from that SAME instruction.
++
++    The caller renders the prompt with its own PromptContext and resolves its
++    own (provider, model) — the builder never branches on agent kind. `model`
++    is a value, not a policy, here.
++    """
++    instruction = completion_instruction(agent_def.output_schema)
++    system_prompt = f"{rendered_system_prompt}\n\n{instruction}"
++    continuation_fn = build_continuation_fn(
++        interactive=interactive,
++        user_chat_input_fn=user_chat_input_fn,
++        instruction=instruction,
++        log=log,
++        agent_id=agent_id,
++    )
++    return AgentInvocation(
++        agent_def=agent_def,
++        provider_name=provider_name,
++        model_name=model_name,
++        system_prompt=system_prompt,
++        initial_messages=initial_messages,
++        change_context=change_context,
++        interactive=interactive,
++        transcript_dir=transcript_dir,
++        fs_permissions=fs_permissions,
++        events_path=events_path,
++        subagent_defs=subagent_defs,
++        max_tool_calls=max_tool_calls,
++        user_input_fn=user_chat_input_fn if interactive else None,
++        continuation_fn=continuation_fn,
++        agent_id=agent_id,
++        event_log=event_log,
++        change_state=change_state,
++        first_event_parent_id=first_event_parent_id,
++        retry_feedback=retry_feedback,
++        balance_on_resume=balance_on_resume,
++        resolved_roles=resolved_roles,
++        model_tiers=model_tiers,
++        subagent_depth=subagent_depth,
++        coordinator=coordinator,
++    )
+diff --git a/tests/test_agent_run.py b/tests/test_agent_run.py
+index b61e30a..83495e3 100644
+--- a/tests/test_agent_run.py
++++ b/tests/test_agent_run.py
+@@ -1,5 +1,28 @@
+ from __future__ import annotations
+ 
++from pathlib import Path
++
++from imp.agents.runner import ChangeContext
++from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
++
++
++def _agent(name: str = "rev", max_tool_calls=None, subagents=()) -> AgentDef:
++    return AgentDef(
++        name=name, description="", tools=frozenset({"complete_step"}),
++        subagents=tuple(subagents),
++        output_schema=OutputSchema(
++            fields=(OutputField(name="status", type="enum",
++                                values=("Success", "Error"), required=True),),
++            source=SourceLoc(file=Path("a.md"), line=1)),
++        prompt_template_source="body", source_path=Path("a.md"),
++        source=SourceLoc(file=Path("a.md"), line=1),
++        max_tool_calls=max_tool_calls)
++
++
++def _cc(tmp: Path) -> ChangeContext:
++    return ChangeContext(slug="s", title="t", project_root=tmp,
++                         workflow_dir=tmp / "wf")
++
+ 
+ def test_error_info_and_agent_run_result_live_in_agent_run() -> None:
+     from imp.engine.agent_run import AgentRunResult, ErrorInfo, SubagentSuspended
+@@ -25,3 +48,50 @@ def test_executor_reexports_agent_run_result() -> None:
+     # from executor (verified by grep), so there is no re-export to preserve.
+     from imp.engine.executor import AgentRunResult
+     assert AgentRunResult.__module__ == "imp.engine.agent_run"
++
++
++def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -> None:
++    from imp.engine.agent_run import build_agent_invocation
++
++    inv = build_agent_invocation(
++        agent_def=_agent(), provider_name="anthropic", model_name="m",
++        rendered_system_prompt="RENDERED BODY",
++        initial_messages=(), change_context=_cc(tmp_path),
++        interactive=False, user_chat_input_fn=None,
++        transcript_dir=tmp_path / "td", fs_permissions=(),
++        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
++        max_tool_calls=7, agent_id="sub:abc", event_log=None,
++        change_state=None, first_event_parent_id="tc-1",
++        resolved_roles=None, coordinator=None, subagent_depth=2)
++
++    # System prompt = rendered body + the complete_step contract.
++    assert inv.system_prompt.startswith("RENDERED BODY")
++    assert "complete_step" in inv.system_prompt
++    # Non-interactive -> a nudge continuation is wired (omission #1/#2 closed).
++    assert inv.continuation_fn is not None
++    # Ceiling resolved (omission #3 closed).
++    assert inv.max_tool_calls == 7
++    # Threaded fields land on the invocation.
++    assert inv.subagent_depth == 2
++    assert inv.agent_id == "sub:abc"
++    assert inv.first_event_parent_id == "tc-1"
++    assert inv.user_input_fn is None  # non-interactive
++
++
++def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) -> None:
++    from imp.engine.agent_run import build_agent_invocation
++
++    inv = build_agent_invocation(
++        agent_def=_agent(), provider_name="anthropic", model_name="m",
++        rendered_system_prompt="BODY", initial_messages=(),
++        change_context=_cc(tmp_path), interactive=True,
++        user_chat_input_fn=lambda _p: "hi",
++        transcript_dir=tmp_path / "td", fs_permissions=(),
++        events_path=tmp_path / "e.jsonl", subagent_defs={}, model_tiers=(),
++        max_tool_calls=None, agent_id="step:p/s", event_log=None,
++        change_state=None, first_event_parent_id=None,
++        resolved_roles=None, coordinator=None)
++
++    assert inv.interactive is True
++    assert inv.continuation_fn is not None
++    assert inv.user_input_fn is not None  # interactive -> PROMPT_USER resume wired
+diff --git a/tests/test_interrupt_coordinator.py b/tests/test_interrupt_coordinator.py
+new file mode 100644
+index 0000000..233c988
+--- /dev/null
++++ b/tests/test_interrupt_coordinator.py
+@@ -0,0 +1,44 @@
++from __future__ import annotations
++
++from imp.cli.signals import InterruptCoordinator
++
++
++def test_runner_attached_saves_and_restores_previous() -> None:
++    coord = InterruptCoordinator()
++
++    async def parent_interrupt() -> None: ...
++    async def child_interrupt() -> None: ...
++
++    coord.attach_runner(parent_interrupt)
++    assert coord._runner_interrupt is parent_interrupt
++
++    with coord.runner_attached(child_interrupt):
++        assert coord._runner_interrupt is child_interrupt
++
++    # Restored, NOT cleared to None.
++    assert coord._runner_interrupt is parent_interrupt
++
++
++def test_runner_attached_restores_on_exception() -> None:
++    coord = InterruptCoordinator()
++
++    async def parent_interrupt() -> None: ...
++    async def child_interrupt() -> None: ...
++
++    coord.attach_runner(parent_interrupt)
++    try:
++        with coord.runner_attached(child_interrupt):
++            raise RuntimeError("boom")
++    except RuntimeError:
++        pass
++    assert coord._runner_interrupt is parent_interrupt
++
++
++def test_runner_attached_from_empty_restores_none() -> None:
++    coord = InterruptCoordinator()
++
++    async def child_interrupt() -> None: ...
++
++    with coord.runner_attached(child_interrupt):
++        assert coord._runner_interrupt is child_interrupt
++    assert coord._runner_interrupt is None
+diff --git a/tests/test_subagent_depth_field.py b/tests/test_subagent_depth_field.py
+new file mode 100644
+index 0000000..951877f
+--- /dev/null
++++ b/tests/test_subagent_depth_field.py
+@@ -0,0 +1,39 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++from imp.agents.runner import AgentInvocation, ChangeContext
++from imp.agents.tools.context import ToolContext
++from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
++
++
++def _agent() -> AgentDef:
++    return AgentDef(
++        name="a", description="", tools=frozenset({"complete_step"}),
++        subagents=(),
++        output_schema=OutputSchema(
++            fields=(OutputField(name="status", type="enum",
++                                values=("Success", "Error"), required=True),),
++            source=SourceLoc(file=Path("a.md"), line=1)),
++        prompt_template_source="hi", source_path=Path("a.md"),
++        source=SourceLoc(file=Path("a.md"), line=1))
++
++
++def test_invocation_subagent_depth_and_coordinator_default() -> None:
++    inv = AgentInvocation(
++        agent_def=_agent(), provider_name="p", model_name="m",
++        system_prompt="s", initial_messages=(),
++        change_context=ChangeContext(slug="x", title="t",
++                                     project_root=Path("/tmp"),
++                                     workflow_dir=Path("/tmp/wf")),
++        interactive=False, transcript_dir=Path("/tmp/td"),
++        fs_permissions=(), events_path=Path("/tmp/e.jsonl"))
++    assert inv.subagent_depth == 0
++    assert inv.coordinator is None
++
++
++def test_toolcontext_subagent_depth_and_coordinator_default() -> None:
++    ctx = ToolContext(project_root=Path("/tmp"), fs_permissions=(),
++                      events_path=Path("/tmp/e.jsonl"))
++    assert ctx.subagent_depth == 0
++    assert ctx.coordinator is None

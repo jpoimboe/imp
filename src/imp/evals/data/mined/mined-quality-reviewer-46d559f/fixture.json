@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-46d559f",
+  "source": "mined",
+  "base_sha": "fa41e25",
+  "head_sha": "46d559f",
+  "task_context": "Code quality review of one commit in a git worktree.\n## Working directory\n/home/jpoimboe/imp/.claude/worktrees/codex-default-workflow (branch worktree-codex-default-workflow). Run from there.\n## What to review\n- DESCRIPTION: A debugging fix. New module `src/imp/providers/codex_stream_limit.py` that proxies the codex SDK exec module's `asyncio` reference to inject a 64 MiB `limit` into `create_subprocess_exec` (the SDK omits it, so asyncio's 64 KiB default made readline() raise ValueError on a codex JSONL line >64 KiB and paused the workflow). Idempotent installer wired into codex_runner `_build_client`'s real-SDK branch. Plus tests reproducing the bug and proving the fix.\n- PLAN_OR_REQUIREMENTS: a systematic-debugging fix for the codex 64 KiB stdout-line limit (no formal plan task)\n## Focus\n- **Monkeypatch safety/clarity:** Proxying a third-party module's `asyncio` reference is inherently a bit unusual. Is it done as safely and legibly as possible? Is the `__getattr__`/`_real` bootstrap recursion-safe (could accessing `self._real` inside `__getattr__` ever recurse infinitely)? Is the module docstring clear about WHY this patch exists so a future maintainer understands it?\n- **Idempotency & leak:** isinstance guard correct? Is there any risk the patch double-wraps (proxy-over-proxy) across repeated installs in a long-lived process? Does the installer mutate global third-party module state in a way that could surprise (e.g. affecting concurrent non-codex asyncio subprocess usage)? The proxy only overrides create_subprocess_exec for the SDK's exec module specifically \u2014 confirm the blast radius is just that module, not global asyncio.\n- **Limit value:** 64 MiB \u2014 reasonable bounded ceiling? Any DoS/memory concern vs. the 64 KiB it replaces (a pathological no-newline stream could now buffer up to 64 MiB)? Is that an acceptable tradeoff and is it commented?\n- **Wiring:** is calling `install_codex_stream_limit()` inside `_build_client` (potentially once per run) fine given it's idempotent? Any thread-safety concern (asyncio single-threaded \u2014 likely fine)?\n- **Test quality:** does the behavioral test genuinely reproduce the exact failure mode (readline ValueError on >64 KiB line) and prove the fix value is sufficient? Is the temp-file approach (vs inline arg) sound? Are tests isolated (no global patch leak)?\n- **Naming, docstrings, dead code** introduced by THIS change.\n- Run `make typecheck` to confirm clean. Note: pre-existing lint errors in docs/superpowers/spikes/ are NOT this commit's concern.\n## Report\n- **Strengths**\n- **Issues** Critical / Important / Minor (file:line)\n- **Assessment:** APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "tests/test_codex_stream_limit.py:110",
+      "symbol": "test_install_is_idempotent_and_forwards",
+      "description": "The test asserts `codex_exec.asyncio.create_subprocess_exec is not None` but should verify the proxy's `create_subprocess_exec` is callable as a coroutine using `asyncio.iscoroutinefunction`.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_codex_stream_limit.py:42",
+      "symbol": "",
+      "description": "Temp file creation with `delete=False` is not wrapped in try/finally, so cleanup in the finally block is never reached if `tempfile.NamedTemporaryFile` raises an exception.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "codex_stream_limit.py:0",
+      "symbol": "CODEX_STREAM_LIMIT",
+      "description": "The constant's comment does not mention the DoS tradeoff that a pathological stream with no newlines will buffer up to 64 MiB per readline() call before raising.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

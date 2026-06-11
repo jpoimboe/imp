@@ -1,0 +1,256 @@
+diff --git a/src/imp/engine/agent_run.py b/src/imp/engine/agent_run.py
+index ac97f33..6901bf6 100644
+--- a/src/imp/engine/agent_run.py
++++ b/src/imp/engine/agent_run.py
+@@ -20,6 +20,7 @@ import it.
+ 
+ from __future__ import annotations
+ 
++import contextlib
+ from collections.abc import Awaitable, Callable
+ from dataclasses import dataclass
+ from pathlib import Path
+@@ -132,3 +133,91 @@ def build_agent_invocation(
+         subagent_depth=subagent_depth,
+         coordinator=coordinator,
+     )
++
++
++async def drive_invocation(
++    invocation: AgentInvocation,
++    runner: Any,
++    *,
++    coordinator: Any,
++    log: Any,
++    emit_events: bool,
++    prior_backoff_attempts: int = 0,
++) -> AgentRunResult:
++    """Drive one invocation to a single terminal outcome.
++
++    Consumes runner.run(), routes each error event through error_policy.decide
++    (Pause -> fatal; RetryWithBackoff -> delay; RetryNow -> errored), captures
++    agent_output, and detects a coordinator-requested pause. A SubagentSuspended
++    raised by a nested subagent propagates up through runner.run() and is
++    caught here as a pause (so the executor persists status="paused").
++
++    The caller owns the backoff loop: on a non-None `delay`, sleep and re-drive
++    with `prior_backoff_attempts + 1` (a FRESH runner — runners are single-use).
++
++    emit_events: when True (the executor), each drained event is appended to
++    `log` with agent_id=invocation.agent_id and synthesized validation errors
++    with agent_id=None — exactly today's behavior. False (subagents) keeps the
++    subagent's terminal events out of the parent's stream, preserving today's
++    dispatch behavior; the runner still writes its own audit events to its log.
++
++    coordinator may be None (legacy/test): interrupt attachment is skipped and
++    no pause is detected.
++    """
++    # LAZY imports (see module docstring): importing error_policy at module top
++    # would pull in providers/__init__ -> anthropic -> agents.subagents and crash
++    # a cold `import imp.agents.subagents`. drive_invocation is never called at
++    # import time.
++    from imp.engine import error_policy
++    from imp.engine.schema import validate_agent_output
++
++    agent_output: dict[str, Any] | None = None
++    attach = (coordinator.runner_attached(runner.interrupt)
++              if coordinator is not None else contextlib.nullcontext())
++    try:
++        with attach:
++            async for event in runner.run(invocation):
++                if emit_events and log is not None:
++                    log.append(agent_id=invocation.agent_id,
++                               type=event["type"], payload=event.get("payload", {}))
++                if event["type"] == "agent_output":
++                    agent_output = event["payload"]
++                if event["type"] == "error":
++                    payload = event.get("payload") or {}
++                    category = payload.get("category", "unknown")
++                    kind = payload.get("kind")
++                    retry_after = (payload.get("detail") or {}).get("retry_after_seconds")
++                    decision = error_policy.decide(
++                        category, prior_backoff_attempts=prior_backoff_attempts,
++                        hint_delay_seconds=retry_after)
++                    if isinstance(decision, error_policy.Pause):
++                        return AgentRunResult(None, True, False, True, None,
++                                              ErrorInfo(category, kind))
++                    if isinstance(decision, error_policy.RetryWithBackoff):
++                        return AgentRunResult(None, True, False, False,
++                                              decision.delay_seconds,
++                                              ErrorInfo(category, kind))
++                    # RetryNow (agent_output_missing today)
++                    return AgentRunResult(None, True, False, False, None,
++                                          ErrorInfo(category, kind))
++                if coordinator is not None and coordinator.should_pause:
++                    return AgentRunResult(None, False, True, False, None)
++    except SubagentSuspended:
++        # A nested subagent paused; unwind this drive as paused too.
++        return AgentRunResult(None, False, True, False, None)
++
++    if agent_output is None:
++        return AgentRunResult(None, True, False, False, None)
++
++    try:
++        validate_agent_output(agent_output, invocation.agent_def.output_schema)
++    except Exception as e:
++        if emit_events and log is not None:
++            log.append(agent_id=None, type="error", payload={
++                "category": "agent_output_missing",
++                "kind": "output_validation",
++                "message": f"output validation: {e}"})
++        return AgentRunResult(None, True, False, False, None,
++                              ErrorInfo("agent_output_missing", "output_validation"))
++
++    return AgentRunResult(agent_output, False, False, False, None)
+diff --git a/tests/test_agent_run.py b/tests/test_agent_run.py
+index 83495e3..2e5ddac 100644
+--- a/tests/test_agent_run.py
++++ b/tests/test_agent_run.py
+@@ -2,10 +2,18 @@ from __future__ import annotations
+ 
+ from pathlib import Path
+ 
++import pytest
++
+ from imp.agents.runner import ChangeContext
++from imp.cli.signals import InterruptCoordinator
+ from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+ 
+ 
++@pytest.fixture
++def anyio_backend():
++    return "asyncio"
++
++
+ def _agent(name: str = "rev", max_tool_calls=None, subagents=()) -> AgentDef:
+     return AgentDef(
+         name=name, description="", tools=frozenset({"complete_step"}),
+@@ -95,3 +103,100 @@ def test_build_agent_invocation_interactive_wires_user_input(tmp_path: Path) ->
+     assert inv.interactive is True
+     assert inv.continuation_fn is not None
+     assert inv.user_input_fn is not None  # interactive -> PROMPT_USER resume wired
++
++
++def _inv(tmp_path: Path):
++    from imp.engine.agent_run import build_agent_invocation
++    return build_agent_invocation(
++        agent_def=_agent(), provider_name="p", model_name="m",
++        rendered_system_prompt="B", initial_messages=(),
++        change_context=_cc(tmp_path), interactive=False,
++        user_chat_input_fn=None, transcript_dir=tmp_path / "td",
++        fs_permissions=(), events_path=tmp_path / "e.jsonl",
++        subagent_defs={}, model_tiers=(), max_tool_calls=None,
++        agent_id="step:p/s", event_log=None, change_state=None,
++        first_event_parent_id=None, resolved_roles=None, coordinator=None)
++
++
++class _Runner:
++    def __init__(self, events, on_run=None):
++        self._events = events
++        self._on_run = on_run
++    async def run(self, invocation):
++        if self._on_run is not None:
++            self._on_run()
++        for e in self._events:
++            yield e
++    async def interrupt(self) -> None: ...
++
++
++@pytest.mark.anyio
++async def test_drive_invocation_success(tmp_path: Path) -> None:
++    from imp.engine.agent_run import drive_invocation
++
++    coord = InterruptCoordinator()
++    runner = _Runner([{"type": "agent_output", "payload": {"status": "Success"}}])
++    res = await drive_invocation(_inv(tmp_path), runner,
++                                 coordinator=coord, log=None, emit_events=False)
++    assert res.output == {"status": "Success"}
++    assert res.errored is False and res.paused is False and res.fatal is False
++
++
++@pytest.mark.anyio
++async def test_drive_invocation_fatal_error(tmp_path: Path) -> None:
++    from imp.engine.agent_run import drive_invocation
++
++    coord = InterruptCoordinator()
++    runner = _Runner([{"type": "error", "payload": {
++        "category": "auth", "kind": "AuthError", "message": "401"}}])
++    res = await drive_invocation(_inv(tmp_path), runner,
++                                 coordinator=coord, log=None, emit_events=False)
++    assert res.fatal is True
++    assert res.error is not None and res.error.category == "auth"
++
++
++@pytest.mark.anyio
++async def test_drive_invocation_backoff_on_rate_limit(tmp_path: Path) -> None:
++    from imp.engine.agent_run import drive_invocation
++
++    coord = InterruptCoordinator()
++    runner = _Runner([{"type": "error", "payload": {
++        "category": "rate_limit", "kind": "429", "message": "slow down"}}])
++    res = await drive_invocation(_inv(tmp_path), runner,
++                                 coordinator=coord, log=None, emit_events=False,
++                                 prior_backoff_attempts=0)
++    assert res.delay is not None and res.delay > 0
++    assert res.error is not None and res.error.category == "rate_limit"
++
++
++@pytest.mark.anyio
++async def test_drive_invocation_coordinator_pause(tmp_path: Path) -> None:
++    from imp.engine.agent_run import drive_invocation
++
++    coord = InterruptCoordinator()
++
++    def _trip():
++        coord._should_pause = True
++
++    # A benign event lets the loop body run once; should_pause is checked there.
++    runner = _Runner([{"type": "thinking", "payload": {}}], on_run=_trip)
++    res = await drive_invocation(_inv(tmp_path), runner,
++                                 coordinator=coord, log=None, emit_events=False)
++    assert res.paused is True
++
++
++@pytest.mark.anyio
++async def test_drive_invocation_catches_subagent_suspended(tmp_path: Path) -> None:
++    from imp.engine.agent_run import SubagentSuspended, drive_invocation
++
++    coord = InterruptCoordinator()
++
++    class _SuspendingRunner:
++        async def run(self, invocation):
++            raise SubagentSuspended("nested pause")
++            yield  # pragma: no cover (makes this an async generator)
++        async def interrupt(self) -> None: ...
++
++    res = await drive_invocation(_inv(tmp_path), _SuspendingRunner(),
++                                 coordinator=coord, log=None, emit_events=False)
++    assert res.paused is True
+diff --git a/tests/test_no_import_cycle.py b/tests/test_no_import_cycle.py
+new file mode 100644
+index 0000000..316cdc5
+--- /dev/null
++++ b/tests/test_no_import_cycle.py
+@@ -0,0 +1,22 @@
++from __future__ import annotations
++
++import subprocess
++import sys
++
++import pytest
++
++
++@pytest.mark.parametrize("module", [
++    "imp.engine.agent_run",
++    "imp.agents.subagents",
++])
++def test_module_imports_cold(module: str) -> None:
++    """A clean interpreter must import these without a circular-import crash.
++    Guards the lazy-import of error_policy/schema in drive_invocation: a
++    top-level import there would loop agent_run -> error_policy ->
++    providers/__init__ -> anthropic -> agents.subagents (partial)."""
++    proc = subprocess.run(
++        [sys.executable, "-c", f"import {module}"],
++        capture_output=True, text=True)
++    assert proc.returncode == 0, (
++        f"cold `import {module}` failed:\n{proc.stderr}")

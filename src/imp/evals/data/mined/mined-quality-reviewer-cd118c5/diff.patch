@@ -1,0 +1,354 @@
+diff --git a/src/imp/providers/openai.py b/src/imp/providers/openai.py
+index 8052a69..1934452 100644
+--- a/src/imp/providers/openai.py
++++ b/src/imp/providers/openai.py
+@@ -15,24 +15,28 @@ Translation surface:
+ from __future__ import annotations
+ 
+ import json
++import os
++from collections.abc import AsyncGenerator, AsyncIterator
+ from typing import Any
+ 
++from imp.agents.classify import ResumeState, classify_resume, count_tool_uses
+ from imp.agents.runner import (
+     AgentInvocation,
++    AgentRunner,
++    Event,
+     Message,
+     TextBlock,
+     ToolResultBlock,
+     ToolUseBlock,
+ )
+-from imp.agents.subagents import make_task_tool
++from imp.agents.subagents import dispatch_task, make_task_tool
+ from imp.agents.tools import Tool, get_registry
+-from imp.agents.tools.complete_step import make_complete_step_tool
++from imp.agents.tools.complete_step import StepComplete, make_complete_step_tool
++from imp.agents.tools.context import ToolContext
++from imp.agents.transcript import Transcript
++from imp.engine.schema import validate_agent_output
+ from imp.providers._openai_schema import to_openai_strict
+-
+-# Runner-side imports (AsyncGenerator, AsyncIterator, os, ResumeState,
+-# classify_resume, count_tool_uses, dispatch_task, StepComplete, ToolContext,
+-# Transcript, validate_agent_output, Provider, Event, AgentRunner) are added
+-# in Task 9 (runner class) and Task 15 (Provider registration).
++from imp.providers.base import Provider
+ 
+ 
+ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
+@@ -193,4 +197,224 @@ def _serialize(msg: Message) -> dict[str, Any]:
+     }
+ 
+ 
+-# The runner class is added in Task 9. Provider class added in Task 15.
++class OpenAIAgentRunner:
++    """Mirrors AnthropicAgentRunner.run; differences live in the translation
++    helpers above and in the API call below."""
++
++    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
++        self.model = model_name                     # public per Provider protocol
++        self._client_factory = client_factory
++        self._client: Any = None
++        self._cancel = False
++
++    def _get_client(self) -> Any:
++        if self._client is None:
++            if self._client_factory is not None:
++                self._client = self._client_factory()
++            else:
++                import openai
++                self._client = openai.AsyncOpenAI()
++        return self._client
++
++    def _make_spawn_subagent(self) -> Any:
++        """Same pattern as anthropic._make_spawn_subagent: spawn a same-class
++        child for the task tool. Provider constraint per spec §6.13: subagent
++        runs on the same provider as parent."""
++        client_factory = self._client_factory
++
++        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
++            child = OpenAIAgentRunner(
++                model_name=sub_invocation.model_name,
++                client_factory=client_factory,
++            )
++            return child.run(sub_invocation)
++
++        return _spawn
++
++    async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
++        transcript = Transcript(invocation.transcript_dir / "transcript.jsonl")
++        tools = _build_tools(invocation)
++        ctx = ToolContext(
++            project_root=invocation.change_context.project_root,
++            artifacts_dir=invocation.change_context.artifacts_dir,
++            fs_permissions=invocation.fs_permissions,
++            events_path=invocation.events_path,
++            subagent_defs=invocation.subagent_defs,
++            provider_name=invocation.provider_name,
++            model_name=invocation.model_name,
++            parent_transcript_dir=invocation.transcript_dir,
++            interactive=invocation.interactive,
++        )
++        ctx.change_context = invocation.change_context
++        ctx.spawn_subagent = self._make_spawn_subagent()
++
++        existing = transcript.load()
++        if existing:
++            messages = existing
++            tool_calls_used = count_tool_uses(messages)
++            state = classify_resume(messages, interactive=invocation.interactive)
++            if state is ResumeState.DANGLING_TOOL_USE:
++                yield {"type": "error", "payload": {
++                    "kind": "transcript_invalid",
++                    "message": "transcript ended with dangling tool_use",
++                }}
++                return
++            if state is ResumeState.MISSING_COMPLETE_STEP:
++                yield {"type": "error", "payload": {
++                    "kind": "missing_complete_step",
++                    "message": "autonomous agent transcript ended without complete_step",
++                }}
++                return
++            # TODO(plan-3): same PROMPT_USER limitation as the Anthropic runner;
++            # see providers/anthropic.py:192-197. Plan 3's cli/signals.py work
++            # finalizes the interactive-resume path.
++        else:
++            messages = []
++            for m in invocation.initial_messages:
++                messages.append(m)
++                transcript.append(m)
++            tool_calls_used = 0
++
++        ceiling = invocation.max_tool_calls or 50
++        openai_tools = [_openai_tool_schema(t) for t in tools.values()]
++        # OpenAI takes the system prompt as the first message rather than a
++        # separate parameter. Build the prefix once; reuse on each call.
++        system_message: dict[str, Any] = {"role": "system", "content": invocation.system_prompt}
++
++        while not self._cancel:
++            client = self._get_client()
++            response = await client.chat.completions.create(
++                model=self.model,
++                messages=[system_message, *_imp_to_openai_messages(messages)],
++                tools=openai_tools,
++            )
++
++            choice = response.choices[0]
++            assistant_msg, block_warnings = _openai_message_to_imp(choice.message)
++            for w in block_warnings:
++                yield {"type": "runner_warning", "payload": {"message": w}}
++            messages.append(assistant_msg)
++            transcript.append(assistant_msg)
++            yield {"type": "agent_message", "payload": _serialize(assistant_msg)}
++
++            tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
++            if not tool_uses:
++                if invocation.interactive and ctx.user_input_fn is not None:
++                    user_text = ctx.user_input_fn("")
++                    user_msg = Message(role="user", content=(TextBlock(text=user_text),))
++                    messages.append(user_msg)
++                    transcript.append(user_msg)
++                    yield {"type": "user_input", "payload": {"text": user_text}}
++                    continue
++                yield {"type": "error", "payload": {
++                    "kind": "no_complete_step",
++                    "message": "agent finished without calling complete_step",
++                }}
++                return
++
++            tool_results: list[ToolResultBlock] = []
++            ceiling_tripped = False
++            for tu in tool_uses:
++                if tool_calls_used >= ceiling:
++                    err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
++                    tool_results.append(ToolResultBlock(tu.id, err_text, is_error=True))
++                    yield {"type": "tool_result", "payload": {
++                        "id": tu.id, "content": err_text, "error": True,
++                    }}
++                    ceiling_tripped = True
++                    continue
++                tool_calls_used += 1
++
++                yield {"type": "tool_call", "payload": {
++                    "id": tu.id, "name": tu.name, "input": tu.input,
++                }}
++
++                if tu.name == "task":
++                    try:
++                        result_str = await dispatch_task(
++                            ctx, tu.input["subagent_name"], tu.input["task_description"],
++                        )
++                    except Exception as e:
++                        text = f"{type(e).__name__}: {e}"
++                        tool_results.append(ToolResultBlock(tu.id, text, is_error=True))
++                        yield {"type": "tool_result", "payload": {
++                            "id": tu.id, "content": text, "error": True,
++                        }}
++                        continue
++                    tool_results.append(ToolResultBlock(tu.id, result_str))
++                    yield {"type": "tool_result", "payload": {
++                        "id": tu.id, "content": result_str,
++                    }}
++                    continue
++
++                tool = tools.get(tu.name)
++                if tool is None:
++                    msg = f"unknown tool {tu.name!r}"
++                    tool_results.append(ToolResultBlock(tu.id, msg, is_error=True))
++                    yield {"type": "tool_result", "payload": {
++                        "id": tu.id, "content": msg, "error": True,
++                    }}
++                    continue
++                try:
++                    raw = tool.invoke(ctx, tu.input)
++                except StepComplete as sc:
++                    try:
++                        validate_agent_output(sc.args_payload, invocation.agent_def.output_schema)
++                    except Exception as ve:
++                        yield {"type": "error", "payload": {
++                            "kind": "output_validation", "message": str(ve),
++                        }}
++                        return
++                    yield {"type": "agent_output", "payload": sc.args_payload}
++                    return
++                except Exception as e:
++                    text = f"{type(e).__name__}: {e}"
++                    tool_results.append(ToolResultBlock(tu.id, text, is_error=True))
++                    yield {"type": "tool_result", "payload": {
++                        "id": tu.id, "content": text, "error": True,
++                    }}
++                    continue
++
++                content_str = raw if isinstance(raw, str) else json.dumps(raw, default=str)
++                tool_results.append(ToolResultBlock(tu.id, content_str))
++                yield {"type": "tool_result", "payload": {
++                    "id": tu.id, "content": content_str,
++                }}
++
++            user_msg = Message(role="user", content=tuple(tool_results))
++            messages.append(user_msg)
++            transcript.append(user_msg)
++
++            if ceiling_tripped:
++                yield {"type": "error", "payload": {
++                    "kind": "tool_call_ceiling_exceeded", "ceiling": ceiling,
++                }}
++                return
++
++        yield {"type": "error", "payload": {
++            "kind": "interrupted", "message": "runner cancelled by interrupt",
++        }}
++
++    async def interrupt(self) -> None:
++        self._cancel = True
++
++
++class OpenAIProvider:
++    name = "openai"
++
++    def __init__(self, model_name: str, *, client_factory: Any = None) -> None:
++        self.model = model_name                     # public per Provider protocol
++        self._client_factory = client_factory
++
++    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
++        return OpenAIAgentRunner(
++            model_name=self.model, client_factory=self._client_factory,
++        )
++
++
++def _env_check() -> bool:
++    return bool(os.environ.get("OPENAI_API_KEY"))
++
++
++def _factory(model: str) -> Provider:
++    return OpenAIProvider(model_name=model)
+diff --git a/tests/test_openai_runner.py b/tests/test_openai_runner.py
+new file mode 100644
+index 0000000..12d621c
+--- /dev/null
++++ b/tests/test_openai_runner.py
+@@ -0,0 +1,82 @@
++# tests/test_openai_runner.py
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from imp.agents.runner import (
++    AgentInvocation,
++    ChangeContext,
++    Message,
++    TextBlock,
++)
++from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
++from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
++from imp.providers.openai import OpenAIAgentRunner
++from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
++
++
++@pytest.fixture
++def anyio_backend():
++    return "asyncio"
++
++
++def _agent_def(tools=frozenset({"complete_step", "read_file"})) -> AgentDef:
++    return AgentDef(
++        name="t", description="", tools=tools, subagents=(),
++        output_schema=OutputSchema(
++            fields=(
++                OutputField(name="status", type="enum",
++                            values=("Success", "Error"), required=True),
++                OutputField(name="note", type="string", required=False),
++            ),
++            source=SourceLoc(file=Path("a.md"), line=1),
++        ),
++        prompt_template_source="hi",
++        source_path=Path("a.md"),
++        source=SourceLoc(file=Path("a.md"), line=1),
++    )
++
++
++def _inv(tmp_path: Path, tools=None) -> AgentInvocation:
++    return AgentInvocation(
++        agent_def=_agent_def(tools or frozenset({"complete_step", "read_file"})),
++        provider_name="openai", model_name="gpt-4o-mini",
++        system_prompt="be terse",
++        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
++        change_context=ChangeContext(
++            change_id=1, project_root=tmp_path, artifacts_dir=tmp_path / "art",
++        ),
++        interactive=False, transcript_dir=tmp_path / "step",
++        fs_permissions=(FsRule(
++            operations=("read",), paths=("/project/**",), mode="allow",
++            source=SourceLoc(file=Path("w.yaml"), line=1),
++        ),),
++        events_path=tmp_path / "events.jsonl",
++    )
++
++
++@pytest.mark.anyio
++async def test_runs_to_complete_step(tmp_path: Path) -> None:
++    (tmp_path / "art").mkdir()
++    fake = FakeAsyncOpenAI([
++        completion(message(
++            content="calling complete_step",
++            tool_calls=[tool_call("c1", "complete_step",
++                                  {"status": "Success", "note": "ok"})],
++        )),
++    ])
++
++    runner = OpenAIAgentRunner(
++        model_name="gpt-4o-mini",
++        client_factory=lambda: fake,
++    )
++    events = []
++    async for ev in runner.run(_inv(tmp_path)):
++        events.append(ev)
++
++    kinds = [e["type"] for e in events]
++    assert "agent_message" in kinds
++    assert kinds[-1] == "agent_output"
++    assert events[-1]["payload"] == {"status": "Success", "note": "ok"}

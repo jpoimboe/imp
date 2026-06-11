@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-64ed553",
+  "source": "mined",
+  "base_sha": "21b8ee0",
+  "head_sha": "64ed553",
+  "task_context": "Code quality reviewer for a small mechanical diff in `/home/jpoimboe/imp`.\n## Context\nThe diff adds a `\"category\"` key to 8 existing error-event payload dicts in `src/imp/providers/anthropic.py`. Spec compliance is already \u2705. No behavior change; this is pure metadata enrichment.\n## Diff Under Review\n## Your Checklist\nThis diff is deliberately mechanical \u2014 code quality concerns here are narrow:\n- Did the implementer accidentally remove or alter any pre-existing key (`kind`, `message`, `tool`, `ceiling`)?\n- Did indentation stay consistent with surrounding code?\n- Did anything get reordered in a way that breaks readability (e.g. `\"kind\"` should still come right before `\"message\"`, with `\"category\"` placed first to surface the policy-relevant field)?\n- Any change outside `anthropic.py`? (must be none)\n- Any new lint/typecheck regressions? Run from `/home/jpoimboe/imp`:\n  - `make lint 2>&1 | grep providers/anthropic` (should print nothing)\n  - `make typecheck 2>&1 | grep providers/anthropic` (should print nothing)\n## Report\n**Strengths:** one line.\n**Issues (Critical / Important / Minor):** as applicable.\n**Assessment:** \u2705 Approved  \u2014OR\u2014  \u26a0\ufe0f Approved with fixes  \u2014OR\u2014  \u274c Changes required\nUnder 100 words. If approved, one paragraph max.",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

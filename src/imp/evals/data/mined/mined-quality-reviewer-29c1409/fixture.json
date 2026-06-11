@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-29c1409",
+  "source": "mined",
+  "base_sha": "c318a8a",
+  "head_sha": "29c1409",
+  "task_context": "Code quality review of the combined `analysis.py` changes from Tasks 4 and 5 of an evals plan (they're tightly coupled \u2014 review them together as the module is only internally consistent after Task 5). Work from `/home/jpoimboe/imp/.claude/worktrees/eval-stage2-q1q4`.\nDESCRIPTION: Task 4 rewrote `compute_q4` to a keyword-only signature taking raw caught/total counts and surfacing them in its return dict. Task 5 rewrote the body of `run_q1_q4` to (a) call run_paired once per fixture, (b) apply per-question self-grading exclusion via `is_self_graded` (Q1 drops mined spec-task-reviewer fixtures, Q4 drops mined code-reviewer fixtures), and (c) thread raw fast/union caught/total counts into the new compute_q4.\nPLAN_OR_REQUIREMENTS: Tasks 4 + 5 from docs/superpowers/plans/2026-06-05-eval-stage2-q1q4.md\nAssess standard code quality AND specifically:\n- Does `run_q1_q4`'s rewritten body read clearly? Is the once-per-fixture-then-gate-per-question structure obvious, or could a future reader accidentally double-run run_paired?\n- Are the accumulator variables (fast_c/fast_t/union_c/union_t/q4_n_diffs) clear?\n- `compute_q4`'s return dict + the M3 NOTE comment \u2014 is the intent (point estimates, no CI, raw counts surfaced) well-documented?\n- Does it follow existing analysis.py patterns/idioms?\n- Test quality: the plumbing test uses monkeypatch + fakes for run_paired/grade. Does it verify REAL behavior (the exclusion logic, the once-per-fixture invariant, raw-count threading) rather than just exercising mocks? Is asserting via fakes appropriate here given run_paired is expensive/bills?\n- Run `make lint && make typecheck` \u2014 report results. Run `PYTHONPATH=src python -m pytest tests/evals/test_analysis.py -v`.\nPre-release, no backward-compat concerns. Calibrate scrutiny to a focused, well-specified change; don't invent issues.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Changes needed).",
+  "expected_findings": [
+    {
+      "locus": "analysis.py:0",
+      "symbol": "run_q1_q4",
+      "description": "The comment structure above the two conditional blocks could mislead readers about whether Q1-excluded fixtures still contribute to Q4.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_analysis.py:0",
+      "symbol": "test_run_q1_q4_excludes_self_graded_and_threads_raw_counts",
+      "description": "Raw-count values are only tested for key presence rather than actual values, which weakens the test's ability to detect silent count-zeroing bugs.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_analysis.py:0",
+      "symbol": "test_run_q1_q4_excludes_self_graded_and_threads_raw_counts",
+      "description": "The test does not verify Q1 pool content beyond n_diffs, such as checking that paired_by_fixture contains exactly the expected fixture IDs.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

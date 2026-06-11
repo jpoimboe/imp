@@ -1,0 +1,79 @@
+diff --git a/tests/test_no_private_reachthroughs.py b/tests/test_no_private_reachthroughs.py
+index a426f48..5abddcb 100644
+--- a/tests/test_no_private_reachthroughs.py
++++ b/tests/test_no_private_reachthroughs.py
+@@ -1,8 +1,14 @@
+-"""Grep guard: enforce the public-attribute contract from Plan 1 review #7.
++"""Grep guard: enforce the public-attribute contract for V1 Provider/Runner.
+ 
+-`Provider.model` is part of the protocol; tests/engine/runners must not reach
+-through to a private `_model` attribute. This test fails loud if any commit
+-re-introduces the pattern.
++Plan 1 review #7 added `Provider.model`. Plan 2 ships two more runners that
++share the same pattern: tests/engine/runners must never reach into the
++runner's private state (`_client`, `_client_factory`, `_model`). Failures
++here mean someone copy-pasted a fixture that monkey-patches a private
++attribute instead of using the constructor's public kwargs.
++
++The runners are: AnthropicAgentRunner, OpenAIAgentRunner, ClaudeCodeAgentRunner.
++Their public surface is the AgentRunner protocol (.run, .interrupt) plus
++.model (per Provider protocol). Anything else is private.
+ """
+ 
+ from __future__ import annotations
+@@ -10,24 +16,43 @@ from __future__ import annotations
+ import subprocess
+ from pathlib import Path
+ 
++PRIVATE_PATTERNS = (
++    r"provider\._model",
++    r"runner\._model",
++    r"\._client_factory\b",
++    r"\._client\b",
++    r"self\._model\b",
++    r"\._model\b",
++)
+ 
+-def test_no_provider_model_reachthrough() -> None:
++
++def test_no_private_reachthrough_across_providers() -> None:
+     repo_root = Path(__file__).resolve().parents[1]
+     this_file = Path(__file__).name
++    pattern = "|".join(PRIVATE_PATTERNS)
+     proc = subprocess.run(
+         ["grep", "-rn", "-E",
+          "--exclude", this_file,
+-         r"provider\._model|self\._model\b|\._model\b",
++         pattern,
+          str(repo_root / "src/imp"), str(repo_root / "tests")],
+         capture_output=True, text=True, check=False,
+     )
+-    # grep returns 1 when no matches (which is what we want).
+-    if proc.returncode == 0:
+-        offending = [
+-            line for line in proc.stdout.splitlines()
+-            if line.strip() and "_model" in line and not line.startswith("#")
+-        ]
+-        assert not offending, (
+-            "Private model attribute reach-through detected (use provider.model):\n"
+-            + "\n".join(offending)
+-        )
++    # grep returns 1 when no matches (good); 0 means we found offenders.
++    if proc.returncode != 0:
++        return  # no matches → pass
++
++    # Two legitimate sites are allowed: each runner's own __init__/_get_client
++    # where the private attrs are *defined*. Everything else fails the test.
++    allowed_substrings = (
++        "src/imp/providers/anthropic.py",
++        "src/imp/providers/openai.py",
++        "src/imp/providers/claude_code.py",
++    )
++    offending = [
++        line for line in proc.stdout.splitlines()
++        if line.strip() and not any(s in line for s in allowed_substrings)
++    ]
++    assert not offending, (
++        "Private attribute reach-through detected (use the public constructor "
++        "kwarg or provider.model instead):\n" + "\n".join(offending)
++    )

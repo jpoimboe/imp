@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-e07b844",
+  "source": "mined",
+  "base_sha": "b0542ed",
+  "head_sha": "e07b844",
+  "task_context": "You are a code quality reviewer. Work from: /home/jpoimboe/imp/.claude/worktrees/name-on-intent\nDESCRIPTION: Task 3 \u2014 pure plumbing: thread the live, mutable `Change` from the executor into `ToolContext.change` (via `AgentInvocation.change` and a new `build_agent_invocation` param), and set `ctx.change` in all four providers. No behavior change yet; `ctx.change` is consumed by a later task.\nPLAN_OR_REQUIREMENTS: Task 3 from docs/superpowers/plans/2026-06-05-name-on-intent-immutable-prompts.md\n- Consistency: are the new `change` fields/params placed and typed consistently with the adjacent `change_state` (which is the established pattern this mirrors)?\n- Are the comments accurate and useful (they distinguish `change` the live mutable Change from `change_state` the State and `change_context` the frozen snapshot)?\n- `Any` typing: the plan deliberately uses `Any` to avoid an import cycle. Is that justified, or is there a clean type available without a cycle? (Briefly check whether `Change` could be imported into context.py/runner.py without a cycle \u2014 if it clearly can't, `Any` is fine.)\n- Provider consistency: all 4 providers handled identically?\n- Any scope creep or accidental edits?\nRun `PYTHONPATH=src python -m pytest tests/test_rename_change_tool.py tests/test_executor_rename.py tests/test_agent_run.py -v` to confirm green.\nReturn:\n- Strengths\n- Issues (Critical / Important / Minor) with file:line refs\n- Assessment: APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "runner.py:115",
+      "symbol": "",
+      "description": "The comment justifying the Any annotation claims it avoids an import cycle, but no actual cycle exists in the import graph.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "context.py:38",
+      "symbol": "",
+      "description": "The comment justifying the Any annotation claims it avoids an import cycle, but no actual cycle exists in the import graph.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

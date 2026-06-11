@@ -1,0 +1,190 @@
+diff --git a/src/imp/providers/openai.py b/src/imp/providers/openai.py
+index c5e7cbb..88d4053 100644
+--- a/src/imp/providers/openai.py
++++ b/src/imp/providers/openai.py
+@@ -273,6 +273,62 @@ def _extract_responses_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+     return Diagnostics(block_warnings=tuple(warnings), thinkings=())
+ 
+ 
++def _collect_openai_url_citations(raw: dict[str, Any]) -> list[dict[str, Any]]:
++    """url_citation annotations across all message output_text parts →
++    [{url, title?}] (best-effort; only url guaranteed)."""
++    cites: list[dict[str, Any]] = []
++    seen: set[str] = set()
++    for item in raw.get("output", []) or []:
++        if item.get("type") != "message":
++            continue
++        for part in item.get("content", []) or []:
++            if part.get("type") != "output_text":
++                continue
++            for ann in part.get("annotations", []) or []:
++                if ann.get("type") != "url_citation":
++                    continue
++                url = ann.get("url")
++                if not url or url in seen:
++                    continue
++                seen.add(url)
++                c: dict[str, Any] = {"url": url}
++                if ann.get("title"):
++                    c["title"] = ann["title"]
++                cites.append(c)
++    return cites
++
++
++def _emit_openai_web_events(raw: dict[str, Any], elog: Any, aid: str) -> None:
++    """Normalized web events from Responses output. Each web_search_call →
++    a web_search tool_call.
++
++    Citation attribution caveat: url_citation annotations live on the assistant
++    output_text, not linked to a specific web_search_call id, so with >1 search
++    in a turn every search's tool_result carries the full citation list (no
++    per-search attribution is possible from this API shape). Single-search is
++    exact.
++    """
++    web_calls = [it for it in (raw.get("output") or [])
++                 if it.get("type") == "web_search_call"]
++    if not web_calls:
++        return
++    citations = _collect_openai_url_citations(raw)
++    for it in web_calls:
++        action = it.get("action") or {}
++        query = action.get("query", "")
++        call_id = it.get("id", "")
++        elog.append_tool_call(
++            agent_id=aid,
++            block=ToolUseBlock(id=call_id, name="web_search",
++                               input={"query": query}))
++        elog.append_tool_result(
++            agent_id=aid,
++            block=ToolResultBlock(call_id, "\n".join(
++                (f"{c['title']} — {c['url']}" if c.get("title") else c["url"])
++                for c in citations)),
++            citations=citations)
++
++
+ def _openai_stop_reason(raw: dict[str, Any]) -> str | None:
+     """Best-effort terminal marker for the llm_response event. Responses exposes
+     `status` at the top level; the fake omits it → None, which is fine."""
+@@ -486,6 +542,7 @@ class OpenAIAgentRunner:
+                 agent_id=aid, provider=invocation.provider_name, model=self.model,
+                 raw=raw, usage=raw.get("usage") or {},
+                 stop_reason=_openai_stop_reason(raw))
++            _emit_openai_web_events(raw, elog, aid)
+ 
+             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
+             if not tool_uses:
+diff --git a/tests/test_openai_web.py b/tests/test_openai_web.py
+new file mode 100644
+index 0000000..7646a84
+--- /dev/null
++++ b/tests/test_openai_web.py
+@@ -0,0 +1,109 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
++from imp.agents.tools import get_registry  # noqa: F401 ensures tools registered
++from imp.engine.state import InMemoryEventLog
++from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
++from imp.providers.openai import OpenAIAgentRunner, _emit_openai_web_events
++from tests.openai_fakes import (
++    FakeResponsesClient,
++    resp_function_call,
++    resp_message,
++    resp_response,
++    resp_web_search_call,
++)
++
++
++def test_emit_web_search_event_with_citations() -> None:
++    raw = resp_response(
++        resp_web_search_call("ws1", query="imp agents"),
++        resp_message("Answer.", citations=[
++            {"url": "https://a.test", "title": "A"}]),
++    ).model_dump(mode="json")
++    elog = InMemoryEventLog()
++    _emit_openai_web_events(raw, elog, "step:p/s")
++    events = list(elog.read())
++    calls = [e for e in events if e["type"] == "tool_call"]
++    results = [e for e in events if e["type"] == "tool_result"]
++    assert [c["payload"]["name"] for c in calls] == ["web_search"]
++    assert calls[0]["payload"]["input"] == {"query": "imp agents"}
++    assert results[0]["payload"]["citations"] == [
++        {"url": "https://a.test", "title": "A"}]
++
++
++def test_no_web_search_call_emits_nothing() -> None:
++    raw = resp_response(resp_message("hi")).model_dump(mode="json")
++    elog = InMemoryEventLog()
++    _emit_openai_web_events(raw, elog, "a")
++    assert [e for e in elog.read() if e["type"] in ("tool_call", "tool_result")] == []
++
++
++# ── Step 5: runner-level injection test — web_search spec reaches responses.create ──
++
++@pytest.fixture
++def anyio_backend():
++    return "asyncio"
++
++
++def _web_agent_def() -> AgentDef:
++    return AgentDef(
++        name="t", description="", tools=frozenset({"complete_step", "web_search"}),
++        subagents=(),
++        output_schema=OutputSchema(
++            fields=(
++                OutputField(name="status", type="enum",
++                            values=("Success", "Error"), required=True),
++            ),
++            source=SourceLoc(file=Path("a.md"), line=1),
++        ),
++        prompt_template_source="hi",
++        source_path=Path("a.md"),
++        source=SourceLoc(file=Path("a.md"), line=1),
++    )
++
++
++def _web_inv(tmp_path: Path, *, event_log=None) -> AgentInvocation:
++    return AgentInvocation(
++        agent_def=_web_agent_def(),
++        provider_name="openai", model_name="gpt-4o-mini",
++        system_prompt="be terse",
++        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
++        change_context=ChangeContext(
++            slug="test", title="Test", project_root=tmp_path,
++            workflow_dir=tmp_path / ".imp" / "change" / "workflow",
++        ),
++        interactive=False, transcript_dir=tmp_path / "step",
++        fs_permissions=(FsRule(
++            operations=("read",), paths=("/project/**",), mode="allow",
++            source=SourceLoc(file=Path("w.yaml"), line=1),
++        ),),
++        events_path=tmp_path / "events.jsonl",
++        agent_id="step:p/s",
++        event_log=event_log,
++    )
++
++
++@pytest.mark.anyio
++async def test_web_search_spec_injected_into_responses_create(tmp_path: Path) -> None:
++    """An agent declaring web_search must have {"type":"web_search"} in the
++    tools list passed to responses.create (Task 17 wiring; no test existed)."""
++    (tmp_path / "art").mkdir()
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
++        ),
++    ])
++    log = InMemoryEventLog()
++    runner = OpenAIAgentRunner(
++        model_name="gpt-4o-mini",
++        client_factory=lambda: fake,
++    )
++    async for _ in runner.run(_web_inv(tmp_path, event_log=log)):
++        pass
++
++    tools_arg = fake.responses.calls[0]["tools"]
++    assert {"type": "web_search"} in tools_arg

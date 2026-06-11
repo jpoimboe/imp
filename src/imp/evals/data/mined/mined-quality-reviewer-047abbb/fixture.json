@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-047abbb",
+  "source": "mined",
+  "base_sha": "5468d1c",
+  "head_sha": "047abbb",
+  "task_context": "Code quality review in repo /home/jpoimboe/imp.\nDESCRIPTION: `imp init` default config generator now uses gpt-5.2 for openai thinking, sets `code` to quick tier, and supports a per-provider `{provider: tier}` mapping for `code_review` (with a required `default`).\nPLAN_OR_REQUIREMENTS: Task 12 from docs/superpowers/plans/2026-05-30-model-role-constraints.md\nAssess:\n- The `_ROLE_TIERS` value-type widening to `str | dict[str, str]` and the resolution logic in `_build_role_map` \u2014 is it clean and readable? The implementer rewrote the plan's backslash-continuation as if/else; is the result clear?\n- Is the \"default tier required for the mapping form\" invariant enforced or at least safe? What happens if a `{provider: tier}` mapping LACKED a \"default\" and an unnamed provider was enabled \u2014 KeyError? Is that acceptable (the only such mapping today has a default), or worth a guard/comment?\n- Comment accuracy.\n- Tests meaningful?\n- Naming.\nruff + mypy clean, tests pass. Judge proportionally. Don't invent issues. Return: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Needs changes).",
+  "expected_findings": [
+    {
+      "locus": "src/imp/__init__.py:70",
+      "symbol": "",
+      "description": "The code accesses tier[\"default\"] without a guard; while the precondition is documented in the comment on lines 68-70, a missing \"default\" key in a future dict-valued role tier would raise KeyError with a confusing message during imp init.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_init.py:0",
+      "symbol": "test_init_code_and_code_review_prefer_heads",
+      "description": "The test docstring references \"the constraint handles the 2-vendor column\" which is a Task 13 concept not yet in the code; this forward-referencing prose is unclear to readers unfamiliar with the roadmap and could be clarified as \"2-provider config\" or dropped.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-7a2c6e3",
+  "source": "mined",
+  "base_sha": "e0d35d5",
+  "head_sha": "7a2c6e3",
+  "task_context": "You are a code quality reviewer. Work from: /home/jpoimboe/imp/.claude/worktrees/name-on-intent\nDESCRIPTION: Task 2 \u2014 `imp new` leaves an unnamed Change with an empty title (slug \"\"); delete the `random_title` auto-name fiction and its assets; fix empty-slug display fallbacks in render_text.py and live_driver.py.\nPLAN_OR_REQUIREMENTS: Task 2 from docs/superpowers/plans/2026-06-05-name-on-intent-immutable-prompts.md\n- Correctness: the two display fallbacks \u2014 is `#{root.slug or '?'}` correct for render_text (empty/None slug => '?')? Is the live_driver `root.slug if root.slug else root.title` sound given the early-return guard above it? Read surrounding context.\n- Did deleting naming.py leave any dangling imports anywhere (run `PYTHONPATH=src python -c \"import imp.cli.main\"` and grep)?\n- Clarity of the new comment; test quality (real behavior, not mocks).\n- Style consistency with surrounding code.\n- File responsibility; any unexpected file growth from THIS change.\n- Over-engineering / YAGNI.\nRun `PYTHONPATH=src python -m pytest tests/test_new_unnamed.py tests/test_render_text.py -v` to confirm green. Be proportionate \u2014 this is a small change.\nReturn:\n- Strengths\n- Issues (Critical / Important / Minor) with file:line refs\n- Assessment: APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/cli/live_driver.py:125",
+      "symbol": "",
+      "description": "Comment 'today there's always one [title]' is stale; should be updated to reflect that imp new without --title creates title-less changes.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_new_unnamed.py:11",
+      "symbol": "test_new_unnamed",
+      "description": "Test does not assert that ch.id matches the passed id value, leaving immutable-id/mutable-title separation undemonstrated.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/cli/render_text.py:32",
+      "symbol": "",
+      "description": "Renders with trailing spaces (#?  ) for unnamed changes when title is empty, cosmetically odd but acceptable per plan.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

@@ -1,0 +1,90 @@
+diff --git a/src/imp/engine/state.py b/src/imp/engine/state.py
+index eaf46a5..a17f07a 100644
+--- a/src/imp/engine/state.py
++++ b/src/imp/engine/state.py
+@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+ 
+ if TYPE_CHECKING:
+     from imp.agents.runner import Message
++    from imp.providers.config import ProviderModel
+ 
+ import filelock
+ 
+@@ -51,12 +52,26 @@ class State:
+     current_step: CurrentStep | None = None
+     retry_feedback: dict[str, Any] | None = None
+     resume_pending: str | None = None
++    resolved_roles: dict[str, ProviderModel] | None = None
+ 
+     @classmethod
+     def load(cls, state_dir: Path) -> State:
++        from imp.providers.config import ProviderModel  # local: avoid import cycle
+         data = json.loads((state_dir / "state.json").read_text())
+         cur = data.pop("current_step", None)
+-        return cls(**data, current_step=CurrentStep.from_dict(cur) if cur else None)
++        raw_rr = data.pop("resolved_roles", None)
++        # Preserve None (not yet resolved) vs a dict (resolved). A `... or {}`
++        # would map null→{}, defeating the executor's `is None` compute-if-absent
++        # check. None still avoids the `.items()`-on-None crash because we guard.
++        resolved_roles = (
++            {role: ProviderModel(**pm) for role, pm in raw_rr.items()}
++            if raw_rr is not None else None
++        )
++        return cls(
++            **data,
++            current_step=CurrentStep.from_dict(cur) if cur else None,
++            resolved_roles=resolved_roles,
++        )
+ 
+     def save(self, state_dir: Path) -> None:
+         """Atomic write: tmp file in same dir, fsync, rename."""
+@@ -72,6 +87,11 @@ class State:
+             "current_step": self.current_step.to_dict() if self.current_step else None,
+             "retry_feedback": self.retry_feedback,
+             "resume_pending": self.resume_pending,
++            "resolved_roles": (
++                {r: {"provider": pm.provider, "model": pm.model}
++                 for r, pm in self.resolved_roles.items()}
++                if self.resolved_roles is not None else None
++            ),
+         }
+         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
+         try:
+diff --git a/tests/test_state.py b/tests/test_state.py
+index 1552c55..985b3c2 100644
+--- a/tests/test_state.py
++++ b/tests/test_state.py
+@@ -171,6 +171,33 @@ def test_state_load_forward_compatible_without_resume_pending(tmp_path: Path) ->
+     assert back.resume_pending is None
+ 
+ 
++def test_state_resolved_roles_roundtrip(tmp_path):
++    from imp.engine.state import State
++    from imp.providers.config import ProviderModel
++    s = State(
++        change_id=1, step="a", step_attempt=0, status="running",
++        resolved_roles={
++            "code": ProviderModel(provider="anthropic", model="haiku"),
++            "code_review": ProviderModel(provider="openai", model="gpt-5.2"),
++        },
++    )
++    s.save(tmp_path)
++    loaded = State.load(tmp_path)
++    assert loaded.resolved_roles is not None
++    assert loaded.resolved_roles["code"] == ProviderModel("anthropic", "haiku")
++    assert loaded.resolved_roles["code_review"].model == "gpt-5.2"
++
++
++def test_state_resolved_roles_none_preserved(tmp_path):
++    """A fresh State persists resolved_roles=null and loads back as None, so the
++    executor's compute-if-absent (`is None`) check still fires after a resume."""
++    from imp.engine.state import State
++    s = State(change_id=1, step="a", step_attempt=0, status="running")
++    assert s.resolved_roles is None
++    s.save(tmp_path)
++    assert State.load(tmp_path).resolved_roles is None
++
++
+ def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
+     tmp_path: Path,
+ ) -> None:

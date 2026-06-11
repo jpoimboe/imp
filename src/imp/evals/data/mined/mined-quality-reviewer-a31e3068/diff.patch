@@ -1,0 +1,170 @@
+diff --git a/src/imp/engine/worktree.py b/src/imp/engine/worktree.py
+new file mode 100644
+index 0000000..e9a1a92
+--- /dev/null
++++ b/src/imp/engine/worktree.py
+@@ -0,0 +1,92 @@
++"""All git mechanics for per-Change worktrees (spec §4), behind a small
++interface so Change, the executor, and the CLI stay git-agnostic. Every
++shared-repo mutation runs under RepoGitLock.
++"""
++
++from __future__ import annotations
++
++import os
++import subprocess
++from contextlib import contextmanager
++from pathlib import Path
++
++import filelock
++
++
++class PreconditionError(Exception):
++    """imp new ran in a repo that can't host a worktree (spec §5.1)."""
++
++
++class BranchExists(Exception):
++    """The slug's branch imp/<slug> already exists (collision)."""
++
++
++def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
++    return subprocess.run(
++        ["git", *args], cwd=cwd, capture_output=True, text=True,
++    )
++
++
++def _git_ok(cwd: Path, *args: str) -> str:
++    proc = _git(cwd, *args)
++    if proc.returncode != 0:
++        raise RuntimeError(
++            f"git {' '.join(args)} failed ({proc.returncode}): {proc.stderr.strip()}"
++        )
++    return proc.stdout
++
++
++def find_control_root(start: Path) -> Path:
++    """Resolve the main checkout from anywhere (incl. inside a worktree) via
++    `git rev-parse --git-common-dir` -> its parent (spec §3, §5.3)."""
++    proc = _git(start, "rev-parse", "--git-common-dir")
++    if proc.returncode != 0:
++        raise PreconditionError(f"{start} is not a git repository")
++    common = Path(proc.stdout.strip())
++    if not common.is_absolute():
++        common = (start / common)
++    return common.resolve().parent
++
++
++def check_preconditions(root: Path) -> None:
++    """Hard requirements git worktree add + branch creation need (spec §5.1)."""
++    if _git(root, "rev-parse", "--git-dir").returncode != 0:
++        raise PreconditionError(f"{root} is not a git repository (run `git init`)")
++    if _git(root, "rev-parse", "HEAD").returncode != 0:
++        raise PreconditionError(
++            "repository has no commits yet; make an initial commit first"
++        )
++    head = _git(root, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
++    if head == "HEAD":
++        raise PreconditionError(
++            "HEAD is detached; check out a branch before `imp new`"
++        )
++
++
++def current_branch(root: Path) -> str:
++    return _git_ok(root, "rev-parse", "--abbrev-ref", "HEAD").strip()
++
++
++class RepoGitLock:
++    """Short-held file lock in the control root, acquired around every
++    shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""
++
++    def __init__(self, control_root: Path) -> None:
++        self.path = control_root / ".imp" / "repo.lock"
++        # Create .imp/ up front so correctness doesn't rely on filelock creating
++        # parent dirs (version-dependent behavior).
++        self.path.parent.mkdir(parents=True, exist_ok=True)
++        self._fl = filelock.FileLock(str(self.path) + ".filelock")
++
++    @contextmanager
++    def acquire(self, timeout: float = 60.0):  # type: ignore[no-untyped-def]
++        self._fl.acquire(timeout=timeout)
++        try:
++            self.path.parent.mkdir(parents=True, exist_ok=True)
++            self.path.write_text(str(os.getpid()))
++            yield self
++        finally:
++            try:
++                self.path.unlink(missing_ok=True)
++            finally:
++                self._fl.release()
+diff --git a/tests/test_worktree.py b/tests/test_worktree.py
+new file mode 100644
+index 0000000..7f03238
+--- /dev/null
++++ b/tests/test_worktree.py
+@@ -0,0 +1,66 @@
++# tests/test_worktree.py
++import subprocess
++from pathlib import Path
++
++import pytest
++
++from imp.engine import worktree as wt
++
++
++def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
++    return subprocess.run(
++        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
++    )
++
++
++def _init_repo(root: Path) -> None:
++    """A git repo with one commit on branch `main` and `.imp/` gitignored."""
++    _git(root, "init", "-q", "-b", "main")
++    _git(root, "config", "user.email", "t@t")
++    _git(root, "config", "user.name", "t")
++    (root / ".gitignore").write_text(".imp/\n")
++    (root / "README.md").write_text("seed\n")
++    _git(root, "add", "-A")
++    _git(root, "commit", "-qm", "seed")
++
++
++def test_find_control_root_from_subdir(tmp_path: Path) -> None:
++    _init_repo(tmp_path)
++    sub = tmp_path / "a" / "b"
++    sub.mkdir(parents=True)
++    assert wt.find_control_root(sub) == tmp_path.resolve()
++
++
++def test_preconditions_ok(tmp_path: Path) -> None:
++    _init_repo(tmp_path)
++    wt.check_preconditions(tmp_path)  # does not raise
++
++
++def test_preconditions_not_a_repo(tmp_path: Path) -> None:
++    with pytest.raises(wt.PreconditionError, match="not a git repository"):
++        wt.check_preconditions(tmp_path)
++
++
++def test_preconditions_no_commits(tmp_path: Path) -> None:
++    _git(tmp_path, "init", "-q", "-b", "main")
++    _git(tmp_path, "config", "user.email", "t@t")
++    _git(tmp_path, "config", "user.name", "t")
++    with pytest.raises(wt.PreconditionError, match="no commits"):
++        wt.check_preconditions(tmp_path)
++
++
++def test_preconditions_detached_head(tmp_path: Path) -> None:
++    _init_repo(tmp_path)
++    head = _git(tmp_path, "rev-parse", "HEAD").stdout.strip()
++    _git(tmp_path, "checkout", "-q", head)  # detach
++    with pytest.raises(wt.PreconditionError, match="detached"):
++        wt.check_preconditions(tmp_path)
++
++
++def test_repo_git_lock_serializes(tmp_path: Path) -> None:
++    _init_repo(tmp_path)
++    lock = wt.RepoGitLock(tmp_path)
++    with lock.acquire():
++        assert (tmp_path / ".imp" / "repo.lock").exists()
++    with lock.acquire():  # re-acquire after release
++        pass

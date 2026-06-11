@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-9af0c5e",
+  "source": "mined",
+  "base_sha": "fef822a",
+  "head_sha": "9af0c5e",
+  "task_context": "Code quality review of one commit in a git worktree.\n## Working directory\n/home/jpoimboe/imp/.claude/worktrees/codex-default-workflow (branch worktree-codex-default-workflow). Run from there.\n## What to review\n- DESCRIPTION: A debugging fix. `codex_mcp.dispatch_tool` now special-cases the `task` tool: instead of routing it through `async_invoke` (which raises `TaskMustBeAwaited` by design), it awaits `agents.subagents.dispatch_task(...)` to dispatch a subagent and returns its output JSON, re-raising `SubagentSuspended` so a subagent-origin pause unwinds. Mirrors the anthropic dispatch-loop special-case. Plus 3 tests.\n- PLAN_OR_REQUIREMENTS: systematic-debugging fix for codex subagent dispatch (no formal plan task)\n## Focus\n- **Correctness & parity:** Does the codex `task` branch faithfully mirror anthropic.py:661-678's semantics (dispatch_task args, raise_if_suspended-first error handling)? Any subtle divergence that matters? Compare also to how openai.py / claude_code.py special-case task if they do.\n- **The cap RMW interaction:** the task dispatch happens AFTER `state.dispatch_count += 1` / cap check. Is it correct that a task dispatch counts against the codex tool-call cap? (It should \u2014 it's a tool call. Just confirm no double-count or off-by-one.)\n- **In-function import:** is importing dispatch_task/raise_if_suspended in-function justified (avoids import cycle: subagents imports from agent_run/runner; does codex_mcp importing subagents at module scope create a cycle)? Briefly check whether a module-scope import would cycle. In-function is also what enables test monkeypatching \u2014 note that.\n- **Known-limitation comment quality:** Is the SubagentSuspended-across-MCP-boundary limitation clearly and accurately documented so a maintainer understands the risk? Is the claim (\"default workflow subagents are autonomous and don't suspend\") accurate enough not to mislead?\n- **args access:** `args[\"subagent_name\"]`/`args[\"task_description\"]` (strict) vs `args.get(\"tier\")` (lenient). The task tool's input_schema marks subagent_name/task_description required, tier optional \u2014 so strict access is safe (a malformed call KeyErrors into the generic except? no \u2014 it's a direct dict access OUTSIDE the try). Check: could `args[\"subagent_name\"]` KeyError escape uncaught? Is that acceptable (the arg-model enforces required fields, so they're always present), or should it be inside the try?\n- **Test quality:** do the 3 tests meaningfully exercise the real dispatch_tool with monkeypatched dispatch_task? Is the happy-path test genuinely proving the TaskMustBeAwaited bypass (not a tautology)? Any missing case?\n- **Naming, dead code, scope.** Run `make typecheck`. Note: pre-existing lint errors in docs/superpowers/spikes/ are NOT this commit's concern.\n## Report\n- **Strengths**\n- **Issues** Critical / Important / Minor (file:line)\n- **Assessment:** APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/codex_mcp.py:109",
+      "symbol": "dispatch_tool",
+      "description": "tool_call_event_id parameter is not passed to dispatch_task unlike all three peer providers, omitting the parent linkage to the tool-call event in the audit log.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/codex_mcp.py:107",
+      "symbol": "dispatch_tool",
+      "description": "Comment incorrectly attributes the in-function import reason to avoiding an import cycle; the actual constraint is test monkeypatching.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/codex_mcp.py:0",
+      "symbol": "",
+      "description": "No test exercises task tool being called when the dispatch cap is already tripped.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

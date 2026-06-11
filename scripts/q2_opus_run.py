@@ -1,6 +1,6 @@
 """Focused Q2 + per-task-granularity run with opus as the reviewer.
 
-Runs the 4 structure variants (whole-change × {mono, slice}, per-task × {mono,
+Runs the 4 structure variants (whole-change x {mono, slice}, per-task x {mono,
 slice}) bound to claude_code/opus over the curated fixtures, grades with the opus
 judge, and writes a Q2-focused scorecard. Answers Q2 (monolithic vs
 completeness-slice) and the per-task-vs-whole-change granularity cut directionally.
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.evals.cli import _curated_fixtures, find_control_root, PRICING_VERSION
+from imp.evals.cli import PRICING_VERSION, _curated_fixtures, find_control_root
 from imp.evals.models import Variant
 from imp.evals.provenance import core_digest, fixture_label_hash, stamp
 from imp.evals.scorecard import build_scorecard, render_markdown

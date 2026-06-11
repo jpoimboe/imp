@@ -1,0 +1,58 @@
+diff --git a/src/imp/engine/state.py b/src/imp/engine/state.py
+index 6709448..370c546 100644
+--- a/src/imp/engine/state.py
++++ b/src/imp/engine/state.py
+@@ -49,6 +49,7 @@ class State:
+     phase_attempt: int
+     status: Status
+     current_step: CurrentStep | None = None
++    retry_feedback: dict[str, str] | None = None
+ 
+     @classmethod
+     def load(cls, state_dir: Path) -> State:
+@@ -69,6 +70,7 @@ class State:
+             "step_attempt": self.step_attempt, "phase_attempt": self.phase_attempt,
+             "status": self.status,
+             "current_step": self.current_step.to_dict() if self.current_step else None,
++            "retry_feedback": self.retry_feedback,
+         }
+         fd, tmp_name = tempfile.mkstemp(prefix=".state-", dir=state_dir)
+         try:
+diff --git a/tests/test_state.py b/tests/test_state.py
+index 01e2eed..b93ba62 100644
+--- a/tests/test_state.py
++++ b/tests/test_state.py
+@@ -105,6 +105,33 @@ def test_state_round_trip_without_current_step(tmp_path: Path) -> None:
+     assert loaded.current_step is None
+ 
+ 
++def test_state_round_trip_with_retry_feedback(tmp_path: Path) -> None:
++    s = State(
++        change_id=7,
++        phase="implement",
++        step="coder",
++        step_attempt=1,
++        phase_attempt=0,
++        status="running",
++        retry_feedback={"target_step": "coder", "text": "fix the lint error"},
++    )
++    s.save(tmp_path)
++    loaded = State.load(tmp_path)
++    assert loaded == s
++    assert loaded.retry_feedback == {"target_step": "coder", "text": "fix the lint error"}
++
++
++def test_state_round_trip_retry_feedback_defaults_none(tmp_path: Path) -> None:
++    s = State(
++        change_id=1, phase="p", step=None, step_attempt=0, phase_attempt=0,
++        status="running",
++    )
++    s.save(tmp_path)
++    raw = json.loads((tmp_path / "state.json").read_text())
++    assert raw["retry_feedback"] is None
++    assert State.load(tmp_path).retry_feedback is None
++
++
+ def test_event_log_read_yields_malformed_sentinel_for_bad_lines(
+     tmp_path: Path,
+ ) -> None:

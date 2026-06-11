@@ -1,0 +1,907 @@
+diff --git a/src/imp/engine/loader.py b/src/imp/engine/loader.py
+index 547c426..0111f07 100644
+--- a/src/imp/engine/loader.py
++++ b/src/imp/engine/loader.py
+@@ -35,6 +35,7 @@ from imp.engine.expr import (
+     parse as parse_expr,
+ )
+ from imp.engine.model_rules import find_constraint_cycle, parse_role_constraints
++from imp.engine.model_tiers import parse_model_tiers
+ from imp.engine.schema import parse_output_schema
+ from imp.engine.types import (
+     Action,
+@@ -97,9 +98,7 @@ def parse_agent_file(path: Path) -> AgentDef:
+ 
+     output_raw = fm["output"]
+     if not isinstance(output_raw, dict):
+-        raise LoadError(
+-            "'output' must be a mapping", source
+-        )
++        raise LoadError("'output' must be a mapping", source)
+     schema = parse_output_schema(output_raw, loc(path, output_raw))
+     tools = frozenset(fm.get("tools") or [])
+     subagents = tuple(fm.get("subagents") or [])
+@@ -149,9 +148,7 @@ _SCRIPT_OUTPUT_TYPES: dict[str, ExprType] = {
+ }
+ 
+ 
+-def _output_types_for_step(
+-    step_kind: str, agent: AgentDef | None
+-) -> dict[str, ExprType] | None:
++def _output_types_for_step(step_kind: str, agent: AgentDef | None) -> dict[str, ExprType] | None:
+     """The expr output-env types for one step. None means branch/human (no output)."""
+     if step_kind == "agent" and agent is not None:
+         out: dict[str, ExprType] = {}
+@@ -175,9 +172,7 @@ _KIND_SIGNALS = {
+ 
+ 
+ def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
+-    present = {
+-        kind for kind, keys in _KIND_SIGNALS.items() if any(k in raw for k in keys)
+-    }
++    present = {kind for kind, keys in _KIND_SIGNALS.items() if any(k in raw for k in keys)}
+     has_rules = "rules" in raw
+     if len(present) > 1:
+         raise LoadError(
+@@ -194,8 +189,7 @@ def _infer_kind(raw: dict[str, Any], source: SourceLoc) -> str:
+     explicit = raw.get("kind")
+     if explicit is not None and explicit != inferred:
+         raise LoadError(
+-            f"declared kind {explicit!r} disagrees with the keys present "
+-            f"(inferred {inferred!r})",
++            f"declared kind {explicit!r} disagrees with the keys present (inferred {inferred!r})",
+             source,
+         )
+     return inferred
+@@ -284,9 +278,7 @@ def _parse_verb(raw: dict[str, Any], source: SourceLoc) -> Action:
+     return Goto(target=target, feedback=feedback, resume=(verb == "resume"))
+ 
+ 
+-def _parse_rules(
+-    raw_rules: Any, source: SourceLoc, yaml_path: Path
+-) -> tuple[Rule, ...]:
++def _parse_rules(raw_rules: Any, source: SourceLoc, yaml_path: Path) -> tuple[Rule, ...]:
+     if not isinstance(raw_rules, list) or not raw_rules:
+         raise LoadError("rules: must be a non-empty list", source)
+     rules: list[Rule] = []
+@@ -302,8 +294,7 @@ def _parse_rules(
+             condition = _parse_if(entry["if"], rsrc)
+         else:
+             raise LoadError("a rule needs `if:` or `else: true`", rsrc)
+-        rules.append(Rule(condition=condition, action=action,
+-                          mutations=mutations, source=rsrc))
++        rules.append(Rule(condition=condition, action=action, mutations=mutations, source=rsrc))
+     return tuple(rules)
+ 
+ 
+@@ -324,12 +315,10 @@ def _parse_vars(raw: Any, source: SourceLoc, yaml_path: Path) -> Vars:
+             raise LoadError(f"var {name!r} needs a 'type'", vsrc)
+         vtype = spec["type"]
+         if vtype not in _VAR_TYPES:
+-            raise LoadError(
+-                f"var {name!r} type must be bool/int/string, got {vtype!r}", vsrc)
++            raise LoadError(f"var {name!r} type must be bool/int/string, got {vtype!r}", vsrc)
+         default = spec.get("default", {"bool": False, "int": 0, "string": ""}[vtype])
+         _check_default_type(name, vtype, default, vsrc)
+-        decls.append(VarDecl(name=str(name), type=_VAR_TYPES[vtype],
+-                             default=default, source=vsrc))
++        decls.append(VarDecl(name=str(name), type=_VAR_TYPES[vtype], default=default, source=vsrc))
+     return Vars(decls=tuple(decls))
+ 
+ 
+@@ -340,8 +329,7 @@ def _check_default_type(name: str, vtype: str, default: object, source: SourceLo
+         or (vtype == "string" and isinstance(default, str))
+     )
+     if not ok:
+-        raise LoadError(
+-            f"var {name!r} default {default!r} does not match type {vtype}", source)
++        raise LoadError(f"var {name!r} default {default!r} does not match type {vtype}", source)
+ 
+ 
+ # ── Int resolution ────────────────────────────────────────────────────────────
+@@ -366,9 +354,7 @@ def _resolve_int(
+     return val
+ 
+ 
+-def _resolve_max_retries(
+-    raw: dict[str, Any], default: int, source: SourceLoc, where: str
+-) -> int:
++def _resolve_max_retries(raw: dict[str, Any], default: int, source: SourceLoc, where: str) -> int:
+     """Resolve max_retries with null tolerance; reject non-int values cleanly."""
+     result = _resolve_int(raw, "max_retries", default, source, where)
+     return result if result is not None else default
+@@ -414,9 +400,7 @@ def _parse_on_max_retries(raw: Any, source: SourceLoc) -> Action:
+     """Parse defaults.on_max_retries as a new verb-style mapping
+     ({pause: true} / {continue: true} / {goto: target})."""
+     if not isinstance(raw, dict):
+-        raise LoadError(
+-            f"on_max_retries must be a mapping, got {type(raw).__name__}", source
+-        )
++        raise LoadError(f"on_max_retries must be a mapping, got {type(raw).__name__}", source)
+     return _parse_verb(raw, source)
+ 
+ 
+@@ -439,12 +423,14 @@ def _parse_human_options(
+             raise LoadError("option missing a string 'label'", osrc)
+         action = _parse_verb(o, osrc)
+         mutations = _parse_set(o["set"], osrc) if "set" in o else ()
+-        options.append(HumanOption(
+-            label=str(o["label"]),
+-            action=action,
+-            mutations=mutations,
+-            source=osrc,
+-        ))
++        options.append(
++            HumanOption(
++                label=str(o["label"]),
++                action=action,
++                mutations=mutations,
++                source=osrc,
++            )
++        )
+     return tuple(options)
+ 
+ 
+@@ -466,16 +452,12 @@ def _typecheck_step_exprs(
+                 require_bool(rule.condition, env)
+             for mut_name, mut_expr in rule.mutations:
+                 if mut_name not in var_types:
+-                    raise LoadError(
+-                        f"set: target {mut_name!r} is not a declared var", rule.source
+-                    )
++                    raise LoadError(f"set: target {mut_name!r} is not a declared var", rule.source)
+                 require_type(mut_expr, env, var_types[mut_name])
+         for opt in step.options:
+             for mut_name, mut_expr in opt.mutations:
+                 if mut_name not in var_types:
+-                    raise LoadError(
+-                        f"set: target {mut_name!r} is not a declared var", opt.source
+-                    )
++                    raise LoadError(f"set: target {mut_name!r} is not a declared var", opt.source)
+                 require_type(mut_expr, env, var_types[mut_name])
+     except LoadError:
+         raise
+@@ -495,16 +477,12 @@ def _parse_fs_rule(
+     ops_raw = raw.get("operations") or []
+     paths_raw = raw.get("paths") or []
+     if not isinstance(ops_raw, list) or not isinstance(paths_raw, list):
+-        raise LoadError(
+-            "fs_permissions 'operations' and 'paths' must be lists", source
+-        )
++        raise LoadError("fs_permissions 'operations' and 'paths' must be lists", source)
+     ops = tuple(ops_raw)
+     paths = tuple(paths_raw)
+     mode = str(raw.get("mode") or "allow")
+     if mode not in ("allow", "deny"):
+-        raise LoadError(
+-            f"fs_permissions mode must be 'allow' or 'deny', got {mode!r}", source
+-        )
++        raise LoadError(f"fs_permissions mode must be 'allow' or 'deny', got {mode!r}", source)
+     if not ops or not paths:
+         raise LoadError("fs_permissions entry needs operations and paths", source)
+     for op in ops:
+@@ -548,9 +526,17 @@ def _parse_step(
+         if "rules" in raw:
+             raise LoadError(f"human step {name!r} uses options:, not rules:", source)
+         options = _parse_human_options(raw.get("options"), source, yaml_path)
+-        step = Step(name=name, phase=phase_name, kind="human", rules=(),
+-                    options=options, on_max_retries=on_max, max_loops=max_loops,
+-                    source=source, ask=str(raw.get("ask") or ""))
++        step = Step(
++            name=name,
++            phase=phase_name,
++            kind="human",
++            rules=(),
++            options=options,
++            on_max_retries=on_max,
++            max_loops=max_loops,
++            source=source,
++            ask=str(raw.get("ask") or ""),
++        )
+         # Type-check human option set: mutations (output is None for a human step).
+         _typecheck_step_exprs(step, agents, var_types, source)
+         return step
+@@ -564,13 +550,19 @@ def _parse_step(
+     if kind == "agent":
+         file = (workflow_dir / raw["file"]) if raw.get("file") else None
+         step = Step(
+-            name=name, phase=phase_name, kind="agent", rules=rules, options=(),
+-            on_max_retries=on_max, max_loops=max_loops, source=source,
+-            file=file, prompt=(str(raw["prompt"]) if raw.get("prompt") else None),
++            name=name,
++            phase=phase_name,
++            kind="agent",
++            rules=rules,
++            options=(),
++            on_max_retries=on_max,
++            max_loops=max_loops,
++            source=source,
++            file=file,
++            prompt=(str(raw["prompt"]) if raw.get("prompt") else None),
+             model_role=str(raw.get("model_role") or "default"),
+             fs_permissions=tuple(
+-                _parse_fs_rule(r, source, yaml_path)
+-                for r in (raw.get("fs_permissions") or [])
++                _parse_fs_rule(r, source, yaml_path) for r in (raw.get("fs_permissions") or [])
+             ),
+             interactive=bool(raw.get("interactive", False)),
+             max_tool_calls=raw.get("max_tool_calls"),
+@@ -578,16 +570,28 @@ def _parse_step(
+         )
+     elif kind == "script":
+         step = Step(
+-            name=name, phase=phase_name, kind="script", rules=rules, options=(),
+-            on_max_retries=on_max, max_loops=max_loops, source=source,
++            name=name,
++            phase=phase_name,
++            kind="script",
++            rules=rules,
++            options=(),
++            on_max_retries=on_max,
++            max_loops=max_loops,
++            source=source,
+             command=str(raw["command"]),
+             cwd=str(raw["cwd"]) if raw.get("cwd") else None,
+             timeout_seconds=raw.get("timeout"),
+         )
+     else:  # branch
+         step = Step(
+-            name=name, phase=phase_name, kind="branch", rules=rules, options=(),
+-            on_max_retries=on_max, max_loops=max_loops, source=source,
++            name=name,
++            phase=phase_name,
++            kind="branch",
++            rules=rules,
++            options=(),
++            on_max_retries=on_max,
++            max_loops=max_loops,
++            source=source,
+         )
+ 
+     # Type-check every if:/set: against this step's env (output and vars).
+@@ -612,9 +616,7 @@ def load_workflow(
+     try:
+         raw = yaml.load(yaml_path.read_text(), Loader=LineLoader) or {}
+     except yaml.YAMLError as e:
+-        raise LoadError(
+-            f"invalid YAML: {e}", SourceLoc(file=yaml_path, line=1)
+-        ) from e
++        raise LoadError(f"invalid YAML: {e}", SourceLoc(file=yaml_path, line=1)) from e
+     if not isinstance(raw, dict):
+         raise LoadError(
+             "workflow.yaml root must be a mapping",
+@@ -665,6 +667,7 @@ def load_workflow(
+         phase_objs.append(Phase(name=pname, steps=steps, source=psrc))
+ 
+     model_rules = parse_role_constraints(raw.get("model_rules"), yaml_path)
++    model_tiers = parse_model_tiers(raw.get("model_tiers"), root_source)
+     # Best-effort workflow-only cycle pre-check for a fast authoring error. The
+     # authoritative check is in resolve_roles, on the workflow+config MERGED
+     # graph (config may add an edge this pre-check can't see).
+@@ -685,10 +688,12 @@ def load_workflow(
+         workflow_dir=workflow_dir,
+         source=root_source,
+         model_rules=model_rules,
++        model_tiers=model_tiers,
+     )
+ 
+     # Run validators and print warnings; raise on errors.
+     from imp.engine.validators import validate
++
+     errors, warnings = validate(workflow, configured_roles=configured_roles)
+     if errors:
+         raise LoadErrors(errors=errors, warnings=warnings)
+diff --git a/src/imp/engine/types.py b/src/imp/engine/types.py
+index efdc8b2..03af795 100644
+--- a/src/imp/engine/types.py
++++ b/src/imp/engine/types.py
+@@ -24,6 +24,7 @@ class SourceLoc:
+ 
+ # ── Actions (internal -- never serialized into YAML) ─────────────────────────
+ 
++
+ @dataclass(frozen=True, slots=True)
+ class Action:
+     """Base for Continue/Retry/Pause/Goto. Use match/case to dispatch."""
+@@ -48,8 +49,8 @@ class Pause(Action):
+ @dataclass(frozen=True, slots=True)
+ class Goto(Action):
+     target: str
+-    feedback: bool = True       # feedback: false suppresses the wrapper on this edge
+-    resume: bool = False        # set by the `resume:` verb; continues the target's transcript
++    feedback: bool = True  # feedback: false suppresses the wrapper on this edge
++    resume: bool = False  # set by the `resume:` verb; continues the target's transcript
+ 
+ 
+ # ── Mutations & rules ─────────────────────────────────────────────────────────
+@@ -61,6 +62,7 @@ Mutation = tuple[tuple[str, Expr], ...]
+ @dataclass(frozen=True, slots=True)
+ class Rule:
+     """One rule in a rules: block. `condition is None` means else (catch-all)."""
++
+     condition: Expr | None
+     action: Action
+     mutations: Mutation
+@@ -81,10 +83,11 @@ class HumanOption:
+ 
+ # ── Variables ─────────────────────────────────────────────────────────────────
+ 
++
+ @dataclass(frozen=True, slots=True)
+ class VarDecl:
+     name: str
+-    type: ExprType                 # "int" | "bool" | "string"
++    type: ExprType  # "int" | "bool" | "string"
+     default: object
+     source: SourceLoc
+ 
+@@ -105,6 +108,7 @@ class Vars:
+ 
+ # ── Output schema (agent's structured output contract) ────────────────────────
+ 
++
+ @dataclass(frozen=True, slots=True)
+ class OutputField:
+     name: str
+@@ -130,6 +134,7 @@ class OutputSchema:
+ 
+ # ── Filesystem permissions (parsed but unused in Plan 1; validated only) ──────
+ 
++
+ @dataclass(frozen=True, slots=True)
+ class FsRule:
+     operations: tuple[Literal["read", "write"], ...]
+@@ -140,26 +145,29 @@ class FsRule:
+ 
+ # ── Cross-role model constraints (model_rules:) ───────────────────────────────
+ 
++
+ @dataclass(frozen=True, slots=True)
+ class RoleConstraint:
+     """One role's cross-role model constraint. `differ_provider_from` names
+     another role whose resolved *provider* this role should differ from (a soft
+     preference; see providers/resolve.resolve_roles). `None` means no constraint.
+     """
++
+     differ_provider_from: str | None = None
+     source: SourceLoc | None = None
+ 
+ 
+ # ── Agent definition (parsed from .md) ────────────────────────────────────────
+ 
++
+ @dataclass(frozen=True, slots=True)
+ class AgentDef:
+     name: str
+     description: str
+     tools: frozenset[str]
+-    subagents: tuple[str, ...]              # subagent names; Plan 2 resolves to full defs
++    subagents: tuple[str, ...]  # subagent names; Plan 2 resolves to full defs
+     output_schema: OutputSchema
+-    prompt_template_source: str             # the .md body before compilation
++    prompt_template_source: str  # the .md body before compilation
+     source_path: Path
+     source: SourceLoc
+     max_tool_calls: int | None = None
+@@ -177,12 +185,12 @@ Kind = Literal["agent", "script", "human", "branch"]
+ 
+ @dataclass(frozen=True, slots=True)
+ class Step:
+-    name: str                       # globally unique; disjoint from phase names
+-    phase: str                      # owning container (set by loader from structure)
++    name: str  # globally unique; disjoint from phase names
++    phase: str  # owning container (set by loader from structure)
+     kind: Kind
+-    rules: tuple[Rule, ...]         # () for human; required for script/branch; optional for agent
++    rules: tuple[Rule, ...]  # () for human; required for script/branch; optional for agent
+     options: tuple[HumanOption, ...]  # human only; () otherwise
+-    on_max_retries: Action          # action on max_loops (and, for agents, max_retries) exhaustion
++    on_max_retries: Action  # action on max_loops (and, for agents, max_retries) exhaustion
+     max_loops: int
+     source: SourceLoc
+     # agent-only
+@@ -210,6 +218,7 @@ class Phase:
+ 
+ # ── Workflow root ─────────────────────────────────────────────────────────────
+ 
++
+ @dataclass(frozen=True, slots=True)
+ class WorkflowDefaults:
+     max_retries: int
+@@ -221,6 +230,7 @@ class WorkflowDefaults:
+ @dataclass(frozen=True, slots=True)
+ class Workflow:
+     """`agents` is a plain dict for V0; callers must treat it as immutable."""
++
+     name: str
+     description: str
+     phases: tuple[Phase, ...]
+@@ -230,6 +240,7 @@ class Workflow:
+     workflow_dir: Path
+     source: SourceLoc
+     model_rules: dict[str, RoleConstraint] = field(hash=False, default_factory=dict)
++    model_tiers: tuple[str, ...] = ()
+ 
+     def flat_steps(self) -> tuple[Step, ...]:
+         return tuple(s for p in self.phases for s in p.steps)
+diff --git a/tests/test_loader.py b/tests/test_loader.py
+index 28c99a1..e33f0fe 100644
+--- a/tests/test_loader.py
++++ b/tests/test_loader.py
+@@ -1,4 +1,5 @@
+ """Tests for the workflow loader."""
++
+ from __future__ import annotations
+ 
+ import textwrap
+@@ -66,8 +67,7 @@ def test_parse_agent_missing_name(tmp_path: Path) -> None:
+     p = write_agent_md(
+         tmp_path / "noname.md",
+         frontmatter=(
+-            "tools: [complete_step]\noutput:\n  "
+-            "status: {type: enum, values: [Success, Error]}"
++            "tools: [complete_step]\noutput:\n  status: {type: enum, values: [Success, Error]}"
+         ),
+     )
+     with pytest.raises(LoadError) as ei:
+@@ -98,8 +98,7 @@ def test_parse_agent_tools_null(tmp_path: Path) -> None:
+     p = write_agent_md(
+         tmp_path / "x.md",
+         frontmatter=(
+-            "name: x\ntools: null\n"
+-            "output:\n  status: {type: enum, values: [Success, Error]}"
++            "name: x\ntools: null\noutput:\n  status: {type: enum, values: [Success, Error]}"
+         ),
+     )
+     agent = parse_agent_file(p)
+@@ -190,7 +189,9 @@ write
+ 
+ 
+ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         vars:
+@@ -220,7 +221,9 @@ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
+                 file: agents/spec-writer.md
+           - name: merge
+             steps: []
+-        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
++        """,
++        agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER},
++    )
+     wf_obj = load_workflow(wf)
+     names = [s.name for s in wf_obj.flat_steps()]
+     assert names == ["spec-writer", "route", "spec-reviewer", "coder"]
+@@ -240,7 +243,9 @@ def test_inline_phase_surface_and_kind_inference(tmp_path: Path) -> None:
+ 
+ 
+ def test_if_string_unquoted_identifier_is_load_error(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         phases:
+@@ -251,13 +256,17 @@ def test_if_string_unquoted_identifier_is_load_error(tmp_path: Path) -> None:
+                 rules:
+                   - {if: "verdict == rework", continue: true}
+                   - {else: true, pause: true}
+-        """, agents={"spec-reviewer": _REVIEWER})
++        """,
++        agents={"spec-reviewer": _REVIEWER},
++    )
+     with pytest.raises((LoadError, LoadErrors)):
+         load_workflow(wf)
+ 
+ 
+ def test_if_must_be_bool(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         vars:
+@@ -269,13 +278,16 @@ def test_if_must_be_bool(tmp_path: Path) -> None:
+                 rules:
+                   - {if: round, continue: true}
+                   - {else: true, pause: true}
+-        """)
++        """,
++    )
+     with pytest.raises((LoadError, LoadErrors)):
+         load_workflow(wf)
+ 
+ 
+ def test_set_type_mismatch_is_load_error(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         vars:
+@@ -286,13 +298,16 @@ def test_set_type_mismatch_is_load_error(tmp_path: Path) -> None:
+               - name: b
+                 rules:
+                   - {else: true, continue: true, set: {round: true}}
+-        """)
++        """,
++    )
+     with pytest.raises((LoadError, LoadErrors)):
+         load_workflow(wf)
+ 
+ 
+ def test_two_kind_signals_is_load_error(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         phases:
+@@ -303,14 +318,17 @@ def test_two_kind_signals_is_load_error(tmp_path: Path) -> None:
+                 prompt: "do it"
+                 rules:
+                   - {else: true, continue: true}
+-        """)
++        """,
++    )
+     with pytest.raises((LoadError, LoadErrors)):
+         load_workflow(wf)
+ 
+ 
+ def test_human_option_set_type_mismatch_is_load_error(tmp_path: Path) -> None:
+     # A human option's set: is type-checked just like a rule's set:.
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         vars:
+@@ -322,7 +340,8 @@ def test_human_option_set_type_mismatch_is_load_error(tmp_path: Path) -> None:
+                 ask: "Proceed?"
+                 options:
+                   - {label: Go, continue: true, set: {round: true}}   # bool into int var
+-        """)
++        """,
++    )
+     with pytest.raises((LoadError, LoadErrors)):
+         load_workflow(wf)
+ 
+@@ -357,7 +376,7 @@ def test_load_workflow_duplicate_agent_name(tmp_path: Path) -> None:
+         ),
+     )
+     (wf_dir / "workflow.yaml").write_text(
+-        "name: x\ndescription: \"\"\nphases:\n  - name: p\n    steps: []\n"
++        'name: x\ndescription: ""\nphases:\n  - name: p\n    steps: []\n'
+     )
+     with pytest.raises(LoadError) as ei:
+         load_workflow(wf_dir)
+@@ -365,7 +384,9 @@ def test_load_workflow_duplicate_agent_name(tmp_path: Path) -> None:
+ 
+ 
+ def test_load_defaults_fallback(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: x
+         description: y
+         phases:
+@@ -373,15 +394,19 @@ def test_load_defaults_fallback(tmp_path: Path) -> None:
+             steps:
+               - name: s
+                 file: agents/spec-writer.md
+-        """, agents={"spec-writer": _WRITER})
++        """,
++        agents={"spec-writer": _WRITER},
++    )
+     wf_obj = load_workflow(wf)
+-    assert wf_obj.defaults.max_retries == 3       # built-in default
++    assert wf_obj.defaults.max_retries == 3  # built-in default
+     assert isinstance(wf_obj.defaults.on_max_retries, Pause)
+ 
+ 
+ def test_load_workflow_max_retries_string(tmp_path: Path) -> None:
+     """max_retries: 'three' should raise LoadError, not TypeError."""
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: x
+         description: ""
+         defaults: {max_retries: "three"}
+@@ -390,7 +415,9 @@ def test_load_workflow_max_retries_string(tmp_path: Path) -> None:
+             steps:
+               - name: s
+                 file: agents/spec-writer.md
+-        """, agents={"spec-writer": _WRITER})
++        """,
++        agents={"spec-writer": _WRITER},
++    )
+     with pytest.raises((LoadError, LoadErrors)) as ei:
+         load_workflow(wf)
+     assert "max_retries" in str(ei.value) and "must be an integer" in str(ei.value)
+@@ -401,7 +428,7 @@ def test_load_workflow_steps_null(tmp_path: Path) -> None:
+     wf_dir = tmp_path / "wf"
+     (wf_dir / "agents").mkdir(parents=True)
+     (wf_dir / "workflow.yaml").write_text(
+-        "name: x\ndescription: \"\"\nphases:\n  - name: p\n    steps: null\n"
++        'name: x\ndescription: ""\nphases:\n  - name: p\n    steps: null\n'
+     )
+     with pytest.raises((LoadError, LoadErrors)) as ei:
+         load_workflow(wf_dir)
+@@ -412,7 +439,7 @@ def test_load_workflow_step_name_null(tmp_path: Path) -> None:
+     wf_dir = tmp_path / "wf"
+     (wf_dir / "agents").mkdir(parents=True)
+     (wf_dir / "workflow.yaml").write_text(
+-        "name: x\ndescription: \"\"\nphases:\n  - name: p\n    steps:\n"
++        'name: x\ndescription: ""\nphases:\n  - name: p\n    steps:\n'
+         "      - {name: null, file: agents/stub.md}\n"
+     )
+     with pytest.raises((LoadError, LoadErrors)) as ei:
+@@ -421,7 +448,9 @@ def test_load_workflow_step_name_null(tmp_path: Path) -> None:
+ 
+ 
+ def test_load_defaults_max_tool_calls(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         defaults: {max_retries: 1, max_tool_calls: 25}
+@@ -430,13 +459,17 @@ def test_load_defaults_max_tool_calls(tmp_path: Path) -> None:
+             steps:
+               - name: w
+                 file: agents/spec-writer.md
+-        """, agents={"spec-writer": _WRITER})
++        """,
++        agents={"spec-writer": _WRITER},
++    )
+     w = load_workflow(wf)
+     assert w.defaults.max_tool_calls == 25
+ 
+ 
+ def test_load_defaults_max_tool_calls_optional(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         defaults: {max_retries: 1}
+@@ -445,7 +478,9 @@ def test_load_defaults_max_tool_calls_optional(tmp_path: Path) -> None:
+             steps:
+               - name: w
+                 file: agents/spec-writer.md
+-        """, agents={"spec-writer": _WRITER})
++        """,
++        agents={"spec-writer": _WRITER},
++    )
+     w = load_workflow(wf)
+     assert w.defaults.max_tool_calls is None
+ 
+@@ -462,12 +497,12 @@ def test_step_source_line_is_accurate(tmp_path: Path) -> None:
+     )
+     wf_yaml = wf_dir / "workflow.yaml"
+     wf_yaml.write_text(
+-        "name: t\n"                      # line 1
+-        "description: \"\"\n"            # line 2
+-        "phases:\n"                      # line 3
+-        "  - name: p\n"                  # line 4
+-        "    steps:\n"                   # line 5
+-        "      - name: s1\n"             # line 6
++        "name: t\n"  # line 1
++        'description: ""\n'  # line 2
++        "phases:\n"  # line 3
++        "  - name: p\n"  # line 4
++        "    steps:\n"  # line 5
++        "      - name: s1\n"  # line 6
+         "        file: agents/spec-writer.md\n"  # line 7
+     )
+     wf = load_workflow(wf_dir)
+@@ -481,7 +516,7 @@ def test_error_includes_source_line(tmp_path: Path) -> None:
+     wf_yaml = wf_dir / "workflow.yaml"
+     wf_yaml.write_text(
+         "name: t\n"
+-        "description: \"\"\n"
++        'description: ""\n'
+         "phases:\n"
+         "  - name: p\n"
+         "    steps:\n"
+@@ -496,7 +531,9 @@ def test_error_includes_source_line(tmp_path: Path) -> None:
+ 
+ 
+ def test_resume_verb_parses_to_goto_with_resume_true(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         phases:
+@@ -509,7 +546,9 @@ def test_resume_verb_parses_to_goto_with_resume_true(tmp_path: Path) -> None:
+                 rules:
+                   - {if: {verdict: rework}, resume: w}
+                   - {else: true, continue: true}
+-        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
++        """,
++        agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER},
++    )
+     wf_obj = load_workflow(wf)
+     by = {s.name: s for s in wf_obj.flat_steps()}
+     act = by["gate"].rules[0].action
+@@ -519,7 +558,9 @@ def test_resume_verb_parses_to_goto_with_resume_true(tmp_path: Path) -> None:
+ 
+ 
+ def test_resume_honors_feedback_false(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         phases:
+@@ -534,7 +575,9 @@ def test_resume_honors_feedback_false(tmp_path: Path) -> None:
+                     resume: w
+                     feedback: false
+                   - {else: true, continue: true}
+-        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
++        """,
++        agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER},
++    )
+     wf_obj = load_workflow(wf)
+     act = {s.name: s for s in wf_obj.flat_steps()}["gate"].rules[0].action
+     assert isinstance(act, Goto)
+@@ -543,7 +586,9 @@ def test_resume_honors_feedback_false(tmp_path: Path) -> None:
+ 
+ 
+ def test_resume_and_goto_are_mutually_exclusive(tmp_path: Path) -> None:
+-    wf = _write(tmp_path, """\
++    wf = _write(
++        tmp_path,
++        """\
+         name: t
+         description: t
+         phases:
+@@ -556,7 +601,9 @@ def test_resume_and_goto_are_mutually_exclusive(tmp_path: Path) -> None:
+                 rules:
+                   - {if: {verdict: rework}, resume: w, goto: w}
+                   - {else: true, continue: true}
+-        """, agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER})
++        """,
++        agents={"spec-writer": _WRITER, "spec-reviewer": _REVIEWER},
++    )
+     with pytest.raises((LoadError, LoadErrors)) as ei:
+         load_workflow(wf)
+     assert "resume" in str(ei.value)
+@@ -564,37 +611,42 @@ def test_resume_and_goto_are_mutually_exclusive(tmp_path: Path) -> None:
+ 
+ def test_parse_agent_file_model_role_absent_is_none(tmp_path):
+     from imp.engine.loader import parse_agent_file
++
+     p = tmp_path / "x.md"
+     p.write_text(
+-        "---\nname: x\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
+-        "---\nbody\n")
++        "---\nname: x\noutput:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n"
++    )
+     agent = parse_agent_file(p)
+     assert agent.model_role is None
+ 
+ 
+ def test_parse_agent_file_model_role_present(tmp_path):
+     from imp.engine.loader import parse_agent_file
++
+     p = tmp_path / "x.md"
+     p.write_text(
+         "---\nname: x\nmodel_role: code_review\n"
+         "output:\n  status: {type: enum, values: [Success, Error]}\n"
+-        "---\nbody\n")
++        "---\nbody\n"
++    )
+     agent = parse_agent_file(p)
+     assert agent.model_role == "code_review"
+ 
+ 
+ def test_load_workflow_parses_model_rules(tmp_path):
+     from imp.engine.loader import load_workflow
++
+     wf_dir = tmp_path / "wf"
+     (wf_dir / "agents").mkdir(parents=True)
+     (wf_dir / "agents" / "a.md").write_text(
+-        "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
+-        "---\nbody\n")
++        "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n"
++    )
+     (wf_dir / "workflow.yaml").write_text(
+         "name: w\n"
+         "model_rules:\n  code_review:\n    differ_provider_from: code\n"
+         "phases:\n  - name: p\n    steps:\n"
+-        "      - {name: s, file: agents/a.md, model_role: code}\n")
++        "      - {name: s, file: agents/a.md, model_role: code}\n"
++    )
+     wf = load_workflow(wf_dir)
+     assert wf.model_rules["code_review"].differ_provider_from == "code"
+ 
+@@ -602,17 +654,69 @@ def test_load_workflow_parses_model_rules(tmp_path):
+ def test_load_workflow_rejects_constraint_cycle(tmp_path):
+     from imp.engine.errors import LoadError, LoadErrors
+     from imp.engine.loader import load_workflow
++
+     wf_dir = tmp_path / "wf"
+     (wf_dir / "agents").mkdir(parents=True)
+     (wf_dir / "agents" / "a.md").write_text(
+-        "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n"
+-        "---\nbody\n")
++        "---\nname: a\noutput:\n  status: {type: enum, values: [Success, Error]}\n---\nbody\n"
++    )
+     (wf_dir / "workflow.yaml").write_text(
+         "name: w\n"
+         "model_rules:\n"
+         "  x:\n    differ_provider_from: y\n"
+         "  y:\n    differ_provider_from: x\n"
+         "phases:\n  - name: p\n    steps:\n"
+-        "      - {name: s, file: agents/a.md}\n")
++        "      - {name: s, file: agents/a.md}\n"
++    )
+     with pytest.raises((LoadError, LoadErrors), match="cycle"):
+         load_workflow(wf_dir)
++
++
++def test_load_workflow_parses_model_tiers(tmp_path: Path) -> None:
++    wf_dir = tmp_path / "wf"
++    wf_dir.mkdir()
++    (wf_dir / "workflow.yaml").write_text(
++        "name: w\n"
++        "model_tiers: [fast, balanced, powerful]\n"
++        "phases:\n"
++        "  - name: p\n"
++        "    steps:\n"
++        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
++    )
++    from imp.engine.loader import load_workflow
++
++    wf = load_workflow(wf_dir)
++    assert wf.model_tiers == ("fast", "balanced", "powerful")
++
++
++def test_load_workflow_model_tiers_absent_is_empty(tmp_path: Path) -> None:
++    wf_dir = tmp_path / "wf"
++    wf_dir.mkdir()
++    (wf_dir / "workflow.yaml").write_text(
++        "name: w\n"
++        "phases:\n"
++        "  - name: p\n"
++        "    steps:\n"
++        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
++    )
++    from imp.engine.loader import load_workflow
++
++    wf = load_workflow(wf_dir)
++    assert wf.model_tiers == ()
++
++
++def test_load_workflow_model_tiers_duplicate_raises(tmp_path: Path) -> None:
++    wf_dir = tmp_path / "wf"
++    wf_dir.mkdir()
++    (wf_dir / "workflow.yaml").write_text(
++        "name: w\n"
++        "model_tiers: [fast, fast]\n"
++        "phases:\n"
++        "  - name: p\n"
++        "    steps:\n"
++        "      - {name: s, command: ./x.sh, rules: [{else: true, continue: true}]}\n"
++    )
++    from imp.engine.loader import load_workflow
++
++    with pytest.raises((LoadError, LoadErrors), match="duplicate"):
++        load_workflow(wf_dir)

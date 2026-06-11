@@ -1,0 +1,141 @@
+diff --git a/src/imp/evals/models.py b/src/imp/evals/models.py
+index 2d5902b..ca2d692 100644
+--- a/src/imp/evals/models.py
++++ b/src/imp/evals/models.py
+@@ -18,7 +18,28 @@ BLOCKING_SEVERITIES = ("Critical", "Major")  # spec "Decision rules": blocking r
+ # role_to_model_map is keyed by agent_name, so same-agent x N is inexpressible.
+ # Adding it = switch role_to_model_map to a `members: tuple[Member, ...]` list
+ # (Member = agent_name+provider+model+override). Not needed for Q1-Q4.
+-STRUCTURES = ("monolithic", "slice-panel")
++PER_TASK_STRUCTURES = ("per-task-monolithic", "per-task-slice-panel")
++STRUCTURES = ("monolithic", "slice-panel", *PER_TASK_STRUCTURES)
++
++
++@dataclass(frozen=True)
++class TaskSlice:
++    """One task's diff in a multi-task fixture sequence. `index` is the 0-based
++    position in `Fixture.tasks` (and equals `ExpectedFinding.manifest_task`), so the
++    `tasks[i]` / `base + tasks[0..i]` slice math is direct. `task_context` describes
++    ONLY this task (not the cumulative change) — feeding the cumulative context to a
++    per-task reviewer would leak the cross-task hint the cell exists to withhold."""
++
++    index: int
++    diff: str
++    task_context: str
++
++    def to_dict(self) -> dict[str, Any]:
++        return asdict(self)
++
++    @classmethod
++    def from_dict(cls, d: dict[str, Any]) -> TaskSlice:
++        return cls(index=int(d["index"]), diff=d["diff"], task_context=d["task_context"])
+ 
+ 
+ @dataclass(frozen=True)
+@@ -32,6 +53,8 @@ class ExpectedFinding:
+     description: str
+     severity: str  # one of SEVERITIES
+     must_catch: bool
++    cross_task: bool = False  # bug manifests only when a LATER task interacts with an earlier one
++    manifest_task: int | None = None  # 0-based index into tasks where the catch is scored; TEST/AUTHORING anchor only — no runtime keys on it
+ 
+     def to_dict(self) -> dict[str, Any]:
+         return asdict(self)
+@@ -44,6 +67,8 @@ class ExpectedFinding:
+             description=d["description"],
+             severity=d["severity"],
+             must_catch=bool(d["must_catch"]),
++            cross_task=bool(d.get("cross_task", False)),
++            manifest_task=d.get("manifest_task"),
+         )
+ 
+ 
+@@ -100,6 +125,7 @@ class Fixture:
+     expected_findings: tuple[ExpectedFinding, ...]
+     clean_loci: tuple[CleanLocus, ...]
+     meta: FixtureMeta
++    tasks: tuple[TaskSlice, ...] = ()  # empty == today's single-diff fixture; top-level `diff` stays the CUMULATIVE base->head diff
+ 
+     def to_dict(self) -> dict[str, Any]:
+         return {
+@@ -112,6 +138,7 @@ class Fixture:
+             "expected_findings": [f.to_dict() for f in self.expected_findings],
+             "clean_loci": [c.to_dict() for c in self.clean_loci],
+             "meta": self.meta.to_dict(),
++            "tasks": [t.to_dict() for t in self.tasks],
+         }
+ 
+     @classmethod
+@@ -128,6 +155,7 @@ class Fixture:
+             ),
+             clean_loci=tuple(CleanLocus.from_dict(c) for c in d.get("clean_loci", [])),
+             meta=FixtureMeta.from_dict(d.get("meta", {})),
++            tasks=tuple(TaskSlice.from_dict(t) for t in d.get("tasks", [])),
+         )
+ 
+ 
+diff --git a/tests/evals/test_models.py b/tests/evals/test_models.py
+index 3cb53eb..f519919 100644
+--- a/tests/evals/test_models.py
++++ b/tests/evals/test_models.py
+@@ -7,6 +7,7 @@ from imp.evals.models import (
+     GradeResult,
+     ReviewFinding,
+     RunResult,
++    TaskSlice,
+     Telemetry,
+     Variant,
+ )
+@@ -190,3 +191,52 @@ def test_run_result_imp_commit_sha_defaults_empty_when_absent():
+         "dollars": 0.0,
+     })
+     assert rr.imp_commit_sha == ""
++
++
++def test_task_slice_roundtrips_through_dict():
++    from imp.evals.models import TaskSlice
++    ts = TaskSlice(index=1, diff="--- a\n+++ b\n", task_context="added the second caller")
++    assert TaskSlice.from_dict(ts.to_dict()) == ts
++
++
++def test_expected_finding_cross_task_survives_reload():
++    # The corruption guard (Component 1, Major): a saved cross_task=True must NOT
++    # silently reload as False through the hand-written from_dict.
++    ef = ExpectedFinding(
++        locus="subagents.py:203", symbol="dispatch_task", description="second caller unbounded",
++        severity="Major", must_catch=True, cross_task=True, manifest_task=1,
++    )
++    back = ExpectedFinding.from_dict(ef.to_dict())
++    assert back.cross_task is True
++    assert back.manifest_task == 1
++    assert back == ef
++
++
++def test_expected_finding_defaults_local_when_fields_absent():
++    # An existing on-disk fixture (no cross_task/manifest_task keys) loads as local.
++    back = ExpectedFinding.from_dict({
++        "locus": "x.py:1", "symbol": "f", "description": "d",
++        "severity": "Major", "must_catch": True,
++    })
++    assert back.cross_task is False
++    assert back.manifest_task is None
++
++
++def test_fixture_with_tasks_roundtrips_and_empty_tasks_is_single_diff():
++    from imp.evals.models import TaskSlice
++    fx = Fixture(
++        id="mt", source="curated", base_sha="a", head_sha="b",
++        diff="CUMULATIVE", task_context="whole change",
++        expected_findings=(ExpectedFinding("x.py:1", "f", "d", "Major", True),),
++        clean_loci=(),
++        meta=FixtureMeta("code-reviewer", None, True, False),
++        tasks=(TaskSlice(0, "D0", "c0"), TaskSlice(1, "D1", "c1")),
++    )
++    assert Fixture.from_dict(fx.to_dict()) == fx
++    # an existing single-diff fixture deserializes with tasks=()
++    legacy = Fixture.from_dict({
++        "id": "legacy", "source": "curated", "base_sha": "a", "head_sha": "b",
++        "diff": "D", "task_context": "c", "expected_findings": [],
++        "clean_loci": [], "meta": {},
++    })
++    assert legacy.tasks == ()

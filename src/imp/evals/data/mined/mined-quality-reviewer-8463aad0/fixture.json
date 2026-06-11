@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-8463aad0",
+  "source": "mined",
+  "base_sha": "89f9db7be3ba04ce93edabae22d044d5fba1402c",
+  "head_sha": "8463aad0f557b3de54fbca863897ffa9ac54d9af",
+  "task_context": "Code quality review of a committed change in /home/jpoimboe/imp.\nDESCRIPTION: Task 7 of Agent Completion Recovery \u2014 wire end-of-turn continuation_fn into the claude_code provider, resuming via `await client.query(...)`, with `_classify_agent_text` gated to the non-interactive path and run BEFORE the nudge.\nPLAN_OR_REQUIREMENTS: Task 7 from docs/superpowers/plans/2026-05-29-agent-completion-recovery.md\nFocus on the behavioral-semantics risks unique to this task:\n- **Classify now runs per non-interactive nudge turn (up to N+1 times), not just the terminal turn.** Is this correctly implemented and is the in-code comment documenting it accurate? Could repeated classification on each nudge turn cause any wrong/duplicate error emission, or is the control flow such that a classify hit always returns before a second classification?\n- **Interactive turns are never classified now.** Confirm this can't regress a real scenario where an interactive claude_code turn previously surfaced an auth/quota error via classify. (Check: on the interactive path, was classify previously reachable? In the original, the interactive branch resumed via user_input_fn and `continue`d before reaching classify \u2014 so classify was effectively non-interactive-only already. Confirm the change doesn't lose coverage.)\n- **`await client.query(next_text)` resume** \u2014 correct for driving the CLI? Compare to how the legacy interactive branch and the existing mid-turn ask_user path call query.\n- Control-flow completeness: every path continues/returns.\n- Duplication across the continuation and legacy interactive blocks (build Message / append \u00d73 / query / continue) \u2014 acceptable given the deferred provider-loop unification, or extract now? Give a judgment.\n- Test quality: do the 3 tests verify real behavior? Is the multi-turn FakeClaudeSDKClient scripting (single flat scripted list advanced by repeated `continue`) a faithful model of the real CLI's receive_response generator?\n- Run `cd /home/jpoimboe/imp && .venv/bin/python -m mypy src/imp/providers/claude_code.py 2>&1 | tail -6` and report whether any mypy errors are NEW vs pre-existing.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (approve / needs changes). Be specific with file:line.",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/claude_code.py:882",
+      "symbol": "",
+      "description": "The continuation block would nudge an interactive session if both interactive=True and continuation_fn are set, lacking the `not invocation.interactive` guard present in classify.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/claude_code.py:895",
+      "symbol": "",
+      "description": "Both the continuation block and legacy interactive block duplicate the same three-step sequence: build Message, append to transcript, call client.query(...).",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/providers/test_claude_code.py:0",
+      "symbol": "test_continuation_resumes_then_completes",
+      "description": "The test lacks an explicit assertion that the continuation nudge was sent; adding assert client.queries[1] == \"please call complete_step\" would make the behavior explicit.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

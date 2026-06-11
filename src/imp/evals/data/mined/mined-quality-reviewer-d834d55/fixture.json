@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-d834d55",
+  "source": "mined",
+  "base_sha": "4a698cb",
+  "head_sha": "d834d55",
+  "task_context": "You are doing a code quality review of Task 1 in the imp project at /home/jpoimboe/imp.\nDESCRIPTION: Added `engine_env()` helper (src/imp/engine/env.py) returning {IMP_PROJECT_ROOT, IMP_ARTIFACTS_DIR} from two Path args, plus a unit test.\nPLAN_OR_REQUIREMENTS: Task 1 from docs/superpowers/plans/2026-05-29-engine-env-injection.md \u2014 a single keyword-only helper, TDD.\nReview the diff: `git -C /home/jpoimboe/imp diff 4a698cb d834d55`\nAssess standard code quality concerns plus:\n- Does the file have one clear responsibility with a well-defined interface?\n- Is it following the plan's file structure?\n- Did it overbuild (extra vars/functions not requested)?\n- Does the test verify real behavior?\nReturn:\n- Strengths\n- Issues (Critical / Important / Minor)\n- Assessment (Approved / needs changes)",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

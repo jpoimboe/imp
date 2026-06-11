@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-1f6db98",
+  "source": "mined",
+  "base_sha": "e07b844",
+  "head_sha": "1f6db98",
+  "task_context": "You are a code quality reviewer. Work from: /home/jpoimboe/imp/.claude/worktrees/name-on-intent\nDESCRIPTION: Task 4 \u2014 `rename_change` now applies the rename immediately inside the tool call and returns the new slug in-band (content-only: rewrites gitignored change.json, emits change_renamed, no git). Adds `Change.rename()` helper; rewrites the tool; rewrites its tests.\nPLAN_OR_REQUIREMENTS: Task 4 from docs/superpowers/plans/2026-06-05-name-on-intent-immutable-prompts.md\n- Correctness: `Change.rename()` \u2014 read/patch/rewrite of change.json: does it preserve all OTHER keys in change.json (it patches only \"title\")? Any risk of losing fields? Is `log.append(agent_id=None, ...)` correct? Does returning `self.slug` after mutating `self.title` correctly re-derive?\n- Correctness of the tool: validate-first ordering (slugify before change_state guard); the no-op short-circuit on slug equality against the LIVE change; the `or JsonlEventLog(ctx.events_path)` fallback for `log` \u2014 is that fallback ever exercised/correct, and does it differ from the event_log the change was created with (could it write to a different events file)?\n- Error surfacing: InvalidSlug subclasses ValueError \u2014 is relying on that clean, or should the tool convert explicitly? (It's relied upon; judge if acceptable.)\n- Test quality: do the 5 tests verify real behavior? Is the noop/double-rename coverage meaningful?\n- Docstrings/comments accurate? Style consistent with the codebase's other tools and the Change dataclass?\n- File responsibility, scope creep, YAGNI.\nRun `PYTHONPATH=src python -m pytest tests/test_rename_change_tool.py -v` to confirm green.\nBe proportionate. Return:\n- Strengths\n- Issues (Critical / Important / Minor) with file:line refs\n- Assessment: APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/agents/tools/rename_change.py:34",
+      "symbol": "",
+      "description": "The fallback `log = ctx.event_log or JsonlEventLog(ctx.events_path)` constructs a fresh log instance that diverges from the runner's `elog`, creating potential chain-map mismatches in test contexts where the fallback fires.",
+      "severity": "Important",
+      "must_catch": true,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/engine/executor.py:195-196",
+      "symbol": "apply_pending_rename",
+      "description": "The `apply_pending_rename` function is now superseded by immediate `rename_change` but remains wired in the executor step loop; should be documented as a legacy path or removed.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_rename_change_tool.py:45",
+      "symbol": "",
+      "description": "The assertion using double conditional `if hasattr(state, \"pending_rename\") else True` is overly complex and should simplify to `assert state.pending_rename is None`.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_rename_change_tool.py:1",
+      "symbol": "",
+      "description": "Missing `from __future__ import annotations` import, inconsistent with other test and source files in the codebase.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

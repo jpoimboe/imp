@@ -1,0 +1,331 @@
+diff --git a/src/imp/assets/words.txt b/src/imp/assets/words.txt
+deleted file mode 100644
+index 7e041f0..0000000
+--- a/src/imp/assets/words.txt
++++ /dev/null
+@@ -1,199 +0,0 @@
+-amber
+-arch
+-ash
+-aspen
+-azure
+-bark
+-bay
+-beacon
+-birch
+-blaze
+-bloom
+-bold
+-brave
+-bray
+-breeze
+-bright
+-brook
+-brush
+-burr
+-calm
+-cedar
+-chalk
+-clay
+-cliff
+-cloak
+-cloud
+-coast
+-colt
+-copper
+-coral
+-crag
+-crisp
+-croft
+-crust
+-dale
+-dawn
+-deft
+-delta
+-dew
+-drift
+-dusk
+-dust
+-echo
+-edge
+-elm
+-ember
+-fawn
+-fern
+-field
+-flint
+-floe
+-flow
+-foam
+-ford
+-forge
+-fox
+-frost
+-gale
+-glade
+-glen
+-glint
+-glow
+-gold
+-granite
+-grove
+-gust
+-harbor
+-hawk
+-hazel
+-heath
+-helm
+-heron
+-hill
+-hilt
+-hue
+-hull
+-husk
+-iris
+-isle
+-ivory
+-jade
+-kelp
+-kestrel
+-knoll
+-lagoon
+-lark
+-laurel
+-leaf
+-ledge
+-lime
+-linen
+-loch
+-loft
+-lunar
+-lupin
+-maple
+-marsh
+-mast
+-meadow
+-mesa
+-milt
+-mint
+-mire
+-mist
+-moon
+-moss
+-mote
+-moth
+-mull
+-nimbus
+-noir
+-oak
+-ochre
+-onyx
+-opal
+-otter
+-peak
+-peat
+-pine
+-plain
+-plum
+-pond
+-pool
+-quartz
+-quill
+-rain
+-raven
+-ray
+-reed
+-reef
+-ridge
+-rill
+-rim
+-river
+-roan
+-rook
+-root
+-rose
+-rune
+-rush
+-sage
+-salt
+-sand
+-seal
+-shale
+-shoal
+-shore
+-silver
+-slate
+-sloe
+-smoke
+-snow
+-sole
+-soot
+-spruce
+-stern
+-stone
+-storm
+-straw
+-stream
+-stripe
+-surf
+-surge
+-sward
+-swift
+-teal
+-thorn
+-tide
+-till
+-timber
+-tine
+-toft
+-trace
+-trawl
+-tread
+-twig
+-umber
+-vale
+-vault
+-veil
+-vent
+-vest
+-vex
+-vine
+-wade
+-wake
+-wale
+-wane
+-ward
+-warp
+-wave
+-wax
+-weld
+-whin
+-wisp
+-wren
+-yarn
+-yew
+-zinc
+diff --git a/src/imp/cli/live_driver.py b/src/imp/cli/live_driver.py
+index 18195c8..58aadd2 100644
+--- a/src/imp/cli/live_driver.py
++++ b/src/imp/cli/live_driver.py
+@@ -126,7 +126,7 @@ class LiveDriver:
+         # its naming step surfaces the name here.
+         if not (root.title and root.title.strip()):
+             return
+-        head = (f"#{root.slug if root.slug is not None else '?'}  "
++        head = (f"#{root.slug if root.slug else root.title}  "
+                 f"{root.title}").rstrip()
+         self._print_lines([pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=self._color)])
+ 
+diff --git a/src/imp/cli/main.py b/src/imp/cli/main.py
+index 61fe358..9d01929 100644
+--- a/src/imp/cli/main.py
++++ b/src/imp/cli/main.py
+@@ -30,7 +30,6 @@ from imp.engine import journal, recovery, worktree
+ from imp.engine.change import Change
+ from imp.engine.errors import LoadError, LoadErrors
+ from imp.engine.executor import RunResult, run_change
+-from imp.engine.naming import random_title
+ from imp.engine.project_root import find_project_root
+ from imp.engine.slug import dated_slug, new_change_id
+ from imp.engine.state import LockHeld, ProjectLock, State
+@@ -140,7 +139,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
+         return 2
+ 
+     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
+-    title = args.title if args.title is not None else random_title()
++    # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
++    # names it via rename_change once intent is clear, or the user passes --title.
++    title = args.title if args.title is not None else ""
+     try:
+         change = Change.create(control, title=title, change_id=change_id,
+                                base_branch=base)
+diff --git a/src/imp/cli/render_text.py b/src/imp/cli/render_text.py
+index 75a5b44..ffb6398 100644
+--- a/src/imp/cli/render_text.py
++++ b/src/imp/cli/render_text.py
+@@ -29,7 +29,7 @@ _DIFFER_LABELS = {1: "vendor jump", 2: "same-vendor fallback", 3: "identical"}
+ def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
+                 width: int = 80) -> Iterator[str]:
+     root = tree.root
+-    head = f"#{root.slug if root.slug is not None else '?'}  {root.title}".rstrip()
++    head = f"#{root.slug or '?'}  {root.title}".rstrip()
+     if root.status != "running":
+         head = f"{head}  ({root.status})"
+     yield pal.ansi(head, *pal.NODE_COLORS["workflow"], enabled=color)
+diff --git a/src/imp/engine/naming.py b/src/imp/engine/naming.py
+deleted file mode 100644
+index 12a94cb..0000000
+--- a/src/imp/engine/naming.py
++++ /dev/null
+@@ -1,28 +0,0 @@
+-"""Random three-word phrase for the default Change title (spec §3.1).
+-
+-This is engine code, so `random` is fair game. The combinatorial space of three
+-independent words makes same-instant collisions negligible; create_worktree
+-still retries on the rare branch collision.
+-"""
+-
+-from __future__ import annotations
+-
+-import random
+-from importlib.resources import files
+-
+-_WORDS: list[str] | None = None
+-
+-
+-def _words() -> list[str]:
+-    global _WORDS
+-    if _WORDS is None:
+-        text = files("imp.assets").joinpath("words.txt").read_text()
+-        _WORDS = [w.strip() for w in text.splitlines() if w.strip()]
+-    return _WORDS
+-
+-
+-def random_title(rng: random.Random | None = None) -> str:
+-    """e.g. "brave silver otter". Slug is derived from this via slug.slugify."""
+-    r = rng or random
+-    pool = _words()
+-    return " ".join(r.choice(pool) for _ in range(3))
+diff --git a/tests/test_naming.py b/tests/test_naming.py
+deleted file mode 100644
+index 129b23f..0000000
+--- a/tests/test_naming.py
++++ /dev/null
+@@ -1,20 +0,0 @@
+-import re
+-
+-from imp.engine.naming import random_title
+-
+-
+-def test_random_title_three_lowercase_words() -> None:
+-    title = random_title()
+-    # Shape only — never assert literal RNG output (spec §11 "shape-valid").
+-    assert re.fullmatch(r"[a-z]+ [a-z]+ [a-z]+", title), title
+-
+-
+-def test_random_title_varies() -> None:
+-    # Over many draws we should see more than one distinct phrase.
+-    seen = {random_title() for _ in range(50)}
+-    assert len(seen) > 1
+-
+-
+-def test_random_title_seeded_is_deterministic() -> None:
+-    import random
+-    assert random_title(rng=random.Random(0)) == random_title(rng=random.Random(0))
+diff --git a/tests/test_new_unnamed.py b/tests/test_new_unnamed.py
+new file mode 100644
+index 0000000..95b63a6
+--- /dev/null
++++ b/tests/test_new_unnamed.py
+@@ -0,0 +1,11 @@
++from pathlib import Path
++
++
++def test_imp_new_without_title_is_unnamed(tmp_path: Path) -> None:
++    from imp.engine.change import Change
++    from tests.conftest import _seed_control
++    _seed_control(tmp_path)
++    ch = Change.create(tmp_path, title="", change_id="2026-06-05-aaa000",
++                       base_branch="main")
++    assert ch.title == ""
++    assert ch.slug == ""          # derived: dated_slug("", ...) == ""

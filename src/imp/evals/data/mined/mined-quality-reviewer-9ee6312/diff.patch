@@ -1,0 +1,559 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 76a2d1f..a8d450c 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -38,6 +38,16 @@ imp = "imp.cli.main:main"
+ [tool.hatch.build.targets.wheel]
+ packages = ["src/imp"]
+ 
++# Explicit package-data for setuptools fallback and editable re-installs.
++# Hatchling (the primary build backend) includes all files under packages=
++# by default, so the .yaml/.sh/.md assets ship without further config.
++[tool.setuptools.package-data]
++"imp.assets" = [
++  "workflows/default/workflow.yaml",
++  "workflows/default/scripts/*.sh",
++  "workflows/default/agents/*.md",
++]
++
+ [tool.pytest.ini_options]
+ testpaths = ["tests"]
+ addopts = "-ra --strict-markers"
+diff --git a/src/imp/assets/__init__.py b/src/imp/assets/__init__.py
+new file mode 100644
+index 0000000..6dbfe59
+--- /dev/null
++++ b/src/imp/assets/__init__.py
+@@ -0,0 +1,27 @@
++"""Static assets shipped with imp (workflows, agent definitions, scripts).
++
++Resolved via importlib.resources so the default workflow is findable inside
++both editable installs and wheel installs.
++"""
++
++from __future__ import annotations
++
++from importlib.resources import files
++from pathlib import Path
++
++
++def default_workflow_dir() -> Path:
++    """Return a real filesystem Path to the shipped default workflow.
++
++    Editable installs return a real source path; wheel installs return a
++    Traversable that we coerce to Path via str(). For V0 we only support
++    sources that resolve to real paths (no zipapp shipping); raise if not.
++    """
++    resource = files("imp.assets").joinpath("workflows", "default")
++    p = Path(str(resource))
++    if not p.is_dir():
++        raise RuntimeError(
++            f"default workflow not found at {p}; was the package installed "
++            f"without its assets? Try `pip install -e .` from a checkout."
++        )
++    return p
+diff --git a/src/imp/assets/workflows/default/agents/code-reviewer.md b/src/imp/assets/workflows/default/agents/code-reviewer.md
+new file mode 100644
+index 0000000..06eb787
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/code-reviewer.md
+@@ -0,0 +1,23 @@
++---
++name: code-reviewer
++description: Review the implementation against the spec.
++tools: [read_file, glob, grep, execute, query_events, git_diff]
++output:
++  status: {type: enum, values: [Success, Error]}
++  verdict: {type: enum, values: [approve, rework]}
++  notes: {type: string, required: false}
++---
++
++You are reviewing the implementation.
++
++Spec: {{ artifacts.spec }}
++Design: {{ artifacts.design }}
++
++Inspect the diff (via git_diff). Evaluate:
++- Does the implementation satisfy the spec's acceptance criteria?
++- Do the tests cover the spec's behavior, not just the implementation?
++- Are there obvious bugs, security issues, or regressions?
++- Is the code consistent with project conventions?
++
++verdict=approve if ready to merge.
++verdict=rework with concrete notes if not.
+diff --git a/src/imp/assets/workflows/default/agents/coder.md b/src/imp/assets/workflows/default/agents/coder.md
+new file mode 100644
+index 0000000..d0f3733
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/coder.md
+@@ -0,0 +1,23 @@
++---
++name: coder
++description: Implement the plan.
++tools: [read_file, write_file, edit_file, glob, grep, execute, ls, query_events, git_diff]
++output:
++  status: {type: enum, values: [Success, Error]}
++  summary: {type: string, required: false}
++---
++
++You are implementing the plan.
++
++Spec: {{ artifacts.spec }}
++Design: {{ artifacts.design }}
++Plan: {{ artifacts.plan }}
++
++Work through the plan task by task. After each task:
++- Run the relevant tests (via execute)
++- Commit only when tests pass
++
++Use `git_diff` to review your own changes before committing. Do not push.
++
++When all plan tasks are complete and the full test suite passes, produce
++status=Success with a summary of what was built.
+diff --git a/src/imp/assets/workflows/default/agents/context-loader.md b/src/imp/assets/workflows/default/agents/context-loader.md
+new file mode 100644
+index 0000000..9bbcbb9
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/context-loader.md
+@@ -0,0 +1,21 @@
++---
++name: context-loader
++description: Survey the repo, capture what already exists, write a context note.
++tools: [ls, glob, grep, read_file, query_events]
++output:
++  status: {type: enum, values: [Success, Error]}
++  summary: {type: string, required: false}
++---
++
++You are surveying a project so the next agent (intent-clarifier) has context.
++
++Your job:
++1. List the top-level directory structure.
++2. Read README.md or equivalent if it exists.
++3. Identify the primary language, framework, and any test setup.
++4. Write a concise summary (under 500 words) to `/artifacts/context.md`.
++
++Do not write code. Do not modify anything outside `/artifacts/`.
++
++When done, produce the structured response with status=Success and a
++one-sentence summary.
+diff --git a/src/imp/assets/workflows/default/agents/design-reviewer.md b/src/imp/assets/workflows/default/agents/design-reviewer.md
+new file mode 100644
+index 0000000..a57dd98
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/design-reviewer.md
+@@ -0,0 +1,22 @@
++---
++name: design-reviewer
++description: Review the design against the spec.
++tools: [read_file, query_events]
++output:
++  status: {type: enum, values: [Success, Error]}
++  verdict: {type: enum, values: [approve, rework]}
++  notes: {type: string, required: false}
++---
++
++You are reviewing the design.
++
++Spec: {{ artifacts.spec }}
++Design: {{ artifacts.design }}
++
++Evaluate:
++- Does the design satisfy the spec's acceptance criteria?
++- Are component boundaries clean?
++- Are the named risks the real risks?
++- Could a competent engineer implement this without inventing decisions?
++
++Produce verdict=approve or verdict=rework with notes.
+diff --git a/src/imp/assets/workflows/default/agents/design-writer.md b/src/imp/assets/workflows/default/agents/design-writer.md
+new file mode 100644
+index 0000000..921a84a
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/design-writer.md
+@@ -0,0 +1,22 @@
++---
++name: design-writer
++description: Write a DESIGN.md from the spec.
++tools: [read_file, write_file, edit_file, glob, grep, query_events]
++output:
++  status: {type: enum, values: [Success, Error]}
++  design_path: {type: string, required: false}
++---
++
++You are designing the implementation approach.
++
++Spec: {{ artifacts.spec }}
++Project context: {{ artifacts.context }}
++
++Write `/artifacts/design.md` covering:
++- **Architecture:** 2-3 paragraphs on the approach
++- **Components:** what modules/files will be created or modified
++- **Interfaces:** signatures and contracts between components
++- **Risks:** what could go wrong; mitigations
++
++Read existing code as needed. Do not write code yet. Only write to
++`/artifacts/`.
+diff --git a/src/imp/assets/workflows/default/agents/documenter.md b/src/imp/assets/workflows/default/agents/documenter.md
+new file mode 100644
+index 0000000..80d0d17
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/documenter.md
+@@ -0,0 +1,18 @@
++---
++name: documenter
++description: Update README/CHANGELOG/docs as needed for this change.
++tools: [read_file, write_file, edit_file, glob, grep, query_events, git_diff]
++output:
++  status: {type: enum, values: [Success, Error]}
++  summary: {type: string, required: false}
++---
++
++You are updating documentation for the just-implemented change.
++
++Spec: {{ artifacts.spec }}
++
++Inspect the diff. Update README, CHANGELOG, or other docs only if the change
++affects user-facing behavior or public APIs. If no documentation changes are
++warranted, say so explicitly in the summary and produce status=Success.
++
++Do not invent doc files the project doesn't already use.
+diff --git a/src/imp/assets/workflows/default/agents/intent-clarifier.md b/src/imp/assets/workflows/default/agents/intent-clarifier.md
+new file mode 100644
+index 0000000..00637a0
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/intent-clarifier.md
+@@ -0,0 +1,19 @@
++---
++name: intent-clarifier
++description: Chat with the user to capture what change they want to make.
++tools: [read_file, query_events]
++output:
++  status: {type: enum, values: [Success, Error]}
++  intent: {type: string}
++---
++
++You are clarifying what change the user wants to make to this project.
++
++Project context: {{ artifacts.context }}
++
++Ask focused questions, one at a time. Aim for 2-5 exchanges, then summarize
++the captured intent and ask the user to confirm. When the user confirms,
++produce the structured response with status=Success and intent= a clear
++1-2 paragraph statement of what should be built.
++
++Do not write code or modify files. Your only output is the structured intent.
+diff --git a/src/imp/assets/workflows/default/agents/plan-writer.md b/src/imp/assets/workflows/default/agents/plan-writer.md
+new file mode 100644
+index 0000000..af1a2d9
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/plan-writer.md
+@@ -0,0 +1,19 @@
++---
++name: plan-writer
++description: Write a PLAN.md (bite-sized task list) from the design.
++tools: [read_file, write_file, edit_file, glob, grep, query_events]
++output:
++  status: {type: enum, values: [Success, Error]}
++  plan_path: {type: string, required: false}
++---
++
++You are decomposing the design into an executable plan.
++
++Spec: {{ artifacts.spec }}
++Design: {{ artifacts.design }}
++
++Write `/artifacts/plan.md`. Use TDD ordering: for each unit of work, list the
++failing test first, then the implementation, then the assertion that it
++passes, then the commit. Tasks should be 5-15 minutes each.
++
++Do not write code. Only write to `/artifacts/`.
+diff --git a/src/imp/assets/workflows/default/agents/spec-reviewer.md b/src/imp/assets/workflows/default/agents/spec-reviewer.md
+new file mode 100644
+index 0000000..d78b91a
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/spec-reviewer.md
+@@ -0,0 +1,26 @@
++---
++name: spec-reviewer
++description: Review the spec against the captured intent; verdict approve or rework.
++tools: [read_file, query_events]
++output:
++  status: {type: enum, values: [Success, Error]}
++  verdict: {type: enum, values: [approve, rework]}
++  notes: {type: string, required: false}
++---
++
++You are reviewing the spec.
++
++Captured intent: {{ events['intent-clarifier'].intent }}
++Spec: {{ artifacts.spec }}
++
++Evaluate:
++- Does the spec address the captured intent?
++- Are the acceptance criteria concrete and testable?
++- Are scope boundaries clear?
++- Are there obvious gaps or contradictions?
++
++Produce a structured response:
++- verdict=approve if the spec is ready for design
++- verdict=rework if substantive issues exist (explain in notes)
++
++Be strict but fair. Cosmetic issues are not rework-worthy.
+diff --git a/src/imp/assets/workflows/default/agents/spec-writer.md b/src/imp/assets/workflows/default/agents/spec-writer.md
+new file mode 100644
+index 0000000..66f0773
+--- /dev/null
++++ b/src/imp/assets/workflows/default/agents/spec-writer.md
+@@ -0,0 +1,25 @@
++---
++name: spec-writer
++description: Write a SPEC.md from the captured intent.
++tools: [read_file, write_file, edit_file, glob, grep, query_events]
++output:
++  status: {type: enum, values: [Success, Error]}
++  spec_path: {type: string, required: false}
++---
++
++You are writing the specification for the change the user described.
++
++Captured intent: {{ events['intent-clarifier'].intent }}
++Project context: {{ artifacts.context }}
++
++Write `/artifacts/spec.md` covering:
++- **Goal:** one sentence
++- **Scope:** what's in and what's out
++- **Decisions summary:** any non-obvious choices
++- **Acceptance criteria:** what proves the change is done
++
++Be concrete. Reference existing code when relevant. Do not modify project
++source files — only write to `/artifacts/`.
++
++When done, produce the structured response with status=Success and
++spec_path="/artifacts/spec.md".
+diff --git a/src/imp/assets/workflows/default/scripts/lint-spec.sh b/src/imp/assets/workflows/default/scripts/lint-spec.sh
+new file mode 100755
+index 0000000..d56ee35
+--- /dev/null
++++ b/src/imp/assets/workflows/default/scripts/lint-spec.sh
+@@ -0,0 +1,9 @@
++#!/usr/bin/env bash
++# Minimal spec lint: artifact exists and is non-empty.
++set -euo pipefail
++SPEC="${IMP_ARTIFACTS_DIR:-.imp/changes/0/artifacts}/spec.md"
++if [[ ! -s "$SPEC" ]]; then
++  echo "spec missing or empty: $SPEC" >&2
++  exit 1
++fi
++echo "spec ok"
+diff --git a/src/imp/assets/workflows/default/scripts/run-tests.sh b/src/imp/assets/workflows/default/scripts/run-tests.sh
+new file mode 100755
+index 0000000..e874989
+--- /dev/null
++++ b/src/imp/assets/workflows/default/scripts/run-tests.sh
+@@ -0,0 +1,12 @@
++#!/usr/bin/env bash
++# Run the project's test suite. Convention: project provides `make test`
++# or `pytest` works. Falls through to a no-op pass if neither exists so
++# new projects without tests don't block.
++set -euo pipefail
++if [[ -f Makefile ]] && grep -q '^test:' Makefile; then
++  make test
++elif command -v pytest >/dev/null 2>&1 && [[ -d tests ]]; then
++  pytest -q
++else
++  echo "no tests found; passing by default"
++fi
+diff --git a/src/imp/assets/workflows/default/workflow.yaml b/src/imp/assets/workflows/default/workflow.yaml
+new file mode 100644
+index 0000000..8c6acea
+--- /dev/null
++++ b/src/imp/assets/workflows/default/workflow.yaml
+@@ -0,0 +1,139 @@
++name: standard-feature
++description: |
++  Standard imp workflow: onboard → spec → design → plan → implement → review → merge.
++  Each gate either advances, retries the current phase, or pauses for human input.
++
++phases: [onboard, spec, design, plan, implement, review, merge]
++
++defaults:
++  max_retries: 3
++  on_max_retries: {kind: pause}
++
++onboard:
++  steps:
++    - {name: context-loader, file: agents/context-loader.md, model_role: default}
++    - {name: intent-clarifier, file: agents/intent-clarifier.md, model_role: spec, interactive: true}
++  gates:
++    - type: human
++      prompt: "Captured intent look right?"
++      options:
++        - {label: Yes,  action: {kind: continue}}
++        - {label: Redo, action: {kind: retry}}
++
++spec:
++  steps:
++    - name: spec-writer
++      file: agents/spec-writer.md
++      model_role: spec
++      fs_permissions:
++        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
++        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
++        - {operations: [write], paths: ["/**"], mode: deny}
++      gates:
++        - type: script
++          command: ./scripts/lint-spec.sh
++          decide:
++            - {when: {exit: 0}, action: {kind: continue}}
++            - {else: true, action: {kind: retry}}
++  gates:
++    - type: agent
++      file: agents/spec-reviewer.md
++      model_role: spec_review
++      decide:
++        - {when: {verdict: approve},  action: {kind: continue}}
++        - {when: {verdict: rework},   action: {kind: retry}}
++        - {else: true, action: {kind: pause}}
++    - type: human
++      prompt: "Approve spec?"
++      options:
++        - {label: Approve,            action: {kind: continue}}
++        - {label: Back to onboarding, action: {kind: goto, target: onboard}}
++        - {label: Rewrite spec,       action: {kind: retry}}
++
++design:
++  steps:
++    - name: design-writer
++      file: agents/design-writer.md
++      model_role: design
++      fs_permissions:
++        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
++        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
++        - {operations: [write], paths: ["/**"], mode: deny}
++  gates:
++    - type: agent
++      file: agents/design-reviewer.md
++      model_role: design_review
++      decide:
++        - {when: {verdict: approve}, action: {kind: continue}}
++        - {when: {verdict: rework},  action: {kind: retry}}
++        - {else: true, action: {kind: pause}}
++    - type: human
++      prompt: "Approve design?"
++      options:
++        - {label: Approve,       action: {kind: continue}}
++        - {label: Back to spec,  action: {kind: goto, target: spec}}
++        - {label: Rewrite design, action: {kind: retry}}
++
++plan:
++  steps:
++    - name: plan-writer
++      file: agents/plan-writer.md
++      model_role: design
++      fs_permissions:
++        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
++        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
++        - {operations: [write], paths: ["/**"], mode: deny}
++  gates:
++    - type: human
++      prompt: "Approve plan?"
++      options:
++        - {label: Approve,        action: {kind: continue}}
++        - {label: Back to design, action: {kind: goto, target: design}}
++        - {label: Rewrite plan,   action: {kind: retry}}
++
++implement:
++  steps:
++    - name: coder
++      file: agents/coder.md
++      model_role: code
++      fs_permissions:
++        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
++        - {operations: [write], paths: ["/project/**"], mode: allow}
++        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
++      gates:
++        - type: script
++          command: ./scripts/run-tests.sh
++          decide:
++            - {when: {exit: 0}, action: {kind: continue}}
++            - {else: true, action: {kind: retry}}
++    - name: documenter
++      file: agents/documenter.md
++      model_role: code
++      fs_permissions:
++        - {operations: [read],  paths: ["/project/**", "/artifacts/**"], mode: allow}
++        - {operations: [write], paths: ["/project/**"], mode: allow}
++        - {operations: [write], paths: ["/artifacts/**"], mode: allow}
++
++review:
++  steps: []
++  gates:
++    - type: agent
++      file: agents/code-reviewer.md
++      model_role: code_review
++      decide:
++        - {when: {verdict: approve}, action: {kind: continue}}
++        - {when: {verdict: rework},  action: {kind: goto, target: implement}}
++        - {else: true, action: {kind: pause}}
++    - type: human
++      prompt: "Merge?"
++      options:
++        - {label: Merge,           action: {kind: continue}}
++        - {label: Back to implement, action: {kind: goto, target: implement}}
++
++merge:
++  steps: []
++  gates:
++    - type: human
++      prompt: "Change complete. Close it?"
++      options:
++        - {label: Close, action: {kind: continue}}
+diff --git a/tests/test_default_workflow.py b/tests/test_default_workflow.py
+new file mode 100644
+index 0000000..40dcaeb
+--- /dev/null
++++ b/tests/test_default_workflow.py
+@@ -0,0 +1,43 @@
++"""The shipped default workflow must pass loader validation as-is."""
++
++from __future__ import annotations
++
++import shutil
++from pathlib import Path
++
++import pytest
++
++from imp.assets import default_workflow_dir
++from imp.engine.loader import load_workflow
++
++
++def test_default_workflow_dir_exists() -> None:
++    wf = default_workflow_dir()
++    assert (wf / "workflow.yaml").is_file()
++    assert (wf / "agents").is_dir()
++    assert (wf / "scripts").is_dir()
++
++
++def test_default_workflow_loads_with_default_roles(tmp_path: Path) -> None:
++    # Stage the workflow into a tmp dir to ensure no .imp/ ambient leakage
++    staged = tmp_path / "wf"
++    shutil.copytree(default_workflow_dir(), staged)
++    # Roles referenced by the default workflow
++    configured = {
++        "default", "spec", "spec_review", "design", "design_review",
++        "code", "code_review",
++    }
++    workflow = load_workflow(staged, configured_roles=configured)
++    assert workflow.name == "standard-feature"
++    assert [p.name for p in workflow.phases] == [
++        "onboard", "spec", "design", "plan", "implement", "review", "merge",
++    ]
++
++
++def test_default_workflow_fails_with_missing_role(tmp_path: Path) -> None:
++    staged = tmp_path / "wf"
++    shutil.copytree(default_workflow_dir(), staged)
++    with pytest.raises(Exception) as exc:
++        load_workflow(staged, configured_roles={"default"})
++    msg = str(exc.value)
++    assert "spec" in msg or "code" in msg  # at least one undefined role surfaces

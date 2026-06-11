@@ -1,0 +1,64 @@
+{
+  "id": "mined-quality-reviewer-f7c342d",
+  "source": "mined",
+  "base_sha": "bccdcd8",
+  "head_sha": "f7c342d",
+  "task_context": "You are reviewing code quality for Task 3 (filling in the dogfood e2e test body).\n## What was implemented\n`tests/test_default_workflow_dogfood_live.py` body of `test_dogfood_imp_on_imp_default_workflow(...)` was filled in with ~290 lines: project seed, PTY harness, gate/ask_user answering loop with `workflow_paused` fail-fast, post-run verification (sentinel grep, git log, artifacts), and `imp log` smoke.\n## Scope of this review\n- Plan: `docs/superpowers/plans/2026-05-27-dogfood-e2e-test.md` (Task 3 section)\n- Spec: `docs/2026-05-27-dogfood-e2e-test-design.md`\n## Things to focus on\n1. **PTY driver loop structure.** Is the event loop correctly draining PTY before each tick? Is the events.jsonl tail correctly handling partial writes (the `_tail_events` helper handles the \"no trailing newline\" case)?\n2. **Failure paths.** Each `pytest.fail(...)` should give actionable diagnostics \u2014 gate counters, PTY tail. Are any failure paths missing context?\n3. **Resource cleanup.** The `finally` block must close the PTY master and kill the subprocess process group. Any leaks?\n4. **`workflow_paused` fail-fast specifically.** This is the new branch (not in the predecessor PTY test). It must:\n   - Be inside the event-processing loop after the `ask_user` branch\n   - Kill the subprocess + wait before pytest.fail\n   - Include the reason field if present\n5. **Sentinel verification.** The grep is at `tmp_path / \"src/imp/agents/tools/bash.py\"`. What happens if the documenter step removes the sentinel? The error message should at least name \"documenter clobbered it\" as a hypothesis \u2014 verify the assertion message includes that.\n6. **Comparison vs. the deleted PTY test** (still present at `tests/test_default_workflow_pty_live.py` since Task 5 hasn't run yet). The dogfood test should be a near-superset of the PTY test's invariants. Read both and check no invariants were dropped.\n7. **Test file size: 530 lines.** Per the plan, this is intentional (one cohesive test). Don't ding for size unless you see a sensible boundary to split that the plan missed.\n## Things NOT to flag\n- Duplicated helpers between the dogfood test and the PTY test \u2014 out of scope per spec.\n- The titled prompt's verbosity \u2014 intentional per spec (Section \"Why the title is so prescriptive\").\n- Lack of test coverage for the new test itself \u2014 it's a live integration test, untestable without LLM credentials and budget.\n- The mid-`else:` clause on the `while` loop (Python loop-else for the wall-clock cap) \u2014 that's a real Python idiom, intentional.\n## Report\n- Strengths\n- Issues by severity: Critical / Important / Minor\n- Assessment: Approved / Changes Required\nWorking directory: `/home/jpoimboe/imp`",
+  "expected_findings": [
+    {
+      "locus": "tests/test_default_workflow_dogfood_live.py:396",
+      "symbol": "",
+      "description": "The workflow_paused reason will almost always be (no reason recorded) because the engine only emits a reason field on SIGINT/SIGTERM path, not on_max_retries pause.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_default_workflow_dogfood_live.py:0",
+      "symbol": "",
+      "description": "Final events are not re-tailed after proc.poll() is not None breaks the loop, missing specific diagnostic information for workflow_paused failures.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_default_workflow_dogfood_live.py:0",
+      "symbol": "_tail_events",
+      "description": "Partial-write byte advance uses re-encoded UTF-8 length instead of raw byte length, which could skip data if the raw stream contains invalid UTF-8 sequences.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_default_workflow_dogfood_live.py:0",
+      "symbol": "",
+      "description": "The ask_questions list is populated but never asserted on or included in diagnostic messages.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_default_workflow_pty_live.py:0",
+      "symbol": "",
+      "description": "Stale comment about CLAUDECODE pop contradicts MEMORY.md and will be resolved when the PTY test is deleted in Task 5.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

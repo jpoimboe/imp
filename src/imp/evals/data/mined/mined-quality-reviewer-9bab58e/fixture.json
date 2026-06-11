@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-9bab58e",
+  "source": "mined",
+  "base_sha": "15b4ada",
+  "head_sha": "9bab58e",
+  "task_context": "You are a code quality reviewer in `/home/jpoimboe/imp`. Review Task 10: wiring three providers (anthropic/openai/claude_code) to copy subagent_depth/coordinator onto the child ToolContext and route their generic `except` clauses through `raise_if_suspended` so a SubagentSuspended unwinds; plus a new test file `tests/test_subagent_pause_unwind.py`.\nDESCRIPTION: Thread subagent_depth/coordinator through providers and propagate SubagentSuspended past the provider task-wrapper + outer run() catches. Add pause-unwind tests (provider-level, e2e-through-dispatch_task, executor pause\u2192restart).\nPLAN_OR_REQUIREMENTS: Task 10 from docs/superpowers/plans/2026-06-01-agent-subagent-unification.md (lines 1790-2163)\nAssess:\n- Are the provider edits consistent across all three (same idiom, same placement)? Is the `raise_if_suspended(exc)` as the first line of each catch a clean pattern, or does it read as surprising? Are the inline comments helpful where the intent is non-obvious (esp. claude_code's Decision #6 limitation)?\n- The new tests: do they verify real behavior?\n  - The provider-level test uses `object.__new__(AgentInvocation)` + a `_run_loop` override. Is that an acceptable test technique here, or fragile? (The plan justifies it because run() is a thin delegator.)\n  - The e2e test (real AnthropicAgentRunner + fake subagent provider tripping the coordinator) \u2014 is it a meaningful integration test or over-mocked?\n  - The executor pause\u2192restart test \u2014 does it actually assert the resume RESTARTS the step (cursor unchanged) and completes?\n- Any test hygiene concerns: leftover `resolve.reset_providers_for_tests()` isolation, registered fake providers not cleaned up, flaky ordering?\n- Run `make check` (lint + typecheck + tests) to confirm green.\nDon't flag pre-existing file sizes. Return: Strengths, Issues (Critical/Important/Minor), Assessment (approved or needs fixes).",
+  "expected_findings": [
+    {
+      "locus": "test_runners.py:0",
+      "symbol": "test_provider_run_reraises_subagent_suspended",
+      "description": "Parametrize list omits ClaudeCodeAgentRunner even though all three runners share the signature and guard.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_runners.py:0",
+      "symbol": "test_pause_propagates_through_dispatch_task_and_task_wrapper",
+      "description": "No teardown call to reset_providers_for_tests() leaves fake provider registered.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_runners.py:0",
+      "symbol": "test_subagent_pause_unwinds_then_resume_restarts",
+      "description": "No teardown call to reset_providers_for_tests() leaves fake provider registered.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_runners.py:0",
+      "symbol": "test_pause_propagates_through_dispatch_task_and_task_wrapper",
+      "description": "transcript_dir is not explicitly created with mkdir; would fail if code path changed to access transcript before exception.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

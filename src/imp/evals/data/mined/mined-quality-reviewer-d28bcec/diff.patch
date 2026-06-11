@@ -1,0 +1,45 @@
+diff --git a/src/imp/cli/live_driver.py b/src/imp/cli/live_driver.py
+index d1f50a9..977fcc3 100644
+--- a/src/imp/cli/live_driver.py
++++ b/src/imp/cli/live_driver.py
+@@ -191,6 +191,11 @@ class LiveDriver:
+ 
+     def _emit_leaf(self, node: Any, depth: int,
+                    gutters: tuple[int, ...] = ()) -> None:
++        if isinstance(node, nv.UserMessageNode):
++            # §4: live already showed the user's input via prompt_toolkit's raw
++            # echo; re-emitting the guttered node would duplicate it. imp log,
++            # which has no terminal echo, still renders the node normally.
++            return
+         if isinstance(node, nv.GateNode) and node.kind == "human":
+             # Live renders the resolved header only; run_human_gate already showed
+             # the prompt/options as chrome (design "Human gates").
+diff --git a/tests/test_live_driver.py b/tests/test_live_driver.py
+index 6d35630..1bc404c 100644
+--- a/tests/test_live_driver.py
++++ b/tests/test_live_driver.py
+@@ -458,3 +458,24 @@ def test_print_chrome_renders_plain_and_carries_no_gutter() -> None:
+     body = out.getvalue()
+     assert "hello from the agent" in body
+     assert "\x1b[" not in body   # agent = () → no codes; main-agent sink → no gutter
++
++
++def test_user_message_suppressed_in_live_present_in_log() -> None:
++    # §4: prompt_toolkit already echoed the user's input in live mode; re-rendering
++    # the UserMessageNode would duplicate it. imp log has no terminal echo so it
++    # must still render the node as the sole record.
++    events = [
++        ev("1", "change_created", change_id=1, title="t"),
++        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
++           model="m", provider="anthropic"),
++        ev("3", "user_message", content=[{"type": "text", "text": "do the thing"}]),
++    ]
++    drv, out = _driver()
++    for e in events:
++        drv.on_event(e)
++    drv.finish()
++    live = out.getvalue()
++    log = "\n".join(_render_body(events))
++
++    assert "> do the thing" not in live   # suppressed in live (prompt_toolkit echoed)
++    assert "> do the thing" in log        # the only record in imp log

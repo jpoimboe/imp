@@ -1,0 +1,80 @@
+diff --git a/src/imp/engine/state.py b/src/imp/engine/state.py
+index 24140db..b723092 100644
+--- a/src/imp/engine/state.py
++++ b/src/imp/engine/state.py
+@@ -161,7 +161,9 @@ class EventLog(Protocol):
+     def append_tool_call(self, *, agent_id: str | None,
+                          block: Any) -> dict[str, Any]: ...
+     def append_tool_result(self, *, agent_id: str | None,
+-                           block: Any) -> dict[str, Any]: ...
++                           block: Any,
++                           citations: list[dict[str, Any]] | None = None,
++                           ) -> dict[str, Any]: ...
+     def append(self, *, agent_id: str | None, type: str,
+                payload: dict[str, Any]) -> dict[str, Any]: ...
+     def read(self) -> Iterator[dict[str, Any]]: ...
+@@ -274,11 +276,18 @@ class _BaseEventLog:
+             payload={"id": block.id, "name": block.name, "input": block.input})
+ 
+     def append_tool_result(self, *, agent_id: str | None,
+-                           block: Any) -> dict[str, Any]:
+-        return self._emit(
+-            agent_id=agent_id, type="tool_result",
+-            payload={"id": block.tool_use_id, "content": block.content,
+-                     "error": block.is_error})
++                           block: Any,
++                           citations: list[dict[str, Any]] | None = None,
++                           ) -> dict[str, Any]:
++        payload: dict[str, Any] = {
++            "id": block.tool_use_id, "content": block.content,
++            "error": block.is_error}
++        # Optional, web-only enrichment. Absent on every non-web result so the
++        # `tool_result` shape and _REQUIRED_KEYS stay unchanged. Empty list is
++        # treated as "no citations" — never write an empty array.
++        if citations:
++            payload["citations"] = citations
++        return self._emit(agent_id=agent_id, type="tool_result", payload=payload)
+ 
+     def append(self, *, agent_id: str | None, type: str,
+                payload: Any) -> dict[str, Any]:
+diff --git a/tests/test_event_citations.py b/tests/test_event_citations.py
+new file mode 100644
+index 0000000..a4feb7e
+--- /dev/null
++++ b/tests/test_event_citations.py
+@@ -0,0 +1,35 @@
++from __future__ import annotations
++
++from imp.agents.runner import ToolResultBlock
++from imp.engine.state import InMemoryEventLog
++
++
++def _results(elog: InMemoryEventLog) -> list[dict]:
++    return [e for e in elog.read() if e["type"] == "tool_result"]
++
++
++def test_tool_result_without_citations_has_no_citations_key() -> None:
++    elog = InMemoryEventLog()
++    elog.append_tool_result(agent_id="a", block=ToolResultBlock("t1", "ok"))
++    payload = _results(elog)[0]["payload"]
++    assert payload == {"id": "t1", "content": "ok", "error": False}
++    assert "citations" not in payload
++
++
++def test_tool_result_with_citations_merges_array() -> None:
++    elog = InMemoryEventLog()
++    cites = [{"url": "https://x.test", "title": "X", "cited_text": "hi"}]
++    elog.append_tool_result(
++        agent_id="a", block=ToolResultBlock("t2", "body"), citations=cites)
++    payload = _results(elog)[0]["payload"]
++    assert payload["id"] == "t2"
++    assert payload["content"] == "body"
++    assert payload["error"] is False
++    assert payload["citations"] == cites
++
++
++def test_tool_result_empty_citations_list_is_omitted() -> None:
++    elog = InMemoryEventLog()
++    elog.append_tool_result(
++        agent_id="a", block=ToolResultBlock("t3", "body"), citations=[])
++    assert "citations" not in _results(elog)[0]["payload"]

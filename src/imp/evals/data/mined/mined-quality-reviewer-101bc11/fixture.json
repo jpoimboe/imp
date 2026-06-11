@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-101bc11",
+  "source": "mined",
+  "base_sha": "74822b5",
+  "head_sha": "101bc11",
+  "task_context": "You are a Senior Code Reviewer reviewing a focused change. Work from /home/jpoimboe/imp.\n## What to review\nTask 5: port `tests/test_mid_step_resume_live.py` (3 opt-in live provider variants) from an obsolete `.imp/changes/1/` + `imp resume 1` layout to the worktree/slug model, using the shared `_await_worktree` helper for slug discovery.\n- PLAN_OR_REQUIREMENTS: Task 5 in `docs/superpowers/plans/2026-06-01-live-test-worktree-slug-port.md`\nThese are live tests gated behind opt-in env vars; they SKIP unless a provider is opted in. You cannot run them live, but evaluate the code as written.\n## Your Job\nEvaluate code quality of the diff only (don't flag pre-existing patterns outside the change). Consider:\n- Correctness: will the ported flow work? worktree-discovery timing (worktree created before first LLM call), SIGINT/process-group handling, the finally-kill guard, reading state.json from the worktree after resume.\n- Consistency across the 3 variants \u2014 is there duplicated logic that's error-prone, or is the duplication acceptable for test clarity? Are the per-variant differences (timeouts, assertions) intentional and correct?\n- `_seed_project` correctness: does committing `imp/` into the repo + `_init_repo`'s `.imp/` gitignore match how `imp new`/`Change.create` read config/workflow? (You may read `tests/conftest.py::_init_repo`, `src/imp/cli/init.py`, `src/imp/engine/change.py`, `src/imp/engine/worktree.py` to verify the seed assumptions.)\n- Test quality: are the assertions meaningful? Any race conditions or flakiness risks introduced?\n- Naming, clarity, dead code, leftover obsolete references.\nYou may run `env -u IMP_LIVE_PROVIDERS -u CLAUDECODE .venv/bin/pytest tests/test_mid_step_resume_live.py -v` (should be 3 skipped), `make lint`, `make typecheck`.\nReturn:\n- **Strengths**\n- **Issues** classified Critical / Important / Minor (file:line references)\n- **Assessment**: Ready to merge? Yes/No\nNote: project gates on `make lint` AND `make typecheck` \u2014 failure in either is at least Important.",
+  "expected_findings": [
+    {
+      "locus": "tests/test_mid_step_resume_live.py:249",
+      "symbol": "",
+      "description": "The openai and claude_code test variants omit the `state[\"step\"] == \"w\"` assertion that is present in the anthropic variant, creating a coverage gap.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_mid_step_resume_live.py:82",
+      "symbol": "_seed_project",
+      "description": "The `-c user.email` and `-c user.name` git config flags are redundant as `_init_repo` already sets these values locally.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_mid_step_resume_live.py:206",
+      "symbol": "",
+      "description": "The openai and claude_code config.yaml overrides should include a comment explaining that uncommitted FS overwrites are valid because `load_config` reads from the working tree.",
+      "severity": "Nit",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

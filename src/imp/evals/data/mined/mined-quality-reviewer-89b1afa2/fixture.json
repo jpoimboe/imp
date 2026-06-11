@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-89b1afa2",
+  "source": "mined",
+  "base_sha": "b72327d5ea83f17fe560f5b23d954fea4d321828",
+  "head_sha": "89b1afa22cb1cefe5e53b54b1c6792c2eafc7846",
+  "task_context": "Code quality review of a committed change in /home/jpoimboe/imp.\nDESCRIPTION: Task 5 of Agent Completion Recovery \u2014 wire end-of-turn continuation_fn hook into the anthropic provider's `if not tool_uses:` block (3 paths: resume on string, agent_incomplete on None, legacy fallback when continuation_fn is None).\nPLAN_OR_REQUIREMENTS: Task 5 from docs/superpowers/plans/2026-05-29-agent-completion-recovery.md\nConsider:\n- Correctness of control flow: is there any path where the loop neither continues, returns, nor yields? Could the continuation cause an unbounded loop if the closure never returns None? (Note: bounding is the executor closure's responsibility per design \u2014 the provider intentionally trusts continuation_fn to eventually return None. Confirm that's the intended division and not a provider bug.)\n- Is `next_text` correctly handled if the closure returns a non-str, non-None (the field type allows `str | None | Awaitable[str | None]`)? After awaiting, can it still be an Awaitable? Confirm the `inspect.isawaitable` handling is correct and that a sync closure returning str works.\n- Duplication: the resume-and-inject block (build Message, append messages/transcript/elog, continue) now appears twice (continuation path + legacy interactive path). Is that acceptable given the two paths will be unified in a deferred refactor (plan's \"step-8 provider-loop refactor\"), or should it be extracted now? Give a judgment, don't just flag it.\n- Test quality: do the tests verify real behavior (event stream + event log contents)? Is the exhaustion test's reliance on the FakeAsyncAnthropic default_response sound?\n- Run `cd /home/jpoimboe/imp && .venv/bin/python -m mypy src/imp/providers/anthropic.py 2>&1 | tail -8` and report whether the change introduces NEW mypy errors (distinguish from pre-existing SDK-stub Any-return errors at lines ~160/162/188).\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (approve / needs changes). Be specific with file:line.",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/anthropic.py:457",
+      "symbol": "",
+      "description": "mypy cannot statically narrow `next_text` to `str` after the `if inspect.isawaitable` branch because `inspect.isawaitable` is not a `TypeGuard`; a cast or `assert isinstance(next_text, str)` would make the narrowing explicit.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/anthropic.py:457",
+      "symbol": "",
+      "description": "Resume-and-inject block is duplicated between the continuation path (lines 457-460) and legacy interactive path (lines 467-470), with resolution planned for the step-8 provider-loop unification refactor.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_anthropic_runner.py:506",
+      "symbol": "",
+      "description": "Test doesn't verify that the injected nudge text appears in the second `user_message` event in the log, though the nudge count assertion adequately covers the injection path.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/anthropic.py:0",
+      "symbol": "",
+      "description": "Continuation path has no loop counter inside the provider; the provider trusts `continuation_fn` to eventually return `None`, with bounding explicitly the executor closure's responsibility per the plan and design.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

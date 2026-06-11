@@ -1,0 +1,138 @@
+diff --git a/src/imp/engine/replay.py b/src/imp/engine/replay.py
+index 2c4ba6a..facfaff 100644
+--- a/src/imp/engine/replay.py
++++ b/src/imp/engine/replay.py
+@@ -30,6 +30,7 @@ from imp.providers.claude_code import (
+     _extract_claude_code_diagnostics,
+     _parse_claude_code_message,
+ )
++from imp.providers.codex_runner import _parse_codex_message
+ from imp.providers.openai import (
+     _extract_responses_diagnostics,
+     _parse_responses_message,
+@@ -39,6 +40,7 @@ _MESSAGE_PARSERS: dict[str, Callable[[dict[str, Any]], Message]] = {
+     "anthropic": _parse_anthropic_message,
+     "openai": _parse_responses_message,
+     "claude_code": _parse_claude_code_message,
++    "codex": _parse_codex_message,
+ }
+ 
+ _DIAGNOSTICS_EXTRACTORS: dict[str, Callable[[dict[str, Any]], Diagnostics]] = {
+diff --git a/src/imp/providers/codex_runner.py b/src/imp/providers/codex_runner.py
+index e1b424c..4c35a66 100644
+--- a/src/imp/providers/codex_runner.py
++++ b/src/imp/providers/codex_runner.py
+@@ -21,7 +21,14 @@ from dataclasses import dataclass, field
+ from pathlib import Path
+ from typing import Any
+ 
+-from imp.agents.runner import AgentInvocation, Event
++from imp.agents.runner import (
++    AgentInvocation,
++    Event,
++    Message,
++    TextBlock,
++    ToolResultBlock,
++    ToolUseBlock,
++)
+ from imp.agents.tools.context import ToolContext, terminate_running_processes
+ from imp.engine.schema import validate_agent_output
+ from imp.engine.state import JsonlEventLog
+@@ -609,7 +616,6 @@ class CodexAgentRunner:
+                                 f"after {nudges_used + 1} nudge(s)"),
+                     "detail": {"last_agent_text": last_text[:500]}}}
+                 return
+-            from imp.agents.runner import Message, TextBlock
+             elog.append_user_message(
+                 agent_id=aid,
+                 message=Message(role="user",
+@@ -716,6 +722,28 @@ def _serialize_mcp_result(result: Any) -> str:
+     return str(result)
+ 
+ 
++def _parse_codex_message(raw: dict[str, Any]) -> Message:
++    """raw → assistant Message for codex. codex's live `llm_response.raw` is
++    text-only; the reassembled full-turn raw (`reassemble_codex_turn`) also
++    carries `tool_use` blocks (a web_search appears as a query-only tool_use).
++    Unknown blocks are dropped (surfaced via `_extract_codex_diagnostics`).
++
++    Lives here (not in replay.py) per the provider-exports-its-parser convention:
++    replay.py imports + registers it, runner can reuse it, no replay-import cycle.
++    """
++    content: list[Any] = []
++    for block in raw.get("content", []):
++        kind = block.get("type")
++        if kind == "text":
++            content.append(TextBlock(text=block.get("text", "")))
++        elif kind == "tool_use":
++            content.append(ToolUseBlock(
++                id=block["id"], name=block["name"],
++                input=block.get("input", {})))
++        # unknown: skipped (see _extract_codex_diagnostics)
++    return Message(role="assistant", content=tuple(content))
++
++
+ def process_event(
+     event: Any, *, elog: Any, agent_id: str, state: dict[str, Any],
+     provider: str, model: str,
+@@ -756,7 +784,6 @@ def process_event(
+             )
+             return
+         if itype == "mcp_tool_call":
+-            from imp.agents.runner import ToolResultBlock, ToolUseBlock
+             # SDK `McpToolCallItem` exposes `tool` + `server`, NOT `name`; reading
+             # `name` silently recorded "" for every call (and made the
+             # complete_step capture below dead). Fall back to `name` only for
+@@ -793,7 +820,6 @@ def process_event(
+                 # model-hosted search. Surface it as a tool_call so it shows in
+                 # the narrative/`imp log`. codex's WebSearchItem exposes only the
+                 # query (no results/citations), so the result is informational.
+-                from imp.agents.runner import ToolResultBlock, ToolUseBlock
+                 call_id = getattr(item, "id", "") or ""
+                 elog.append_tool_call(
+                     agent_id=agent_id,
+diff --git a/tests/test_codex_replay_parser.py b/tests/test_codex_replay_parser.py
+new file mode 100644
+index 0000000..3e1b17f
+--- /dev/null
++++ b/tests/test_codex_replay_parser.py
+@@ -0,0 +1,39 @@
++"""Fix 2: codex render/audit parser + diagnostics + turn reassembly."""
++from __future__ import annotations
++
++from imp.agents.runner import TextBlock, ToolUseBlock
++from imp.engine.replay import parse_message
++
++
++def test_parse_codex_text_only_message() -> None:
++    raw = {"content": [{"type": "text", "text": "hello"}]}
++    msg = parse_message("codex", raw)
++    assert msg.role == "assistant"
++    assert msg.content == (TextBlock(text="hello"),)
++
++
++def test_parse_codex_message_with_tool_use_block() -> None:
++    raw = {"content": [
++        {"type": "text", "text": "calling tool"},
++        {"type": "tool_use", "id": "call-1", "name": "edit_file",
++         "input": {"path": "a.py"}},
++    ]}
++    msg = parse_message("codex", raw)
++    assert msg.content == (
++        TextBlock(text="calling tool"),
++        ToolUseBlock(id="call-1", name="edit_file", input={"path": "a.py"}),
++    )
++
++
++def test_parse_codex_web_search_block_is_query_only() -> None:
++    # web_search is represented as a tool_use carrying only the query (the
++    # ungoverned/opaque limitation: codex exposes no results/citations).
++    raw = {"content": [
++        {"type": "tool_use", "id": "ws-1", "name": "web_search",
++         "input": {"query": "python asyncio"}},
++    ]}
++    msg = parse_message("codex", raw)
++    assert msg.content == (
++        ToolUseBlock(id="ws-1", name="web_search",
++                     input={"query": "python asyncio"}),
++    )

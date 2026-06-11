@@ -1,0 +1,56 @@
+diff --git a/src/imp/providers/config.py b/src/imp/providers/config.py
+index df11fd8..def5638 100644
+--- a/src/imp/providers/config.py
++++ b/src/imp/providers/config.py
+@@ -39,6 +39,7 @@ class Config:
+     model_rules: dict[str, RoleConstraint] = field(hash=False, default_factory=dict)
+     model_tiers: tuple[str, ...] | None = field(hash=False, default=None)
+     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
++    lint_command: str | None = field(hash=False, default=None)
+ 
+     def role_names(self) -> frozenset[str]:
+         return frozenset(self.roles)
+@@ -107,9 +108,14 @@ def load_config(project_root: Path) -> Config:
+         parse_model_tiers(raw["model_tiers"], src) if "model_tiers" in raw else None
+     )
+     var_overrides = _parse_var_overrides(raw.get("vars"), src)
++    lint_command = raw.get("lint_command")
++    if lint_command is not None and not isinstance(lint_command, str):
++        raise LoadError(
++            f"{path}: 'lint_command' must be a string (e.g. \"make lint\")"
++        )
+     return Config(roles=roles, source=src,
+                   model_rules=model_rules, model_tiers=model_tiers,
+-                  var_overrides=var_overrides)
++                  var_overrides=var_overrides, lint_command=lint_command)
+ 
+ 
+ def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:
+diff --git a/tests/test_config.py b/tests/test_config.py
+index f8416c6..615c59b 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -109,3 +109,23 @@ def test_config_model_tiers_duplicate_raises(tmp_path: Path) -> None:
+     )
+     with pytest.raises(LoadError, match="duplicate"):
+         load_config(tmp_path)
++
++
++def test_load_config_parses_lint_command(tmp_path: Path) -> None:
++    (tmp_path / "imp").mkdir()
++    (tmp_path / "imp" / "config.yaml").write_text(
++        "lint_command: \"make lint\"\n"
++        "roles:\n"
++        "  default: {prefer: [{provider: anthropic, model: m}]}\n"
++    )
++    cfg = load_config(tmp_path)
++    assert cfg.lint_command == "make lint"
++
++
++def test_load_config_lint_command_absent_is_none(tmp_path: Path) -> None:
++    (tmp_path / "imp").mkdir()
++    (tmp_path / "imp" / "config.yaml").write_text(
++        "roles:\n  default: {prefer: [{provider: anthropic, model: m}]}\n"
++    )
++    cfg = load_config(tmp_path)
++    assert cfg.lint_command is None

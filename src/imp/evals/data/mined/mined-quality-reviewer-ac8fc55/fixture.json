@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-ac8fc55",
+  "source": "mined",
+  "base_sha": "15fb030",
+  "head_sha": "ac8fc55",
+  "task_context": "Two-stage review of Task 22 commit (ClaudeCodeAgentRunner full loop).\nWorking directory: /home/jpoimboe/imp\n## SHAs\n## What was requested\nAppend to `src/imp/providers/claude_code.py`:\n- `ClaudeCodeAgentRunner` class with full agent loop:\n  - `__init__(model_name, *, client_factory=None)`\n  - `_build_options(invocation, mcp_server, tool_names)` \u2014 constructs ClaudeAgentOptions\n  - `_build_client(opts)` \u2014 uses factory if injected, else ClaudeSDKClient(opts)\n  - `_make_spawn_subagent()` \u2014 same-provider child runner\n  - `async run(invocation)`:\n    * Resume-state classification (DANGLING_TOOL_USE / MISSING_COMPLETE_STEP \u2192 error events)\n    * Create _RunState, _make_sdk_tools, build options (with try/except ImportError on create_sdk_mcp_server)\n    * `async with self._build_client(opts) as client: await client.query(_stream_history(messages)); async for sdk_msg in client.receive_response(): ...`\n    * Translate sdk_msg, emit runner_warning per warns, append to transcript\n    * For AssistantMessage role: emit agent_message; for each ToolUseBlock \u2014 dual-write complete_step state if name==\"complete_step\", observational ceiling check, emit tool_call\n    * For UserMessage role: emit tool_result events\n    * On ResultMessage: emit agent_output (with validation), or error (no_complete_step / tool_call_ceiling_exceeded), or prompt user (interactive)\n    * Fall-through error: kind=\"no_result_message\"\n  - `async interrupt()` sets _cancel=True\n- `ClaudeCodeProvider` with name=\"claude_code\", model attr, create_runner\n- `_env_check()` returns `shutil.which(\"claude\") is not None`\n- `_factory(model)` now returns `ClaudeCodeProvider(model)` (was raising NotImplementedError in the skeleton)\n`tests/test_claude_code_runner.py` with one happy-path test exercising the runner via FakeClaudeSDKClient.\nConstraints:\n- Single commit: `feat(providers): ClaudeCodeAgentRunner \u2014 full agent loop via claude_agent_sdk`\n- Only those 2 files in the commit\n- ruff + mypy clean\nDEVIATION: implementer noted that `_build_options` is gated on `mcp_server is not None` to avoid constructing ClaudeAgentOptions with None mcp_server in test paths where the SDK import fails. opts can be None in that branch.\n## SPEC COMPLIANCE\n2. Read `src/imp/providers/claude_code.py`. Confirm:\n   - `ClaudeCodeAgentRunner` exists with all the methods.\n   - `_factory` returns `ClaudeCodeProvider(model)` (not NotImplementedError).\n   - Resume-state branching is correct.\n   - Dual-write of `complete_step` state in the assistant-message ToolUseBlock loop.\n   - Ceiling check is post-hoc (after ResultMessage), not mid-stream.\n   - Interactive branch (`ctx.user_input_fn`) emits `user_input` and sends another query.\n   - Fall-through emits `no_result_message` error.\n3. Read `tests/test_claude_code_runner.py` and confirm the happy-path test.\n4. Run `pytest tests/test_claude_code_runner.py tests/test_claude_code_wrap.py tests/test_claude_code_stream.py tests/test_no_private_reachthroughs.py -q` \u2014 all pass.\n## CODE QUALITY\n1. `ruff check src/imp/providers/claude_code.py tests/test_claude_code_runner.py` \u2014 clean.\n2. `mypy src/imp/providers/claude_code.py tests/test_claude_code_runner.py` \u2014 clean.\n3. The deviation around `opts = None`: In the test path with SDK installed, `create_sdk_mcp_server` succeeds anyway. Is there any code path where `opts=None` reaches `_build_client(opts)`? Trace it:\n   - If `_client_factory is not None`: `_build_client(opts)` returns `self._client_factory(opts)` \u2014 passes potentially-None opts to the fake. Fake doesn't care.\n   - If `_client_factory is None` (production): SDK is installed, mcp_server is real, opts is built. Safe.\n   The \"opts=None + production\" branch is effectively unreachable because production requires SDK installed \u2192 create_sdk_mcp_server succeeds \u2192 opts built. Flag as Minor \u2014 slight code smell but not a bug.\n4. Does `_make_spawn_subagent` correctly propagate client_factory to children?\n5. The `try/except ImportError` around `create_sdk_mcp_server` \u2014 claude_agent_sdk IS in the project deps (pyproject.toml). This branch is defensive (defense-in-depth) but technically unreachable. Flag as Minor.\nReport (under 300 words):\n- Spec verdict: \u2705 / \u274c\n- Quality verdict: APPROVED / NEEDS_FIX",
+  "expected_findings": [
+    {
+      "locus": "src/imp/runners/claude_code_runner.py:383",
+      "symbol": "_build_client",
+      "description": "_build_client has signature opts: Any with no guard, allowing a future caller to accidentally pass None into the real ClaudeSDKClient.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/runners/claude_code_runner.py:0",
+      "symbol": "",
+      "description": "try/except ImportError around create_sdk_mcp_server is defense-in-depth for a structurally unreachable case where the SDK dependency is not installed.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

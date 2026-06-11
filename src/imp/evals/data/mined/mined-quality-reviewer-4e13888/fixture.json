@@ -1,0 +1,28 @@
+{
+  "id": "mined-quality-reviewer-4e13888",
+  "source": "mined",
+  "base_sha": "f81d80d",
+  "head_sha": "4e13888",
+  "task_context": "You are a code quality reviewer in `/home/jpoimboe/imp`. Review Task 7: the executor's `_run_agent_invocation` rewired onto the shared `build_agent_invocation` + `drive_invocation` (net \u2212136 lines, deleting the executor's own `_build_continuation_fn`/`_NUDGE_LIMIT` and inline drain loop).\nDESCRIPTION: Refactor executor._run_agent_invocation to delegate invocation construction + drain to the shared builder/driver; remove now-duplicate continuation/drain code.\nPLAN_OR_REQUIREMENTS: Task 7 from docs/superpowers/plans/2026-06-01-agent-subagent-unification.md\nAssess:\n- Is the rewritten `_run_agent_invocation` clean and readable now that it delegates? Good docstring?\n- Were all now-dead imports/helpers removed (no orphaned imports, no dead locals, no leftover dead code from the deleted drain loop)? Run `make lint` and `make typecheck` to confirm no unused-import/dead-code warnings.\n- Is `_route_agent` (the caller that owns the backoff sleep loop) still coherent \u2014 does it still correctly consume the AgentRunResult from the rewritten function? Read it.\n- A reviewer-noted concern from a prior task: `detach_runner` on InterruptCoordinator may now be unused in the production path (the executor switched to `runner_attached`). Check whether `attach_runner`/`detach_runner` still have callers (`git grep -n \"attach_runner\\|detach_runner\" src/imp`). If they're now fully dead, note it as a Minor cleanup opportunity (but the plan said to LEAVE them, so it's not a defect \u2014 just observe).\n- Did the change accidentally alter any behavior outside the function it was scoped to?\nDon't flag pre-existing file sizes. Return: Strengths, Issues (Critical/Important/Minor), Assessment (approved or needs fixes).",
+  "expected_findings": [
+    {
+      "locus": "interrupt_coordinator.py:0",
+      "symbol": "attach_runner",
+      "description": "The `attach_runner` docstring contains a stale reference to a call site in executor.py that was removed in this task.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

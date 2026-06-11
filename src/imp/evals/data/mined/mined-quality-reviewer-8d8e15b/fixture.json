@@ -1,0 +1,64 @@
+{
+  "id": "mined-quality-reviewer-8d8e15b",
+  "source": "mined",
+  "base_sha": "c2c6ebe",
+  "head_sha": "8d8e15b",
+  "task_context": "Combined spec + code-quality review for Task 11 of the provider-error-taxonomy plan in `/home/jpoimboe/imp`.\n## Context\nTask 11 mirrors Task 10 (`c2c6ebe` \u2014 anthropic classifier) for the OpenAI provider. New: `_classify_openai_exception` + top-level try/except wrapper in `OpenAIAgentRunner.run()`.\n## Diff Under Review\n## Spec\n### In `src/imp/providers/openai.py`\n1. **`from imp.providers import errors as perr`** import added.\n2. **`_classify_openai_exception(exc: BaseException) -> perr.ProviderError`**:\n   - `AuthenticationError` \u2192 `AuthError(message)` (no `request_id` extraction needed; OpenAI SDK doesn't expose it the same way)\n   - `PermissionDeniedError` \u2192 `AuthError(message)`\n   - `RateLimitError` \u2192 `RateLimitError(detail={\"retry_after_seconds\": ...})` via `response.headers[\"retry-after\"]`\n   - `APIConnectionError | APITimeoutError | InternalServerError` \u2192 `NetworkError`\n   - `NotFoundError` \u2192 `ConfigError(\"model not found: ...\")`\n   - `BadRequestError`:\n     - lowercase message contains `\"maximum context length\"` OR `\"context_length_exceeded\"` \u2192 `ContextWindowError`\n     - lowercase message contains `\"quota\"` OR `\"billing\"` OR `\"insufficient_quota\"` \u2192 `QuotaError`\n     - else \u2192 `ConfigError`\n   - `APIStatusError` \u2192 `NetworkError(f\"{status_code}: ...\")`\n   - else \u2192 `raise exc`\n3. **Outer wrapper around `_run_loop` in `run()`** \u2014 nested try/except, preserves `finally: await self._close_client()`. Unclassifiable exceptions reach `make_unknown_error_event`.\n### In `tests/test_openai_provider.py`\n- `_make_httpx_resp` helper (copied from anthropic test file pattern).\n- 6 classifier tests + 1 runner-integration test (auth \u2192 category=auth event).\n## Verify\n```bash\ncd /home/jpoimboe/imp\npytest tests/test_openai_provider.py tests/test_openai_runner.py tests/test_openai_provider_protocol.py tests/test_openai_schema.py -v 2>&1 | tail -3\nmake lint 2>&1 | grep -E \"providers/openai|test_openai_provider\"\nmake typecheck 2>&1 | grep providers/openai\n```\n## Critical Properties\n1. **`finally: await self._close_client()` is preserved** \u2014 verify by reading the `run()` method.\n2. **The classifier matches case sensitivity per spec:** OpenAI's context-window detection is case-INSENSITIVE (`msg_low`) for both substrings, unlike Anthropic where the context-window substring `\"prompt is too long\"` is case-SENSITIVE. Verify this difference is actually in the OpenAI code.\n3. **Unclassifiable exceptions become `category=unknown` events** via the inner classifier-try/except.\n4. **The OpenAI wrapper handles the fact that `run()` returns an `AsyncGenerator` but the wrap is on `_run_loop`**, not on the entire `run()` body \u2014 verify the setup code (the part that builds `transcript`, `tools`, `ctx`) is still inside the outer `try` so the `finally: await self._close_client()` always runs. (If setup is outside the outer try, the client cleanup may not run on early setup errors \u2014 that would be a regression.)\n## Your Checklist\n- All spec items present?\n- Tests cover the classifier branches?\n- The runner-integration test actually exercises the wrapper (an SDK exception escapes from `_run_loop` and the test verifies one error event with category=auth)?\n- No lint/typecheck regressions?\n## Report\n**Verdict:** \u2705 Approved  \u2014OR\u2014  \u274c Issues found / \u26a0\ufe0f Approved with minor fixes\nIf issues, list with `file:line` references. Under 250 words.",
+  "expected_findings": [
+    {
+      "locus": "openai.py:0",
+      "symbol": "_classify_openai_exception",
+      "description": "Missing test branch coverage for context_length_exceeded (second substring) substring check in context window detection.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "openai.py:0",
+      "symbol": "_classify_openai_exception",
+      "description": "Missing test branch coverage for NotFoundError exception classification.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "openai.py:0",
+      "symbol": "_classify_openai_exception",
+      "description": "Missing test branch coverage for InternalServerError exception classification.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "openai.py:0",
+      "symbol": "_classify_openai_exception",
+      "description": "Missing test branch coverage for APITimeoutError exception classification.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "openai.py:0",
+      "symbol": "_classify_openai_exception",
+      "description": "Missing test branch coverage for BadRequestError to ConfigError fallback.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

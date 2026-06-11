@@ -65,7 +65,7 @@ sha = imp_commit_sha()
 full = {(v.id, fxid, r) for v in VARIANTS for fxid in mt_fixtures for r in range(v.n_repeats)}
 present = set()
 for f in glob.glob(str(cache_dir / "*.json")):
-    d = json.load(open(f))
+    d = json.loads(Path(f).read_text())
     vid = d.get("variant_id")
     if vid not in vmap or d.get("fixture_id") not in mt_fixtures:
         continue
@@ -101,7 +101,7 @@ else:
 
 best = {}
 for f in glob.glob(str(cache_dir / "*.json")):
-    d = json.load(open(f))
+    d = json.loads(Path(f).read_text())
     if d.get("variant_id") not in vmap or d.get("fixture_id") not in mt_fixtures:
         continue
     if d.get("failed") or (d.get("telemetry", {}).get("tool_calls") or 0) <= 0:

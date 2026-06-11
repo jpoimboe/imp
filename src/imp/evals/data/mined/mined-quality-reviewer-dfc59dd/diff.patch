@@ -1,0 +1,51 @@
+diff --git a/src/imp/assets/workflows/default/agents/code-reviewer.md b/src/imp/assets/workflows/default/agents/code-reviewer.md
+index 4b85cfe..abd0fd2 100644
+--- a/src/imp/assets/workflows/default/agents/code-reviewer.md
++++ b/src/imp/assets/workflows/default/agents/code-reviewer.md
+@@ -48,6 +48,11 @@ Read all of these before forming a verdict.
+ 
+ **Testing:**
+ - Tests verify real behavior, not implementation details?
++- **Falsifiability** — could each key test be green if the feature were broken? A
++  test whose expected value merely echoes the implementation (plan-echo) verifies
++  transcription, not behavior. A genuine plan-echo on a key test is a **`task_gap`**:
++  name the test in `findings` so the task-lead re-opens it. Uncertain or lesser
++  instances are **Important** open items under `approve`.
+ - Edge cases covered?
+ - Integration tests where they matter?
+ - The `run-tests` gate has already confirmed the suite passes — you may re-run
+diff --git a/tests/test_workflow_prompt_contract.py b/tests/test_workflow_prompt_contract.py
+index ae43477..bb1df60 100644
+--- a/tests/test_workflow_prompt_contract.py
++++ b/tests/test_workflow_prompt_contract.py
+@@ -12,6 +12,30 @@ SUBAGENT_FILES = ["implementer.md", "spec-task-reviewer.md", "quality-reviewer.m
+ # question is correct for them. Exempt from the no-bare-question rule.
+ INTERACTIVE_STEP_FILES = ["spec-writer.md", "final-review.md"]
+ 
++SKILLS_DIR = Path("src/imp/assets/workflows/default/skills")
++
++# Falsifiability-hardening guards: each component's edit leaves a marker in a
++# specific file. These are per-(path, marker) pairs spanning skills/ and direct
++# agents/ reads (including quality-reviewer, already in SUBAGENT_FILES for the
++# complete_step guards — reused here for a *different* marker, not re-listed for
++# the same purpose). NOT a uniform sweep over SUBAGENT_FILES. A presence guard
++# proves the marker exists somewhere in the file; section placement is left to
++# author self-review and the reviewer pass.
++FALSIFIABILITY_MARKERS = [
++    (AGENTS_DIR / "code-reviewer.md", "falsifiab"),  # C: whole-change backstop
++]
++
++
++@pytest.mark.parametrize(
++    "path,marker",
++    FALSIFIABILITY_MARKERS,
++    ids=[f"{p.name}:{m}" for p, m in FALSIFIABILITY_MARKERS],
++)
++def test_falsifiability_marker_present(path: Path, marker: str) -> None:
++    assert marker.lower() in path.read_text().lower(), (
++        f"{path.name}: missing falsifiability marker {marker!r} — the "
++        f"test-falsifiability hardening edit for this file is absent")
++
+ 
+ def _read(name: str) -> str:
+     return (AGENTS_DIR / name).read_text()

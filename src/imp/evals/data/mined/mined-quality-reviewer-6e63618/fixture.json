@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-6e63618",
+  "source": "mined",
+  "base_sha": "bb5e2a4",
+  "head_sha": "6e63618",
+  "task_context": "You are doing a code quality review of Task 4 (a doc-only change) in the imp project at /home/jpoimboe/imp.\nDESCRIPTION: Corrected the run_script_gate docstring (it wrongly said cwd is the project root; it's actually the workflow snapshot dir) and replaced a stale comment in run-tests.sh that referenced the never-set IMP_WORKFLOW_DIR var.\nReview the diff: `git -C /home/jpoimboe/imp diff bb5e2a4 6e63618`\nThis is purely documentation/comments. Assess only:\n- Is the NEW text factually accurate? Verify against reality: in src/imp/engine/executor.py the script-gate branch passes `cwd=change.workflow_dir` (confirm), and run-tests.sh's `cd \"${IMP_PROJECT_ROOT:?...}\"` relies on the IMP_PROJECT_ROOT env var. So the new docstring claim \"cwd is the workflow snapshot dir; project root via IMP_PROJECT_ROOT env var\" should be correct \u2014 verify it.\n- Is the wording clear and free of typos?\n- Does it reference engine_env correctly (the helper added in this series)?\nReturn:\n- Strengths\n- Issues (Critical / Important / Minor)\n- Assessment (Approved / needs changes)",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

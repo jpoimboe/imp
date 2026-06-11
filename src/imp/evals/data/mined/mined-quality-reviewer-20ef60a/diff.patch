@@ -1,0 +1,171 @@
+diff --git a/src/imp/cli/main.py b/src/imp/cli/main.py
+index 4517066..dd584c3 100644
+--- a/src/imp/cli/main.py
++++ b/src/imp/cli/main.py
+@@ -526,40 +526,84 @@ def _journal_last_activity(control: Path, slug: str) -> str:
+     return _format_last_timestamp(raw.decode("utf-8", errors="replace"))
+ 
+ 
+-# Spec §10: status shows only in-flight Changes; completed ones live in the
+-# journal (a merged Change's worktree is removed).
++# Spec §10: in-flight statuses; completed Changes live in the journal.
+ _INFLIGHT = ("running", "paused", "merge_blocked")
+ 
+ 
++def _status_row(slug: str, state_json: bytes, change_json: bytes,
++                last_activity: str) -> tuple[str, str, str, str, str]:
++    """Pure (slug, status, step, last_activity, title) extractor, fed by either
++    worktree file bytes or journal_show bytes. The journaled state.json and
++    change.json are schema-identical to the in-flight ones (both written by
++    State.save / Change.create), so the two sections can't silently drift."""
++    st = json.loads(state_json)
++    meta = json.loads(change_json)
++    return (slug, st["status"], st.get("step") or "-", last_activity, meta["title"])
++
++
+ def _status_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
+     rows: list[tuple[str, str, str, str, str]] = []
+     for slug in _list_change_worktrees(control):
+         cdir = control / ".imp" / "worktrees" / slug / ".imp" / "change"
+-        meta = json.loads((cdir / "change.json").read_text())
+-        state = State.load(cdir / "state")
+-        if state.status not in _INFLIGHT:
+-            continue
++        state_json = (cdir / "state" / "state.json").read_bytes()
++        change_json = (cdir / "change.json").read_bytes()
+         last = _last_event_timestamp(cdir / "events.jsonl")
+-        rows.append((slug, state.status, state.step or "-", last, meta["title"]))
++        row = _status_row(slug, state_json, change_json, last)
++        if row[1] not in _INFLIGHT:
++            continue
++        rows.append(row)
+     return rows
+ 
+ 
++def _completed_rows(control: Path) -> list[tuple[str, str, str, str, str]]:
++    """Journal-backed completed Changes: every journaled slug NOT present as a
++    live worktree (in-flight takes precedence on the crash-window overlap)."""
++    live = set(_list_change_worktrees(control))
++    rows: list[tuple[str, str, str, str, str]] = []
++    for slug in journal.journal_slugs(control):
++        if slug in live:
++            continue
++        state_json = journal.journal_show(control, slug, "state.json")
++        change_json = journal.journal_show(control, slug, "change.json")
++        if state_json is None or change_json is None:
++            continue
++        last = _journal_last_activity(control, slug)
++        row = _status_row(slug, state_json, change_json, last)
++        if row[1] in _INFLIGHT:
++            continue  # belt-and-suspenders; journaled rows are completed
++        rows.append(row)
++    return rows
++
++
++_STATUS_HEADER = (
++    f"{'SLUG':<24} {'STATUS':<12} {'STEP':<18} {'LAST_ACTIVITY':<20} TITLE"
++)
++
++
++def _print_status_section(title: str, rows: list[tuple[str, str, str, str, str]],
++                          empty_msg: str) -> None:
++    print(title)
++    if rows:
++        print(_STATUS_HEADER)
++        for r in rows:
++            print(f"{r[0]:<24} {r[1]:<12} {r[2]:<18} {r[3]:<20} {r[4]}")
++    else:
++        print(empty_msg)
++
++
+ def _cmd_status(args: argparse.Namespace) -> int:
+     try:
+         control = _control_root()
+     except worktree.PreconditionError:
+-        print("No in-flight Changes.")
+-        print("\nCompleted Changes are in the journal: git log refs/imp/journal")
++        _print_status_section("In-flight Changes", [], "No in-flight Changes.")
++        print()
++        _print_status_section("Completed Changes", [], "No completed Changes.")
+         return 0
+-    rows = _status_rows(control)
+-    if not rows:
+-        print("No in-flight Changes.")
+-    else:
+-        print(f"{'SLUG':<24} {'STATUS':<12} {'STEP':<18} {'LAST_ACTIVITY':<20} TITLE")
+-        for r in rows:
+-            print(f"{r[0]:<24} {r[1]:<12} {r[2]:<18} {r[3]:<20} {r[4]}")
+-    # Completed Changes live in the journal (spec §5 item 5, §10).
+-    print("\nCompleted Changes are in the journal: git log refs/imp/journal")
++    _print_status_section("In-flight Changes", _status_rows(control),
++                          "No in-flight Changes.")
++    print()
++    _print_status_section("Completed Changes", _completed_rows(control),
++                          "No completed Changes.")
+     return 0
+ 
+ 
+diff --git a/tests/test_journal_read_cli.py b/tests/test_journal_read_cli.py
+index 29aebe5..5312b34 100644
+--- a/tests/test_journal_read_cli.py
++++ b/tests/test_journal_read_cli.py
+@@ -89,3 +89,59 @@ def test_log_no_slug_falls_through_to_journal(
+         rc = main(["log", "--no-pager"])  # no slug, no in-flight worktrees
+     assert rc == 0
+     assert "Only One" in buf.getvalue()
++
++
++def test_status_shows_completed_section_from_journal(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    import imp.cli.main as m
++
++    _seed_control(tmp_path)
++    # One in-flight, one merged-and-journaled.
++    Change.create(tmp_path, title="Live One", slug="live-one", base_branch="main")
++    Change.create(tmp_path, title="Gone One", slug="gone-one", base_branch="main")
++    _complete_and_journal(tmp_path, "gone-one")
++
++    monkeypatch.chdir(tmp_path)
++    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
++
++    rc = m._cmd_status(type("NS", (), {})())
++    assert rc == 0
++    out = capsys.readouterr().out
++    assert "In-flight Changes" in out
++    assert "Completed Changes" in out
++    # in-flight slug appears under in-flight; merged slug under completed.
++    assert "live-one" in out
++    assert "gone-one" in out
++    # The merged Change shows its title + completed status, not blank columns.
++    assert "Gone One" in out
++    assert "completed" in out
++
++
++def test_status_inflight_takes_precedence_over_journal(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
++    capsys: pytest.CaptureFixture[str],
++) -> None:
++    """If a slug is BOTH a live worktree and in the journal (crash between
++    journal and remove), the completed section must not double-list it."""
++    import imp.cli.main as m
++
++    _seed_control(tmp_path)
++    ch = Change.create(tmp_path, title="Both", slug="both", base_branch="main")
++    # Journal it but DON'T remove the worktree (simulates the crash window).
++    worktree.journal_commit(tmp_path, "both", {
++        "events.jsonl": ch.events_path,
++        "change.json": ch.change_dir / "change.json",
++        "state.json": ch.state_dir / "state.json",
++    })
++
++    monkeypatch.chdir(tmp_path)
++    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
++
++    completed = m._completed_rows(tmp_path)
++    assert [r[0] for r in completed] == []  # in-flight worktree wins
++    rc = m._cmd_status(type("NS", (), {})())
++    assert rc == 0
++    out = capsys.readouterr().out
++    assert out.count("both") == 1  # only in the in-flight section

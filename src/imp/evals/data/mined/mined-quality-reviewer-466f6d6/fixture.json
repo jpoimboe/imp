@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-466f6d6",
+  "source": "mined",
+  "base_sha": "92f6bc7",
+  "head_sha": "466f6d6",
+  "task_context": "You are a Senior Code Reviewer. Work from: /home/jpoimboe/imp. Review against plan + code-quality standards.\n## What Was Implemented\nTask 2 of the imp live-run polish plan (\u00a72): added an `editing_mode` (\"vi\"|\"emacs\", default \"emacs\") config field, validated in `load_config`, and threaded it through `Prompt`/`_build_session` into the prompt_toolkit `PromptSession`. `main.py` reads it via a new `_editing_mode()` helper that defaults to emacs on config-load failure.\n## Requirements / Plan\nTask 2 from docs/superpowers/plans/2026-06-03-imp-new-live-run-polish.md (\u00a72). Files: config.py, prompt.py, main.py, test_config.py, test_prompt.py. Gate: `make check`.\n## Git Range\n## What to Check\n- Plan alignment; clean separation; type safety; error handling (the `_editing_mode` fallback swallows config errors by design \u2014 assess whether that's reasonable and whether it could mask a genuinely broken config silently for the user; note the plan explicitly justifies it: run_change reports bad config with full context elsewhere).\n- Tests verify real behavior (the vi test exercises the real PromptSession).\n- Lazy import of EditingMode / load_config \u2014 consistent with codebase conventions?\n- No scope creep; no unnecessarily large files.\n- Validation placement and the LoadError message quality.\n## Output Format\n### Strengths\n### Issues\n#### Critical (Must Fix)\n#### Important (Should Fix)\n#### Minor (Nice to Have)\n(file:line, what's wrong, why, how to fix)\n### Assessment\n**Ready to merge?** [Yes | No | With fixes] + reasoning.\nCalibrate: this is a small config-plumbing change. Don't inflate nitpicks.",
+  "expected_findings": [
+    {
+      "locus": "tests/test_config.py:192",
+      "symbol": "test_editing_mode_rejects_unknown",
+      "description": "The test omits the `match=` parameter in `pytest.raises()`, making it fragile; analogous lint_command and test_command tests use `match=` to pin the error message and prevent false positives from unrelated LoadErrors.",
+      "severity": "Important",
+      "must_catch": true,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/cli/main.py:358",
+      "symbol": "_editing_mode",
+      "description": "The function silently swallows all LoadError/LoadErrors which is wider than the docstring's claim of only \"absent or invalid\" cases, though the plan explicitly justifies this design and run_change provides the user-facing error.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_config.py:174",
+      "symbol": "",
+      "description": "New config test functions (lines 174, 182, 191) drop the `Path` type annotation on `tmp_path` parameter, inconsistent with existing test style; future annotation-completeness linter rules could flag these.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

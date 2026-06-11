@@ -1,0 +1,359 @@
+diff --git a/src/imp/providers/anthropic.py b/src/imp/providers/anthropic.py
+index 7b89a4e..6bdb7e2 100644
+--- a/src/imp/providers/anthropic.py
++++ b/src/imp/providers/anthropic.py
+@@ -18,7 +18,7 @@ from __future__ import annotations
+ import inspect
+ import json
+ import os
+-from collections.abc import AsyncGenerator, AsyncIterator
++from collections.abc import AsyncGenerator
+ from typing import Any, cast
+ 
+ from imp.agents.classify import ResumeState, classify_resume
+@@ -46,6 +46,7 @@ from imp.agents.transcript import (
+ from imp.engine.schema import validate_agent_output
+ from imp.providers import errors as perr
+ from imp.providers.base import Provider
++from imp.providers.resolve import spawn_subagent_via_registry
+ 
+ 
+ def _classify_anthropic_exception(exc: BaseException) -> perr.ProviderError:
+@@ -248,23 +249,6 @@ class AnthropicAgentRunner:
+                 self._client = anthropic.AsyncAnthropic()
+         return self._client
+ 
+-    def _make_spawn_subagent(self) -> Any:
+-        """Closure that creates a same-class child runner for the task tool.
+-
+-        Returns an async callable that takes a sub_invocation and returns the
+-        child runner's event AsyncIterator. Same provider, same model — V1
+-        constraint per spec §6.13.
+-        """
+-        client_factory = self._client_factory
+-
+-        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
+-            child = AnthropicAgentRunner(
+-                model_name=sub_invocation.model_name, client_factory=client_factory,
+-            )
+-            return child.run(sub_invocation)
+-
+-        return _spawn
+-
+     async def _close_client(self) -> None:
+         """Close the underlying SDK client if we own it and it supports close().
+ 
+@@ -322,7 +306,8 @@ class AnthropicAgentRunner:
+             interactive=invocation.interactive,
+         )
+         ctx.change_context = invocation.change_context  # for subagent dispatch
+-        ctx.spawn_subagent = self._make_spawn_subagent()
++        ctx.spawn_subagent = spawn_subagent_via_registry
++        ctx.resolved_roles = invocation.resolved_roles
+         ctx.event_log = elog                       # shared write instance
+         if self._user_input_fn is not None:
+             ctx.user_input_fn = self._user_input_fn
+diff --git a/src/imp/providers/claude_code.py b/src/imp/providers/claude_code.py
+index 7ac7ab1..17f1db5 100644
+--- a/src/imp/providers/claude_code.py
++++ b/src/imp/providers/claude_code.py
+@@ -28,7 +28,7 @@ import json
+ import re
+ import shutil
+ import uuid
+-from collections.abc import AsyncGenerator, AsyncIterator
++from collections.abc import AsyncGenerator
+ from dataclasses import dataclass, field
+ from typing import Any
+ 
+@@ -58,6 +58,7 @@ from imp.engine.schema import validate_agent_output
+ from imp.providers import errors as perr
+ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
+ from imp.providers.base import Provider
++from imp.providers.resolve import spawn_subagent_via_registry
+ 
+ _AUTH_PATTERNS = (
+     "Invalid API key",
+@@ -639,20 +640,6 @@ class ClaudeCodeAgentRunner:
+         from claude_agent_sdk import ClaudeSDKClient
+         return ClaudeSDKClient(opts)
+ 
+-    def _make_spawn_subagent(self) -> Any:
+-        client_factory = self._client_factory
+-        user_input_fn = self._user_input_fn
+-
+-        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
+-            child = ClaudeCodeAgentRunner(
+-                model_name=sub_invocation.model_name,
+-                client_factory=client_factory,
+-                user_input_fn=user_input_fn,
+-            )
+-            return child.run(sub_invocation)
+-
+-        return _spawn
+-
+     async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+         try:
+             async for ev in self._run_loop(invocation):
+@@ -683,7 +670,8 @@ class ClaudeCodeAgentRunner:
+             interactive=invocation.interactive,
+         )
+         ctx.change_context = invocation.change_context
+-        ctx.spawn_subagent = self._make_spawn_subagent()
++        ctx.spawn_subagent = spawn_subagent_via_registry
++        ctx.resolved_roles = invocation.resolved_roles
+         ctx.event_log = elog
+         if self._user_input_fn is not None:
+             ctx.user_input_fn = self._user_input_fn
+diff --git a/src/imp/providers/openai.py b/src/imp/providers/openai.py
+index ed1f81b..47dd076 100644
+--- a/src/imp/providers/openai.py
++++ b/src/imp/providers/openai.py
+@@ -18,7 +18,7 @@ from __future__ import annotations
+ import inspect
+ import json
+ import os
+-from collections.abc import AsyncGenerator, AsyncIterator
++from collections.abc import AsyncGenerator
+ from typing import Any, cast
+ 
+ from imp.agents.classify import ResumeState, classify_resume
+@@ -47,6 +47,7 @@ from imp.engine.schema import validate_agent_output
+ from imp.providers import errors as perr
+ from imp.providers._openai_schema import to_openai_strict
+ from imp.providers.base import Provider
++from imp.providers.resolve import spawn_subagent_via_registry
+ 
+ 
+ def _classify_openai_exception(exc: BaseException) -> perr.ProviderError:
+@@ -356,23 +357,6 @@ class OpenAIAgentRunner:
+                 self._client = openai.AsyncOpenAI()
+         return self._client
+ 
+-    def _make_spawn_subagent(self) -> Any:
+-        """Same pattern as anthropic._make_spawn_subagent: spawn a same-class
+-        child for the task tool. Provider constraint per spec §6.13: subagent
+-        runs on the same provider as parent."""
+-        client_factory = self._client_factory
+-        user_input_fn = self._user_input_fn
+-
+-        async def _spawn(sub_invocation: AgentInvocation) -> AsyncIterator[Event]:
+-            child = OpenAIAgentRunner(
+-                model_name=sub_invocation.model_name,
+-                client_factory=client_factory,
+-                user_input_fn=user_input_fn,
+-            )
+-            return child.run(sub_invocation)
+-
+-        return _spawn
+-
+     async def _close_client(self) -> None:
+         """Close the underlying SDK client if we own it and it supports close().
+ 
+@@ -431,7 +415,8 @@ class OpenAIAgentRunner:
+             interactive=invocation.interactive,
+         )
+         ctx.change_context = invocation.change_context
+-        ctx.spawn_subagent = self._make_spawn_subagent()
++        ctx.spawn_subagent = spawn_subagent_via_registry
++        ctx.resolved_roles = invocation.resolved_roles
+         ctx.event_log = elog                       # shared write instance
+         if self._user_input_fn is not None:
+             ctx.user_input_fn = self._user_input_fn
+diff --git a/tests/test_anthropic_runner.py b/tests/test_anthropic_runner.py
+index 18354f7..28f75df 100644
+--- a/tests/test_anthropic_runner.py
++++ b/tests/test_anthropic_runner.py
+@@ -410,6 +410,17 @@ async def test_runner_dispatches_task_via_subagent(tmp_path: Path) -> None:
+                           {"status": "Success", "note": "done"})),
+     ])
+ 
++    # Register a fake anthropic provider so spawn_subagent_via_registry builds
++    # the child runner with the same client fake (not a real network client).
++    from imp.providers import resolve as _resolve
++    from imp.providers.anthropic import AnthropicProvider
++    _resolve.register_provider(
++        "anthropic", env_check=lambda: True,
++        factory=lambda m: AnthropicProvider(
++            model_name=m, client_factory=lambda: parent_fake,
++        ),
++    )
++
+     runner = AnthropicAgentRunner(
+         model_name="claude-sonnet-4-6",
+         client_factory=lambda: parent_fake,
+diff --git a/tests/test_event_logging_integration.py b/tests/test_event_logging_integration.py
+index 670059e..49019eb 100644
+--- a/tests/test_event_logging_integration.py
++++ b/tests/test_event_logging_integration.py
+@@ -225,6 +225,17 @@ async def test_subagent_events_isolated_by_agent_id(tmp_path: Path) -> None:
+                            {"status": "Success", "note": "done"})),
+     ])
+ 
++    # Register a fake anthropic provider so spawn_subagent_via_registry
++    # builds the child runner with the same client fake (not a real network client).
++    from imp.providers import resolve as _resolve
++    from imp.providers.anthropic import AnthropicProvider
++    _resolve.register_provider(
++        "anthropic", env_check=lambda: True,
++        factory=lambda m: AnthropicProvider(
++            model_name=m, client_factory=lambda: shared_fake,
++        ),
++    )
++
+     runner = AnthropicAgentRunner(
+         model_name="claude-sonnet-4-6",
+         client_factory=lambda: shared_fake,
+diff --git a/tests/test_openai_runner.py b/tests/test_openai_runner.py
+index dd32312..690b120 100644
+--- a/tests/test_openai_runner.py
++++ b/tests/test_openai_runner.py
+@@ -223,10 +223,14 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
+ 
+ @pytest.mark.anyio
+ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
+-    """task tool dispatches to a same-provider child runner; result flows back
+-    as the parent's tool_result content."""
++    """task tool dispatches to a same-provider child runner via the resolve
++    registry; result flows back as the parent's tool_result content."""
++    import json
+     from dataclasses import replace
+ 
++    from imp.providers import resolve as _resolve
++    from imp.providers.openai import OpenAIProvider
++
+     (tmp_path / "art").mkdir()
+ 
+     sub_def = AgentDef(
+@@ -254,7 +258,7 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
+ 
+     # Sequence:
+     #   1. parent emits task(sub, ...)
+-    #   2. sub emits complete_step(status=Success)
++    #   2. sub emits complete_step(status=Success)  ← consumed from fake queue
+     #   3. parent receives JSON tool_result, emits complete_step
+     fake = FakeAsyncOpenAI([
+         # parent turn 1
+@@ -276,6 +280,18 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
+         )),
+     ])
+ 
++    # Register a fake openai provider so spawn_subagent_via_registry builds the
++    # child runner with the same shared fake client (not a real network client).
++    # Without this, the registry path resolves "openai" to the real factory,
++    # which builds an OpenAI client with a stub key and makes a real network
++    # call that returns 401.
++    _resolve.register_provider(
++        "openai", env_check=lambda: True,
++        factory=lambda m: OpenAIProvider(
++            model_name=m, client_factory=lambda: fake,
++        ),
++    )
++
+     log = InMemoryEventLog()
+     runner = OpenAIAgentRunner(
+         model_name="gpt-4o-mini",
+@@ -292,6 +308,19 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
+     log_types = [e["type"] for e in log.read()]
+     assert "tool_call" in log_types
+     assert "tool_result" in log_types
++    # Verify the subagent's output actually flowed back as the task tool_result.
++    # If dispatch regressed (e.g. spawn_subagent_via_registry never called), the
++    # task tool_result would be an error string, not the subagent's JSON output.
++    task_result_ev = next(
++        e for e in log.read()
++        if e["type"] == "tool_result" and e["payload"].get("id") == "p1"
++    )
++    parsed = json.loads(task_result_ev["payload"]["content"])
++    assert parsed.get("status") == "Success"
++    # All three fake responses must have been consumed: parent turn 1, sub turn
++    # 1, parent turn 2. If the subagent ran on the real client instead of fake,
++    # the sub's queued response would remain unconsumed here.
++    assert len(fake.chat.completions.calls) == 3
+ 
+ 
+ @pytest.mark.anyio
+diff --git a/tests/test_subagent_spawn.py b/tests/test_subagent_spawn.py
+new file mode 100644
+index 0000000..cfe144a
+--- /dev/null
++++ b/tests/test_subagent_spawn.py
+@@ -0,0 +1,78 @@
++# tests/test_subagent_spawn.py
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from imp.agents.runner import AgentInvocation, ChangeContext
++from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
++from imp.providers import resolve
++
++_SRC = SourceLoc(file=Path("a.md"), line=1)
++
++
++def _agent(name: str) -> AgentDef:
++    return AgentDef(
++        name=name, description="", tools=frozenset(), subagents=(),
++        output_schema=OutputSchema(
++            fields=(OutputField(name="status", type="enum",
++                                values=("Success", "Error")),), source=_SRC),
++        prompt_template_source="", source_path=Path("a.md"), source=_SRC)
++
++
++class _RecordingRunner:
++    def __init__(self, name, model):
++        self.name = name
++        self.model = model
++
++    async def run(self, invocation):
++        yield {"type": "agent_output",
++               "payload": {"status": "Success", "ran_on": self.name,
++                           "model": self.model}}
++
++
++class _RecordingProvider:
++    def __init__(self, name, model):
++        self.name = name
++        self.model = model
++
++    def create_runner(self, invocation):
++        return _RecordingRunner(self.name, self.model)
++
++
++@pytest.fixture
++def anyio_backend():
++    return "asyncio"
++
++
++@pytest.fixture(autouse=True)
++def _providers():
++    resolve.reset_providers_for_tests()
++    resolve.register_provider(
++        "anthropic", env_check=lambda: True,
++        factory=lambda m: _RecordingProvider("anthropic", m))
++    resolve.register_provider(
++        "openai", env_check=lambda: True,
++        factory=lambda m: _RecordingProvider("openai", m))
++    yield
++    resolve.reset_providers_for_tests()
++
++
++def _inv(provider, model, tmp_path):
++    return AgentInvocation(
++        agent_def=_agent("rev"), provider_name=provider, model_name=model,
++        system_prompt="", initial_messages=(),
++        change_context=ChangeContext(1, tmp_path, tmp_path),
++        interactive=False, transcript_dir=tmp_path, fs_permissions=(),
++        events_path=tmp_path / "e.jsonl")
++
++
++@pytest.mark.anyio
++async def test_spawn_builds_runner_of_resolved_provider(tmp_path):
++    """A subagent whose invocation names openai runs on openai's runner, even
++    though the parent might be anthropic."""
++    gen = await resolve.spawn_subagent_via_registry(_inv("openai", "gpt-5.2", tmp_path))
++    outs = [e async for e in gen]
++    assert outs[-1]["payload"]["ran_on"] == "openai"
++    assert outs[-1]["payload"]["model"] == "gpt-5.2"

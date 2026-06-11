@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-5737517",
+  "source": "mined",
+  "base_sha": "5362b81",
+  "head_sha": "5737517",
+  "task_context": "You are doing a code quality review of a small change in the `imp` Python project. Work from: /home/jpoimboe/imp\nDESCRIPTION: Added a `resume: bool = False` field to the frozen `Goto` dataclass, with a test asserting default, settability, and that it participates in value equality.\nPLAN_OR_REQUIREMENTS: Task 1 from docs/superpowers/plans/2026-05-30-resume-action-verb.md\n- Is the field placement, type, default, and comment consistent with the surrounding dataclass style?\n- Does the test actually verify behavior (default value, equality participation)?\n- Any clean-code, naming, or maintainability concerns introduced by THIS change?\nThis is a deliberately tiny, additive change. Do not flag pre-existing code or request scope expansion.\nReturn: Strengths, Issues (Critical/Important/Minor), and an Assessment (Approved / Changes requested).",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

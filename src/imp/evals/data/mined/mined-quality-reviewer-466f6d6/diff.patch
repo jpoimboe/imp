@@ -1,0 +1,163 @@
+diff --git a/src/imp/cli/main.py b/src/imp/cli/main.py
+index 488e459..76e88a0 100644
+--- a/src/imp/cli/main.py
++++ b/src/imp/cli/main.py
+@@ -121,7 +121,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
+     try:
+         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
+             print(f"Created Change {change.slug}: {change.title!r}")
+-            prompt = Prompt(skills_dir=change.workflow_dir / "skills")
++            prompt = Prompt(skills_dir=change.workflow_dir / "skills",
++                            editing_mode=_editing_mode(change.control_root))
+             status = LiveStatus(sys.stdout)
+             driver = LiveDriver(stream=sys.stdout,
+                                 color=should_use_color(sys.stdout),
+@@ -241,7 +242,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
+     try:
+         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
+             print(f"Resuming Change {change.slug}: {change.title!r}")
+-            prompt = Prompt(skills_dir=change.workflow_dir / "skills")
++            prompt = Prompt(skills_dir=change.workflow_dir / "skills",
++                            editing_mode=_editing_mode(change.control_root))
+             status = LiveStatus(sys.stdout)
+             driver = LiveDriver(stream=sys.stdout,
+                                 color=should_use_color(sys.stdout),
+@@ -348,6 +350,17 @@ def _cmd_resume(args: argparse.Namespace) -> int:
+     return anyio.run(_async_cmd_resume, args)
+ 
+ 
++def _editing_mode(control_root: Path) -> str:
++    """Read editing_mode from config; default to emacs if config is absent or
++    invalid (run_change reports a bad config with full context — don't double-fail
++    here just to pick a prompt mode)."""
++    from imp.providers.config import load_config
++    try:
++        return load_config(control_root).editing_mode
++    except (LoadError, LoadErrors):
++        return "emacs"
++
++
+ def _term_width() -> int:
+     # shutil.get_terminal_size honors $COLUMNS and substitutes the fallback when
+     # the OS reports columns <= 0 (e.g. a winsize-0 PTY), unlike
+diff --git a/src/imp/cli/prompt.py b/src/imp/cli/prompt.py
+index 6b53346..8ee4b4a 100644
+--- a/src/imp/cli/prompt.py
++++ b/src/imp/cli/prompt.py
+@@ -15,16 +15,19 @@ from pathlib import Path
+ from typing import Any
+ 
+ 
+-def _build_session(skills_dir: Any | None = None) -> Any:
++def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs") -> Any:
+     from prompt_toolkit import PromptSession
++    from prompt_toolkit.enums import EditingMode
+     from prompt_toolkit.history import InMemoryHistory
+     from prompt_toolkit.key_binding import KeyBindings
+ 
+     history = InMemoryHistory()
+     kb = KeyBindings()
++    mode = EditingMode.VI if editing_mode == "vi" else EditingMode.EMACS
+ 
+     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
+-    return PromptSession(history=history, key_bindings=kb, completer=completer)  # type: ignore[arg-type]
++    return PromptSession(history=history, key_bindings=kb, completer=completer,  # type: ignore[arg-type]
++                         editing_mode=mode)
+ 
+ 
+ class SlashCompleter:
+@@ -69,9 +72,11 @@ class Prompt:
+         self,
+         *,
+         skills_dir: Any | None = None,
++        editing_mode: str = "emacs",
+         _session_factory: Callable[[], Any] | None = None,
+     ) -> None:
+-        self._session_factory = _session_factory or (lambda: _build_session(skills_dir))
++        self._session_factory = _session_factory or (
++            lambda: _build_session(skills_dir, editing_mode=editing_mode))
+         self._session = self._session_factory()
+ 
+     def ask(self, prompt_text: str = "> ") -> str:
+diff --git a/src/imp/providers/config.py b/src/imp/providers/config.py
+index 937c235..ed1ea18 100644
+--- a/src/imp/providers/config.py
++++ b/src/imp/providers/config.py
+@@ -41,6 +41,7 @@ class Config:
+     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
+     lint_command: str | None = field(hash=False, default=None)
+     test_command: str | None = field(hash=False, default=None)
++    editing_mode: str = field(hash=False, default="emacs")
+ 
+     def role_names(self) -> frozenset[str]:
+         return frozenset(self.roles)
+@@ -119,10 +120,15 @@ def load_config(project_root: Path) -> Config:
+         raise LoadError(
+             "'test_command' must be a string (e.g. \"make test\")", src
+         )
++    editing_mode = raw.get("editing_mode", "emacs")
++    if editing_mode not in ("vi", "emacs"):
++        raise LoadError(
++            "'editing_mode' must be 'vi' or 'emacs'", src
++        )
+     return Config(roles=roles, source=src,
+                   model_rules=model_rules, model_tiers=model_tiers,
+                   var_overrides=var_overrides, lint_command=lint_command,
+-                  test_command=test_command)
++                  test_command=test_command, editing_mode=editing_mode)
+ 
+ 
+ def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:
+diff --git a/tests/test_config.py b/tests/test_config.py
+index 61fb0a6..7240608 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -169,3 +169,29 @@ def test_load_config_test_command_not_string_raises(tmp_path: Path) -> None:
+     )
+     with pytest.raises(LoadError, match="test_command"):
+         load_config(tmp_path)
++
++
++def test_editing_mode_defaults_to_emacs(tmp_path) -> None:
++    (tmp_path / "imp").mkdir()
++    (tmp_path / "imp" / "config.yaml").write_text(
++        "roles:\n  default:\n    prefer:\n    - {provider: claude_code, model: opus}\n")
++    cfg = load_config(tmp_path)
++    assert cfg.editing_mode == "emacs"
++
++
++def test_editing_mode_vi_accepted(tmp_path) -> None:
++    (tmp_path / "imp").mkdir()
++    (tmp_path / "imp" / "config.yaml").write_text(
++        "editing_mode: vi\n"
++        "roles:\n  default:\n    prefer:\n    - {provider: claude_code, model: opus}\n")
++    cfg = load_config(tmp_path)
++    assert cfg.editing_mode == "vi"
++
++
++def test_editing_mode_rejects_unknown(tmp_path) -> None:
++    (tmp_path / "imp").mkdir()
++    (tmp_path / "imp" / "config.yaml").write_text(
++        "editing_mode: nano\n"
++        "roles:\n  default:\n    prefer:\n    - {provider: claude_code, model: opus}\n")
++    with pytest.raises(LoadError):
++        load_config(tmp_path)
+diff --git a/tests/test_prompt.py b/tests/test_prompt.py
+index 736305d..62ff9ba 100644
+--- a/tests/test_prompt.py
++++ b/tests/test_prompt.py
+@@ -33,6 +33,14 @@ def test_history_persists_across_asks() -> None:
+     assert "first" in p.history_strings()
+ 
+ 
++def test_build_session_vi_mode() -> None:
++    from prompt_toolkit.enums import EditingMode
++
++    from imp.cli.prompt import _build_session
++    session = _build_session(None, editing_mode="vi")
++    assert session.editing_mode == EditingMode.VI
++
++
+ class _FakeSession:
+     def __init__(self, answers: list[str] | None = None, raises=None) -> None:
+         self.answers = list(answers or [])

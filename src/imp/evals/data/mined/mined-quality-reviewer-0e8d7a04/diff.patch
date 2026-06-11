@@ -1,0 +1,137 @@
+diff --git a/src/imp/engine/model_tiers.py b/src/imp/engine/model_tiers.py
+new file mode 100644
+index 0000000..cb2a04f
+--- /dev/null
++++ b/src/imp/engine/model_tiers.py
+@@ -0,0 +1,57 @@
++"""Parse and resolve the selectable model-tier menu (model_tiers:).
++
++A *tier* is just a configured role surfaced to the running parent agent as a
++runtime choice. This module owns (1) the YAML parser shared by loader.py and
++config.py, and (2) the config-wholesale-replace rule. Kept standalone (like
++engine/model_rules.py) so loader/config/resolve/executor import it without a
++cycle.
++"""
++
++from __future__ import annotations
++
++from typing import TYPE_CHECKING, Any
++
++from imp.engine.errors import LoadError
++from imp.engine.types import SourceLoc
++
++if TYPE_CHECKING:
++    from imp.engine.types import Workflow
++    from imp.providers.config import Config
++
++
++def parse_model_tiers(raw: Any, source: SourceLoc) -> tuple[str, ...]:
++    """Normalize a raw `model_tiers:` value into an ordered tuple of role names.
++
++    None or [] -> (). Rejects a non-list value, a non-string entry, or a
++    duplicate entry (an ordered menu with a repeated label is ambiguous).
++    """
++    if raw is None:
++        return ()
++    if not isinstance(raw, list):
++        raise LoadError(
++            f"model_tiers: must be a list of role names, got {type(raw).__name__}",
++            source,
++        )
++    out: list[str] = []
++    seen: set[str] = set()
++    for entry in raw:
++        if not isinstance(entry, str):
++            raise LoadError(
++                f"model_tiers entry must be a string, got {type(entry).__name__}",
++                source,
++            )
++        if entry in seen:
++            raise LoadError(
++                f"model_tiers has duplicate entry {entry!r}", source)
++        seen.add(entry)
++        out.append(entry)
++    return tuple(out)
++
++
++def effective_model_tiers(workflow: Workflow, config: Config) -> tuple[str, ...]:
++    """The menu after applying config override. A config-level `model_tiers:`
++    (even an explicit empty list = off) REPLACES the workflow's list wholesale;
++    an absent config-level list (None) leaves the workflow's list in force."""
++    if config.model_tiers is not None:
++        return config.model_tiers
++    return workflow.model_tiers
+diff --git a/tests/test_model_tiers.py b/tests/test_model_tiers.py
+new file mode 100644
+index 0000000..8000c21
+--- /dev/null
++++ b/tests/test_model_tiers.py
+@@ -0,0 +1,68 @@
++# tests/test_model_tiers.py
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from imp.engine.errors import LoadError
++from imp.engine.model_tiers import effective_model_tiers, parse_model_tiers
++from imp.engine.types import SourceLoc
++
++_SRC = SourceLoc(file=Path("w.yaml"), line=1)
++
++
++def test_parse_none_is_empty() -> None:
++    assert parse_model_tiers(None, _SRC) == ()
++
++
++def test_parse_empty_list_is_empty() -> None:
++    assert parse_model_tiers([], _SRC) == ()
++
++
++def test_parse_orders_preserved() -> None:
++    assert parse_model_tiers(["fast", "balanced", "powerful"], _SRC) == (
++        "fast", "balanced", "powerful")
++
++
++def test_parse_non_list_raises() -> None:
++    with pytest.raises(LoadError, match="must be a list"):
++        parse_model_tiers("fast", _SRC)
++
++
++def test_parse_non_string_entry_raises() -> None:
++    with pytest.raises(LoadError, match="must be a string"):
++        parse_model_tiers(["fast", 3], _SRC)
++
++
++def test_parse_duplicate_raises() -> None:
++    with pytest.raises(LoadError, match="duplicate"):
++        parse_model_tiers(["fast", "fast"], _SRC)
++
++
++class _Cfg:
++    def __init__(self, model_tiers):
++        self.model_tiers = model_tiers
++
++
++class _Wf:
++    def __init__(self, model_tiers):
++        self.model_tiers = model_tiers
++
++
++def test_effective_uses_workflow_when_config_absent() -> None:
++    wf = _Wf(("fast", "powerful"))
++    cfg = _Cfg(None)
++    assert effective_model_tiers(wf, cfg) == ("fast", "powerful")
++
++
++def test_effective_config_replaces_wholesale() -> None:
++    wf = _Wf(("fast", "balanced", "powerful"))
++    cfg = _Cfg(("balanced",))
++    assert effective_model_tiers(wf, cfg) == ("balanced",)
++
++
++def test_effective_config_empty_list_turns_feature_off() -> None:
++    wf = _Wf(("fast", "balanced", "powerful"))
++    cfg = _Cfg(())                       # explicit empty list = off
++    assert effective_model_tiers(wf, cfg) == ()

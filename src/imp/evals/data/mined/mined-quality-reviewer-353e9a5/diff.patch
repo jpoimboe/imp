@@ -1,0 +1,102 @@
+diff --git a/src/imp/providers/claude_code.py b/src/imp/providers/claude_code.py
+index cf3816b..3217d24 100644
+--- a/src/imp/providers/claude_code.py
++++ b/src/imp/providers/claude_code.py
+@@ -60,7 +60,11 @@ from imp.providers import errors as perr
+ from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
+ from imp.providers.base import Provider
+ from imp.providers.resolve import spawn_subagent_via_registry
+-from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
++from imp.providers.web_native import (
++    WEB_TOOL_NAMES,
++    cc_enabled_web_builtins,
++    check_web_capability,
++)
+ 
+ _AUTH_PATTERNS = (
+     "Invalid API key",
+@@ -629,7 +633,9 @@ class ClaudeCodeAgentRunner:
+         # tool_use without a matching tool_result ("API Error: 400 due to
+         # tool use concurrency issues"). Keep ToolSearch out of the deny
+         # list while keeping every other built-in denied.
+-        disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t != "ToolSearch"]
++        enabled_web = cc_enabled_web_builtins(invocation.agent_def)
++        exempt = {"ToolSearch", *enabled_web}
++        disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t not in exempt]
+         return ClaudeAgentOptions(
+             model=self.model,
+             # Pin the `claude` subprocess to the change's project_root. Without
+@@ -640,7 +646,7 @@ class ClaudeCodeAgentRunner:
+             cwd=str(invocation.change_context.project_root),
+             system_prompt=invocation.system_prompt,
+             mcp_servers={"imp": mcp_server},
+-            allowed_tools=[f"mcp__imp__{n}" for n in tool_names],
++            allowed_tools=[f"mcp__imp__{n}" for n in tool_names] + list(enabled_web),
+             disallowed_tools=disallowed,
+             setting_sources=[],
+             strict_mcp_config=True,
+diff --git a/tests/test_claude_code_web.py b/tests/test_claude_code_web.py
+new file mode 100644
+index 0000000..d0e402b
+--- /dev/null
++++ b/tests/test_claude_code_web.py
+@@ -0,0 +1,59 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
++from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
++from imp.providers.claude_code import ClaudeCodeAgentRunner
++
++
++def _agent(tools: frozenset[str]) -> AgentDef:
++    loc = SourceLoc(file=Path("a.md"), line=1)
++    return AgentDef(
++        name="t", description="", tools=tools, subagents=(),
++        output_schema=OutputSchema(
++            fields=(OutputField(name="status", type="enum",
++                                values=("Success",), required=True),),
++            source=loc),
++        prompt_template_source="hi", source_path=Path("a.md"), source=loc)
++
++
++def _inv(tmp_path: Path, tools: frozenset[str]) -> AgentInvocation:
++    return AgentInvocation(
++        agent_def=_agent(tools), provider_name="claude_code",
++        model_name="claude-sonnet-4-6", system_prompt="s",
++        initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
++        change_context=ChangeContext(slug="s", title="t", project_root=tmp_path,
++                                     workflow_dir=tmp_path),
++        interactive=False, transcript_dir=tmp_path / "step",
++        fs_permissions=(), events_path=tmp_path / "events.jsonl")
++
++
++def test_web_search_declared_enables_builtin(tmp_path: Path) -> None:
++    runner = ClaudeCodeAgentRunner("claude-sonnet-4-6")
++    opts = runner._build_options(
++        _inv(tmp_path, frozenset({"complete_step", "web_search"})),
++        mcp_server=object(), tool_names=["bash"])
++    assert "WebSearch" in opts.allowed_tools
++    assert "WebSearch" not in opts.disallowed_tools
++    # WebFetch not declared → stays disallowed, not allowlisted.
++    assert "WebFetch" not in opts.allowed_tools
++    assert "WebFetch" in opts.disallowed_tools
++
++
++def test_no_web_declared_keeps_builtins_disallowed(tmp_path: Path) -> None:
++    runner = ClaudeCodeAgentRunner("claude-sonnet-4-6")
++    opts = runner._build_options(
++        _inv(tmp_path, frozenset({"complete_step"})),
++        mcp_server=object(), tool_names=["bash"])
++    assert "WebSearch" in opts.disallowed_tools
++    assert "WebFetch" in opts.disallowed_tools
++    assert "WebSearch" not in opts.allowed_tools
++
++
++def test_toolsearch_still_exempt(tmp_path: Path) -> None:
++    runner = ClaudeCodeAgentRunner("claude-sonnet-4-6")
++    opts = runner._build_options(
++        _inv(tmp_path, frozenset({"complete_step", "web_search"})),
++        mcp_server=object(), tool_names=["bash"])
++    assert "ToolSearch" not in opts.disallowed_tools

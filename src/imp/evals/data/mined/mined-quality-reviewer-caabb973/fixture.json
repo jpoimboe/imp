@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-caabb973",
+  "source": "mined",
+  "base_sha": "f06934974e12565fbdcb545a122da65134c607ee",
+  "head_sha": "caabb973efc2950cc862699f94c309107f39652a",
+  "task_context": "You are performing a code quality review. Work from: /home/jpoimboe/imp\nDESCRIPTION: Added a RolesResolvedNode dataclass + _h_roles_resolved handler (and registration) to the narrative builder, parsing the once-per-run roles_resolved event into a root-level node; plus a root-attachment unit test.\nPLAN_OR_REQUIREMENTS: Task 6 from docs/superpowers/plans/2026-05-30-model-role-constraints-followups.md\n## Your job\nAssess code quality:\n- Does the new dataclass follow the conventions of the sibling node dataclasses (FallbackLine etc.) in narrative.py \u2014 field style, `collapsible` attribute, docstring?\n- Does the handler follow the established `_h_*` handler + `_HANDLERS[...]` registration pattern (compare to `_h_agent_retry` and other handlers)? Is the defensive `or {}` reasonable?\n- Any dead code, type issue, or inconsistency?\n- Run `ruff check src/imp/cli/narrative.py tests/test_render_text.py`. Also run targeted `python -m mypy src/imp/cli/narrative.py` if feasible (mypy is part of the project gate; `make typecheck` runs `mypy src`). Confirm no new type errors introduced by this node (e.g. `collapsible = False` as a bare class attr vs annotated \u2014 check it matches how sibling nodes declare it).\nDo NOT flag pre-existing issues outside this diff.\nReturn:\n- **Strengths**\n- **Issues** (Critical / Important / Minor)\n- **Assessment** (Approved / Changes needed)",
+  "expected_findings": [
+    {
+      "locus": "render.py:0",
+      "symbol": "RolesResolvedNode",
+      "description": "RolesResolvedNode has no render branch yet",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_render_text.py:0",
+      "symbol": "test_snapshot_covers_every_node_type",
+      "description": "test_snapshot_covers_every_node_type does not include RolesResolvedNode in required",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

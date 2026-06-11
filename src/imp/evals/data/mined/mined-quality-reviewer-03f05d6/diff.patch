@@ -1,0 +1,109 @@
+diff --git a/src/imp/cli/render.py b/src/imp/cli/render.py
+new file mode 100644
+index 0000000..84825d7
+--- /dev/null
++++ b/src/imp/cli/render.py
+@@ -0,0 +1,46 @@
++"""Human-readable renderer for `imp log` / `imp log --full`.
++
++Self-contained: depends only on the event-dict shape used in
++``events.jsonl``. No imports from ``imp.engine.*``. Pure functions and one
++generator; no global state.
++
++Spec: ``docs/superpowers/specs/2026-05-27-imp-log-readability-design.md``.
++"""
++
++from __future__ import annotations
++
++import os
++from typing import Any
++
++
++_ANSI: dict[str, str] = {
++    "dim":     "\x1b[2m",
++    "bold":    "\x1b[1m",
++    "red":     "\x1b[31m",
++    "green":   "\x1b[32m",
++    "yellow":  "\x1b[33m",
++    "blue":    "\x1b[34m",
++    "magenta": "\x1b[35m",
++    "cyan":    "\x1b[36m",
++    "gray":    "\x1b[90m",  # bright-black, not white
++    "reset":   "\x1b[0m",
++}
++
++
++def _style(text: str, *codes: str, enabled: bool) -> str:
++    """Wrap ``text`` in the named ANSI codes when ``enabled``.
++
++    Returns ``text`` unchanged when disabled. Codes are applied in argument
++    order; a single ``reset`` is appended once.
++    """
++    if not enabled or not codes:
++        return text
++    prefix = "".join(_ANSI[c] for c in codes)
++    return f"{prefix}{text}{_ANSI['reset']}"
++
++
++def should_use_color(stream: Any) -> bool:
++    """Color is enabled iff ``stream.isatty()`` is true and ``NO_COLOR`` is
++    unset in the environment. Matches the de-facto ``NO_COLOR`` convention.
++    """
++    return bool(stream.isatty()) and "NO_COLOR" not in os.environ
+diff --git a/tests/test_cli_log_render.py b/tests/test_cli_log_render.py
+new file mode 100644
+index 0000000..095e9fb
+--- /dev/null
++++ b/tests/test_cli_log_render.py
+@@ -0,0 +1,51 @@
++"""Tests for the imp log renderer (src/imp/cli/render.py)."""
++
++from __future__ import annotations
++
++import io
++import os
++
++import pytest
++
++from imp.cli import render
++
++
++def test_style_disabled_returns_plain_text() -> None:
++    assert render._style("hi", "red", enabled=False) == "hi"
++
++
++def test_style_enabled_wraps_in_ansi() -> None:
++    out = render._style("hi", "red", enabled=True)
++    assert out == "\x1b[31mhi\x1b[0m"
++
++
++def test_style_multiple_codes() -> None:
++    out = render._style("hi", "bold", "magenta", enabled=True)
++    # codes concatenated in order, single reset
++    assert out == "\x1b[1m\x1b[35mhi\x1b[0m"
++
++
++def test_should_use_color_off_when_not_a_tty(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.delenv("NO_COLOR", raising=False)
++    stream = io.StringIO()  # not a tty
++    assert render.should_use_color(stream) is False
++
++
++def test_should_use_color_off_when_no_color_set(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setenv("NO_COLOR", "1")
++
++    class FakeTTY:
++        def isatty(self) -> bool:
++            return True
++
++    assert render.should_use_color(FakeTTY()) is False
++
++
++def test_should_use_color_on_when_tty_and_no_no_color(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.delenv("NO_COLOR", raising=False)
++
++    class FakeTTY:
++        def isatty(self) -> bool:
++            return True
++
++    assert render.should_use_color(FakeTTY()) is True

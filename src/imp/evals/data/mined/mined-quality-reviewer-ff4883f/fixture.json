@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-ff4883f",
+  "source": "mined",
+  "base_sha": "693d712",
+  "head_sha": "ff4883f",
+  "task_context": "Code quality review of one commit in a git worktree.\n## Working directory\n/home/jpoimboe/imp/.claude/worktrees/codex-default-workflow (branch worktree-codex-default-workflow). Run from there.\n## What to review\n- DESCRIPTION: Task 8 \u2014 add a pure helper `reassemble_codex_turn(items)` to codex_runner.py that builds a full-turn llm_response.raw ({\"content\": [text + tool_use blocks; web_search as query-only tool_use]}) from a codex turn's SDK items, so the audit reconstruction API can pair tool_use/tool_result. LATENT/audit-only \u2014 deliberately NOT wired into any live path. Plus 2 tests (reassembly shape; reconstruct pairing guard).\n- PLAN_OR_REQUIREMENTS: Task 8 of docs/superpowers/plans/2026-06-05-codex-default-workflow-support.md\n## Focus\n- Readability and correctness of `reassemble_codex_turn`: the `getattr(item, \"type\", None)` dispatch, the `or \"\"`/`or {}` defensive defaults, the `item.tool` with `item.name` fallback. Are the defensive defaults sensible (codex SDK items vs fakes), or do they mask real bugs?\n- Is the docstring's LATENT/AUDIT-ONLY warning clear enough that a future maintainer won't accidentally wire it into the emit path?\n- Symmetry/consistency: `reassemble_codex_turn` produces blocks that `_parse_codex_message` consumes. Do their block shapes agree exactly (text: {type,text}; tool_use: {type,id,name,input})? Any drift between producer and consumer?\n- Are the two tests meaningful? The reconstruct test is the real value \u2014 it exercises the actual audit API (reconstruct_request_for_response) end-to-end with a codex-shaped event stream. Does it genuinely prove tool_use/tool_result pairing (not a tautology)? Is the first test's exact-dict assertion appropriately strict?\n- Placement: function sits between _serialize_mcp_result and _parse_codex_message \u2014 sensible grouping with the other codex render/audit helpers?\n- Dead code / naming / magic values introduced by THIS change. (Note the function is intentionally uncalled in production \u2014 that is BY DESIGN, do not flag it as dead code; it's a latent guard with test callers.)\n- Run `make typecheck` to confirm clean.\nNote: pre-existing lint errors in docs/superpowers/spikes/ are NOT this commit's concern.\n## Report\n- **Strengths**\n- **Issues** Critical / Important / Minor (file:line)\n- **Assessment:** APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "tests/test_codex_replay_parser.py:58",
+      "symbol": "",
+      "description": "Three `# noqa: E402` imports appear after the first five tests with no explanatory comment; a separator comment would clarify intent and eliminate the code smell.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/codex_fakes.py:66",
+      "symbol": "FakeWebSearchItem",
+      "description": "`FakeWebSearchItem` has no `id` attribute while the real SDK's `WebSearchItem` may have one, leaving the non-empty-id path untested; a note explaining this would clarify intent.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_codex_replay_parser.py:0",
+      "symbol": "test_reconstruct_pairs_codex_tool_use_with_tool_result",
+      "description": "The filter `getattr(b, \"name\", None)` is an ad-hoc type discriminator; using `isinstance(b, ToolUseBlock)` would be tighter and more resilient.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

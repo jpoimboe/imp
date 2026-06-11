@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-6cd2e4b",
+  "source": "mined",
+  "base_sha": "ce94c52",
+  "head_sha": "6cd2e4b",
+  "task_context": "You are performing a code quality review of a large, cross-cutting refactor. Work from `/home/jpoimboe/imp/.claude/worktrees/stable-change-id`.\nDESCRIPTION: Task 4 \u2014 anchor a Change's identity on an immutable `id` (`YYYY-MM-DD-<6 chars>`) instead of the mutable slug, across change.py/slug.py/worktree.py/journal.py/env.py/bash.py/executor.py/prompts.py/subagents.py/openai.py + coupled test rewrites.\nPLAN_OR_REQUIREMENTS: Task 4 (Steps 1\u201321) in docs/superpowers/plans/2026-06-04-stable-change-id.md.\n## Expected partial-red \u2014 NOT defects\nThis task deliberately does NOT touch `src/imp/cli/main.py` (migrated next task). So 5 typecheck errors confined to `main.py` and 14 test failures in `tests/test_cli_interrupt.py`/`test_cli_log_pager.py`/`test_cli_view.py`/`test_journal_read_cli.py` are EXPECTED. `make lint` is clean and 1106 tests pass. Do NOT flag the expected red; judge only the quality of the changes made.\nAssess for code quality and maintainability:\n- **`apply_pending_rename` rewrite** (executor.py) \u2014 is the content-only logic correct and clean? Pay special attention to the spec-file move: `git mv` with a `Path.rename()` fallback for untracked drafts. Is the fallback correct (does it move the file so nothing lingers at the old name)? Is the `old_slug != new_slug` guard sound? Does it correctly use the now-derived `slug` property after setting `change.title`? Is `on_event` now an unused param (acceptable per plan, ruff doesn't select ARG) \u2014 confirm it's harmless.\n- **`Change.slug` as a derived property** \u2014 `dated_slug(self.title, date=self.id[:10])`. Any edge cases (e.g. an `id` shorter than 10 chars in a test)? Is the local import of `dated_slug` inside the property reasonable?\n- **`merge_to_base` title threading** \u2014 subject `f\"Merge {title}\\n\\n(imp/{change_id})\"` consistent across `_merge_in_place` and `_merge_detached`; signatures coherent.\n- **`worktree.py` param rename** slug\u2192change_id \u2014 complete and consistent, no half-renamed locals; `rename` fully removed with no dangling references.\n- **`build_context`/`ChangeContext`/`_prompt_cache_key`** \u2014 keyword-only defaults applied sanely; naming follows the \"attribute is `id`, params are `change_id`\" rule.\n- **Test quality** \u2014 are the rewritten tests (`test_change.py`, `test_executor_rename.py`, `test_change_identity.py`, `test_cache_key_stable.py`, `test_worktree.py` merge subject) verifying real behavior? Is `test_cache_key_stable.py` non-tautological? Did the sweep introduce any weak/incorrect assertions (e.g. asserting a derived slug that's actually wrong)?\n- **Scope/bloat** \u2014 anything changed beyond what the signature changes force? Files that grew unreasonably?\n- **One responsibility per unit**, consistency with surrounding code, naming clarity.\nReturn: **Strengths**, **Issues** (Critical / Important / Minor with file:line), **Assessment** (Approved / Changes needed). Be proportionate but rigorous \u2014 this is the load-bearing task.",
+  "expected_findings": [
+    {
+      "locus": "executor.py:316",
+      "symbol": "apply_pending_rename",
+      "description": "Path.rename fallback can silently overwrite a tracked destination if git mv fails for reasons other than untracked source.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "executor.py:276",
+      "symbol": "apply_pending_rename",
+      "description": "Parameter on_event is genuinely unused in apply_pending_rename after the rewrite.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_concurrent_changes.py:0",
+      "symbol": "",
+      "description": "Test fixtures use non-date change_ids (alpha, feat, iso) which are unrealistic for the date-based scheme; affects test_concurrent_changes.py, test_executor_merge.py, and test_cli_status.py.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

@@ -1,0 +1,82 @@
+diff --git a/src/imp/engine/completion.py b/src/imp/engine/completion.py
+new file mode 100644
+index 0000000..54f8f5a
+--- /dev/null
++++ b/src/imp/engine/completion.py
+@@ -0,0 +1,30 @@
++"""Render an OutputSchema into a 'call complete_step' instruction.
++
++Single source of truth, consumed only by the executor: it (1) appends the
++text to every agent's system prompt and (2) seeds the non-interactive nudge
++closure. No provider imports this module, so there is no providers→engine
++import edge.
++"""
++
++from __future__ import annotations
++
++from imp.engine.types import OutputSchema
++
++
++def completion_instruction(schema: OutputSchema) -> str:
++    """Prose instruction naming every field the agent must pass to
++    `complete_step`, with enum values inlined and optional fields marked."""
++    parts: list[str] = []
++    for field in schema.fields:
++        if field.type == "enum":
++            spec = f"`{field.name}` ({'|'.join(field.values)})"
++        else:
++            spec = f"`{field.name}` ({field.type})"
++        if not field.required:
++            spec += " (optional)"
++        parts.append(spec)
++    fields_text = ", ".join(parts)
++    return (
++        "To finish this step you MUST call the `complete_step` tool with: "
++        f"{fields_text}. Do not answer in prose — call the tool."
++    )
+diff --git a/tests/test_completion.py b/tests/test_completion.py
+new file mode 100644
+index 0000000..ed4111d
+--- /dev/null
++++ b/tests/test_completion.py
+@@ -0,0 +1,40 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++from imp.engine.completion import completion_instruction
++from imp.engine.types import OutputField, OutputSchema, SourceLoc
++
++
++def _schema() -> OutputSchema:
++    return OutputSchema(
++        fields=(
++            OutputField(name="status", type="enum",
++                        values=("Success", "Error"), required=True),
++            OutputField(name="verdict", type="enum",
++                        values=("approve", "rework"), required=True),
++            OutputField(name="notes", type="string", required=False),
++        ),
++        source=SourceLoc(file=Path("a.md"), line=1),
++    )
++
++
++def test_names_the_tool() -> None:
++    assert "complete_step" in completion_instruction(_schema())
++
++
++def test_names_every_required_field_and_enum_value() -> None:
++    text = completion_instruction(_schema())
++    for token in ("status", "Success", "Error", "verdict", "approve", "rework"):
++        assert token in text, token
++
++
++def test_marks_optional_fields_optional() -> None:
++    text = completion_instruction(_schema())
++    assert "notes" in text
++    assert "optional" in text.lower()
++
++
++def test_instructs_tool_call_not_prose() -> None:
++    text = completion_instruction(_schema())
++    assert "prose" in text.lower()

@@ -1,0 +1,64 @@
+{
+  "id": "mined-quality-reviewer-b9b91c7",
+  "source": "mined",
+  "base_sha": "131489b",
+  "head_sha": "b9b91c7",
+  "task_context": "Code quality review of a focused change. Repo: /home/jpoimboe/imp.\nDESCRIPTION: Task 8 \u2014 add `_emit_anthropic_web_events` + helpers (`_collect_text_citations`, `_normalize_web_result`) to anthropic.py and call the walker in _run_loop after append_llm_response. Emits normalized web tool_call/tool_result events with citations. Audit-only side path (never dispatches).\nAssess:\n- Correctness: the list-vs-dict content discrimination; the nested `_cite` closure merging text-block citations; empty-result handling; document-order emission; resilience to missing keys (`.get` usage).\n- Clarity: function decomposition (3 small functions), naming, docstrings.\n- Cohesion / single responsibility: each helper does one thing; testable independently.\n- Tests verify real behavior; edge cases (url-only fetch) covered. Any gaps worth noting (e.g. multiple searches in one turn, missing-url results)?\n- Anything unnecessary or over-engineered.\nReturn: Strengths; Issues tagged (Critical/Important/Minor); Assessment (APPROVED or CHANGES REQUESTED). If clean, APPROVED.",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/anthropic/response.py:296",
+      "symbol": "_normalize_web_result",
+      "description": "web_fetch body text extraction is broken against real API responses; code looks for doc.get('text') but SDK model_dump serializes to source.data, causing body text to be silently dropped from audit_text",
+      "severity": "Important",
+      "must_catch": true,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/anthropic/response.py:0",
+      "symbol": "_collect_text_citations",
+      "description": "Function stores title field in collected dict but _cite() never reads it from the citations dict; the stored title is dead weight",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/anthropic/response.py:0",
+      "symbol": "_collect_text_citations",
+      "description": "last-write-wins silently drops cited_text for duplicate URLs; when same URL appears in multiple text citations, only the last excerpt is kept, which is undocumented",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/anthropic/response.py:0",
+      "symbol": "_emit_anthropic_web_events",
+      "description": "No test coverage for error-content results; both web_search_tool_result_error and web_fetch_tool_result_error cases are not tested to verify they emit empty citations without raising",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/anthropic/response.py:0",
+      "symbol": "_emit_anthropic_web_events",
+      "description": "No test for multiple searches in one turn; a second server_tool_use+web_search_tool_result pair would exercise the multi-call ordering guarantee but is not tested",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

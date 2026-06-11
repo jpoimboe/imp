@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-961e641",
+  "source": "mined",
+  "base_sha": "9cf4a4d",
+  "head_sha": "961e641",
+  "task_context": "Code quality review of a focused change. Repo: /home/jpoimboe/imp.\nDESCRIPTION: Task 4 \u2014 in all three runner `_build_tools` (anthropic/claude_code/openai), add a `check_web_capability` fail-loud guard and skip reserved `WEB_TOOL_NAMES` so web tools aren't registry-looked-up. New test file + a one-line fake patch in test_load_skill_injection.py.\nAssess: correctness (guard called before the loop; skip branch in the right place; no behavior change for non-web tools); consistency (the three files use identical patterns; comments accurate); DRY concern \u2014 note whether the near-identical skip logic across three runners is acceptable duplication or should be factored (judge pragmatically: these `_build_tools` already had parallel structure); tests verify real behavior; the test-double patch is clean; nothing unnecessary.\nReturn: Strengths; Issues tagged (Critical/Important/Minor); Assessment (APPROVED or CHANGES REQUESTED). If clean, say APPROVED.",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

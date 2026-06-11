@@ -1,0 +1,97 @@
+diff --git a/src/imp/providers/codex_mcp.py b/src/imp/providers/codex_mcp.py
+index 36ed326..c8c138d 100644
+--- a/src/imp/providers/codex_mcp.py
++++ b/src/imp/providers/codex_mcp.py
+@@ -81,7 +81,14 @@ async def dispatch_tool(
+         # runner reads `state.complete_step_args` at that boundary, not via
+         # a call-stack return (design "complete_step capture").
+         state.complete_step_called = True
+-        state.complete_step_args = dict(args)
++        # The dynamic arg-model (_register_imp_tool) defaults every non-required
++        # property to None (PydanticField(None)), so model_dump materializes
++        # e.g. spec_path=None even when codex omitted it. Drop None-valued keys
++        # so complete_step_args reflects what the agent ACTUALLY sent —
++        # otherwise output-schema validation rejects a present-but-None optional
++        # field ("expected string, got NoneType"). imp output types are never
++        # nullable, so a None here always means "field not provided".
++        state.complete_step_args = {k: v for k, v in args.items() if v is not None}
+         return "step complete"
+     try:
+         raw = await tool.async_invoke(ctx, args)
+diff --git a/tests/test_codex_mcp_dispatch.py b/tests/test_codex_mcp_dispatch.py
+index 4b7e4a9..f676c4d 100644
+--- a/tests/test_codex_mcp_dispatch.py
++++ b/tests/test_codex_mcp_dispatch.py
+@@ -106,6 +106,72 @@ def test_dispatch_awaits_async_tool(tmp_path: Path) -> None:
+     assert state.dispatch_count == 1
+ 
+ 
++def test_complete_step_drops_none_valued_optional_args(tmp_path: Path) -> None:
++    """codex's arg-model defaults absent optional fields to None via
++    PydanticField(None); the capture must drop them so output validation
++    doesn't reject a present-but-None optional field with 'expected string,
++    got NoneType' (regression: spec-writer spec_path omitted by codex)."""
++    ctx = _ctx(tmp_path)
++    state = RunState(cap=50)
++
++    def _cs(ctx: Any, **kwargs: Any) -> str:
++        raise AssertionError("complete_step body must not run inside the wrapper")
++
++    cs = Tool(name="complete_step", description="",
++              input_schema={"type": "object",
++                            "properties": {
++                                "status": {"type": "string"},
++                                "phase": {"type": "string"},
++                                "complexity": {"type": "string"},
++                                "spec_path": {"type": "string"},
++                            },
++                            "required": ["status"]},
++              fn=_cs)
++
++    # Simulate codex omitting the optional spec_path — the arg-model
++    # materialises spec_path=None; the fix must strip it.
++    out = asyncio.run(dispatch_tool(
++        tool=cs,
++        args={"status": "Success", "phase": "drafting",
++              "complexity": "trivial", "spec_path": None},
++        ctx=ctx, state=state,
++    ))
++    assert state.complete_step_called is True
++    assert state.complete_step_args == {
++        "status": "Success", "phase": "drafting", "complexity": "trivial"}
++    assert "spec_path" not in state.complete_step_args
++    assert out == "step complete"
++
++
++def test_complete_step_preserves_non_none_optional_arg(tmp_path: Path) -> None:
++    """A non-None optional field (e.g. spec_path provided) must NOT be dropped —
++    the filter is None-only, not 'optional field' blanket removal."""
++    ctx = _ctx(tmp_path)
++    state = RunState(cap=50)
++
++    def _cs(ctx: Any, **kwargs: Any) -> str:
++        raise AssertionError("complete_step body must not run inside the wrapper")
++
++    cs = Tool(name="complete_step", description="",
++              input_schema={"type": "object",
++                            "properties": {
++                                "status": {"type": "string"},
++                                "spec_path": {"type": "string"},
++                            },
++                            "required": ["status"]},
++              fn=_cs)
++
++    out = asyncio.run(dispatch_tool(
++        tool=cs,
++        args={"status": "Success", "spec_path": "docs/my-spec.md"},
++        ctx=ctx, state=state,
++    ))
++    assert state.complete_step_called is True
++    assert state.complete_step_args == {
++        "status": "Success", "spec_path": "docs/my-spec.md"}
++    assert out == "step complete"
++
++
+ def test_cap_rmw_literal_has_no_await_between_read_and_decision() -> None:
+     """AC #19 source-inspection guard: between the `dispatch_count += 1`
+     increment and the `> state.cap` comparison there must be no `await`

@@ -268,7 +268,8 @@ def test_autosquash_noop_without_fixups_keeps_merge(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _build_clean_merge(pr)
     head_before = _git(pr, "rev-parse", "HEAD").stdout.strip()
-    assert _run(pr).returncode == 0
+    result = _run(pr)
+    assert result.returncode == 0, result.stderr
     assert _git(pr, "rev-parse", "HEAD").stdout.strip() == head_before
 
 
@@ -286,7 +287,8 @@ def test_autosquash_folds_with_no_integration_merge(tmp_path: Path) -> None:
     _git(pr, "add", "g.txt")
     _git(pr, "commit", f"--fixup={target}")
 
-    assert _run(pr).returncode == 0
+    result = _run(pr)
+    assert result.returncode == 0, result.stderr
     assert not any(s.startswith("fixup!") for s in _subjects(pr))
     assert (pr / "g.txt").read_text() == "work (fixed)\n"
 
@@ -312,6 +314,7 @@ def test_autosquash_folds_squash_only_no_fixup(tmp_path: Path) -> None:
         "setup failed to land the squash! commit (editor-dependent setup?)"
     )
 
-    assert _run(pr).returncode == 0
+    result = _run(pr)
+    assert result.returncode == 0, result.stderr
     assert not any(
         s.startswith(("fixup!", "squash!", "amend!")) for s in _subjects(pr))

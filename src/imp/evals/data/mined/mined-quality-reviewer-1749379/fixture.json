@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-1749379",
+  "source": "mined",
+  "base_sha": "f91bf4f",
+  "head_sha": "1749379",
+  "task_context": "Code quality review in repo /home/jpoimboe/imp.\nDESCRIPTION: Loader parses agent frontmatter `model_role:` and workflow `model_rules:`, with a best-effort cycle pre-check.\nPLAN_OR_REQUIREMENTS: Task 3 from docs/superpowers/plans/2026-05-30-model-role-constraints.md\nAssess standard code quality AND:\n- Does the new loader code follow the file's existing patterns (how other frontmatter fields like `max_tool_calls` are parsed; how other YAML blocks are parsed; LoadError usage with SourceLoc)?\n- Is the cycle pre-check placed sensibly, with a clear comment explaining it's best-effort (the authoritative check is later in resolve_roles)?\n- Are the tests meaningful (not just mock-asserting)?\n- Any correctness concerns with the None-coercion of model_role or the cycle error message?\nruff is already clean and mypy runs on src only. Judge proportionally \u2014 this is a focused additive change to an existing large file. Don't invent issues.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Needs changes).",
+  "expected_findings": [
+    {
+      "locus": "test_loader.py:0",
+      "symbol": "",
+      "description": "The four new tests use local (inline) imports inside function bodies instead of module-level imports used throughout the rest of the file.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_loader.py:0",
+      "symbol": "test_load_workflow_rejects_constraint_cycle",
+      "description": "The tmp_path parameter lacks the type annotation (tmp_path: Path) used by all prior tests in the file.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "loader.py:0",
+      "symbol": "parse_agent_file",
+      "description": "No validation that model_role in agent frontmatter is a non-empty string; code allows str(123) \u2192 \"123\" or empty strings without guards, inconsistent with step-level parsing.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": true,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

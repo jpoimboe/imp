@@ -1,0 +1,18 @@
+{
+  "id": "mined-spec-task-reviewer-8f80df9",
+  "source": "mined",
+  "base_sha": "e6e9eef",
+  "head_sha": "8f80df9",
+  "task_context": "You are a spec-compliance reviewer in `/home/jpoimboe/imp`. Verify by reading actual code \u2014 do not trust the report.\n## What Was Requested (Task 5)\nAdd `build_agent_invocation(*, ...)` to `src/imp/engine/agent_run.py`. It must:\n1. Compute `instruction = completion_instruction(agent_def.output_schema)`.\n2. Set `system_prompt = f\"{rendered_system_prompt}\\n\\n{instruction}\"`.\n3. Build `continuation_fn = build_continuation_fn(interactive=..., user_chat_input_fn=..., instruction=instruction, log=log, agent_id=agent_id)` \u2014 using the SAME instruction string (this is the invariant the builder owns).\n4. Construct and return an `AgentInvocation` with `user_input_fn=user_chat_input_fn if interactive else None` and all other fields threaded through.\n5. Signature is keyword-only with these params: agent_def, provider_name, model_name, rendered_system_prompt, initial_messages, change_context, interactive, user_chat_input_fn, transcript_dir, fs_permissions, events_path, subagent_defs, model_tiers, max_tool_calls, agent_id, event_log, change_state, first_event_parent_id, resolved_roles, coordinator, subagent_depth=0, retry_feedback=None, balance_on_resume=False, log=None.\n6. New top-level imports added; module must NOT import engine.executor, agents.subagents, error_policy, or schema at module top.\nTwo new tests appended to `tests/test_agent_run.py`: `test_build_agent_invocation_appends_completion_instruction` and `test_build_agent_invocation_interactive_wires_user_input`.\n## Your Job \u2014 verify by reading code\n2. Read `build_agent_invocation` in `src/imp/engine/agent_run.py`. Confirm points 1-5 above exactly: the instruction is computed once and passed to BOTH the system_prompt and build_continuation_fn (same string \u2014 this is the whole point). Confirm `user_input_fn=user_chat_input_fn if interactive else None`.\n3. CRITICAL: Confirm every kwarg passed to the `AgentInvocation(...)` constructor is a REAL field of the dataclass (read `src/imp/agents/runner.py`'s `AgentInvocation`). Confirm no field is silently dropped that lacks a default (i.e. the constructed invocation is valid). Confirm `completion_instruction` actually accepts an OutputSchema and returns str (read `src/imp/engine/completion.py`).\n4. Confirm module top imports do NOT include engine.executor, agents.subagents, error_policy, schema. Run: `python3 -c \"import imp.engine.agent_run\"` to confirm it imports clean.\n5. Confirm the two tests are present and assert the documented behavior.\n6. Check for EXTRA/unrequested changes (the test file imports \u2014 confirm no duplicate-import lint issues were introduced; the implementer may have consolidated imports at the top).\n7. Run `python3 -m pytest tests/test_agent_run.py -v`.\nReport: \u2705 Spec compliant, or \u274c Issues found (file:line specifics).",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "spec-task-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

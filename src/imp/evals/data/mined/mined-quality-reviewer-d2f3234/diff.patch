@@ -1,0 +1,75 @@
+diff --git a/src/imp/providers/claude_code.py b/src/imp/providers/claude_code.py
+index 1decb5a..a26a4a3 100644
+--- a/src/imp/providers/claude_code.py
++++ b/src/imp/providers/claude_code.py
+@@ -507,12 +507,14 @@ class ClaudeCodeAgentRunner:
+             resume_state = classify_resume(messages, interactive=invocation.interactive)
+             if resume_state is ResumeState.DANGLING_TOOL_USE:
+                 yield {"type": "error", "payload": {
++                    "category": "config",
+                     "kind": "transcript_invalid",
+                     "message": "transcript ended with dangling tool_use",
+                 }}
+                 return
+             if resume_state is ResumeState.MISSING_COMPLETE_STEP:
+                 yield {"type": "error", "payload": {
++                    "category": "agent_output_missing",
+                     "kind": "missing_complete_step",
+                     "message": "autonomous agent transcript ended without complete_step",
+                 }}
+@@ -520,6 +522,7 @@ class ClaudeCodeAgentRunner:
+             if resume_state is ResumeState.PROMPT_USER:
+                 if ctx.user_input_fn is None:
+                     yield {"type": "error", "payload": {
++                        "category": "config",
+                         "kind": "no_user_input_fn",
+                         "message": (
+                             "PROMPT_USER resume requires user_input_fn; "
+@@ -552,6 +555,7 @@ class ClaudeCodeAgentRunner:
+             async for sdk_msg in client.receive_response():
+                 if self._cancel:
+                     yield {"type": "error", "payload": {
++                        "category": "config",
+                         "kind": "interrupted",
+                         "message": "runner cancelled by interrupt",
+                     }}
+@@ -625,6 +629,7 @@ class ClaudeCodeAgentRunner:
+                 if state.fatal_tool_error is not None:
+                     tool_name, msg = state.fatal_tool_error
+                     yield {"type": "error", "payload": {
++                        "category": "config",
+                         "kind": "fatal_tool_error",
+                         "tool": tool_name,
+                         "message": msg,
+@@ -644,6 +649,7 @@ class ClaudeCodeAgentRunner:
+                             )
+                         except Exception as ve:
+                             yield {"type": "error", "payload": {
++                                "category": "agent_output_missing",
+                                 "kind": "output_validation",
+                                 "message": str(ve),
+                             }}
+@@ -654,6 +660,7 @@ class ClaudeCodeAgentRunner:
+ 
+                     if tool_calls_used >= ceiling and not state.complete_step_called:
+                         yield {"type": "error", "payload": {
++                            "category": "config",
+                             "kind": "tool_call_ceiling_exceeded",
+                             "ceiling": ceiling,
+                         }}
+@@ -674,6 +681,7 @@ class ClaudeCodeAgentRunner:
+                         continue
+ 
+                     yield {"type": "error", "payload": {
++                        "category": "agent_output_missing",
+                         "kind": "no_complete_step",
+                         "message": "agent finished without calling complete_step",
+                     }}
+@@ -681,6 +689,7 @@ class ClaudeCodeAgentRunner:
+ 
+         # Fell out of the receive loop without seeing a ResultMessage.
+         yield {"type": "error", "payload": {
++            "category": "network",
+             "kind": "no_result_message",
+             "message": "SDK closed without yielding a ResultMessage",
+         }}

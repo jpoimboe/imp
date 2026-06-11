@@ -1,0 +1,32 @@
+diff --git a/src/imp/assets/workflows/default/scripts/run-tests.sh b/src/imp/assets/workflows/default/scripts/run-tests.sh
+index 2c04ff6..cacf70b 100755
+--- a/src/imp/assets/workflows/default/scripts/run-tests.sh
++++ b/src/imp/assets/workflows/default/scripts/run-tests.sh
+@@ -2,8 +2,8 @@
+ # Run the project's test suite. Convention: project provides `make test`
+ # or `python -m pytest` works.
+ #
+-# Script gates run with cwd=$IMP_WORKFLOW_DIR; cd into the project tree
+-# before invoking the test runner.
++# Script gates run with cwd set to the workflow snapshot dir; cd into the
++# project tree (IMP_PROJECT_ROOT, set by the engine) before running tests.
+ #
+ # Decision tree:
+ #   - Makefile with `test:` target → `make test`
+diff --git a/src/imp/engine/gates.py b/src/imp/engine/gates.py
+index 0a62056..a71ec4a 100644
+--- a/src/imp/engine/gates.py
++++ b/src/imp/engine/gates.py
+@@ -39,8 +39,10 @@ def run_script_gate(
+ ) -> tuple[Action, dict[str, Any]]:
+     """Run the script, capture exit/stdout/stderr, evaluate decide.
+ 
+-    The `cwd` argument is the Change's project root; the gate's own `cwd:`
+-    overrides if set.
++    The `cwd` argument is the Change's workflow snapshot dir (so relative
++    `command:` paths like `./scripts/lint.sh` resolve against the snapshot);
++    the gate's own `cwd:` overrides if set. The project root is exposed to the
++    script via the IMP_PROJECT_ROOT env var (see engine_env), not via cwd.
+ 
+     `shell=True` is intentional and not a security issue: workflow YAML is part
+     of the trusted code base (snapshotted at imp new, gitted, peer-reviewed)

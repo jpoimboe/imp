@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-bb5e2a4",
+  "source": "mined",
+  "base_sha": "77cedcd",
+  "head_sha": "bb5e2a4",
+  "task_context": "You are doing a code quality review of Task 3 in the imp project at /home/jpoimboe/imp.\nDESCRIPTION: Made the agent `bash` tool inject IMP_PROJECT_ROOT/IMP_ARTIFACTS_DIR into its subprocess by merging engine_env() on top of os.environ and passing env= to anyio.open_process. Added two tests in tests/test_bash_tool.py asserting a bash command sees both vars.\nPLAN_OR_REQUIREMENTS: Task 3 from docs/superpowers/plans/2026-05-29-engine-env-injection.md.\nReview the diff: `git -C /home/jpoimboe/imp diff 77cedcd bb5e2a4`\nAssess standard code quality concerns plus:\n- Is the change minimal and following the plan's structure?\n- Merge order correctness (os.environ base, engine_env overriding) \u2014 is that the right semantics?\n- Does passing an explicit `env=` (replacing implicit inheritance) preserve the full parent environment? (i.e. spreading os.environ means PATH etc. are retained)\n- Do the tests verify real subprocess behavior?\n- Any subtle regressions in process handling?\nReturn:\n- Strengths\n- Issues (Critical / Important / Minor)\n- Assessment (Approved / needs changes)",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

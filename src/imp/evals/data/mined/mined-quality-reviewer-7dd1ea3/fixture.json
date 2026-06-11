@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-7dd1ea3",
+  "source": "mined",
+  "base_sha": "fd21784",
+  "head_sha": "7dd1ea3",
+  "task_context": "Code quality review of one commit in a git worktree.\n## Working directory\n/home/jpoimboe/imp/.claude/worktrees/codex-default-workflow (branch worktree-codex-default-workflow). Run commands from there.\n## What to review\n- DESCRIPTION: Task 2 \u2014 new pure helper module `src/imp/providers/codex_rollout.py` (persist_rollout / restore_rollout / _newest_matching_rollout) that copies codex's on-disk rollout out to a durable transcript_dir on pause and restores it on resume, plus unit tests.\n- PLAN_OR_REQUIREMENTS: Task 2 of docs/superpowers/plans/2026-06-05-codex-default-workflow-support.md\n## Focus\n- Single clear responsibility, well-defined interface (keyword-only API, clear return contract)?\n- Are the functions understandable and independently testable? Are tests testing real file behavior (they do real fs round-trips via tmp_path \u2014 good) vs mock artifacts?\n- Edge cases: the `_newest_matching_rollout` fallback logic (newest name-match by mtime; sole-rollout fallback; None). Is the fallback sound or surprising? Any risk the sole-rollout fallback grabs a wrong file?\n- Error handling clarity: do the FileNotFoundError messages help a future debugger?\n- Naming, magic values, dead code, docstring accuracy.\n- Does it follow patterns of sibling provider modules (look at src/imp/providers/codex_config.py for style \u2014 logging, constants, type hints)?\n- Did this change introduce anything already-large? (It's a small new file \u2014 judge only what this commit added.)\nRun `make typecheck` and `ruff check src/imp/providers/codex_rollout.py tests/test_codex_rollout.py` to confirm clean (note: a separate pre-existing set of lint errors in docs/superpowers/spikes/ files is NOT this commit's concern \u2014 only flag issues in the two files this commit added).\n## Report\n- **Strengths**\n- **Issues** Critical / Important / Minor (file:line)\n- **Assessment:** APPROVED or CHANGES REQUESTED",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/codex_rollout.py:31",
+      "symbol": "_newest_matching_rollout",
+      "description": "thread_id in p.name is a substring check that could yield false positives if codex naming convention changes; should use p.stem.endswith(f\"-{thread_id}\") for precision",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/codex_rollout.py:34",
+      "symbol": "_newest_matching_rollout",
+      "description": "The sole-rollout fallback docstring should explicitly state that it can only match a rollout from the current run because CODEX_HOME is process-isolated",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "tests/test_codex_rollout.py:51",
+      "symbol": "",
+      "description": "The rel variable is redundant; the stronger assertion on content already validates the restoration",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/codex_rollout.py:51",
+      "symbol": "persist_rollout",
+      "description": "write_text without explicit encoding= argument relies on locale-default encoding, which is technically fragile on non-UTF-8 systems",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

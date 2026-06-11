@@ -1,0 +1,1195 @@
+diff --git a/src/imp/engine/replay.py b/src/imp/engine/replay.py
+index 93d3ee8..2c4ba6a 100644
+--- a/src/imp/engine/replay.py
++++ b/src/imp/engine/replay.py
+@@ -31,19 +31,19 @@ from imp.providers.claude_code import (
+     _parse_claude_code_message,
+ )
+ from imp.providers.openai import (
+-    _extract_openai_diagnostics,
+-    _parse_openai_message,
++    _extract_responses_diagnostics,
++    _parse_responses_message,
+ )
+ 
+ _MESSAGE_PARSERS: dict[str, Callable[[dict[str, Any]], Message]] = {
+     "anthropic": _parse_anthropic_message,
+-    "openai": _parse_openai_message,
++    "openai": _parse_responses_message,
+     "claude_code": _parse_claude_code_message,
+ }
+ 
+ _DIAGNOSTICS_EXTRACTORS: dict[str, Callable[[dict[str, Any]], Diagnostics]] = {
+     "anthropic": _extract_anthropic_diagnostics,
+-    "openai": _extract_openai_diagnostics,
++    "openai": _extract_responses_diagnostics,
+     "claude_code": _extract_claude_code_diagnostics,
+ }
+ 
+diff --git a/src/imp/providers/openai.py b/src/imp/providers/openai.py
+index 620ca79..c5e7cbb 100644
+--- a/src/imp/providers/openai.py
++++ b/src/imp/providers/openai.py
+@@ -2,7 +2,7 @@
+ 
+ Loop:
+   1. Build messages (transcript or initial_messages)
+-  2. POST to chat.completions.create with declared tools
++  2. POST to responses.create (store=False) with declared tools
+   3. Append assistant response to transcript; append llm_response to EventLog
+   4. For each tool_call block: dispatch tool, append tool_result to EventLog
+   5. complete_step catches StepComplete → validate, emit agent_output, return
+@@ -49,7 +49,11 @@ from imp.providers import errors as perr
+ from imp.providers._openai_schema import to_openai_strict
+ from imp.providers.base import Provider
+ from imp.providers.resolve import spawn_subagent_via_registry
+-from imp.providers.web_native import WEB_TOOL_NAMES, check_web_capability
++from imp.providers.web_native import (
++    WEB_TOOL_NAMES,
++    check_web_capability,
++    openai_web_tool_specs,
++)
+ 
+ 
+ def _classify_openai_exception(exc: BaseException) -> perr.ProviderError:
+@@ -138,20 +142,6 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
+     return out
+ 
+ 
+-def _openai_tool_schema(t: Tool) -> dict[str, Any]:
+-    """Translate an imp Tool to OpenAI's function-call tool entry, with the
+-    strict-mode transform applied to the parameters."""
+-    return {
+-        "type": "function",
+-        "function": {
+-            "name": t.name,
+-            "description": t.description,
+-            "parameters": to_openai_strict(t.input_schema),
+-            "strict": True,
+-        },
+-    }
+-
+-
+ def _responses_tool_schema(t: Tool) -> dict[str, Any]:
+     """Responses function-tool entry: flat shape (no nested `function` wrapper),
+     strict mode on. Replaces _openai_tool_schema at the Task 17 flip."""
+@@ -164,64 +154,6 @@ def _responses_tool_schema(t: Tool) -> dict[str, Any]:
+     }
+ 
+ 
+-def _imp_to_openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
+-    """Convert an imp message list to OpenAI's flattened message list.
+-
+-    Assistant messages with multiple tool_use blocks → ONE OpenAI assistant
+-    message carrying all tool_calls.
+-
+-    User messages with multiple tool_result blocks → MULTIPLE OpenAI
+-    `role: "tool"` messages, one per ToolResultBlock.
+-    """
+-    out: list[dict[str, Any]] = []
+-    for m in messages:
+-        if m.role == "system":
+-            out.append({"role": "system", "content": _join_text(m.content)})
+-            continue
+-        if m.role == "assistant":
+-            text = _join_text(m.content)
+-            tool_calls = []
+-            for b in m.content:
+-                if isinstance(b, ToolUseBlock):
+-                    tool_calls.append({
+-                        "id": b.id,
+-                        "type": "function",
+-                        "function": {
+-                            "name": b.name,
+-                            "arguments": json.dumps(b.input),
+-                        },
+-                    })
+-            entry: dict[str, Any] = {"role": "assistant"}
+-            # OpenAI accepts `content: null` only when `tool_calls` is
+-            # present; otherwise it 400s. Emit `""` when there's no text,
+-            # regardless of tool_calls presence — accepted in all cases and
+-            # avoids the latent bug a refusal-followed-by-continuation
+-            # scenario would otherwise trigger.
+-            entry["content"] = text if text else ""
+-            if tool_calls:
+-                entry["tool_calls"] = tool_calls
+-            out.append(entry)
+-            continue
+-        # user
+-        tool_results = [b for b in m.content if isinstance(b, ToolResultBlock)]
+-        if tool_results:
+-            for tr in tool_results:
+-                content = tr.content
+-                if tr.is_error:
+-                    # OpenAI doesn't have an is_error flag on tool messages;
+-                    # embed an explicit prefix so the model sees it.
+-                    content = f"[error] {content}"
+-                out.append({
+-                    "role": "tool",
+-                    "tool_call_id": tr.tool_use_id,
+-                    "content": content,
+-                })
+-            continue
+-        # Plain user text (initial prompt, or interactive follow-up)
+-        out.append({"role": "user", "content": _join_text(m.content)})
+-    return out
+-
+-
+ def _imp_to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
+     """Convert imp messages to Responses `input[]` items.
+ 
+@@ -267,84 +199,6 @@ def _join_text(content: tuple[Any, ...]) -> str:
+     return "".join(b.text for b in content if isinstance(b, TextBlock))
+ 
+ 
+-def _openai_message_to_imp(
+-    msg: Any,
+-) -> tuple[Message, list[str]]:
+-    """Convert an OpenAI assistant message (SDK object form) to an imp Message
+-    + warnings list.
+-
+-    Called from tests only; the production runner now reconstructs the assistant
+-    Message from the serialized llm_response.raw via _parse_openai_message. This
+-    helper is retained as a tested record of the SDK-object → imp Message surface.
+-
+-    Unknown shapes (e.g., msg.refusal — OpenAI's refusal field) become
+-    runner_warning entries, never raise (unknown content block types translate
+-    to a runner_warning rather than crashing the runner)."""
+-    blocks: list[Any] = []
+-    warnings: list[str] = []
+-
+-    text = getattr(msg, "content", None)
+-    if text:
+-        blocks.append(TextBlock(text=text))
+-
+-    tool_calls = getattr(msg, "tool_calls", None) or []
+-    for tc in tool_calls:
+-        tc_type = getattr(tc, "type", "function")
+-        if tc_type != "function":
+-            warnings.append(f"skipped tool_call type {tc_type!r}")
+-            continue
+-        fn = getattr(tc, "function", None)
+-        if fn is None:
+-            warnings.append("tool_call missing function block")
+-            continue
+-        try:
+-            args = json.loads(fn.arguments) if fn.arguments else {}
+-        except json.JSONDecodeError as e:
+-            warnings.append(f"tool_call {tc.id!r} arguments not JSON: {e}")
+-            args = {}
+-        blocks.append(ToolUseBlock(id=tc.id, name=fn.name, input=args))
+-
+-    refusal = getattr(msg, "refusal", None)
+-    if refusal:
+-        warnings.append(f"skipped refusal: {refusal[:80]!r}")
+-
+-    return Message(role="assistant", content=tuple(blocks)), warnings
+-
+-
+-def _serialize_openai_response(response: Any) -> dict[str, Any]:
+-    """response → llm_response.raw dict. SDK .model_dump() preferred; fake
+-    fallback introspects choices[0].message + usage."""
+-    dump = getattr(response, "model_dump", None)
+-    if callable(dump):
+-        try:
+-            return cast(dict[str, Any], dump(mode="json"))
+-        except TypeError:
+-            return cast(dict[str, Any], dump())
+-    choice = response.choices[0]
+-    msg = choice.message
+-    tool_calls = []
+-    for tc in getattr(msg, "tool_calls", None) or []:
+-        fn = getattr(tc, "function", None)
+-        tool_calls.append({
+-            "id": getattr(tc, "id", None),
+-            "type": getattr(tc, "type", "function"),
+-            "function": {"name": getattr(fn, "name", None),
+-                         "arguments": getattr(fn, "arguments", "")},
+-        })
+-    return {
+-        "choices": [{
+-            "message": {
+-                "role": "assistant",
+-                "content": getattr(msg, "content", None),
+-                "tool_calls": tool_calls or None,
+-                "refusal": getattr(msg, "refusal", None),
+-            },
+-            "finish_reason": getattr(choice, "finish_reason", None),
+-        }],
+-        "usage": _usage_dict(getattr(response, "usage", None)),
+-    }
+-
+-
+ def _serialize_responses_response(response: Any) -> dict[str, Any]:
+     """response → llm_response.raw dict. SDK .model_dump() preferred; the fake
+     path returns {output, usage} directly. Replaces _serialize_openai_response
+@@ -398,28 +252,10 @@ def _usage_dict(usage: Any) -> dict[str, Any]:
+     if isinstance(usage, dict):
+         return usage
+     return {k: getattr(usage, k) for k in
+-            ("prompt_tokens", "completion_tokens", "total_tokens")
++            ("input_tokens", "output_tokens", "total_tokens")
+             if getattr(usage, k, None) is not None}
+ 
+ 
+-def _parse_openai_message(raw: dict[str, Any]) -> Message:
+-    msg = raw["choices"][0]["message"]
+-    blocks: list[Any] = []
+-    text = msg.get("content")
+-    if text:
+-        blocks.append(TextBlock(text=text))
+-    for tc in msg.get("tool_calls") or []:
+-        if tc.get("type", "function") != "function":
+-            continue
+-        fn = tc.get("function") or {}
+-        try:
+-            args = json.loads(fn.get("arguments") or "{}")
+-        except json.JSONDecodeError:
+-            args = {}
+-        blocks.append(ToolUseBlock(id=tc["id"], name=cast(str, fn.get("name")), input=args))
+-    return Message(role="assistant", content=tuple(blocks))
+-
+-
+ def _extract_responses_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+     """Responses-vocabulary diagnostics. Replaces _extract_openai_diagnostics
+     at the Task 17 flip."""
+@@ -437,22 +273,10 @@ def _extract_responses_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+     return Diagnostics(block_warnings=tuple(warnings), thinkings=())
+ 
+ 
+-def _extract_openai_diagnostics(raw: dict[str, Any]) -> Diagnostics:
+-    msg = raw["choices"][0]["message"]
+-    warnings: list[str] = []
+-    for tc in msg.get("tool_calls") or []:
+-        if tc.get("type", "function") != "function":
+-            warnings.append(f"skipped tool_call type {tc.get('type')!r}")
+-        else:
+-            fn = tc.get("function") or {}
+-            try:
+-                json.loads(fn.get("arguments") or "{}")
+-            except json.JSONDecodeError as e:
+-                warnings.append(f"tool_call {tc.get('id')!r} arguments not JSON: {e}")
+-    refusal = msg.get("refusal")
+-    if refusal:
+-        warnings.append(f"skipped refusal: {refusal[:80]!r}")
+-    return Diagnostics(block_warnings=tuple(warnings), thinkings=())
++def _openai_stop_reason(raw: dict[str, Any]) -> str | None:
++    """Best-effort terminal marker for the llm_response event. Responses exposes
++    `status` at the top level; the fake omits it → None, which is fine."""
++    return raw.get("status")
+ 
+ 
+ class OpenAIAgentRunner:
+@@ -621,18 +445,16 @@ class OpenAIAgentRunner:
+                 agent_id=aid, parent_id_override=invocation.first_event_parent_id,
+                 provider=invocation.provider_name, model=self.model,
+                 system_prompt=invocation.system_prompt,
+-                tools_schema=[_openai_tool_schema(t) for t in tools.values()],
+-                params={},
++                tools_schema=[_responses_tool_schema(t) for t in tools.values()],
++                params={"store": False},
+                 max_tool_calls=invocation.max_tool_calls)
+             for m in invocation.initial_messages:
+                 if all(isinstance(b, TextBlock) for b in m.content):
+                     elog.append_user_message(agent_id=aid, message=m)
+ 
+         ceiling = invocation.max_tool_calls  # may be None (no cap)
+-        openai_tools = [_openai_tool_schema(t) for t in tools.values()]
+-        # OpenAI takes the system prompt as the first message rather than a
+-        # separate parameter. Build the prefix once; reuse on each call.
+-        system_message: dict[str, Any] = {"role": "system", "content": invocation.system_prompt}
++        openai_tools = [_responses_tool_schema(t) for t in tools.values()]
++        openai_tools.extend(openai_web_tool_specs(invocation.agent_def))
+         # Stable routing/affinity hint for OpenAI's automatic prompt cache.
+         # Keyed to one growing conversation (one agent invocation within one
+         # change) so the prefix stays cache-resident turn-over-turn. slug
+@@ -643,16 +465,18 @@ class OpenAIAgentRunner:
+ 
+         while not self._cancel:
+             client = self._get_client()
+-            response = await client.chat.completions.create(
++            response = await client.responses.create(
+                 model=self.model,
+-                messages=[system_message, *_imp_to_openai_messages(messages)],
++                instructions=invocation.system_prompt,
++                input=_imp_to_responses_input(messages),
+                 tools=openai_tools,
++                store=False,
+                 prompt_cache_key=prompt_cache_key,
+             )
+ 
+-            raw = _serialize_openai_response(response)
+-            assistant_msg = _parse_openai_message(raw)
+-            diag = _extract_openai_diagnostics(raw)
++            raw = _serialize_responses_response(response)
++            assistant_msg = _parse_responses_message(raw)
++            diag = _extract_responses_diagnostics(raw)
+             for w in diag.block_warnings:
+                 elog.append(agent_id=aid, type="runner_warning",
+                             payload={"message": w})
+@@ -661,7 +485,7 @@ class OpenAIAgentRunner:
+             elog.append_llm_response(
+                 agent_id=aid, provider=invocation.provider_name, model=self.model,
+                 raw=raw, usage=raw.get("usage") or {},
+-                stop_reason=raw["choices"][0].get("finish_reason"))
++                stop_reason=_openai_stop_reason(raw))
+ 
+             tool_uses = [b for b in assistant_msg.content if isinstance(b, ToolUseBlock)]
+             if not tool_uses:
+diff --git a/tests/openai_fakes.py b/tests/openai_fakes.py
+index 103d667..08168f3 100644
+--- a/tests/openai_fakes.py
++++ b/tests/openai_fakes.py
+@@ -1,117 +1,18 @@
+ """Fake openai SDK client for unit-testing OpenAIAgentRunner.
+ 
+-The real client exposes `chat.completions.create(...)` returning a
+-ChatCompletion with `.choices[0].message` carrying `.content: str | None` and
+-`.tool_calls: list[ChatCompletionMessageToolCall] | None`. The fake returns a
++The real client exposes `responses.create(...)` returning a Response whose
++`.model_dump(mode="json")` carries an `output[]` list of items (message /
++function_call / web_search_call / ...) plus `usage`. The fake returns a
+ sequence of canned responses; once exhausted, an optional default is returned
+ indefinitely (mirrors tests/anthropic_fakes.FakeAsyncAnthropic semantics).
+ """
+ 
+ from __future__ import annotations
+ 
+-import json
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+ from typing import Any
+ 
+-
+-@dataclass
+-class FakeFunction:
+-    name: str
+-    arguments: str  # JSON string per OpenAI shape
+-
+-
+-@dataclass
+-class FakeToolCall:
+-    id: str
+-    type: str  # always "function" in V1
+-    function: FakeFunction
+-
+-
+-@dataclass
+-class FakeMessage:
+-    role: str
+-    content: str | None = None
+-    tool_calls: list[FakeToolCall] | None = None
+-    # OpenAI sometimes adds `refusal: str | None`; ignored for now (Task 11
+-    # exercises the warn-on-unknown path).
+-    refusal: str | None = None
+-
+-
+-@dataclass
+-class FakeChoice:
+-    message: FakeMessage
+-    finish_reason: str = "stop"
+-    index: int = 0
+-
+-
+-@dataclass
+-class FakeCompletion:
+-    choices: list[FakeChoice] = field(default_factory=list)
+-    id: str = "chatcmpl_fake"
+-    model: str = "gpt-4o-mini"
+-
+-
+-class _FakeCompletions:
+-    def __init__(
+-        self, responses: list[FakeCompletion],
+-        default: FakeCompletion | None = None,
+-    ) -> None:
+-        self._responses = list(responses)
+-        self._default = default
+-        self.calls: list[dict[str, Any]] = []
+-
+-    async def create(self, **kwargs: Any) -> FakeCompletion:
+-        self.calls.append(kwargs)
+-        if self._responses:
+-            return self._responses.pop(0)
+-        if self._default is not None:
+-            return self._default
+-        raise IndexError(
+-            "FakeAsyncOpenAI: out of canned responses (no default set)"
+-        )
+-
+-
+-class _FakeChat:
+-    def __init__(self, completions: _FakeCompletions) -> None:
+-        self.completions = completions
+-
+-
+-class FakeAsyncOpenAI:
+-    def __init__(
+-        self,
+-        responses: list[FakeCompletion],
+-        *,
+-        default_response: FakeCompletion | None = None,
+-    ) -> None:
+-        self.chat = _FakeChat(_FakeCompletions(responses, default_response))
+-
+-
+-# Convenience constructors for tests
+-def message(
+-    *,
+-    content: str | None = None,
+-    tool_calls: list[FakeToolCall] | None = None,
+-    refusal: str | None = None,
+-) -> FakeMessage:
+-    return FakeMessage(role="assistant", content=content,
+-                       tool_calls=tool_calls, refusal=refusal)
+-
+-
+-def tool_call(id_: str, name: str, args: dict[str, Any]) -> FakeToolCall:
+-    return FakeToolCall(
+-        id=id_, type="function",
+-        function=FakeFunction(name=name, arguments=json.dumps(args)),
+-    )
+-
+-
+-def completion(*messages: FakeMessage, finish_reason: str = "tool_calls") -> FakeCompletion:
+-    """Most fixtures use a single-choice completion."""
+-    return FakeCompletion(
+-        choices=[FakeChoice(message=m, finish_reason=finish_reason) for m in messages],
+-    )
+-
+-
+-# ── Responses API fakes (migration) ──────────────────────────────────────────
++# ── Responses API fakes ──────────────────────────────────────────────────────
+ 
+ @dataclass
+ class _Dumpable:
+diff --git a/tests/test_default_workflow_e2e_mocked.py b/tests/test_default_workflow_e2e_mocked.py
+index 5d36039..7f5fc91 100644
+--- a/tests/test_default_workflow_e2e_mocked.py
++++ b/tests/test_default_workflow_e2e_mocked.py
+@@ -194,8 +194,14 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
+ async def test_full_default_workflow_completes_with_canned_openai(
+     tmp_path: Path,
+ ) -> None:
++    import json
++
+     from imp.providers.openai import OpenAIProvider
+-    from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
++    from tests.openai_fakes import (
++        FakeResponsesClient,
++        resp_function_call,
++        resp_response,
++    )
+ 
+     change = _seed_default_workflow(tmp_path)
+     # Rewrite config to OpenAI provider for every role.
+@@ -205,15 +211,14 @@ async def test_full_default_workflow_completes_with_canned_openai(
+         "{provider: openai, model: gpt-4o-mini}",
+     ))
+ 
+-    default_completion = completion(message(
+-        content=None,
+-        tool_calls=[tool_call("c0", "complete_step", {
++    default_completion = resp_response(
++        resp_function_call("c0", "complete_step", json.dumps({
+             "status": "Success", "verdict": "approve",
+             "summary": "ok", "notes": "ok",
+             "spec": "stub", "plan": "stub",
+-        })],
+-    ))
+-    fake = FakeAsyncOpenAI([], default_response=default_completion)
++        })),
++    )
++    fake = FakeResponsesClient([], default_response=default_completion)
+ 
+     resolve.reset_providers_for_tests()
+     resolve.register_provider(
+diff --git a/tests/test_event_logging_integration.py b/tests/test_event_logging_integration.py
+index e64611d..53f02ce 100644
+--- a/tests/test_event_logging_integration.py
++++ b/tests/test_event_logging_integration.py
+@@ -621,10 +621,11 @@ def test_parse_message_round_trips_thinking_signature_blockorder() -> None:
+         "thinking block should not appear in reconstructed Message"
+     )
+ 
+-    # OpenAI path: simple text-only response
+-    oraw = {"choices": [{"message": {
+-        "content": "hi", "tool_calls": None, "refusal": None,
+-    }}]}
++    # OpenAI path: simple text-only response (Responses output[] shape).
++    oraw = {"output": [{
++        "type": "message", "role": "assistant",
++        "content": [{"type": "output_text", "text": "hi"}],
++    }]}
+     omsg = parse_message("openai", oraw)
+     assert omsg.content[0].text == "hi", (
+         f"expected openai text 'hi', got {omsg.content[0]}"
+diff --git a/tests/test_load_skill_parity.py b/tests/test_load_skill_parity.py
+index 549fded..7d6512f 100644
+--- a/tests/test_load_skill_parity.py
++++ b/tests/test_load_skill_parity.py
+@@ -77,16 +77,9 @@ from tests.cc_fakes import (
+     user as cc_user,
+ )
+ from tests.openai_fakes import (
+-    FakeAsyncOpenAI,
+-)
+-from tests.openai_fakes import (
+-    completion as o_completion,
+-)
+-from tests.openai_fakes import (
+-    message as o_message,
+-)
+-from tests.openai_fakes import (
+-    tool_call as o_tool_call,
++    FakeResponsesClient,
++    resp_function_call,
++    resp_response,
+ )
+ 
+ 
+@@ -238,17 +231,17 @@ async def test_anthropic_load_skill_parity(tmp_path: Path) -> None:
+ @pytest.mark.anyio
+ async def test_openai_load_skill_parity(tmp_path: Path) -> None:
+     """OpenAI: load_skill dispatches in-process, emits skill_load event."""
+-    fake = FakeAsyncOpenAI([
++    import json
++    fake = FakeResponsesClient([
+         # Turn 1: LLM calls load_skill — tool dispatched in-process
+-        o_completion(o_message(
+-            content=None,
+-            tool_calls=[o_tool_call("tu1", "load_skill", {"name": "refactor"})],
+-        )),
++        resp_response(
++            resp_function_call("tu1", "load_skill", '{"name": "refactor"}'),
++        ),
+         # Turn 2: LLM calls complete_step — terminates the step
+-        o_completion(o_message(
+-            content=None,
+-            tool_calls=[o_tool_call("tu2", "complete_step", COMPLETE_STEP_ARGS)],
+-        )),
++        resp_response(
++            resp_function_call("tu2", "complete_step",
++                               json.dumps(COMPLETE_STEP_ARGS)),
++        ),
+     ])
+     runner = OpenAIAgentRunner(
+         model_name="gpt-4o-mini", client_factory=lambda: fake,
+diff --git a/tests/test_openai_parse.py b/tests/test_openai_parse.py
+index a26a0dc..161bac0 100644
+--- a/tests/test_openai_parse.py
++++ b/tests/test_openai_parse.py
+@@ -2,25 +2,27 @@ from __future__ import annotations
+ 
+ from imp.agents.runner import TextBlock, ToolUseBlock
+ from imp.providers.openai import (
+-    _extract_openai_diagnostics,
+-    _parse_openai_message,
+-    _serialize_openai_response,
++    _extract_responses_diagnostics,
++    _parse_responses_message,
++    _serialize_responses_response,
+ )
+-from tests.openai_fakes import completion, message, tool_call
++from tests.openai_fakes import resp_function_call, resp_message, resp_response
+ 
+ 
+ def test_serialize_then_parse_round_trips() -> None:
+-    comp = completion(message(content="hi",
+-                              tool_calls=[tool_call("t1", "read_file", {"p": "x"})]))
+-    raw = _serialize_openai_response(comp)
+-    assert "choices" in raw
+-    msg = _parse_openai_message(raw)
++    resp = resp_response(
++        resp_message("hi"),
++        resp_function_call("t1", "read_file", '{"p": "x"}'),
++    )
++    raw = _serialize_responses_response(resp)
++    assert "output" in raw
++    msg = _parse_responses_message(raw)
+     assert msg.content[0] == TextBlock(text="hi")
+     assert msg.content[1] == ToolUseBlock(id="t1", name="read_file", input={"p": "x"})
+ 
+ 
+-def test_refusal_becomes_warning() -> None:
+-    comp = completion(message(content=None, refusal="nope"))
+-    raw = _serialize_openai_response(comp)
+-    diag = _extract_openai_diagnostics(raw)
+-    assert any("refusal" in w for w in diag.block_warnings)
++def test_bad_function_args_become_warning() -> None:
++    resp = resp_response(resp_function_call("t1", "read_file", "{not json}"))
++    raw = _serialize_responses_response(resp)
++    diag = _extract_responses_diagnostics(raw)
++    assert any("not JSON" in w for w in diag.block_warnings)
+diff --git a/tests/test_openai_provider.py b/tests/test_openai_provider.py
+index 0783d43..5ca877f 100644
+--- a/tests/test_openai_provider.py
++++ b/tests/test_openai_provider.py
+@@ -22,11 +22,11 @@ from imp.agents.runner import (
+ from imp.agents.tools.complete_step import make_complete_step_tool
+ from imp.engine.types import AgentDef, OutputField, OutputSchema, SourceLoc
+ from imp.providers.openai import (
+-    _imp_to_openai_messages,
+-    _openai_message_to_imp,
+-    _openai_tool_schema,
++    _imp_to_responses_input,
++    _parse_responses_message,
++    _responses_tool_schema,
+ )
+-from tests.openai_fakes import FakeFunction, FakeMessage, FakeToolCall
++from tests.openai_fakes import resp_function_call, resp_response
+ 
+ 
+ def _make_httpx_resp(status_code: int = 400, headers: dict | None = None) -> object:
+@@ -72,18 +72,20 @@ def _inv(tmp_path: Path) -> AgentInvocation:
+     )
+ 
+ 
+-def test_imp_to_openai_system_then_user() -> None:
+-    out = _imp_to_openai_messages([
++def test_imp_to_responses_system_skipped_user_kept() -> None:
++    # The system prompt rides on the `instructions` param, so system messages
++    # are dropped from input[]; plain user text becomes an input_text message.
++    out = _imp_to_responses_input([
+         Message(role="system", content=(TextBlock(text="be terse"),)),
+         Message(role="user", content=(TextBlock(text="hi"),)),
+     ])
+     assert out == [
+-        {"role": "system", "content": "be terse"},
+-        {"role": "user", "content": "hi"},
++        {"type": "message", "role": "user",
++         "content": [{"type": "input_text", "text": "hi"}]},
+     ]
+ 
+ 
+-def test_imp_to_openai_assistant_with_tool_uses() -> None:
++def test_imp_to_responses_assistant_with_tool_uses() -> None:
+     msg = Message(
+         role="assistant",
+         content=(
+@@ -91,19 +93,19 @@ def test_imp_to_openai_assistant_with_tool_uses() -> None:
+             ToolUseBlock(id="c1", name="complete_step", input={"status": "Success"}),
+         ),
+     )
+-    out = _imp_to_openai_messages([msg])
+-    assert len(out) == 1
+-    entry = out[0]
+-    assert entry["role"] == "assistant"
+-    assert entry["content"] == "calling complete_step"
+-    assert entry["tool_calls"][0]["id"] == "c1"
+-    assert entry["tool_calls"][0]["function"]["name"] == "complete_step"
+-    assert json.loads(entry["tool_calls"][0]["function"]["arguments"]) == {
+-        "status": "Success",
+-    }
++    out = _imp_to_responses_input([msg])
++    # One assistant output_text message, then a function_call item.
++    assert out[0] == {"type": "message", "role": "assistant",
++                      "content": [{"type": "output_text",
++                                   "text": "calling complete_step"}]}
++    fc = out[1]
++    assert fc["type"] == "function_call"
++    assert fc["call_id"] == "c1"
++    assert fc["name"] == "complete_step"
++    assert json.loads(fc["arguments"]) == {"status": "Success"}
+ 
+ 
+-def test_imp_to_openai_user_with_tool_results_fans_out() -> None:
++def test_imp_to_responses_user_with_tool_results_fans_out() -> None:
+     msg = Message(
+         role="user",
+         content=(
+@@ -111,17 +113,18 @@ def test_imp_to_openai_user_with_tool_results_fans_out() -> None:
+             ToolResultBlock(tool_use_id="c2", content="bad", is_error=True),
+         ),
+     )
+-    out = _imp_to_openai_messages([msg])
++    out = _imp_to_responses_input([msg])
+     assert len(out) == 2
+-    assert out[0] == {"role": "tool", "tool_call_id": "c1", "content": "ok"}
+-    # is_error → embedded prefix because OpenAI has no flag for it.
+-    assert out[1]["role"] == "tool"
+-    assert out[1]["tool_call_id"] == "c2"
+-    assert out[1]["content"].startswith("[error]")
+-    assert "bad" in out[1]["content"]
++    assert out[0] == {"type": "function_call_output",
++                      "call_id": "c1", "output": "ok"}
++    # is_error → embedded prefix because Responses has no flag for it.
++    assert out[1]["type"] == "function_call_output"
++    assert out[1]["call_id"] == "c2"
++    assert out[1]["output"].startswith("[error]")
++    assert "bad" in out[1]["output"]
+ 
+ 
+-def test_openai_tool_schema_wraps_with_function() -> None:
++def test_responses_tool_schema_is_flat() -> None:
+     schema = OutputSchema(
+         fields=(
+             OutputField(name="status", type="enum",
+@@ -131,12 +134,13 @@ def test_openai_tool_schema_wraps_with_function() -> None:
+         source=SourceLoc(file=Path("a.md"), line=1),
+     )
+     tool = make_complete_step_tool(schema)
+-    wrapped = _openai_tool_schema(tool)
++    wrapped = _responses_tool_schema(tool)
+     assert wrapped["type"] == "function"
+-    assert wrapped["function"]["name"] == "complete_step"
+-    assert wrapped["function"]["strict"] is True
++    assert wrapped["name"] == "complete_step"
++    assert "function" not in wrapped          # flat, no nested wrapper
++    assert wrapped["strict"] is True
+     # Strict-mode discipline: optionals are nullable and in required.
+-    params = wrapped["function"]["parameters"]
++    params = wrapped["parameters"]
+     assert params["additionalProperties"] is False
+     assert "note" in params["required"]
+     # Pydantic emits Optional[T] as anyOf with a null variant; accept either
+@@ -153,26 +157,19 @@ def test_openai_tool_schema_wraps_with_function() -> None:
+ 
+ 
+ def test_round_trip_two_turn_conversation() -> None:
+-    """Build an imp message list, convert to OpenAI, parse a canned OpenAI
+-    response, then verify the resulting imp Message ends the conversation
+-    correctly."""
+-    # Imp-side: user said "go", assistant called complete_step.
++    """Build an imp message list, convert to Responses input[], parse a canned
++    Responses output, then verify the resulting imp Message ends the
++    conversation correctly."""
++    # Imp-side: user said "go".
+     user = Message(role="user", content=(TextBlock(text="go"),))
+-    out = _imp_to_openai_messages([user])
+-    assert out == [{"role": "user", "content": "go"}]
++    out = _imp_to_responses_input([user])
++    assert out == [{"type": "message", "role": "user",
++                    "content": [{"type": "input_text", "text": "go"}]}]
+ 
+-    fake_response = FakeMessage(
+-        role="assistant", content=None,
+-        tool_calls=[FakeToolCall(
+-            id="c1", type="function",
+-            function=FakeFunction(
+-                name="complete_step",
+-                arguments='{"status": "Success"}',
+-            ),
+-        )],
+-    )
+-    parsed, warns = _openai_message_to_imp(fake_response)
+-    assert warns == []
++    raw = resp_response(
++        resp_function_call("c1", "complete_step", '{"status": "Success"}'),
++    ).model_dump(mode="json")
++    parsed = _parse_responses_message(raw)
+     tool_uses = [b for b in parsed.content if isinstance(b, ToolUseBlock)]
+     assert len(tool_uses) == 1
+     assert tool_uses[0].name == "complete_step"
+@@ -268,7 +265,7 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
+ 
+     from imp.providers.openai import OpenAIAgentRunner
+ 
+-    class _ExplodingCompletions:
++    class _ExplodingResponses:
+         async def create(self, **_kwargs):
+             raise AuthenticationError(
+                 message="Invalid API key",
+@@ -276,11 +273,8 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
+                 body=None,
+             )
+ 
+-    class _ExplodingChat:
+-        completions = _ExplodingCompletions()
+-
+     class _ExplodingClient:
+-        chat = _ExplodingChat()
++        responses = _ExplodingResponses()
+ 
+         async def close(self):
+             return None
+@@ -301,15 +295,18 @@ async def test_runner_translates_sdk_auth_error_to_event(tmp_path: Path) -> None
+     assert payload["category"] == "auth"
+ 
+ 
+-def test_real_sdk_accepts_prompt_cache_key() -> None:
++def test_real_sdk_accepts_responses_params() -> None:
+     """Guard: the kwarg-capture tests use a fake that swallows **kwargs.
+-    This pins the real openai SDK contract our runner depends on."""
++    This pins the real openai SDK contract our runner depends on — the
++    Responses create() must accept the params the flipped runner passes."""
+     import inspect
+ 
+-    from openai.resources.chat.completions import AsyncCompletions
++    from openai.resources.responses import AsyncResponses
+ 
+-    params = inspect.signature(AsyncCompletions.create).parameters
+-    assert "prompt_cache_key" in params
++    params = inspect.signature(AsyncResponses.create).parameters
++    for name in ("model", "input", "instructions", "tools", "store",
++                 "prompt_cache_key"):
++        assert name in params, f"responses.create missing {name!r}"
+ 
+ 
+ @pytest.fixture
+diff --git a/tests/test_openai_runner.py b/tests/test_openai_runner.py
+index 6d98074..cc0c3dc 100644
+--- a/tests/test_openai_runner.py
++++ b/tests/test_openai_runner.py
+@@ -19,7 +19,12 @@ from imp.agents.transcript import Transcript
+ from imp.engine.state import InMemoryEventLog
+ from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+ from imp.providers.openai import OpenAIAgentRunner
+-from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
++from tests.openai_fakes import (
++    FakeResponsesClient,
++    resp_function_call,
++    resp_message,
++    resp_response,
++)
+ 
+ 
+ @pytest.fixture
+@@ -70,12 +75,12 @@ def _inv(tmp_path: Path, tools=None, *, event_log=None, agent_id="step:p/s",
+ @pytest.mark.anyio
+ async def test_runs_to_complete_step(tmp_path: Path) -> None:
+     (tmp_path / "art").mkdir()
+-    fake = FakeAsyncOpenAI([
+-        completion(message(
+-            content="calling complete_step",
+-            tool_calls=[tool_call("c1", "complete_step",
+-                                  {"status": "Success", "note": "ok"})],
+-        )),
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_message("calling complete_step"),
++            resp_function_call("c1", "complete_step",
++                               '{"status": "Success", "note": "ok"}'),
++        ),
+     ])
+ 
+     log = InMemoryEventLog()
+@@ -97,6 +102,15 @@ async def test_runs_to_complete_step(tmp_path: Path) -> None:
+     assert "raw" in resp["payload"]
+     assert resp["agent_id"] == "step:p/s"
+     assert yielded[-1]["payload"] == {"status": "Success", "note": "ok"}
++    # The call carries the Responses surface: instructions/input/tools/store,
++    # no Chat Completions `messages`/`system`.
++    call = fake.responses.calls[0]
++    assert call["instructions"] == "be terse"
++    assert "input" in call
++    assert "tools" in call
++    assert call["store"] is False
++    assert "messages" not in call
++    assert "system" not in call
+ 
+ 
+ @pytest.mark.anyio
+@@ -122,11 +136,11 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
+ 
+     # The runner sees the SEND_TO_LLM resume state; next call is the agent's
+     # next turn — and it completes the step.
+-    fake = FakeAsyncOpenAI([
+-        completion(message(
+-            content="done",
+-            tool_calls=[tool_call("c1", "complete_step", {"status": "Success"})],
+-        )),
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_message("done"),
++            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
++        ),
+     ])
+     runner = OpenAIAgentRunner(
+         model_name="gpt-4o-mini",
+@@ -147,13 +161,15 @@ async def test_resume_from_existing_transcript(tmp_path: Path) -> None:
+ 
+ @pytest.mark.anyio
+ async def test_refusal_emits_runner_warning(tmp_path: Path) -> None:
+-    """OpenAI's `refusal` field is not part of imp Message; should warn, not fail."""
++    """A function_call with malformed arguments warns, not fails; the turn has
++    no dispatchable tool_use (bad JSON → empty args still dispatches), so we use
++    a refusal item to exercise the warn-then-no-complete-step path."""
+     (tmp_path / "art").mkdir()
+ 
+-    fake = FakeAsyncOpenAI([
+-        # First response: only a refusal. No tool_calls → runner falls through
+-        # to "agent finished without complete_step" error (autonomous mode).
+-        completion(message(content=None, refusal="I can't help with that.")),
++    fake = FakeResponsesClient([
++        # A refusal item: no message/function_call content → no tool_uses, so
++        # the runner falls through to "agent finished without complete_step".
++        resp_response({"type": "refusal", "refusal": "I can't help with that."}),
+     ])
+     log = InMemoryEventLog()
+     runner = OpenAIAgentRunner(
+@@ -168,8 +184,7 @@ async def test_refusal_emits_runner_warning(tmp_path: Path) -> None:
+     assert "runner_warning" in log_types
+     warnings = [e for e in log.read() if e["type"] == "runner_warning"]
+     assert any("refusal" in w["payload"]["message"] for w in warnings)
+-    # No fatal — the final event is `error` (no complete_step), not `error` for
+-    # an unknown block.
++    # No fatal — the final event is `error` (no complete_step).
+     final = events[-1]
+     assert final["type"] == "error"
+     assert final["payload"]["kind"] == "no_complete_step"
+@@ -193,21 +208,15 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
+ 
+     # Two assistant turns, each issuing two tool_use blocks. After 2 calls
+     # the ceiling trips on the 3rd; the rest are backfilled with errors.
+-    fake = FakeAsyncOpenAI([
+-        completion(message(
+-            content=None,
+-            tool_calls=[
+-                tool_call("c1", "read_file", {"path": "/project/f.txt"}),
+-                tool_call("c2", "read_file", {"path": "/project/f.txt"}),
+-            ],
+-        )),
+-        completion(message(
+-            content=None,
+-            tool_calls=[
+-                tool_call("c3", "read_file", {"path": "/project/f.txt"}),
+-                tool_call("c4", "read_file", {"path": "/project/f.txt"}),
+-            ],
+-        )),
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_function_call("c1", "read_file", '{"path": "/project/f.txt"}'),
++            resp_function_call("c2", "read_file", '{"path": "/project/f.txt"}'),
++        ),
++        resp_response(
++            resp_function_call("c3", "read_file", '{"path": "/project/f.txt"}'),
++            resp_function_call("c4", "read_file", '{"path": "/project/f.txt"}'),
++        ),
+     ])
+     runner = OpenAIAgentRunner(
+         model_name="gpt-4o-mini",
+@@ -220,6 +229,15 @@ async def test_tool_call_ceiling_enforced(tmp_path: Path) -> None:
+ 
+     errors = [e for e in events if e["type"] == "error"]
+     assert any(e["payload"].get("kind") == "tool_call_ceiling_exceeded" for e in errors)
++    # The backfilled ceiling-error tool_result lands in the transcript.
++    loaded = Transcript(inv.transcript_dir / "transcript.jsonl").load()
++    err_results = [
++        b for m in loaded if m.role == "user"
++        for b in m.content
++        if isinstance(b, ToolResultBlock) and b.is_error
++        and "ceiling" in b.content
++    ]
++    assert err_results, "expected a backfilled ceiling-error tool_result"
+ 
+ 
+ @pytest.mark.anyio
+@@ -260,24 +278,24 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
+     #   1. parent emits task(sub, ...)
+     #   2. sub emits complete_step(status=Success)  ← consumed from fake queue
+     #   3. parent receives JSON tool_result, emits complete_step
+-    fake = FakeAsyncOpenAI([
++    fake = FakeResponsesClient([
+         # parent turn 1
+-        completion(message(
+-            content="dispatching",
+-            tool_calls=[tool_call("p1", "task",
+-                                  {"subagent_name": "sub",
+-                                   "task_description": "do work"})],
+-        )),
++        resp_response(
++            resp_message("dispatching"),
++            resp_function_call("p1", "task",
++                               '{"subagent_name": "sub",'
++                               ' "task_description": "do work"}'),
++        ),
+         # sub turn 1 (uses the same fake — order matters)
+-        completion(message(
+-            content="sub finishing",
+-            tool_calls=[tool_call("s1", "complete_step", {"status": "Success"})],
+-        )),
++        resp_response(
++            resp_message("sub finishing"),
++            resp_function_call("s1", "complete_step", '{"status": "Success"}'),
++        ),
+         # parent turn 2
+-        completion(message(
+-            content="all done",
+-            tool_calls=[tool_call("p2", "complete_step", {"status": "Success"})],
+-        )),
++        resp_response(
++            resp_message("all done"),
++            resp_function_call("p2", "complete_step", '{"status": "Success"}'),
++        ),
+     ])
+ 
+     # Register a fake openai provider so spawn_subagent_via_registry builds the
+@@ -319,7 +337,7 @@ async def test_runs_subagent_via_task(tmp_path: Path, provider_registry) -> None
+     # All three fake responses must have been consumed: parent turn 1, sub turn
+     # 1, parent turn 2. If the subagent ran on the real client instead of fake,
+     # the sub's queued response would remain unconsumed here.
+-    assert len(fake.chat.completions.calls) == 3
++    assert len(fake.responses.calls) == 3
+ 
+ 
+ @pytest.mark.anyio
+@@ -330,7 +348,6 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
+ 
+     from imp.agents.runner import Message, TextBlock
+     from imp.agents.transcript import Transcript
+-    from tests.openai_fakes import FakeAsyncOpenAI, completion, message, tool_call
+ 
+     (tmp_path / "art").mkdir()
+     inv = _inv(tmp_path, interactive=True)
+@@ -343,11 +360,11 @@ async def test_interactive_resume_from_prompt_user_prompts_then_continues(
+         content=(TextBlock(text="anything else to clarify?"),),
+     ))
+ 
+-    fake = FakeAsyncOpenAI([
+-        completion(message(
+-            content="done",
+-            tool_calls=[tool_call("c1", "complete_step", {"status": "Success"})],
+-        )),
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_message("done"),
++            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
++        ),
+     ])
+     user_inputs = iter(["nothing, proceed"])
+     log = InMemoryEventLog()
+@@ -384,11 +401,10 @@ async def test_runner_interrupt_kills_bash_emits_tool_killed_then_errors(
+         tools=frozenset({"complete_step", "bash"}),
+     ))
+ 
+-    fake = FakeAsyncOpenAI([
+-        completion(message(
+-            content=None,
+-            tool_calls=[tool_call("c1", "bash", {"command": "sleep 10"})],
+-        )),
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_function_call("c1", "bash", '{"command": "sleep 10"}'),
++        ),
+     ])
+     log = InMemoryEventLog()
+     runner = OpenAIAgentRunner(
+@@ -433,10 +449,11 @@ async def test_continuation_resumes_then_completes(tmp_path: Path) -> None:
+     from dataclasses import replace
+ 
+     (tmp_path / "art").mkdir()
+-    fake = FakeAsyncOpenAI([
+-        completion(message(content="prose, no tool call")),
+-        completion(message(tool_calls=[tool_call("c1", "complete_step",
+-                                                  {"status": "Success"})])),
++    fake = FakeResponsesClient([
++        resp_response(resp_message("prose, no tool call")),
++        resp_response(
++            resp_function_call("c1", "complete_step", '{"status": "Success"}'),
++        ),
+     ])
+     log = InMemoryEventLog()
+     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+@@ -452,8 +469,8 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
+     from dataclasses import replace
+ 
+     (tmp_path / "art").mkdir()
+-    fake = FakeAsyncOpenAI(
+-        [], default_response=completion(message(content="still prose")),
++    fake = FakeResponsesClient(
++        [], default_response=resp_response(resp_message("still prose")),
+     )
+     log = InMemoryEventLog()
+     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+@@ -470,6 +487,7 @@ async def test_continuation_exhaustion_emits_agent_incomplete(tmp_path: Path) ->
+     events = [e async for e in runner.run(inv)]
+     assert events[-1]["type"] == "error"
+     assert events[-1]["payload"]["category"] == "agent_incomplete"
++    assert events[-1]["payload"]["kind"] == "no_complete_step_after_nudges"
+     assert calls["n"] == 2
+ 
+ 
+@@ -479,20 +497,21 @@ async def test_create_passes_stable_prompt_cache_key(tmp_path: Path) -> None:
+     prompt_cache_key, equal to f"{change_slug}:{agent_id}"."""
+     (tmp_path / "art").mkdir()
+     (tmp_path / "data.txt").write_text("payload")
+-    fake = FakeAsyncOpenAI([
+-        completion(message(
+-            tool_calls=[tool_call("u1", "read_file",
+-                                  {"path": "/project/data.txt"})])),
+-        completion(message(
+-            tool_calls=[tool_call("c1", "complete_step",
+-                                  {"status": "Success", "note": "ok"})])),
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_function_call("u1", "read_file", '{"path": "/project/data.txt"}'),
++        ),
++        resp_response(
++            resp_function_call("c1", "complete_step",
++                               '{"status": "Success", "note": "ok"}'),
++        ),
+     ])
+     runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                                client_factory=lambda: fake)
+     async for _ in runner.run(_inv(tmp_path)):
+         pass
+ 
+-    calls = fake.chat.completions.calls
++    calls = fake.responses.calls
+     assert len(calls) == 2, f"expected 2 create() calls, got {len(calls)}"
+     keys = [c["prompt_cache_key"] for c in calls]
+     assert keys == ["test:step:p/s", "test:step:p/s"]
+@@ -505,10 +524,11 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
+     from dataclasses import replace
+ 
+     (tmp_path / "art").mkdir()
+-    fake = FakeAsyncOpenAI([
+-        completion(message(
+-            tool_calls=[tool_call("c1", "complete_step",
+-                                  {"status": "Success", "note": "ok"})])),
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_function_call("c1", "complete_step",
++                               '{"status": "Success", "note": "ok"}'),
++        ),
+     ])
+     inv = _inv(tmp_path)
+     inv = replace(
+@@ -523,4 +543,4 @@ async def test_prompt_cache_key_distinct_per_change(tmp_path: Path) -> None:
+     async for _ in runner.run(inv):
+         pass
+ 
+-    assert fake.chat.completions.calls[0]["prompt_cache_key"] == "test-2:step:p/s"
++    assert fake.responses.calls[0]["prompt_cache_key"] == "test-2:step:p/s"
+diff --git a/tests/test_three_runner_parity.py b/tests/test_three_runner_parity.py
+index fb103d3..e59adce 100644
+--- a/tests/test_three_runner_parity.py
++++ b/tests/test_three_runner_parity.py
+@@ -44,16 +44,9 @@ from tests.cc_fakes import (
+     tool_use as cc_tool_use,
+ )
+ from tests.openai_fakes import (
+-    FakeAsyncOpenAI,
+-)
+-from tests.openai_fakes import (
+-    completion as o_completion,
+-)
+-from tests.openai_fakes import (
+-    message as o_message,
+-)
+-from tests.openai_fakes import (
+-    tool_call as o_tool_call,
++    FakeResponsesClient,
++    resp_function_call,
++    resp_response,
+ )
+ 
+ 
+@@ -137,11 +130,11 @@ async def test_anthropic_runner_matches(tmp_path: Path) -> None:
+ 
+ @pytest.mark.anyio
+ async def test_openai_runner_matches(tmp_path: Path) -> None:
+-    fake = FakeAsyncOpenAI([
+-        o_completion(o_message(
+-            content=None,
+-            tool_calls=[o_tool_call("c1", "complete_step", EXPECTED)],
+-        )),
++    import json
++    fake = FakeResponsesClient([
++        resp_response(
++            resp_function_call("c1", "complete_step", json.dumps(EXPECTED)),
++        ),
+     ])
+     runner = OpenAIAgentRunner(
+         model_name="gpt-4o-mini", client_factory=lambda: fake,

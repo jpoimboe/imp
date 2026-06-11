@@ -1,0 +1,55 @@
+{
+  "id": "mined-quality-reviewer-8f80df9",
+  "source": "mined",
+  "base_sha": "b98e2ed",
+  "head_sha": "8f80df9",
+  "task_context": "You are a code quality reviewer in `/home/jpoimboe/imp`. Review Task 5: the shared `build_agent_invocation` builder added to `src/imp/engine/agent_run.py`.\nDESCRIPTION: A keyword-only builder that constructs an AgentInvocation, owning the completion-contract invariant (append completion_instruction to system prompt + wire continuation_fn from the same instruction).\nPLAN_OR_REQUIREMENTS: Task 5 from docs/superpowers/plans/2026-06-01-agent-subagent-unification.md\nAssess:\n- Is the function clean with one clear responsibility (construct + own the instruction/continuation invariant)? Good docstring?\n- The signature is deliberately wide (~24 kwargs, all keyword-only). The plan's Decision #8 accepts this by design (\"most args ARE the per-caller differences\"). Don't flag the width as a defect, but assess whether the keyword-only + defaults choices are sound and whether `Any` typing on several params is reasonable here (it avoids import churn).\n- Do the tests verify real behavior (instruction appended, continuation wired, threaded fields land, interactive vs non-interactive user_input_fn)?\n- Run `make lint` and `make typecheck` to confirm clean.\n- Note: this module's no-cycle invariant is important \u2014 confirm the new imports (`agents.runner`, `engine.completion`, `engine.types`) are all cycle-free leaves and nothing problematic was added at module top.\nDon't flag pre-existing file sizes. Return: Strengths, Issues (Critical/Important/Minor), Assessment (approved or needs fixes).",
+  "expected_findings": [
+    {
+      "locus": "engine/test_agent_run.py:0",
+      "symbol": "test_build_agent_invocation_interactive_wires_user_input",
+      "description": "The test asserts user_input_fn is not None but lacks an identity check to verify it is the exact function passed in.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "engine/agent_run.py:0",
+      "symbol": "build_agent_invocation",
+      "description": "The function is not tested for the case where interactive=True but user_chat_input_fn=None, which should result in continuation_fn=None.",
+      "severity": "Important",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "engine/agent_run.py:0",
+      "symbol": "build_agent_invocation",
+      "description": "The log parameter should be grouped with other threading parameters like coordinator and event_log instead of being ordered after defaulted parameters.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "engine/agent_run.py:0",
+      "symbol": "build_agent_invocation",
+      "description": "The blank-line separator between rendered_system_prompt and instruction is hardcoded inline without documentation or a named constant.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

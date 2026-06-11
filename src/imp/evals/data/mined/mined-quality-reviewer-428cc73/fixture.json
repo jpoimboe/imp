@@ -1,0 +1,37 @@
+{
+  "id": "mined-quality-reviewer-428cc73",
+  "source": "mined",
+  "base_sha": "2481c83",
+  "head_sha": "428cc73",
+  "task_context": "Code quality review of the CORE resolver logic in repo /home/jpoimboe/imp. This is the most important task in the plan \u2014 review with rigor.\nDESCRIPTION: Add `resolve_roles` (once-per-run global role resolution with cross-role differ_provider_from constraints, 3-tier scoring, topo order, cycle check), `provider_from_model`, and `spawn_subagent_via_registry` to resolve.py.\nPLAN_OR_REQUIREMENTS: Task 7 from docs/superpowers/plans/2026-05-30-model-role-constraints.md\nAssess standard code quality AND specifically scrutinize for CORRECTNESS bugs and edge cases:\n- The fixpoint loop that pulls in differ-targets: can it loop forever, miss a target, or add spurious roles? Is `list(roles)` snapshotting correct while mutating `roles`?\n- `_topo_order`: correct for chains (a\u2192b\u2192c), shared targets, and roles with no constraint? Determinism?\n- Tier scoring + `min` tie-break: does it truly prefer different-vendor, then same-vendor-different-model, then identical, breaking ties by prefer-list index?\n- Interaction between the fixpoint-added targets and the `active` dict / cycle check / topo order \u2014 are targets that were pulled in but have no constraint handled (they should resolve via the unconstrained branch)?\n- `provider_from_model` ignoring env_check: is that safe given resolution already happened? Any failure mode if the registry changed between resolve and rebuild?\n- `spawn_subagent_via_registry` returning `runner.run(...)` un-awaited: correct contract for an async generator?\n- Does it follow resolve.py's existing patterns (exception types, registry access, the legacy resolve_role path)?\n- Naming clarity, comment accuracy.\nruff + mypy are already clean. Don't re-verify those; focus on logic correctness and maintainability. Don't invent issues, but DO flag any genuine correctness concern however subtle.\nReturn: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Needs changes).",
+  "expected_findings": [
+    {
+      "locus": "src/imp/providers/resolve.py:0",
+      "symbol": "spawn_subagent_via_registry",
+      "description": "Child subagent receives fresh provider-default client instead of inheriting parent's injected client_factory; worth documenting in docstring that same-vendor subagents no longer share parent's client.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "src/imp/providers/resolve.py:138",
+      "symbol": "",
+      "description": "Comment about one-level-deep subagent reachability depends on external invariant that dispatch_task sets subagent_defs={} for children; fragile if invariant changes.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

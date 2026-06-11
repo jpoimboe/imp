@@ -1,0 +1,59 @@
+diff --git a/src/imp/cli/narrative.py b/src/imp/cli/narrative.py
+index 44de4aa..7f2937a 100644
+--- a/src/imp/cli/narrative.py
++++ b/src/imp/cli/narrative.py
+@@ -67,6 +67,8 @@ class StepNode:
+     provider: str | None = None
+     children: list[Any] = field(default_factory=list)
+     outcome: OutcomeLine | None = None
++    start_ts: str | None = None        # ISO-8601 from step_started.timestamp (issue 3)
++    agent_output: dict[str, Any] | None = None  # stashed complete_step args (issues 5/6)
+     closed: bool = False
+     collapsible = False
+ 
+@@ -376,12 +378,15 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
+             existing.model = p.get("model")
+             existing.provider = p.get("provider")
+             existing.interactive = bool(p.get("interactive", False))
++            existing.start_ts = event.get("timestamp")
++            existing.agent_output = None
+             self._step_stack = [existing]
+             return
+     _ensure_phase(self, phase)
+     node = StepNode(name=name, kind=kind, model=p.get("model"),
+                     provider=p.get("provider"),
+-                    interactive=bool(p.get("interactive", False)))
++                    interactive=bool(p.get("interactive", False)),
++                    start_ts=event.get("timestamp"))
+     self._append(node)
+     self._step_stack.append(node)
+ 
+diff --git a/tests/test_narrative.py b/tests/test_narrative.py
+index e32cb45..f7bc7b9 100644
+--- a/tests/test_narrative.py
++++ b/tests/test_narrative.py
+@@ -636,3 +636,24 @@ def test_summarize_result_flattens_subagent_fold_outcome() -> None:
+     assert sub.running is False
+     assert sub.outcome == "subagent done"
+     assert "[{'" not in sub.outcome
++
++
++def test_step_started_stashes_start_ts_normal_and_resume() -> None:
++    # Normal path: start_ts captured from the event's top-level timestamp.
++    e1 = _ev("1", "step_started", step="spec", kind="agent", phase="design")
++    e1["timestamp"] = "2026-05-30T10:00:00+00:00"
++    b = nv.NarrativeBuilder()
++    b.add(_ev("0", "change_created", change_id=1, title="x"))
++    b.add(e1)
++    step = b._step_stack[-1]
++    assert step.start_ts == "2026-05-30T10:00:00+00:00"
++    assert step.agent_output is None
++
++    # Resume re-entry path reuses the open StepNode and must restamp start_ts.
++    b.add(_ev("2", "workflow_resumed"))
++    e3 = _ev("3", "step_started", step="spec", kind="agent", phase="design")
++    e3["timestamp"] = "2026-05-30T10:05:00+00:00"
++    b.add(e3)
++    reused = b._step_stack[-1]
++    assert reused is step                      # same node reused
++    assert reused.start_ts == "2026-05-30T10:05:00+00:00"

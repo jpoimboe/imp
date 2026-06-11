@@ -1,0 +1,129 @@
+diff --git a/src/imp/agents/builtin_filter.py b/src/imp/agents/builtin_filter.py
+new file mode 100644
+index 0000000..541edf3
+--- /dev/null
++++ b/src/imp/agents/builtin_filter.py
+@@ -0,0 +1,59 @@
++"""Filter deepagents' built-in tools against the agent's declared `tools:` list.
++
++Plan 2 Task 17 documented gap: deepagents 0.6.x has no `excluded_tools`
++kwarg, so every agent silently receives every built-in. Spec §6.2 wants
++strict declaration-based gating.
++
++Strategy: for every built-in NOT declared, register a same-named stub tool
++that raises UndeclaredTool when invoked. Tools added via `tools=` shadow
++built-ins of the same name (verified by spike during Plan 2 Task 17).
++If a future deepagents version stops shadowing, this falls back to no-op:
++the agent still sees the built-in, and the error never fires.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Iterable
++
++from langchain_core.tools import BaseTool, StructuredTool
++from pydantic import BaseModel
++
++# Tracks deepagents 0.6.x built-ins. Keep in sync with the runner's
++# _DEEPAGENT_BUILTINS constant. `complete_step` was dropped in Plan 2.
++_BUILTINS = frozenset({
++    "read_file", "write_file", "edit_file", "glob", "grep", "ls",
++    "execute", "write_todos", "task", "ask_user",
++})
++
++
++class UndeclaredTool(Exception):
++    pass
++
++
++class _AnyArgs(BaseModel):
++    model_config = {"extra": "allow"}
++
++
++def _make_stub(name: str) -> BaseTool:
++    def _stub(**kwargs: object) -> str:
++        raise UndeclaredTool(
++            f"tool {name!r} is not declared in this agent's tools: list; "
++            f"add it to the agent .md frontmatter or remove the call"
++        )
++
++    return StructuredTool.from_function(
++        func=_stub,
++        name=name,
++        description=(
++            f"Stub: {name!r} is not declared. Invocation raises UndeclaredTool."
++        ),
++        args_schema=_AnyArgs,
++    )
++
++
++def build_filtered_builtin_overrides(
++    declared: Iterable[str],
++) -> list[BaseTool]:
++    """Return one stub BaseTool per built-in NOT in `declared`."""
++    dset = set(declared)
++    return [_make_stub(b) for b in sorted(_BUILTINS) if b not in dset]
+diff --git a/src/imp/agents/deepagent_runner.py b/src/imp/agents/deepagent_runner.py
+index f9cb15d..31843e9 100644
+--- a/src/imp/agents/deepagent_runner.py
++++ b/src/imp/agents/deepagent_runner.py
+@@ -32,6 +32,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
+ from pydantic import BaseModel
+ 
+ from imp.agents.backends import build_backend
++from imp.agents.builtin_filter import build_filtered_builtin_overrides
+ from imp.agents.chat_middleware import ChatMiddleware
+ from imp.agents.output_schema import schema_to_pydantic_model
+ from imp.agents.runner import AgentInvocation
+@@ -159,6 +160,9 @@ class DeepAgentRunner:
+             invocation.agent_def.output_schema
+         )
+         tools = _build_imp_tools(invocation)
++        tools.extend(build_filtered_builtin_overrides(
++            invocation.agent_def.tools,
++        ))
+         backend = build_backend(invocation)
+         subagent_specs = compile_subagent_specs(
+             invocation.agent_def,
+diff --git a/tests/test_builtin_filter.py b/tests/test_builtin_filter.py
+new file mode 100644
+index 0000000..2d234d5
+--- /dev/null
++++ b/tests/test_builtin_filter.py
+@@ -0,0 +1,36 @@
++"""Builtin-tool filtering: undeclared tools raise a clear error if invoked."""
++
++from __future__ import annotations
++
++import pytest
++
++from imp.agents.builtin_filter import (
++    UndeclaredTool, build_filtered_builtin_overrides,
++)
++
++
++def test_undeclared_tool_returns_stub_that_raises() -> None:
++    overrides = build_filtered_builtin_overrides(declared={"read_file"})
++    by_name = {t.name: t for t in overrides}
++    assert "execute" in by_name  # built-in not declared
++    with pytest.raises(UndeclaredTool) as exc:
++        by_name["execute"].invoke({"command": "ls"})
++    assert "execute" in str(exc.value)
++    assert "not declared" in str(exc.value).lower()
++
++
++def test_declared_tool_is_not_in_overrides() -> None:
++    """If an agent declares `execute`, we don't override it — deepagents'
++    real execute should win."""
++    overrides = build_filtered_builtin_overrides(declared={"execute"})
++    names = {t.name for t in overrides}
++    assert "execute" not in names
++    assert "read_file" in names  # still filtered out
++
++
++def test_complete_step_never_filtered() -> None:
++    """complete_step doesn't exist in our world (response_format replaced it
++    per Plan 2 review #5). Should never appear in overrides regardless."""
++    overrides = build_filtered_builtin_overrides(declared=set())
++    names = {t.name for t in overrides}
++    assert "complete_step" not in names

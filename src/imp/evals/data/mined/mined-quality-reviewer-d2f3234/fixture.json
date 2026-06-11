@@ -1,0 +1,18 @@
+{
+  "id": "mined-quality-reviewer-d2f3234",
+  "source": "mined",
+  "base_sha": "51d9fc7",
+  "head_sha": "d2f3234",
+  "task_context": "Combined spec + code-quality review for a mechanical diff in `/home/jpoimboe/imp`.\n## Context\nTask 5 of the provider-error-taxonomy plan: add a `\"category\"` key to 9 existing error-event payloads in `src/imp/providers/claude_code.py`. The 9th is the claude_code-unique `no_result_message` \u2192 `network`.\n## Diff Under Review\n## Mapping Spec\n| `kind`                       | `category`             |\n|------------------------------|------------------------|\n| `transcript_invalid`         | `config`               |\n| `missing_complete_step`      | `agent_output_missing` |\n| `no_complete_step`           | `agent_output_missing` |\n| `no_user_input_fn`           | `config`               |\n| `fatal_tool_error`           | `config`               |\n| `output_validation`          | `agent_output_missing` |\n| `tool_call_ceiling_exceeded` | `config`               |\n| `interrupted`                | `config`               |\n| `no_result_message`          | `network`              |\n## Verify\n1. **Exactly 9 emit sites updated.** `grep -c '\"category\":' src/imp/providers/claude_code.py` returns `9`.\n2. **Each kind\u2192category pair correct** per the table.\n3. **No other key removed or altered** in any hunk; `tool_name`/`ceiling`/`message` fields intact where present.\n5. **Tests pass:** `pytest tests/test_claude_code_runner.py tests/test_claude_code_stream.py tests/test_claude_code_wrap.py -v 2>&1 | tail -3`.\n6. **No new lint or typecheck regressions:** `make lint 2>&1 | grep providers/claude_code` and `make typecheck 2>&1 | grep providers/claude_code` print nothing.\n## Report\n**Verdict:** \u2705 Approved  \u2014OR\u2014  \u274c Issues found\nUnder 150 words.",
+  "expected_findings": [],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

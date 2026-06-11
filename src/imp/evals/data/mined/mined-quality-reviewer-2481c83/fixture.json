@@ -1,0 +1,46 @@
+{
+  "id": "mined-quality-reviewer-2481c83",
+  "source": "mined",
+  "base_sha": "6850cd6",
+  "head_sha": "2481c83",
+  "task_context": "Code quality review in repo /home/jpoimboe/imp.\nDESCRIPTION: Add `resolved_roles` carriage fields (default None, typed dict[str,Any]|None) to `AgentInvocation` and `ToolContext`, plus default tests.\nPLAN_OR_REQUIREMENTS: Task 6 from docs/superpowers/plans/2026-05-30-model-role-constraints.md\nAssess: does it follow each file's existing field/comment patterns? Are the explanatory comments accurate (they describe how the executor threads the map and how dispatch_task will use it)? Is typing-as-Any (to avoid importing ProviderModel) justified here? Tests meaningful?\nThis is a tiny additive change. Judge proportionally; don't invent issues. Return: Strengths, Issues (Critical/Important/Minor), Assessment (Approved / Needs changes).",
+  "expected_findings": [
+    {
+      "locus": "test_runner_types.py:test_agent_invocation_resolved_roles_defaults_none",
+      "symbol": "test_agent_invocation_resolved_roles_defaults_none",
+      "description": "Test re-imports Path locally when it is already imported at module top-level, perpetuating a pre-existing pattern inconsistency.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_runner_types.py:test_agent_invocation_resolved_roles_defaults_none",
+      "symbol": "test_agent_invocation_resolved_roles_defaults_none",
+      "description": "Test function omits -> None return annotation that every other test in the file has.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    },
+    {
+      "locus": "test_runner_types.py:test_tool_context_resolved_roles_defaults_none",
+      "symbol": "test_tool_context_resolved_roles_defaults_none",
+      "description": "Test function omits -> None return annotation that every other test in the file has.",
+      "severity": "Minor",
+      "must_catch": false,
+      "cross_task": false,
+      "manifest_task": null
+    }
+  ],
+  "clean_loci": [],
+  "meta": {
+    "reviewer_type": "quality-reviewer",
+    "original_model": null,
+    "blocking": false,
+    "was_fixed": false,
+    "stratum": null,
+    "independence": null
+  },
+  "tasks": []
+}

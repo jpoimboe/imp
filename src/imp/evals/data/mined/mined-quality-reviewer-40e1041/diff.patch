@@ -1,0 +1,237 @@
+diff --git a/src/imp/providers/_openai_schema.py b/src/imp/providers/_openai_schema.py
+new file mode 100644
+index 0000000..265f52c
+--- /dev/null
++++ b/src/imp/providers/_openai_schema.py
+@@ -0,0 +1,91 @@
++"""Recursive strict-mode schema transform for OpenAI function-call tools.
++
++OpenAI's strict mode (spec §6.14) requires:
++  1. `additionalProperties: false` at every nested object level.
++  2. Every property name in `required`.
++  3. Optionals expressed as nullable: `{"type": ["<orig>", "null"]}`.
++
++The complete_step schema already satisfies (1) thanks to
++`agents.tools.complete_step._normalize_anthropic_schema`. This module adds
++(2) and (3) without re-deriving (1) — the transform is idempotent.
++
++`required` discipline: imp's `OutputSchema` tracks `required: bool` per
++field. The complete_step schema reflects that via JSON schema's `required:
++[...]` array. Strict mode flattens that distinction: every field must appear
++in `required`, but originally-optional fields are *nullable*. Callers treat
++`null` as absent.
++"""
++
++from __future__ import annotations
++
++from copy import deepcopy
++from typing import Any
++
++
++def to_openai_strict(schema: dict[str, Any]) -> dict[str, Any]:
++    """Return a new schema satisfying OpenAI strict mode.
++
++    Original `required` is preserved structurally — every property gets added
++    to `required`, but properties that were *not* in the original `required`
++    list get their `type` widened to `[<orig>, "null"]`. Nested objects are
++    transformed recursively.
++    """
++    return _walk(deepcopy(schema))
++
++
++def _walk(node: dict[str, Any]) -> dict[str, Any]:
++    if not isinstance(node, dict):
++        return node
++    if node.get("type") == "object":
++        return _walk_object(node)
++    # Non-object types: recurse into items / anyOf / oneOf in case they
++    # contain nested objects. V1's complete_step schemas are flat objects;
++    # this branch is defense-in-depth for future schema shapes.
++    for key in ("items", "additionalProperties"):
++        if key in node and isinstance(node[key], dict):
++            node[key] = _walk(node[key])
++    for key in ("anyOf", "oneOf", "allOf"):
++        if key in node and isinstance(node[key], list):
++            node[key] = [_walk(s) if isinstance(s, dict) else s for s in node[key]]
++    return node
++
++
++def _walk_object(node: dict[str, Any]) -> dict[str, Any]:
++    props = node.get("properties") or {}
++    originally_required = set(node.get("required") or [])
++    # Recurse first so nested objects are also strict.
++    new_props: dict[str, Any] = {}
++    for pname, pschema in props.items():
++        if isinstance(pschema, dict):
++            pschema = _walk(pschema)
++            if pname not in originally_required:
++                pschema = _nullable(pschema)
++        new_props[pname] = pschema
++    node["properties"] = new_props
++    node["additionalProperties"] = False
++    # Strict requires every property in `required`.
++    node["required"] = list(new_props.keys())
++    return node
++
++
++def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
++    """Widen `type: T` to `type: [T, "null"]`. Idempotent if already nullable,
++    including the `anyOf: [{...}, {"type": "null"}]` form Pydantic emits for
++    `Optional[T]`."""
++    t = schema.get("type")
++    if isinstance(t, list):
++        if "null" not in t:
++            schema["type"] = [*t, "null"]
++        return schema
++    if isinstance(t, str):
++        schema["type"] = [t, "null"]
++        return schema
++    # No top-level `type`. If it's already nullable via anyOf (Pydantic's
++    # form for Optional[T]), leave it alone.
++    any_of = schema.get("anyOf")
++    if isinstance(any_of, list) and any(
++        isinstance(v, dict) and v.get("type") == "null" for v in any_of
++    ):
++        return schema
++    # Otherwise wrap in anyOf.
++    return {"anyOf": [schema, {"type": "null"}]}
+diff --git a/tests/test_openai_schema.py b/tests/test_openai_schema.py
+new file mode 100644
+index 0000000..309e9ff
+--- /dev/null
++++ b/tests/test_openai_schema.py
+@@ -0,0 +1,134 @@
++"""Strict-mode JSON schema transform for OpenAI function-call tools (spec §6.14).
++
++The transform is the load-bearing translation layer for V1 OpenAI support.
++Bugs here turn into 400s from OpenAI at runtime, so coverage stays close to
++each rule the strict-mode spec enforces.
++"""
++
++from __future__ import annotations
++
++from imp.providers._openai_schema import to_openai_strict
++
++
++def test_required_property_unchanged() -> None:
++    """A field that was originally required stays required and keeps its type."""
++    src = {
++        "type": "object", "additionalProperties": False,
++        "properties": {"status": {"type": "string"}},
++        "required": ["status"],
++    }
++    out = to_openai_strict(src)
++    assert out["properties"]["status"] == {"type": "string"}
++    assert out["required"] == ["status"]
++    assert out["additionalProperties"] is False
++
++
++def test_optional_property_becomes_nullable_and_required() -> None:
++    """An originally-optional field becomes nullable AND appears in required."""
++    src = {
++        "type": "object", "additionalProperties": False,
++        "properties": {
++            "status": {"type": "string"},
++            "note":   {"type": "string"},
++        },
++        "required": ["status"],
++    }
++    out = to_openai_strict(src)
++    assert out["properties"]["note"]["type"] == ["string", "null"]
++    assert out["properties"]["status"]["type"] == "string"
++    assert set(out["required"]) == {"status", "note"}
++
++
++def test_nested_object_recursively_normalized() -> None:
++    src = {
++        "type": "object", "additionalProperties": False,
++        "properties": {
++            "outer": {
++                "type": "object",
++                "properties": {
++                    "inner_req": {"type": "string"},
++                    "inner_opt": {"type": "int"},
++                },
++                "required": ["inner_req"],
++            },
++        },
++        "required": ["outer"],
++    }
++    out = to_openai_strict(src)
++    outer = out["properties"]["outer"]
++    assert outer["additionalProperties"] is False
++    assert set(outer["required"]) == {"inner_req", "inner_opt"}
++    assert outer["properties"]["inner_opt"]["type"] == ["int", "null"]
++
++
++def test_enum_field_stays_enum() -> None:
++    """Enum-only properties (no top-level `type`) are wrapped in anyOf when optional."""
++    src = {
++        "type": "object", "additionalProperties": False,
++        "properties": {
++            "verdict": {"enum": ["approve", "rework"]},
++        },
++        "required": [],
++    }
++    out = to_openai_strict(src)
++    # No `type` to widen; nullable wrapper is anyOf.
++    verdict = out["properties"]["verdict"]
++    assert "anyOf" in verdict
++    assert {"type": "null"} in verdict["anyOf"]
++    assert out["required"] == ["verdict"]
++
++
++def test_idempotent() -> None:
++    """Running the transform twice produces the same output as running it once."""
++    src = {
++        "type": "object", "additionalProperties": False,
++        "properties": {"a": {"type": "string"}, "b": {"type": "string"}},
++        "required": ["a"],
++    }
++    once = to_openai_strict(src)
++    twice = to_openai_strict(once)
++    assert twice == once
++
++
++def test_complete_step_schema_round_trip() -> None:
++    """Sanity: pull a real complete_step schema through the transform end-to-end."""
++    from pathlib import Path
++
++    from imp.agents.tools.complete_step import make_complete_step_tool
++    from imp.engine.types import OutputField, OutputSchema, SourceLoc
++
++    schema = OutputSchema(
++        fields=(
++            OutputField(
++                name="status", type="enum",
++                values=("Success", "Error"), required=True,
++            ),
++            OutputField(name="note", type="string", required=False),
++            OutputField(name="count", type="int", required=False),
++        ),
++        source=SourceLoc(file=Path("a.md"), line=1),
++    )
++    tool = make_complete_step_tool(schema)
++    strict = to_openai_strict(tool.input_schema)
++    assert set(strict["required"]) == {"status", "note", "count"}
++    assert strict["additionalProperties"] is False
++    # Optional fields are nullable (Pydantic emits Optional[T] as
++    # anyOf: [{type: T}, {type: null}]; the transform recognizes that form
++    # and leaves it alone rather than double-wrapping).
++    for opt in ("note", "count"):
++        prop = strict["properties"][opt]
++        assert _is_nullable(prop), f"{opt} not nullable: {prop}"
++
++
++def _is_nullable(prop: dict) -> bool:
++    """A property is nullable if its `type` is a list including 'null', OR
++    if it has an `anyOf` containing a `{"type": "null"}` variant."""
++    t = prop.get("type")
++    if isinstance(t, list) and "null" in t:
++        return True
++    if isinstance(t, str) and t == "null":
++        return True  # not really a property but keep the check robust
++    any_of = prop.get("anyOf")
++    if isinstance(any_of, list):
++        return any(isinstance(v, dict) and v.get("type") == "null" for v in any_of)
++    return False
