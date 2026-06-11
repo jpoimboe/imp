@@ -25,7 +25,7 @@ import anyio
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.dispatch import TurnState, dispatch_one_tool_use
-from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
+from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -715,7 +715,8 @@ class AnthropicAgentRunner:
                         name=by_id[b.tool_use_id].name if b.tool_use_id in by_id else "",
                         tool_use_id=b.tool_use_id,
                         input=by_id[b.tool_use_id].input if b.tool_use_id in by_id else {},
-                        is_error=b.is_error)
+                        is_error=b.is_error,
+                        result_preview=_result_preview(b.content))
                     for b in tool_results
                 ],
                 has_complete_step=False)

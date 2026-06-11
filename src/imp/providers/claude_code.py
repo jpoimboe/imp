@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from imp.agents.classify import ResumeState, classify_resume
-from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
+from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -1160,6 +1160,8 @@ class ClaudeCodeAgentRunner:
                                     elog.append_tool_result(agent_id=aid, block=b)
                                     if b.tool_use_id in pending_tools:
                                         pending_tools[b.tool_use_id].is_error = b.is_error
+                                        pending_tools[b.tool_use_id].result_preview = \
+                                            _result_preview(b.content)
 
                     # Drain any bash kills detected by the MCP wrapper.
                     while state.killed_tool_uses:
