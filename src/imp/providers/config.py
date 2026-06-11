@@ -51,6 +51,7 @@ class Config:
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
+    remote: dict[str, Any] = field(hash=False, default_factory=dict)
 
     def tier_names(self) -> frozenset[str]:
         return frozenset(self.tiers)
@@ -111,6 +112,8 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         out["theme"] = v
     if raw.get("sandbox") is not None:
         out["sandbox"] = _parse_sandbox(raw["sandbox"], src)
+    if raw.get("remote") is not None:
+        out["remote"] = _parse_remote(raw["remote"], src)
     return out, src
 
 
@@ -184,6 +187,7 @@ def _parse_provider_envs(raw: Any, src: SourceLoc) -> dict[str, str]:
 
 
 _SANDBOX_BOOL_KEYS = ("enabled", "allow_unsandboxed", "network")
+_DRIVER_KNOWN_KEYS = {"command", "events", "startup_timeout", "reply_timeout"}
 _SANDBOX_LIST_KEYS = (
     "secret_paths", "writable_caches", "extra_readable", "extra_writable", "extra_env",
 )
@@ -209,6 +213,54 @@ def _parse_sandbox(raw: Any, src: SourceLoc) -> dict[str, Any]:
                 f"sandbox.{k!r} is not a known sandbox setting "
                 f"(allowed: {list(_SANDBOX_BOOL_KEYS + _SANDBOX_LIST_KEYS)})", src)
     return out
+
+
+def _parse_remote(raw: Any, src: SourceLoc) -> dict[str, Any]:
+    """Validate + normalize the optional `remote:` namespace. Only `remote.driver`
+    is recognized; every leaf is defaulted so a configured driver is fully
+    specified downstream. Validation errors surface through LoadError (spec §A)."""
+    if not isinstance(raw, dict):
+        raise LoadError(f"{src.file.name} 'remote:' must be a mapping", src)
+    for k in raw:
+        if k != "driver":
+            raise LoadError(
+                f"remote.{k!r} is not a known remote setting (only 'driver')", src)
+    driver = raw.get("driver")
+    if driver is None:
+        return {}
+    if not isinstance(driver, dict):
+        raise LoadError(f"{src.file.name} 'remote.driver:' must be a mapping", src)
+    for k in driver:
+        if k not in _DRIVER_KNOWN_KEYS:
+            raise LoadError(
+                f"remote.driver.{k!r} is not a known driver setting", src)
+    command = driver.get("command")
+    if (not isinstance(command, list) or not command
+            or not all(isinstance(c, str) for c in command)):
+        raise LoadError(
+            "remote.driver.command must be a non-empty list of strings", src)
+    events = driver.get("events", ["all"])
+    if (not isinstance(events, list) or not events
+            or not all(isinstance(e, str) for e in events)):
+        raise LoadError(
+            "remote.driver.events must be a non-empty list of strings (or [all])", src)
+    st = driver.get("startup_timeout", 10.0)
+    if not isinstance(st, (int, float)) or isinstance(st, bool) or st <= 0:
+        raise LoadError(
+            "remote.driver.startup_timeout must be a positive number of seconds", src)
+    rt = driver.get("reply_timeout", None)
+    if rt is not None and (
+            not isinstance(rt, (int, float)) or isinstance(rt, bool) or rt <= 0):
+        raise LoadError(
+            "remote.driver.reply_timeout must be null or a positive number", src)
+    return {
+        "driver": {
+            "command": list(command),
+            "events": list(events),
+            "startup_timeout": float(st),
+            "reply_timeout": float(rt) if rt is not None else None,
+        }
+    }
 
 
 def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:
