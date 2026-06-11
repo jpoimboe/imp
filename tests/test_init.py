@@ -207,3 +207,15 @@ def test_initial_selection_preselects_claude_code() -> None:
 def test_initial_selection_empty_when_claude_code_absent() -> None:
     from imp.cli.init import _initial_selection
     assert _initial_selection(["anthropic", "openai"]) == set()
+
+
+def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=lambda _msg: None,
+    )
+    text = (tmp_path / "xdg" / "imp" / "config.yaml").read_text()
+    assert yaml.safe_load(text).get("remote") is None
+    assert "# remote:" in text
+    assert "#   driver: telegram" in text
+    assert "IMP_TELEGRAM_TOKEN" in text and "IMP_TELEGRAM_CHAT_ID" in text
