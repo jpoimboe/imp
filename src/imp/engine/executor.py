@@ -369,9 +369,14 @@ async def _dispatch_step(
         sandbox_policy=sandbox_policy)
 
 
+def _step_started_payload(step: Step) -> dict[str, Any]:
+    return {"step": step.name, "kind": step.kind, "phase": step.phase,
+            "quiet": step.quiet}
+
+
 def _emit_started(log: EventLog, step: Step, **extra: Any) -> dict[str, Any]:
     return _emit(log, "step_started",
-                 {"step": step.name, "kind": step.kind, "phase": step.phase, **extra},
+                 {**_step_started_payload(step), **extra},
                  agent_id=None)
 
 
@@ -539,12 +544,7 @@ async def _route_agent(
             fs_permissions=step.fs_permissions, tier=step.tier, step_name=step.name,
             workflow=workflow, change=change, state=state, log=log,
             transcript_dir=transcript_dir,
-            # MUST include "step" — _run_agent_invocation builds step_started as
-            # {model, provider, tools, **extras}; the narrative tree
-            # names/pairs the node on payload.step. Branch/script get it via
-            # _emit_started; the agent path must match.
-            step_started_payload_extras={
-                "step": step.name, "kind": "agent", "phase": step.phase},
+            step_started_payload_extras=_step_started_payload(step),
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator, prior_backoff_attempts=backoff,
             retry_feedback=retry_wrapper if backoff == 0 else None,
