@@ -105,3 +105,91 @@ class TuiApp:
         if app is not None:
             with contextlib.suppress(Exception):
                 app.exit()
+
+    # -- prompt_toolkit Application ------------------------------------------
+    def _key_bindings(self) -> Any:
+        from prompt_toolkit.filters import Condition
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.keys import Keys
+
+        kb = KeyBindings()
+        not_prompt = Condition(lambda: not self._prompt_visible)
+
+        @kb.add("pageup")
+        def _(event: Any) -> None:
+            self.scroll_page_up()
+
+        @kb.add("pagedown")
+        def _(event: Any) -> None:
+            self.scroll_page_down()
+
+        @kb.add("end", filter=not_prompt)
+        def _(event: Any) -> None:
+            self.jump_to_bottom()
+
+        @kb.add("c-o")
+        def _(event: Any) -> None:
+            self.toggle_verbosity()
+
+        @kb.add(Keys.ScrollUp)
+        def _(event: Any) -> None:
+            self.scroll_up_lines()
+
+        @kb.add(Keys.ScrollDown)
+        def _(event: Any) -> None:
+            self.scroll_down_lines()
+
+        @kb.add("escape", filter=not_prompt)
+        async def _(event: Any) -> None:
+            await self.pause_run()
+
+        @kb.add("c-c", filter=not_prompt)
+        async def _(event: Any) -> None:
+            await self.interrupt_run()
+
+        return kb
+
+    def _vertical_scroll(self, window: Any) -> int:
+        info = window.render_info
+        if info is None:
+            return 0
+        return self._viewport.vertical_scroll(
+            total_lines=info.ui_content.line_count, height=info.window_height)
+
+    def _build_app(self) -> None:
+        from prompt_toolkit.application import Application
+        from prompt_toolkit.buffer import Buffer
+        from prompt_toolkit.filters import Condition
+        from prompt_toolkit.formatted_text import ANSI
+        from prompt_toolkit.layout import HSplit, Layout, Window
+        from prompt_toolkit.layout.containers import ConditionalContainer
+        from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+
+        self._body = Window(
+            content=FormattedTextControl(text=lambda: ANSI(self.narrative())),
+            get_vertical_scroll=self._vertical_scroll,
+            wrap_lines=False, always_hide_cursor=True)
+        status = Window(
+            content=FormattedTextControl(text=lambda: ANSI(self.status_line())),
+            height=1, style="reverse")
+        self._buffer = Buffer(
+            accept_handler=lambda buf: self._accept(buf),  # type: ignore[attr-defined]
+            multiline=False)
+        prompt_win = ConditionalContainer(
+            Window(BufferControl(buffer=self._buffer), height=1),
+            filter=Condition(lambda: self._prompt_visible))
+        slash_win = ConditionalContainer(
+            Window(FormattedTextControl(
+                text=lambda: ANSI("\n".join(self._slash_lines)))),
+            filter=Condition(lambda: self._prompt_visible and bool(self._slash_lines)))
+        layout = Layout(
+            HSplit([self._body, slash_win, status, prompt_win]),
+            focused_element=self._body)
+        self._app = Application(
+            layout=layout, key_bindings=self._key_bindings(),
+            full_screen=True, mouse_support=True)
+
+    async def run_async(self) -> None:
+        if self._app is None:
+            self._build_app()
+        await self._app.run_async(handle_sigint=False)

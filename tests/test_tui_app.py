@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from imp.cli.narrative import build_tree
@@ -89,6 +91,43 @@ async def test_interrupt_run_routes_ctrl_c_to_coordinator() -> None:
     app = TuiApp(coord=coord, color=False, width=80)
     await app.interrupt_run()
     assert coord.pauses == ["ctrl-c"]
+
+
+def test_build_app_registers_all_bindings() -> None:
+    from prompt_toolkit.keys import Keys
+
+    app = _app()
+    app._build_app()
+    bound = {k for b in app._app.key_bindings.bindings for k in b.keys}
+    for key in (Keys.PageUp, Keys.PageDown, Keys.End, Keys.ControlO,
+                Keys.Escape, Keys.ControlC, Keys.ScrollUp, Keys.ScrollDown):
+        assert key in bound, key
+    assert app._app.full_screen is True
+    assert app._app.mouse_support() is True
+
+
+@pytest.mark.anyio
+async def test_run_async_pageup_disengages_follow_and_ctrl_o_toggles() -> None:
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input.defaults import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    app = TuiApp(coord=_FakeCoord(), color=False, width=80)
+    for e in SAMPLE:
+        app.on_event(e)
+
+    with create_pipe_input() as pin, create_app_session(input=pin, output=DummyOutput()):
+        async def _drive() -> None:
+            pin.send_text("\x1b[5~")          # PageUp
+            pin.send_text("\x0f")             # Ctrl-O
+            await asyncio.sleep(0.05)
+            app.exit()
+
+        asyncio.ensure_future(_drive())  # noqa: RUF006
+        await app.run_async()
+
+    assert app._viewport.follow is False      # PageUp disengaged auto-follow
+    assert app._full is False                 # Ctrl-O toggled verbosity
 
 
 @pytest.fixture
