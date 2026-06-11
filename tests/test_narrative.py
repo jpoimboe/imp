@@ -508,7 +508,7 @@ def test_current_activity_reports_open_burst() -> None:
         b.add(e)
     assert b.current_burst is not None
     act = b.current_activity()
-    assert act is not None and "spec" in act and "read_file" in act and "1 tools" in act
+    assert act == nv.Activity(count="1 call", detail="read_file config.py")
 
 
 def test_current_activity_idle_gap_between_nodes() -> None:
@@ -520,7 +520,7 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == "spec · working"
+    assert b.current_activity() == nv.Activity(label="thinking")
 
 
 def test_current_activity_none_when_no_step() -> None:
@@ -529,7 +529,7 @@ def test_current_activity_none_when_no_step() -> None:
     assert b.current_activity() is None
 
 
-def test_current_activity_thinking_cue_when_latest_child_is_thinking() -> None:
+def test_current_activity_agent_step_with_thinking_child_is_thinking() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -538,36 +538,8 @@ def test_current_activity_thinking_cue_when_latest_child_is_thinking() -> None:
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == "spec · thinking"
+    assert b.current_activity() == nv.Activity(label="thinking")
 
-
-def test_current_activity_falls_back_to_working_after_thinking() -> None:
-    b = nv.NarrativeBuilder()
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="spec", kind="agent", phase="design",
-           model="m", provider="anthropic"),
-        ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
-        ev("5", "llm_response", agent_id="step:design/spec",
-           raw={"content": [{"type": "text", "text": "prose"}]}, usage={}),
-    ]:
-        b.add(e)
-    # After prose appends, the latest child is no longer a ThinkingFold.
-    assert b.current_activity() == "spec · working"
-
-
-def test_current_activity_blank_thinking_does_not_cue() -> None:
-    # A whitespace-only thinking event is dropped as noise by render_text; the
-    # status cue must stay consistent and NOT flash `· thinking`.
-    b = nv.NarrativeBuilder()
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="spec", kind="agent", phase="design",
-           model="m", provider="anthropic"),
-        ev("4", "thinking", agent_id="step:design/spec", content="   "),
-    ]:
-        b.add(e)
-    assert b.current_activity() == "spec · working"
 
 
 def test_subagent_current_activity_includes_nested_detail() -> None:
@@ -583,7 +555,8 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
     ]:
         b.add(e)
     act = b.current_activity()
-    assert act is not None and "task → coder" in act and "executor.py" in act
+    assert act is not None and act.label is not None
+    assert "task → coder" in act.label and "executor.py" in act.label
 
 
 def test_summarize_result_flattens_text_block_list_in_burst() -> None:
@@ -718,11 +691,12 @@ def test_current_activity_collapses_multiline_bash_command() -> None:
     cmd = "python3 -c 'import sys\nprint(sys.version)\n" + "x" * 80 + "'"
     b.add(_ev("2", "tool_call", agent_id="step:build/coder", id="t1",
               name="bash", input={"command": cmd}))
-    activity = b.current_activity()
-    assert "\n" not in activity                       # single line only
-    assert "…" in activity                            # truncated
-    assert len(activity) < 120                         # not the whole script
-    assert "coder · bash" in activity
+    act = b.current_activity()
+    assert act.detail is not None
+    assert "\n" not in act.detail                    # single line only
+    assert "…" in act.detail                         # truncated
+    assert len(act.detail) < 120                      # not the whole script
+    assert act.detail.startswith("bash ")             # name + sanitized arg, no step prefix
 
 
 def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
@@ -1014,3 +988,46 @@ def test_tool_result_citations_go_to_footer_not_result() -> None:
     rep = nv.structural_repr(b.current_burst)["calls"][0]
     assert rep["citations_footer"] == "\n\nSources:\n- https://a.test"
     assert rep["input"] == {"query": "x"}
+
+
+def test_current_activity_burst_form_count_and_named_on_visible_basis() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="load_skill",
+             input={"name": "x"}))                       # omitted
+    b.add(ev("t2", "tool_call", agent_id="a", id="c2", name="bash",
+             input={"command": "make test"}))
+    act = b.current_activity()
+    assert isinstance(act, nv.Activity)
+    assert act.count == "1 call"
+    assert act.detail == "bash make test"
+    assert act.label is None
+
+
+def test_current_activity_all_killed_basis_is_bare_count() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash", input={}))
+    b.add(ev("k1", "tool_killed", agent_id="a", id="c1", name="bash"))
+    act = b.current_activity()
+    assert act.count == "1 call"          # count keeps killed
+    assert act.detail is None             # named call excludes killed → bare count
+
+
+def test_current_activity_agent_step_no_burst_is_thinking() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    assert b.current_activity() == nv.Activity(label="thinking")
+
+
+def test_current_activity_chrome_step_is_running() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="g", kind="merge", phase="p"))
+    assert b.current_activity() == nv.Activity(label="running")
+
+
+def test_activity_to_text_flattens_segments() -> None:
+    assert nv.activity_to_text(nv.Activity(count="3 calls", detail="bash x")) == \
+        "3 calls · bash x"
+    assert nv.activity_to_text(nv.Activity(label="thinking")) == "thinking"
+    assert nv.activity_to_text(None) == ""

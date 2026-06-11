@@ -159,6 +159,24 @@ def visible_calls(burst: ToolBurstFold) -> list[ToolCall]:
 
 
 @dataclass
+class Activity:
+    """The structured live-status description (§3): count phrase, gray detail
+    (tool name + arg), and a fallback label. Any field may be None. Plain text —
+    the driver colors the segments (live_driver.compose_status)."""
+    count: str | None = None
+    detail: str | None = None
+    label: str | None = None
+
+
+def activity_to_text(activity: Activity | None) -> str:
+    """Flatten an Activity to one plain (no-ANSI) line — used by SubagentFold to
+    fold its nested builder's activity into its own status text."""
+    if activity is None:
+        return ""
+    return " · ".join(p for p in (activity.count, activity.detail, activity.label) if p)
+
+
+@dataclass
 class SkillLoadNode:
     """A skill the agent pulled in mid-run (the skill_load event). Rendered as a
     quiet `load skill {name}` line — distinct from the redundant `load_skill`
@@ -190,7 +208,7 @@ class SubagentFold:
         return self.nested.tree
 
     def current_activity(self) -> str:
-        detail = self.nested.current_activity()
+        detail = activity_to_text(self.nested.current_activity())
         tail = f" · {detail}" if detail else ""
         return f"task → {self.subagent_name} · {self.event_count} events{tail}"
 
@@ -327,33 +345,31 @@ class NarrativeBuilder:
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
 
-    def current_activity(self) -> str | None:
-        """A one-line description of what the active step is doing right now, for
-        the live status line. None when no step is active. Reads only public-ish
-        state via this method so LiveStatus never touches builder internals."""
-        step = (self._step_stack[-1].name if self._step_stack
-                else self._current_phase.name if self._current_phase else None)
+    def current_activity(self) -> Activity | None:
+        """Structured one-line description of current activity for the live status
+        line (§3/§4). None when there is nothing to show."""
         for fold in self._open_sub_by_block.values():
             if fold.running:
-                return fold.current_activity()
+                return Activity(label=fold.current_activity())
         burst = self._current_burst
-        if burst is not None and burst.calls:
-            last = burst.calls[-1]
-            arg = _sanitize_activity_arg(next(iter((last.input or {}).values()), ""))
-            head = f"{step} · " if step else ""
-            return f"{head}{last.name} {arg} · {len(burst.calls)} tools".rstrip()
-        # Transient reasoning cue: the persistent thinking line is gone in default
-        # mode, so surface it on the status line while a NON-EMPTY thinking fold is
-        # the step's most recent child (flushed away by the next prose/tool event).
-        # The `.content.strip()` guard mirrors render_text dropping blank thinking
-        # as noise — a whitespace-only thinking event must not flash `· thinking`.
+        if burst is not None:
+            basis = visible_calls(burst)         # keeps killed (recap parity)
+            if basis:
+                n = len(basis)
+                count = f"{n} call{'s' if n != 1 else ''}"
+                named = next((c for c in reversed(basis) if not c.killed), None)
+                detail = None
+                if named is not None:
+                    arg = _sanitize_activity_arg(
+                        next(iter((named.input or {}).values()), ""))
+                    detail = f"{named.name} {arg}".rstrip()
+                return Activity(count=count, detail=detail)
+            # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
-            last_step = self._step_stack[-1]
-            last_child = last_step.children[-1] if last_step.children else None
-            if isinstance(last_child, ThinkingFold) and last_child.content.strip():
-                return f"{last_step.name} · thinking"
-        if step is not None:
-            return f"{step} · working"
+            step = self._step_stack[-1]
+            return Activity(label="running" if step.kind in CHROME_KINDS else "thinking")
+        if self._current_phase is not None:
+            return Activity(label=f"{self._current_phase.name} · working")
         return None
 
     def add(self, event: Any) -> None:

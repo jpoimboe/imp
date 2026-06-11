@@ -715,3 +715,15 @@ def test_user_message_resets_status_span() -> None:
         drv.on_event(e)
     # restart_span fired exactly at step_started (e2) and user_message (e7).
     assert calls == ["restart", "restart"]
+
+
+def test_compose_status_colors_count_detail_label() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=True, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "ls"}))
+    line = drv.compose_status(0, 1.0)
+    assert "1 call" in line
+    assert "bash ls" in line
+    assert "\x1b[90m" in line          # detail painted gray
