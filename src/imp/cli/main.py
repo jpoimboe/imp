@@ -26,6 +26,12 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
+from imp.cli.remote_channel import (
+    RemoteChannel,
+    compose_on_event,
+    driver_config_from,
+    effective_reply_fn,
+)
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
 from imp.engine import journal, recovery, worktree
@@ -114,6 +120,24 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
         raise AwaitingUserInput()
 
     return _reply
+
+
+def _maybe_build_channel(change: Change) -> RemoteChannel | None:
+    """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
+    behaves exactly as today). Title is captured at run start. A bad config is
+    surfaced elsewhere (run_change reloads it) — never fail channel construction
+    over config here; return None on any config error."""
+    from imp.providers.effective import load_effective_config
+    try:
+        config = load_effective_config(
+            project_root=change.project_root,
+            control_root=change.control_root).config
+    except (LoadError, LoadErrors):
+        return None
+    dc = driver_config_from(config)
+    if dc is None:
+        return None
+    return RemoteChannel.from_driver_config(dc, id=change.id, title=change.title)
 
 
 def _build_interactive_input(
@@ -353,6 +377,7 @@ async def _run_change_session(
     reply_input_fn: Callable[[], Awaitable[str]],
     non_interactive: bool,
     tg: Any,
+    channel: Any = None,
 ) -> int:
     """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
     loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
@@ -379,6 +404,11 @@ async def _run_change_session(
     tg.start_soon(_run_actuator, coord, exit_event, run_scope_holder)
 
     try:
+        if channel is not None and not await channel.start(tg):
+            channel = None
+        run_on_event = (
+            compose_on_event(driver.on_event, channel.on_event)
+            if channel is not None else driver.on_event)
         reader_armed = (
             bool(esc_reader and esc_reader._armed) if not non_interactive else False)
         result: RunResult | None = None
@@ -389,7 +419,8 @@ async def _run_change_session(
                     # Bind the CURRENT reply_input_fn (it is rebound on reader
                     # respawn each round) so the wait_for_user channel always
                     # calls the live one.
-                    _reply: Callable[[], Awaitable[str]] = reply_input_fn
+                    _reply: Callable[[], Awaitable[str]] = effective_reply_fn(
+                        reply_input_fn, channel, non_interactive=non_interactive)
 
                     def _chat(
                         _q: object,
@@ -398,7 +429,7 @@ async def _run_change_session(
                         return _fn()
 
                     result = await run_change(
-                        change, on_event=driver.on_event,
+                        change, on_event=run_on_event,
                         user_chat_input_fn=_chat,
                         coordinator=coord, non_interactive=non_interactive)
             except EOFError:
@@ -470,6 +501,9 @@ async def _run_change_session(
         driver.finish()
         return _handle_terminal_outcome(change, result, coord)
     finally:
+        if channel is not None:
+            with anyio.CancelScope(shield=True):
+                await channel.stop()
         status.reset()
         tg.cancel_scope.cancel()
 
@@ -645,6 +679,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                                 color=should_use_color(sys.stdout),
                                 width=_term_width(), status=status)
             coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
             rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
@@ -672,7 +707,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                     rc = await _run_change_session(
                         change, coord=coord, driver=driver, status=status,
                         esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                        non_interactive=non_interactive, tg=tg)
+                        non_interactive=non_interactive, tg=tg, channel=channel)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -775,6 +810,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                                 color=should_use_color(sys.stdout),
                                 width=_term_width(), status=status)
             coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
             rc = 0
             # Append the resume marker exactly once (for the persisted log /
             # imp log). NO replay: the engine picks up from the current step
@@ -818,7 +854,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     rc = await _run_change_session(
                         change, coord=coord, driver=driver, status=status,
                         esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                        non_interactive=non_interactive, tg=tg)
+                        non_interactive=non_interactive, tg=tg, channel=channel)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
