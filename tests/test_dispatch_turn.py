@@ -10,6 +10,7 @@ import imp.agents.dispatch as dispatch_mod
 from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import ChangeContext, ToolUseBlock
+from imp.agents.subagents import SubagentSuspended
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
@@ -189,3 +190,37 @@ async def test_kill_switch_inline_is_sequential(tmp_path: Path) -> None:
         reset_parallelism_cache()
     assert gate["peak"] == 1                       # sequential, no overlap
     assert [b.tool_use_id for b in tool_results] == ["t1", "t2"]
+
+
+@pytest.mark.anyio
+async def test_trailing_non_task_never_dispatched_on_suspension(
+    tmp_path: Path,
+) -> None:
+    """AC10: [task1, noop] where task1 suspends -> the batch (at the first-task
+    position) raises and the trailing noop is NEVER dispatched (no noop tool_call
+    / tool_result event, no batch tool_results). Falsifiable: a regression that
+    ran non-task tools before the batch settled, or that swallowed the batch
+    raise, would log a noop event here."""
+    reset_parallelism_cache()
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
+                    abort_dispatch=None):
+        raise SubagentSuspended("t1 paused")
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path)
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        tus = [_task_tu("t1"), _noop_tu("n1")]
+        with pytest.raises(SubagentSuspended):
+            await _drain(ctx, elog, tus, tool_results,
+                         TurnState(tool_calls_used=0), None)
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    rows = [e for e in elog.read() if e["agent_id"] == "step:p/s"]
+    noop_rows = [e for e in rows if e["payload"].get("id") == "n1"]
+    assert noop_rows == []                          # noop never dispatched
+    assert tool_results == []
+    reset_parallelism_cache()

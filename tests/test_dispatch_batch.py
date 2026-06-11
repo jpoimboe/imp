@@ -446,3 +446,41 @@ async def test_batch_multi_suspension_first_captured_wins(tmp_path: Path) -> Non
     assert collected == []                          # AC6: zero heartbeats
     assert tool_results == []
     reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_batch_cancellation_cancels_children_cleanly(tmp_path: Path) -> None:
+    """AC18: a surrounding cancel (watchdog/aclose) during the batch group await
+    cancels all in-flight children via the task group; each child's finally runs
+    (clean teardown) and no result is appended. Falsifiable: a regression that
+    swallowed cancellation in a child wrapper (e.g. catching BaseException) would
+    leave finally un-run or append results."""
+    reset_parallelism_cache()
+    finals = {"count": 0}
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
+                    abort_dispatch=None):
+        try:
+            await anyio.sleep(10)
+            return json.dumps({"status": "Success"})
+        finally:
+            finals["count"] += 1
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        tus = [_task_tu("t1"), _task_tu("t2")]
+        with anyio.move_on_after(0.05):
+            async for _ in dispatch_task_batch(
+                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
+                    tool_results=tool_results, state=state, ceiling=None):
+                pass
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    assert finals["count"] == 2                     # both children cancelled cleanly
+    assert tool_results == []                       # no results from cancelled children
+    reset_parallelism_cache()
