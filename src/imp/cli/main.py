@@ -34,6 +34,7 @@ from imp.cli.remote_channel import (
 )
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
+from imp.cli.tui_app import TuiApp
 from imp.engine import journal, recovery, worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
@@ -633,6 +634,63 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
+    if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
+        print("imp: --tui needs an interactive terminal; streaming instead.",
+              file=sys.stderr)
+
+
+def _tui_requested(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "tui", False)) and sys.stdout.isatty()
+
+
+async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
+    from imp.cli.signals import InterruptCoordinator
+
+    # No EscKeyReader — TuiApp owns the tty exclusively.
+    coord = InterruptCoordinator()
+    app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
+    channel = _maybe_build_channel(change)
+
+    async def _chat(_prompt: object) -> str:
+        return await app.solicit(change)
+
+    holder: dict[str, Any] = {}
+    load_err: Exception | None = None
+    try:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(coord.run_signal_receiver)
+            if channel is not None and not await channel.start(tg):
+                channel = None
+            run_on_event = (
+                compose_on_event(app.on_event, channel.on_event)
+                if channel is not None else app.on_event)
+
+            async def _run() -> None:
+                try:
+                    holder["result"] = await run_change(
+                        change, on_event=run_on_event, user_chat_input_fn=_chat,
+                        coordinator=coord, non_interactive=False)
+                finally:
+                    app.exit()
+
+            tg.start_soon(_run)
+            await app.run_async()
+            tg.cancel_scope.cancel()
+    except* (LoadError, LoadErrors) as eg:
+        load_err = eg.exceptions[0]
+
+    app.print_collapsed_transcript(sys.stdout)
+    if load_err is not None:
+        print(f"imp: {load_err}", file=sys.stderr)
+        return 2
+    result = holder.get("result")
+    if result is None or (result is RunResult.PAUSED and coord.should_pause):
+        return _finalize_paused_exit(
+            change, app, coord, coord.pause_reason or "ctrl-c")
+    return _handle_terminal_outcome(change, result, coord)
+
+
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -674,6 +732,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             # prints the bold `#slug  title` workflow header as the opener, so a
             # second headline here would just duplicate it.
             non_interactive = bool(getattr(args, "non_interactive", False))
+            _warn_if_tui_unavailable(args, sys.stdout)
+            if _tui_requested(args) and not non_interactive:
+                return await _run_tui_session(change, args=args)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -805,13 +866,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     return 2
 
             non_interactive = bool(getattr(args, "non_interactive", False))
-            status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout,
-                                color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
-            coord = InterruptCoordinator()
-            channel = _maybe_build_channel(change)
-            rc = 0
+            _warn_if_tui_unavailable(args, sys.stdout)
             # Append the resume marker exactly once (for the persisted log /
             # imp log). NO replay: the engine picks up from the current step
             # cursor, re-emitting step_started + the step body fresh
@@ -829,6 +884,16 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     rewind_plan, workflow, state, change.event_log())
             state.save(change.state_dir)
 
+            if _tui_requested(args) and not non_interactive:
+                return await _run_tui_session(change, args=args)
+
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout,
+                                color=should_use_color(sys.stdout),
+                                width=_term_width(), status=status)
+            coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
+            rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
                 reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
@@ -1365,8 +1430,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1381,6 +1445,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="Headless reply consumed by the first wait_for_user; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
+    p_new.add_argument("--tui", action="store_true",
+                       help="Render the run in a full-screen, scrollable viewer "
+                            "(expanded steps); falls back to streaming on a non-tty.")
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
@@ -1391,6 +1458,9 @@ def main(argv: list[str] | None = None) -> int:
                           help="Headless reply consumed by the first wait_for_user; "
                                "pause+resume with another --message. "
                                "Requires --non-interactive.")
+    p_resume.add_argument("--tui", action="store_true",
+                          help="Render the run in a full-screen, scrollable viewer "
+                               "(expanded steps); falls back to streaming on a non-tty.")
     p_resume.add_argument(
         "--from", dest="from_target", metavar="TARGET",
         help="Rewind/jump the step cursor to TARGET (a step or phase name) and "
@@ -1437,10 +1507,13 @@ def main(argv: list[str] | None = None) -> int:
     p_abandon.set_defaults(func=_cmd_abandon)
 
     from imp.evals.cli import add_eval_parser
-
     add_eval_parser(sub)
+    return parser
 
-    ns = parser.parse_args(args)
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    ns = _build_parser().parse_args(args)
     _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
         rc: int = ns.func(ns)

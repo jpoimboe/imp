@@ -793,3 +793,35 @@ def test_wfu_submit_live_equals_imp_log() -> None:
         drv.on_event(e)
     drv.finish()
     assert _body(out) == _render_body(events)      # byte-identical to imp log
+
+
+def test_compose_activity_status_none_when_idle() -> None:
+    from imp.cli.live_driver import compose_activity_status
+    builder = nv.NarrativeBuilder()
+    assert compose_activity_status(builder, frame=0, elapsed=1.0, color=True) is None
+
+
+def test_compose_activity_status_paints_count_detail_label() -> None:
+    from imp.cli.live_driver import compose_activity_status
+    builder = nv.NarrativeBuilder()
+    builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    builder.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                   input={"command": "ls"}))
+    line = compose_activity_status(builder, frame=0, elapsed=1.0, color=True)
+    assert line is not None
+    assert "1 call" in line
+    assert "bash ls" in line
+    assert "\x1b[90m" in line          # detail painted gray
+
+
+def test_compose_status_returns_activity_content() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=True, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "ls"}))
+    result = drv.compose_status(0, 1.0)
+    assert result is not None
+    assert "bash ls" in result
+    assert "1 call" in result
+    assert "\x1b[90m" in result    # gray detail segment
