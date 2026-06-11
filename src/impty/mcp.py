@@ -130,7 +130,7 @@ def view(full: bool = False) -> str:
 
 
 @mcp.tool()
-def send(data: str, wait: bool = True) -> str:
+def send(data: str, wait: bool | float = True) -> str:
     """Send raw keystrokes to the program, then (by default) return the new screen.
 
     `data` is literal bytes the program receives — NOT a description. Common keys:
@@ -138,9 +138,15 @@ def send(data: str, wait: bool = True) -> str:
     Up=`\\x1b[A` Down=`\\x1b[B` Right=`\\x1b[C` Left=`\\x1b[D`.
     So answering a prompt "foo" then Enter = data="foo\\r".
 
-    With wait=True (default) it waits for the program to react and returns the
-    fresh screen — type-then-look in one call. Set wait=False to fire keys
-    without waiting (e.g. mid-stream input).
+    `wait` controls how long to settle before snapshotting:
+    - True (default): wait for the program to react and go QUIET, then return —
+      type-then-look in one call. Best for apps that settle after a keystroke.
+    - False: fire and return `[sent]` immediately (e.g. mid-stream input).
+    - a number (seconds): settle for that FIXED duration, then return the screen.
+      Use this for a continuously-animating full-screen app (a spinner / live
+      TUI) that NEVER goes quiet — there `wait=True` would block the full settle
+      cap (~15 s) every keystroke. e.g. `wait=0.4` lets the reaction render, then
+      snapshots. The background drainer keeps pyte current during the wait.
     """
     session = _require()
     # Mark the type-then-look boundary just before the keystroke so wait_idle
@@ -148,9 +154,14 @@ def send(data: str, wait: bool = True) -> str:
     # touched seconds ago.
     since = time.monotonic()
     session.send(_decode_keys(data))
-    if not wait:
+    # `is False` / `is True`: bool is an int subclass, so a numeric `wait` must be
+    # distinguished by identity, not truthiness (0.0 is a valid fixed settle).
+    if wait is False:
         return "[sent]"
-    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD, since=since)
+    if wait is True:
+        session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD, since=since)
+    else:
+        time.sleep(max(0.0, float(wait)))  # fixed settle; drainer updates pyte
     return _render(session)
 
 
