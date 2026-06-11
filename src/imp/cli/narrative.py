@@ -658,6 +658,19 @@ def _user_message_text(payload: dict[str, Any]) -> str:
         if isinstance(b, dict) and b.get("type") == "text")
 
 
+def _sole_success_tool_result(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The payload's content when it is exactly one success-shaped tool_result
+    block, else None. The resume-reply rule keys on this shape PLUS the armed
+    flag (the disjointness argument)."""
+    content = payload.get("content") or []
+    if len(content) != 1:
+        return None
+    b = content[0]
+    if not isinstance(b, dict) or b.get("type") != "tool_result" or b.get("is_error"):
+        return None
+    return b
+
+
 def _is_prose_field(key: str, value: Any) -> bool:
     """True for a free-text output field that should render as a bold prose block
     rather than fold into the breadcrumb (issues 5/6)."""
@@ -723,6 +736,16 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_burst()
     interactive, self._awaiting_reply = self._awaiting_reply, False
     question, self._pending_question = self._pending_question, ""
+    text = _user_message_text(p)
+    if interactive and not text.strip():
+        block = _sole_success_tool_result(p)
+        if block is not None:
+            # Live-safe resume reply: the injected message's sole block is a
+            # success tool_result carrying the human's reply (anthropic/openai/
+            # claude_code resume shape). A known dangling id is a strengthener.
+            text = _summarize_result(block.get("content"))
+            rid = str(block.get("tool_use_id") or block.get("id") or "")
+            self._pending_wfu.pop(rid, None)
     # M3: the event's prompt is the only GUARANTEED source of the question (the
     # attended tool path solicits with ""). But in the usual case the agent's
     # end-of-turn assistant text — already rendered as prose just above — IS the
@@ -734,8 +757,7 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     else:
         rendered_question = ""
     self._append(UserMessageNode(
-        text=_user_message_text(p), interactive=interactive,
-        pending_question=rendered_question))
+        text=text, interactive=interactive, pending_question=rendered_question))
 
 
 def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:

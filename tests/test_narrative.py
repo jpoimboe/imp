@@ -1143,3 +1143,31 @@ def test_double_wfu_each_synthesis_gets_own_question():             # [I1][I4] d
     # bash is still unresulted; it should be in the final fresh burst
     assert b.current_burst is not None
     assert b.current_burst.calls[0].call_id == "b1"
+
+
+def test_resume_tool_result_shaped_user_message_renders_reply():    # [I1]
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("aw", "awaiting_user_input", agent_id="a", prompt="continue?"))
+    b.add(ev("um", "user_message", agent_id="a", content=[
+        {"type": "tool_result", "tool_use_id": "w1", "is_error": False,
+         "content": "the human reply"}]))
+    step = _step_node(b)            # PhaseNode→StepNode helper from Task 8's block
+    user = next(k for k in step.children if isinstance(k, nv.UserMessageNode))
+    assert user.interactive is True
+    assert user.text == "the human reply"
+    assert user.pending_question == "continue?"
+
+
+def test_resume_unarmed_balance_injection_renders_nothing():         # [I1] negative
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    # no awaiting_user_input → flag unarmed; balance-shaped sole tool_result block
+    b.add(ev("um", "user_message", agent_id="a", content=[
+        {"type": "tool_result", "tool_use_id": "x", "is_error": False,
+         "content": "previous step output recorded; resuming"}]))
+    step = _step_node(b)            # PhaseNode→StepNode helper from Task 8's block
+    users = [k for k in step.children if isinstance(k, nv.UserMessageNode)]
+    # interactive=False (unarmed) → synthetic, and text stays empty (no text block)
+    assert all(not u.interactive for u in users)
+    assert all(u.text == "" for u in users)
