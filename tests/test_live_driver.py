@@ -793,3 +793,18 @@ def test_wfu_submit_live_equals_imp_log() -> None:
         drv.on_event(e)
     drv.finish()
     assert _body(out) == _render_body(events)      # byte-identical to imp log
+
+
+def test_driver_takes_pending_wait_for_user_question() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
+                    prompt="Pick A or B?"))
+    assert drv.take_pending_question() == "Pick A or B?"
+    assert drv.take_pending_question() == ""        # consumed; not re-shown
+
+
+def test_driver_has_no_question_without_a_solicit() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    assert drv.take_pending_question() == ""
