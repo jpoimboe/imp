@@ -796,7 +796,7 @@ def test_wfu_submit_live_equals_imp_log() -> None:
 
 
 def test_driver_takes_pending_wait_for_user_question() -> None:
-    drv, out = _driver()
+    drv, _ = _driver()
     drv.on_event(ev("1", "change_created", change_id=1, title="x"))
     drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
                     prompt="Pick A or B?"))
@@ -805,7 +805,7 @@ def test_driver_takes_pending_wait_for_user_question() -> None:
 
 
 def test_driver_has_no_question_without_a_solicit() -> None:
-    drv, out = _driver()
+    drv, _ = _driver()
     drv.on_event(ev("1", "change_created", change_id=1, title="x"))
     assert drv.take_pending_question() == ""
 
@@ -884,6 +884,42 @@ def test_quiet_forward_goto_arrow_matches_log() -> None:
     assert any(ln.strip() == "→ plan" for ln in body)
     assert not any("fast-path-spec-gate" in ln for ln in body)
     assert body == _render_body(events)
+
+
+def test_is_final_resume_goto_quiet_step_is_emitted() -> None:
+    # A quiet step that closes on a backward rework edge (goto resume=True) sets
+    # quiet_line="→ reworking" and is FINAL immediately — the live cursor must not
+    # block on it the way it blocks an unresolved forward goto.
+    drv, _ = _driver()
+    node = nv.StepNode(name="spec-verify-commit", kind="script", quiet=True)
+    node.quiet_line = "→ reworking"
+    node.closed = True
+    node.outcome = nv.OutcomeLine(
+        action={"verb": "goto", "target": "spec-writer", "resume": True})
+    assert drv._is_final(node, container=None) is True
+
+
+def test_quiet_pause_surfaces_live_and_matches_log() -> None:
+    # Live/log parity for the non-linear-outcome path: a quiet step that PAUSES
+    # (merge_blocked etc.) must surface its full block in the live stream exactly
+    # as `imp log` renders it — not get silently held/dropped like a quiet
+    # continue.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="merge-to-base", kind="script",
+           phase="merge", quiet=True),
+        ev("3", "error", message="merge conflict in foo.py"),
+        ev("4", "step_completed", step="merge-to-base", kind="script",
+           action={"verb": "pause"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("merge-to-base" in ln for ln in body)
+    assert any("merge conflict in foo.py" in ln for ln in body)
+    assert body == _render_body(events)          # live == imp log, line for line
 
 
 def test_compose_activity_status_none_when_idle() -> None:

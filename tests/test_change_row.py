@@ -64,6 +64,22 @@ def test_format_truncates_long_title():
     assert "x" * 24 not in line
 
 
+def test_format_truncates_legacy_token_to_fit_width():
+    # A legacy `YYYY-MM-DD-<slug>` id has no short token, so the ID column would
+    # overflow 80 cols. It's truncated; modern 6-char tokens are untouched.
+    legacy = format_change_line(
+        **_row(change_id="2026-06-03-imp-init-improvements", status="abandoned"),
+        color=False, dim=True)
+    assert "…" in legacy
+    assert "2026-06-03-imp-init-improvements" not in legacy
+    # display width (the dim row has SGR wrappers) — measure the inner text.
+    inner = legacy.removeprefix("\x1b[2m").removesuffix("\x1b[0m")
+    assert len(inner) <= 80, f"{len(inner)}: {inner!r}"
+    # a modern token is short enough to survive verbatim.
+    modern = format_change_line(**_row(change_id="2026-06-11-yaitd7"), color=False)
+    assert modern.rstrip().endswith("yaitd7")
+
+
 def test_format_unnamed_title():
     line = format_change_line(**_row(title="   "), color=False)
     assert "(unnamed)" in line

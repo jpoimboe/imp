@@ -156,6 +156,7 @@ phases:
           - {else: true, resume: task-lead}   # carries test stderr as feedback
 
       - name: fast-path-cycle-gate
+        quiet: true
         rules:
           - {if: {fast_path: true}, goto: review}       # straight to autosquash/review
           - {else: true, continue: true}
@@ -171,18 +172,21 @@ phases:
   - name: review
     steps:
       - name: autosquash
+        quiet: true
         command: ./scripts/autosquash.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}   # rebase conflict → human resolves
 
       - name: stamp-trailers
+        quiet: true
         command: ./scripts/stamp-trailers.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}   # self-verify failed → human resolves
 
       - name: panel-gate           # guard the opus panel: skip it on re-entry AND on fast-path
+        quiet: true
         rules:
           - {if: {panel_done: true}, goto: recheck}         # panel already ran -> sonnet re-check only
           - {if: {fast_path: true}, goto: recheck}          # trivial change -> skip the opus panel; one cheap sonnet whole-diff recheck still runs
@@ -207,6 +211,7 @@ phases:
 
       # ── integrate base into the branch, before review folds into one decision ──
       - name: integrate-merge        # B2: merge base into the branch, uncommitted
+        quiet: true                  # mechanical; the integrator/integration-review agents narrate
         command: ./scripts/integrate-merge.sh
         rules:
           - {if: {exit: 2}, goto: summarizer}     # base already integrated -> skip integration
@@ -246,6 +251,7 @@ phases:
         tier: high
 
       - name: final-review-gate
+        quiet: true
         rules:
           - {if: {final_review: false}, set: {ready_to_merge: true}, goto: merge}
           - {if: {ready_to_merge: true, integration_needs_review: false}, goto: merge}   # C2.1: approved + clean reviewed re-integration -> skip re-review
@@ -264,6 +270,7 @@ phases:
   - name: merge
     steps:
       - name: base-fresh-check       # B3: cheap pre-lock freshness fast-path
+        quiet: true
         command: ./scripts/base-fresh-check.sh
         rules:
           - {if: {exit: 0}, continue: true}          # base unchanged / not-integrated -> take the lock

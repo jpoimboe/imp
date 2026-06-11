@@ -23,6 +23,7 @@ ALL_CLAUDE_CODE_BUILTIN_TOOLS: tuple[str, ...] = (
     "CronCreate",
     "CronDelete",
     "CronList",
+    "DesignSync",
     "Edit",
     "EnterPlanMode",
     "EnterWorktree",

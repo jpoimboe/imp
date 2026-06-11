@@ -342,8 +342,9 @@ class NarrativeBuilder:
         self._resuming = False
         # A quiet step whose forward goto's target phase is not known until the
         # target's step_started arrives (the arrow names the target PHASE). Holds
-        # (quiet_step_node, target_step_name) between the two events.
-        self._pending_quiet: tuple[StepNode, str] | None = None
+        # (quiet_step_node, target_step_name, gate_phase) between the two events;
+        # gate_phase lets a SAME-phase forward goto resolve to silence.
+        self._pending_quiet: tuple[StepNode, str, str | None] | None = None
         # True between an awaiting_user_input event and the user_message that
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
@@ -563,11 +564,19 @@ def _h_step_started(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     kind = p.get("kind")
     phase = p.get("phase", "?")
     if self._pending_quiet is not None:
-        qnode, target = self._pending_quiet
-        # The forward goto runs its target next, so this step IS the target and
-        # its phase is the arrow's phase. Fall back to the raw target name if a
-        # different step somehow intervenes (defensive; never the shipped path).
-        qnode.quiet_line = f"→ {phase if name == target else target}"
+        qnode, target, gate_phase = self._pending_quiet
+        if phase == gate_phase:
+            # SAME-phase forward goto (e.g. panel-gate → recheck, both in review):
+            # an internal skip, not a phase transition — render nothing. "" is the
+            # resolved-but-silent sentinel, distinct from None (= unresolved, which
+            # holds the live cursor in live_driver._is_final).
+            qnode.quiet_line = ""
+        else:
+            # Cross-phase: the forward goto runs its target next, so this step IS
+            # the target and its phase is the arrow's phase. Fall back to the raw
+            # target name if a different step somehow intervenes (defensive; never
+            # the shipped path).
+            qnode.quiet_line = f"→ {phase if name == target else target}"
         self._pending_quiet = None
     # Retry re-entry: the executor's transient-error retry loop re-emits
     # step_started on every iteration WITHOUT a prior step_completed for that
@@ -651,7 +660,9 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
             else:
                 # forward goto: the arrow names the TARGET phase, which is known
                 # only once the target's step_started arrives (resolved there).
-                self._pending_quiet = (node, str(action.get("target", "")))
+                # Capture the gate's own phase so a same-phase skip resolves silent.
+                gate_phase = self._current_phase.name if self._current_phase else None
+                self._pending_quiet = (node, str(action.get("target", "")), gate_phase)
 
 
 NarrativeBuilder._HANDLERS["step_started"] = _h_step_started

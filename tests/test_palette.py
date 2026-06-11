@@ -189,7 +189,7 @@ def _lum(rgb: tuple[int, int, int]) -> float:
 
 def test_dark_hierarchy_phase_above_agent_header_above_tool_chrome() -> None:
     # On a dark surface, more prominent = brighter. Hierarchy:
-    # phase (blue) › agent·model header (step) › tool-summary (gray).
+    # phase (blue) > agent-model header (step) > tool-summary (gray).
     d = pal._DARK_RGB
     assert _lum(d["blue"]) > _lum(d["step"]) > _lum(d["gray"])
     # change header (magenta, bold) must outrank phase (blue) in luminance too
@@ -199,7 +199,7 @@ def test_dark_hierarchy_phase_above_agent_header_above_tool_chrome() -> None:
 def test_dark_phase_and_step_contrast_is_raised() -> None:
     # The overhaul RAISES phase/agent-header contrast above the muted pre-overhaul
     # blues: each now clears the gray chrome by a wide margin (old gaps were
-    # blue−gray ≈ 52 and step−gray ≈ 21).
+    # blue-gray ~= 52 and step-gray ~= 21).
     d = pal._DARK_RGB
     assert _lum(d["blue"]) - _lum(d["gray"]) >= 55
     assert _lum(d["step"]) - _lum(d["gray"]) >= 40

@@ -20,9 +20,8 @@ from typing import Any, NoReturn
 import anyio
 
 from imp.agents.tools.wait_for_user import AwaitingUserInput
-from imp.cli import change_row
+from imp.cli import change_row, resume_select
 from imp.cli import palette as pal
-from imp.cli import resume_select
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
@@ -42,7 +41,7 @@ from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.project_root import find_project_root
-from imp.engine.slug import dated_slug, new_change_id
+from imp.engine.slug import dated_slug, new_change_id, slugify
 from imp.engine.state import LockHeld, ProjectLock, State
 
 
@@ -878,7 +877,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     except (LoadError, LoadErrors):
         return _resume_gone(control, change_id)
     state = State.load(change.state_dir)
-    if state.status not in ("paused", "errored", "merge_blocked"):
+    # `running` is allowed THROUGH: it may be a crashed run (the OS dropped its
+    # lock, but the status.json still says running). The ProjectLock acquire below
+    # adjudicates — a genuinely-live run still holds the lock and trips LockHeld
+    # ("already running"); a crashed one's lock is free, so we recover it.
+    if state.status not in RESUMABLE and state.status != "running":
         print(
             f"imp: Change {change.id} status is {state.status!r}; "
             "nothing to resume",
@@ -893,7 +896,10 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # removing the worktree) could have landed in the gap. Re-checking
             # here ensures resume never runs a Change abandon has finalized.
             state = State.load(change.state_dir)
-            if state.status not in ("paused", "errored", "merge_blocked"):
+            # We now HOLD the lock, so a `running` status here is a crashed run,
+            # not a live one (a live holder would have tripped LockHeld) — resume
+            # it. The re-read still catches a concurrent abandon (→ "abandoned").
+            if state.status not in RESUMABLE and state.status != "running":
                 print(
                     f"imp: Change {change.id} status is {state.status!r}; "
                     "nothing to resume",
@@ -1099,10 +1105,14 @@ def _resolve_id(control: Path, token: str) -> str:
         if title is None:
             continue
         try:
-            slug = dated_slug(title, date=cid[:10])
+            dated = dated_slug(title, date=cid[:10])         # 2026-06-11-add-version-flag
+            bare = slugify(title)                            # add-version-flag
         except Exception:
             continue
-        if slug == token:
+        # Match the human dated slug OR the bare name a user naturally types
+        # (`imp resume add-version-flag`); without the bare form this tier was
+        # dead for undated names and they fell through to "no Change matches".
+        if token in (dated, bare):
             slug_hits.append(cid)
     if len(slug_hits) == 1:                                 # (3) current slug
         return slug_hits[0]
@@ -1315,6 +1325,38 @@ _INFLIGHT = ("running", "paused", "errored", "merge_blocked")
 RESUMABLE = ("paused", "errored", "merge_blocked")
 
 
+def _pid_alive(pid: int) -> bool:
+    """Signal-0 liveness probe. ESRCH (no such process) → dead; EPERM (exists,
+    not ours) → alive. A live run's pid is never falsely reported dead, so this
+    never lets two processes into one worktree — the safe direction."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _effective_status(status: str, change_dir: Path) -> str:
+    """Re-derive a `running` status against its ProjectLock holder. A run holds
+    `change_dir/lock` (pid inside) for its whole life; a hard kill / crash has the
+    OS drop the flock but leaves the stale pid file and a `running` state.json. So
+    a `running` Change whose lock pid is dead has CRASHED — surface it as
+    `errored` (in RESUMABLE) so `imp status` shows it and `imp resume` offers it.
+
+    Only `running` is re-derived; every other status is authoritative. A MISSING
+    lock file is left as `running` (the microsecond between Change.create and the
+    run acquiring the lock) — a real crash leaves the pid file behind."""
+    if status != "running":
+        return status
+    try:
+        pid = int((change_dir / "lock").read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return status
+    return status if _pid_alive(pid) else "errored"
+
+
 # Row = (id, status, step, last_activity, title, created_at). created_at is the
 # trailing sort key only — the renderer never displays it (see _cmd_status, which
 # formats each row via change_row.format_change_line).
@@ -1340,6 +1382,10 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
 
 def _row_for_id(control: Path, change_id: str) -> _Row | None:
     cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    # journal_show returns bytes | None; the live-worktree branch always finds the
+    # files. Annotate so the None-guard below stays reachable (not dead code).
+    state_json: bytes | None
+    change_json: bytes | None
     if (cdir / "change.json").exists():
         state_json = (cdir / "state" / "state.json").read_bytes()
         change_json = (cdir / "change.json").read_bytes()
@@ -1350,7 +1396,12 @@ def _row_for_id(control: Path, change_id: str) -> _Row | None:
         if state_json is None or change_json is None:
             return None
         last = _journal_last_iso(control, change_id) or ""
-    return _status_row(change_id, state_json, change_json, last)
+    row = _status_row(change_id, state_json, change_json, last)
+    if row is None:
+        return None
+    # A live worktree may hold a crashed `running` run — re-derive against its
+    # lock (journaled rows are terminal, so the check is a no-op there).
+    return (row[0], _effective_status(row[1], cdir), *row[2:])
 
 
 def _status_rows(control: Path) -> list[_Row]:
@@ -1361,7 +1412,11 @@ def _status_rows(control: Path) -> list[_Row]:
         change_json = (cdir / "change.json").read_bytes()
         last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
-        if row is None or row[1] not in _INFLIGHT:
+        if row is None:
+            continue
+        status = _effective_status(row[1], cdir)   # crashed `running` → `errored`
+        row = (row[0], status, *row[2:])
+        if row[1] not in _INFLIGHT:
             continue
         rows.append(row)
     return rows
