@@ -10,7 +10,7 @@ import imp.agents.dispatch as dispatch_mod
 from imp.agents.dispatch import TurnState, dispatch_task_batch
 from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import ChangeContext, ToolUseBlock
-from imp.agents.subagents import SubagentSuspended
+from imp.agents.subagents import SubagentSuspended, TaskDispatchSkipped
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.state import InMemoryEventLog
@@ -108,7 +108,7 @@ async def test_batch_assembles_results_in_document_order(tmp_path: Path) -> None
     [t1, t2] — proving the batch keys assembly off task_tus order, not arrival."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
         await anyio.sleep(0.04 if desc == "slow" else 0.0)
         return json.dumps({"status": "Success", "echo": desc})
 
@@ -135,7 +135,7 @@ async def test_batch_failure_isolation(tmp_path: Path) -> None:
     """AC3: child 'bad' raises, child 'good' succeeds -> bad is_error, good intact."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
         if name == "bad":
             raise RuntimeError("boom")
         return json.dumps({"status": "Success"})
@@ -168,7 +168,7 @@ async def test_batch_over_ceiling_backfill_shape(tmp_path: Path) -> None:
     tool_result; both tool_call events precede either tool_result (pre-group)."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
         return json.dumps({"status": "Success"})
 
     monkey = dispatch_mod.dispatch_task
@@ -258,7 +258,7 @@ async def test_batch_suspension_surfaces_bare(tmp_path: Path) -> None:
     single-exception group is unwrapped), never as an ExceptionGroup."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
         raise SubagentSuspended("child paused")
 
     monkey = dispatch_mod.dispatch_task
@@ -288,7 +288,7 @@ async def test_batch_child_body_bug_not_wrapped_in_group(tmp_path: Path) -> None
     class _Boom(BaseException):
         pass
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
         raise _Boom("wrapper bug")
 
     monkey = dispatch_mod.dispatch_task
@@ -318,3 +318,131 @@ async def test_dispatch_one_tool_use_rejects_task_tu(tmp_path: Path) -> None:
             ctx=ctx, elog=InMemoryEventLog(), aid="step:p/s", invocation=None,
             tools={}, tu=_task_tu("t1"), tool_results=[],
             state=TurnState(tool_calls_used=0), ceiling=None)
+
+
+@pytest.mark.anyio
+async def test_batch_captures_suspension_then_skips_queued_sibling(
+    tmp_path: Path,
+) -> None:
+    """AC4: t1 suspends; the membership freeze skips the still-running t2 via
+    TaskDispatchSkipped, so t2 is NEVER dispatched (no tool_result event); the
+    captured suspension re-raises after the batch settles, no batch tool_results
+    are assembled, and the discarded-sibling count is recorded. AC6: no
+    heartbeats on the suspension path."""
+    reset_parallelism_cache()
+    spawned: list = []
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
+                    abort_dispatch=None):
+        if desc == "suspend":
+            raise SubagentSuspended("t1 paused")   # captures on first scheduling
+        await anyio.sleep(0.02)                    # let t1 capture first
+        if abort_dispatch is not None and abort_dispatch():
+            raise TaskDispatchSkipped("frozen")
+        spawned.append(name)
+        return json.dumps({"status": "Success"})
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        tus = [_task_tu("t1", desc="suspend"), _task_tu("t2", desc="go")]
+        collected: list = []
+        with pytest.raises(SubagentSuspended) as ei:
+            async for ev in dispatch_task_batch(
+                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
+                    tool_results=tool_results, state=state, ceiling=None):
+                collected.append(ev)
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    assert str(ei.value) == "t1 paused"            # captured suspension re-raised
+    assert spawned == []                           # t2 never dispatched
+    assert tool_results == []                      # no batch results on suspension
+    assert collected == []                         # AC6: zero heartbeats
+    rows = [e for e in elog.read() if e["agent_id"] == "step:p/s"]
+    t2_results = [e for e in rows if e["type"] == "tool_result"
+                  and e["payload"]["id"] == "t2"]
+    assert t2_results == []                        # AC4: no tool_result event for t2
+    assert state.discarded_siblings == 1
+    reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_batch_runwide_pause_raises_synthetic_suspension(
+    tmp_path: Path,
+) -> None:
+    """AC5: should_pause set before the batch -> every child is frozen out on
+    entry (TaskDispatchSkipped), the suspension slot stays empty, and the batch
+    raises a SYNTHETIC SubagentSuspended after settle so the turn unwinds with no
+    unresolved tus. No child is dispatched; no tool_results; no heartbeats."""
+    reset_parallelism_cache()
+    spawned: list = []
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
+                    abort_dispatch=None):
+        if abort_dispatch is not None and abort_dispatch():
+            raise TaskDispatchSkipped("frozen")
+        spawned.append(name)
+        return json.dumps({"status": "Success"})
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        await ctx.coordinator.signal_pause()        # run-wide pause unwinding
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        tus = [_task_tu("t1"), _task_tu("t2")]
+        collected: list = []
+        with pytest.raises(SubagentSuspended):
+            async for ev in dispatch_task_batch(
+                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
+                    tool_results=tool_results, state=state, ceiling=None):
+                collected.append(ev)
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    assert spawned == []                            # nothing dispatched
+    assert tool_results == []
+    assert collected == []                          # AC6
+    assert state.discarded_siblings == 2            # both skipped
+    reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_batch_multi_suspension_first_captured_wins(tmp_path: Path) -> None:
+    """AC8: two children suspend for different reasons; the FIRST-captured wins
+    (exactly one raise), the second is discarded cleanly. AC6: the suspension
+    path yields ZERO heartbeats and assembles no tool_results."""
+    reset_parallelism_cache()
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
+                    abort_dispatch=None):
+        if name == "fast":
+            raise SubagentSuspended("fast paused")  # captures first
+        await anyio.sleep(0.02)
+        raise SubagentSuspended("slow paused")      # second; discarded
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        state = TurnState(tool_calls_used=0)
+        tus = [_task_tu("t1", name="fast"), _task_tu("t2", name="slow")]
+        collected: list = []
+        with pytest.raises(SubagentSuspended) as ei:
+            async for ev in dispatch_task_batch(
+                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
+                    tool_results=tool_results, state=state, ceiling=None):
+                collected.append(ev)
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+    assert str(ei.value) == "fast paused"           # first-captured wins
+    assert collected == []                          # AC6: zero heartbeats
+    assert tool_results == []
+    reset_parallelism_cache()

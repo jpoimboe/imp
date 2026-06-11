@@ -28,6 +28,7 @@ from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import ToolResultBlock, ToolUseBlock
 from imp.agents.subagents import (
     SubagentSuspended,
+    TaskDispatchSkipped,
     dispatch_task,
     raise_if_suspended,
 )
@@ -45,6 +46,7 @@ class TurnState:
 
     tool_calls_used: int
     ceiling_tripped: bool = False
+    discarded_siblings: int = 0
 
 
 async def dispatch_one_tool_use(
@@ -175,11 +177,9 @@ async def dispatch_task_batch(
     backfilled).
 
     Failure isolation (Decision 3): a child's ordinary exception becomes its own
-    is_error tool_result. A SubagentSuspended re-raises through the group and
-    unwinds the whole turn; the single-exception group anyio wraps it in is
-    unwrapped at the batch boundary so upstream consumers (drive_invocation
-    catches by bare type) see today's exception forms. (Part 4 replaces the
-    re-raise with capture-into-slot so siblings settle first.)
+    is_error tool_result. A child's SubagentSuspended is captured into a
+    first-wins slot and re-raised only after all siblings settle; a run-wide
+    pause that freezes every child out raises a synthetic suspension.
     """
     # Sweep once before the batch — the parent's registry, not the children's
     # (each child sweeps its own fresh ToolContext inside its own drive loop).
@@ -199,15 +199,29 @@ async def dispatch_task_batch(
             tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
             dispatched.append((tu, tc_ev["id"]))
 
+    captured: list[SubagentSuspended] = []
+    skipped = 0
+
+    def _frozen() -> bool:
+        coord = getattr(ctx, "coordinator", None)
+        paused = coord is not None and coord.should_pause
+        return bool(captured) or paused
+
     async def _run_child(tu: ToolUseBlock, tcid: str) -> None:
+        nonlocal skipped
         try:
             result_str = await dispatch_task(
                 ctx, tu.input["subagent_name"], tu.input["task_description"],
                 tool_call_event_id=tcid, tier=tu.input.get("tier"),
+                abort_dispatch=_frozen,
             )
-        except SubagentSuspended:
-            # A subagent-origin pause must unwind the whole turn (Decision 4).
-            raise
+        except TaskDispatchSkipped:
+            skipped += 1
+            return
+        except SubagentSuspended as susp:
+            if not captured:
+                captured.append(susp)
+            return
         except Exception as e:
             err_text = f"{type(e).__name__}: {e}"
             block = ToolResultBlock(tu.id, err_text, is_error=True)
@@ -230,6 +244,15 @@ async def dispatch_task_batch(
         if len(eg.exceptions) == 1:
             raise eg.exceptions[0] from None
         raise
+
+    state.discarded_siblings += skipped
+
+    if captured:
+        raise captured[0]
+    if skipped:
+        raise SubagentSuspended(
+            "task batch membership frozen during run-wide pause; "
+            "no dispatch completed")
 
     # Assemble in document order (NOT completion order): the API pairs by id, but
     # the assembled message order is imp's to choose and document order is the one
