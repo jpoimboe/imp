@@ -7,6 +7,8 @@ Scenarios:
            collapsed transcript to stdout (normal scrollback).
   prompt — feed a small narrative, run, solicit once, write the reply line to
            <result_path>, then exit.
+  promptscroll — like prompt but with a TALL narrative, so the test can scroll /
+           toggle verbosity while the solicit is active (Finding 4 regression).
 
 No agent, no provider: events are synthesized so the run is deterministic and
 offline. PYTHONPATH=src is pinned by tests/conftest.py for the child.
@@ -49,7 +51,7 @@ class _Change:
 
 async def _main(scenario: str, result_path: str) -> None:
     app = TuiApp(coord=InterruptCoordinator(), color=True, width=80)
-    n_tools = 4 if scenario == "prompt" else 40
+    n_tools = 4 if scenario == "prompt" else 40  # promptscroll/view/exit need scrollback
     for e in _events(n_tools):
         app.on_event(e)
 
@@ -71,7 +73,7 @@ async def _main(scenario: str, result_path: str) -> None:
         sys.stdout.flush()
         return
 
-    if scenario == "prompt":
+    if scenario in ("prompt", "promptscroll"):
         with tempfile.TemporaryDirectory() as tmpdir:
             wf = Path(tmpdir) / "wf"
             (wf / "skills").mkdir(parents=True)

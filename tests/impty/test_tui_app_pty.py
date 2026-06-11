@@ -98,3 +98,34 @@ def test_in_app_prompt_accepts_line_with_slash_handling_and_completion(tmp_path)
         s.send("go ahead\r")                               # plain line resolves the solicit
         s.run_to_completion(hard=8.0)
         assert result.read_text() == "go ahead"       # the typed reply was returned (criterion 6)
+
+
+def test_scroll_and_ctrl_o_reach_viewport_during_active_solicit(tmp_path) -> None:
+    # Finding 4: while a wait_for_user solicit owns the prompt buffer, the
+    # app-level navigation keys must still drive the viewport (scroll to read
+    # context / toggle verbosity while being asked a question), and the navigation
+    # bytes must NOT leak into the answer. Locks in that precedence — the keys are
+    # bound eager so the embedded prompt buffer can never shadow them.
+    result = tmp_path / "reply.txt"
+    with _session("promptscroll", str(result)) as s:
+        s.wait_idle(idle=0.3, hard=8.0)
+        _, y = s.cursor()
+        assert y == s.rows - 1                        # solicit prompt active at the bottom
+        win = "\n".join(s.lines(limit=s.rows))
+        assert "command=echo" in win                  # expanded + tail-pinned
+        assert "echo 0" not in win                    # earliest is off-screen
+
+        since = time.monotonic()
+        s.send("\x1b[5~")                                  # PageUp *during the solicit*
+        s.wait_idle(idle=0.3, hard=5.0, since=since)
+        assert "echo 0" in "\n".join(s.lines(limit=s.rows))   # scrolled up, not shadowed
+
+        since = time.monotonic()
+        s.send("\x0f")                                     # Ctrl-O -> lean *during the solicit*
+        s.wait_idle(idle=0.3, hard=5.0, since=since)
+        assert "command=echo" not in "\n".join(s.lines(limit=s.rows))  # toggled, not open-line
+
+        since = time.monotonic()
+        s.send("go ahead\r")                               # the buffer is still clean: resolves
+        s.run_to_completion(hard=8.0)
+        assert result.read_text() == "go ahead"       # no stray nav bytes leaked into the answer

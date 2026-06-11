@@ -5,8 +5,23 @@ from pathlib import Path
 import pyte
 from PIL import Image
 
-from impty.render import render_screen
+from impty.render import light_surface, render_screen
 from impty.screen import TerminalScreen
+
+
+def test_light_surface_paints_a_pale_canvas_not_the_dark_default(tmp_path: Path) -> None:
+    # The light option swaps the surface so an app's light theme previews on the
+    # background it was tuned for, instead of the dark default (which inverts the
+    # intended contrast). The corner is pure padding, so it is the surface bg.
+    screen = TerminalScreen(20, 4, history=10, ratio=0.5)
+    pyte.ByteStream(screen).feed(b"hi")
+    bg, fg = light_surface()
+    dark = Image.open(render_screen(screen, str(tmp_path / "d.png"))).convert("RGB")
+    light = Image.open(
+        render_screen(screen, str(tmp_path / "l.png"), bg=bg, fg=fg)).convert("RGB")
+    assert dark.getpixel((0, 0)) == (0x1E, 0x1E, 0x1E)   # default dark surface
+    assert light.getpixel((0, 0)) == bg                  # pale surface instead
+    assert sum(bg) > sum(dark.getpixel((0, 0)))          # genuinely lighter
 
 
 def test_render_full_includes_history_rows(tmp_path: Path) -> None:

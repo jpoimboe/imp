@@ -119,19 +119,30 @@ class TuiApp:
         kb = KeyBindings()
         not_prompt = Condition(lambda: not self._prompt_visible)
 
-        @kb.add("pageup")
+        # eager=True guarantees these reach the viewport even while the
+        # wait_for_user prompt buffer is focused — navigation/verbosity belong to
+        # the viewer, not the input line. On today's prompt_toolkit a single-line
+        # Buffer happens not to bind PgUp/PgDn and filters emacs `open-line`
+        # (Ctrl-O) out, so the global bindings already fire during a solicit (see
+        # test_scroll_and_ctrl_o_reach_viewport_during_active_solicit); eager
+        # makes that precedence explicit and robust to that incidentally-true
+        # behaviour changing.
+        @kb.add("pageup", eager=True)
         def _(event: Any) -> None:
             self.scroll_page_up()
 
-        @kb.add("pagedown")
+        @kb.add("pagedown", eager=True)
         def _(event: Any) -> None:
             self.scroll_page_down()
 
+        # `end` stays prompt-gated: while typing an answer it is the editing
+        # end-of-line key (Ctrl-E aside), not jump-to-bottom. PgDn scrolls back
+        # down during a solicit, re-engaging follow at the tail.
         @kb.add("end", filter=not_prompt)
         def _(event: Any) -> None:
             self.jump_to_bottom()
 
-        @kb.add("c-o")
+        @kb.add("c-o", eager=True)
         def _(event: Any) -> None:
             self.toggle_verbosity()
 
