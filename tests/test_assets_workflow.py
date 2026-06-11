@@ -17,6 +17,9 @@ def _steps(wf):
 _BASE_VARS = {
     "fast_path": False, "ready_to_merge": False, "final_review": True,
     "spec_minors_integrated": False, "plan_minors_integrated": False,
+    "panel_done": False, "integration_needs_review": False,
+    "spec_confirm": True, "spec_unseen_changes": False,
+    "spec_gate_pending": False, "spec_gate_passed": False,
 }
 
 
@@ -202,12 +205,17 @@ def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     rules = _steps(wf)["spec-writer"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"phase": "written", "complexity": "trivial", "status": "Success"})
+    vars_ = {**_BASE_VARS, "spec_unseen_changes": False,
+             "spec_gate_pending": False, "spec_gate_passed": False,
+             "spec_confirm": True}
+    m = evaluate_rules(rules, vars=vars_,
+                       output={"phase": "written", "complexity": "trivial",
+                               "status": "Success", "unseen_changes": False})
     assert m.var_mutations["fast_path"] is True
 
-    m2 = evaluate_rules(rules, vars=_BASE_VARS,
-                        output={"phase": "written", "complexity": "standard", "status": "Success"})
+    m2 = evaluate_rules(rules, vars=vars_,
+                        output={"phase": "written", "complexity": "standard",
+                                "status": "Success", "unseen_changes": False})
     assert m2.var_mutations["fast_path"] is False
 
 

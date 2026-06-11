@@ -36,3 +36,62 @@ def test_new_gate_vars_declared_with_design_defaults() -> None:
     assert defaults["spec_unseen_changes"] is False
     assert defaults["spec_gate_pending"] is False
     assert defaults["spec_gate_passed"] is False
+
+
+def test_spec_writer_gated_confirm_sets_passed_and_continues() -> None:
+    rules = _steps(_wf())["spec-writer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_gate_pending": True},
+        output={"status": "Success", "phase": "confirmed",
+                "complexity": "standard", "unseen_changes": False},
+    )
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations["spec_gate_pending"] is False
+    assert m.var_mutations["spec_gate_passed"] is True
+
+
+def test_spec_writer_else_consumes_pending_and_clears_passed_and_arms() -> None:
+    # A `written` rework that changed the spec undirected: arm the var, and
+    # one-shot-clear both guard flags on the else branch.
+    rules = _steps(_wf())["spec-writer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_gate_pending": True,
+              "spec_gate_passed": True, "spec_unseen_changes": False},
+        output={"status": "Success", "phase": "written",
+                "complexity": "standard", "unseen_changes": True},
+    )
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations["spec_gate_pending"] is False
+    assert m.var_mutations["spec_gate_passed"] is False
+    assert m.var_mutations["spec_unseen_changes"] is True
+    assert m.var_mutations["fast_path"] is False
+
+
+def test_spec_writer_confirmed_with_unseen_true_falls_to_else() -> None:
+    # A confirmed completion self-reporting undirected edits is a declared
+    # contract violation: it must NOT take the gated-confirm branch.
+    rules = _steps(_wf())["spec-writer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_gate_pending": True},
+        output={"status": "Success", "phase": "confirmed",
+                "complexity": "standard", "unseen_changes": True},
+    )
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations["spec_gate_passed"] is False
+    assert m.var_mutations["spec_unseen_changes"] is True
+
+
+def test_spec_writer_first_pass_written_does_not_arm() -> None:
+    # Initial written turn reports unseen_changes:false -> var stays false,
+    # fast_path tracks complexity.
+    rules = _steps(_wf())["spec-writer"].rules
+    m = evaluate_rules(
+        rules, vars=_BASE_VARS,
+        output={"status": "Success", "phase": "written",
+                "complexity": "trivial", "unseen_changes": False},
+    )
+    assert m.var_mutations["spec_unseen_changes"] is False
+    assert m.var_mutations["fast_path"] is True

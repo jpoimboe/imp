@@ -40,7 +40,13 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["imp/specs/**"], mode: allow}
         rules:
-          - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
+          - {if: {phase: confirmed, spec_gate_pending: true, unseen_changes: false},
+             set: {spec_gate_pending: false, spec_gate_passed: true}, continue: true}
+          - {else: true,
+             set: {spec_gate_pending: false, spec_gate_passed: false,
+                   fast_path: "output.complexity == 'trivial'",
+                   spec_unseen_changes: "spec_unseen_changes or unseen_changes"},
+             continue: true}
 
       - name: spec-verify-commit
         command: ./scripts/spec-commit-verify.sh
