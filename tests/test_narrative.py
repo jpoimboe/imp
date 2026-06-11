@@ -986,3 +986,16 @@ def test_structural_repr_omits_call_ts() -> None:
            "payload": {"id": "c1", "name": "bash", "input": {"command": "ls"}}})
     rep = nv.structural_repr(b.current_burst)
     assert "call_ts" not in rep["calls"][0]
+
+
+def test_visible_calls_omits_load_skill_tool_and_wait_for_user() -> None:
+    burst = nv.ToolBurstFold(calls=[
+        nv.ToolCall(call_id="1", name="bash", input={}),
+        nv.ToolCall(call_id="2", name="load_skill", input={}),
+        nv.ToolCall(call_id="3", name="tool", input={}),
+        nv.ToolCall(call_id="4", name="wait_for_user", input={}),
+        nv.ToolCall(call_id="5", name="read_file", input={}),
+    ])
+    assert [c.name for c in nv.visible_calls(burst)] == ["bash", "read_file"]
+    assert frozenset({"load_skill", "tool", "wait_for_user"}) == nv._OMIT
+    assert frozenset({"script", "branch", "merge"}) == nv.CHROME_KINDS

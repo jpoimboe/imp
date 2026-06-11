@@ -593,8 +593,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     `load skill …` line, so counting it here would double up) and the bare
     `tool` placeholder (the sentinel name for an orphan/unnamed result — no real
     tool info). Returns None when nothing renderable remains."""
-    _OMIT = {"load_skill", "tool"}
-    calls = [c for c in burst.calls if c.name not in _OMIT]
+    calls = nv.visible_calls(burst)
     if not calls:
         return None
     names = list(dict.fromkeys(c.name for c in calls))

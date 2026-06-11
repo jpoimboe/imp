@@ -19,6 +19,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar
 
+# Tool names omitted from the burst recap AND the live status basis (§1/§3). They
+# render elsewhere (load_skill → its own `load skill …` line) or are placeholders
+# (`tool`), and `wait_for_user` becomes its own synthesized user turn (§1).
+_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user"})
+
+# Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
+CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge"})
+
 
 # ── token accumulator (design §7.7 / F1: read usage straight from payload) ──
 @dataclass
@@ -141,6 +149,12 @@ class ToolBurstFold:
     start_ts: str | None = None        # first tool_call.timestamp (burst timing)
     end_ts: str | None = None          # last tool_result.timestamp
     collapsible = True
+
+
+def visible_calls(burst: ToolBurstFold) -> list[ToolCall]:
+    """Burst calls minus the _OMIT names — the shared basis for the lean recap
+    (render_text) and the live status count/named-call (current_activity)."""
+    return [c for c in burst.calls if c.name not in _OMIT]
 
 
 @dataclass
