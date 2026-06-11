@@ -859,9 +859,12 @@ def test_action_payload_goto_carries_resume_bool() -> None:
     from imp.engine.executor import _action_payload
     from imp.engine.types import Continue, Goto
     assert _action_payload(Goto("coder", resume=True)) == {
-        "verb": "goto", "target": "coder", "resume": True}
+        "verb": "goto", "target": "coder", "resume": True, "rework": False}
     assert _action_payload(Goto("coder")) == {
-        "verb": "goto", "target": "coder", "resume": False}
+        "verb": "goto", "target": "coder", "resume": False, "rework": False}
+    # feedback present -> rework True (a loud reviewer rework on a plain goto edge)
+    assert _action_payload(Goto("coder", feedback="Here's feedback:")) == {
+        "verb": "goto", "target": "coder", "resume": False, "rework": True}
     # non-goto actions are unchanged
     assert _action_payload(Continue()) == {"verb": "continue"}
 
