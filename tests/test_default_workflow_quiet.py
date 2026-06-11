@@ -6,7 +6,7 @@ from imp.engine.loader import load_workflow
 
 _QUIET = {
     "spec-verify-commit", "plan-verify-commit", "commit-check",
-    "fast-path-spec-gate", "fast-path-plan-gate",
+    "spec-exit-gate", "fast-path-plan-gate",
 }
 
 

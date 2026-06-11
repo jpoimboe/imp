@@ -24,6 +24,7 @@ import yaml
 
 from imp.assets import default_workflow_dir
 from imp.engine.sandbox import sandbox_available
+from imp.remote.drivers import REGISTRY
 
 # The order providers are presented in the picker. Bindings (tier→model) are
 # owned by the provider-code floor now, so init no longer carries a model table.
@@ -63,6 +64,21 @@ def _build_user_config(
         "theme": theme,
         "editing_mode": editing_mode,
     }
+
+
+def _remote_hint() -> str:
+    lines = [
+        "",
+        "# Remote driver: watch and drive a run from a chat surface. Enable ONE",
+        "# built-in by name (credentials stay in the environment, never here):",
+        "# remote:",
+        "#   driver: telegram",
+        "# Built-ins and the env vars each needs:",
+    ]
+    for name in sorted(REGISTRY):
+        entry = REGISTRY[name]
+        lines.append(f"#   {name} — {entry.description} env: {', '.join(entry.required_env)}")
+    return "\n".join(lines) + "\n"
 
 
 # claude_code (Anthropic) is the recommended single-provider default (review
@@ -245,7 +261,8 @@ def run_init(
         user_path.write_text(
             yaml.safe_dump(
                 _build_user_config(providers, theme),
-                sort_keys=False, default_flow_style=False))
+                sort_keys=False, default_flow_style=False)
+            + _remote_hint())
 
     # --- ensure .imp/ is gitignored (control-root state lives there) ---
     project_gi = project_root / ".gitignore"

@@ -49,6 +49,29 @@ def test_spec_verify_fails_when_file_untouched(tmp_path: Path) -> None:
     assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
 
 
+def test_spec_verify_fails_on_uncommitted_spec_edit(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "imp" / "specs").mkdir(parents=True)
+    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "docs: spec")
+    # HEAD touches the spec (old check passes) but the working tree has an
+    # uncommitted edit to it -> new clean-spec-path check must fail.
+    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec edited\n")
+    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
+
+
+def test_spec_verify_fails_on_untracked_stray_in_specs(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / "imp" / "specs").mkdir(parents=True)
+    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-m", "docs: spec")
+    # An untracked scratch file under imp/specs/ -> porcelain is non-empty -> fail.
+    (root / "imp" / "specs" / "scratch.md").write_text("draft\n")
+    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
+
+
 def test_plan_verify_passes_on_newest_plan(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / "imp" / "plans").mkdir(parents=True)

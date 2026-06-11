@@ -35,6 +35,25 @@ from imp.cli.live_status import LiveStatus
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
+def compose_activity_status(
+    builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
+) -> str | None:
+    activity = builder.current_activity()
+    if activity is None:
+        return None
+    spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=color)
+    segs: list[str] = []
+    if activity.count:
+        segs.append(pal.ansi(activity.count, enabled=color))
+    if activity.detail:
+        segs.append(pal.ansi(activity.detail, "gray", enabled=color))
+    if activity.label:
+        segs.append(pal.ansi(activity.label, enabled=color))
+    body = " · ".join(segs)
+    tail = pal.ansi(f"· {rt.fmt_seconds(elapsed)}", "dim", enabled=color)
+    return f"{spin} {body} {tail}"
+
+
 @dataclass
 class _Cursor:
     container: Any   # WorkflowNode | PhaseNode | StepNode | SubagentFold
@@ -104,20 +123,8 @@ class LiveDriver:
         self._status.reset()
 
     def compose_status(self, frame: int, elapsed: float) -> str | None:
-        activity = self._builder.current_activity()
-        if activity is None:
-            return None
-        spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=self._color)
-        segs: list[str] = []
-        if activity.count:
-            segs.append(pal.ansi(activity.count, enabled=self._color))   # default fg
-        if activity.detail:
-            segs.append(pal.ansi(activity.detail, "gray", enabled=self._color))
-        if activity.label:
-            segs.append(pal.ansi(activity.label, enabled=self._color))   # default fg
-        body = " · ".join(segs)
-        tail = pal.ansi(f"· {rt.fmt_seconds(elapsed)}", "dim", enabled=self._color)
-        return f"{spin} {body} {tail}"
+        return compose_activity_status(
+            self._builder, frame=frame, elapsed=elapsed, color=self._color)
 
     def take_pending_question(self) -> str:
         q, self._pending_question = self._pending_question, ""

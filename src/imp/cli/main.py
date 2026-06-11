@@ -28,8 +28,15 @@ from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
+from imp.cli.remote_channel import (
+    RemoteChannel,
+    compose_on_event,
+    driver_config_from,
+    effective_reply_fn,
+)
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
+from imp.cli.tui_app import TuiApp
 from imp.engine import journal, recovery, worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
@@ -116,6 +123,24 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
         raise AwaitingUserInput()
 
     return _reply
+
+
+def _maybe_build_channel(change: Change) -> RemoteChannel | None:
+    """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
+    behaves exactly as today). Title is captured at run start. A bad config is
+    surfaced elsewhere (run_change reloads it) — never fail channel construction
+    over config here; return None on any config error."""
+    from imp.providers.effective import load_effective_config
+    try:
+        config = load_effective_config(
+            project_root=change.project_root,
+            control_root=change.control_root).config
+    except (LoadError, LoadErrors):
+        return None
+    dc = driver_config_from(config)
+    if dc is None:
+        return None
+    return RemoteChannel.from_driver_config(dc, id=change.id, title=change.title)
 
 
 def _build_interactive_input(
@@ -382,6 +407,7 @@ async def _run_change_session(
     reply_input_fn: Callable[[], Awaitable[str]],
     non_interactive: bool,
     tg: Any,
+    channel: Any = None,
 ) -> int:
     """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
     loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
@@ -408,6 +434,11 @@ async def _run_change_session(
     tg.start_soon(_run_actuator, coord, exit_event, run_scope_holder)
 
     try:
+        if channel is not None and not await channel.start(tg):
+            channel = None
+        run_on_event = (
+            compose_on_event(driver.on_event, channel.on_event)
+            if channel is not None else driver.on_event)
         reader_armed = (
             bool(esc_reader and esc_reader._armed) if not non_interactive else False)
         result: RunResult | None = None
@@ -418,7 +449,8 @@ async def _run_change_session(
                     # Bind the CURRENT reply_input_fn (it is rebound on reader
                     # respawn each round) so the wait_for_user channel always
                     # calls the live one.
-                    _reply: Callable[[], Awaitable[str]] = reply_input_fn
+                    _reply: Callable[[], Awaitable[str]] = effective_reply_fn(
+                        reply_input_fn, channel, non_interactive=non_interactive)
 
                     def _chat(
                         _q: object,
@@ -427,7 +459,7 @@ async def _run_change_session(
                         return _fn()
 
                     result = await run_change(
-                        change, on_event=driver.on_event,
+                        change, on_event=run_on_event,
                         user_chat_input_fn=_chat,
                         coordinator=coord, non_interactive=non_interactive)
             except EOFError:
@@ -499,6 +531,9 @@ async def _run_change_session(
         driver.finish()
         return _handle_terminal_outcome(change, result, coord)
     finally:
+        if channel is not None:
+            with anyio.CancelScope(shield=True):
+                await channel.stop()
         status.reset()
         tg.cancel_scope.cancel()
 
@@ -634,6 +669,63 @@ def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> 
             + ansi(f" · {marker}", "dim", enabled=color))
 
 
+def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
+    if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
+        print("imp: --tui needs an interactive terminal; streaming instead.",
+              file=sys.stderr)
+
+
+def _tui_requested(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "tui", False)) and sys.stdout.isatty()
+
+
+async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
+    from imp.cli.signals import InterruptCoordinator
+
+    # No EscKeyReader — TuiApp owns the tty exclusively.
+    coord = InterruptCoordinator()
+    app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
+    channel = _maybe_build_channel(change)
+
+    async def _chat(_prompt: object) -> str:
+        return await app.solicit(change)
+
+    holder: dict[str, Any] = {}
+    load_err: Exception | None = None
+    try:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(coord.run_signal_receiver)
+            if channel is not None and not await channel.start(tg):
+                channel = None
+            run_on_event = (
+                compose_on_event(app.on_event, channel.on_event)
+                if channel is not None else app.on_event)
+
+            async def _run() -> None:
+                try:
+                    holder["result"] = await run_change(
+                        change, on_event=run_on_event, user_chat_input_fn=_chat,
+                        coordinator=coord, non_interactive=False)
+                finally:
+                    app.exit()
+
+            tg.start_soon(_run)
+            await app.run_async()
+            tg.cancel_scope.cancel()
+    except* (LoadError, LoadErrors) as eg:
+        load_err = eg.exceptions[0]
+
+    app.print_collapsed_transcript(sys.stdout)
+    if load_err is not None:
+        print(f"imp: {load_err}", file=sys.stderr)
+        return 2
+    result = holder.get("result")
+    if result is None or (result is RunResult.PAUSED and coord.should_pause):
+        return _finalize_paused_exit(
+            change, app, coord, coord.pause_reason or "ctrl-c")
+    return _handle_terminal_outcome(change, result, coord)
+
+
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -674,11 +766,15 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             print(_run_header_line(
                 change.slug, change.id, "new", color=should_use_color(sys.stdout)))
             non_interactive = bool(getattr(args, "non_interactive", False))
+            _warn_if_tui_unavailable(args, sys.stdout)
+            if _tui_requested(args) and not non_interactive:
+                return await _run_tui_session(change, args=args)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
                                 width=_term_width(), status=status)
             coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
             rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
@@ -706,7 +802,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                     rc = await _run_change_session(
                         change, coord=coord, driver=driver, status=status,
                         esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                        non_interactive=non_interactive, tg=tg)
+                        non_interactive=non_interactive, tg=tg, channel=channel)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -809,12 +905,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     return 2
 
             non_interactive = bool(getattr(args, "non_interactive", False))
-            status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout,
-                                color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
-            coord = InterruptCoordinator()
-            rc = 0
+            _warn_if_tui_unavailable(args, sys.stdout)
             # Append the resume marker exactly once (for the persisted log /
             # imp log). NO replay: the engine picks up from the current step
             # cursor, re-emitting step_started + the step body fresh
@@ -832,6 +923,16 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     rewind_plan, workflow, state, change.event_log())
             state.save(change.state_dir)
 
+            if _tui_requested(args) and not non_interactive:
+                return await _run_tui_session(change, args=args)
+
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout,
+                                color=should_use_color(sys.stdout),
+                                width=_term_width(), status=status)
+            coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
+            rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
                 reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
@@ -857,7 +958,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     rc = await _run_change_session(
                         change, coord=coord, driver=driver, status=status,
                         esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                        non_interactive=non_interactive, tg=tg)
+                        non_interactive=non_interactive, tg=tg, channel=channel)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -1411,8 +1512,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1427,6 +1527,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="Headless reply consumed by the first wait_for_user; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
+    p_new.add_argument("--tui", action="store_true",
+                       help="Render the run in a full-screen, scrollable viewer "
+                            "(expanded steps); falls back to streaming on a non-tty.")
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
@@ -1437,6 +1540,9 @@ def main(argv: list[str] | None = None) -> int:
                           help="Headless reply consumed by the first wait_for_user; "
                                "pause+resume with another --message. "
                                "Requires --non-interactive.")
+    p_resume.add_argument("--tui", action="store_true",
+                          help="Render the run in a full-screen, scrollable viewer "
+                               "(expanded steps); falls back to streaming on a non-tty.")
     p_resume.add_argument(
         "--from", dest="from_target", metavar="TARGET",
         help="Rewind/jump the step cursor to TARGET (a step or phase name) and "
@@ -1483,10 +1589,13 @@ def main(argv: list[str] | None = None) -> int:
     p_abandon.set_defaults(func=_cmd_abandon)
 
     from imp.evals.cli import add_eval_parser
-
     add_eval_parser(sub)
+    return parser
 
-    ns = parser.parse_args(args)
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    ns = _build_parser().parse_args(args)
     _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
         rc: int = ns.func(ns)

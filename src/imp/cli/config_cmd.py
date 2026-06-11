@@ -8,6 +8,7 @@ from typing import TextIO
 
 from imp.providers.effective import FLOOR_SRC, EffectiveConfig
 from imp.providers.resolve import iter_provider_defaults
+from imp.remote.drivers import REGISTRY
 
 
 def _label(src_file: Path) -> str:
@@ -62,6 +63,15 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False) -> 
         mark = "✓" if present else "✗"
         suffix = "set" if present else f"{env} not set"
         out.write(f"  {mark} {vendor:<14} {suffix}\n")
+
+    out.write("\navailable drivers:\n")
+    enabled = (cfg.remote.get("driver") or {}).get("name")
+    for name in sorted(REGISTRY):
+        entry = REGISTRY[name]
+        state = "enabled" if name == enabled else "available"
+        out.write(f"  {name:<14} ({state})\n")
+        out.write(f"      {entry.description}\n")
+        out.write(f"      env: {', '.join(entry.required_env)}\n")
 
 
 def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool = False) -> None:
