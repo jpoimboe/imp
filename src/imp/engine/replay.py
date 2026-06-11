@@ -21,6 +21,7 @@ from imp.agents.runner import (
     Message,
     TextBlock,
     ToolResultBlock,
+    ToolUseBlock,
 )
 from imp.providers.anthropic import (
     _extract_anthropic_diagnostics,
@@ -79,6 +80,23 @@ def _user_message_from_event(payload: dict[str, Any]) -> Message:
     return Message(role="user", content=blocks)
 
 
+def _drop_trailing_dangling_tool_use(
+    msgs: list[Message], resolved_ids: set[str],
+) -> list[Message]:
+    if not msgs or msgs[-1].role != "assistant":
+        return msgs
+    last = msgs[-1]
+    kept = tuple(
+        b for b in last.content
+        if not (isinstance(b, ToolUseBlock) and b.id not in resolved_ids)
+    )
+    if kept == last.content:
+        return msgs
+    if not kept:
+        return msgs[:-1]
+    return [*msgs[:-1], Message(role="assistant", content=kept)]
+
+
 def build_messages_from_events(
     events: Iterable[dict[str, Any]],
     *,
@@ -88,6 +106,7 @@ def build_messages_from_events(
     """Reconstruct the agent's messages array from its deduped surface."""
     msgs: list[Message] = []
     pending_results: list[ToolResultBlock] = []
+    resolved_ids: set[str] = set()
 
     def flush() -> None:
         if pending_results:
@@ -108,11 +127,12 @@ def build_messages_from_events(
             flush()
             msgs.append(parse_message(p["provider"], p["raw"]))
         elif t == "tool_result":
+            resolved_ids.add(p["id"])
             pending_results.append(ToolResultBlock(
                 tool_use_id=p["id"], content=p.get("content", ""),
                 is_error=bool(p.get("error", False))))
     flush()
-    return tuple(msgs)
+    return tuple(_drop_trailing_dangling_tool_use(msgs, resolved_ids))
 
 
 def reconstruct_request_for_response(
