@@ -1,7 +1,6 @@
-# contrib/drivers/telegram/tests/test_handle_poll.py
 from __future__ import annotations
 
-import imp_telegram
+from imp.remote.drivers import telegram as imp_telegram
 
 
 def test_handle_event_sends_loud_with_notification() -> None:

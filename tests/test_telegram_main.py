@@ -1,10 +1,10 @@
-# contrib/drivers/telegram/tests/test_main.py
 from __future__ import annotations
 
 import io
 
-import imp_telegram
 import pytest
+
+from imp.remote.drivers import telegram as imp_telegram
 
 
 def test_main_refuses_to_start_without_chat_id(monkeypatch: pytest.MonkeyPatch) -> None:

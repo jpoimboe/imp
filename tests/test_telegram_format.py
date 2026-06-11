@@ -1,9 +1,8 @@
-# contrib/drivers/telegram/tests/test_format.py
 from __future__ import annotations
 
 import io
 
-import imp_telegram
+from imp.remote.drivers import telegram as imp_telegram
 
 
 def test_format_includes_change_title_event_type_and_body() -> None:

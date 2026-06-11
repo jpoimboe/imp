@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import imp_telegram
 import pytest
+
+from imp.remote.drivers import telegram as imp_telegram
 
 
 @pytest.mark.parametrize(
