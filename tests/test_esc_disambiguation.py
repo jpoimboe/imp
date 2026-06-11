@@ -190,3 +190,31 @@ async def test_drain_yields_buffered_bytes_to_prompt_on_quiesce() -> None:
     finally:
         os.close(leader)
         os.close(follower)
+
+
+@pytest.mark.anyio
+async def test_reader_parks_when_should_pause_already_set() -> None:
+    reader, leader, follower = _reader_on_pty()
+    coord = reader._coord
+    fired: list[str] = []
+    orig = coord.signal_pause
+
+    async def _spy(*, reason: str = "ctrl-c") -> None:
+        fired.append(reason)
+        await orig(reason=reason)
+    coord.signal_pause = _spy  # type: ignore[assignment]
+
+    try:
+        await coord.signal_pause(reason="ctrl-c")  # SIGINT set should_pause first
+        fired.clear()
+        # _maybe_park_on_pause is the seam between read-return and fire: with
+        # should_pause already set it parks (returns True, sets _parked_on_pause)
+        # and the caller drops the byte instead of firing/capturing. run() routes
+        # every post-read byte through this gate (verified by code inspection;
+        # the run()-loop bypass-freedom is covered in the B3 spec review).
+        assert reader._maybe_park_on_pause() is True
+        assert reader._parked_on_pause is True
+        assert fired == []  # parked → no second signal_pause fire
+    finally:
+        os.close(leader)
+        os.close(follower)

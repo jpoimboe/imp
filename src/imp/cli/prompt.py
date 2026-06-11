@@ -31,6 +31,24 @@ def _build_session(skills_dir: Any | None = None, *, editing_mode: str = "emacs"
     kb = KeyBindings()
     mode = EditingMode.VI if editing_mode == "vi" else EditingMode.EMACS
 
+    hint_shown = False
+
+    @kb.add("c-c")
+    def _(event: Any) -> None:
+        # Typed Ctrl-C must NEVER raise (the default binding does). Non-empty
+        # buffer → clear it; empty buffer → hint at Ctrl-D, once per session.
+        nonlocal hint_shown
+        buf = event.app.current_buffer
+        if buf.text:
+            buf.reset()                    # clear the typed line in place
+            return
+        if not hint_shown:
+            hint_shown = True
+            from prompt_toolkit.application import run_in_terminal
+            # Fire-and-forget: run_in_terminal schedules via ensure_future; the
+            # returned Future is intentionally not awaited from this sync handler.
+            run_in_terminal(lambda: print("press ctrl-d to exit"))
+
     completer = SlashCompleter(skills_dir) if skills_dir is not None else None
     # No style override: while the user types, the input region keeps the
     # terminal's default fg/bg (a bright-blue caret is the only marker). On
@@ -110,14 +128,33 @@ class Prompt:
     def ask(self, prompt_text: str | None = None) -> str:
         """Read a single line. Returns the user's text.
         Raises KeyboardInterrupt (Ctrl+C) or EOFError (Ctrl+D) up to caller."""
-        result = self._session.prompt(self._message(prompt_text))
+        # handle_sigint=False: see ask_async for the rationale. The sync path is
+        # not used interactively, but we keep the two consistent.
+        result = self._session.prompt(self._message(prompt_text), handle_sigint=False)
         return str(result) if result is not None else ""
 
     async def ask_async(self, prompt_text: str | None = None) -> str:
         """Async version of ask() — uses prompt_toolkit's native prompt_async()
         so it shares the outer event loop instead of calling asyncio.run()
-        internally (which would crash inside anyio.run())."""
-        result = await self._session.prompt_async(self._message(prompt_text))
+        internally (which would crash inside anyio.run()).
+
+        handle_sigint=False: typed Ctrl-C is handled by the `c-c` KEY binding (a
+        key event in _build_session), independent of handle_sigint —
+        handle_sigint only governs OS-signal handling. With the default
+        handle_sigint=True, prompt_toolkit installs its OWN SIGINT handler for
+        the prompt's duration and raises KeyboardInterrupt inside the prompt app
+        coroutine on an out-of-band SIGINT; across the claude_code in-process MCP
+        task boundary (a wait_for_user solicit runs inside the SDK's MCP handler
+        task) that KeyboardInterrupt escapes imp's except arms and crashes
+        anyio.run, leaving the change status="running". Setting it False lets
+        imp's InterruptCoordinator SIGINT handler stay installed during the
+        prompt and route an out-of-band SIGINT through the coordinator exit path
+        (identical to SIGTERM). This also means prompt_toolkit never calls
+        loop.remove_signal_handler(SIGINT) on prompt exit, so the handler-deletion
+        problem (a88e96e) cannot recur — the rearm_signal_handlers call in
+        ask_line_with_slash becomes a harmless defensive no-op (kept)."""
+        result = await self._session.prompt_async(
+            self._message(prompt_text), handle_sigint=False)
         return str(result) if result is not None else ""
 
     def history_strings(self) -> list[str]:

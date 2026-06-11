@@ -117,6 +117,21 @@ def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, .
     return (Message(role="user", content=(TextBlock(text=text),)),)
 
 
+def _liveness_on_event(coordinator: Any, on_event: EventCallback) -> EventCallback:
+    """Compose subtree-liveness onto the run's `on_event`. Every append to the
+    shared event log — by the task-lead OR any descendant subagent, since they
+    all write through this one instance — pulses `coordinator.note_activity()`,
+    which resets the B.2 inactivity watchdog (`agent_run._pull_with_inactivity_watchdog`).
+    This is the signal that keeps flowing while a parent is parked in an in-process
+    subagent dispatch and claude_code yields nothing; without it a busy subtree is
+    falsely torn down every AGENT_INACTIVITY_TIMEOUT_S. The original driver
+    callback is preserved (live narrative unaffected)."""
+    def _composed(e: Any) -> None:
+        coordinator.note_activity()
+        on_event(e)
+    return _composed
+
+
 async def run_change(
     change: Change,
     *,
@@ -142,7 +157,8 @@ async def run_change(
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,
         ).config
-        log: EventLog = JsonlEventLog(change.events_path, on_event=on_event)
+        log: EventLog = JsonlEventLog(
+            change.events_path, on_event=_liveness_on_event(coordinator, on_event))
         sandbox_policy = _build_sandbox_policy(change, config, log)
         state = State.load(change.state_dir)
 

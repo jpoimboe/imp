@@ -378,6 +378,107 @@ async def test_drive_invocation_stalls_on_inactivity(
     assert interrupted["called"] is True
 
 
+@pytest.mark.anyio
+async def test_drive_invocation_survives_when_subtree_active(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """B.2 false-positive fix: an agent whose OWN generator yields nothing for
+    far longer than the inactivity window is NOT torn down, as long as the shared
+    subtree keeps signalling liveness via `coordinator.note_activity()`.
+
+    This is the real claude_code shape: a task-lead parked in an in-process
+    subagent dispatch (or a busy leaf that appends to the shared elog without
+    yielding) produces no generator yields for minutes, yet is fully alive.
+
+    The agent stays silent for ~4x the window while activity is signalled every
+    ~half-window, then finally yields its output. A correct fix delivers that
+    output. A timestamp-only non-fix that kept `with fail_after(window): await
+    gen.__anext__()` would still fire at start+window (the single bounded await
+    never returns), so this test also guards against that vacuous change.
+    """
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _BusyButSilentRunner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+        async def run(self, _invocation):
+            # Yield NOTHING for ~0.8s (4x the 0.2s window) while the subtree
+            # stays active — note_activity every 0.1s (< window) must keep the
+            # watchdog from tripping.
+            for _ in range(8):
+                await anyio.sleep(0.1)
+                coord.note_activity()
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    with anyio.fail_after(5):
+        result = await ar.drive_invocation(
+            _inv(tmp_path), _BusyButSilentRunner(), coordinator=coord,
+            log=None, emit_events=False)
+
+    assert result.errored is False, "busy-but-silent agent wrongly torn down"
+    assert result.output == {"status": "Success"}
+    assert interrupted["called"] is False
+
+
+@pytest.mark.anyio
+async def test_drive_invocation_stalls_with_coordinator_but_no_activity(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """True-positive guard WITH a real coordinator present: a genuinely hung
+    agent that emits nothing AND signals no subtree activity is still torn down
+    as config/stalled. Confirms the liveness wiring doesn't keep a silent agent
+    alive merely by being present (the guard the plan requires alongside the
+    busy-survives case)."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _StallRunner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+        async def run(self, _invocation):
+            await anyio.sleep(3600)   # no events, no note_activity, ever
+            yield {"type": "agent_output", "payload": {}}  # never reached
+
+    with anyio.fail_after(5):
+        result = await ar.drive_invocation(
+            _inv(tmp_path), _StallRunner(), coordinator=coord, log=None,
+            emit_events=False)
+    assert result.errored is True
+    assert result.error is not None and result.error.kind == "stalled"
+    assert interrupted["called"] is True
+
+
+def test_shared_log_append_pulses_coordinator_activity(tmp_path: Path) -> None:
+    """B.2 production wiring: every append to the run's shared event log pulses
+    coordinator.note_activity() (which resets the inactivity watchdog), and the
+    original on_event fan-out is preserved. Without this, the unit-level watchdog
+    fix would pass while the real claude_code window never resets — the live
+    hazard the plan calls out."""
+    from imp.engine.executor import _liveness_on_event
+    from imp.engine.state import JsonlEventLog
+
+    coord = InterruptCoordinator()
+    pulses = {"n": 0}
+    coord.add_activity_listener(lambda: pulses.__setitem__("n", pulses["n"] + 1))
+    seen: list[dict] = []
+
+    log = JsonlEventLog(
+        tmp_path / "e.jsonl", on_event=_liveness_on_event(coord, seen.append))
+    log.append(agent_id="step:p/s", type="thinking", payload={"x": 1})
+
+    assert pulses["n"] == 1, "append did not pulse coordinator.note_activity()"
+    assert len(seen) == 1, "composed on_event dropped the original driver callback"
+
+
 def _build_inv(tmp_path: Path, **kw):
     from imp.engine.agent_run import build_agent_invocation
     return build_agent_invocation(

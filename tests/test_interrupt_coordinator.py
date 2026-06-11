@@ -119,3 +119,65 @@ async def test_tty_quiesced_delegates_to_attached_reader() -> None:
     async with coord.tty_quiesced():
         pass
     assert enter_calls == [1]                     # back to no-op
+
+
+@pytest.mark.anyio
+async def test_reset_clears_pause_keeps_interjects_and_unparks() -> None:
+    coord = InterruptCoordinator()
+    coord.enqueue_interject("keep me")
+    await coord.signal_pause(reason="esc")
+    assert coord.should_pause is True
+
+    unparked: list[int] = []
+
+    class _FakeReader:
+        def __init__(self) -> None:
+            self._parked_on_pause = True
+        def unpark_on_reset(self) -> None:
+            self._parked_on_pause = False
+            unparked.append(1)
+
+    coord.attach_esc_reader(_FakeReader())
+    coord.reset()
+
+    assert coord.should_pause is False
+    assert coord.pause_reason is None
+    assert coord.drain_interject() == "keep me"  # interjects preserved
+    assert unparked == [1]
+
+
+def test_reset_clears_suppression_window() -> None:
+    # A fresh session-loop round must start a NEW suppression window — reset()
+    # clears _first_gesture_at so a Ctrl-C after a reset is not permanently
+    # suppressed by a gesture from the prior round.
+    coord = InterruptCoordinator()
+    assert coord._register_gesture(kind="ctrl-c") is True
+    assert coord._first_gesture_at is not None
+    coord.reset()
+    assert coord._first_gesture_at is None
+    assert coord._register_gesture(kind="ctrl-c") is True  # new window opens
+
+
+def test_suppression_window_from_first_gesture() -> None:
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]  # inject monotonic clock
+
+    assert coord._register_gesture(kind="ctrl-c") is True   # first → allowed
+    t["now"] = 100.5
+    assert coord._register_gesture(kind="esc") is False     # within 1 s → suppressed
+    t["now"] = 100.9
+    assert coord._register_gesture(kind="ctrl-c") is False  # window not restarted
+    t["now"] = 101.2
+    # >1 s from the FIRST gesture → escalation territory (allowed through).
+    assert coord._register_gesture(kind="ctrl-c") is True
+
+
+def test_sigterm_is_exempt_from_suppression() -> None:
+    coord = InterruptCoordinator()
+    t = {"now": 100.0}
+    coord._now = lambda: t["now"]
+    assert coord._register_gesture(kind="ctrl-c") is True
+    t["now"] = 100.3
+    # A supervisor SIGTERM 0.3 s later must NOT be suppressed.
+    assert coord._register_gesture(kind="sigterm") is True

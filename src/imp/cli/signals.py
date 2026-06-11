@@ -15,9 +15,12 @@ wraps that call in `coord.tty_quiesced()`, which restores the tty's original
 termios for the duration of the prompt and re-arms cbreak on exit, so the two
 never hold the tty in raw/cbreak mode at once.
 
-prompt_toolkit's `prompt_async(handle_sigint=True)` installs its OWN SIGINT
-handler while the interactive prompt is active and raises KeyboardInterrupt
-there — handled in cli.main, separately from this coordinator.
+The CLI calls `prompt_async(handle_sigint=False)`, so prompt_toolkit does NOT
+own SIGINT during a prompt: an out-of-band SIGINT then lands in this
+coordinator's loop handler (`_dispatch_signal`) and — while a prompt is being
+awaited (`_at_prompt`) — is routed through the exit path, identical to SIGTERM.
+Typed Ctrl-C at a prompt is the `c-c` KEY binding (a key event, independent of
+`handle_sigint`); only OS signals are governed here.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -37,16 +41,25 @@ from imp.engine.state import State
 
 _suppress = contextlib.suppress
 
+_SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 
-def pause_and_exit(change: Change, *, reason: str) -> None:
-    """Save state as paused; append workflow_paused with reason. Idempotent."""
+
+def pause_and_exit(
+    change: Change, *, reason: str, engine_pause_reason: str | None = None,
+) -> None:
+    """Save state as paused (ONLY transitioning from running — a missing or
+    merge_blocked status is preserved) and append workflow_paused unless the
+    engine already emitted an identical one (engine_pause_reason == reason)."""
     try:
         state = State.load(change.state_dir)
-        state.status = "paused"
-        state.save(change.state_dir)
+        if state.status == "running":
+            state.status = "paused"
+            state.save(change.state_dir)
     except FileNotFoundError:
         # State never reached the durable phase — nothing to update
         pass
+    if reason == engine_pause_reason:
+        return  # the engine's workflow_paused already carries this; no dup append
     change.event_log().append(agent_id=None, type="workflow_paused", payload={"reason": reason})
 
 
@@ -93,6 +106,74 @@ class InterruptCoordinator:
         self._loop: Any = None          # event loop owning the signal handlers
         self._sig_send: Any = None      # memory-stream send half (loop cb -> task)
         self._interjects: list[str] = []
+        self._first_gesture_at: float | None = None  # monotonic; suppression window
+        self.escalated = False
+        self._exit_event: Any = None    # set by SIGTERM/escalation routing (C3/C4)
+        self.escalation_event: Any = None   # anyio.Event set on escalation (C4)
+        self._trigger_escalation: Any = None
+        self._trigger_exit: Any = None
+        self._now = time.monotonic      # injectable for tests
+        self._ack_hook: Any = None
+        # True ONLY while an interactive prompt is being awaited (set/cleared by
+        # ask_line_with_slash). During a RUN (agent thinking) this is False so an
+        # in-band Ctrl-C → signal_pause → runner interrupt → pause-to-prompt is
+        # unchanged. With handle_sigint=False on the prompt, an out-of-band SIGINT
+        # at a prompt lands in _dispatch_signal (not as a prompt_toolkit KBI);
+        # this flag tells _dispatch_signal to route it through the exit path.
+        self._at_prompt = False
+        # B.2 liveness: the inactivity watchdog registers a per-pull "bump"
+        # callback here; `note_activity()` fires them on every shared-event-log
+        # append by this agent OR any descendant. This is the ONLY liveness
+        # signal that keeps flowing while a parent agent is parked in an
+        # in-process subagent dispatch (claude_code yields nothing then), and it
+        # is why a busy subtree no longer trips the parent's watchdog. Shared
+        # subtree-wide (one coordinator per run), so a child's appends push every
+        # ancestor watchdog's deadline. Same-event-loop, single-threaded => no lock.
+        self._activity_listeners: list[Any] = []
+
+    def add_activity_listener(self, fn: Any) -> Any:
+        """Register a no-arg callback fired on each `note_activity()`. Returns
+        `fn` so the watchdog can pass it back to `remove_activity_listener`."""
+        self._activity_listeners.append(fn)
+        return fn
+
+    def remove_activity_listener(self, fn: Any) -> None:
+        with _suppress(ValueError):
+            self._activity_listeners.remove(fn)
+
+    def note_activity(self) -> None:
+        """Signal subtree liveness — wired to every shared-event-log append.
+        Fires each registered watchdog bump; a failing bump (e.g. no running loop
+        on some odd append path) must never break the append, so each is
+        suppressed individually."""
+        for fn in tuple(self._activity_listeners):
+            with _suppress(Exception):
+                fn()
+
+    def set_at_prompt(self, value: bool) -> None:
+        """Mark whether an interactive prompt is currently being awaited. A plain
+        boolean, NOT depth-counted: prompts are serialized (single controlling
+        tty; `router.begin_solicit`/`end_solicit`; the resume prompt runs only
+        after the run loop returns), so `ask_line_with_slash` calls never nest.
+        If a nested prompt site is ever added, make this depth-counted (like the
+        reader's `tty_quiesced`) so the inner reset does not clear it early.
+        Routes an out-of-band SIGINT through the exit path while True
+        (see _dispatch_signal)."""
+        self._at_prompt = value
+
+    def set_ack_hook(self, fn: Any) -> None:
+        """fn(text: str) renders transient stop-acknowledgment chrome in the
+        status-line area (never journaled). None = no ack (tests/non-interactive)."""
+        self._ack_hook = fn
+
+    def _note_gesture_ack(self, *, force_quit_available: bool) -> None:
+        fn = self._ack_hook
+        if fn is None:
+            return
+        text = "stopping…"
+        if force_quit_available:
+            text += " (interrupt again to force-quit)"
+        fn(text)
 
     def enqueue_interject(self, text: str) -> None:
         """Queue a human-typed line for delivery at the next agent turn boundary."""
@@ -101,6 +182,38 @@ class InterruptCoordinator:
     def drain_interject(self) -> str | None:
         """Pop the oldest queued interject, or None. Called at the turn boundary."""
         return self._interjects.pop(0) if self._interjects else None
+
+    def has_queued_interject(self) -> bool:
+        """True when an interject is queued for delivery (§2 resume decision)."""
+        return bool(self._interjects)
+
+    def _register_gesture(self, *, kind: str) -> bool:
+        """Record an interrupt gesture and decide whether it proceeds. SIGTERM is
+        exempt (a supervisor shutdown must never be suppressed). For ESC/Ctrl-C: a
+        gesture within _SUPPRESS_WINDOW_S of the FIRST gesture is suppressed
+        (returns False); the window is measured from the first gesture and is NOT
+        restarted by suppressed presses. Returns True to proceed."""
+        if kind == "sigterm":
+            return True
+        now = self._now()
+        if self._first_gesture_at is None:
+            self._first_gesture_at = now
+            return True
+        # Within the window → suppressed; after it → escalation territory (C3).
+        # The window is NOT restarted here (no write to _first_gesture_at).
+        return now - self._first_gesture_at >= _SUPPRESS_WINDOW_S
+
+    def reset(self) -> None:
+        """Clear interrupt state between session-loop rounds (§1). Runs right
+        after run_change returns, before the prompt. Does NOT clear queued
+        interjects. Un-parks the should_pause-parked ESC reader (Task B3)."""
+        self._should_pause = False
+        self.pause_reason = None
+        self._first_gesture_at = None
+        self.escalated = False
+        reader = self._esc_reader
+        if reader is not None and hasattr(reader, "unpark_on_reset"):
+            reader.unpark_on_reset()
 
     def attach_runner(self, interrupt_fn: Any) -> None:
         """interrupt_fn is an `async def () -> None` callable. All three V1
@@ -115,6 +228,22 @@ class InterruptCoordinator:
 
     def detach_runner(self) -> None:
         self._runner_interrupt = None
+
+    def set_escalation_hook(self, fn: Any) -> None:
+        self._trigger_escalation = fn
+
+    def set_exit_hook(self, fn: Any) -> None:
+        self._trigger_exit = fn
+
+    def request_exit(self, reason: str) -> None:
+        """Route an out-of-band stop (prompt-level SIGINT, SIGTERM) to the exit
+        path — sets pause state + fires the exit event the actuator watches."""
+        if self.pause_reason is None:
+            self.pause_reason = reason
+        self._should_pause = True
+        fn = self._trigger_exit
+        if fn is not None:
+            fn(reason)
 
     @contextlib.contextmanager
     def runner_attached(self, interrupt_fn: Any) -> Iterator[None]:
@@ -163,6 +292,7 @@ class InterruptCoordinator:
         fn = self._runner_interrupt
         if self.pause_reason is None:
             self.pause_reason = reason
+            self._note_gesture_ack(force_quit_available=False)
         self._should_pause = True
         if fn is not None:
             await fn()
@@ -171,16 +301,16 @@ class InterruptCoordinator:
         """(Re)install SIGINT/SIGTERM handlers on the running loop. Idempotent —
         `add_signal_handler` overwrites any existing entry.
 
-        This is also the RE-ARM primitive. prompt_toolkit's
-        `prompt_async(handle_sigint=True)` calls `loop.remove_signal_handler(
-        SIGINT)` when the prompt exits, which DELETES the loop's SIGINT dispatch
-        entry. (Its `_restore_sigint_from_ctypes` restores the C-level handler,
-        so the wakeup byte is still written — but with no Handle the loop reads
-        the byte and dispatches nothing.) Without re-arming, the FIRST interactive
-        prompt permanently and silently disables mid-run Ctrl-C — the runner's
-        `coord.signal_pause` is never called again, so `_cancel`/`should_pause`
-        never flip and a process-group Ctrl-C surfaces as a codex-exec error
-        classified `unknown`. See `rearm_signal_handlers`."""
+        This is also the RE-ARM primitive — now DEFENSIVE-ONLY. With the CLI's
+        `prompt_async(handle_sigint=False)` prompt_toolkit no longer installs or
+        deletes a SIGINT handler, so imp's handler stays installed across a prompt
+        and the re-arm is a harmless no-op. It is kept so a future provider (or a
+        nested prompt) that re-enables `handle_sigint=True` still re-arms: that
+        path calls `loop.remove_signal_handler(SIGINT)` on prompt exit, DELETING
+        the loop's SIGINT dispatch entry (its `_restore_sigint_from_ctypes`
+        restores the C-level handler, so the wakeup byte is still written — but
+        with no Handle the loop dispatches nothing), which without re-arming would
+        permanently and silently disable mid-run Ctrl-C. See `rearm_signal_handlers`."""
         loop = self._loop
         if loop is None:
             return
@@ -189,10 +319,42 @@ class InterruptCoordinator:
                 loop.add_signal_handler(sig, self._dispatch_signal, sig)
 
     def _dispatch_signal(self, sig: int) -> None:
-        """Loop-thread signal callback: enqueue the signal for the receiver task
-        (which awaits `signal_pause`). Keeping the await in the task — rather than
-        firing `signal_pause` as a bare task from here — preserves structured
-        concurrency and the first-wins reason semantics."""
+        """Loop-thread signal callback. SIGTERM routes straight to the exit path
+        (wedge-proof: bypasses the receiver, signal_pause, and interrupt()).
+        SIGINT: if a stop is already unwinding, apply the §1 suppression/escalation
+        gate HERE (signal_pause can wedge on the cancellation-immune interrupt());
+        otherwise enqueue for the receiver as before."""
+        if sig == signal.SIGTERM:
+            # Wedge-proof exit. Set pause state HERE so the loop's post-cancellation
+            # path persists status=paused with the right reason — the exit hook only
+            # signals the event. Bypasses the receiver/signal_pause/interrupt() chain.
+            if self.pause_reason is None:
+                self.pause_reason = "sigterm"
+            self._should_pause = True
+            fn = self._trigger_exit
+            if fn is not None:
+                fn("sigterm")  # reason is always "sigterm" on this branch
+            return
+        if self._should_pause:
+            # A stop is already unwinding. Gate the repeat gesture synchronously.
+            if self._register_gesture(kind="ctrl-c"):
+                self._note_gesture_ack(force_quit_available=True)
+                esc = self._trigger_escalation
+                if esc is not None:
+                    esc()
+            return  # suppressed or escalated — never re-enter a wedged interrupt()
+        if self._at_prompt:
+            # At an interactive prompt, prompt_toolkit no longer owns SIGINT
+            # (handle_sigint=False), so an out-of-band SIGINT lands here. Route it
+            # through the coordinator exit path — identical to SIGTERM — instead of
+            # signal_pause/runner-interrupt (which is the DURING-A-RUN behavior).
+            # Register the gesture first so a SECOND out-of-band SIGINT still hits
+            # the escalation/suppression gate above (force-quit).
+            self._register_gesture(kind="ctrl-c")
+            self.request_exit("ctrl-c")
+            return
+        # First gesture during a run: record it and enqueue for the receiver.
+        self._register_gesture(kind="ctrl-c")
         send = self._sig_send
         if send is None:
             return
@@ -207,8 +369,10 @@ class InterruptCoordinator:
         self._install_loop_signal_handlers()
 
     async def run_signal_receiver(self) -> None:
-        """Long-running task: install SIGINT/SIGTERM loop handlers and turn each
-        delivered signal into `signal_pause` (tagged 'ctrl-c'/'sigterm').
+        """Long-running task: install SIGINT/SIGTERM loop handlers. SIGINT is
+        turned into `signal_pause(reason='ctrl-c')` via this receiver. SIGTERM is
+        intercepted in `_dispatch_signal` BEFORE the stream — it sets pause state
+        and fires the exit hook directly (wedge-proof) and never reaches this loop.
 
         Replaces `anyio.open_signal_receiver` with directly-managed loop handlers
         so they can be RE-ARMED (`rearm_signal_handlers`) after prompt_toolkit
@@ -297,11 +461,30 @@ class EscKeyReader:
         # Spec §4: follow-up byte poll window for ESC disambiguation. Default
         # mirrors the loop's existing select timeout (~50 ms). Injectable by tests.
         self._seq_timeout_s: float = _READ_TIMEOUT_S
+        # Spec §4 unwind parking: set True when a stop is unwinding (should_pause
+        # already set before we process a newly-returned byte). The reader stops
+        # consuming /dev/tty so during-unwind typing surfaces as prompt type-ahead.
+        # Cleared by coordinator.reset() (Task C1).
+        self._parked_on_pause = False
+
+    def unpark_on_reset(self) -> None:
+        """Coordinator.reset() calls this to release a should_pause park (Task B3)."""
+        self._parked_on_pause = False
 
     def set_interject_sink(self, sink: Any) -> None:
         """Attach (or replace) the `(line: str) -> None` interject sink after
         construction. None restores legacy ESC-only behavior."""
         self._on_interject = sink
+
+    def _maybe_park_on_pause(self) -> bool:
+        """Between read-return and fire: if a stop is unwinding (should_pause
+        set), park — stop consuming /dev/tty so during-unwind typing stays in the
+        kernel buffer and surfaces as prompt type-ahead. Returns True if parked.
+        coordinator.reset() (Task C1) clears _parked_on_pause to un-park."""
+        if self._coord.should_pause:
+            self._parked_on_pause = True
+            return True
+        return False
 
     async def run(self, *, task_status: TaskStatus[None] = TASK_STATUS_IGNORED) -> None:
         # `task_status.started()` is signalled once the reader has either armed or
@@ -344,8 +527,18 @@ class EscKeyReader:
                     await self._unquiesce_evt.wait()
                     self._unquiesce_evt = None
                     continue
+                if self._parked_on_pause:
+                    # Stop is unwinding: idle until coordinator.reset() (Task C1)
+                    # clears _parked_on_pause. Poll at the read-timeout interval so
+                    # we resume promptly once reset fires.
+                    await anyio.sleep(self._seq_timeout_s)
+                    continue
                 byte = await anyio.to_thread.run_sync(
                     self._read_one_byte, abandon_on_cancel=True)
+                if self._maybe_park_on_pause():
+                    # Stop unwinding: drop this byte, wait for reset() to un-park
+                    # (the §C reset triggers the same unpark machinery).
+                    continue
                 if byte == b"\x1b":
                     if not await self._disambiguate_esc():
                         continue                 # consumed an escape sequence
