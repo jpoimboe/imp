@@ -147,6 +147,31 @@ def deliver_interject(coordinator: Any, messages: Any, transcript: Any,
     return True
 
 
+def drain_all_interjects_at_resume(
+    coordinator: Any, messages: Any, transcript: Any, elog: Any, agent_id: str,
+) -> int:
+    """Resume-entry drain (§2): deliver EVERY queued interject in order as user
+    messages, folded into the first request, and CLEAR the queue so the
+    following turn-boundary drain is a no-op (no double-delivery). Returns the
+    count delivered. Mid-turn shape (messages-list providers: anthropic/openai).
+    The dangling-wait join is handled separately by the resume classifier (F5)."""
+    if coordinator is None:
+        return 0
+    from imp.agents.runner import Message, TextBlock
+    n = 0
+    while True:
+        text = coordinator.drain_interject()
+        if text is None:
+            break
+        msg = Message(role="user", content=(TextBlock(text=text),))
+        messages.append(msg)
+        transcript.append(msg)
+        elog.append_user_message(agent_id=agent_id, message=msg)
+        elog.append(agent_id=agent_id, type="user_interjected", payload={"text": text})
+        n += 1
+    return n
+
+
 def build_agent_invocation(
     *,
     agent_def: AgentDef,
