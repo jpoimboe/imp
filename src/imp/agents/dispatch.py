@@ -24,7 +24,7 @@ from typing import Any
 
 import anyio
 
-from imp.agents.parallel import max_parallel_tasks  # noqa: F401  (used by Task 3)
+from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import ToolResultBlock, ToolUseBlock
 from imp.agents.subagents import (
     SubagentSuspended,
@@ -272,6 +272,47 @@ def _reorder_results_to_document_order(
     tool_results.sort(key=lambda b: order.get(b.tool_use_id, len(order)))
 
 
+async def _dispatch_one_task_inline(
+    *,
+    ctx: Any,
+    elog: Any,
+    aid: str,
+    tu: ToolUseBlock,
+    tool_results: list[ToolResultBlock],
+    state: TurnState,
+    ceiling: int | None,
+) -> None:
+    """Kill-switch inline dispatch of ONE task tu — today's sequential shapes
+    exactly (sweep, ceiling, tool_call, dispatch_task, tool_result). Reconstructs
+    the task arm removed from dispatch_one_tool_use; a SubagentSuspended unwinds
+    the turn as it does today (raise_if_suspended re-raises)."""
+    await _bg._sweep_bg(ctx)
+    if ceiling is not None and state.tool_calls_used >= ceiling:
+        err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
+        block = ToolResultBlock(tu.id, err_text, is_error=True)
+        tool_results.append(block)
+        elog.append_tool_result(agent_id=aid, block=block)
+        state.ceiling_tripped = True
+        return
+    state.tool_calls_used += 1
+    tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
+    try:
+        result_str = await dispatch_task(
+            ctx, tu.input["subagent_name"], tu.input["task_description"],
+            tool_call_event_id=tc_ev["id"], tier=tu.input.get("tier"),
+        )
+    except Exception as e:
+        raise_if_suspended(e)
+        err_text = f"{type(e).__name__}: {e}"
+        block = ToolResultBlock(tu.id, err_text, is_error=True)
+        tool_results.append(block)
+        elog.append_tool_result(agent_id=aid, block=block)
+        return
+    block = ToolResultBlock(tu.id, result_str)
+    tool_results.append(block)
+    elog.append_tool_result(agent_id=aid, block=block)
+
+
 async def dispatch_turn_tool_uses(
     *,
     ctx: Any,
@@ -292,6 +333,27 @@ async def dispatch_turn_tool_uses(
     per processed tu plus any terminal event dict (the caller yields it and
     stops). SubagentSuspended / AwaitingUserInput propagate (terminal — no
     heartbeat; the generator ends by raising)."""
+    if max_parallel_tasks() == 1:
+        # Kill switch (Decision 5): inline document-order path, no task group —
+        # today's shapes exactly. Each tu (task and non-task) dispatches
+        # sequentially in document order; results are already document-ordered, so
+        # no reorder is applied (and none is needed).
+        for tu in tool_uses:
+            if tu.name == "task":
+                await _dispatch_one_task_inline(
+                    ctx=ctx, elog=elog, aid=aid, tu=tu,
+                    tool_results=tool_results, state=state, ceiling=ceiling)
+            else:
+                terminal = await dispatch_one_tool_use(
+                    ctx=ctx, elog=elog, aid=aid, invocation=invocation,
+                    tools=tools, tu=tu, tool_results=tool_results,
+                    state=state, ceiling=ceiling)
+                if terminal is not None:
+                    yield terminal
+                    return
+            yield {"type": "tool_heartbeat", "payload": {}}
+        return
+
     task_tus = [tu for tu in tool_uses if tu.name == "task"]
     batch_started = False
     for tu in tool_uses:

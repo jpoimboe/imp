@@ -154,3 +154,38 @@ async def test_mixed_turn_ceiling_reordering(tmp_path: Path) -> None:
     assert "tool_call_ceiling_exceeded" in by_id["n1"].content
     assert [b.tool_use_id for b in tool_results] == ["t1", "n1", "t2"]
     reset_parallelism_cache()
+
+
+@pytest.mark.anyio
+async def test_kill_switch_inline_is_sequential(tmp_path: Path) -> None:
+    """AC21: with IMP_MAX_PARALLEL_TASKS=1 a two-task turn takes the inline path —
+    NO task group, so the children do NOT overlap (peak concurrency 1) — and
+    results land in document order."""
+    reset_parallelism_cache()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    gate = {"active": 0, "peak": 0}
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
+        gate["active"] += 1
+        gate["peak"] = max(gate["peak"], gate["active"])
+        try:
+            await anyio.sleep(0.02)
+            return json.dumps({"status": "Success", "echo": desc})
+        finally:
+            gate["active"] -= 1
+
+    monkey = dispatch_mod.dispatch_task
+    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        ctx = _ctx(tmp_path)
+        elog = InMemoryEventLog()
+        tool_results: list = []
+        tus = [_task_tu("t1", "a"), _task_tu("t2", "b")]
+        await _drain(ctx, elog, tus, tool_results, TurnState(tool_calls_used=0), None)
+    finally:
+        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
+        monkeypatch.undo()
+        reset_parallelism_cache()
+    assert gate["peak"] == 1                       # sequential, no overlap
+    assert [b.tool_use_id for b in tool_results] == ["t1", "t2"]
