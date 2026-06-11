@@ -56,6 +56,23 @@ def test_warn_if_tui_unavailable_silent_without_flag(capsys) -> None:
     assert capsys.readouterr().err == ""
 
 
+def test_is_benign_interrupt_teardown_matches_killed_child_writes() -> None:
+    import asyncio
+
+    class CLIConnectionError(Exception):
+        pass
+
+    # The two detached-task exceptions a process-group interrupt leaves behind.
+    assert m._is_benign_interrupt_teardown(
+        CLIConnectionError("Cannot write to terminated process (exit code: 0)"))
+    assert m._is_benign_interrupt_teardown(asyncio.InvalidStateError("invalid state"))
+    # A real provider failure (or no exception) must still surface.
+    assert not m._is_benign_interrupt_teardown(
+        CLIConnectionError("connection refused"))
+    assert not m._is_benign_interrupt_teardown(RuntimeError("boom"))
+    assert not m._is_benign_interrupt_teardown(None)
+
+
 def test_new_tui_on_non_tty_warns_and_streams(tmp_path, monkeypatch, capsys) -> None:
     from imp.engine.executor import RunResult
     from tests.conftest import _seed_control

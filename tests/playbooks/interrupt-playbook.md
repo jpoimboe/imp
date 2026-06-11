@@ -3,7 +3,7 @@
 > **You are the test driver.** This file is your full instruction set. You drive `imp`
 > *through the impty MCP server* (`mcp__impty__start` / `send` / `send_signal` / `view` /
 > `wait` / `snapshot` / `stop`) — a real pty with a faithful pyte render — fire
-> interrupts (Ctrl-C, **ESC**, Ctrl-D) at well-defined points across four providers and
+> interrupts (Ctrl-C, **ESC**, Ctrl-D) at well-defined points for a **single provider** and
 > several agent states (model thinking, **a tool running**, an in-turn prompt, a
 > subagent, resume), judge whether imp behaves and *speaks* correctly, and write every
 > defect to a bug report. Work in a throwaway standalone `git clone` and abandon everything
@@ -15,8 +15,12 @@
 > that predates it, the ESC / pause-reason / clean-classification checks are *expected* to
 > fail — record them as to-dos, not surprises.
 >
-> **Scope: four providers.** The feature (and so the §0 "clean classification" bar)
-> covers `claude_code`, `anthropic`, `openai`, and `codex`.
+> **Scope: one provider per run (default `claude_code`).** Run this playbook against a
+> single provider — `claude_code` unless the operator names another (`anthropic`, `openai`,
+> or `codex`). The feature (and so the §0 "clean classification" bar) covers all four
+> identically, so testing one provider end-to-end is a complete pass for that provider; to
+> cover another, re-run the whole playbook with that one provider forced (§4). Pick the
+> provider **before** §3 and keep it fixed for the entire run.
 >
 > Read the whole file before you touch a tool.
 
@@ -53,7 +57,7 @@ interrupts with `wait=False` so they go immediately, then read with `wait` / `vi
 
 > `SIGTERM` → `paused (sigterm)` is also part of the feature. Deliver it in one call with
 > `send_signal(sig=15)` — it signals imp's process group directly, no pid scraping. Run it
-> once per provider where convenient; it is no longer a skippable afterthought.
+> once where convenient during this run; it is no longer a skippable afterthought.
 
 ### The bar for "correct" (every interrupt point, unless stated otherwise)
 
@@ -110,8 +114,9 @@ A correct imp does **all** of:
   from the worktree), user `~/.config/imp/config.yaml` (`providers`/`theme`, global), and
   gitignored `.imp/config.yaml` (local, control root, highest precedence). Precedence
   (low→high): `floor < project < user < local` — operator-wins among the config layers.
-- **Providers:** `claude_code`, `anthropic`, `openai`, `codex` — all four are in scope
-  for the full §0 classification bar.
+- **Provider:** exactly one per run — `claude_code` by default, or whichever single
+  provider the operator names (`anthropic`, `openai`, or `codex`). That one provider is in
+  scope for the full §0 classification bar; the others are out of scope for this run.
 - **Credentials:** `~/.anthropic-key` → `ANTHROPIC_API_KEY`, `~/.openai-key` →
   `OPENAI_API_KEY`. `claude_code` / `codex` use their own local auth.
 - **impty MCP server** is running from `.mcp.json` with controlling-terminal support.
@@ -190,12 +195,13 @@ local`), the layer that forces a provider is **local** — `$WT/.imp/config.yaml
 read from the control root). Because `$WT` is a standalone clone, its control root is `$WT`
 itself, so this file both **wins** (highest precedence) and **stays isolated**.
 
-Write the one-provider override (swap the provider name per run under test):
+Write the single-provider override (this run targets exactly one provider — `claude_code`
+by default; substitute another only if the operator named it):
 ```bash
 mkdir -p "$WT/.imp"
 cat > "$WT/.imp/config.yaml" <<'YAML'
-providers: [codex]      # one of: claude_code | anthropic | openai | codex
-theme: ansi             # fixed theme so snapshots render predictably
+providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
+theme: ansi                # fixed theme so snapshots render predictably
 YAML
 ```
 
@@ -293,10 +299,10 @@ there is a bug. Different lines, no contradiction.)
 
 ## 6. Test matrix
 
-For **each** in-scope provider, run the points below. Use `INTERRUPT-AND-VERIFY` and
+For the **single provider under test**, run the points below. Use `INTERRUPT-AND-VERIFY` and
 `RESUME-AND-VERIFY`. You don't have to fire every trigger at every point — follow the
 **Trigger** column, which targets the meaningful combinations. Keep a tally
-(provider × point × trigger → outcome) for the report.
+(point × trigger → outcome) for the report.
 
 | # | Point (imp state) | How to reach it | Trigger(s) | Expected |
 |---|-------------------|-----------------|-----------|----------|
@@ -316,7 +322,7 @@ For **each** in-scope provider, run the points below. Use `INTERRUPT-AND-VERIFY`
 - **Very-early interrupt:** Ctrl-C in the brief window right after `imp new` before the
   first prompt/agent appears. Record whatever happens (clean pause preferred; a crash or
   unkillable state is a bug).
-- **Clean-resume positive control:** for ≥1 Change per provider, after a pause do a clean
+- **Clean-resume positive control:** for ≥1 Change, after a pause do a clean
   `RESUME-AND-VERIFY` and let it reach a prompt *without* interrupting — proves imp truly
   recovered state, not just exited tidily.
 
@@ -335,10 +341,11 @@ Include:
 
 1. **Build under test** — which `imp` (branch/commit:
    `git -C "$REPO" rev-parse --short HEAD`, plus whether the
-   esc-and-clean-interrupt feature is present) and the impty commit.
-2. **Summary matrix** — rows = providers; columns = A1/A2 / B-ctrlc / B-esc / C-ctrlc /
-   C-esc / D-ctrlc / D-esc(neg) / E / F / clean-resume; cells = ✅ / ⚠️ issue / ⏭️ skipped
-   (one-line reason).
+   esc-and-clean-interrupt feature is present), the **provider under test**, and the
+   impty commit.
+2. **Summary matrix** — one row for the provider under test; columns = A1/A2 / B-ctrlc /
+   B-esc / C-ctrlc / C-esc / D-ctrlc / D-esc(neg) / E / F / clean-resume; cells = ✅ /
+   ⚠️ issue / ⏭️ skipped (one-line reason).
 3. **One section per bug** — title + severity (blocker/major/minor/cosmetic); provider &
    point & trigger; **expected** (cite §0); **what happened** (paste `view(full=True)`
    excerpt and/or a `snapshot()` PNG path; include `alive`/exit, whether one interrupt
@@ -347,10 +354,10 @@ Include:
 4. **Message-clarity findings** — any user-facing text that was unclear, missing, or
    misleading even where the exit code was right (e.g. wrong/empty pause reason, leaked
    internals, no resume hint).
-5. **Skips** — providers/points/triggers skipped and why.
+5. **Skips** — points/triggers skipped and why.
 
 Zero bugs is still a report: write the matrix and an explicit "no defects observed" note
-per provider — a clean run is a recorded result.
+for the provider under test — a clean run is a recorded result.
 
 ---
 
@@ -374,6 +381,6 @@ was supposed to contain all the churn.
 ## 9. Done
 
 Report a one-paragraph wrap-up: build tested (commit + whether the feature is present),
-which providers/points/triggers ran, the headline findings (especially anything failing
-the bar in §0), the report path, and confirmation the clone and all test Changes were
-abandoned. Then stop.
+the provider under test and which points/triggers ran, the headline findings (especially
+anything failing the bar in §0), the report path, and confirmation the clone and all test
+Changes were abandoned. Then stop.

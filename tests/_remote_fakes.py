@@ -20,6 +20,12 @@ if args.get("--exit") == "1":
 if args.get("--ignore-sigterm") == "1":
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 log = args.get("--log")
+stderr_bytes = args.get("--stderr-bytes")
+if stderr_bytes:
+    # Flood stderr BEFORE the reply: past a pipe buffer (~64KiB) this blocks
+    # unless imp captures *and* drains the driver's stderr.
+    sys.stderr.write("x" * int(stderr_bytes) + "\\n")
+    sys.stderr.flush()
 reply = args.get("--reply")
 if reply:
     sys.stdout.write(reply + "\\n")
@@ -34,6 +40,7 @@ for line in sys.stdin:
 def fake_driver_command(
     tmp_path: Path, *, log: Path | None = None, reply: str | None = None,
     exit_immediately: bool = False, ignore_sigterm: bool = False,
+    stderr_bytes: int | None = None,
 ) -> list[str]:
     script = tmp_path / "fake_driver.py"
     script.write_text(_DRIVER_SRC)
@@ -46,4 +53,6 @@ def fake_driver_command(
         cmd += ["--exit", "1"]
     if ignore_sigterm:
         cmd += ["--ignore-sigterm", "1"]
+    if stderr_bytes is not None:
+        cmd += ["--stderr-bytes", str(stderr_bytes)]
     return cmd

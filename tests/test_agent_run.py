@@ -274,6 +274,32 @@ async def test_drive_invocation_coordinator_pause(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_drive_invocation_pause_in_flight_wins_over_retryable_error(
+    tmp_path: Path,
+) -> None:
+    """When a pause is already in flight, an error event must pause cleanly, NOT
+    retry on its own classification. A process-group interrupt kills a provider's
+    CLI child instantly, so a (sub)agent can surface a `network`/no_result_message
+    teardown artifact a beat before signal_pause's interrupt() sets _cancel;
+    retrying it replays an interrupted transcript (the 400 guard). Regression for
+    the --tui playbook's subagent-interrupt finding.
+    """
+    from imp.engine.agent_run import drive_invocation
+
+    coord = InterruptCoordinator()
+    coord._should_pause = True  # pause already requested (signal_pause fired)
+    # A retryable network error — would normally return a backoff delay.
+    runner = _Runner([{"type": "error", "payload": {
+        "category": "network", "kind": "no_result_message",
+        "message": "SDK closed without yielding a ResultMessage"}}])
+    res = await drive_invocation(_inv(tmp_path), runner,
+                                 coordinator=coord, log=None, emit_events=False)
+    assert res.paused is True
+    assert res.delay is None          # NOT retried
+    assert res.errored is False
+
+
+@pytest.mark.anyio
 async def test_drive_invocation_catches_subagent_suspended(tmp_path: Path) -> None:
     from imp.engine.agent_run import SubagentSuspended, drive_invocation
 

@@ -45,6 +45,24 @@ async def test_start_spawns_feeds_events_and_reads_reply(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
+async def test_start_captures_and_drains_driver_stderr(tmp_path: Path) -> None:
+    # The driver's stderr must NOT be inherited onto imp's controlling terminal
+    # (it corrupts a --tui alt-screen / interleaves with streaming output). The
+    # driver floods 200KiB to stderr — past a pipe buffer — *before* its reply: a
+    # captured-but-undrained pipe would block the driver there and the reply would
+    # never arrive. Captured (proc.stderr is a pipe, not None) + drained → reply flows.
+    ch = _channel(fake_driver_command(
+        tmp_path, reply="after-flood", stderr_bytes=200_000))
+    async with anyio.create_task_group() as tg:
+        assert await ch.start(tg) is True
+        assert ch._proc.stderr is not None       # captured, not inherited onto the tty
+        with anyio.fail_after(5):
+            assert await ch.next_reply() == "after-flood"   # drain kept the driver unblocked
+        await ch.stop()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
 async def test_start_returns_false_when_driver_exits_immediately(
         tmp_path: Path) -> None:
     errors: list[str] = []

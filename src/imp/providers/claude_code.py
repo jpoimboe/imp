@@ -192,6 +192,21 @@ def _subprocess_diag(client: Any) -> dict[str, Any]:
     return out
 
 
+def _is_terminated_process_teardown(exc: BaseException) -> bool:
+    """A `CLIConnectionError: Cannot write to terminated process` from the claude
+    SDK means a (process-group) interrupt already killed the CLI child cleanly and
+    the SDK *then* tried to write to it — interrupt teardown, never a recoverable
+    provider failure. Recognizing it lets the runner classify it as a Pause
+    (`config`/`interrupted`) instead of the `unknown` fallback, which would surface
+    as "unclassified provider error" and a `paused: unknown` headline. Matched by
+    class name + message so we don't import the SDK's error type (its transport
+    surface is not a stable contract). Critically, when a *subagent's* CLI child is
+    killed mid-flight its runner's own `interrupt()`/`_cancel` may not have fired,
+    so the `_cancel` check alone misses this case."""
+    return (type(exc).__name__ == "CLIConnectionError"
+            and "terminated process" in str(exc))
+
+
 # ── Per-run state captured by tool wrappers and read by the receive loop ─────
 
 
@@ -841,9 +856,15 @@ class ClaudeCodeAgentRunner:
                 raise  # headless wait_for_user pause unwinds, not classified
             except Exception as exc:
                 raise_if_suspended(exc)
-                if self._cancel:
-                    # Interrupt fired before the SDK transport raised. Reclassify to
-                    # the same `interrupted` event the in-loop _cancel check emits.
+                if self._cancel or _is_terminated_process_teardown(exc):
+                    # Interrupt fired before the SDK transport raised — or the SDK
+                    # tried to write to a CLI child a (process-group) interrupt had
+                    # already terminated. Either way it is interrupt teardown, not a
+                    # provider failure: classify it as the same `interrupted` pause
+                    # the in-loop _cancel check emits, NOT `unknown` (which surfaces
+                    # as "unclassified provider error" / `paused: unknown`). The
+                    # terminated-process arm is what catches a killed *subagent*
+                    # whose runner's own `_cancel` never fired.
                     yield {"type": "error", "payload": {
                         "category": "config",
                         "kind": "interrupted",

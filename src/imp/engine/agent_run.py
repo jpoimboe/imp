@@ -526,6 +526,17 @@ async def drive_invocation(
                     if event["type"] == "agent_output":
                         agent_output = event["payload"]
                     if event["type"] == "error":
+                        # A pause already in flight wins over the error's own
+                        # classification: a (process-group) interrupt kills a
+                        # provider's CLI child instantly, so the runner can surface
+                        # a teardown artifact (e.g. a subagent's `network`/
+                        # no_result_message) a beat before signal_pause's
+                        # interrupt() sets the runner's _cancel. Retrying that
+                        # replays an interrupted transcript (the 400 the runners
+                        # guard against); pause cleanly instead — same outcome as
+                        # the should_pause check below, just reached via an error.
+                        if coordinator is not None and coordinator.should_pause:
+                            return AgentRunResult(None, False, True, False, None)
                         payload = event.get("payload") or {}
                         category = payload.get("category", "unknown")
                         kind = payload.get("kind")

@@ -678,7 +678,23 @@ def _tui_requested(args: argparse.Namespace) -> bool:
     return bool(getattr(args, "tui", False)) and sys.stdout.isatty()
 
 
+def _is_benign_interrupt_teardown(exc: BaseException | None) -> bool:
+    """True for the detached-task exceptions a (process-group) interrupt leaves
+    behind when it kills a provider's CLI child mid-write: the SDK's
+    `CLIConnectionError: Cannot write to terminated process` and asyncio's
+    connection-lost `InvalidStateError`. Benign teardown noise — in `--tui` it must
+    not surface (prompt_toolkit would wedge on a "Press ENTER to continue" modal)."""
+    import asyncio
+    if isinstance(exc, asyncio.InvalidStateError):
+        return True
+    return (exc is not None
+            and type(exc).__name__ == "CLIConnectionError"
+            and "terminated process" in str(exc))
+
+
 async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
+    import asyncio
+
     from imp.cli.signals import InterruptCoordinator
 
     # No EscKeyReader — TuiApp owns the tty exclusively.
@@ -689,8 +705,25 @@ async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
     async def _chat(_prompt: object) -> str:
         return await app.solicit(change)
 
+    # The full-screen app runs with set_exception_handler=False, so loop-level
+    # exceptions reach the handler we install here instead of prompt_toolkit's
+    # "Press ENTER" modal. Swallow interrupt-teardown noise (a pause is in flight,
+    # or a benign killed-child write); surface anything else via the prior handler.
+    loop = asyncio.get_running_loop()
+    prev_exc_handler = loop.get_exception_handler()
+
+    def _tui_loop_exc_handler(lp: Any, context: dict[str, Any]) -> None:
+        if coord.should_pause or _is_benign_interrupt_teardown(
+                context.get("exception")):
+            return
+        if prev_exc_handler is not None:
+            prev_exc_handler(lp, context)
+        else:
+            lp.default_exception_handler(context)
+
     holder: dict[str, Any] = {}
     load_err: Exception | None = None
+    loop.set_exception_handler(_tui_loop_exc_handler)
     try:
         async with anyio.create_task_group() as tg:
             tg.start_soon(coord.run_signal_receiver)
@@ -713,6 +746,8 @@ async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
             tg.cancel_scope.cancel()
     except* (LoadError, LoadErrors) as eg:
         load_err = eg.exceptions[0]
+    finally:
+        loop.set_exception_handler(prev_exc_handler)
 
     app.print_collapsed_transcript(sys.stdout)
     if load_err is not None:
@@ -771,7 +806,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
+                                width=_term_width(), status=status,
+                                suppress_opening_question=True)
             coord = InterruptCoordinator()
             channel = _maybe_build_channel(change)
             rc = 0

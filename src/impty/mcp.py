@@ -194,7 +194,7 @@ def wait(idle: float = _SETTLE_IDLE, hard: float = _SETTLE_HARD) -> str:
 
 
 @mcp.tool()
-def snapshot(path: str | None = None, full: bool = False) -> str:
+def snapshot(path: str | None = None, full: bool = False, light: bool = False) -> str:
     """Render the screen to a PNG (true color, bold weight, box-drawing glyphs)
     and return its path — for SEEING the TUI, not just the grid text view()
     returns. The image reflects the live session's size.
@@ -203,18 +203,23 @@ def snapshot(path: str | None = None, full: bool = False) -> str:
     scrolled-off history above it — a tall image, so it is opt-in. `path`
     defaults to a fresh temp file. Faint (dim) text isn't shown — pyte discards
     SGR 2 at parse time — but color, bold, and layout are faithful.
+
+    The canvas is a dark terminal by default. Set light=True to render on a
+    near-white surface instead — use it to preview an app's *light* theme, which
+    tunes its accents for a pale background and so reads wrong on the dark default.
     """
     import os
     import tempfile
 
-    from impty.render import render_screen
+    from impty.render import light_surface, render_screen
 
     session = _require()
     if path is None:
         fd, path = tempfile.mkstemp(prefix="impty-", suffix=".png")
         os.close(fd)
+    bg, fg = light_surface() if light else (None, None)
     with session.paused():  # freeze pyte while render reads the raw screen buffer
-        render_screen(session.screen, path, full=full)
+        render_screen(session.screen, path, full=full, bg=bg, fg=fg)
     return f"[wrote {path}]"
 
 

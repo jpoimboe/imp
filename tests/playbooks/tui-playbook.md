@@ -113,9 +113,18 @@ mkdir -p "$WT/.imp"
 cat > "$WT/.imp/config.yaml" <<'YAML'
 providers: [claude_code]       # local provider; no key
 theme: dark                    # primary pass; you will also sweep light + ansi (§6-L)
+remote:
+  driver: null                 # disable any inherited remote channel for the clean pass — see §6-J
 YAML
-cd "$WT" && imp config          # confirm `providers` resolves to claude_code on the `(local)` layer
+cd "$WT" && imp config          # confirm `providers` resolves to claude_code on `(local)`; telegram shows `(available)`, not `(enabled)`
 ```
+
+> **Disable inherited remote channels for the functional pass.** If your *user* config
+> (`~/.config/imp/config.yaml`) enables a `remote.driver` (e.g. telegram), the clone inherits it
+> and the channel **subprocess writes to stderr — inherited onto the pty — which corrupts the
+> alternate screen** (a real defect; you test it on purpose in §6-J). The `remote: {driver: null}`
+> override above turns it off so §6-C…L judge the viewer, not the leak. Confirm `imp config` shows
+> the channel `(available)`, not `(enabled)`, before the clean pass.
 
 ---
 
@@ -224,6 +233,19 @@ nothing). `snapshot()` if judging color.
 Change (banner names the same `#slug`/id, not `nothing to resume`, not a restart); the replayed
 history renders **expanded and scrollable** (PageUp works immediately); then live events fold in
 on top. Note header parity with the live run.
+
+### J — remote-channel non-interference (regression — alt-screen integrity)
+The `--tui` path builds a `RemoteChannel` when `remote.driver` is configured; that channel's
+**subprocess stderr must not reach the alternate screen.** Re-enable a channel in a throwaway
+config and confirm the alt-screen stays clean:
+```bash
+printf 'providers: [claude_code]\ntheme: dark\nremote:\n  driver: telegram\n' > "$WT/.imp/config.yaml"
+```
+`start` `imp new --tui` (no valid token needed — a failing poll is the stress). **Expected:** the
+viewer renders cleanly; **no** `imp-telegram: …` / channel stderr lines appear on the alt-screen,
+no garbled/overlapping body, the status bar stays the last line. If channel diagnostics land on
+the screen, that's a defect (the subprocess stderr is inherited onto the pty instead of being
+captured/routed). Restore `remote: {driver: null}` afterward.
 
 ### K — non-tty fallback (crit 7)
 Pipe stdout so imp sees a non-tty, while stdin stays the tty:
