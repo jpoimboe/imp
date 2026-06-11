@@ -13,8 +13,16 @@ from typing import Any
 
 
 def ev(eid: str, etype: str, agent_id: str | None = None, **payload: Any) -> dict[str, Any]:
-    """An events.jsonl-shaped event dict: {id, agent_id, type, payload}."""
-    return {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
+    """An events.jsonl-shaped event dict: {id, agent_id, type, payload}.
+
+    If a `timestamp` keyword is provided it is hoisted to the top-level field
+    (where the real events.jsonl places it) and removed from the payload dict.
+    """
+    ts = payload.pop("timestamp", None)
+    event: dict[str, Any] = {"id": eid, "agent_id": agent_id, "type": etype, "payload": payload}
+    if ts is not None:
+        event["timestamp"] = ts
+    return event
 
 
 # A minimal change -> step (phase derived) -> thinking -> complete sequence.

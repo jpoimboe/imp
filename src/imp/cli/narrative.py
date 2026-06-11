@@ -331,6 +331,9 @@ class NarrativeBuilder:
         # _awaiting_reply, handed to the answering user_message as its rendered
         # question line (M3). Reset to "" when consumed.
         self._pending_question = ""
+        # Unresolved wait_for_user calls: id → that call's input.prompt. Drives
+        # the §1 orphan-result net and call-keyed question attribution (I4).
+        self._pending_wfu: dict[str, str] = {}
 
     # -- public API -----------------------------------------------------------
     @property
@@ -799,9 +802,12 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
     burst = _ensure_burst(self)
     if burst.start_ts is None:
         burst.start_ts = event.get("timestamp")  # burst clock starts at first call
-    burst.calls.append(ToolCall(
+    call = ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
-        input=p.get("input") or {}, call_ts=event.get("timestamp")))
+        input=p.get("input") or {}, call_ts=event.get("timestamp"))
+    burst.calls.append(call)
+    if call.name == "wait_for_user":
+        self._pending_wfu[call.call_id] = str((call.input or {}).get("prompt", ""))
 
 
 def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
@@ -831,43 +837,80 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
 
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
+    ts = event.get("timestamp")
+    is_error = bool(p.get("error", False))
+    footer = _format_citations_footer(p.get("citations"))
+    summary = _summarize_result(p.get("content"))
+
     # Closing a subagent? (parent `task` tool_result carries the block id.)
     fold = self._open_sub_by_block.pop(rid, None)
     if fold is not None:
-        _close_subagent_fold(fold, p, event.get("timestamp"))
+        _close_subagent_fold(fold, p, ts)
         return
+
+    pending_prompt = self._pending_wfu.get(rid)
+
     # Normal burst result: pair with the matching open call.
-    footer = _format_citations_footer(p.get("citations"))
     burst = self._current_burst
     if burst is not None:
-        burst.end_ts = event.get("timestamp")    # advance the burst clock
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
-                call.result = _summarize_result(p.get("content"))
+                if call.name == "wait_for_user":
+                    self._pending_wfu.pop(rid, None)
+                    if is_error:
+                        # Failed dispatch: keep the call (renders as failed per §2),
+                        # no split, no turn; the solicit is over so consume flags.
+                        call.result = summary
+                        call.citations_footer = footer
+                        call.is_error = True
+                        self._awaiting_reply = False
+                        self._pending_question = ""
+                        return
+                    _synthesize_wfu_turn(
+                        self, text=summary,
+                        question=str((call.input or {}).get("prompt", "")),
+                        answered_call=call)
+                    return
+                # Non-wfu pairing: this turn actually ran → advance the clock.
+                burst.end_ts = ts
+                call.result = summary
                 call.citations_footer = footer
-                call.is_error = bool(p.get("error", False))
+                call.is_error = is_error
                 return
-    # §11: an unmatched result with an open subagent fold is the `task` close whose
-    # block id never matched the (empty / mismatched) open key. Only treat it as a
-    # fold-close when no open burst call could have been the real target — otherwise
-    # a stale/duplicate non-task result could mis-close a live fold. Single-level
-    # routing means at most one fold is open, so close the most-recently opened one.
+
+    # Pending-id net — BEFORE the fold-close fallthrough (load-bearing order).
+    if pending_prompt is not None:
+        self._pending_wfu.pop(rid, None)
+        if is_error:
+            # Error-shaped result matching a pending id that missed pairing →
+            # bypass fold-close, route to the true-orphan branch, no turn.
+            b = _ensure_burst(self)
+            b.end_ts = ts
+            b.calls.append(ToolCall(
+                call_id=rid, name="tool", input={}, result=summary,
+                citations_footer=footer, is_error=True, call_ts=ts))
+            self._awaiting_reply = False
+            self._pending_question = ""
+            return
+        _synthesize_wfu_turn(self, text=summary, question=pending_prompt,
+                             answered_call=None)
+        return
+
+    # §11 fold-close fallthrough (unmatched result; open fold; no open burst call).
     burst_has_open_call = (
         self._current_burst is not None
-        and any(c.result is None for c in self._current_burst.calls)
-    )
+        and any(c.result is None for c in self._current_burst.calls))
     if self._open_sub_by_block and not burst_has_open_call:
-        _, fold = self._open_sub_by_block.popitem()   # LIFO; dicts preserve order
-        _close_subagent_fold(fold, p, event.get("timestamp"))
+        _, fold = self._open_sub_by_block.popitem()
+        _close_subagent_fold(fold, p, ts)
         return
-    # Orphan result (malformed log): start/extend a burst with a "tool" entry.
+
+    # True orphan (malformed log): the burst that owns the entry advances.
     burst = _ensure_burst(self)
+    burst.end_ts = ts
     burst.calls.append(ToolCall(
-        call_id=rid, name="tool", input={},
-        result=_summarize_result(p.get("content")),
-        citations_footer=footer,
-        is_error=bool(p.get("error", False)),
-        call_ts=event.get("timestamp")))
+        call_id=rid, name="tool", input={}, result=summary,
+        citations_footer=footer, is_error=is_error, call_ts=ts))
 
 
 def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -934,6 +977,36 @@ def _summarize_result(content: Any) -> str:
         # surfaced as [<type>] tags rather than silently dropped.
         return "".join(_flatten_block(b) for b in content)
     return str(content)      # safety net for any other shape (unchanged)
+
+
+def _synthesize_wfu_turn(self: NarrativeBuilder, *, text: str, question: str,
+                         answered_call: ToolCall | None) -> None:
+    """Split the open burst and append the synthesized user turn (I1/I3). Child
+    order: [closed burst, user turn, fresh open burst]. Carries unresulted
+    siblings (result is None — including killed-unresulted) into the fresh burst,
+    whose start_ts is the earliest carried call_ts. No carried siblings → no
+    fresh burst; _current_burst becomes None. Consumes the awaiting flags."""
+    burst = self._current_burst
+    self._current_burst = None
+    carried: list[ToolCall] = []
+    if burst is not None:
+        if answered_call is not None and answered_call in burst.calls:
+            burst.calls.remove(answered_call)
+        carried = [c for c in burst.calls if c.result is None]
+        burst.calls = [c for c in burst.calls if c.result is not None]
+    # Consume the awaiting flags (mirrors _h_user_message) and dedup the question
+    # against the immediately-preceding prose turn.
+    self._awaiting_reply = False
+    self._pending_question = ""
+    q = question if (question and question.strip() != _last_prose_text(self)) else ""
+    self._append(UserMessageNode(text=text, interactive=True, pending_question=q))
+    if carried:
+        fresh = ToolBurstFold()
+        cts = [c.call_ts for c in carried if c.call_ts]
+        fresh.start_ts = min(cts) if cts else None
+        fresh.calls = carried
+        self._current_burst = fresh
+        self._append(fresh)
 
 
 NarrativeBuilder._HANDLERS["tool_call"] = _h_tool_call

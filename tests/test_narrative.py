@@ -1031,3 +1031,115 @@ def test_activity_to_text_flattens_segments() -> None:
         "3 calls · bash x"
     assert nv.activity_to_text(nv.Activity(label="thinking")) == "thinking"
     assert nv.activity_to_text(None) == ""
+
+
+def _wfu_step(b):
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+
+
+def _step_node(b):
+    # A step_started carrying a `phase` wraps the StepNode inside a PhaseNode
+    # (_h_step_started → _ensure_phase). So root.children[-1] is the PhaseNode and
+    # the StepNode — which owns the synthesized UserMessageNode / ToolBurstFold
+    # children — is its sole child. This mirrors the file's existing convention
+    # (tests/test_narrative.py uses tree.root.children[0].children[0]).
+    return b.tree.root.children[-1].children[0]
+
+
+def test_wfu_pairing_synthesizes_user_turn_and_splits_burst():       # [I1][I2][I3]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "continue?"}, timestamp="2026-06-10T00:00:01"))
+    b.add(ev("t2", "tool_result", agent_id="a", id="w1", content="yes please"))
+    step = _step_node(b)
+    kids = step.children
+    # child order: closed burst (now empty → still present), user turn, no fresh burst
+    user = next(k for k in kids if isinstance(k, nv.UserMessageNode))
+    assert user.interactive is True
+    assert user.text == "yes please"
+    assert user.pending_question == "continue?"
+    assert b.current_burst is None        # no siblings → no fresh burst, cursor cleared
+
+
+def test_wfu_pairing_carries_unresulted_sibling_into_fresh_burst():  # [I2][I3]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t0", "tool_call", agent_id="a", id="b1", name="bash",
+             input={"command": "sleep 40"}, timestamp="2026-06-10T00:00:01"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "ok?"}, timestamp="2026-06-10T00:00:02"))
+    b.add(ev("t2", "tool_result", agent_id="a", id="w1", content="ok"))
+    fresh = b.current_burst
+    assert fresh is not None
+    assert [c.call_id for c in fresh.calls] == ["b1"]      # sibling carried
+    assert fresh.start_ts == "2026-06-10T00:00:01"          # earliest carried call_ts
+
+
+def test_wfu_error_shaped_result_does_not_synthesize():             # [I1]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "ok?"}))
+    b.add(ev("t2", "tool_result", agent_id="a", id="w1",
+             content="AssertionError: boom", error=True))
+    step = _step_node(b)
+    assert not any(isinstance(k, nv.UserMessageNode) for k in step.children)
+    call = b.current_burst.calls[0]
+    assert call.is_error is True and call.result == "AssertionError: boom"
+
+
+def test_wfu_end_ts_advances_only_on_non_wfu_pairing():             # [I2]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t0", "tool_call", agent_id="a", id="b1", name="bash", input={},
+             timestamp="2026-06-10T00:00:01"))
+    b.add(ev("r0", "tool_result", agent_id="a", id="b1", content="ok",
+             timestamp="2026-06-10T00:00:05"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "ok?"}, timestamp="2026-06-10T00:00:06"))
+    b.add(ev("r1", "tool_result", agent_id="a", id="w1", content="yes",
+             timestamp="2026-06-10T00:45:00"))
+    closed = next(k for k in _step_node(b).children
+                  if isinstance(k, nv.ToolBurstFold))
+    assert closed.end_ts == "2026-06-10T00:00:05"   # the human's wait is NOT billed
+
+
+def test_wfu_orphan_net_synthesizes_when_pairing_missed():          # [I1][I3]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "ok?"}, timestamp="2026-06-10T00:00:01"))
+    # a prose llm_response flushes the burst, so the wfu call's result misses pairing
+    b.add(ev("p1", "llm_response", agent_id="a",
+             raw={"content": [{"type": "text", "text": "thinking"}]}, usage={}))
+    b.add(ev("r1", "tool_result", agent_id="a", id="w1", content="yes"))
+    step = _step_node(b)
+    user = next(k for k in step.children if isinstance(k, nv.UserMessageNode))
+    assert user.text == "yes" and user.interactive is True
+    assert "w1" not in b._pending_wfu        # id discarded after net synthesis
+
+
+def test_double_wfu_each_synthesis_gets_own_question():             # [I1][I4] double-wfu
+    """Two sequential wait_for_user calls in the same burst; each reply attributed
+    to its own call's prompt. I1 (no reply lost), I4 (per-call question attribution)."""
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t0", "tool_call", agent_id="a", id="b1", name="bash",
+             input={"command": "ls"}, timestamp="2026-06-10T00:00:01"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "Q1?"}, timestamp="2026-06-10T00:00:02"))
+    b.add(ev("r1", "tool_result", agent_id="a", id="w1", content="A1"))
+    # After first synthesis: fresh burst carries bash(b1); w2 is then added to it
+    b.add(ev("t2", "tool_call", agent_id="a", id="w2", name="wait_for_user",
+             input={"prompt": "Q2?"}, timestamp="2026-06-10T00:00:03"))
+    b.add(ev("r2", "tool_result", agent_id="a", id="w2", content="A2"))
+    # Two UserMessageNodes must exist; each attributed to its own prompt
+    step = _step_node(b)
+    users = [k for k in step.children if isinstance(k, nv.UserMessageNode)]
+    assert len(users) == 2                          # [I1] neither reply lost
+    assert users[0].text == "A1" and users[0].pending_question == "Q1?"   # [I4]
+    assert users[1].text == "A2" and users[1].pending_question == "Q2?"   # [I4]
+    # bash is still unresulted; it should be in the final fresh burst
+    assert b.current_burst is not None
+    assert b.current_burst.calls[0].call_id == "b1"
