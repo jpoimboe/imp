@@ -418,7 +418,8 @@ def _wrap_one(
                         err_text = f"{type(exc).__name__}: {exc}"
                         ctx.event_log.append_tool_result(
                             agent_id=state.agent_id,
-                            block=ToolResultBlock(minted, err_text, is_error=True))
+                            block=ToolResultBlock(minted, err_text, is_error=True),
+                            id_ns="block")
                     raise
                 if ctx.event_log is not None:
                     # Success close: the canonical, outcome-carrying tool_result for
@@ -427,7 +428,8 @@ def _wrap_one(
                     # result (the toolu_… one) so this minted one stays canonical.
                     ctx.event_log.append_tool_result(
                         agent_id=state.agent_id,
-                        block=ToolResultBlock(minted, result, is_error=False))
+                        block=ToolResultBlock(minted, result, is_error=False),
+                        id_ns="block")
                 return _tool_response(result, is_error=False)
             if name == "complete_step":
                 # Capture the args; return a "success" body so claude proceeds

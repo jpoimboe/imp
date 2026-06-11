@@ -359,3 +359,90 @@ def test_cc_task_annotation_derived_from_allowlist(
         assert wrapped.annotations is None
     finally:
         reset_parallelism_cache()
+
+
+def _sub_def() -> AgentDef:
+    return AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("sub.md"), line=1)),
+        prompt_template_source="hi", source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1))
+
+
+@pytest.mark.anyio
+async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> None:
+    # AC38 (production): _impl's canonical SUCCESS task tool_result (keyed on the
+    # minted non-empty block id) stamps id_ns="block".
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _FakeRunner:
+        async def run(self, inv):
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+    assert json.loads(out["content"][0]["text"]) == {"status": "Success"}
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is False
+    assert results[0]["payload"]["id_ns"] == "block"
+
+
+@pytest.mark.anyio
+async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None:
+    # AC38 (production): _impl's error-close task tool_result (dispatch raises an
+    # ordinary exception) also stamps id_ns="block" on the same minted block id.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _BoomRunner:
+        async def run(self, inv):
+            raise ValueError("kaboom")
+            yield  # pragma: no cover  (make it an async generator)
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _BoomRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+    assert out.get("isError") is True
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is True
+    assert results[0]["payload"]["id_ns"] == "block"
