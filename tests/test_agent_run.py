@@ -584,3 +584,101 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
         "<imp:begin/>")
     assert inv2.system_prompt.index("<imp:begin/>") < inv2.system_prompt.index(
         "complete_step")
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_frozen_during_solicit_does_not_stall(monkeypatch) -> None:
+    """While solicit_active is True, a pull that blocks far past the window is
+    NOT torn down: the deadline is frozen to inf. A single begin call with NO
+    further activity, then a 4x-window sleep, distinguishes the inf-freeze from a
+    one-shot now+window bump (which would expire at ~1 window and stall)."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_solicit_watchdog()   # freeze (single call, no further activity)
+        await anyio.sleep(0.8)           # 4x window, silent
+        coord.end_solicit_watchdog()
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is False
+    assert interrupted["called"] is False
+    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_stalls_when_not_soliciting(monkeypatch) -> None:
+    """Genuine stalls are unaffected: with solicit_active False, an agent silent
+    past the window (no activity) is still torn down as a stall."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        await anyio.sleep(3600)          # never solicits, never signals activity
+        yield {"type": "agent_output", "payload": {}}  # unreached
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is True
+    assert interrupted["called"] is True
+    assert events == []
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_restores_finite_window_after_end(monkeypatch) -> None:
+    """end_solicit_watchdog restores an ENFORCEABLE finite deadline: after a
+    frozen interval ends, a subsequent over-window silence stalls again. Guards
+    against end leaving the deadline frozen at inf forever."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_solicit_watchdog()
+        await anyio.sleep(0.4)           # frozen: survives 2x window
+        coord.end_solicit_watchdog()     # restore finite window
+        await anyio.sleep(3600)          # now silent past the window -> must stall
+        yield {"type": "agent_output", "payload": {}}  # unreached
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is True
+    assert interrupted["called"] is True
+    assert events == []

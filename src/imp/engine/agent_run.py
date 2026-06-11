@@ -21,6 +21,7 @@ import it.
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -135,9 +136,20 @@ async def _pull_with_inactivity_watchdog(
                 if add_listener is not None:
                     def _bump(_scope: Any = scope) -> None:
                         # Read the module global at call time so a monkeypatched
-                        # window (tests) and the live value agree.
-                        _scope.deadline = (
-                            anyio.current_time() + AGENT_INACTIVITY_TIMEOUT_S)
+                        # window (tests) and the live value agree. While an
+                        # attended agent is blocked awaiting a human reply, FREEZE
+                        # the in-flight deadline to inf (disabling this fail_after
+                        # entirely) instead of a finite now+window: there is no
+                        # periodic activity during the blocked await, so a one-shot
+                        # finite bump would expire one window later and re-introduce
+                        # the false kill. end_solicit_watchdog's note_activity then
+                        # re-fires this with solicit_active False, restoring a fresh
+                        # finite window.
+                        if getattr(coordinator, "solicit_active", False):
+                            _scope.deadline = math.inf
+                        else:
+                            _scope.deadline = (
+                                anyio.current_time() + AGENT_INACTIVITY_TIMEOUT_S)
                     bump = add_listener(_bump)
                 try:
                     ev = await gen.__anext__()
