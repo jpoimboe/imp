@@ -1075,3 +1075,68 @@ async def test_receive_loop_sweeps_bg_per_message(
     events = [e async for e in runner.run(_inv(tmp_path))]
     assert events[-1]["type"] == "agent_output"
     assert calls["n"] >= 2          # at least one sweep per received message
+
+
+@pytest.mark.anyio
+async def test_awaiting_user_reraise_deferred_until_inflight_drains(
+        tmp_path: Path) -> None:
+    # AC26: a wait_for_user pause captured while a sibling task is in flight is NOT
+    # re-raised at the assistant message; the gate defers it (inflight==1), the run
+    # proceeds to ResultMessage, and the stream-end fallback drains then re-raises.
+    # Falsifiable: WITHOUT the gate the unconditional raise fires at the assistant
+    # message and ResultMessage is never consumed, so saw_result stays False.
+    import asyncio
+
+    import imp.providers.claude_code as cc
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    (tmp_path / "art").mkdir()
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, tools=frozenset({"complete_step", "wait_for_user"}),
+               event_log=log)
+
+    # Capture the _RunState run() constructs so the message hook can drive its
+    # inflight counter (the fake client bypasses MCP, so _impl never runs here).
+    captured = cc._RunState()
+    orig_runstate = cc._RunState
+    orig_s2i = cc._sdk_message_to_imp
+    saw_result = {"v": False}
+
+    def fake_s2i(sdk_msg):  # type: ignore[no-untyped-def]
+        res = orig_s2i(sdk_msg)
+        tn = type(sdk_msg).__name__
+        if tn == "AssistantMessage":
+            captured.inflight_task_dispatches = 1   # sibling in flight at the gate
+        if tn == "ResultMessage":
+            saw_result["v"] = True
+
+            async def _settle() -> None:
+                await asyncio.sleep(0)
+                captured.inflight_task_dispatches = 0   # sibling settles
+
+            asyncio.get_running_loop().create_task(_settle())
+        return res
+
+    scripted = [
+        assistant(text("need a decision"),
+                  tool_use("wfu1", "wait_for_user", {"prompt": "merge?"})),
+        result()]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory, user_input_fn=None)
+
+    cc._RunState = lambda: captured          # type: ignore[assignment]
+    cc._sdk_message_to_imp = fake_s2i        # type: ignore[assignment]
+    try:
+        with pytest.raises(AwaitingUserInput) as ei:
+            async for _ev in runner.run(inv):
+                pass
+    finally:
+        cc._RunState = orig_runstate         # type: ignore[assignment]
+        cc._sdk_message_to_imp = orig_s2i    # type: ignore[assignment]
+    assert ei.value.prompt == "merge?"
+    assert saw_result["v"] is True           # gate deferred past the assistant turn
+    assert captured.inflight_task_dispatches == 0   # fallback drained before raising

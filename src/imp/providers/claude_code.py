@@ -23,6 +23,7 @@ SDK `_internal/transport/subprocess_cli.py`).
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import json
@@ -1285,10 +1286,19 @@ class ClaudeCodeAgentRunner:
                     # persisted transcript ends at the dangling wait_for_user
                     # tool_use with NO following tool_result (the real human reply
                     # on an attended resume resolves it).
-                    if state.awaiting_user:
+                    if state.awaiting_user and state.inflight_task_dispatches == 0:
                         raise AwaitingUserInput(state.awaiting_prompt)
 
                     if cls_name == "ResultMessage":
+                        # Stream-end drain-then-raise fallback (design §2 drain
+                        # gate): the turn ended with a wait_for_user pause captured
+                        # while a sibling task was in flight, so the in-loop gate
+                        # above deferred the re-raise. Await the in-flight drain,
+                        # then re-raise so run() pauses before returning.
+                        if state.awaiting_user:
+                            while state.inflight_task_dispatches > 0:
+                                await asyncio.sleep(0)
+                            raise AwaitingUserInput(state.awaiting_prompt)
                         # Loop guard: ResultMessage is the true end-of-turn
                         # marker, so flush the accumulated turn here EXACTLY ONCE
                         # (a turn ending in complete_step set pending_complete →
