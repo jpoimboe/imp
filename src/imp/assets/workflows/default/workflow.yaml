@@ -20,6 +20,10 @@ vars:
   plan_minors_integrated: {type: bool, default: false}
   panel_done:             {type: bool, default: false}
   integration_needs_review: {type: bool, default: false}
+  spec_confirm:           {type: bool, default: true}    # confirm-gate enable
+  spec_unseen_changes:    {type: bool, default: false}   # some turn changed the spec without user direction
+  spec_gate_pending:      {type: bool, default: false}   # a confirm resume is in flight (one-shot grant)
+  spec_gate_passed:       {type: bool, default: false}   # gated confirm accepted; route past review (one-shot)
 
 defaults:
   max_retries: 3
