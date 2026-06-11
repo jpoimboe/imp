@@ -21,6 +21,7 @@ import it.
 from __future__ import annotations
 
 import contextlib
+import math
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -257,9 +258,20 @@ async def _pull_with_inactivity_watchdog(
                 if add_listener is not None:
                     def _bump(_scope: Any = scope) -> None:
                         # Read the module global at call time so a monkeypatched
-                        # window (tests) and the live value agree.
-                        _scope.deadline = (
-                            anyio.current_time() + AGENT_INACTIVITY_TIMEOUT_S)
+                        # window (tests) and the live value agree. While an
+                        # attended agent is blocked awaiting a human reply, FREEZE
+                        # the in-flight deadline to inf (disabling this fail_after
+                        # entirely) instead of a finite now+window: there is no
+                        # periodic activity during the blocked await, so a one-shot
+                        # finite bump would expire one window later and re-introduce
+                        # the false kill. end_solicit_watchdog's note_activity then
+                        # re-fires this with solicit_active False, restoring a fresh
+                        # finite window.
+                        if getattr(coordinator, "solicit_active", False):
+                            _scope.deadline = math.inf
+                        else:
+                            _scope.deadline = (
+                                anyio.current_time() + AGENT_INACTIVITY_TIMEOUT_S)
                     bump = add_listener(_bump)
                 try:
                     ev = await gen.__anext__()
@@ -326,7 +338,17 @@ async def _resolve_wait_reply(
         return joined
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
-        raw = await raw
+        # Resume-side blocked solicit (all four providers route here): freeze the
+        # inactivity watchdog for the duration of the await, symmetrical with
+        # wait_for_user. The finally ALWAYS restores it. Guard for legacy/test
+        # coordinators (None) with no watchdog to suspend.
+        if coordinator is not None:
+            coordinator.begin_solicit_watchdog()
+        try:
+            raw = await raw
+        finally:
+            if coordinator is not None:
+                coordinator.end_solicit_watchdog()
     return str(raw)
 
 
