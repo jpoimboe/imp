@@ -87,7 +87,7 @@ def _help(out: Callable[[str], None]) -> None:
 
 async def ask_line_with_slash(
     prompt: Any, status: Any, change: Any, *, color: bool = False, width: int = 80,
-    coord: Any = None,
+    coord: Any = None, driver: Any = None,
 ) -> str:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> returns the
@@ -102,6 +102,9 @@ async def ask_line_with_slash(
     `coord` (the run's InterruptCoordinator) wraps the prompt turn in
     `coord.tty_quiesced()` so the ESC reader releases /dev/tty for
     prompt_toolkit; None (tests / non-interactive) = no-op.
+
+    `driver` (the run's LiveDriver) is called for prepare_for_prompt before each
+    prompt iteration and flush_deferred once in the finally on solicit exit.
 
     Shared by the run and resume paths so the slash/skills logic exists once."""
 
@@ -126,24 +129,34 @@ async def ask_line_with_slash(
     # every return/exception path, including the at-prompt KeyboardInterrupt.
     try:
         async with _quiesce():
-            while True:
-                # Keep the whole turn inside status.suspend(): /help, /skills, and
-                # not-found messages print via handle_slash_line, and the live status
-                # display must stay suspended while they do, or it interleaves/clobbers
-                # them before the loop re-prompts.
-                with status.suspend():
-                    line: str = await prompt.ask_async()
-                    if line.strip().lower() in ("exit", "quit"):
-                        # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
-                        # run loop's existing EOFError handler (cli/main.py) pauses.
-                        raise EOFError
-                    if not is_slash_command(line):
-                        return line
-                    result = handle_slash_line(line, change=change, output_fn=print)
-                    if result is REPROMPT:
-                        continue
-                    assert isinstance(result, str)  # handle_slash_line returns str (skill body)
-                    return result
+            # Hoist status.suspend() across the WHOLE solicit loop — one suspend
+            # entry/exit per user turn, not per iteration. /help, /skills, and
+            # not-found messages print via handle_slash_line, and the live status
+            # display must stay suspended while they do, or it interleaves/clobbers
+            # them before the loop re-prompts.
+            with status.suspend():
+                try:
+                    while True:
+                        if driver is not None:
+                            driver.prepare_for_prompt()
+                        line: str = await prompt.ask_async()
+                        if line.strip().lower() in ("exit", "quit"):
+                            # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
+                            # run loop's existing EOFError handler (cli/main.py) pauses.
+                            raise EOFError
+                        if not is_slash_command(line):
+                            return line
+                        result = handle_slash_line(line, change=change, output_fn=print)
+                        if result is REPROMPT:
+                            print("")  # one blank between slash output and the reprompt
+                            continue
+                        assert isinstance(result, str)  # handle_slash_line returns str (skill body)
+                        return result
+                finally:
+                    # Flush deferred live-driver blocks exactly once on solicit exit
+                    # (normal return, EOFError, or any exception).
+                    if driver is not None:
+                        driver.flush_deferred()
     finally:
         # prompt_toolkit deleted SIGINT on prompt exit — restore it so a later
         # mid-run Ctrl-C is still delivered to the coordinator (see above).

@@ -117,7 +117,7 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
 
 
 def _build_interactive_input(
-    change: Change, status: LiveStatus, coord: Any, esc_reader: Any,
+    change: Change, status: LiveStatus, coord: Any, esc_reader: Any, driver: Any,
 ) -> tuple[ReplyInterjectRouter, Callable[[], Awaitable[str]]]:
     """Build the interactive input plumbing shared by `new` and `resume` (Task 11).
 
@@ -162,7 +162,7 @@ def _build_interactive_input(
             return await ask_line_with_slash(
                 prompt, status, change,
                 color=should_use_color(sys.stdout), width=_term_width(),
-                coord=coord)
+                coord=coord, driver=driver)
         finally:
             router.end_solicit()
 
@@ -376,7 +376,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 # also captures interject lines; the solicit/reply prompt is the
                 # router-flagged reply_input_fn. See _build_interactive_input.
                 _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader)
+                    change, status, coord, esc_reader, driver)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
@@ -580,7 +580,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 # Task 11: ESC reader captures interjects; router-flagged prompt is
                 # the reply channel (see _build_interactive_input).
                 _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader)
+                    change, status, coord, esc_reader, driver)
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(coord.run_signal_receiver)
