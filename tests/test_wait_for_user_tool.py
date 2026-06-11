@@ -107,3 +107,56 @@ async def test_non_interactive_propagates_reply_fn_pause(tmp_path):
     tool = make_wait_for_user_tool()
     with pytest.raises(AwaitingUserInput):
         await tool.async_invoke(ctx, {"prompt": "x"})
+
+
+class _RecordingCoord:
+    """Records begin/end_solicit_watchdog calls and tracks the active flag, so a
+    user_input_fn can assert the watchdog is frozen DURING its await."""
+
+    def __init__(self):
+        self.events = []
+        self.active = False
+
+    def drain_interject(self):
+        return None  # no pending interject -> fall through to solicit
+
+    def begin_solicit_watchdog(self):
+        self.active = True
+        self.events.append("begin")
+
+    def end_solicit_watchdog(self):
+        self.active = False
+        self.events.append("end")
+
+
+@pytest.mark.anyio
+async def test_wait_for_user_brackets_await_with_begin_end(tmp_path):
+    coord = _RecordingCoord()
+
+    async def _ainput(_q):
+        assert coord.active is True   # watchdog frozen DURING the blocked await
+        return "ship it"
+
+    ctx = _ctx(tmp_path, user_input_fn=_ainput, non_interactive=False,
+               coordinator=coord)
+    tool = make_wait_for_user_tool()
+    result = await tool.async_invoke(ctx, {"prompt": "x"})
+    assert result == "ship it"
+    assert coord.events == ["begin", "end"]
+    assert coord.active is False      # restored on normal return
+
+
+@pytest.mark.anyio
+async def test_wait_for_user_restores_watchdog_on_cancel(tmp_path):
+    coord = _RecordingCoord()
+
+    async def _ainput(_q):
+        raise KeyboardInterrupt       # SIGINT/escalation tore the prompt down
+
+    ctx = _ctx(tmp_path, user_input_fn=_ainput, non_interactive=False,
+               coordinator=coord)
+    tool = make_wait_for_user_tool()
+    with pytest.raises(AwaitingUserInput):
+        await tool.async_invoke(ctx, {"prompt": "x"})
+    assert coord.events == ["begin", "end"]   # finally restored it on the exception
+    assert coord.active is False

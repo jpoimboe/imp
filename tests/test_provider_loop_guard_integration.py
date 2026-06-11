@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from imp.agents.loop_guard import DEFAULT_NOPROGRESS_N
+from imp.agents.loop_guard import DEFAULT_NOPROGRESS_N, DEFAULT_REPEAT_K
 from imp.engine.state import InMemoryEventLog
 from imp.providers.anthropic import AnthropicAgentRunner
 from tests.anthropic_fakes import FakeAsyncAnthropic, response, text, tool_use
@@ -72,3 +72,22 @@ async def test_anthropic_healthy_run_never_trips(tmp_path) -> None:
     assert events[-1]["type"] == "agent_output"
     assert not any(e["type"] == "error" and e["payload"].get("category") == "loop"
                    for e in events)
+
+
+async def test_anthropic_failed_tool_preview_reaches_full_summary(tmp_path) -> None:
+    (tmp_path / "art").mkdir()
+    # K identical failing read_file turns → repeated_failure; the failed result's
+    # text must populate result_preview → full_summary = "failed read_file: <preview>".
+    fake = FakeAsyncAnthropic([
+        response(tool_use(f"r{i}", "read_file", {"path": "does-not-exist.txt"}))
+        for i in range(DEFAULT_REPEAT_K + 1)])
+    log = InMemoryEventLog()
+    runner = AnthropicAgentRunner(model_name="claude-sonnet-4-6",
+                                  client_factory=lambda: fake)
+    inv = _inv(tmp_path, event_log=log)
+    events = [e async for e in runner.run(inv)]
+    final = events[-1]
+    assert final["payload"]["kind"] == "repeated_failure"
+    fs = final["payload"]["detail"]["full_summary"]
+    assert fs.startswith("failed read_file: ")   # colon proves preview populated
+    assert len(fs) > len("failed read_file: ")

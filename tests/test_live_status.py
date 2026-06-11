@@ -28,7 +28,7 @@ def test_update_writes_carriage_return_and_erase_on_tty() -> None:
     s = _TTY()
     ls = LiveStatus(s, now=now)
     ls.update(lambda frame, elapsed: f"frame={frame} elapsed={int(elapsed)}")
-    assert s.getvalue() == "\r\x1b[Kframe=0 elapsed=0"
+    assert s.getvalue() == "\nframe=0 elapsed=0"
 
 
 def test_tick_advances_frame_and_elapsed() -> None:
@@ -76,8 +76,8 @@ def test_suspend_clears_then_yields() -> None:
     ls = LiveStatus(s, now=now)
     ls.update(lambda f, e: "busy")
     with ls.suspend():
-        # on enter the line is erased; the trailing write is the erase sequence
-        assert s.getvalue().endswith("\r\x1b[K")
+        # on enter the line is erased (plus cursor-up onto the status-owned blank)
+        assert "\x1b[K" in s.getvalue() and "\x1b[1A" in s.getvalue()
 
 
 def test_suspend_suppresses_concurrent_tick_draw() -> None:
@@ -110,3 +110,57 @@ def test_restart_span_resets_elapsed() -> None:
     clock["t"] = 135.0          # advance 5s past the restart point
     ls.update(lambda frame, elapsed: seen.append(elapsed) or "x")
     assert seen[-1] == 5.0      # elapsed is from the new t0 (not 35.0 from the original)
+
+
+def test_first_draw_after_hidden_writes_newline_then_status() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: "ready")
+    assert out.getvalue().startswith("\n")          # status-owned blank above
+    assert "ready" in out.getvalue()
+
+
+def test_hide_from_visible_erases_then_cursor_up() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: "ready")
+    out.truncate(0)
+    out.seek(0)
+    s.hide()
+    assert "\x1b[K" in out.getvalue()               # erase the status row
+    assert "\x1b[1A" in out.getvalue()              # then climb onto the blank
+
+
+def test_double_hide_does_not_cursor_up() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 80
+    s.update(lambda f, e: "ready")
+    s.hide()
+    out.truncate(0)
+    out.seek(0)
+    s.hide()                                         # already hidden → strict no-op
+    assert out.getvalue() == ""
+
+
+def test_status_clipped_to_width_minus_one() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    s._width_fn = lambda: 6
+    s.update(lambda f, e: "abcdefghij")
+    assert "abcd…" in out.getvalue()           # 5 cols = width-1
+
+
+def test_narrowing_from_visible_abandons_without_cursor_up() -> None:
+    out = _TTY()
+    s = LiveStatus(out, now=lambda: 0.0)
+    widths = iter([20, 4])
+    s._width_fn = lambda: next(widths)
+    s.update(lambda f, e: "first frame here")       # drawn at width 20
+    out.truncate(0)
+    out.seek(0)
+    s.update(lambda f, e: "second")                 # width now 4 → narrowing
+    assert "\x1b[1A" not in out.getvalue()          # no cursor-up on narrowing
+    assert "\n" in out.getvalue()                   # fresh redraw: new blank + status below

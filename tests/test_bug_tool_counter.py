@@ -35,8 +35,8 @@ def test_consecutive_tools_accumulate_into_one_burst() -> None:
     for event in _events():
         builder.add(event)
         if event.get("type") == "tool_call":
-            activity = builder.current_activity() or ""
-            m = re.search(r"·\s*(\d+)\s*tools?", activity)
+            activity = nv.activity_to_text(builder.current_activity())
+            m = re.search(r"(\d+)\s*calls?", activity)
             if m:
                 max_count = max(max_count, int(m.group(1)))
 

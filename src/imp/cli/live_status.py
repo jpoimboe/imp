@@ -11,14 +11,32 @@ line. compose returning None means "nothing to show" (the line is erased)."""
 from __future__ import annotations
 
 import contextlib
+import re
+import shutil
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
+from unicodedata import east_asian_width
+
+from imp.cli import palette as pal
 
 _ERASE = "\r\x1b[K"     # carriage return + clear-to-end-of-line
 _DIM = "\x1b[2m"        # SGR 2 (dim)
 _RESET_SGR = "\x1b[0m"  # SGR 0 (reset all attributes)
 _ACK_MAX_WIDTH = 120    # clip the transient ack line so it never wraps
+
+
+def _term_width() -> int:
+    try:
+        return shutil.get_terminal_size().columns
+    except OSError:
+        return 80
+
+
+def _display_width(text: str) -> int:
+    """Escape-aware display column count for narrowing detection."""
+    visible = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return sum(2 if east_asian_width(ch) in ("W", "F") else 1 for ch in visible)
 
 
 class LiveStatus:
@@ -31,6 +49,8 @@ class LiveStatus:
         self._visible = False
         self._suspended = False
         self._frame = 0
+        self._prev_width: int | None = None     # display width of the last drawn frame
+        self._width_fn: Callable[[], int] = _term_width
 
     def update(self, compose: Callable[[int, float], str | None]) -> None:
         """Set/refresh the compose fn and redraw. Starts the session timer on the
@@ -118,12 +138,33 @@ class LiveStatus:
         if text is None:
             self._erase()
             return
-        self._stream.write(f"{_ERASE}{text}")
+        width = self._width_fn()
+        # Clip to width-1 (§5b): a status that fills the whole width can
+        # auto-wrap and resurrect committed-spinner artifact.
+        clipped = pal.clip_display(text, width - 1)
+        new_w = _display_width(clipped)
+        if self._visible and self._prev_width is not None and (width - 1) < self._prev_width:
+            # Narrowing transition: reflow-safe abandon. Erase current row only,
+            # do NOT cursor-up, mark hidden, redraw fresh below.
+            self._stream.write(_ERASE)
+            self._visible = False
+            self._prev_width = None
+        if self._visible:
+            # Already showing: rewrite in place on the same row.
+            self._stream.write(f"{_ERASE}{clipped}")
+        else:
+            # First draw after hidden: own the blank line, then status below it.
+            self._stream.write(f"\n{clipped}")
         self._stream.flush()
         self._visible = True
+        self._prev_width = new_w
 
     def _erase(self) -> None:
         if self._enabled and self._visible:
-            self._stream.write(_ERASE)
+            # Erase the status text, then climb onto the status-owned blank so
+            # the next printed block overwrites it. The cursor-up lives INSIDE the
+            # visibility guard — from the not-visible state this is a strict no-op.
+            self._stream.write(_ERASE + "\x1b[1A")
             self._stream.flush()
         self._visible = False
+        self._prev_width = None

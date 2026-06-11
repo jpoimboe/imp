@@ -61,7 +61,7 @@ def test_executor_reexports_agent_run_result() -> None:
 
 
 def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -> None:
-    from imp.engine.agent_run import build_agent_invocation
+    from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
 
     inv = build_agent_invocation(
         agent_def=_agent(), provider_name="anthropic", model_name="m",
@@ -74,8 +74,9 @@ def test_build_agent_invocation_appends_completion_instruction(tmp_path: Path) -
         change_state=None, first_event_parent_id="tc-1",
         resolved_tiers=None, coordinator=None, subagent_depth=2)
 
-    # System prompt = rendered body + the complete_step contract.
-    assert inv.system_prompt.startswith("RENDERED BODY")
+    # System prompt = base persona + rendered body + the complete_step contract.
+    assert inv.system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert "RENDERED BODY" in inv.system_prompt
     assert "complete_step" in inv.system_prompt
     # Non-interactive -> a nudge continuation is wired (omission #1/#2 closed).
     assert inv.continuation_fn is not None
@@ -94,7 +95,7 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
     # An agent holding `bash` gets the relative-paths note appended to its
     # body (between the rendered body and the completion contract), so every
     # bash-capable agent learns the rule without each prompt re-pasting it.
-    from imp.engine.agent_run import build_agent_invocation
+    from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
 
     inv = build_agent_invocation(
         agent_def=_agent(tools={"complete_step", "bash"}),
@@ -108,7 +109,8 @@ def test_build_agent_invocation_injects_bash_paths_note_when_bash_present(
         change_state=None, first_event_parent_id=None,
         resolved_tiers=None, coordinator=None)
 
-    assert inv.system_prompt.startswith("RENDERED BODY")
+    assert inv.system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert "RENDERED BODY" in inv.system_prompt
     assert "IMP_PROJECT_ROOT" in inv.system_prompt
     assert "relative to the project root" in inv.system_prompt
     # The note precedes the completion contract.
@@ -493,14 +495,42 @@ def _build_inv(tmp_path: Path, **kw):
     )
 
 
+def test_build_agent_invocation_prepends_base_persona(tmp_path: Path) -> None:
+    # The fresh-assembly branch puts the always-on base persona FIRST, then the
+    # rendered agent role, then bash note (iff bash), then the engine-seed note,
+    # then the completion instruction — in that exact order.
+    from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
+
+    inv = build_agent_invocation(
+        agent_def=_agent(tools={"complete_step", "bash"}),
+        provider_name="anthropic", model_name="m",
+        rendered_system_prompt="RENDERED BODY",
+        initial_messages=(), change_context=_cc(tmp_path),
+        user_chat_input_fn=None,
+        transcript_dir=tmp_path / "td", fs_permissions=(),
+        events_path=tmp_path / "e.jsonl", subagent_defs={}, tiers=(),
+        max_tool_calls=None, agent_id="step:p/s", event_log=None,
+        change_state=None, first_event_parent_id=None,
+        resolved_tiers=None, coordinator=None)
+
+    sp = inv.system_prompt
+    assert sp.startswith(_AGENT_BASE_PROMPT)
+    assert sp.index(_AGENT_BASE_PROMPT) < sp.index("RENDERED BODY")
+    assert sp.index("RENDERED BODY") < sp.index("IMP_PROJECT_ROOT")
+    assert sp.index("IMP_PROJECT_ROOT") < sp.index("<imp:begin/>")
+    assert sp.index("<imp:begin/>") < sp.index("complete_step")
+
+
 def test_build_invocation_override_is_used_verbatim(tmp_path: Path) -> None:
     inv = _build_inv(tmp_path, system_prompt_override="EXACT STORED PROMPT")
     assert inv.system_prompt == "EXACT STORED PROMPT"        # no notes appended
 
 
 def test_build_invocation_no_override_assembles_with_notes(tmp_path: Path) -> None:
+    from imp.engine.agent_run import _AGENT_BASE_PROMPT
     inv = _build_inv(tmp_path)
-    assert inv.system_prompt.startswith("BODY")
+    assert inv.system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert "BODY" in inv.system_prompt
     assert "Session start: `<imp:begin/>`" in inv.system_prompt   # seed note appended
 
 
@@ -541,7 +571,7 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
     """Every agent's system prompt carries the `<imp:begin/>` engine-seed note,
     regardless of whether it has the `bash` tool. The note sits between any
     body addenda and the completion contract."""
-    from imp.engine.agent_run import build_agent_invocation
+    from imp.engine.agent_run import _AGENT_BASE_PROMPT, build_agent_invocation
 
     # Without bash: still gets the engine-seed note.
     inv = build_agent_invocation(
@@ -559,8 +589,9 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
     assert "<imp:begin/>" in inv.system_prompt
     # The note explains the tag is engine-emitted, not user input.
     assert "engine" in inv.system_prompt.lower()
-    # Order: rendered body first, engine-seed note before completion contract.
-    assert inv.system_prompt.startswith("RENDERED BODY")
+    # Order: base persona first, rendered body present, engine-seed note before completion contract.
+    assert inv.system_prompt.startswith(_AGENT_BASE_PROMPT)
+    assert "RENDERED BODY" in inv.system_prompt
     assert inv.system_prompt.index("<imp:begin/>") < inv.system_prompt.index(
         "complete_step")
 
@@ -584,3 +615,229 @@ def test_build_agent_invocation_appends_engine_seed_note_unconditionally(
         "<imp:begin/>")
     assert inv2.system_prompt.index("<imp:begin/>") < inv2.system_prompt.index(
         "complete_step")
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_frozen_during_solicit_does_not_stall(monkeypatch) -> None:
+    """While solicit_active is True, a pull that blocks far past the window is
+    NOT torn down: the deadline is frozen to inf. A single begin call with NO
+    further activity, then a 4x-window sleep, distinguishes the inf-freeze from a
+    one-shot now+window bump (which would expire at ~1 window and stall)."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_solicit_watchdog()   # freeze (single call, no further activity)
+        await anyio.sleep(0.8)           # 4x window, silent
+        coord.end_solicit_watchdog()
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is False
+    assert interrupted["called"] is False
+    assert events == [{"type": "agent_output", "payload": {"status": "Success"}}]
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_stalls_when_not_soliciting(monkeypatch) -> None:
+    """Genuine stalls are unaffected: with solicit_active False, an agent silent
+    past the window (no activity) is still torn down as a stall."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        await anyio.sleep(3600)          # never solicits, never signals activity
+        yield {"type": "agent_output", "payload": {}}  # unreached
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is True
+    assert interrupted["called"] is True
+    assert events == []
+
+
+@pytest.mark.anyio
+async def test_pull_watchdog_restores_finite_window_after_end(monkeypatch) -> None:
+    """end_solicit_watchdog restores an ENFORCEABLE finite deadline: after a
+    frozen interval ends, a subsequent over-window silence stalls again. Guards
+    against end leaving the deadline frozen at inf forever."""
+    import imp.engine.agent_run as ar
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    interrupted = {"called": False}
+
+    class _Runner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+    async def _gen():
+        coord.begin_solicit_watchdog()
+        await anyio.sleep(0.4)           # frozen: survives 2x window
+        coord.end_solicit_watchdog()     # restore finite window
+        await anyio.sleep(3600)          # now silent past the window -> must stall
+        yield {"type": "agent_output", "payload": {}}  # unreached
+
+    stall = {"hit": False}
+    events = []
+    with anyio.fail_after(5):
+        async for ev in ar._pull_with_inactivity_watchdog(
+                _gen(), runner=_Runner(), stall=stall, coordinator=coord):
+            events.append(ev)
+
+    assert stall["hit"] is True
+    assert interrupted["called"] is True
+    assert events == []
+
+
+class _RecordingCoord:
+    """Records begin/end_solicit_watchdog and the active flag; drains no
+    interjects (so _resolve_wait_reply falls through to soliciting)."""
+
+    def __init__(self):
+        self.events = []
+        self.active = False
+
+    def drain_interject(self):
+        return None
+
+    def begin_solicit_watchdog(self):
+        self.active = True
+        self.events.append("begin")
+
+    def end_solicit_watchdog(self):
+        self.active = False
+        self.events.append("end")
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_brackets_await_with_begin_end() -> None:
+    import imp.engine.agent_run as ar
+    coord = _RecordingCoord()
+
+    async def _ainput(_q):
+        assert coord.active is True   # watchdog frozen DURING the await
+        return "resumed reply"
+
+    result = await ar._resolve_wait_reply(coord, _ainput)
+    assert result == "resumed reply"
+    assert coord.events == ["begin", "end"]
+    assert coord.active is False
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_restores_watchdog_on_exception() -> None:
+    import imp.engine.agent_run as ar
+    coord = _RecordingCoord()
+
+    async def _ainput(_q):
+        raise RuntimeError("prompt torn down")
+
+    with pytest.raises(RuntimeError):
+        await ar._resolve_wait_reply(coord, _ainput)
+    assert coord.events == ["begin", "end"]   # finally restored it on the exception
+    assert coord.active is False
+
+
+@pytest.mark.anyio
+async def test_real_wait_for_user_solicit_is_not_torn_down_by_watchdog(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression for the live ~35-min loop: an attended agent blocked at the
+    REAL wait_for_user tool for far longer than the inactivity window is NOT
+    killed by the watchdog. Once the human replies the turn continues. Drives the
+    real drive_invocation -> _pull_with_inactivity_watchdog -> wait_for_user
+    bracket -> coordinator freeze, deterministically (no LLM)."""
+    import imp.engine.agent_run as ar
+    from imp.agents.tools.context import ToolContext
+    from imp.agents.tools.wait_for_user import make_wait_for_user_tool
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    release = anyio.Event()
+    interrupted = {"called": False}
+    captured = {"reply": None}
+
+    class _CaptureLog:
+        def __init__(self):
+            self.events = []
+
+        def append(self, *, agent_id, type, payload):
+            self.events.append({"type": type, "payload": payload})
+            return {"id": "e"}
+
+    log = _CaptureLog()
+
+    async def _blocking_input(_q):
+        await release.wait()          # block until the releaser fires (past window)
+        return "ship it"
+
+    class _SolicitRunner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+        async def run(self, invocation):
+            tool = make_wait_for_user_tool()
+            ctx = ToolContext(
+                project_root=tmp_path, fs_permissions=(),
+                events_path=tmp_path / "e.jsonl",
+                user_input_fn=_blocking_input, non_interactive=False,
+                event_log=log, agent_id="step:p/s", coordinator=coord)
+            captured["reply"] = await tool.async_invoke(ctx, {"prompt": "merge?"})
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    result_holder = {}
+
+    async def _releaser():
+        # Stay silent (no reply) for 3x the inactivity window: a pre-fix watchdog
+        # tears the solicit down here at ~1 window.
+        await anyio.sleep(0.6)
+        release.set()
+
+    async def _drive():
+        result_holder["r"] = await ar.drive_invocation(
+            _inv(tmp_path), _SolicitRunner(), coordinator=coord,
+            log=log, emit_events=True)
+
+    with anyio.fail_after(5):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_releaser)
+            tg.start_soon(_drive)
+
+    result = result_holder["r"]
+    assert result.errored is False
+    assert result.output == {"status": "Success"}
+    assert captured["reply"] == "ship it"          # turn continued after the reply
+    assert interrupted["called"] is False          # solicit never torn down
+    stalls = [
+        e for e in log.events
+        if e["type"] == "error"
+        and e["payload"].get("category") == "config"
+        and e["payload"].get("kind") == "stalled"
+    ]
+    assert stalls == []                            # no false config/stalled teardown

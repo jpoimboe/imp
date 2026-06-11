@@ -19,6 +19,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar
 
+# Tool names omitted from the burst recap AND the live status basis (§1/§3). They
+# render elsewhere (load_skill → its own `load skill …` line) or are placeholders
+# (`tool`), and `wait_for_user` becomes its own synthesized user turn (§1).
+_OMIT: frozenset[str] = frozenset({"load_skill", "tool", "wait_for_user"})
+
+# Chrome step kinds (§4 status precedence). A frozenset so the constant cannot drift.
+CHROME_KINDS: frozenset[str] = frozenset({"script", "branch", "merge"})
+
 
 # ── token accumulator (design §7.7 / F1: read usage straight from payload) ──
 @dataclass
@@ -132,6 +140,8 @@ class ToolCall:
     result: str | None = None
     is_error: bool = False
     killed: bool = False
+    call_ts: str | None = None         # the constructing event's timestamp (§1 burst clock)
+    citations_footer: str = ""          # §2: rendered as the block's final line, outside the clip
 
 
 @dataclass
@@ -140,6 +150,30 @@ class ToolBurstFold:
     start_ts: str | None = None        # first tool_call.timestamp (burst timing)
     end_ts: str | None = None          # last tool_result.timestamp
     collapsible = True
+
+
+def visible_calls(burst: ToolBurstFold) -> list[ToolCall]:
+    """Burst calls minus the _OMIT names — the shared basis for the lean recap
+    (render_text) and the live status count/named-call (current_activity)."""
+    return [c for c in burst.calls if c.name not in _OMIT]
+
+
+@dataclass
+class Activity:
+    """The structured live-status description (§3): count phrase, gray detail
+    (tool name + arg), and a fallback label. Any field may be None. Plain text —
+    the driver colors the segments (live_driver.compose_status)."""
+    count: str | None = None
+    detail: str | None = None
+    label: str | None = None
+
+
+def activity_to_text(activity: Activity | None) -> str:
+    """Flatten an Activity to one plain (no-ANSI) line — used by SubagentFold to
+    fold its nested builder's activity into its own status text."""
+    if activity is None:
+        return ""
+    return " · ".join(p for p in (activity.count, activity.detail, activity.label) if p)
 
 
 @dataclass
@@ -180,7 +214,7 @@ class SubagentFold:
         return self.nested.tree
 
     def current_activity(self) -> str:
-        detail = self.nested.current_activity()
+        detail = activity_to_text(self.nested.current_activity())
         tail = f" · {detail}" if detail else ""
         return f"task → {self.subagent_name} · {self.event_count} events{tail}"
 
@@ -190,6 +224,7 @@ class ErrorNode:
     message: str
     category: str | None = None
     is_warning: bool = False
+    detail: str = ""                   # §6: full_summary for the --full detail block
     collapsible = False
 
 
@@ -235,11 +270,9 @@ class BreadcrumbLine:
     elapsed_s: float | None
     action: Any                        # dict {verb, target?} from step_completed
     extras: list[str] = field(default_factory=list)
-    show_complete: bool = True         # False for a chrome step (script/branch),
-                                       # whose start line is never printed — the
-                                       # `· 0s` alone reads as "done", so the word
-                                       # "complete" (which pairs with a start) is
-                                       # dropped to avoid a dangling half-bookend.
+    show_complete: bool = True         # always True (§4): chrome steps now print
+                                       # a start header, so the breadcrumb always
+                                       # carries the word "complete".
     collapsible = False
 
 
@@ -305,6 +338,9 @@ class NarrativeBuilder:
         # _awaiting_reply, handed to the answering user_message as its rendered
         # question line (M3). Reset to "" when consumed.
         self._pending_question = ""
+        # Unresolved wait_for_user calls: id → that call's input.prompt. Drives
+        # the §1 orphan-result net and call-keyed question attribution (I4).
+        self._pending_wfu: dict[str, str] = {}
 
     # -- public API -----------------------------------------------------------
     @property
@@ -317,33 +353,31 @@ class NarrativeBuilder:
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
 
-    def current_activity(self) -> str | None:
-        """A one-line description of what the active step is doing right now, for
-        the live status line. None when no step is active. Reads only public-ish
-        state via this method so LiveStatus never touches builder internals."""
-        step = (self._step_stack[-1].name if self._step_stack
-                else self._current_phase.name if self._current_phase else None)
+    def current_activity(self) -> Activity | None:
+        """Structured one-line description of current activity for the live status
+        line (§3/§4). None when there is nothing to show."""
         for fold in self._open_sub_by_block.values():
             if fold.running:
-                return fold.current_activity()
+                return Activity(label=fold.current_activity())
         burst = self._current_burst
-        if burst is not None and burst.calls:
-            last = burst.calls[-1]
-            arg = _sanitize_activity_arg(next(iter((last.input or {}).values()), ""))
-            head = f"{step} · " if step else ""
-            return f"{head}{last.name} {arg} · {len(burst.calls)} tools".rstrip()
-        # Transient reasoning cue: the persistent thinking line is gone in default
-        # mode, so surface it on the status line while a NON-EMPTY thinking fold is
-        # the step's most recent child (flushed away by the next prose/tool event).
-        # The `.content.strip()` guard mirrors render_text dropping blank thinking
-        # as noise — a whitespace-only thinking event must not flash `· thinking`.
+        if burst is not None:
+            basis = visible_calls(burst)         # keeps killed (recap parity)
+            if basis:
+                n = len(basis)
+                count = f"{n} call{'s' if n != 1 else ''}"
+                named = next((c for c in reversed(basis) if not c.killed), None)
+                detail = None
+                if named is not None:
+                    arg = _sanitize_activity_arg(
+                        next(iter((named.input or {}).values()), ""))
+                    detail = f"{named.name} {arg}".rstrip()
+                return Activity(count=count, detail=detail)
+            # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:
-            last_step = self._step_stack[-1]
-            last_child = last_step.children[-1] if last_step.children else None
-            if isinstance(last_child, ThinkingFold) and last_child.content.strip():
-                return f"{last_step.name} · thinking"
-        if step is not None:
-            return f"{step} · working"
+            step = self._step_stack[-1]
+            return Activity(label="running" if step.kind in CHROME_KINDS else "thinking")
+        if self._current_phase is not None:
+            return Activity(label=f"{self._current_phase.name} · working")
         return None
 
     def _resume_close_folds(self, agent_id: str, event: Any) -> None:
@@ -579,10 +613,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
         node.children.append(BreadcrumbLine(
             step_name=node.name, elapsed_s=elapsed, action=action,
-            extras=_breadcrumb_extras(node.agent_output),
-            # A chrome step (script/branch/merge gate) prints no start line, so its
-            # breadcrumb omits the word "complete" (see BreadcrumbLine).
-            show_complete=node.kind not in ("script", "branch", "merge")))
+            extras=_breadcrumb_extras(node.agent_output)))
         node.closed = True
 
 
@@ -675,6 +706,19 @@ def _user_message_text(payload: dict[str, Any]) -> str:
         if isinstance(b, dict) and b.get("type") == "text")
 
 
+def _sole_success_tool_result(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The payload's content when it is exactly one success-shaped tool_result
+    block, else None. The resume-reply rule keys on this shape PLUS the armed
+    flag (the disjointness argument)."""
+    content = payload.get("content") or []
+    if len(content) != 1:
+        return None
+    b = content[0]
+    if not isinstance(b, dict) or b.get("type") != "tool_result" or b.get("is_error"):
+        return None
+    return b
+
+
 def _is_prose_field(key: str, value: Any) -> bool:
     """True for a free-text output field that should render as a bold prose block
     rather than fold into the breadcrumb (issues 5/6)."""
@@ -740,6 +784,16 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_burst()
     interactive, self._awaiting_reply = self._awaiting_reply, False
     question, self._pending_question = self._pending_question, ""
+    text = _user_message_text(p)
+    if interactive and not text.strip():
+        block = _sole_success_tool_result(p)
+        if block is not None:
+            # Live-safe resume reply: the injected message's sole block is a
+            # success tool_result carrying the human's reply (anthropic/openai/
+            # claude_code resume shape). A known dangling id is a strengthener.
+            text = _summarize_result(block.get("content"))
+            rid = str(block.get("tool_use_id") or block.get("id") or "")
+            self._pending_wfu.pop(rid, None)
     # M3: the event's prompt is the only GUARANTEED source of the question (the
     # attended tool path solicits with ""). But in the usual case the agent's
     # end-of-turn assistant text — already rendered as prose just above — IS the
@@ -751,8 +805,7 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     else:
         rendered_question = ""
     self._append(UserMessageNode(
-        text=_user_message_text(p), interactive=interactive,
-        pending_question=rendered_question))
+        text=text, interactive=interactive, pending_question=rendered_question))
 
 
 def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -819,9 +872,12 @@ def _h_tool_call(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any
     burst = _ensure_burst(self)
     if burst.start_ts is None:
         burst.start_ts = event.get("timestamp")  # burst clock starts at first call
-    burst.calls.append(ToolCall(
+    call = ToolCall(
         call_id=str(p.get("id", "")), name=str(p.get("name", "tool")),
-        input=p.get("input") or {}))
+        input=p.get("input") or {}, call_ts=event.get("timestamp"))
+    burst.calls.append(call)
+    if call.name == "wait_for_user":
+        self._pending_wfu[call.call_id] = str((call.input or {}).get("prompt", ""))
 
 
 def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
@@ -851,21 +907,65 @@ def _close_subagent_fold(fold: SubagentFold, p: dict[str, Any],
 
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
+    ts = event.get("timestamp")
+    is_error = bool(p.get("error", False))
+    footer = _format_citations_footer(p.get("citations"))
+    summary = _summarize_result(p.get("content"))
+
     # Closing a subagent? (parent `task` tool_result carries the block id.)
     fold = self._open_sub_by_block.pop(rid, None)
     if fold is not None:
-        _close_subagent_fold(fold, p, event.get("timestamp"))
+        _close_subagent_fold(fold, p, ts)
         return
+
+    pending_prompt = self._pending_wfu.get(rid)
+
     # Normal burst result: pair with the matching open call.
-    footer = _format_citations_footer(p.get("citations"))
     burst = self._current_burst
     if burst is not None:
-        burst.end_ts = event.get("timestamp")    # advance the burst clock
         for call in burst.calls:
             if call.call_id == rid and call.result is None:
-                call.result = _summarize_result(p.get("content")) + footer
-                call.is_error = bool(p.get("error", False))
+                if call.name == "wait_for_user":
+                    self._pending_wfu.pop(rid, None)
+                    if is_error:
+                        # Failed dispatch: keep the call (renders as failed per §2),
+                        # no split, no turn; the solicit is over so consume flags.
+                        call.result = summary
+                        call.citations_footer = footer
+                        call.is_error = True
+                        self._awaiting_reply = False
+                        self._pending_question = ""
+                        return
+                    _synthesize_wfu_turn(
+                        self, text=summary,
+                        question=str((call.input or {}).get("prompt", "")),
+                        answered_call=call)
+                    return
+                # Non-wfu pairing: this turn actually ran → advance the clock.
+                burst.end_ts = ts
+                call.result = summary
+                call.citations_footer = footer
+                call.is_error = is_error
                 return
+
+    # Pending-id net — BEFORE the orphan fallthrough (load-bearing order).
+    if pending_prompt is not None:
+        self._pending_wfu.pop(rid, None)
+        if is_error:
+            # Error-shaped result matching a pending id that missed pairing →
+            # route to the true-orphan branch, no turn.
+            b = _ensure_burst(self)
+            b.end_ts = ts
+            b.calls.append(ToolCall(
+                call_id=rid, name="tool", input={}, result=summary,
+                citations_footer=footer, is_error=True, call_ts=ts))
+            self._awaiting_reply = False
+            self._pending_question = ""
+            return
+        _synthesize_wfu_turn(self, text=summary, question=pending_prompt,
+                             answered_call=None)
+        return
+
     # (The former §11 unmatched-result heuristic — popitem() the most-recent open
     # fold — was removed: the resume-close fallback in add() now closes a fold whose
     # task tool_result is missing/lost, deterministically and outcome-free, when the
@@ -873,10 +973,10 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # existed to salvage, so an unmatched result here is a genuine orphan.)
     # Orphan result (malformed log): start/extend a burst with a "tool" entry.
     burst = _ensure_burst(self)
+    burst.end_ts = ts
     burst.calls.append(ToolCall(
-        call_id=rid, name="tool", input={},
-        result=_summarize_result(p.get("content")) + footer,
-        is_error=bool(p.get("error", False))))
+        call_id=rid, name="tool", input={}, result=summary,
+        citations_footer=footer, is_error=is_error, call_ts=ts))
 
 
 def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -890,7 +990,8 @@ def _h_tool_killed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # No matching open burst call → record a standalone killed marker.
     b = _ensure_burst(self)
     b.calls.append(ToolCall(
-        call_id=rid, name=str(p.get("name", "tool")), input={}, killed=True))
+        call_id=rid, name=str(p.get("name", "tool")), input={}, killed=True,
+        call_ts=event.get("timestamp")))
 
 
 def _flatten_block(b: Any) -> str:
@@ -944,6 +1045,36 @@ def _summarize_result(content: Any) -> str:
     return str(content)      # safety net for any other shape (unchanged)
 
 
+def _synthesize_wfu_turn(self: NarrativeBuilder, *, text: str, question: str,
+                         answered_call: ToolCall | None) -> None:
+    """Split the open burst and append the synthesized user turn (I1/I3). Child
+    order: [closed burst, user turn, fresh open burst]. Carries unresulted
+    siblings (result is None — including killed-unresulted) into the fresh burst,
+    whose start_ts is the earliest carried call_ts. No carried siblings → no
+    fresh burst; _current_burst becomes None. Consumes the awaiting flags."""
+    burst = self._current_burst
+    self._current_burst = None
+    carried: list[ToolCall] = []
+    if burst is not None:
+        if answered_call is not None and answered_call in burst.calls:
+            burst.calls.remove(answered_call)
+        carried = [c for c in burst.calls if c.result is None]
+        burst.calls = [c for c in burst.calls if c.result is not None]
+    # Consume the awaiting flags (mirrors _h_user_message) and dedup the question
+    # against the immediately-preceding prose turn.
+    self._awaiting_reply = False
+    self._pending_question = ""
+    q = question if (question and question.strip() != _last_prose_text(self)) else ""
+    self._append(UserMessageNode(text=text, interactive=True, pending_question=q))
+    if carried:
+        fresh = ToolBurstFold()
+        cts = [c.call_ts for c in carried if c.call_ts]
+        fresh.start_ts = min(cts) if cts else None
+        fresh.calls = carried
+        self._current_burst = fresh
+        self._append(fresh)
+
+
 NarrativeBuilder._HANDLERS["tool_call"] = _h_tool_call
 NarrativeBuilder._HANDLERS["tool_result"] = _h_tool_result
 NarrativeBuilder._HANDLERS["tool_killed"] = _h_tool_killed
@@ -964,9 +1095,13 @@ NarrativeBuilder._HANDLERS["skill_load"] = _h_skill_load
 
 def _h_error(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
+    detail = ""
+    d = p.get("detail")
+    if isinstance(d, dict):
+        detail = str(d.get("full_summary") or "")
     self._append(ErrorNode(
         message=str(p.get("message", "?")), category=p.get("category"),
-        is_warning=False))
+        is_warning=False, detail=detail))
 
 
 def _h_runner_warning(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1076,7 +1211,9 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, ToolBurstFold):
         return {"t": t, "calls": [
             {"name": c.name, "call_id": c.call_id, "result": c.result,
-             "is_error": c.is_error, "killed": c.killed} for c in node.calls]}
+             "is_error": c.is_error, "killed": c.killed,
+             "citations_footer": c.citations_footer, "input": c.input}
+            for c in node.calls]}
     if isinstance(node, SkillLoadNode):
         return {"t": t, "name": node.name, "source": node.source}
     if isinstance(node, SubagentFold):
@@ -1087,7 +1224,7 @@ def structural_repr(node: Any) -> Any:
                 "nested": [structural_repr(c) for c in node.tree.root.children]}
     if isinstance(node, ErrorNode):
         return {"t": t, "message": node.message, "category": node.category,
-                "is_warning": node.is_warning}
+                "is_warning": node.is_warning, "detail": node.detail}
     if isinstance(node, PauseNode):
         return {"t": t, "reason": node.reason}
     if isinstance(node, StepContextNode):

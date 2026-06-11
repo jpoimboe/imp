@@ -67,6 +67,9 @@ class LiveDriver:
         # so the live view and `imp log` look identical (design §5.4). Any non-prose
         # output resets it; an empty emission leaves it untouched.
         self._prev_prose = False
+        self._prompt_active = False        # defer _print_lines while a prompt owns the screen
+        self._separator_emitted = False    # prepare_for_prompt printed the leading blank
+        self._deferred: list[tuple[list[str], bool, str]] = []
         # root cursor: render root's children at depth 0 (matches render_tree).
         self._frontier: list[_Cursor] = [
             _Cursor(container=self._builder.tree.root, depth=0)]
@@ -96,11 +99,17 @@ class LiveDriver:
         activity = self._builder.current_activity()
         if activity is None:
             return None
-        # cyan spinner draws the eye; the elapsed tail dims so it doesn't compete
-        # with the activity text. Plain when color is off (byte-identical to before).
         spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=self._color)
+        segs: list[str] = []
+        if activity.count:
+            segs.append(pal.ansi(activity.count, enabled=self._color))   # default fg
+        if activity.detail:
+            segs.append(pal.ansi(activity.detail, "gray", enabled=self._color))
+        if activity.label:
+            segs.append(pal.ansi(activity.label, enabled=self._color))   # default fg
+        body = " · ".join(segs)
         tail = pal.ansi(f"· {rt.fmt_seconds(elapsed)}", "dim", enabled=self._color)
-        return f"{spin} {activity} {tail}"
+        return f"{spin} {body} {tail}"
 
     # -- emission -------------------------------------------------------------
     def _walk(self, *, force: bool = False) -> None:
@@ -140,34 +149,14 @@ class LiveDriver:
                 # OWN depth (no +1) so prose aligns under the header instead of
                 # burying it — must match render_text._render. (aligned indent)
                 gutters = self._gutters()
-                if rt.is_chrome_step(child):
-                    # A no-op gate/script step has no header — it collapses to the
-                    # single dark-gray breadcrumb its step_completed appends. Skip
-                    # the header line; descend so that breadcrumb still streams. It's
-                    # surrounded like a leaf, so arm the blank-above here (its
-                    # breadcrumb provides the blank-below via spaces_after).
-                    if rt.spaces_before(child):
-                        self._prev_prose = True
-                else:
-                    if rt.spaces_before(child):
-                        # A phase header and an interactive step header get a blank
-                        # line above them (matching render_text._render_children).
-                        # Arming the prose-adjacency flag makes the next emission —
-                        # the header — carry the leading separator.
-                        self._prev_prose = True
-                    self._stream_or_hold(
-                        rt.header_line(child, depth=cur.depth, color=self._color,
-                                       gutters=gutters),
-                        depth=cur.depth, gutters=gutters)
-                    if isinstance(child, (nv.StepNode, nv.PhaseNode)):
-                        # One blank line below the header: between an agent step's
-                        # header and its first words, and between a phase's start
-                        # line and its first step (surrounding the phase start).
-                        # Arm the prose-adjacency flag so the next real emission
-                        # carries a leading separator; the dropped lean context
-                        # line is an empty emission that leaves this untouched, so
-                        # the blank lands before the real content.
-                        self._prev_prose = True
+                if rt.spaces_before(child):
+                    self._prev_prose = True
+                self._stream_or_hold(
+                    rt.header_line(child, depth=cur.depth, color=self._color,
+                                   gutters=gutters),
+                    depth=cur.depth, gutters=gutters)
+                if isinstance(child, (nv.StepNode, nv.PhaseNode)):
+                    self._prev_prose = True
                 child_depth = cur.depth + 1 if isinstance(child, nv.PhaseNode) else cur.depth
                 self._frontier.append(_Cursor(container=child, depth=child_depth))
             else:
@@ -252,16 +241,59 @@ class LiveDriver:
         # SubagentFold (mirroring render_text._render_children). An empty
         # emission returns early and leaves _prev_prose untouched (so a lean-
         # mode thinking/tool turn between two prose blocks doesn't break their
-        # pairing).
+        # pairing). While a prompt is active, non-empty emissions are deferred
+        # to flush_deferred() so the prompt screen stays clean (§5a).
+        if not lines:
+            return
+        if self._prompt_active:
+            self._deferred.append((lines, prose, separator_indent))
+            return
+        self._emit_now(lines, prose=prose, separator_indent=separator_indent)
+
+    def _emit_now(self, lines: list[str], *, prose: bool, separator_indent: str) -> None:
         if not lines:
             return
         self._status.hide()
-        if self._prev_prose:
+        if self._separator_emitted:
+            # prepare_for_prompt already printed the leading blank; consume it
+            # (only a non-empty emission consumes — this method is non-empty).
+            self._separator_emitted = False
+        elif self._prev_prose:
             self._stream.write(separator_indent + "\n")
         for ln in lines:
             self._stream.write(ln + "\n")
         self._stream.flush()
         self._prev_prose = prose
+
+    def _frontier_depth(self) -> int:
+        """Depth at which the open frontier cursor renders its children — the depth
+        of a synthesized user turn (and its separator) in imp log. Empty frontier
+        (malformed stream) → 0 (a bare \\n, indent-free)."""
+        return self._frontier[-1].depth if self._frontier else 0
+
+    def prepare_for_prompt(self) -> None:
+        """Flush the armed separator before the interactive prompt draws, record
+        that it was emitted (consumed by the next non-empty _print_lines), and mark
+        the prompt active so subsequent _print_lines are deferred (§5a). Self-hiding
+        and idempotent."""
+        self._status.hide()
+        if self._prev_prose:
+            depth = self._frontier_depth()
+            indent = rt._gutter_indent(depth, self._gutters(), self._color)
+            self._stream.write(indent + "\n")
+            self._stream.flush()
+            self._prev_prose = False
+            self._separator_emitted = True
+        self._prompt_active = True
+
+    def flush_deferred(self) -> None:
+        """Clear the prompt-active flag and flush any blocks deferred during the
+        prompt (§5a). Called from the solicit `finally` (submit / abandon / EOF) so
+        the run is never left muted."""
+        self._prompt_active = False
+        deferred, self._deferred = self._deferred, []
+        for lines, prose, sep in deferred:
+            self._emit_now(lines, prose=prose, separator_indent=sep)
 
     def _refresh_status(self) -> None:
         # The status line is TRANSIENT: it draws on the line just below the last
