@@ -188,6 +188,7 @@ def test_dispatch_task_happy_path_returns_subagent_output(
     async def _stub_dispatch_task(
         ctx: Any, subagent_name: str, task_description: str,
         *, tool_call_event_id: str = "", tier: Any = None,
+        abort_dispatch: Any = None,
     ) -> str:
         assert subagent_name == "impl"
         assert task_description == "do it"
@@ -222,6 +223,7 @@ def test_dispatch_task_subagent_suspended_captured_not_reraised(
     async def _stub_dispatch_task(
         ctx: Any, subagent_name: str, task_description: str,
         *, tool_call_event_id: str = "", tier: Any = None,
+        abort_dispatch: Any = None,
     ) -> str:
         raise SubagentSuspended("paused by coordinator")
 
@@ -254,6 +256,7 @@ def test_dispatch_task_generic_error_becomes_is_error_text(
     async def _stub_dispatch_task(
         ctx: Any, subagent_name: str, task_description: str,
         *, tool_call_event_id: str = "", tier: Any = None,
+        abort_dispatch: Any = None,
     ) -> str:
         raise ValueError("boom")
 
@@ -289,6 +292,7 @@ def test_task_dispatch_mints_parent_tool_call_and_passes_id(
     async def _stub_dispatch_task(
         ctx: Any, subagent_name: str, task_description: str,
         *, tool_call_event_id: str = "", tier: Any = None,
+        abort_dispatch: Any = None,
     ) -> str:
         seen["tool_call_event_id"] = tool_call_event_id
         return '{"answer": "ok"}'
@@ -603,3 +607,40 @@ def test_head_refusal_fires_on_should_pause_alone(
             ctx=ctx, state=state))
     assert state.minted_task_ids == []
     assert state.dispatch_count == 0
+
+
+def test_post_limiter_skip_moves_mint_to_refused_and_raises_sentinel(
+    tmp_path: Path, monkeypatch: Any,
+) -> None:
+    """AC29: a child that froze while queued behind the limiter raises
+    TaskDispatchSkipped; dispatch_tool MOVES its mint to refused_task_mints and
+    raises the sentinel (so the sentinel item later closes that minted event)."""
+    from imp.agents.subagents import (
+        TASK_REFUSAL_SENTINEL,
+        TaskDispatchSkipped,
+        TaskRefused,
+    )
+    from imp.engine.state import InMemoryEventLog
+    from imp.providers.codex_mcp import _args_fingerprint
+    state = RunState(cap=10)
+
+    async def _stub(ctx: Any, subagent_name: str, task_description: str,
+                    **_kw: Any) -> str:
+        raise TaskDispatchSkipped("froze while queued")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    args = {"subagent_name": "impl", "task_description": "queued work"}
+    with pytest.raises(TaskRefused) as ei:
+        asyncio.run(dispatch_tool(
+            tool=make_task_tool(), args=args, ctx=ctx, state=state))
+    assert str(ei.value) == TASK_REFUSAL_SENTINEL
+    # The mint was minted (head check passed) then MOVED, not left dangling.
+    assert state.minted_task_ids == []
+    assert len(state.refused_task_mints) == 1
+    moved_id, moved_fp = state.refused_task_mints[0]
+    assert moved_fp == _args_fingerprint(args)
+    assert moved_id  # a real minted event id
+    # The drain counter returned to 0 (finally) so the skip did not wedge it.
+    assert state.inflight_task_dispatches == 0

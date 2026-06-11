@@ -99,6 +99,11 @@ class RunState:
     # the dispatch await and decremented in finally on every exit; the runner
     # defers a captured suspension / awaiting_user re-raise until this is 0.
     inflight_task_dispatches: int = 0
+    # Mints whose child was skipped post-limiter (membership froze while queued).
+    # process_event resolves the arriving sentinel item against this list FIRST,
+    # closing the minted tool_call as a failed task (design §2 / AC29).
+    refused_task_mints: list[tuple[str, tuple[tuple[str, str], ...]]] = field(
+        default_factory=list)
 
 
 def _cap_error_text(cap: int) -> str:
@@ -194,13 +199,13 @@ async def dispatch_tool(
         # dispatch_task. process_event later re-keys the result to that id when
         # it sees the real SDK item arrive (via state.minted_task_ids).
         from imp.agents.runner import ToolUseBlock
-        from imp.agents.subagents import dispatch_task
+        from imp.agents.subagents import TaskDispatchSkipped, dispatch_task
         tc_ev = ctx.event_log.append_tool_call(
             agent_id=state.agent_id,
             block=ToolUseBlock(id="", name="task", input=dict(args)),
         )
-        state.minted_task_ids.append(
-            (tc_ev["id"], _args_fingerprint(dict(args))))
+        minted_entry = (tc_ev["id"], _args_fingerprint(dict(args)))
+        state.minted_task_ids.append(minted_entry)
         # Drain counter: a capturing child decrements ITSELF in finally, so it is
         # never counted as a draining sibling (design §2 drain gate).
         state.inflight_task_dispatches += 1
@@ -211,7 +216,17 @@ async def dispatch_tool(
                 args["task_description"],
                 tool_call_event_id=tc_ev["id"],
                 tier=args.get("tier"),
+                abort_dispatch=lambda: _task_membership_frozen(state, ctx),
             )
+        except TaskDispatchSkipped as skip:
+            # Post-limiter skip: the child froze while queued behind the limiter.
+            # MOVE its mint so the arriving sentinel item closes the minted
+            # tool_call (one pair), then raise the sentinel so FastMCP wraps it
+            # error-shaped for the SDK (design §2 / AC29).
+            if minted_entry in state.minted_task_ids:
+                state.minted_task_ids.remove(minted_entry)
+            state.refused_task_mints.append(minted_entry)
+            raise TaskRefused(TASK_REFUSAL_SENTINEL) from skip
         except Exception as exc:
             if isinstance(exc, SubagentSuspended):
                 state.subagent_suspended = exc  # runner re-raises to unwind cleanly
