@@ -172,13 +172,14 @@ async def test_post_api_sweep_runs_before_first_dispatch(
 
     monkeypatch.setattr(bg_mod, "_sweep_bg", rec_sweep)
     import imp.agents.dispatch as dispatch_mod
-    real_dispatch = dispatch_mod.dispatch_one_tool_use
+    real_dispatch = dispatch_mod.dispatch_turn_tool_uses
 
     async def rec_dispatch(**kw):
         order.append("dispatch")
-        return await real_dispatch(**kw)
+        async for ev in real_dispatch(**kw):
+            yield ev
 
-    monkeypatch.setattr(anthropic_mod, "dispatch_one_tool_use", rec_dispatch)
+    monkeypatch.setattr(anthropic_mod, "dispatch_turn_tool_uses", rec_dispatch)
     (tmp_path / "f.txt").write_text("x")
     fake = FakeAsyncAnthropic([
         response(tool_use("u1", "read_file", {"path": "f.txt"})),
