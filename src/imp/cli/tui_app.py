@@ -222,7 +222,14 @@ class TuiApp:
             self._build_app()
         task = asyncio.create_task(self._refresh_loop())
         try:
-            await self._app.run_async(handle_sigint=False)
+            # set_exception_handler=False: don't let prompt_toolkit install its
+            # loop exception handler, which drops the alt-screen and blocks on a
+            # "Press ENTER to continue..." dialog for any loop-level exception. On
+            # interrupt the provider SDK's detached tasks fail writing to the
+            # killed CLI child — benign teardown that must not wedge the viewer.
+            # _run_tui_session installs a pause-gated handler that swallows it.
+            await self._app.run_async(
+                handle_sigint=False, set_exception_handler=False)
         finally:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

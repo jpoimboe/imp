@@ -245,7 +245,8 @@ class RemoteChannel:
         try:
             self._proc = subprocess.Popen(
                 list(self._command),
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE)
         except OSError as exc:
             self._on_error(f"driver failed to spawn ({self._command[0]!r}): {exc}")
             self._proc = None
@@ -258,7 +259,30 @@ class RemoteChannel:
             self._proc = None
             return False
         tg.start_soon(self._reader_loop)
+        tg.start_soon(self._stderr_drain)
         return True
+
+    async def _stderr_drain(self) -> None:
+        """Drain the driver's stderr for the channel's lifetime. The driver is
+        imp's subprocess but its diagnostics are NOT imp's output: inheriting its
+        stderr onto imp's controlling terminal corrupts a `--tui` alternate screen
+        and interleaves with streaming output (and an undrained PIPE would fill and
+        wedge a chatty driver). Lines go to the `imp.remote` logger at DEBUG —
+        default-silent (imp installs no handler), recoverable with debug logging.
+        Teardown closes stderr (EOF) so the worker thread ends."""
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
+        try:
+            while True:
+                raw = await anyio.to_thread.run_sync(proc.stderr.readline)
+                if raw == b"":
+                    return
+                _log.debug("driver stderr: %s",
+                           raw.decode("utf-8", "replace").rstrip("\r\n"))
+        finally:
+            with contextlib.suppress(Exception):
+                proc.stderr.close()
 
     async def _reader_loop(self) -> None:
         """Read driver stdout lines for the channel's lifetime and push each onto
