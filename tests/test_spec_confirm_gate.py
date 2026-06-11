@@ -138,3 +138,110 @@ def test_spec_exit_gate_else_continues_into_review() -> None:
     rules = _steps(_wf())["spec-exit-gate"].rules
     m = evaluate_rules(rules, vars=_BASE_VARS, output=None)
     assert isinstance(m.action, Continue)
+
+
+_CONFIRM_FB = ("The review cycle is complete and the spec is accepted. "
+               "Surface any significant decisions made during review to the "
+               "user and confirm before finalizing:")
+
+
+def test_reviewer_rule2_armed_clean_after_minors_fires_gate() -> None:
+    rules = _steps(_wf())["spec-reviewer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": True,
+              "spec_confirm": True, "spec_unseen_changes": True},
+        output={"blocking": False, "has_minor_findings": True},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "spec-writer" and m.action.resume is True
+    assert m.action.feedback == _CONFIRM_FB
+    assert m.var_mutations["spec_gate_pending"] is True
+    assert m.var_mutations["spec_minors_integrated"] is False
+    assert m.var_mutations["spec_unseen_changes"] is False
+
+
+def test_reviewer_rule3_armed_but_disabled_clears_and_proceeds() -> None:
+    # gate disabled (spec_confirm:false) but armed -> proceed, vars cleared.
+    rules = _steps(_wf())["spec-reviewer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": True,
+              "spec_confirm": False, "spec_unseen_changes": True},
+        output={"blocking": False, "has_minor_findings": False},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer" and m.action.resume is False
+    assert m.var_mutations["spec_minors_integrated"] is False
+    assert m.var_mutations["spec_unseen_changes"] is False
+
+
+def test_reviewer_rule5_armed_clean_no_minors_fires_gate() -> None:
+    rules = _steps(_wf())["spec-reviewer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": False,
+              "spec_confirm": True, "spec_unseen_changes": True},
+        output={"blocking": False, "has_minor_findings": False},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "spec-writer" and m.action.resume is True
+    assert m.action.feedback == _CONFIRM_FB
+    assert m.var_mutations["spec_gate_pending"] is True
+    assert m.var_mutations["spec_unseen_changes"] is False
+
+
+def test_reviewer_rule6_armed_but_disabled_clears_on_no_minors_path() -> None:
+    rules = _steps(_wf())["spec-reviewer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_confirm": False, "spec_unseen_changes": True},
+        output={"blocking": False, "has_minor_findings": False},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer"
+    assert m.var_mutations["spec_unseen_changes"] is False
+
+
+# ── precedence (first-match-wins is load-bearing) ──
+def test_reviewer_rule1_beats_2_and_3_on_blocking_with_minors_integrated() -> None:
+    rules = _steps(_wf())["spec-reviewer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": True,
+              "spec_unseen_changes": True},
+        output={"blocking": True, "has_minor_findings": False},
+    )
+    assert m.action.target == "spec-writer" and m.action.resume is True
+    assert m.action.feedback == "Here's review feedback to address:"
+    assert m.var_mutations["spec_minors_integrated"] is False
+
+
+def test_reviewer_rule2_beats_4_verification_with_new_minors_while_armed() -> None:
+    # armed verification review still carrying fresh minors -> gate fires (rule 2),
+    # the new minors are dropped (NOT a second minors pass).
+    rules = _steps(_wf())["spec-reviewer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": True,
+              "spec_confirm": True, "spec_unseen_changes": True},
+        output={"blocking": False, "has_minor_findings": True},
+    )
+    assert m.action.feedback == _CONFIRM_FB
+    assert m.var_mutations["spec_gate_pending"] is True
+
+
+def test_reviewer_rule4_beats_5_clean_minors_armed_not_yet_integrated() -> None:
+    # clean + actionable minors + armed but minors not yet integrated -> minors
+    # pass FIRST (rule 4); the gate fires only after the verification review.
+    rules = _steps(_wf())["spec-reviewer"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_minors_integrated": False,
+              "spec_confirm": True, "spec_unseen_changes": True},
+        output={"blocking": False, "has_minor_findings": True},
+    )
+    assert m.action.target == "spec-writer" and m.action.resume is True
+    assert m.action.feedback == ("No blocking issues — integrate these minor "
+                                 "improvements; a final review follows:")
+    assert m.var_mutations["spec_minors_integrated"] is True

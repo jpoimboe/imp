@@ -68,14 +68,25 @@ phases:
         # has already spent its one minors-integration pass for the current settled
         # state — so a clean *verification* review stops and drops its own minors.
         rules:
-          # Critical/Major -> rework, then re-review. Clear the flag: a real fix re-opens the one minors pass.
-          - {if: {blocking: true}, set: {spec_minors_integrated: false}, resume: spec-writer, feedback: "Here's review feedback to address:"}
-          # Clean, and the writer already did its minors-integration pass -> stop; drop this review's minors.
-          - {if: {spec_minors_integrated: true}, set: {spec_minors_integrated: false}, goto: plan-writer}
-          # Clean with actionable minors -> integrate them, then owe one more (verification) review.
-          - {if: {has_minor_findings: true}, set: {spec_minors_integrated: true}, resume: spec-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
-          # Clean, nothing to integrate -> stop.
-          - {else: true, goto: plan-writer}
+          # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
+          - {if: {blocking: true}, set: {spec_minors_integrated: false},
+             resume: spec-writer, feedback: "Here's review feedback to address:"}
+          # Clean verification review after a minors pass, armed -> confirm gate (if enabled).
+          - {if: {spec_minors_integrated: true, spec_confirm: true, spec_unseen_changes: true},
+             set: {spec_minors_integrated: false, spec_unseen_changes: false, spec_gate_pending: true},
+             resume: spec-writer, feedback: &confirm_fb "The review cycle is complete and the spec is accepted. Surface any significant decisions made during review to the user and confirm before finalizing:"}
+          # Clean verification review, gate disabled or unarmed -> proceed.
+          - {if: {spec_minors_integrated: true},
+             set: {spec_minors_integrated: false, spec_unseen_changes: false}, goto: plan-writer}
+          # Clean with actionable minors -> minors pass; arming happens via the writer's unseen_changes.
+          - {if: {has_minor_findings: true}, set: {spec_minors_integrated: true},
+             resume: spec-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+          # Clean, no minors, but the cycle changed the spec -> confirm gate (if enabled).
+          - {if: {spec_confirm: true, spec_unseen_changes: true},
+             set: {spec_unseen_changes: false, spec_gate_pending: true},
+             resume: spec-writer, feedback: *confirm_fb}
+          # Clean first pass, nothing changed since the brainstorm -> proceed.
+          - {else: true, set: {spec_unseen_changes: false}, goto: plan-writer}
 
   - name: plan
     steps:

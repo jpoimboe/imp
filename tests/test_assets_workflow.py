@@ -198,7 +198,7 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is False
-    assert m.var_mutations == {}
+    assert m.var_mutations == {"spec_unseen_changes": False}
 
 
 def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
