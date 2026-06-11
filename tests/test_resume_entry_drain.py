@@ -155,6 +155,22 @@ async def test_anthropic_resume_entry_drain_before_first_send(tmp_path: Path) ->
     assert "interject-B" in all_texts, (
         f"interject-B missing from first request messages: {first_call_messages}"
     )
+    # No double-delivery: each interject appears EXACTLY once across the whole
+    # conversation (the entry drain cleared the queue, so the later turn-boundary
+    # drain is a no-op).
+    all_request_texts: list[str] = []
+    for call in fake.messages.calls:
+        for m in call["messages"]:
+            content = m["content"] if isinstance(m, dict) else m.content
+            if isinstance(content, str):
+                all_request_texts.append(content)
+            else:
+                for block in content:
+                    text = block.get("text") if isinstance(block, dict) else None
+                    if text is not None:
+                        all_request_texts.append(text)
+    assert all_request_texts.count("interject-A") == 1
+    assert all_request_texts.count("interject-B") == 1
     # Both interjects consumed (queue cleared).
     assert coord.drain_interject() is None
 
