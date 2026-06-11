@@ -35,6 +35,8 @@ from imp.agents.runner import (
 if TYPE_CHECKING:
     from imp.engine.state import EventLog
 
+RESUME_SUPERSEDED_NOTE = "previous step output recorded; superseded by the feedback below"
+
 
 class Transcript:
     def __init__(self, path: Path) -> None:
@@ -152,7 +154,7 @@ def balance_success_on_resume(
         if tu.name == "complete_step":
             result_blocks.append(ToolResultBlock(
                 tool_use_id=tu.id,
-                content="previous step output recorded; superseded by the feedback below"
+                content=RESUME_SUPERSEDED_NOTE
                         if wrapper_text else "previous step output recorded; resuming",
                 is_error=False))
         else:
