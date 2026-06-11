@@ -11,9 +11,14 @@ diagnostics go to stderr.
 from __future__ import annotations
 
 import json
+import os
+import sys
+import threading
+import time
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 # Curation map (spec Decisions §"Default curation"). Curation lives in the
@@ -25,6 +30,7 @@ _SILENT = frozenset({"agent_output", "llm_response"})
 _API_BASE = "https://api.telegram.org"
 _LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
 _HTTP_TIMEOUT = 35        # seconds; urlopen ceiling, must exceed the long-poll
+_POLL_GAP = 1.0   # seconds to back off after a failed poll cycle
 
 
 def curate(event_type: Any) -> str | None:
@@ -196,3 +202,95 @@ def poll_once(
     for reply in replies:
         write_reply(reply)
     return new_offset
+
+
+def _log(msg: str) -> None:
+    """Diagnostics go to stderr; stdout is reserved for reply lines."""
+    print(f"imp-telegram: {msg}", file=sys.stderr, flush=True)
+
+
+def _event_loop(stdin: Any, send: Callable[..., None], chat_id: int) -> None:
+    """Read NDJSON events from imp on stdin and relay curated ones to Telegram.
+    A send failure is logged and swallowed — the driver must never die on a
+    transient API error (and must never block imp)."""
+    for raw in stdin:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        try:
+            handle_event(event, send, chat_id)
+        except Exception as exc:  # best-effort: never die on a transient API error
+            _log(f"send failed: {exc}")
+
+
+def _poll_loop(
+    get_updates: Callable[[int], Mapping[str, Any]],
+    chat_id: int,
+    offset: int,
+    write_reply: Callable[[str], None],
+) -> None:
+    """Long-poll getUpdates forever, writing allowlisted replies to stdout. A
+    poll error backs off briefly and retries; the thread is a daemon, so it dies
+    with the process when imp tears the driver down."""
+    while True:
+        try:
+            offset = poll_once(get_updates, chat_id, offset, write_reply)
+        except Exception as exc:  # best-effort: back off and retry, never crash
+            _log(f"poll failed: {exc}")
+            time.sleep(_POLL_GAP)
+
+
+def main(
+    env: Mapping[str, str] | None = None,
+    stdin: Any = None,
+    stdout: Any = None,
+) -> int:
+    """Entry point. Loads config (refusing without the chat_id allowlist),
+    drains pre-startup backlog, starts the getUpdates poll thread, then relays
+    stdin events until EOF (imp tore us down). Returns 2 on a config refusal."""
+    env = os.environ if env is None else env
+    stdin = sys.stdin if stdin is None else stdin
+    stdout = sys.stdout if stdout is None else stdout
+
+    file_text: str | None = None
+    cfg_path = env.get("IMP_TELEGRAM_CONFIG_FILE")
+    if cfg_path and Path(cfg_path).is_file():
+        file_text = Path(cfg_path).read_text(encoding="utf-8")
+
+    try:
+        cfg = load_config(env, file_text)
+    except ConfigError as exc:
+        _log(str(exc))
+        return 2
+
+    send = make_send(cfg.token)
+    get_updates = make_get_updates(cfg.token)
+
+    # Skip the pre-startup backlog: drain once, keep only the advanced offset so
+    # only post-startup messages surface (spec AC 10).
+    try:
+        _, offset = extract_replies(get_updates(0), cfg.chat_id, 0)
+    except Exception as exc:  # best-effort: a failed drain just starts at offset 0
+        _log(f"initial getUpdates failed: {exc}")
+        offset = 0
+
+    def write_reply(text: str) -> None:
+        emit_reply(text, stdout)
+
+    poll_thread = threading.Thread(
+        target=_poll_loop,
+        args=(get_updates, cfg.chat_id, offset, write_reply),
+        daemon=True,
+    )
+    poll_thread.start()
+
+    _event_loop(stdin, send, cfg.chat_id)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
