@@ -28,15 +28,15 @@ import time
 from mcp.server.fastmcp import FastMCP
 
 from impty import TerminalSession
+from impty.session import DEFAULT_SETTLE_HARD, DEFAULT_SETTLE_IDLE
 
 mcp = FastMCP("impty")
 
-# The settle policy shared by start/send/send_signal/wait: how long the program
-# must be quiet to count as "done reacting" (idle) and the wall-clock ceiling
-# before we give up and return whatever's on screen (hard). One place, so the
-# four call sites can't drift apart.
-_SETTLE_IDLE = 0.3
-_SETTLE_HARD = 15.0
+# The settle policy (idle quiet-window, hard ceiling) lives in TerminalSession —
+# this MCP layer is a thin pass-through and sets none of its own. start/send/
+# send_signal just call wait_idle() and inherit it; the `wait` tool surfaces the
+# two knobs to the caller, defaulting to the library values (imported, not
+# redefined, so the default can't drift from the library).
 
 # C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
 # Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
@@ -111,7 +111,7 @@ def start(
         _session.close()
         _session = None
     session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)
-    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD)
+    session.wait_idle()  # inherit the library settle policy
     _session = session
     return _render(session)
 
@@ -144,9 +144,9 @@ def send(data: str, wait: bool | float = True) -> str:
     - False: fire and return `[sent]` immediately (e.g. mid-stream input).
     - a number (seconds): settle for that FIXED duration, then return the screen.
       Use this for a continuously-animating full-screen app (a spinner / live
-      TUI) that NEVER goes quiet — there `wait=True` would block the full settle
-      cap (~15 s) every keystroke. e.g. `wait=0.4` lets the reaction render, then
-      snapshots. The background drainer keeps pyte current during the wait.
+      TUI) that NEVER goes quiet — there `wait=True` blocks the whole settle cap
+      every keystroke. e.g. `wait=0.4` lets the reaction render, then snapshots.
+      The background drainer keeps pyte current during the wait.
     """
     session = _require()
     # Mark the type-then-look boundary just before the keystroke so wait_idle
@@ -159,7 +159,7 @@ def send(data: str, wait: bool | float = True) -> str:
     if wait is False:
         return "[sent]"
     if wait is True:
-        session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD, since=since)
+        session.wait_idle(since=since)  # inherit the library settle policy
     else:
         time.sleep(max(0.0, float(wait)))  # fixed settle; drainer updates pyte
     return _render(session)
@@ -184,12 +184,12 @@ def send_signal(sig: int = signal.SIGINT) -> str:
     # (handler output, exit), not on a stale pre-signal screen.
     since = time.monotonic()
     session.send_signal(sig)
-    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD, since=since)
+    session.wait_idle(since=since)  # inherit the library settle policy
     return _render(session)
 
 
 @mcp.tool()
-def wait(idle: float = _SETTLE_IDLE, hard: float = _SETTLE_HARD) -> str:
+def wait(idle: float = DEFAULT_SETTLE_IDLE, hard: float = DEFAULT_SETTLE_HARD) -> str:
     """Wait for the program to settle, then return the screen.
 
     For watching a program that's still working (spinners, streaming) without
