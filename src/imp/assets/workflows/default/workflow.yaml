@@ -52,7 +52,7 @@ phases:
         command: ./scripts/spec-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: spec-writer}
+          - {else: true, set: {spec_gate_passed: false}, resume: spec-writer}
 
       - name: fast-path-spec-gate      # trivial change -> skip spec review entirely
         rules:

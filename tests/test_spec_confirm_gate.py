@@ -95,3 +95,22 @@ def test_spec_writer_first_pass_written_does_not_arm() -> None:
     )
     assert m.var_mutations["spec_unseen_changes"] is False
     assert m.var_mutations["fast_path"] is True
+
+
+def test_spec_verify_commit_failure_clears_gate_passed() -> None:
+    rules = _steps(_wf())["spec-verify-commit"].rules
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "spec_gate_passed": True},
+        output={"exit": 1},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "spec-writer" and m.action.resume is True
+    assert m.var_mutations["spec_gate_passed"] is False
+
+
+def test_spec_verify_commit_success_continues_no_mutation() -> None:
+    rules = _steps(_wf())["spec-verify-commit"].rules
+    m = evaluate_rules(rules, vars=_BASE_VARS, output={"exit": 0})
+    assert isinstance(m.action, Continue)
+    assert m.var_mutations == {}
