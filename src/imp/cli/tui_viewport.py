@@ -30,6 +30,11 @@ class ViewportState:
         self.follow = False
         self.scroll = max(0, base - n)
 
+    def scroll_down_lines(self, n: int, *, total_lines: int, height: int) -> None:
+        bottom = max(0, total_lines - height)
+        base = self.vertical_scroll(total_lines=total_lines, height=height)
+        self.scroll = min(base + n, bottom)
+
     def jump_to_bottom(self) -> None:
         self.follow = True
         self.scroll = 0

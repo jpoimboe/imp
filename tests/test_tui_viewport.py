@@ -51,3 +51,16 @@ def test_jump_to_bottom_reengages_follow() -> None:
     vs.jump_to_bottom()
     assert vs.follow is True
     assert vs.vertical_scroll(total_lines=100, height=20) == 80
+
+
+def test_scroll_down_lines_moves_toward_bottom_without_reengaging_follow() -> None:
+    vs = ViewportState(follow=False, scroll=40)
+    vs.scroll_down_lines(5, total_lines=100, height=20)
+    assert vs.follow is False
+    assert vs.vertical_scroll(total_lines=100, height=20) == 45
+
+
+def test_scroll_down_lines_clamps_at_bottom() -> None:
+    vs = ViewportState(follow=False, scroll=78)
+    vs.scroll_down_lines(10, total_lines=100, height=20)   # bottom is 80
+    assert vs.vertical_scroll(total_lines=100, height=20) == 80
