@@ -507,11 +507,15 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # args (status=…, *_path=…, plan counts) are detail the lean view doesn't
         # need beside every step — they survive in --full only; the routing verb
         # and elapsed time stay in both (they're outcome, not args).
-        parts = [f"{node.step_name} complete" if node.show_complete else node.step_name]
+        if node.interrupted:
+            parts = [f"{node.step_name} interrupted"]
+        else:
+            parts = [f"{node.step_name} complete" if node.show_complete
+                     else node.step_name]
         if full:
             parts.extend(node.extras)
         verb_text = pal.action_text(node.action) if node.action is not None else None
-        if verb_text and verb_text != "continue":
+        if not node.interrupted and verb_text and verb_text != "continue":
             parts.append(verb_text)
         if node.elapsed_s is not None:
             parts.append(fmt_seconds(node.elapsed_s))
