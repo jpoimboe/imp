@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from imp.cli.change_row import relative_age
+from imp.cli.change_row import relative_age, resume_token
 
 _NOW = datetime(2026, 6, 11, 12, 0, 0, tzinfo=UTC)
 
@@ -22,3 +22,17 @@ _NOW = datetime(2026, 6, 11, 12, 0, 0, tzinfo=UTC)
 )
 def test_relative_age(then_iso, expected):
     assert relative_age(then_iso, now=_NOW) == expected
+
+
+@pytest.mark.parametrize(
+    "change_id, expected",
+    [
+        ("2026-06-11-yaitd7", "yaitd7"),                 # modern id → 6-char suffix
+        ("2026-06-11-add-version-flag",
+         "2026-06-11-add-version-flag"),                 # legacy descriptive → full id
+        ("legacy-no-date", "legacy-no-date"),            # no date prefix → full id
+        ("2026-06-11-AB12CD", "2026-06-11-AB12CD"),      # uppercase tail → not modern → full id
+    ],
+)
+def test_resume_token(change_id, expected):
+    assert resume_token(change_id) == expected
