@@ -996,7 +996,7 @@ def _resolve_default_id(control: Path) -> str | None:
     journaled = journal.journal_ids(control)
     if not journaled:
         return None
-    return max(journaled, key=lambda s: _journal_last_activity(control, s))
+    return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
@@ -1104,6 +1104,35 @@ def _journal_last_activity(control: Path, change_id: str) -> str:
     if line is None:
         return "-"
     return _format_last_timestamp(line.decode("utf-8", errors="replace"))
+
+
+def _iso_from_line(line: str) -> str | None:
+    if not line.strip():
+        return None
+    try:
+        return str(json.loads(line)["timestamp"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def _last_event_iso(events_path: Path) -> str | None:
+    try:
+        line = _read_last_line(events_path)
+    except FileNotFoundError:
+        return None
+    if line is None:
+        return None
+    return _iso_from_line(line.decode("utf-8", errors="replace"))
+
+
+def _journal_last_iso(control: Path, change_id: str) -> str | None:
+    raw = journal.journal_show(control, change_id, "events.jsonl")
+    if raw is None:
+        return None
+    line = _last_nonempty_line(raw)
+    if line is None:
+        return None
+    return _iso_from_line(line.decode("utf-8", errors="replace"))
 
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.
