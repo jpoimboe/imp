@@ -111,3 +111,35 @@ def test_interactive_steps_exist_and_are_exempt(name: str) -> None:
     if not path.exists():
         pytest.skip(f"{name} not present in this workflow revision")
     assert path.read_text()  # non-empty
+
+
+TASK_LEAD = AGENTS_DIR / "task-lead.md"
+
+
+def test_task_lead_gates_nits_on_fixability_not_severity() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # Critical/Major stay unconditional; Minor/Nit gate on fixability (AC 1-2).
+    assert "critical/major are mandatory" in low
+    assert "gate on fixability, not severity" in low
+    assert "fixability bar" in low
+    for fix_now in ("mechanical", "confined to the task's own diff",
+                    "behavior-preserving or test-strengthening", "bounded"):
+        assert fix_now in low, f"missing fix-now property: {fix_now}"
+    for defer in ("needs judgment or design", "out of scope", "non-local"):
+        assert defer in low, f"missing defer property: {defer}"
+
+
+def test_task_lead_nit_fix_dispatch_has_overreach_guardrail() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # Over-reach guardrail on the nit-fix dispatch (AC 3).
+    assert "apply only these named nits" in low
+    assert "do not refactor beyond the named change" in low
+    # Qualifying nits ride the same fixup round, folded by autosquash (AC 4).
+    assert "same fixup round" in low
+
+
+def test_task_lead_nit_only_fixup_skips_rereview_and_degraded() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # A nit-only fixup is cheap and polish-only (AC 5).
+    assert "does not re-trigger the quality-reviewer" in low
+    assert "does not mark the run degraded" in low

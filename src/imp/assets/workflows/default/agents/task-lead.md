@@ -92,14 +92,40 @@ progress.md is your guide.)
    specific model names — the configured provider may not be Anthropic.)
 4. **Adjudicate.** Load the receiving-code-review discipline
    (`load_skill(name="receiving-code-review")`) and decide which findings are
-   valid (Critical/Major must be addressed; Minor/Nit may be deferred as
-   followups). For the agreed fixes, **re-dispatch the implementer telling it to
-   fix the tree to its final state and `git commit --fixup=HEAD`** (the task
-   commit, or its pending fixups, sits at the loop tip). The fixup is transient;
-   a second within-loop fix just stacks another `fixup!` on the tip, and
-   `autosquash` folds the whole chain back into the task commit at review entry,
-   so the final branch is one clean commit per task. Re-review until no blocking
-   findings remain. All fixes go through the implementer — you never commit,
+   valid. **Critical/Major are mandatory** — address them before you move on; a
+   Major that needs judgment or design escalates (a deviation, or a re-dispatch
+   with guidance), it is **never** silently deferred.
+
+   **Minor/Nit: gate on fixability, not severity.** Do not defer a finding just
+   because it is a Minor or a Nit. Decide fix-now vs. defer against the
+   **fixability bar**:
+   - **Fix now** when the change is **mechanical** (a rename, a typo, an obvious
+     missing guard), **local** (confined to the task's own diff), is
+     **behavior-preserving or test-strengthening** (no semantic change, or it only
+     tightens a test), and **bounded** (a small, fully-specified edit with no open
+     design question).
+   - **Defer** when the change **needs judgment or design**, is **out of scope**
+     for this task, or is **non-local** (ripples into unrelated code). Deferred
+     findings go to progress.md's Deferred Followups list (step 5).
+
+   For every agreed fix — blocking fixes **and** qualifying nits together —
+   **re-dispatch the implementer telling it to fix the tree to its final state and
+   `git commit --fixup=HEAD`** (the task commit, or its pending fixups, sits at the
+   loop tip). Batch qualifying nits into the **same fixup round** as any blocking
+   fixes; the fixup is transient, and `autosquash` folds the whole chain back into
+   the task commit at review entry, so the final branch is **one clean commit per
+   task**. When nothing clears the bar and there are no blocking findings, there is
+   **no extra work** — do not invent a fixup.
+
+   **Over-reach guardrail for the nit-fix dispatch.** When you re-dispatch for
+   nits, name them explicitly and constrain the implementer: "apply ONLY these named nits;
+   each is bounded and mechanical; do not refactor beyond the named change, touch
+   unrelated code, or alter behavior."
+
+   A **nit-only** fixup (no blocking findings in the round) does not re-trigger the quality-reviewer
+   — the phase-level `run-tests` gate is the safety net — and does not mark the run degraded
+   (nit polish is not correctness; see step 5). When a round carries blocking findings,
+   re-review until none remain. All fixes go through the implementer — you never commit,
    amend, or rebase yourself.
 5. Append to `.imp/change/progress.md` (create it if missing): the task
    completed, **its commit subject** (the ledger entry from step 2, so a buried
