@@ -793,3 +793,162 @@ def test_wfu_submit_live_equals_imp_log() -> None:
         drv.on_event(e)
     drv.finish()
     assert _body(out) == _render_body(events)      # byte-identical to imp log
+
+
+def test_driver_takes_pending_wait_for_user_question() -> None:
+    drv, _ = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
+                    prompt="Pick A or B?"))
+    assert drv.take_pending_question() == "Pick A or B?"
+    assert drv.take_pending_question() == ""        # consumed; not re-shown
+
+
+def test_driver_has_no_question_without_a_solicit() -> None:
+    drv, _ = _driver()
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    assert drv.take_pending_question() == ""
+
+
+def test_new_run_swallows_only_the_opening_question() -> None:
+    # `imp new` opens on the workflow's first wait_for_user; that opening
+    # question is not surfaced as a label above the first `>`. Every later
+    # solicit still shows its question.
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_opening_question=True)
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
+                    prompt="What change would you like to make?"))
+    assert drv.take_pending_question() == ""          # opening: swallowed
+    drv.on_event(ev("3", "awaiting_user_input", agent_id="a",
+                    prompt="Pick A or B?"))
+    assert drv.take_pending_question() == "Pick A or B?"   # later: shown
+
+
+def test_suppression_skips_empty_takes_until_a_real_question() -> None:
+    # An empty take (a solicit with no pending question) must NOT consume the
+    # one-shot suppression — only the first real question is swallowed.
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     suppress_opening_question=True)
+    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
+    assert drv.take_pending_question() == ""          # nothing pending yet
+    drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
+                    prompt="What change would you like to make?"))
+    assert drv.take_pending_question() == ""          # opening still swallowed
+
+
+def test_quiet_continue_is_silent_live_and_matches_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="step:spec/spec",
+           raw={"content": [{"type": "text", "text": "done"}]}, usage={}),
+        ev("4", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("5", "step_started", step="spec-verify-commit", kind="script",
+           phase="spec", quiet=True),
+        ev("6", "step_completed", step="spec-verify-commit", kind="script",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert not any("spec-verify-commit" in ln for ln in _body(out))
+    assert _body(out) == _render_body(events)   # live == imp log, line for line
+
+
+def test_quiet_forward_goto_arrow_matches_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="fast-path-spec-gate", kind="branch",
+           phase="spec", quiet=True),
+        ev("3", "step_completed", step="fast-path-spec-gate", kind="branch",
+           action={"verb": "goto", "target": "plan-writer", "resume": False},
+           var_mutations={}),
+        ev("4", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("5", "llm_response", agent_id="step:plan/plan-writer",
+           raw={"content": [{"type": "text", "text": "planning"}]}, usage={}),
+        ev("6", "step_completed", step="plan-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any(ln.strip() == "→ plan" for ln in body)
+    assert not any("fast-path-spec-gate" in ln for ln in body)
+    assert body == _render_body(events)
+
+
+def test_is_final_resume_goto_quiet_step_is_emitted() -> None:
+    # A quiet step that closes on a backward rework edge (goto resume=True) sets
+    # quiet_line="→ reworking" and is FINAL immediately — the live cursor must not
+    # block on it the way it blocks an unresolved forward goto.
+    drv, _ = _driver()
+    node = nv.StepNode(name="spec-verify-commit", kind="script", quiet=True)
+    node.quiet_line = "→ reworking"
+    node.closed = True
+    node.outcome = nv.OutcomeLine(
+        action={"verb": "goto", "target": "spec-writer", "resume": True})
+    assert drv._is_final(node, container=None) is True
+
+
+def test_quiet_pause_surfaces_live_and_matches_log() -> None:
+    # Live/log parity for the non-linear-outcome path: a quiet step that PAUSES
+    # (merge_blocked etc.) must surface its full block in the live stream exactly
+    # as `imp log` renders it — not get silently held/dropped like a quiet
+    # continue.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="merge-to-base", kind="script",
+           phase="merge", quiet=True),
+        ev("3", "error", message="merge conflict in foo.py"),
+        ev("4", "step_completed", step="merge-to-base", kind="script",
+           action={"verb": "pause"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("merge-to-base" in ln for ln in body)
+    assert any("merge conflict in foo.py" in ln for ln in body)
+    assert body == _render_body(events)          # live == imp log, line for line
+
+
+def test_compose_activity_status_none_when_idle() -> None:
+    from imp.cli.live_driver import compose_activity_status
+    builder = nv.NarrativeBuilder()
+    assert compose_activity_status(builder, frame=0, elapsed=1.0, color=True) is None
+
+
+def test_compose_activity_status_paints_count_detail_label() -> None:
+    from imp.cli.live_driver import compose_activity_status
+    builder = nv.NarrativeBuilder()
+    builder.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    builder.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                   input={"command": "ls"}))
+    line = compose_activity_status(builder, frame=0, elapsed=1.0, color=True)
+    assert line is not None
+    assert "1 call" in line
+    assert "bash ls" in line
+    assert "\x1b[90m" in line          # detail painted gray
+
+
+def test_compose_status_returns_activity_content() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=True, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "ls"}))
+    result = drv.compose_status(0, 1.0)
+    assert result is not None
+    assert "bash ls" in result
+    assert "1 call" in result
+    assert "\x1b[90m" in result    # gray detail segment

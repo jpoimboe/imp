@@ -33,6 +33,22 @@ from impty.screen import Regime
 _BG = (0x1E, 0x1E, 0x1E)
 _FG = (0xFF, 0xFF, 0xFF)
 
+# A representative LIGHT terminal surface (near-white bg, near-black fg) the way
+# _BG/_FG mirror a common dark one. Use it to preview an app's *light* theme: a
+# light theme tunes its accents for a pale background, so rendering it on the dark
+# default looks wrong (chrome meant to recede reads as high-contrast). The accents
+# themselves are truecolor and render exactly regardless — only the surface needs
+# to change, so swapping bg/fg is enough for a faithful light preview.
+_BG_LIGHT = (0xFA, 0xFA, 0xF8)
+_FG_LIGHT = (0x2A, 0x2A, 0x2A)
+
+
+def light_surface() -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+    """`(bg, fg)` for a representative light terminal — pass to
+    `render_screen(bg=, fg=)` (or `snapshot(light=True)`) to preview an app's
+    light theme on the surface it was designed for."""
+    return _BG_LIGHT, _FG_LIGHT
+
 _PALETTE: dict[str, tuple[int, int, int]] = {
     "black": (0x00, 0x00, 0x00), "red": (0xCD, 0x00, 0x00),
     "green": (0x00, 0xCD, 0x00), "brown": (0xCD, 0xCD, 0x00),

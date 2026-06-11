@@ -5,7 +5,13 @@ from pathlib import Path
 
 from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import Message, TextBlock, ToolResultBlock, ToolUseBlock
-from imp.agents.transcript import Transcript, balance_success_on_resume
+from imp.agents.transcript import (
+    RESUME_DURABILITY_NOTE,
+    RESUME_SUPERSEDED_NOTE,
+    Transcript,
+    balance_success_on_resume,
+    repair_dangling_tool_use_on_resume,
+)
 from imp.engine.state import InMemoryEventLog
 
 
@@ -120,7 +126,10 @@ def test_balance_without_wrapper_emits_success_shaped_result(tmp_path: Path) -> 
     assert result.role == "user"
     blocks = [b for b in result.content if isinstance(b, ToolResultBlock)]
     assert blocks and blocks[0].is_error is False         # success-shaped, not "interrupted"
-    assert not any(isinstance(b, TextBlock) for b in result.content)  # no wrapper
+    # Even with no wrapper, the resume-durability note rides on the turn — and it
+    # is the only text block (no feedback to follow it).
+    texts = [b for b in result.content if isinstance(b, TextBlock)]
+    assert [b.text for b in texts] == [RESUME_DURABILITY_NOTE]
 
 
 def test_balance_with_wrapper_rides_on_same_user_turn(tmp_path: Path) -> None:
@@ -130,7 +139,8 @@ def test_balance_with_wrapper_rides_on_same_user_turn(tmp_path: Path) -> None:
     texts = [b for b in msgs[-1].content if isinstance(b, TextBlock)]
     results = [b for b in msgs[-1].content if isinstance(b, ToolResultBlock)]
     assert results[0].is_error is False
-    assert texts and texts[0].text == "not accepted"      # same user message
+    # Note frames the results first; the actionable wrapper stays last.
+    assert [b.text for b in texts] == [RESUME_DURABILITY_NOTE, "not accepted"]
 
 
 def test_balance_noop_when_no_trailing_tool_use(tmp_path: Path) -> None:
@@ -138,3 +148,45 @@ def test_balance_noop_when_no_trailing_tool_use(tmp_path: Path) -> None:
     msgs = [Message(role="user", content=(TextBlock(text="hi"),))]
     t.append(msgs[0])
     assert balance_success_on_resume(msgs, t, InMemoryEventLog(), "x", wrapper_text=None) is None
+
+
+def test_balance_success_on_resume_emits_superseded_note_with_wrapper_text(tmp_path: Path) -> None:
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="begin"),)),
+        Message(role="assistant", content=(
+            TextBlock(text="done"),
+            ToolUseBlock(id="c9", name="complete_step", input={"status": "Success"}),
+        )),
+    ]
+    for m in msgs:
+        t.append(m)
+    injected = balance_success_on_resume(msgs, t, InMemoryEventLog(), "step:x",
+                                         wrapper_text="feedback")
+    assert injected is not None
+    results = [b for b in injected.content if isinstance(b, ToolResultBlock)]
+    assert len(results) >= 1
+    assert results[0].content == RESUME_SUPERSEDED_NOTE
+
+
+def test_repair_dangling_tool_use_appends_durability_note(tmp_path: Path) -> None:
+    """A genuine mid-tool interrupt synthesizes is_error placeholders; the
+    resume-durability note rides on the same turn so the model verifies rather
+    than redoes the interrupted work."""
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="b1", name="bash", input={"command": "x"}),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    repair = repair_dangling_tool_use_on_resume(msgs, t)
+    assert repair is not None
+    results = [b for b in repair.content if isinstance(b, ToolResultBlock)]
+    texts = [b for b in repair.content if isinstance(b, TextBlock)]
+    assert results and results[0].is_error is True
+    assert [b.text for b in texts] == [RESUME_DURABILITY_NOTE]
+    # The note must survive the round-trip to disk (replayed verbatim on resume).
+    assert any(RESUME_DURABILITY_NOTE in b.text
+               for b in t.load()[-1].content if isinstance(b, TextBlock))

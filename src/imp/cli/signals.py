@@ -130,6 +130,12 @@ class InterruptCoordinator:
         # subtree-wide (one coordinator per run), so a child's appends push every
         # ancestor watchdog's deadline. Same-event-loop, single-threaded => no lock.
         self._activity_listeners: list[Any] = []
+        # Suspend-during-solicit (this Change): True ONLY while an attended agent
+        # is blocked awaiting a human reply at wait_for_user / _resolve_wait_reply.
+        # While True the per-pull inactivity watchdog freezes its deadline to inf
+        # (see agent_run._pull_with_inactivity_watchdog). Name-identical to the
+        # unrelated ReplyInterjectRouter.solicit_active (reply routing) — distinct.
+        self._solicit_active = False
 
     def add_activity_listener(self, fn: Any) -> Any:
         """Register a no-arg callback fired on each `note_activity()`. Returns
@@ -149,6 +155,25 @@ class InterruptCoordinator:
         for fn in tuple(self._activity_listeners):
             with _suppress(Exception):
                 fn()
+
+    @property
+    def solicit_active(self) -> bool:
+        """True while an attended agent is blocked awaiting a human reply."""
+        return self._solicit_active
+
+    def begin_solicit_watchdog(self) -> None:
+        """Enter a blocked human solicit: freeze the inactivity watchdog. Fires
+        note_activity() so every registered per-pull bump re-evaluates NOW and
+        freezes its in-flight deadline to inf."""
+        self._solicit_active = True
+        self.note_activity()
+
+    def end_solicit_watchdog(self) -> None:
+        """Leave a blocked human solicit: restore the inactivity watchdog. Fires
+        note_activity() so every registered bump re-evaluates and installs a
+        fresh finite window."""
+        self._solicit_active = False
+        self.note_activity()
 
     def set_at_prompt(self, value: bool) -> None:
         """Mark whether an interactive prompt is currently being awaited. A plain

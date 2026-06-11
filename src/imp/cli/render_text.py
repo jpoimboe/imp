@@ -155,6 +155,26 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     return out or [indent + bullet]
 
 
+def quiet_step_is_silent(node: nv.StepNode) -> bool:
+    """Whether a quiet step keeps its quiet treatment (hidden, or a one-line
+    routing arrow) rather than rendering its full block.
+
+    Spec §4.1: a quiet step hides on the happy path but "yields to any
+    non-linear outcome". A clean linear `continue` (or a still-open step) stays
+    silent; a resolved routing edge (`quiet_line`, set for a forward/rework
+    goto) renders its single arrow. But a quiet step that PAUSES — merge_blocked,
+    retry_ceiling, a max-retries Pause (executor emits step_completed with
+    verb="pause") — or ends on any other non-linear verb must surface: it falls
+    through to the full loud-step block so the failure and its error children are
+    not swallowed. Shared by `imp log` and the live driver (which renders a quiet
+    step as a leaf through this same `_render`), so both paths agree."""
+    if node.quiet_line is not None:
+        return True                          # resolved routing arrow → one line
+    act = node.outcome.action if (node.outcome and isinstance(node.outcome.action, dict)) else None
+    verb = act.get("verb") if act else None
+    return verb in (None, "continue")        # open, or a clean linear continue
+
+
 def is_prose_leaf(node: Any) -> bool:
     """True for the agent-speech blocks (rendered LLM prose / surfaced free-text
     output fields). Consecutive prose blocks get one blank line between them so
@@ -180,7 +200,7 @@ def spaces_after(node: Any, *, full: bool) -> bool:
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
-                             nv.ErrorNode, nv.PauseNode))
+                             nv.ErrorNode, nv.PauseNode, nv.RenameNode))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
@@ -196,7 +216,7 @@ def spaces_before(node: Any) -> bool:
     lands identically in `imp log` and the live view."""
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
-        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode))
+        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode))
     )
 
 
@@ -372,6 +392,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.StepNode):
+        if node.quiet and quiet_step_is_silent(node):
+            if node.quiet_line:
+                yield _line(node.quiet_line, depth, color,
+                            *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+            return
+        # A quiet step that yielded to a non-linear outcome (a pause/error) falls
+        # through here and renders its full block, just like a loud step.
         # A step's content flows at the step's OWN indent (no +1): the header is a
         # label and its prose/breadcrumb align directly beneath it, rather than
         # indenting a further level and burying the agent's words. Phases still
@@ -502,6 +529,13 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # any, was already shown as its own `error:` event above.
         yield _line(f"⏸ paused ({node.reason})", depth, color,
                     *pal.NODE_COLORS["metadata"], gutters=gutters)
+        return
+
+    if isinstance(node, nv.RenameNode):
+        indent = _gutter_indent(depth, gutters, color)
+        marker = pal.ansi("→ named ", "dim", enabled=color)
+        name = pal.ansi(node.name, *pal.NODE_COLORS["workflow"], enabled=color)
+        yield indent + marker + name
         return
 
     if isinstance(node, nv.ErrorNode):

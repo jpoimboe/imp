@@ -179,6 +179,7 @@ class Step:
     command: str | None = None
     cwd: str | None = None
     timeout_seconds: int | None = None
+    quiet: bool = False
 
 
 @dataclass(frozen=True, slots=True)

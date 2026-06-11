@@ -36,9 +36,12 @@ def test_shared_date_prefix_is_ambiguous(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit):
         _resolve_id(tmp_path, "2026-06-04")     # prefix shared -> ambiguous, not resolved
     err = capsys.readouterr().err
-    # AC 5: rejected as ambiguous AND lists the candidates (not a blank no-match).
+    # AC 5: rejected as ambiguous AND lists the candidates via the shared formatter
+    # (TITLE header + each title + resume token), not a blank no-match.
     assert "ambiguous" in err
-    assert "2026-06-04-aaaaaa" in err and "2026-06-04-bbbbbb" in err
+    assert "TITLE" in err
+    assert "One" in err and "Two" in err
+    assert "aaaaaa" in err and "bbbbbb" in err
 
 
 def test_current_slug_resolves(tmp_path: Path) -> None:
@@ -46,6 +49,28 @@ def test_current_slug_resolves(tmp_path: Path) -> None:
     ch = _mk(tmp_path, "2026-06-04-aaaaaa", "Add OAuth")
     assert ch.slug == "2026-06-04-add-oauth"
     assert _resolve_id(tmp_path, "2026-06-04-add-oauth") == "2026-06-04-aaaaaa"
+
+
+def test_bare_name_resolves(tmp_path: Path) -> None:
+    # The bare name a user naturally types (no date prefix) resolves via the slug
+    # tier — previously it only matched the dated slug and fell through to "no
+    # Change matches".
+    _seed_control(tmp_path)
+    _mk(tmp_path, "2026-06-04-aaaaaa", "Add version flag")
+    assert _resolve_id(tmp_path, "add-version-flag") == "2026-06-04-aaaaaa"
+
+
+def test_bare_name_collision_is_ambiguous(tmp_path: Path, capsys) -> None:
+    # Two changes sharing a name (different days) -> the bare name is ambiguous
+    # and lists candidates, rather than a blank no-match.
+    _seed_control(tmp_path)
+    _mk(tmp_path, "2026-06-04-aaaaaa", "Add version flag")
+    _mk(tmp_path, "2026-06-05-bbbbbb", "Add version flag")
+    with pytest.raises(SystemExit):
+        _resolve_id(tmp_path, "add-version-flag")
+    err = capsys.readouterr().err
+    assert "ambiguous" in err
+    assert "aaaaaa" in err and "bbbbbb" in err
 
 
 def test_no_match_exits(tmp_path: Path) -> None:
@@ -62,4 +87,7 @@ def test_cross_day_shared_suffix_is_ambiguous(tmp_path: Path, capsys) -> None:
     with pytest.raises(SystemExit):
         _resolve_id(tmp_path, "zzzzzz")        # suffix shared across days -> ambiguous
     err = capsys.readouterr().err
-    assert "2026-06-04-zzzzzz" in err and "2026-06-05-zzzzzz" in err
+    # Both share the resume token zzzzzz; the titles disambiguate the rows.
+    assert "ambiguous" in err
+    assert "One" in err and "Two" in err
+    assert "zzzzzz" in err

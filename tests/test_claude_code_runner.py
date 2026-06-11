@@ -157,6 +157,44 @@ async def test_cancelled_no_result_yields_interrupted_not_network(
 
 
 @pytest.mark.anyio
+async def test_terminated_process_teardown_classified_interrupted_not_unknown(
+    tmp_path: Path,
+) -> None:
+    """A process-group SIGINT can kill a (sub)agent's claude CLI child BEFORE the
+    runner's own interrupt()/_cancel fires; the SDK then raises
+    `CLIConnectionError: Cannot write to terminated process`. That is interrupt
+    teardown, not a provider failure — it must classify as config/interrupted, NOT
+    the `unknown` "unclassified provider error" the --tui playbook caught (which
+    also surfaces a `paused: unknown` headline). Note: NO runner.interrupt() here,
+    so `_cancel` stays False — this exercises the terminated-process arm that
+    catches a killed subagent whose own runner never saw the cancel.
+    """
+    (tmp_path / "art").mkdir()
+
+    class CLIConnectionError(Exception):
+        pass
+
+    class _DeadOnQuery(FakeClaudeSDKClient):
+        async def query(self, prompt: Any) -> None:
+            raise CLIConnectionError(
+                "Cannot write to terminated process (exit code: 0)")
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5",
+        client_factory=lambda opts: _DeadOnQuery(opts, scripted_messages=[]),
+    )
+    inv = _inv(tmp_path)
+    events = [ev async for ev in runner.run(inv)]
+
+    errs = [e for e in events if e["type"] == "error"]
+    assert len(errs) == 1, errs
+    assert errs[0]["payload"]["category"] == "config", errs[0]["payload"]
+    assert errs[0]["payload"]["kind"] == "interrupted", errs[0]["payload"]
+    # The forbidden classification must NOT appear.
+    assert "unclassified provider error" not in errs[0]["payload"]["message"]
+
+
+@pytest.mark.anyio
 async def test_cancel_during_continuation_skips_nudge_and_requery(
     tmp_path: Path,
 ) -> None:

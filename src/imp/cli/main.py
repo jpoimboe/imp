@@ -20,20 +20,28 @@ from typing import Any, NoReturn
 import anyio
 
 from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.cli import change_row, resume_select
 from imp.cli import palette as pal
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
 from imp.cli.live_status import LiveStatus
 from imp.cli.palette import ansi, should_use_color
 from imp.cli.prompt import Prompt
+from imp.cli.remote_channel import (
+    RemoteChannel,
+    compose_on_event,
+    driver_config_from,
+    effective_reply_fn,
+)
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
+from imp.cli.tui_app import TuiApp
 from imp.engine import journal, recovery, worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.project_root import find_project_root
-from imp.engine.slug import dated_slug, new_change_id
+from imp.engine.slug import dated_slug, new_change_id, slugify
 from imp.engine.state import LockHeld, ProjectLock, State
 
 
@@ -116,6 +124,24 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
     return _reply
 
 
+def _maybe_build_channel(change: Change) -> RemoteChannel | None:
+    """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
+    behaves exactly as today). Title is captured at run start. A bad config is
+    surfaced elsewhere (run_change reloads it) — never fail channel construction
+    over config here; return None on any config error."""
+    from imp.providers.effective import load_effective_config
+    try:
+        config = load_effective_config(
+            project_root=change.project_root,
+            control_root=change.control_root).config
+    except (LoadError, LoadErrors):
+        return None
+    dc = driver_config_from(config)
+    if dc is None:
+        return None
+    return RemoteChannel.from_driver_config(dc, id=change.id, title=change.title)
+
+
 def _build_interactive_input(
     change: Change, status: LiveStatus, coord: Any, esc_reader: Any, driver: Any,
 ) -> tuple[ReplyInterjectRouter, Callable[[], Awaitable[str]]]:
@@ -186,18 +212,45 @@ def _emit_completed(change: Change, value: str, *, merged: bool) -> None:
         print(ansi(f"{mark}Change {change.id}: {value}", "green", enabled=color))
 
 
-def _emit_paused(change: Change, how: str) -> None:
+def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
+    """The current phase: the phase of the most recent step_started event."""
+    phase: str | None = None
+    for e in events:
+        if e.get("type") == "step_started":
+            phase = (e.get("payload") or {}).get("phase") or phase
+    return phase
+
+
+def _pause_lines(name: str, phase: str | None, token: str, *, color: bool) -> list[str]:
+    mark = "⏸  " if color else ""
+    at = f"  at {phase}" if phase else ""
+    return [
+        ansi(f"{mark}Paused  {name}{at}", "dim", enabled=color),
+        ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
+    ]
+
+
+def _pause_facts(change: Change) -> tuple[str, str | None, str]:
+    from imp.cli.change_row import resume_token
+    from imp.cli.narrative import _slug_descriptor
+    name = _slug_descriptor(change.slug) or change.id
+    phase = _phase_from_events(list(change.event_log().read()))
+    return name, phase, resume_token(change.id)
+
+
+def _emit_paused(change: Change) -> None:
     """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim, ⏸."""
     color = should_use_color(sys.stdout)
-    mark = "⏸ " if color else ""
-    print("\n" + ansi(f"{mark}Change {change.id}: paused ({how})", "dim", enabled=color))
+    name, phase, token = _pause_facts(change)
+    print("\n" + "\n".join(_pause_lines(name, phase, token, color=color)))
 
 
-def _emit_paused_summary(change: Change, value: str) -> None:
+def _emit_paused_summary(change: Change) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
-    mark = "⏸ " if color else ""
-    print(ansi(f"{mark}Change {change.id}: {value}", "dim", enabled=color))
+    name, phase, token = _pause_facts(change)
+    for ln in _pause_lines(name, phase, token, color=color):
+        print(ln)
 
 
 def _emit_merge_blocked(
@@ -313,7 +366,7 @@ def _handle_terminal_outcome(
                 final_state.step,
                 (matched.get("payload") or {}).get("stderr", ""),
             )
-    _emit_paused_summary(change, result.value)
+    _emit_paused_summary(change)
     return 1
 
 
@@ -353,6 +406,7 @@ async def _run_change_session(
     reply_input_fn: Callable[[], Awaitable[str]],
     non_interactive: bool,
     tg: Any,
+    channel: Any = None,
 ) -> int:
     """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
     loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
@@ -379,6 +433,11 @@ async def _run_change_session(
     tg.start_soon(_run_actuator, coord, exit_event, run_scope_holder)
 
     try:
+        if channel is not None and not await channel.start(tg):
+            channel = None
+        run_on_event = (
+            compose_on_event(driver.on_event, channel.on_event)
+            if channel is not None else driver.on_event)
         reader_armed = (
             bool(esc_reader and esc_reader._armed) if not non_interactive else False)
         result: RunResult | None = None
@@ -389,7 +448,8 @@ async def _run_change_session(
                     # Bind the CURRENT reply_input_fn (it is rebound on reader
                     # respawn each round) so the wait_for_user channel always
                     # calls the live one.
-                    _reply: Callable[[], Awaitable[str]] = reply_input_fn
+                    _reply: Callable[[], Awaitable[str]] = effective_reply_fn(
+                        reply_input_fn, channel, non_interactive=non_interactive)
 
                     def _chat(
                         _q: object,
@@ -398,7 +458,7 @@ async def _run_change_session(
                         return _fn()
 
                     result = await run_change(
-                        change, on_event=driver.on_event,
+                        change, on_event=run_on_event,
                         user_chat_input_fn=_chat,
                         coordinator=coord, non_interactive=non_interactive)
             except EOFError:
@@ -413,34 +473,41 @@ async def _run_change_session(
                     change, driver, coord, coord.pause_reason or "sigterm")
             assert result is not None
 
-            final_state = State.load(change.state_dir)
-            interactive = _interactive_loop_predicate(
-                non_interactive=non_interactive, reader_armed=reader_armed,
-                stdin_tty=sys.stdin.isatty(), stdout_tty=sys.stdout.isatty())
             interrupt_paused = (
                 result is RunResult.PAUSED
                 and coord.should_pause
                 and not coord.escalated)
+            if not interrupt_paused:
+                # Terminal outcome (COMPLETED, or a non-interrupt PAUSE such as
+                # merge_blocked). Do NOT reload State here: a merge-completing run
+                # has already finalized in _complete by removing the worktree —
+                # the change state dir, and its state.json, went with it — so
+                # State.load(change.state_dir) would crash with FileNotFoundError.
+                # final_state is only ever consulted on the interrupt-paused
+                # loopable path below, so it is never needed here. The terminal
+                # handler reads the outcome from `result`, not from disk.
+                break
+            final_state = State.load(change.state_dir)
+            interactive = _interactive_loop_predicate(
+                non_interactive=non_interactive, reader_armed=reader_armed,
+                stdin_tty=sys.stdin.isatty(), stdout_tty=sys.stdout.isatty())
             loopable = (
-                interrupt_paused
-                and coord.pause_reason in ("esc", "ctrl-c")
+                coord.pause_reason in ("esc", "ctrl-c")
                 and final_state.status == "paused"
                 and interactive)
             if not loopable:
-                if interrupt_paused:
-                    # An interrupt paused the run but the session is not loopable
-                    # (--non-interactive, or no controlling tty): exit paused,
-                    # mirroring the legacy `coord.should_pause` arm (rc 130).
-                    return _finalize_paused_exit(
-                        change, driver, coord, coord.pause_reason or "ctrl-c")
-                break
+                # An interrupt paused the run but the session is not loopable
+                # (--non-interactive, or no controlling tty): exit paused,
+                # mirroring the legacy `coord.should_pause` arm (rc 130).
+                return _finalize_paused_exit(
+                    change, driver, coord, coord.pause_reason or "ctrl-c")
 
             coord.reset()
             if not non_interactive and _should_respawn_reader(
                     reader_exited=(coord._esc_reader is None)):
                 esc_reader = EscKeyReader(coord)
                 _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader)
+                    change, status, coord, esc_reader, driver)
                 await tg.start(esc_reader.run)
                 reader_armed = bool(esc_reader._armed)
 
@@ -463,6 +530,9 @@ async def _run_change_session(
         driver.finish()
         return _handle_terminal_outcome(change, result, coord)
     finally:
+        if channel is not None:
+            with anyio.CancelScope(shield=True):
+                await channel.stop()
         status.reset()
         tg.cancel_scope.cancel()
 
@@ -476,7 +546,7 @@ def _finalize_paused_exit(
     SIGTERM/escalation path out of the session loop."""
     driver.finish()
     pause_and_exit(change, reason=reason, engine_pause_reason=coord.pause_reason)
-    _emit_paused(change, reason)
+    _emit_paused(change)
     return 130
 
 
@@ -592,6 +662,104 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> str:
+    display = slug.strip() or change_id
+    return (ansi(display, *pal.NODE_COLORS["workflow"], enabled=color)
+            + ansi(f" · {marker}", "dim", enabled=color))
+
+
+def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
+    if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
+        print("imp: --tui needs an interactive terminal; streaming instead.",
+              file=sys.stderr)
+
+
+def _tui_requested(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "tui", False)) and sys.stdout.isatty()
+
+
+def _is_benign_interrupt_teardown(exc: BaseException | None) -> bool:
+    """True for the detached-task exceptions a (process-group) interrupt leaves
+    behind when it kills a provider's CLI child mid-write: the SDK's
+    `CLIConnectionError: Cannot write to terminated process` and asyncio's
+    connection-lost `InvalidStateError`. Benign teardown noise — in `--tui` it must
+    not surface (prompt_toolkit would wedge on a "Press ENTER to continue" modal)."""
+    import asyncio
+    if isinstance(exc, asyncio.InvalidStateError):
+        return True
+    return (exc is not None
+            and type(exc).__name__ == "CLIConnectionError"
+            and "terminated process" in str(exc))
+
+
+async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
+    import asyncio
+
+    from imp.cli.signals import InterruptCoordinator
+
+    # No EscKeyReader — TuiApp owns the tty exclusively.
+    coord = InterruptCoordinator()
+    app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
+    channel = _maybe_build_channel(change)
+
+    async def _chat(_prompt: object) -> str:
+        return await app.solicit(change)
+
+    # The full-screen app runs with set_exception_handler=False, so loop-level
+    # exceptions reach the handler we install here instead of prompt_toolkit's
+    # "Press ENTER" modal. Swallow interrupt-teardown noise (a pause is in flight,
+    # or a benign killed-child write); surface anything else via the prior handler.
+    loop = asyncio.get_running_loop()
+    prev_exc_handler = loop.get_exception_handler()
+
+    def _tui_loop_exc_handler(lp: Any, context: dict[str, Any]) -> None:
+        if coord.should_pause or _is_benign_interrupt_teardown(
+                context.get("exception")):
+            return
+        if prev_exc_handler is not None:
+            prev_exc_handler(lp, context)
+        else:
+            lp.default_exception_handler(context)
+
+    holder: dict[str, Any] = {}
+    load_err: Exception | None = None
+    loop.set_exception_handler(_tui_loop_exc_handler)
+    try:
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(coord.run_signal_receiver)
+            if channel is not None and not await channel.start(tg):
+                channel = None
+            run_on_event = (
+                compose_on_event(app.on_event, channel.on_event)
+                if channel is not None else app.on_event)
+
+            async def _run() -> None:
+                try:
+                    holder["result"] = await run_change(
+                        change, on_event=run_on_event, user_chat_input_fn=_chat,
+                        coordinator=coord, non_interactive=False)
+                finally:
+                    app.exit()
+
+            tg.start_soon(_run)
+            await app.run_async()
+            tg.cancel_scope.cancel()
+    except* (LoadError, LoadErrors) as eg:
+        load_err = eg.exceptions[0]
+    finally:
+        loop.set_exception_handler(prev_exc_handler)
+
+    app.print_collapsed_transcript(sys.stdout)
+    if load_err is not None:
+        print(f"imp: {load_err}", file=sys.stderr)
+        return 2
+    result = holder.get("result")
+    if result is None or (result is RunResult.PAUSED and coord.should_pause):
+        return _finalize_paused_exit(
+            change, app, coord, coord.pause_reason or "ctrl-c")
+    return _handle_terminal_outcome(change, result, coord)
+
+
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -629,15 +797,19 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
 
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            # No "Created Change …" line: the driver's `change_created` event
-            # prints the bold `#slug  title` workflow header as the opener, so a
-            # second headline here would just duplicate it.
+            print(_run_header_line(
+                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
             non_interactive = bool(getattr(args, "non_interactive", False))
+            _warn_if_tui_unavailable(args, sys.stdout)
+            if _tui_requested(args) and not non_interactive:
+                return await _run_tui_session(change, args=args)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
+                                width=_term_width(), status=status,
+                                suppress_opening_question=True)
             coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
             rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
@@ -665,7 +837,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                     rc = await _run_change_session(
                         change, coord=coord, driver=driver, status=status,
                         esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                        non_interactive=non_interactive, tg=tg)
+                        non_interactive=non_interactive, tg=tg, channel=channel)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -689,17 +861,27 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     control = _control_root()
-    try:
-        change_id = _resolve_id(control, args.token)
-    except SystemExit:
-        return 2
+    if args.token is None:
+        target = await _pick_resume_target(
+            control, non_interactive=bool(getattr(args, "non_interactive", False)))
+        if isinstance(target, int):
+            return target
+        change_id = target
+    else:
+        try:
+            change_id = _resolve_id(control, args.token)
+        except SystemExit:
+            return 2
     try:
         change = Change.load(control, change_id)
-    except (LoadError, LoadErrors) as err:
-        print(f"imp: {err}", file=sys.stderr)
-        return 2
+    except (LoadError, LoadErrors):
+        return _resume_gone(control, change_id)
     state = State.load(change.state_dir)
-    if state.status not in ("paused", "errored", "merge_blocked"):
+    # `running` is allowed THROUGH: it may be a crashed run (the OS dropped its
+    # lock, but the status.json still says running). The ProjectLock acquire below
+    # adjudicates — a genuinely-live run still holds the lock and trips LockHeld
+    # ("already running"); a crashed one's lock is free, so we recover it.
+    if state.status not in RESUMABLE and state.status != "running":
         print(
             f"imp: Change {change.id} status is {state.status!r}; "
             "nothing to resume",
@@ -714,7 +896,10 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # removing the worktree) could have landed in the gap. Re-checking
             # here ensures resume never runs a Change abandon has finalized.
             state = State.load(change.state_dir)
-            if state.status not in ("paused", "errored", "merge_blocked"):
+            # We now HOLD the lock, so a `running` status here is a crashed run,
+            # not a live one (a live holder would have tripped LockHeld) — resume
+            # it. The re-read still catches a concurrent abandon (→ "abandoned").
+            if state.status not in RESUMABLE and state.status != "running":
                 print(
                     f"imp: Change {change.id} status is {state.status!r}; "
                     "nothing to resume",
@@ -725,10 +910,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # workflow header — emit a matching one here (bold `#slug  title`) with
             # a dim resuming marker, so a resumed run opens like a fresh one. A
             # title-less change defers its header too (Option B), matching new.
-            _color = should_use_color(sys.stdout)
-            if change.title and change.title.strip():
-                print(ansi(f"#{change.slug}  {change.title}", "bold", "magenta", enabled=_color)
-                      + ansi(" · resuming", "dim", enabled=_color))
+            print(_run_header_line(
+                change.slug, change.id, "resuming",
+                color=should_use_color(sys.stdout)))
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
             # + gate-check FIRST (plan_rewind raises before mutating/emitting) so
@@ -763,12 +947,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     return 2
 
             non_interactive = bool(getattr(args, "non_interactive", False))
-            status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout,
-                                color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
-            coord = InterruptCoordinator()
-            rc = 0
+            _warn_if_tui_unavailable(args, sys.stdout)
             # Append the resume marker exactly once (for the persisted log /
             # imp log). NO replay: the engine picks up from the current step
             # cursor, re-emitting step_started + the step body fresh
@@ -786,6 +965,16 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     rewind_plan, workflow, state, change.event_log())
             state.save(change.state_dir)
 
+            if _tui_requested(args) and not non_interactive:
+                return await _run_tui_session(change, args=args)
+
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout,
+                                color=should_use_color(sys.stdout),
+                                width=_term_width(), status=status)
+            coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
+            rc = 0
             esc_reader: EscKeyReader | None = None
             if non_interactive:
                 reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
@@ -811,7 +1000,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     rc = await _run_change_session(
                         change, coord=coord, driver=driver, status=status,
                         esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                        non_interactive=non_interactive, tg=tg)
+                        non_interactive=non_interactive, tg=tg, channel=channel)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -908,7 +1097,7 @@ def _resolve_id(control: Path, token: str) -> str:
     if len(suffix_hits) == 1:                              # (2) unique suffix
         return suffix_hits[0]
     if len(suffix_hits) > 1:
-        _exit_ambiguous(token, suffix_hits)
+        _exit_ambiguous(token, suffix_hits, control)
 
     slug_hits = []
     for cid in ids:
@@ -916,15 +1105,19 @@ def _resolve_id(control: Path, token: str) -> str:
         if title is None:
             continue
         try:
-            slug = dated_slug(title, date=cid[:10])
+            dated = dated_slug(title, date=cid[:10])         # 2026-06-11-add-version-flag
+            bare = slugify(title)                            # add-version-flag
         except Exception:
             continue
-        if slug == token:
+        # Match the human dated slug OR the bare name a user naturally types
+        # (`imp resume add-version-flag`); without the bare form this tier was
+        # dead for undated names and they fell through to "no Change matches".
+        if token in (dated, bare):
             slug_hits.append(cid)
     if len(slug_hits) == 1:                                 # (3) current slug
         return slug_hits[0]
     if len(slug_hits) > 1:
-        _exit_ambiguous(token, slug_hits)
+        _exit_ambiguous(token, slug_hits, control)
 
     # Not resolvable. A bare prefix shared by several ids (e.g. `2026-06-04`) is
     # rejected as AMBIGUOUS and lists the candidates (spec §5 / AC 5): prefixes
@@ -932,16 +1125,25 @@ def _resolve_id(control: Path, token: str) -> str:
     # rather than a blank "no match", so the user can retype with a suffix.
     prefix_hits = [cid for cid in ids if cid.startswith(token)]
     if len(prefix_hits) > 1:
-        _exit_ambiguous(token, prefix_hits)
+        _exit_ambiguous(token, prefix_hits, control)
 
     print(f"imp: no Change matches {token!r}", file=sys.stderr)
     raise SystemExit(2)
 
 
-def _exit_ambiguous(token: str, candidates: list[str]) -> NoReturn:
+def _exit_ambiguous(token: str, candidates: list[str], control: Path) -> NoReturn:
     print(f"imp: {token!r} is ambiguous; candidates:", file=sys.stderr)
+    color = should_use_color(sys.stderr)
+    now = datetime.now(UTC)
+    print(change_row.header_line(color=color), file=sys.stderr)
     for cid in sorted(candidates):
-        print(f"  {cid}", file=sys.stderr)
+        row = _row_for_id(control, cid)
+        if row is None:
+            print(f"  {cid}", file=sys.stderr)
+            continue
+        print(change_row.format_change_line(
+            change_id=row[0], title=row[4], status=row[1], step=row[2],
+            last_iso=row[3], now=now, color=color), file=sys.stderr)
     raise SystemExit(2)
 
 
@@ -989,7 +1191,7 @@ def _resolve_default_id(control: Path) -> str | None:
     journaled = journal.journal_ids(control)
     if not journaled:
         return None
-    return max(journaled, key=lambda s: _journal_last_activity(control, s))
+    return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
@@ -1065,46 +1267,99 @@ def _read_last_line(events_path: Path) -> bytes | None:
         return _last_nonempty_line(buf)
 
 
-def _format_last_timestamp(line: str) -> str:
-    """Local-time YYYY-MM-DD HH:MM:SS for a single already-extracted event line,
-    or '-' when the line is empty / malformed. Callers pass the last non-empty
-    line (see _read_last_line / _last_nonempty_line)."""
+
+def _iso_from_line(line: str) -> str | None:
     if not line.strip():
-        return "-"
+        return None
     try:
-        record = json.loads(line)
-        ts = datetime.fromisoformat(record["timestamp"]).astimezone()
-        return ts.strftime("%Y-%m-%d %H:%M:%S")
-    except (json.JSONDecodeError, KeyError, ValueError):
-        return "-"
+        return str(json.loads(line)["timestamp"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
 
 
-def _last_event_timestamp(events_path: Path) -> str:
+def _last_event_iso(events_path: Path) -> str | None:
     try:
         line = _read_last_line(events_path)
     except FileNotFoundError:
-        return "-"
+        return None
     if line is None:
-        return "-"
-    return _format_last_timestamp(line.decode("utf-8", errors="replace"))
+        return None
+    return _iso_from_line(line.decode("utf-8", errors="replace"))
 
 
-def _journal_last_activity(control: Path, change_id: str) -> str:
+def _journal_last_iso(control: Path, change_id: str) -> str | None:
     raw = journal.journal_show(control, change_id, "events.jsonl")
     if raw is None:
-        return "-"
+        return None
     line = _last_nonempty_line(raw)
     if line is None:
-        return "-"
-    return _format_last_timestamp(line.decode("utf-8", errors="replace"))
+        return None
+    return _iso_from_line(line.decode("utf-8", errors="replace"))
+
+
+def _journal_status(control: Path, change_id: str) -> str | None:
+    raw = journal.journal_show(control, change_id, "state.json")
+    if raw is None:
+        return None
+    try:
+        return str(json.loads(raw)["status"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def _resume_gone(control: Path, change_id: str) -> int:
+    status = _journal_status(control, change_id)
+    title = _title_for_id(control, change_id) or change_id
+    if status == "abandoned":
+        print(f"{title} was abandoned; nothing to resume.")
+        return 0
+    if status is not None:
+        print(f"{title} is already completed; nothing to resume.")
+        return 0
+    print(f"imp: no Change matches {change_id!r}", file=sys.stderr)
+    return 2
 
 
 # Spec §10: in-flight statuses; completed Changes live in the journal.
-_INFLIGHT = ("running", "paused", "merge_blocked")
+_INFLIGHT = ("running", "paused", "errored", "merge_blocked")
+RESUMABLE = ("paused", "errored", "merge_blocked")
+
+
+def _pid_alive(pid: int) -> bool:
+    """Signal-0 liveness probe. ESRCH (no such process) → dead; EPERM (exists,
+    not ours) → alive. A live run's pid is never falsely reported dead, so this
+    never lets two processes into one worktree — the safe direction."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _effective_status(status: str, change_dir: Path) -> str:
+    """Re-derive a `running` status against its ProjectLock holder. A run holds
+    `change_dir/lock` (pid inside) for its whole life; a hard kill / crash has the
+    OS drop the flock but leaves the stale pid file and a `running` state.json. So
+    a `running` Change whose lock pid is dead has CRASHED — surface it as
+    `errored` (in RESUMABLE) so `imp status` shows it and `imp resume` offers it.
+
+    Only `running` is re-derived; every other status is authoritative. A MISSING
+    lock file is left as `running` (the microsecond between Change.create and the
+    run acquiring the lock) — a real crash leaves the pid file behind."""
+    if status != "running":
+        return status
+    try:
+        pid = int((change_dir / "lock").read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return status
+    return status if _pid_alive(pid) else "errored"
 
 
 # Row = (id, status, step, last_activity, title, created_at). created_at is the
-# trailing sort key only — the renderer never displays it (see _render_status_table).
+# trailing sort key only — the renderer never displays it (see _cmd_status, which
+# formats each row via change_row.format_change_line).
 _Row = tuple[str, str, str, str, str, str]
 
 
@@ -1125,15 +1380,43 @@ def _status_row(change_id: str, state_json: bytes, change_json: bytes,
         return None
 
 
+def _row_for_id(control: Path, change_id: str) -> _Row | None:
+    cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    # journal_show returns bytes | None; the live-worktree branch always finds the
+    # files. Annotate so the None-guard below stays reachable (not dead code).
+    state_json: bytes | None
+    change_json: bytes | None
+    if (cdir / "change.json").exists():
+        state_json = (cdir / "state" / "state.json").read_bytes()
+        change_json = (cdir / "change.json").read_bytes()
+        last = _last_event_iso(cdir / "events.jsonl") or ""
+    else:
+        state_json = journal.journal_show(control, change_id, "state.json")
+        change_json = journal.journal_show(control, change_id, "change.json")
+        if state_json is None or change_json is None:
+            return None
+        last = _journal_last_iso(control, change_id) or ""
+    row = _status_row(change_id, state_json, change_json, last)
+    if row is None:
+        return None
+    # A live worktree may hold a crashed `running` run — re-derive against its
+    # lock (journaled rows are terminal, so the check is a no-op there).
+    return (row[0], _effective_status(row[1], cdir), *row[2:])
+
+
 def _status_rows(control: Path) -> list[_Row]:
     rows: list[_Row] = []
     for change_id in _list_change_worktrees(control):
         cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
         state_json = (cdir / "state" / "state.json").read_bytes()
         change_json = (cdir / "change.json").read_bytes()
-        last = _last_event_timestamp(cdir / "events.jsonl")
+        last = _last_event_iso(cdir / "events.jsonl") or ""
         row = _status_row(change_id, state_json, change_json, last)
-        if row is None or row[1] not in _INFLIGHT:
+        if row is None:
+            continue
+        status = _effective_status(row[1], cdir)   # crashed `running` → `errored`
+        row = (row[0], status, *row[2:])
+        if row[1] not in _INFLIGHT:
             continue
         rows.append(row)
     return rows
@@ -1151,7 +1434,7 @@ def _completed_rows(control: Path) -> list[_Row]:
         change_json = journal.journal_show(control, change_id, "change.json")
         if state_json is None or change_json is None:
             continue
-        last = _journal_last_activity(control, change_id)
+        last = _journal_last_iso(control, change_id) or ""
         row = _status_row(change_id, state_json, change_json, last)
         if row is None or row[1] in _INFLIGHT:
             continue  # belt-and-suspenders; journaled rows are completed
@@ -1159,56 +1442,52 @@ def _completed_rows(control: Path) -> list[_Row]:
     return rows
 
 
-# STATUS cell colors mirror imp log's restraint — color only this cell,
-# leave the rest plain. Padding is computed against the un-colored status
-# text so the column edge holds when colors are on.
-_STATUS_COLORS: dict[str, tuple[str, ...]] = {
-    "running": ("green",),
-    "paused": ("cyan",),
-    "merge_blocked": ("yellow",),
-    "errored": ("bold", "red"),
-    "completed": ("gray",),
-    "abandoned": ("gray",),
-}
+def _sort_rows_newest_first(rows: list[_Row]) -> list[_Row]:
+    return sorted(rows, key=lambda r: (r[3], r[5]), reverse=True)
 
 
-def _render_status_table(
-    rows: list[_Row],
-    *,
-    color_enabled: bool,
-) -> list[str]:
-    """Format pre-sorted rows into aligned table lines. Per-column widths are
-    `max(len(header), max(len(cell) for cell in column))` over the un-colored
-    cell text; only the STATUS value (not its trailing pad) is wrapped in
-    ANSI, so later columns hold their offset whether color is on or off."""
-    headers = ("ID", "STATUS", "STEP", "LAST_ACTIVITY", "TITLE")
-    # Compute widths for columns 0-3 only; TITLE is the terminal column and
-    # needs no padding.
-    widths = [
-        max(len(headers[i]), max((len(r[i]) for r in rows), default=0))
-        for i in range(4)
-    ]
-    lines: list[str] = [
-        f"{headers[0]:<{widths[0]}} "
-        f"{headers[1]:<{widths[1]}} "
-        f"{headers[2]:<{widths[2]}} "
-        f"{headers[3]:<{widths[3]}} "
-        f"{headers[4]}"
-    ]
-    for slug, status, step, last, title, _created in rows:
-        status_cell = f"{status:<{widths[1]}}"
-        codes = _STATUS_COLORS.get(status, ())
-        if color_enabled and codes:
-            pad = " " * (widths[1] - len(status))
-            status_cell = ansi(status, *codes, enabled=True) + pad
-        lines.append(
-            f"{slug:<{widths[0]}} "
-            f"{status_cell} "
-            f"{step:<{widths[2]}} "
-            f"{last:<{widths[3]}} "
-            f"{title}"
-        )
-    return lines
+def _resumable_rows(control: Path) -> list[_Row]:
+    rows = [r for r in _status_rows(control) if r[1] in RESUMABLE]
+    return _sort_rows_newest_first(rows)
+
+
+def _past_change_count(control: Path) -> int:
+    return len(_completed_rows(control))
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
+    rows = _resumable_rows(control)
+    if not rows:
+        print("Nothing to resume.")
+        past = _past_change_count(control)
+        if past:
+            plural = "s" if past != 1 else ""
+            print(pal.ansi(
+                f"({past} past change{plural} — see `imp status --all`)",
+                "dim", enabled=should_use_color(sys.stdout)))
+        return 0
+    if len(rows) == 1:
+        return rows[0][0]
+    if non_interactive or not _interactive():
+        print("Multiple resumable Changes — pass a token:", file=sys.stderr)
+        color = should_use_color(sys.stderr)
+        now = datetime.now(UTC)
+        print(change_row.header_line(color=color), file=sys.stderr)
+        for r in rows:
+            print(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                last_iso=r[3], now=now, color=color), file=sys.stderr)
+        return 2
+    candidates = [resume_select.Candidate(
+        change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3])
+        for r in rows]
+    chosen = await resume_select.run_picker(
+        candidates, now=datetime.now(UTC), color=should_use_color(sys.stdout))
+    return chosen if chosen is not None else 2
 
 
 def _abandon(control: Path, change_id: str) -> int:
@@ -1282,23 +1561,25 @@ def _cmd_status(args: argparse.Namespace) -> int:
     except worktree.PreconditionError:
         print("No Changes.")
         return 0
-    # In-flight Changes show by default; completed/abandoned ones are journaled
-    # history and only listed with --all (they'd otherwise pile up indefinitely).
-    rows = _status_rows(control)
-    if args.all:
-        rows = rows + _completed_rows(control)
-    if not rows:
+    inflight = _sort_rows_newest_first(_status_rows(control))
+    past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
+    if not inflight and not past:
         print("No Changes.")
         return 0
-    # Sort by last activity, oldest first. last_activity (r[3]) is a fixed-width
-    # "YYYY-MM-DD HH:MM:SS" local-time string (or "-" when there's no event), so
-    # lexicographic ascending == chronological oldest-first; activity-less "-"
-    # rows ("-" < any digit) sort to the top. created_at (r[5]) breaks ties
-    # deterministically (older Change first within the same activity second).
-    rows.sort(key=lambda r: (r[3], r[5]))
-    color_enabled = should_use_color(sys.stdout)
-    for line in _render_status_table(rows, color_enabled=color_enabled):
-        print(line)
+    color = should_use_color(sys.stdout)
+    now = datetime.now(UTC)
+    print(change_row.header_line(color=color))
+    for r in inflight:
+        print(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            last_iso=r[3], now=now, color=color))
+    if past:
+        if inflight:
+            print()
+        for r in past:
+            print(change_row.format_change_line(
+                change_id=r[0], title=r[4], status=r[1], step=r[2],
+                last_iso=r[3], now=now, color=color, dim=True))
     return 0
 
 
@@ -1322,8 +1603,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -1338,16 +1618,22 @@ def main(argv: list[str] | None = None) -> int:
                        help="Headless reply consumed by the first wait_for_user; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
+    p_new.add_argument("--tui", action="store_true",
+                       help="Render the run in a full-screen, scrollable viewer "
+                            "(expanded steps); falls back to streaming on a non-tty.")
     p_new.set_defaults(func=_cmd_new)
 
     p_resume = sub.add_parser("resume")
-    p_resume.add_argument("token")
+    p_resume.add_argument("token", nargs="?")
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
                           help="Headless reply consumed by the first wait_for_user; "
                                "pause+resume with another --message. "
                                "Requires --non-interactive.")
+    p_resume.add_argument("--tui", action="store_true",
+                          help="Render the run in a full-screen, scrollable viewer "
+                               "(expanded steps); falls back to streaming on a non-tty.")
     p_resume.add_argument(
         "--from", dest="from_target", metavar="TARGET",
         help="Rewind/jump the step cursor to TARGET (a step or phase name) and "
@@ -1394,10 +1680,13 @@ def main(argv: list[str] | None = None) -> int:
     p_abandon.set_defaults(func=_cmd_abandon)
 
     from imp.evals.cli import add_eval_parser
-
     add_eval_parser(sub)
+    return parser
 
-    ns = parser.parse_args(args)
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    ns = _build_parser().parse_args(args)
     _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
         rc: int = ns.func(ns)

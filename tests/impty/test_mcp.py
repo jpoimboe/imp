@@ -5,6 +5,7 @@ import contextlib
 import os
 import signal
 import sys
+import time
 
 import pytest
 
@@ -28,6 +29,27 @@ _SIGINT_CHILD = (
     "tty.setraw(sys.stdin.fileno())\n"
     "os.write(1, b'READY\\r\\n')\n"
     "time.sleep(30)\n"
+)
+
+
+# A full-screen-ish child that NEVER goes quiet: after a brief READY pause (so
+# start()'s wait_idle settles), it repaints every 20ms forever. Reacts to 'x'
+# (-> GOT-X marker) and 'q' (exit). Drives the "animating app" settle behaviour.
+_ANIMATING_CHILD = (
+    "import os, sys, select, time, tty\n"
+    "tty.setraw(sys.stdin.fileno())\n"
+    "os.write(1, b'READY\\r\\n')\n"
+    "time.sleep(0.4)\n"                       # let start() settle on READY
+    "hit = b''\n"
+    "end = time.time() + 30\n"
+    "while time.time() < end:\n"
+    "    r, _, _ = select.select([sys.stdin], [], [], 0)\n"
+    "    if r:\n"
+    "        c = os.read(sys.stdin.fileno(), 1)\n"
+    "        if c == b'x': hit = b'GOT-X'\n"
+    "        elif c == b'q': break\n"
+    "    os.write(1, b'\\rtick ' + hit + b'   ')\n"
+    "    time.sleep(0.02)\n"
 )
 
 
@@ -91,6 +113,20 @@ def test_send_signal_tool_delivers_sigint_regardless_of_tty_mode() -> None:
 
 
 @pytest.mark.skipif(not _can_pty(), reason="pty not available")
+def test_start_passes_env_to_child() -> None:
+    # The env param lets a driver set variables (e.g. API keys) WITHOUT a
+    # `bash -lc "export …; exec …"` wrapper — which would otherwise put bash, not
+    # the target program, in the foreground process group. Spawn directly with
+    # env and confirm the child sees it.
+    prog = "import os, time\nprint('VAL=' + os.environ.get('IMPTY_TEST', 'MISSING'))\ntime.sleep(1)"
+    mcp_mod.start([sys.executable, "-c", prog], env={"IMPTY_TEST": "hello"})
+    try:
+        assert "VAL=hello" in mcp_mod.view(full=True)
+    finally:
+        mcp_mod.stop()
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
 def test_view_returns_current_screen_by_default_and_full_on_demand() -> None:
     prog = "import time\n[print('line', i) for i in range(40)]\ntime.sleep(1)"
     mcp_mod.start([sys.executable, "-c", prog])
@@ -101,5 +137,43 @@ def test_view_returns_current_screen_by_default_and_full_on_demand() -> None:
         assert "line 0" not in v                       # whole strip NOT dumped by default
         full = mcp_mod.view(full=True)
         assert "line 0" in full                        # full strip on demand
+    finally:
+        mcp_mod.stop()
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+def test_send_numeric_wait_settles_a_fixed_time_on_an_always_animating_app() -> None:
+    # An app that repaints every 20ms NEVER goes quiet, so wait=True blocks the
+    # whole settle cap on every keystroke (a live TUI / spinner). A numeric wait
+    # settles a FIXED duration instead — long enough for the reaction to render —
+    # and returns promptly.
+    mcp_mod.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        t = time.monotonic()
+        screen = mcp_mod.send("x", wait=0.5)         # fixed 0.5s settle
+        dt = time.monotonic() - t
+        assert "GOT-X" in screen                     # the reaction rendered
+        assert dt < 3.0                              # NOT a full settle-cap block
+        assert mcp_mod.send("q", wait=False) == "[sent]"   # bool path unchanged
+    finally:
+        mcp_mod.stop()
+
+
+@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+def test_default_settle_cap_is_short_not_fifteen_seconds() -> None:
+    # The settle policy lives in TerminalSession (DEFAULT_SETTLE_HARD); the MCP
+    # tools inherit it, they don't set their own. On a never-quiet app the default
+    # wait() returns at the (short) hard ceiling — guards against the cap creeping
+    # back up to the old 15s, and against the MCP layer re-introducing its own.
+    from impty.session import DEFAULT_SETTLE_HARD
+
+    assert DEFAULT_SETTLE_HARD <= 5.0                # policy stays responsive
+    mcp_mod.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        t = time.monotonic()
+        mcp_mod.wait()                               # no args -> inherit the default cap
+        dt = time.monotonic() - t
+        assert dt < DEFAULT_SETTLE_HARD + 1.5        # capped near the default, not 15s
+        mcp_mod.send("q", wait=False)
     finally:
         mcp_mod.stop()

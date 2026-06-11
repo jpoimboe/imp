@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from imp.cli.prompt import Prompt
+from imp.cli.prompt import Prompt, _placeholder_text, _prompt_message_text
 
 
 def test_prompt_returns_user_text() -> None:
@@ -87,3 +87,26 @@ class _FakeHistory:
 
     def get_strings(self) -> list[str]:
         return list(self._strings)
+
+
+def test_message_is_bare_caret_without_a_question_plain() -> None:
+    assert _prompt_message_text("", color=False) == "> "
+
+
+def test_message_puts_the_question_above_the_caret_plain() -> None:
+    assert _prompt_message_text("Pick A or B?", color=False) == "Pick A or B?\n> "
+
+
+def test_message_strips_question_whitespace_plain() -> None:
+    assert _prompt_message_text("  Pick A or B?  ", color=False) == "Pick A or B?\n> "
+
+
+def test_message_color_dims_question_and_blues_caret() -> None:
+    msg = _prompt_message_text("Pick A or B?", color=True)
+    assert msg.startswith("\x1b[2mPick A or B?\x1b[0m\n")   # dim question line
+    assert msg.endswith("\x1b[94m> \x1b[0m")                # bright-blue caret
+
+
+def test_placeholder_hint_is_the_dim_reply_prompt() -> None:
+    assert _placeholder_text(color=False) == "type your reply"
+    assert _placeholder_text(color=True) == "\x1b[2mtype your reply\x1b[0m"

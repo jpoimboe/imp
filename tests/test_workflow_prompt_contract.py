@@ -71,6 +71,37 @@ def test_subagent_prompt_forbids_turn_ending_question(name: str) -> None:
             f"{name}: subagents have no user channel — remove {banned!r}")
 
 
+def test_spec_writer_infers_intent_from_pasted_context() -> None:
+    text = _read("spec-writer.md")
+    assert "context instead of intent" in text
+    assert "wait_for_user" in text
+    assert "infer" in text.lower()
+
+
+TURN_TERMINAL_REVIEWERS = [
+    "code-reviewer.md", "quality-reviewer.md", "plan-reviewer.md",
+    "spec-reviewer.md", "integration-reviewer.md", "completeness-slice.md",
+    "boundaries-slice.md", "spec-compliance-slice.md", "plan-cycle-check.md",
+    "review-panel.md",
+]
+
+
+@pytest.mark.parametrize("name", TURN_TERMINAL_REVIEWERS)
+def test_reviewer_md_has_no_unreconciled_no_preamble_directive(name: str) -> None:
+    # The base persona tells every agent to "state in one sentence what you're
+    # about to do" before its first tool call. A reviewer that ALSO carried a
+    # "no preamble / output only the tool" directive would read ambiguously
+    # against that base (spec acceptance #5). The planning audit found none; this
+    # guard fails loudly if a future edit introduces one without reconciling it.
+    low = _read(name).lower()
+    for banned in ("no preamble", "without any preamble", "without preamble",
+                   "do not output any text", "output only the tool",
+                   "go straight to the tool"):
+        assert banned not in low, (
+            f"{name}: {banned!r} conflicts with the base persona's "
+            f"say-one-sentence-before-your-first-tool-call default — reconcile it")
+
+
 @pytest.mark.parametrize("name", INTERACTIVE_STEP_FILES)
 def test_interactive_steps_exist_and_are_exempt(name: str) -> None:
     # Guard the exemption: if these files are renamed/removed, this test fails
@@ -80,3 +111,46 @@ def test_interactive_steps_exist_and_are_exempt(name: str) -> None:
     if not path.exists():
         pytest.skip(f"{name} not present in this workflow revision")
     assert path.read_text()  # non-empty
+
+
+TASK_LEAD = AGENTS_DIR / "task-lead.md"
+
+
+def test_task_lead_gates_nits_on_fixability_not_severity() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # Critical/Major stay unconditional; Minor/Nit gate on fixability (AC 1-2).
+    assert "critical/major are mandatory" in low
+    assert "gate on fixability, not severity" in low
+    assert "fixability bar" in low
+    for fix_now in ("mechanical", "confined to the task's own diff",
+                    "behavior-preserving or test-strengthening", "bounded"):
+        assert fix_now in low, f"missing fix-now property: {fix_now}"
+    for defer in ("needs judgment or design", "out of scope", "non-local"):
+        assert defer in low, f"missing defer property: {defer}"
+
+
+def test_task_lead_nit_fix_dispatch_has_overreach_guardrail_and_batches() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # Over-reach guardrail on the nit-fix dispatch (AC 3).
+    assert "apply only these named nits" in low
+    assert "do not refactor beyond the named change" in low
+    # Qualifying nits ride the same fixup round, folded by autosquash (AC 4).
+    assert "same fixup round" in low
+
+
+def test_task_lead_nit_only_fixup_skips_rereview_and_degraded() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # A nit-only fixup is cheap and polish-only (AC 5).
+    assert "does not re-trigger the quality-reviewer" in low
+    assert "does not mark the run degraded" in low
+
+
+def test_task_lead_records_fixed_inline_nits_and_reserves_followups() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # Qualifying nits are recorded as fixed-inline (AC 6).
+    assert "fixed-inline" in low
+    # The Deferred Followups list is reserved for judgment/out-of-scope findings.
+    assert "deferred followups" in low
+    assert "reserved for the judgment-call" in low
+    # A bar-cleared nit is polish, not an open_items / degraded trigger.
+    assert "cleared the fixability bar" in low

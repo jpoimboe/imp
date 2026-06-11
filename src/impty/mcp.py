@@ -28,15 +28,15 @@ import time
 from mcp.server.fastmcp import FastMCP
 
 from impty import TerminalSession
+from impty.session import DEFAULT_SETTLE_HARD, DEFAULT_SETTLE_IDLE
 
 mcp = FastMCP("impty")
 
-# The settle policy shared by start/send/send_signal/wait: how long the program
-# must be quiet to count as "done reacting" (idle) and the wall-clock ceiling
-# before we give up and return whatever's on screen (hard). One place, so the
-# four call sites can't drift apart.
-_SETTLE_IDLE = 0.3
-_SETTLE_HARD = 15.0
+# The settle policy (idle quiet-window, hard ceiling) lives in TerminalSession —
+# this MCP layer is a thin pass-through and sets none of its own. start/send/
+# send_signal just call wait_idle() and inherit it; the `wait` tool surfaces the
+# two knobs to the caller, defaulting to the library values (imported, not
+# redefined, so the default can't drift from the library).
 
 # C-style escape mnemonics the send() contract documents (\r, \t, \x03, \x1b…).
 # Only RECOGNIZED escapes are matched, so ordinary text — including non-ASCII
@@ -91,20 +91,27 @@ def start(
     cwd: str | None = None,
     cols: int = 80,
     rows: int = 24,
+    env: dict[str, str] | None = None,
 ) -> str:
     """Spawn an interactive program on a fresh pty and return its first screen.
 
     Replaces any existing session. `argv` is the command + args, e.g.
-    ["imp", "new", "my-change"]. `cols`/`rows` set the terminal size (a real
-    test parameter — programs reflow by width). Waits for the program to settle
-    before returning, so the returned screen is the first thing to react to.
+    ["imp", "new", "my-change"] — spawned directly, so the program is the
+    foreground, controlling-tty session leader (Ctrl-C/ESC reach it). No shell
+    wrapper is needed; pass `env` to set variables (e.g. API keys) instead of a
+    `bash -lc "export …; exec …"` wrapper, which would otherwise put bash — not
+    your program — in the foreground group. `env`, when given, REPLACES the
+    inherited environment (TERM is still defaulted); merge with the parent env
+    yourself if you want to extend it. `cols`/`rows` set the terminal size (a
+    real test parameter — programs reflow by width). Waits for the program to
+    settle before returning, so the returned screen is the first thing to react to.
     """
     global _session
     if _session is not None:
         _session.close()
         _session = None
-    session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows)
-    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD)
+    session = TerminalSession(argv, cwd=cwd, cols=cols, rows=rows, env=env)
+    session.wait_idle()  # inherit the library settle policy
     _session = session
     return _render(session)
 
@@ -123,7 +130,7 @@ def view(full: bool = False) -> str:
 
 
 @mcp.tool()
-def send(data: str, wait: bool = True) -> str:
+def send(data: str, wait: bool | float = True) -> str:
     """Send raw keystrokes to the program, then (by default) return the new screen.
 
     `data` is literal bytes the program receives — NOT a description. Common keys:
@@ -131,9 +138,15 @@ def send(data: str, wait: bool = True) -> str:
     Up=`\\x1b[A` Down=`\\x1b[B` Right=`\\x1b[C` Left=`\\x1b[D`.
     So answering a prompt "foo" then Enter = data="foo\\r".
 
-    With wait=True (default) it waits for the program to react and returns the
-    fresh screen — type-then-look in one call. Set wait=False to fire keys
-    without waiting (e.g. mid-stream input).
+    `wait` controls how long to settle before snapshotting:
+    - True (default): wait for the program to react and go QUIET, then return —
+      type-then-look in one call. Best for apps that settle after a keystroke.
+    - False: fire and return `[sent]` immediately (e.g. mid-stream input).
+    - a number (seconds): settle for that FIXED duration, then return the screen.
+      Use this for a continuously-animating full-screen app (a spinner / live
+      TUI) that NEVER goes quiet — there `wait=True` blocks the whole settle cap
+      every keystroke. e.g. `wait=0.4` lets the reaction render, then snapshots.
+      The background drainer keeps pyte current during the wait.
     """
     session = _require()
     # Mark the type-then-look boundary just before the keystroke so wait_idle
@@ -141,9 +154,14 @@ def send(data: str, wait: bool = True) -> str:
     # touched seconds ago.
     since = time.monotonic()
     session.send(_decode_keys(data))
-    if not wait:
+    # `is False` / `is True`: bool is an int subclass, so a numeric `wait` must be
+    # distinguished by identity, not truthiness (0.0 is a valid fixed settle).
+    if wait is False:
         return "[sent]"
-    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD, since=since)
+    if wait is True:
+        session.wait_idle(since=since)  # inherit the library settle policy
+    else:
+        time.sleep(max(0.0, float(wait)))  # fixed settle; drainer updates pyte
     return _render(session)
 
 
@@ -166,12 +184,12 @@ def send_signal(sig: int = signal.SIGINT) -> str:
     # (handler output, exit), not on a stale pre-signal screen.
     since = time.monotonic()
     session.send_signal(sig)
-    session.wait_idle(idle=_SETTLE_IDLE, hard=_SETTLE_HARD, since=since)
+    session.wait_idle(since=since)  # inherit the library settle policy
     return _render(session)
 
 
 @mcp.tool()
-def wait(idle: float = _SETTLE_IDLE, hard: float = _SETTLE_HARD) -> str:
+def wait(idle: float = DEFAULT_SETTLE_IDLE, hard: float = DEFAULT_SETTLE_HARD) -> str:
     """Wait for the program to settle, then return the screen.
 
     For watching a program that's still working (spinners, streaming) without
@@ -187,7 +205,7 @@ def wait(idle: float = _SETTLE_IDLE, hard: float = _SETTLE_HARD) -> str:
 
 
 @mcp.tool()
-def snapshot(path: str | None = None, full: bool = False) -> str:
+def snapshot(path: str | None = None, full: bool = False, light: bool = False) -> str:
     """Render the screen to a PNG (true color, bold weight, box-drawing glyphs)
     and return its path — for SEEING the TUI, not just the grid text view()
     returns. The image reflects the live session's size.
@@ -196,18 +214,23 @@ def snapshot(path: str | None = None, full: bool = False) -> str:
     scrolled-off history above it — a tall image, so it is opt-in. `path`
     defaults to a fresh temp file. Faint (dim) text isn't shown — pyte discards
     SGR 2 at parse time — but color, bold, and layout are faithful.
+
+    The canvas is a dark terminal by default. Set light=True to render on a
+    near-white surface instead — use it to preview an app's *light* theme, which
+    tunes its accents for a pale background and so reads wrong on the dark default.
     """
     import os
     import tempfile
 
-    from impty.render import render_screen
+    from impty.render import light_surface, render_screen
 
     session = _require()
     if path is None:
         fd, path = tempfile.mkstemp(prefix="impty-", suffix=".png")
         os.close(fd)
+    bg, fg = light_surface() if light else (None, None)
     with session.paused():  # freeze pyte while render reads the raw screen buffer
-        render_screen(session.screen, path, full=full)
+        render_screen(session.screen, path, full=full, bg=bg, fg=fg)
     return f"[wrote {path}]"
 
 

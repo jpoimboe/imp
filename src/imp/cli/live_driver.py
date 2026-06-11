@@ -35,6 +35,25 @@ from imp.cli.live_status import LiveStatus
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
 
+def compose_activity_status(
+    builder: nv.NarrativeBuilder, *, frame: int, elapsed: float, color: bool,
+) -> str | None:
+    activity = builder.current_activity()
+    if activity is None:
+        return None
+    spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=color)
+    segs: list[str] = []
+    if activity.count:
+        segs.append(pal.ansi(activity.count, enabled=color))
+    if activity.detail:
+        segs.append(pal.ansi(activity.detail, "gray", enabled=color))
+    if activity.label:
+        segs.append(pal.ansi(activity.label, enabled=color))
+    body = " · ".join(segs)
+    tail = pal.ansi(f"· {rt.fmt_seconds(elapsed)}", "dim", enabled=color)
+    return f"{spin} {body} {tail}"
+
+
 @dataclass
 class _Cursor:
     container: Any   # WorkflowNode | PhaseNode | StepNode | SubagentFold
@@ -43,7 +62,12 @@ class _Cursor:
 
 
 def _is_container(node: Any) -> bool:
-    return isinstance(node, (nv.PhaseNode, nv.StepNode))
+    # A quiet StepNode is NOT a streamed container: it has no narrative children
+    # and renders as a single deferred leaf (its routing arrow, or nothing),
+    # mirroring render_text's quiet branch so live == imp log.
+    if isinstance(node, nv.StepNode):
+        return not node.quiet
+    return isinstance(node, nv.PhaseNode)
 
 
 def _container_children(container: Any) -> list[Any]:
@@ -56,7 +80,8 @@ def _container_closed(container: Any) -> bool:
 
 
 class LiveDriver:
-    def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus) -> None:
+    def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus,
+                 suppress_opening_question: bool = False) -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
@@ -67,6 +92,14 @@ class LiveDriver:
         # so the live view and `imp log` look identical (design §5.4). Any non-prose
         # output resets it; an empty emission leaves it untouched.
         self._prev_prose = False
+        self._pending_question = ""
+        # `imp new` opens on the workflow's first wait_for_user. That opening
+        # question is the run's premise, not a reply solicit, and surfacing it as
+        # a label above the very first `>` resurfaces a question that was never
+        # shown in prose (its proper display is handled elsewhere). Swallow the
+        # first non-empty pending question on the new path only; resume keeps the
+        # label so the in-progress question is resurfaced as the user expects.
+        self._suppress_opening_question = suppress_opening_question
         self._prompt_active = False        # defer _print_lines while a prompt owns the screen
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._deferred: list[tuple[list[str], bool, str]] = []
@@ -77,6 +110,8 @@ class LiveDriver:
     # -- engine callbacks -----------------------------------------------------
     def on_event(self, event: Any) -> None:
         self._builder.add(event)
+        if isinstance(event, dict) and event.get("type") == "awaiting_user_input":
+            self._pending_question = (event.get("payload") or {}).get("prompt", "")
         if isinstance(event, dict) and event.get("type") in (
                 "step_started", "user_message"):
             # §7: time-the-agent-working-since-the-last-user-reply. Reset on
@@ -96,20 +131,15 @@ class LiveDriver:
         self._status.reset()
 
     def compose_status(self, frame: int, elapsed: float) -> str | None:
-        activity = self._builder.current_activity()
-        if activity is None:
-            return None
-        spin = pal.ansi(_SPINNER[frame % len(_SPINNER)], "cyan", enabled=self._color)
-        segs: list[str] = []
-        if activity.count:
-            segs.append(pal.ansi(activity.count, enabled=self._color))   # default fg
-        if activity.detail:
-            segs.append(pal.ansi(activity.detail, "gray", enabled=self._color))
-        if activity.label:
-            segs.append(pal.ansi(activity.label, enabled=self._color))   # default fg
-        body = " · ".join(segs)
-        tail = pal.ansi(f"· {rt.fmt_seconds(elapsed)}", "dim", enabled=self._color)
-        return f"{spin} {body} {tail}"
+        return compose_activity_status(
+            self._builder, frame=frame, elapsed=elapsed, color=self._color)
+
+    def take_pending_question(self) -> str:
+        q, self._pending_question = self._pending_question, ""
+        if q and self._suppress_opening_question:
+            self._suppress_opening_question = False   # only the opening one
+            return ""
+        return q
 
     # -- emission -------------------------------------------------------------
     def _walk(self, *, force: bool = False) -> None:
@@ -163,6 +193,17 @@ class LiveDriver:
                 self._emit_leaf(child, cur.depth, gutters=self._gutters())
 
     def _is_final(self, node: Any, *, container: Any) -> bool:
+        if isinstance(node, nv.StepNode) and node.quiet:
+            if not node.closed:
+                return False
+            act = (node.outcome.action if node.outcome else None) or {}
+            if act.get("verb") == "goto" and not act.get("resume"):
+                # forward goto: hold until the target's step_started resolves the
+                # arrow's phase (quiet_line). A `continue` (quiet_line stays None,
+                # renders nothing) and a `resume` (quiet_line set at close) are
+                # final immediately.
+                return node.quiet_line is not None
+            return True
         if isinstance(node, nv.SubagentFold):
             # A subagent is a LEAF (Part D): final once it stops running, so the
             # status row resolves to its terminal status on close. While running it

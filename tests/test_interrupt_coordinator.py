@@ -201,3 +201,18 @@ def test_should_pause_is_latched_until_reset() -> None:
     # Only reset() (between rounds) clears it.
     coord.reset()
     assert coord.should_pause is False
+
+
+def test_begin_end_solicit_watchdog_toggles_flag_and_fires_listeners() -> None:
+    coord = InterruptCoordinator()
+    assert coord.solicit_active is False  # default
+    fired = {"n": 0}
+    coord.add_activity_listener(lambda: fired.__setitem__("n", fired["n"] + 1))
+
+    coord.begin_solicit_watchdog()
+    assert coord.solicit_active is True
+    assert fired["n"] == 1  # note_activity fired the registered listener
+
+    coord.end_solicit_watchdog()
+    assert coord.solicit_active is False
+    assert fired["n"] == 2  # fired again on end
