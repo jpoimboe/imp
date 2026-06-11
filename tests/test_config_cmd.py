@@ -86,4 +86,4 @@ def test_render_marks_enabled_driver(
     out = io.StringIO()
     render_config(eff, out, color=False)
     assert "telegram" in out.getvalue()
-    assert "enabled" in out.getvalue()           # the configured driver is flagged
+    assert "(enabled)" in out.getvalue()         # the configured driver's state marker

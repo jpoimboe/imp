@@ -41,6 +41,21 @@ def test_parse_remote_dict_form_keeps_knob_overrides(tmp_path: Path) -> None:
     }
 
 
+def test_parse_remote_dict_form_keeps_only_present_knobs(tmp_path: Path) -> None:
+    # A partial override carries only the leaves present; unset knobs are absent
+    # (the driver falls back to its own defaults), and `reply_timeout: null`
+    # round-trips to None — the "wait forever, like a local prompt" form.
+    layer = parse_config_layer(_write(tmp_path, (
+        "remote:\n"
+        "  driver:\n"
+        "    name: telegram\n"
+        "    reply_timeout: null\n"
+    )))
+    assert layer is not None
+    out, _src = layer
+    assert out["remote"]["driver"] == {"name": "telegram", "reply_timeout": None}
+
+
 def test_parse_remote_rejects_command_key(tmp_path: Path) -> None:
     # `command` is no longer a known driver key (the raw-argv form is removed).
     with pytest.raises(LoadError):
