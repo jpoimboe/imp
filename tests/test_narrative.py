@@ -510,7 +510,7 @@ def test_current_activity_reports_open_burst() -> None:
         b.add(e)
     assert b.current_burst is not None
     act = b.current_activity()
-    assert act is not None and "spec" in act and "read_file" in act and "1 tools" in act
+    assert act == nv.Activity(count="1 call", detail="read_file config.py")
 
 
 def test_current_activity_idle_gap_between_nodes() -> None:
@@ -522,7 +522,7 @@ def test_current_activity_idle_gap_between_nodes() -> None:
     ]:
         b.add(e)
     assert b.current_burst is None
-    assert b.current_activity() == "spec · working"
+    assert b.current_activity() == nv.Activity(label="thinking")
 
 
 def test_current_activity_none_when_no_step() -> None:
@@ -531,7 +531,7 @@ def test_current_activity_none_when_no_step() -> None:
     assert b.current_activity() is None
 
 
-def test_current_activity_thinking_cue_when_latest_child_is_thinking() -> None:
+def test_current_activity_agent_step_with_thinking_child_is_thinking() -> None:
     b = nv.NarrativeBuilder()
     for e in [
         ev("1", "change_created", change_id=1, title="x"),
@@ -540,36 +540,8 @@ def test_current_activity_thinking_cue_when_latest_child_is_thinking() -> None:
         ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
     ]:
         b.add(e)
-    assert b.current_activity() == "spec · thinking"
+    assert b.current_activity() == nv.Activity(label="thinking")
 
-
-def test_current_activity_falls_back_to_working_after_thinking() -> None:
-    b = nv.NarrativeBuilder()
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="spec", kind="agent", phase="design",
-           model="m", provider="anthropic"),
-        ev("4", "thinking", agent_id="step:design/spec", content="reasoning..."),
-        ev("5", "llm_response", agent_id="step:design/spec",
-           raw={"content": [{"type": "text", "text": "prose"}]}, usage={}),
-    ]:
-        b.add(e)
-    # After prose appends, the latest child is no longer a ThinkingFold.
-    assert b.current_activity() == "spec · working"
-
-
-def test_current_activity_blank_thinking_does_not_cue() -> None:
-    # A whitespace-only thinking event is dropped as noise by render_text; the
-    # status cue must stay consistent and NOT flash `· thinking`.
-    b = nv.NarrativeBuilder()
-    for e in [
-        ev("1", "change_created", change_id=1, title="x"),
-        ev("3", "step_started", step="spec", kind="agent", phase="design",
-           model="m", provider="anthropic"),
-        ev("4", "thinking", agent_id="step:design/spec", content="   "),
-    ]:
-        b.add(e)
-    assert b.current_activity() == "spec · working"
 
 
 def test_subagent_current_activity_includes_nested_detail() -> None:
@@ -585,7 +557,8 @@ def test_subagent_current_activity_includes_nested_detail() -> None:
     ]:
         b.add(e)
     act = b.current_activity()
-    assert act is not None and "task → coder" in act and "executor.py" in act
+    assert act is not None and act.label is not None
+    assert "task → coder" in act.label and "executor.py" in act.label
 
 
 def test_summarize_result_flattens_text_block_list_in_burst() -> None:
@@ -703,14 +676,14 @@ def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
     sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
     assert sub.running is True
     # current_activity sits on the running subagent before the parent resumes.
-    assert "task → reviewer" in (b.current_activity() or "")
+    assert "task → reviewer" in nv.activity_to_text(b.current_activity())
     # Parent resumes (same agent_id) with NO task tool_result — resume-close fires.
     b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
               model="m", stop_reason="end_turn", usage={}, raw={"content": [
                   {"type": "text", "text": "parent resumes"}]}))
     assert sub.running is False
     # Status line advanced off the subagent (no running fold left).
-    act = b.current_activity() or ""
+    act = nv.activity_to_text(b.current_activity())
     assert "task → reviewer" not in act
 
 
@@ -781,11 +754,12 @@ def test_current_activity_collapses_multiline_bash_command() -> None:
     cmd = "python3 -c 'import sys\nprint(sys.version)\n" + "x" * 80 + "'"
     b.add(_ev("2", "tool_call", agent_id="step:build/coder", id="t1",
               name="bash", input={"command": cmd}))
-    activity = b.current_activity()
-    assert "\n" not in activity                       # single line only
-    assert "…" in activity                            # truncated
-    assert len(activity) < 120                         # not the whole script
-    assert "coder · bash" in activity
+    act = b.current_activity()
+    assert act.detail is not None
+    assert "\n" not in act.detail                    # single line only
+    assert "…" in act.detail                         # truncated
+    assert len(act.detail) < 120                      # not the whole script
+    assert act.detail.startswith("bash ")             # name + sanitized arg, no step prefix
 
 
 def test_step_completed_emits_merged_breadcrumb_and_preserves_outcome() -> None:
@@ -1017,3 +991,297 @@ def test_change_renamed_ignores_legacy_partial_event() -> None:
              title="renamed"))   # NO new_title — legacy/partial schema
     assert b.tree.root.title == "orig"          # unchanged (event ignored)
     assert b.tree.root.slug == "2026-06-05-orig"  # unchanged (no half-update)
+
+
+def test_toolcall_call_ts_stamped_by_all_three_constructors() -> None:
+    b = nv.NarrativeBuilder()
+    b.add({"id": "1", "type": "step_started", "agent_id": None,
+           "payload": {"step": "s", "kind": "agent", "phase": "p"}})
+    # normal tool_call constructor
+    b.add({"id": "e1", "type": "tool_call", "agent_id": "a",
+           "timestamp": "2026-06-10T00:00:01",
+           "payload": {"id": "c1", "name": "bash", "input": {"command": "ls"}}})
+    # tool_killed standalone-marker constructor (no matching open call)
+    b.add({"id": "e2", "type": "tool_killed", "agent_id": "a",
+           "timestamp": "2026-06-10T00:00:02",
+           "payload": {"id": "zz", "name": "sleep"}})
+    # tool_result orphan constructor (no matching open call; "c1" is open but id
+    # "orphan" doesn't match it, so a new orphan ToolCall is appended)
+    b.add({"id": "e3", "type": "tool_result", "agent_id": "a",
+           "timestamp": "2026-06-10T00:00:03",
+           "payload": {"id": "orphan", "content": "x"}})
+    burst = b.current_burst
+    assert burst is not None
+    by_id = {c.call_id: c for c in burst.calls}
+    assert by_id["c1"].call_ts == "2026-06-10T00:00:01"
+    assert by_id["zz"].call_ts == "2026-06-10T00:00:02"
+    assert by_id["orphan"].call_ts == "2026-06-10T00:00:03"
+
+
+def test_structural_repr_omits_call_ts() -> None:
+    b = nv.NarrativeBuilder()
+    b.add({"id": "1", "type": "step_started", "agent_id": None,
+           "payload": {"step": "s", "kind": "agent", "phase": "p"}})
+    b.add({"id": "e1", "type": "tool_call", "agent_id": "a",
+           "timestamp": "2026-06-10T00:00:01",
+           "payload": {"id": "c1", "name": "bash", "input": {"command": "ls"}}})
+    rep = nv.structural_repr(b.current_burst)
+    assert "call_ts" not in rep["calls"][0]
+
+
+def test_visible_calls_omits_load_skill_tool_and_wait_for_user() -> None:
+    burst = nv.ToolBurstFold(calls=[
+        nv.ToolCall(call_id="1", name="bash", input={}),
+        nv.ToolCall(call_id="2", name="load_skill", input={}),
+        nv.ToolCall(call_id="3", name="tool", input={}),
+        nv.ToolCall(call_id="4", name="wait_for_user", input={}),
+        nv.ToolCall(call_id="5", name="read_file", input={}),
+    ])
+    assert [c.name for c in nv.visible_calls(burst)] == ["bash", "read_file"]
+    assert frozenset({"load_skill", "tool", "wait_for_user"}) == nv._OMIT
+    assert frozenset({"script", "branch", "merge"}) == nv.CHROME_KINDS
+
+
+def test_tool_result_citations_go_to_footer_not_result() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="web_search",
+             input={"query": "x"}))
+    b.add(ev("t2", "tool_result", agent_id="a", id="c1", content="body text",
+             citations=[{"url": "https://a.test"}]))
+    call = b.current_burst.calls[0]
+    assert call.result == "body text"          # footer NOT appended into result
+    assert call.citations_footer == "\n\nSources:\n- https://a.test"
+    rep = nv.structural_repr(b.current_burst)["calls"][0]
+    assert rep["citations_footer"] == "\n\nSources:\n- https://a.test"
+    assert rep["input"] == {"query": "x"}
+
+
+def test_current_activity_burst_form_count_and_named_on_visible_basis() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="load_skill",
+             input={"name": "x"}))                       # omitted
+    b.add(ev("t2", "tool_call", agent_id="a", id="c2", name="bash",
+             input={"command": "make test"}))
+    act = b.current_activity()
+    assert isinstance(act, nv.Activity)
+    assert act.count == "1 call"
+    assert act.detail == "bash make test"
+    assert act.label is None
+
+
+def test_current_activity_all_killed_basis_is_bare_count() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="c1", name="bash", input={}))
+    b.add(ev("k1", "tool_killed", agent_id="a", id="c1", name="bash"))
+    act = b.current_activity()
+    assert act.count == "1 call"          # count keeps killed
+    assert act.detail is None             # named call excludes killed → bare count
+
+
+def test_current_activity_agent_step_no_burst_is_thinking() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    assert b.current_activity() == nv.Activity(label="thinking")
+
+
+def test_current_activity_chrome_step_is_running() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="g", kind="merge", phase="p"))
+    assert b.current_activity() == nv.Activity(label="running")
+
+
+def test_activity_to_text_flattens_segments() -> None:
+    assert nv.activity_to_text(nv.Activity(count="3 calls", detail="bash x")) == \
+        "3 calls · bash x"
+    assert nv.activity_to_text(nv.Activity(label="thinking")) == "thinking"
+    assert nv.activity_to_text(None) == ""
+
+
+def _wfu_step(b):
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+
+
+def _step_node(b):
+    # A step_started carrying a `phase` wraps the StepNode inside a PhaseNode
+    # (_h_step_started → _ensure_phase). So root.children[-1] is the PhaseNode and
+    # the StepNode — which owns the synthesized UserMessageNode / ToolBurstFold
+    # children — is its sole child. This mirrors the file's existing convention
+    # (tests/test_narrative.py uses tree.root.children[0].children[0]).
+    return b.tree.root.children[-1].children[0]
+
+
+def test_wfu_pairing_synthesizes_user_turn_and_splits_burst():       # [I1][I2][I3]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "continue?"}, timestamp="2026-06-10T00:00:01"))
+    b.add(ev("t2", "tool_result", agent_id="a", id="w1", content="yes please"))
+    step = _step_node(b)
+    kids = step.children
+    # child order: closed burst (now empty → still present), user turn, no fresh burst
+    user = next(k for k in kids if isinstance(k, nv.UserMessageNode))
+    assert user.interactive is True
+    assert user.text == "yes please"
+    assert user.pending_question == "continue?"
+    assert b.current_burst is None        # no siblings → no fresh burst, cursor cleared
+
+
+def test_wfu_pairing_carries_unresulted_sibling_into_fresh_burst():  # [I2][I3]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t0", "tool_call", agent_id="a", id="b1", name="bash",
+             input={"command": "sleep 40"}, timestamp="2026-06-10T00:00:01"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "ok?"}, timestamp="2026-06-10T00:00:02"))
+    b.add(ev("t2", "tool_result", agent_id="a", id="w1", content="ok"))
+    fresh = b.current_burst
+    assert fresh is not None
+    assert [c.call_id for c in fresh.calls] == ["b1"]      # sibling carried
+    assert fresh.start_ts == "2026-06-10T00:00:01"          # earliest carried call_ts
+
+
+def test_wfu_error_shaped_result_does_not_synthesize():             # [I1]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "ok?"}))
+    b.add(ev("t2", "tool_result", agent_id="a", id="w1",
+             content="AssertionError: boom", error=True))
+    step = _step_node(b)
+    assert not any(isinstance(k, nv.UserMessageNode) for k in step.children)
+    call = b.current_burst.calls[0]
+    assert call.is_error is True and call.result == "AssertionError: boom"
+
+
+def test_wfu_end_ts_advances_only_on_non_wfu_pairing():             # [I2]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t0", "tool_call", agent_id="a", id="b1", name="bash", input={},
+             timestamp="2026-06-10T00:00:01"))
+    b.add(ev("r0", "tool_result", agent_id="a", id="b1", content="ok",
+             timestamp="2026-06-10T00:00:05"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "ok?"}, timestamp="2026-06-10T00:00:06"))
+    b.add(ev("r1", "tool_result", agent_id="a", id="w1", content="yes",
+             timestamp="2026-06-10T00:45:00"))
+    closed = next(k for k in _step_node(b).children
+                  if isinstance(k, nv.ToolBurstFold))
+    assert closed.end_ts == "2026-06-10T00:00:05"   # the human's wait is NOT billed
+
+
+def test_wfu_orphan_net_synthesizes_when_pairing_missed():          # [I1][I3]
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "ok?"}, timestamp="2026-06-10T00:00:01"))
+    # a prose llm_response flushes the burst, so the wfu call's result misses pairing
+    b.add(ev("p1", "llm_response", agent_id="a",
+             raw={"content": [{"type": "text", "text": "thinking"}]}, usage={}))
+    b.add(ev("r1", "tool_result", agent_id="a", id="w1", content="yes"))
+    step = _step_node(b)
+    user = next(k for k in step.children if isinstance(k, nv.UserMessageNode))
+    assert user.text == "yes" and user.interactive is True
+    assert "w1" not in b._pending_wfu        # id discarded after net synthesis
+
+
+def test_double_wfu_each_synthesis_gets_own_question():             # [I1][I4] double-wfu
+    """Two sequential wait_for_user calls in the same burst; each reply attributed
+    to its own call's prompt. I1 (no reply lost), I4 (per-call question attribution)."""
+    b = nv.NarrativeBuilder()
+    _wfu_step(b)
+    b.add(ev("t0", "tool_call", agent_id="a", id="b1", name="bash",
+             input={"command": "ls"}, timestamp="2026-06-10T00:00:01"))
+    b.add(ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+             input={"prompt": "Q1?"}, timestamp="2026-06-10T00:00:02"))
+    b.add(ev("r1", "tool_result", agent_id="a", id="w1", content="A1"))
+    # After first synthesis: fresh burst carries bash(b1); w2 is then added to it
+    b.add(ev("t2", "tool_call", agent_id="a", id="w2", name="wait_for_user",
+             input={"prompt": "Q2?"}, timestamp="2026-06-10T00:00:03"))
+    b.add(ev("r2", "tool_result", agent_id="a", id="w2", content="A2"))
+    # Two UserMessageNodes must exist; each attributed to its own prompt
+    step = _step_node(b)
+    users = [k for k in step.children if isinstance(k, nv.UserMessageNode)]
+    assert len(users) == 2                          # [I1] neither reply lost
+    assert users[0].text == "A1" and users[0].pending_question == "Q1?"   # [I4]
+    assert users[1].text == "A2" and users[1].pending_question == "Q2?"   # [I4]
+    # bash is still unresulted; it should be in the final fresh burst
+    assert b.current_burst is not None
+    assert b.current_burst.calls[0].call_id == "b1"
+
+
+def test_resume_tool_result_shaped_user_message_renders_reply():    # [I1]
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("aw", "awaiting_user_input", agent_id="a", prompt="continue?"))
+    b.add(ev("um", "user_message", agent_id="a", content=[
+        {"type": "tool_result", "tool_use_id": "w1", "is_error": False,
+         "content": "the human reply"}]))
+    step = _step_node(b)            # PhaseNode→StepNode helper from Task 8's block
+    user = next(k for k in step.children if isinstance(k, nv.UserMessageNode))
+    assert user.interactive is True
+    assert user.text == "the human reply"
+    assert user.pending_question == "continue?"
+
+
+def test_resume_unarmed_balance_injection_renders_nothing():         # [I1] negative
+    b = nv.NarrativeBuilder()
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    # no awaiting_user_input → flag unarmed; balance-shaped sole tool_result block
+    b.add(ev("um", "user_message", agent_id="a", content=[
+        {"type": "tool_result", "tool_use_id": "x", "is_error": False,
+         "content": "previous step output recorded; resuming"}]))
+    step = _step_node(b)            # PhaseNode→StepNode helper from Task 8's block
+    users = [k for k in step.children if isinstance(k, nv.UserMessageNode)]
+    # interactive=False (unarmed) → synthetic, and text stays empty (no text block)
+    assert all(not u.interactive for u in users)
+    assert all(u.text == "" for u in users)
+
+
+def test_error_node_threads_full_summary_absent_tolerantly() -> None:
+    b = nv.NarrativeBuilder()
+    b.add(ev("e1", "error", category="loop", message="[loop] repeated failure x3: y",
+             detail={"full_summary": "the full unclipped summary"}))
+    err = next(k for k in b.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert err.detail == "the full unclipped summary"
+    rep = nv.structural_repr(err)
+    assert rep["detail"] == "the full unclipped summary"
+
+    b2 = nv.NarrativeBuilder()
+    b2.add(ev("e2", "error", category="api", message="boom"))   # no detail key
+    err2 = next(k for k in b2.tree.root.children if isinstance(k, nv.ErrorNode))
+    assert err2.detail == ""
+
+
+def test_incremental_equals_batch_for_wfu_and_grown_repr() -> None:
+    events = [
+        ev("2", "step_started", step="s", kind="agent", phase="p"),
+        ev("t0", "tool_call", agent_id="a", id="b1", name="bash",
+           input={"command": "ls"}, timestamp="2026-06-10T00:00:01"),
+        ev("r0", "tool_result", agent_id="a", id="b1", content="ok",
+           citations=[{"url": "https://a.test"}]),
+        ev("e1", "error", category="loop", message="x",
+           detail={"full_summary": "deep detail"}),
+    ]
+    # batch == incremental over the whole tree (structural_repr on root)
+    batch = nv.build_tree(events)
+    b = nv.NarrativeBuilder()
+    for e in events:
+        b.add(e)
+    assert nv.structural_repr(batch.root) == nv.structural_repr(b.tree.root)
+    # The above is a smoke test (both use the same NarrativeBuilder path).
+    # Positive assertions verify the GROWN FIELD VALUES in the structural repr:
+    repr_root = nv.structural_repr(batch.root)
+    # Navigate: root → PhaseNode → StepNode → [ToolBurstFold, ErrorNode]
+    phase = repr_root["children"][0]
+    step = phase["children"][0]
+    burst = next(c for c in step["children"] if c["t"] == "ToolBurstFold")
+    err = next(c for c in step["children"] if c["t"] == "ErrorNode")
+    # Task 3: citations_footer is non-empty (citations were parsed)
+    assert burst["calls"][0]["citations_footer"] != ""          # Task 3
+    # Task 12: ErrorNode.detail carries the full_summary string
+    assert err["detail"] == "deep detail"                       # Task 12
+    # Task 1: call_ts is excluded from call structural repr
+    assert "call_ts" not in burst["calls"][0]                   # Task 1

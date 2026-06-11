@@ -7,7 +7,9 @@ third-party imports — consumed by render_text.py (imp log) and live_driver.py
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
+from unicodedata import east_asian_width
 
 # Weight/reset are theme-independent (not hue), so they live outside the themes.
 _ATTRS: dict[str, str] = {"dim": "\x1b[2m", "bold": "\x1b[1m", "reset": "\x1b[0m"}
@@ -163,6 +165,53 @@ def caret(*, enabled: bool) -> str:
 def rule(width: int, *, enabled: bool) -> str:
     """A horizontal rule the width of the terminal, gray so it recedes."""
     return ansi("─" * max(1, width), "gray", enabled=enabled)
+
+
+_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _char_cols(ch: str) -> int:
+    """Display columns for a single character (wcwidth-style; CJK/emoji = 2)."""
+    if east_asian_width(ch) in ("W", "F"):
+        return 2
+    return 1
+
+
+def clip_display(text: str, width: int) -> str:
+    """Clip `text` to at most `width` DISPLAY columns, ignoring SGR escapes when
+    measuring (§5b). If clipping is needed, append `…` (1 column) and — only when
+    the emitted text carries any SGR — a single closing reset, so a wrapped status
+    can never resurrect committed spinner text. A frame that already fits is
+    returned byte-identical (no reset added)."""
+    if width <= 0:
+        return ""
+    # Tokenize into escapes (zero width) and visible chars.
+    out: list[str] = []
+    cols = 0
+    has_sgr = False
+    i = 0
+    clipped = False
+    while i < len(text):
+        m = _SGR_RE.match(text, i)
+        if m:
+            out.append(m.group())
+            has_sgr = True
+            i = m.end()
+            continue
+        ch = text[i]
+        w = _char_cols(ch)
+        if cols + w > width - 1:        # reserve one column for the ellipsis
+            clipped = True
+            break
+        out.append(ch)
+        cols += w
+        i += 1
+    if not clipped:
+        return text                     # fits → byte-identical
+    out.append("…")
+    if has_sgr:
+        out.append(_ANSI["reset"])
+    return "".join(out)
 
 
 def should_use_color(stream: Any) -> bool:

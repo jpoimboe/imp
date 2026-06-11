@@ -47,6 +47,8 @@ _PRESENTATION_KNOBS = {
 }
 DEFAULT_REPEAT_K = 3
 DEFAULT_NOPROGRESS_N = 6
+_RESULT_PREVIEW_CLIP = 1000     # storage bound on result_preview (§6)
+_SUMMARY_DISPLAY_CLIP = 200     # display bound on the lean _summary line (§6)
 
 
 @dataclass
@@ -61,6 +63,35 @@ class ToolOutcome:
     tool_use_id: str
     input: dict[str, Any]
     is_error: bool
+    result_preview: str = ""        # §6: first line of result text, 1,000-char clip
+
+
+def _flatten_result_text(content: str | list[Any] | None) -> str:
+    """Flatten a tool_result content into text, matching narrative._summarize_result
+    semantics. Implemented locally — the agents layer cannot import imp.cli.narrative."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    out = []
+    for b in content:
+        if isinstance(b, dict):
+            if b.get("type") == "text":
+                out.append(b.get("text") or "")
+            elif "type" in b:
+                out.append(f"[{b['type']}]")
+            else:
+                out.append(str(b))
+        else:
+            out.append(str(b))
+    return "".join(out)
+
+
+def _result_preview(content: str | list[Any] | None) -> str:
+    """First line of the flattened result, clipped to 1,000 chars (§6)."""
+    flat = _flatten_result_text(content)
+    first = flat.split("\n", 1)[0]
+    return first[:_RESULT_PREVIEW_CLIP]
 
 
 @dataclass
@@ -118,10 +149,12 @@ class LoopGuard:
             exc = LoopError(f"repeated failure x{self._repeat_count}: "
                             f"{self._summary(record)}")
             exc.kind = "repeated_failure"  # type: ignore[attr-defined]
+            exc.detail["full_summary"] = self._summary_text(record)
             return exc
         if self._noprogress_count >= self.noprogress_n:
             exc = LoopError(f"no progress for {self._noprogress_count} turns")
             exc.kind = "no_progress"  # type: ignore[attr-defined]
+            exc.detail["full_summary"] = self._summary_text(record)
             return exc
         return None
 
@@ -187,10 +220,23 @@ class LoopGuard:
             for t in record.tools)
         return f"text|{record.assistant_text}|{tool_sig}"
 
-    def _summary(self, record: TurnRecord) -> str:
+    def _summary_text(self, record: TurnRecord) -> str:
+        """Unclipped one-line summary. Feeds both _summary (display) and
+        exc.detail['full_summary']."""
         if record.error_category is not None:
             return f"{record.error_category}/{record.error_kind}"
         for t in record.tools:
             if t.is_error:
-                return f"failed {t.name}"
-        return (record.assistant_text or "")[:80]
+                name = t.name or "tool"
+                return f"failed {name}: {t.result_preview}" if t.result_preview \
+                    else f"failed {name}"
+        for line in (record.assistant_text or "").split("\n"):
+            if line.strip():
+                return line.strip()
+        return ""
+
+    def _summary(self, record: TurnRecord) -> str:
+        text = self._summary_text(record)
+        if len(text) > _SUMMARY_DISPLAY_CLIP:
+            return text[:_SUMMARY_DISPLAY_CLIP - 1] + "…"
+        return text

@@ -137,7 +137,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any) -> str:
 
 async def ask_line_with_slash(
     prompt: Any, status: Any, change: Any, *, color: bool = False, width: int = 80,
-    coord: Any = None,
+    coord: Any = None, driver: Any = None,
 ) -> str:
     """Read one interactive line, intercepting slash commands. /help, /skills,
     unknown, and not-found commands print and re-prompt; /<name> returns the
@@ -152,6 +152,9 @@ async def ask_line_with_slash(
     `coord` (the run's InterruptCoordinator) wraps the prompt turn in
     `coord.tty_quiesced()` so the ESC reader releases /dev/tty for
     prompt_toolkit; None (tests / non-interactive) = no-op.
+
+    `driver` (the run's LiveDriver) is called for prepare_for_prompt before each
+    prompt iteration and flush_deferred once in the finally on solicit exit.
 
     Shared by the run and resume paths so the slash/skills logic exists once."""
 
@@ -183,46 +186,56 @@ async def ask_line_with_slash(
         coord.set_at_prompt(True)
     try:
         async with _quiesce():
-            while True:
-                # Keep the whole turn inside status.suspend(): /help, /skills, and
-                # not-found messages print via handle_slash_line, and the live status
-                # display must stay suspended while they do, or it interleaves/clobbers
-                # them before the loop re-prompts.
-                with status.suspend():
-                    # _exit_event is None until C4 wires it; getattr is defensive
-                    # for pre-C4 builds, where the read takes the unraced path.
-                    exit_evt = getattr(coord, "_exit_event", None) if coord else None
-                    try:
-                        if exit_evt is None:
-                            line: str = await prompt.ask_async()
-                        else:
-                            line = await _ask_or_exit(prompt, exit_evt)
-                    except KeyboardInterrupt:
-                        # A KeyboardInterrupt reaching here is normally the
-                        # exit-event-won synthesis from _ask_or_exit: an out-of-band
-                        # SIGINT at the prompt now lands in the coordinator's loop
-                        # handler (handle_sigint=False), which (via _at_prompt) calls
-                        # request_exit("ctrl-c") → fires the exit event → _ask_or_exit
-                        # cancels the read and raises KeyboardInterrupt. The c-c key
-                        # binding handles TYPED Ctrl-C (no KBI). request_exit here is a
-                        # defensive idempotent re-assert (first-wins pause_reason keeps
-                        # "ctrl-c") covering any path that raises a bare KBI; we then
-                        # re-raise so the CLI's except-KeyboardInterrupt arm runs
-                        # pause_and_exit. The finally still resets _at_prompt.
-                        if coord is not None:
-                            coord.request_exit("ctrl-c")
-                        raise
-                    if line.strip().lower() in ("exit", "quit"):
-                        # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
-                        # run loop's existing EOFError handler (cli/main.py) pauses.
-                        raise EOFError
-                    if not is_slash_command(line):
-                        return line
-                    result = handle_slash_line(line, change=change, output_fn=print)
-                    if result is REPROMPT:
-                        continue
-                    assert isinstance(result, str)  # handle_slash_line returns str (skill body)
-                    return result
+            # Hoist status.suspend() across the WHOLE solicit loop — one suspend
+            # entry/exit per user turn, not per iteration. /help, /skills, and
+            # not-found messages print via handle_slash_line, and the live status
+            # display must stay suspended while they do, or it interleaves/clobbers
+            # them before the loop re-prompts.
+            with status.suspend():
+                try:
+                    while True:
+                        if driver is not None:
+                            driver.prepare_for_prompt()
+                        # _exit_event is None until C4 wires it; getattr is defensive
+                        # for pre-C4 builds, where the read takes the unraced path.
+                        exit_evt = getattr(coord, "_exit_event", None) if coord else None
+                        try:
+                            if exit_evt is None:
+                                line: str = await prompt.ask_async()
+                            else:
+                                line = await _ask_or_exit(prompt, exit_evt)
+                        except KeyboardInterrupt:
+                            # A KeyboardInterrupt reaching here is normally the
+                            # exit-event-won synthesis from _ask_or_exit: an out-of-band
+                            # SIGINT at the prompt now lands in the coordinator's loop
+                            # handler (handle_sigint=False), which (via _at_prompt) calls
+                            # request_exit("ctrl-c") → fires the exit event → _ask_or_exit
+                            # cancels the read and raises KeyboardInterrupt. The c-c key
+                            # binding handles TYPED Ctrl-C (no KBI). request_exit here is a
+                            # defensive idempotent re-assert (first-wins pause_reason keeps
+                            # "ctrl-c") covering any path that raises a bare KBI; we then
+                            # re-raise so the CLI's except-KeyboardInterrupt arm runs
+                            # pause_and_exit. The finally still resets _at_prompt.
+                            if coord is not None:
+                                coord.request_exit("ctrl-c")
+                            raise
+                        if line.strip().lower() in ("exit", "quit"):
+                            # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
+                            # run loop's existing EOFError handler (cli/main.py) pauses.
+                            raise EOFError
+                        if not is_slash_command(line):
+                            return line
+                        result = handle_slash_line(line, change=change, output_fn=print)
+                        if result is REPROMPT:
+                            print("")  # one blank between slash output and the reprompt
+                            continue
+                        assert isinstance(result, str)  # handle_slash_line returns str (skill body)
+                        return result
+                finally:
+                    # Flush deferred live-driver blocks exactly once on solicit exit
+                    # (normal return, EOFError, or any exception).
+                    if driver is not None:
+                        driver.flush_deferred()
     finally:
         # Leave the at-prompt state so a SIGINT during a subsequent RUN takes the
         # signal_pause path again (the headline mid-run Ctrl-C). Runs on every

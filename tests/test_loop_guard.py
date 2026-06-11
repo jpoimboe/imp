@@ -8,6 +8,7 @@ from imp.agents.loop_guard import (
     LoopGuard,
     ToolOutcome,
     TurnRecord,
+    _result_preview,
 )
 
 
@@ -257,3 +258,67 @@ def test_grep_different_search_is_progress() -> None:
     assert g.observe(turn(3, pattern="a", glob="*.py")) is None
     assert g.observe(turn(4, pattern="a", case_insensitive=True)) is None
     assert g.observe(turn(5, pattern="a", path="src")) is None
+
+
+def _failed_tool_turn(name: str, preview: str) -> TurnRecord:
+    return TurnRecord(
+        assistant_text="", has_complete_step=False,
+        tools=[ToolOutcome(name=name, tool_use_id="", input={"path": "x"},
+                           is_error=True, result_preview=preview)])
+
+
+def test_result_preview_flattens_list_and_clips_to_first_line() -> None:
+    assert _result_preview(None) == ""
+    assert _result_preview("first\nsecond") == "first"
+    assert _result_preview([{"type": "text", "text": "hello\nworld"},
+                            {"type": "image"}]) == "hello"
+    assert _result_preview("x" * 2000) == "x" * 1000
+
+
+def test_summary_failed_tool_includes_preview_and_bare_when_empty() -> None:
+    g = LoopGuard()
+    for _ in range(DEFAULT_REPEAT_K):
+        err = g.observe(_failed_tool_turn("bash", "boom: exit 2"))
+    assert err is not None
+    assert err.detail["full_summary"] == "failed bash: boom: exit 2"
+
+    g2 = LoopGuard()
+    for _ in range(DEFAULT_REPEAT_K):
+        err2 = g2.observe(_failed_tool_turn("bash", ""))
+    assert err2.detail["full_summary"] == "failed bash"
+
+
+def test_summary_empty_name_falls_back_to_tool() -> None:
+    g = LoopGuard()
+    for _ in range(DEFAULT_REPEAT_K):
+        err = g.observe(_failed_tool_turn("", "msg"))
+    assert err.detail["full_summary"] == "failed tool: msg"
+
+
+def test_summary_stuck_text_uses_first_non_empty_line() -> None:
+    g = LoopGuard()
+    for _ in range(DEFAULT_REPEAT_K):
+        err = g.observe(_text_turn("\n\n  the real first line  \nmore"))
+    assert err.detail["full_summary"] == "the real first line"
+
+
+def test_no_progress_full_summary_is_last_turn_summary() -> None:
+    g = LoopGuard()
+    err = None
+    for i in range(DEFAULT_NOPROGRESS_N):
+        err = g.observe(_text_turn(f"distinct line {i}"))
+    assert err is not None and err.kind == "no_progress"  # type: ignore[attr-defined]
+    assert err.detail["full_summary"] == f"distinct line {DEFAULT_NOPROGRESS_N - 1}"
+
+
+def test_summary_display_clips_to_200_with_trailing_ellipsis() -> None:
+    g = LoopGuard()
+    long = "z" * 500
+    err = None
+    for _ in range(DEFAULT_REPEAT_K):
+        err = g.observe(_failed_tool_turn("bash", long))
+    assert len(err.detail["full_summary"]) > 200
+    line = f"repeated failure x{DEFAULT_REPEAT_K}: " in str(err)
+    assert line and str(err).endswith("…")
+    summary_part = str(err).split("repeated failure", 1)[1].split(": ", 1)[1]
+    assert len(summary_part) <= 200 and summary_part.endswith("…")

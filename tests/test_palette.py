@@ -153,3 +153,30 @@ def test_caret_and_rule_helpers() -> None:
     assert pal.caret(enabled=False) == "> "
     assert pal.rule(4, enabled=True) == "\x1b[90m────\x1b[0m"
     assert pal.rule(4, enabled=False) == "────"
+
+
+def test_clip_display_returns_fitting_frame_byte_identical() -> None:
+    s = "\x1b[36m⠋\x1b[0m hello"
+    assert pal.clip_display(s, 80) == s            # fits → unchanged, no extra reset
+
+
+def test_clip_display_truncates_on_display_columns_with_ellipsis() -> None:
+    out = pal.clip_display("abcdefghij", 5)
+    assert out == "abcd…"                          # 5 display columns total
+
+
+def test_clip_display_color_off_adds_no_reset() -> None:
+    out = pal.clip_display("abcdefghij", 5)        # no SGR present
+    assert "\x1b[0m" not in out
+
+
+def test_clip_display_with_sgr_appends_single_reset_when_clipped() -> None:
+    out = pal.clip_display("\x1b[90mabcdefghij\x1b[0m", 5)
+    assert out.endswith("…\x1b[0m")
+    assert out.count("\x1b[0m") == 1
+
+
+def test_clip_display_counts_wide_chars_as_two_columns() -> None:
+    # two CJK chars = 4 display columns; width 3 keeps one wide char + ellipsis
+    out = pal.clip_display("漢字", 3)
+    assert out == "漢…"

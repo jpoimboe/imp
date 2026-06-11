@@ -188,31 +188,16 @@ def spaces_after(node: Any, *, full: bool) -> bool:
 def spaces_before(node: Any) -> bool:
     """A node that wants a blank line ABOVE it regardless of what preceded it.
     An interactive step (the human's turn is a conversational beat), a phase
-    header (a new phase starts on its own), an error (it must stand clear of the
-    line before it), and a chrome step (a bare completion breadcrumb — it's
-    surrounded like a leaf, since nothing else inside it carries spacing) all
-    qualify. A regular step-completion breadcrumb is NOT here: it already trails a
-    spaced block (the step's final prose / the header gap), so it gets its
-    blank-above for free without risking a doubled separator. The batch walk and
-    the live driver both key off this so the lead-in blank lands identically in
-    `imp log` and the live view."""
+    header (a new phase starts on its own), and an error (it must stand clear of
+    the line before it) all qualify. A regular step-completion breadcrumb is NOT
+    here: it already trails a spaced block (the step's final prose / the header
+    gap), so it gets its blank-above for free without risking a doubled separator.
+    The batch walk and the live driver both key off this so the lead-in blank
+    lands identically in `imp log` and the live view."""
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
-        or is_chrome_step(node)
         or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode))
     )
-
-
-_CHROME_KINDS = ("script", "branch", "merge")
-
-
-def is_chrome_step(node: Any) -> bool:
-    """True for a no-op structural step (a script gate / branch) whose whole
-    contribution is a completion breadcrumb. These collapse to that single
-    dark-gray line — the redundant `name` header above the `name complete · 0s`
-    line is pure noise. Agent (and human) steps carry real content and keep their
-    header."""
-    return isinstance(node, nv.StepNode) and node.kind in _CHROME_KINDS
 
 
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
@@ -392,21 +377,6 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # indenting a further level and burying the agent's words. Phases still
         # indent their steps (the +1 lives in PhaseNode above); subagent folds add
         # their own level + gutter internally. (design: aligned indent)
-        if is_chrome_step(node):
-            # A no-op gate/script step collapses to its single dark-gray
-            # breadcrumb (`✓ name · 0s`); the name-only header above it is noise.
-            yield from _render_children(node.children, depth=depth, full=full,
-                                        color=color, width=width, gutters=gutters)
-            if not node.closed:
-                # Still executing. A script gate is not instant chrome — it can
-                # run a project's full test suite for many minutes — so an open
-                # one must say so, or `imp log` on an in-flight change goes
-                # silent for the gate's whole duration (the breadcrumb only
-                # lands at step_completed). Step color (not breadcrumb gray):
-                # while running it IS the active step, same as any other.
-                yield _line(f"{node.name} · running", depth, color,
-                            *pal.NODE_COLORS["step"], gutters=gutters)
-            return
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         # One blank line between the step header and the agent's first words, so the
         # speaker label and the speech don't bunch (design: §5.4 air). Priming the
@@ -542,6 +512,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
             tag = f"[{node.category}] " if node.category else ""
             yield _line(f"error: {tag}{node.message}", depth, color,
                         *pal.NODE_COLORS["error"], gutters=gutters)
+            if full and node.detail and node.detail not in node.message:
+                yield from _wrap(node.detail, width, depth + 1, color,
+                                 *pal.NODE_COLORS["error"], gutters=gutters)
         return
 
     if isinstance(node, nv.SkillLoadNode):
@@ -584,29 +557,53 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
 
+_ARG_VALUE_CLIP = 120        # §2: per-arg-value clip on the --full args line
+_OUTPUT_LINE_CLIP = 400      # §2: per-source-line clip in the --full output block
+_OUTPUT_MAX_LINES = 10       # §2: source lines shown before the "+N more" tail
+
+
+def _call_args_line(c: nv.ToolCall) -> str:
+    """`· {name}[ tag]  k=v …` with each value newline-collapsed and clipped."""
+    if c.killed:
+        tag = " [killed]"                 # killed wins; tags never stack
+    elif c.is_error:
+        tag = " [error]"
+    else:
+        tag = ""
+    parts = []
+    for k, v in (c.input or {}).items():
+        val = " ".join(str(v).split())    # collapse newlines/whitespace runs
+        if len(val) > _ARG_VALUE_CLIP:
+            val = val[:_ARG_VALUE_CLIP] + "…"
+        parts.append(f"{k}={val}")
+    head = f"· {c.name}{tag}"
+    return f"{head}  {'  '.join(parts)}".rstrip() if parts else head
+
+
 def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     """One-line recap of a finished tool burst for the lean view: the distinct
     tool names (first-seen order, capped), the call count, and the burst duration.
     Mirrors what the live status line showed WHILE the burst ran, left behind as a
     quiet marker so a `prose → tools → prose` turn shows the work happened without
-    expanding it. Two names are omitted: `load_skill` (it renders as its own
-    `load skill …` line, so counting it here would double up) and the bare
-    `tool` placeholder (the sentinel name for an orphan/unnamed result — no real
-    tool info). Returns None when nothing renderable remains."""
-    _OMIT = {"load_skill", "tool"}
-    calls = [c for c in burst.calls if c.name not in _OMIT]
+    expanding it. Three names are omitted: `load_skill` (it renders as its own
+    `load skill …` line, so counting it here would double up), the bare `tool`
+    placeholder (the sentinel name for an orphan/unnamed result — no real tool
+    info), and `wait_for_user` (a gate call, not a user-visible tool action).
+    Returns None when nothing renderable remains."""
+    calls = nv.visible_calls(burst)
     if not calls:
         return None
     names = list(dict.fromkeys(c.name for c in calls))
     shown = " · ".join(names[:4])
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
     n = len(calls)
+    count = f"{n} call{'s' if n != 1 else ''}"
     elapsed = nv._elapsed_seconds(burst.start_ts, burst.end_ts)
     secs = "" if elapsed is None else f" · {fmt_seconds(elapsed)}"
-    # No leading marker: a tool burst is sub-detail of the agent's turn, so it
-    # carries no dot — it's indented (by _render_burst) to sit under the turn's
-    # words instead. Internal `·` separators stay.
-    return f"{shown}{more} · {n} call{'s' if n != 1 else ''}{secs}"
+    # Count-first (§3): the count leads, then the distinct names, then duration.
+    # No leading marker — a tool burst is sub-detail of the agent's turn and is
+    # indented (by _render_burst) under the turn's words. Internal `·` stay.
+    return f"{count} · {shown}{more}{secs}"
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
@@ -622,17 +619,39 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
             yield _line("  " + summary, depth, color,
                         *pal.NODE_COLORS["tools"], gutters=gutters)
         return
+    if not burst.calls:
+        return                            # §1 empty-burst guard (split may empty it)
     yield _line(f"{pal.fold_glyph(expanded=True)} tools", depth, color,
                 *pal.NODE_COLORS["tools"], gutters=gutters)
     for c in burst.calls:
-        args = " ".join(f"{k}={v}" for k, v in (c.input or {}).items())
-        killed = " [killed]" if c.killed else ""
-        result = (c.result or "").replace("\n", " ")
-        if len(result) > 60:
-            result = result[:60] + "…"
-        line = f"· {c.name}  {args}  → {result}{killed}".rstrip()
-        yield from _wrap(line, width, depth + 1, color, *pal.NODE_COLORS["tools"],
-                         gutters=gutters)
+        yield from _hang_wrap(_call_args_line(c), "", width, depth + 1, color,
+                              *pal.NODE_COLORS["tools"], gutters=gutters)
+        result = c.result or ""
+        if result:
+            src = result.split("\n")
+            shown = src[:_OUTPUT_MAX_LINES]
+            clipped = [(ln[:_OUTPUT_LINE_CLIP] + "…") if len(ln) > _OUTPUT_LINE_CLIP
+                       else ln for ln in shown]
+            block = "\n".join(clipped)
+            yield from _hang_wrap(block, "→ ", width, depth + 1, color,
+                                  *pal.NODE_COLORS["tools"], gutters=gutters)
+            extra = len(src) - len(shown)
+            if extra > 0:
+                yield from _hang_wrap(f"… (+{extra:,} more lines)", "→ ", width,
+                                      depth + 1, color, *pal.NODE_COLORS["tools"],
+                                      gutters=gutters)
+        if c.citations_footer:
+            # Footer rides outside the clip; render whether or not an output block
+            # printed. When result is non-empty, align at the "→ " column; when
+            # empty (footer-only shape), render without the arrow anchor so the
+            # output reads cleanly without a stray "→ " prefix.
+            footer = c.citations_footer.lstrip("\n")
+            if result:
+                yield from _hang_wrap(footer, "→ ", width, depth + 1, color,
+                                      *pal.NODE_COLORS["tools"], gutters=gutters)
+            else:
+                yield from _wrap(footer, width, depth + 1, color,
+                                 *pal.NODE_COLORS["tools"], gutters=gutters)
 
 
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,

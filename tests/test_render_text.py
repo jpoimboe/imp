@@ -69,9 +69,9 @@ def test_collapsed_folds_drop_thinking_keep_burst_recap() -> None:
     assert "thinking" not in out
     # The tool burst now leaves ONE dark-gray recap line (point 8): distinct tool
     # names (first-seen order) + the call count — not the full per-call dump.
-    assert "bash · ls · 3 calls" in out
+    assert "3 calls · bash · ls" in out
     # one recap line, not one per call
-    assert out.count("bash · ls · 3 calls") == 1
+    assert out.count("3 calls · bash · ls") == 1
     assert "→ ok" not in out            # per-call results stay in --full only
 
 
@@ -445,26 +445,22 @@ def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
 
 
 def test_chrome_step_collapses_to_single_breadcrumb() -> None:
-    # A no-op gate/script step renders ONLY its breadcrumb — the redundant
-    # name-only header line above it is dropped. Because that start line is never
-    # printed, the breadcrumb omits the word "complete" (the `· 0s` says it).
-    out = _lines([
+    # §4: a chrome step (script/branch/merge gate) now prints a start header AND
+    # a `complete` breadcrumb, just like any agent step.
+    out = "\n".join(_lines([
         _ev("1", "change_created", slug="s", title="t"),
         _ev("2", "step_started", step="spec-verify-commit", kind="script", phase="spec"),
         _ev("3", "step_completed", step="spec-verify-commit", kind="script",
             action={"verb": "continue"}),
-    ])
-    hits = [ln for ln in out if "spec-verify-commit" in ln]
-    assert len(hits) == 1                       # one line, not header + breadcrumb
-    assert hits[0].strip().startswith("spec-verify-commit")
-    assert "complete" not in hits[0]            # no start line → no "complete"
+    ]))
+    assert "spec-verify-commit" in out
+    assert "spec-verify-commit complete" in out   # show_complete now unconditional
 
 
-def test_open_chrome_step_shows_running_line() -> None:
-    # An OPEN script gate (step_started seen, no step_completed yet) renders a
-    # `name · running` line. A script gate is not instant chrome — run-tests can
-    # run a project's full suite for minutes — and without this line `imp log`
-    # on an in-flight change shows nothing at all for the gate's whole duration.
+def test_open_chrome_step_shows_header() -> None:
+    # §4: an OPEN chrome step (step_started seen, no step_completed yet) renders
+    # its header line — just like any other open step. The old `name · running`
+    # line is gone; the header is the step name, carrying the step color.
     out = _lines([
         _ev("1", "change_created", slug="s", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script",
@@ -472,17 +468,16 @@ def test_open_chrome_step_shows_running_line() -> None:
     ])
     hits = [ln for ln in out if "run-tests" in ln]
     assert len(hits) == 1
-    assert hits[0].strip() == "run-tests · running"
-    # The running line carries the STEP color (it is the active step), not the
-    # receded breadcrumb gray.
+    assert "running" not in hits[0]
+    # The header carries the STEP color (not breadcrumb gray).
     colored = list(render_tree(nv.build_tree([
         _ev("1", "change_created", slug="s", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script",
             phase="implement"),
     ]), full=False, color=True, width=80))
-    running_line = next(ln for ln in colored if "running" in ln)
-    assert pal._ANSI["step"] in running_line
-    # Once the gate completes, the running line is gone — only the breadcrumb.
+    header_ln = next(ln for ln in colored if "run-tests" in ln)
+    assert pal._ANSI["step"] in header_ln
+    # Once the gate completes, both header and `complete` breadcrumb appear.
     out2 = _lines([
         _ev("1", "change_created", slug="s", title="t"),
         _ev("2", "step_started", step="run-tests", kind="script",
@@ -491,8 +486,8 @@ def test_open_chrome_step_shows_running_line() -> None:
             action={"verb": "continue"}),
     ])
     hits2 = [ln for ln in out2 if "run-tests" in ln]
-    assert len(hits2) == 1
-    assert "running" not in hits2[0]
+    assert len(hits2) == 2                       # header + breadcrumb
+    assert any("complete" in ln for ln in hits2)
 
 
 def test_breadcrumb_and_fallback_recede_to_gray() -> None:
@@ -1089,3 +1084,130 @@ def test_stalled_subagent_renders_stalled_glyph_through_builder() -> None:
     assert fold.terminal_state == "stalled"
     lines = list(_render(fold, depth=0, full=False, color=False, width=80))
     assert any("(stalled)" in ln for ln in lines)
+
+
+def test_burst_recap_omits_wait_for_user() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="read_file",
+            input={"path": "x"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="ok"),
+        _ev("6", "tool_call", agent_id="step:p/s", id="b2", name="wait_for_user",
+            input={"prompt": "go?"}),
+        _ev("7", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ]))
+    assert "wait_for_user" not in out
+
+
+def test_full_burst_per_call_args_and_output_block() -> None:
+    body = "\n".join(f"line{i}" for i in range(1, 13))      # 12 source lines
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "make test\n&& echo done"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content=body),
+        _ev("7", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ], full=True))
+    # multi-line arg value collapsed to a single space:
+    assert "· bash  command=make test && echo done" in out
+    # output block: first source line under the "→ " column, 10 shown, tail count:
+    assert "→ line1" in out
+    assert "line10" in out
+    assert "line11" not in out
+    assert "… (+2 more lines)" in out
+
+
+def test_full_burst_killed_wins_over_error_tag() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "x"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="boom",
+            error=True),
+        _ev("k1", "tool_killed", agent_id="step:p/s", id="b1", name="bash"),
+        _ev("7", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ], full=True))
+    assert "· bash [killed]" in out
+    assert "[error]" not in out
+
+
+def test_full_burst_empty_result_no_arrow_but_footer_renders() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="web_search",
+            input={"query": "x"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="",
+            citations=[{"url": "https://a.test"}]),
+        _ev("7", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ], full=True))
+    assert "· web_search  query=x" in out
+    assert "→ " not in out                       # empty result: no arrow anchor
+    assert "Sources:" in out and "https://a.test" in out
+
+
+def test_full_burst_empty_burst_renders_nothing() -> None:
+    burst = nv.ToolBurstFold(calls=[])
+    lines = list(rt._render_burst(burst, depth=1, full=True, color=False, width=80))
+    assert lines == []
+
+
+def test_burst_recap_is_count_first() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="read_file",
+            input={"path": "x"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1", content="ok"),
+        _ev("6", "tool_call", agent_id="step:p/s", id="b2", name="bash",
+            input={"command": "y"}),
+        _ev("7", "tool_result", agent_id="step:p/s", id="b2", content="ok"),
+        _ev("8", "step_completed", step="s", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ]))
+    assert "2 calls · read_file · bash" in out
+    assert "read_file · bash · 2 calls" not in out
+
+
+def test_chrome_step_prints_header_and_complete_breadcrumb() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="gate", kind="script", phase="verify"),
+        _ev("3", "step_completed", step="gate", kind="script",
+            action={"verb": "continue"}, var_mutations={}),
+    ]))
+    assert "gate" in out
+    assert "gate complete" in out          # show_complete now unconditional
+
+
+def test_is_chrome_step_is_deleted() -> None:
+    assert not hasattr(rt, "is_chrome_step")
+    assert not hasattr(rt, "_CHROME_KINDS")
+
+
+def test_error_detail_block_renders_in_full_when_adds_info() -> None:
+    out = "\n".join(_lines([
+        _ev("e1", "error", category="loop", message="[loop] repeated failure x3: clip…",
+            detail={"full_summary": "the complete unclipped detail line"}),
+    ], full=True))
+    assert "the complete unclipped detail line" in out
+
+
+def test_error_detail_block_suppressed_when_substring_of_message() -> None:
+    out = "\n".join(_lines([
+        _ev("e1", "error", category="loop",
+            message="[loop] repeated failure x3: embedded detail",
+            detail={"full_summary": "embedded detail"}),
+    ], full=True))
+    assert out.count("embedded detail") == 1     # message only; no extra block
+
+
+def test_error_detail_block_absent_in_lean() -> None:
+    out = "\n".join(_lines([
+        _ev("e1", "error", category="loop", message="[loop] x3: clip…",
+            detail={"full_summary": "full detail here"}),
+    ], full=False))
+    assert "full detail here" not in out

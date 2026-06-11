@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord
+from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
 from imp.agents.runner import (
     AgentInvocation,
     Diagnostics,
@@ -1049,7 +1049,8 @@ def process_event(
             # so no stripping is needed.
             state.setdefault("turn_tool_outcomes", []).append(
                 ToolOutcome(name=name, tool_use_id=call_id, input=dict(args),
-                            is_error=is_error))
+                            is_error=is_error,
+                            result_preview=_result_preview(content)))
             # Buffer for the full-turn llm_response reassembly (Unit F).
             state.setdefault("turn_items", []).append(item)
             return

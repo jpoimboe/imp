@@ -52,7 +52,7 @@ def test_burst_recap_streams_then_prose_in_live_path() -> None:
                     usage={}))
     body = _body(out)
     # point 8: the closed burst leaves a single dark-gray recap line, then prose.
-    assert any("read_file · glob · 2 calls" in ln for ln in body)
+    assert any("2 calls · read_file · glob" in ln for ln in body)
     assert any("done" in ln for ln in body)        # prose still streams after it
 
 
@@ -69,7 +69,7 @@ def test_burst_recap_then_prose_kept_in_order() -> None:
     ]:
         drv.on_event(e)
     body = _body(out)
-    recap_i = next(i for i, ln in enumerate(body) if "grep · 1 call" in ln)
+    recap_i = next(i for i, ln in enumerate(body) if "1 call · grep" in ln)
     answer_i = next(i for i, ln in enumerate(body) if "the answer" in ln)
     assert recap_i < answer_i          # recap precedes the prose it preceded live
 
@@ -230,7 +230,7 @@ def test_open_burst_recap_emitted_at_finish() -> None:
     assert not any("call" in ln for ln in _body(out))   # still open — held
     drv.finish()
     # finish() force-flushes the open burst, leaving its recap (point 8).
-    assert any("read_file · 1 call" in ln for ln in _body(out))
+    assert any("1 call · read_file" in ln for ln in _body(out))
 
 
 def test_subagent_row_resolves_only_on_close() -> None:
@@ -637,9 +637,9 @@ def test_tty_chrome_steps_no_committed_status_no_double_blanks() -> None:
     rows = [ln.rstrip() for ln in screen.display]
     # The transient spinner line never gets committed to scroll-back.
     assert not any("working" in r for r in rows), f"committed status line: {rows}"
-    # Each chrome breadcrumb is present exactly once.
-    assert sum("spec-verify-commit" in r for r in rows) == 1
-    assert sum("fast-path-gate" in r for r in rows) == 1
+    # Each chrome step now prints both a header and a `complete` breadcrumb (§4).
+    assert sum("spec-verify-commit" in r for r in rows) == 2
+    assert sum("fast-path-gate" in r for r in rows) == 2
     # No two blank content rows in a row (trailing screen padding excluded).
     content = rows[:max(i for i, r in enumerate(rows) if r.strip()) + 1]
     assert not any(not content[i].strip() and not content[i + 1].strip()
@@ -715,3 +715,81 @@ def test_user_message_resets_status_span() -> None:
         drv.on_event(e)
     # restart_span fired exactly at step_started (e2) and user_message (e7).
     assert calls == ["restart", "restart"]
+
+
+def test_compose_status_colors_count_detail_label() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=True, width=80, status=LiveStatus(out))
+    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    drv.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "ls"}))
+    line = drv.compose_status(0, 1.0)
+    assert "1 call" in line
+    assert "bash ls" in line
+    assert "\x1b[90m" in line          # detail painted gray
+
+
+def test_chrome_step_header_streams_live_and_matches_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("2", "step_started", step="gate", kind="script", phase="verify"),
+        ev("3", "step_completed", step="gate", kind="script",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("gate" in ln and "complete" not in ln for ln in body)   # start header
+    assert any("gate complete" in ln for ln in body)                    # breadcrumb
+    assert body == _render_body(events)                                 # live == imp log
+
+
+def test_prepare_for_prompt_flushes_separator_with_indent_bytes() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="design",
+                    model="m", provider="anthropic"))
+    # step header emitted, _prev_prose armed for the step body
+    drv.prepare_for_prompt()
+    # the armed separator is a blank carrying the step-children indent (depth 1 = 2 spaces)
+    assert out.getvalue().endswith("  \n")
+    assert drv._separator_emitted is True
+
+
+def test_deferred_print_lines_held_then_flushed_before_user_turn() -> None:
+    drv, out = _driver()
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                    model="m", provider="anthropic"))
+    drv.prepare_for_prompt()
+    base = out.getvalue()
+    # a mid-prompt event (e.g. skill_load) must be DEFERRED while the prompt is active
+    drv.on_event(ev("sk", "skill_load", agent_id="a", name="refactor", source="human"))
+    assert out.getvalue() == base                       # nothing printed yet
+    drv.flush_deferred()
+    assert "load skill refactor" in out.getvalue()      # flushed at prompt exit
+
+
+def test_flush_deferred_clears_prompt_active_for_liveness() -> None:
+    drv, out = _driver()
+    drv.prepare_for_prompt()
+    drv.flush_deferred()
+    assert drv._prompt_active is False                  # never left muted
+    # subsequent events print normally
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p"))
+    assert "s" in out.getvalue()
+
+
+def test_wfu_submit_live_equals_imp_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("2", "step_started", step="s", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+        ev("aw", "awaiting_user_input", agent_id="a", prompt="continue?"),
+        ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+           input={"prompt": "continue?"}, timestamp="2026-06-10T00:00:01"),
+        ev("t2", "tool_result", agent_id="a", id="w1", content="yes please"),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert _body(out) == _render_body(events)      # byte-identical to imp log

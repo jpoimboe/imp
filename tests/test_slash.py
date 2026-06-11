@@ -184,3 +184,66 @@ def test_no_chrome_printed_around_the_submitted_prompt(
     line = anyio.run(ask_line_with_slash, prompt, _NullStatus(), _FakeChange(tmp_path))
     assert line == "hello"
     assert capsys.readouterr().out == ""
+
+
+class _RecDriver:
+    """Recording driver stub: tracks prepare_for_prompt / flush_deferred calls."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def prepare_for_prompt(self) -> None:
+        self.events.append("prepare")
+
+    def flush_deferred(self) -> None:
+        self.events.append("flush")
+
+
+class _CountStatus:
+    """Status stub that counts how many times suspend() is entered."""
+
+    def __init__(self) -> None:
+        self.suspend_calls = 0
+
+    def suspend(self) -> object:
+        import contextlib as _cm
+        self.suspend_calls += 1
+        return _cm.nullcontext()
+
+
+def test_solicit_prepares_then_flushes_once(tmp_path: Path) -> None:
+    """driver.prepare_for_prompt fires before the prompt; flush_deferred fires
+    exactly once (in the finally) on normal exit.  status.suspend() is called
+    exactly once (hoisted above the loop, not per-iteration)."""
+    from imp.cli.slash import ask_line_with_slash
+    drv = _RecDriver()
+    status = _CountStatus()
+    change = _FakeChange(tmp_path)
+    prompt = _FakePrompt(["just a line"])
+
+    async def _run() -> str:
+        return await ask_line_with_slash(prompt, status, change, driver=drv)
+
+    line = anyio.run(_run)
+    assert line == "just a line"
+    assert drv.events == ["prepare", "flush"]
+    assert status.suspend_calls == 1   # exactly one hoisted suspend, not per-iteration
+
+
+def test_solicit_flushes_on_slash_reprompt(tmp_path: Path) -> None:
+    """flush_deferred fires once even when a slash command reprompts first."""
+    from imp.cli.slash import ask_line_with_slash
+    drv = _RecDriver()
+    status = _CountStatus()
+    change = _FakeChange(tmp_path)
+    # /help reprompts, then "real input" returns
+    prompt = _FakePrompt(["/help", "real input"])
+
+    async def _run() -> str:
+        return await ask_line_with_slash(prompt, status, change, driver=drv)
+
+    line = anyio.run(_run)
+    assert line == "real input"
+    # prepare fires twice (once per loop iteration), flush fires once (in finally)
+    assert drv.events == ["prepare", "prepare", "flush"]
+    assert status.suspend_calls == 1   # hoisted: still just one suspend
