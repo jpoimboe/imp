@@ -31,6 +31,12 @@ class AwaitingUserInput(Exception):
         self.prompt = prompt
 
 
+def _cancelled_exc() -> type[BaseException]:
+    import anyio
+
+    return anyio.get_cancelled_exc_class()
+
+
 _SCHEMA = {
     "type": "object",
     "properties": {
@@ -65,7 +71,13 @@ def make_wait_for_user_tool() -> Tool:
             pending = coord.drain_interject()
         reply = pending if pending is not None else ctx.user_input_fn("")
         if inspect.isawaitable(reply):
-            reply = await reply
+            try:
+                reply = await reply
+            except (KeyboardInterrupt, _cancelled_exc()):
+                # SIGTERM/escalation tore the prompt down mid-solicit. Convert to
+                # the dangling-wait pause so no exception crosses the MCP boundary;
+                # the headless AwaitingUserInput path takes over from here.
+                raise AwaitingUserInput(prompt) from None
         assert isinstance(reply, str)
         return reply
 

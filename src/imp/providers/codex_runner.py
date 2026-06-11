@@ -35,6 +35,7 @@ from imp.agents.subagents import raise_if_suspended
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.agents.tools.wait_for_user import AwaitingUserInput
+from imp.engine.agent_run import _resolve_wait_reply
 from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
 from imp.providers import errors as perr
@@ -447,6 +448,9 @@ class CodexAgentRunner:
                 thread = client.start_thread()
         # Build initial prompt with anti-native-tool instruction prepended.
         next_prompt = self._build_prompt(invocation.system_prompt)
+        # Hoist rstate so the §2 resume-entry drain below can reference it safely
+        # even when balance_on_resume is False (fresh-entry path has no rstate).
+        rstate = None
         # Resume seam (Unit G): on a balance_on_resume re-entry, codex holds no
         # parsed message list, so derive the resume state from imp's own
         # events.jsonl. An AWAITING_USER turn (a paused wait_for_user, detected
@@ -467,14 +471,15 @@ class CodexAgentRunner:
                     return
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": last_text})
-                import inspect as _inspect
-                reply = invocation.user_input_fn("")
-                if _inspect.isawaitable(reply):
-                    reply = await reply
+                # §2 dangling-wait join (F5): queued interjects satisfy the wait
+                # directly (mirrors wait_for_user.py R6). Fall back to
+                # user_input_fn only when the queue is empty.
+                reply: str = await _resolve_wait_reply(
+                    invocation.coordinator, invocation.user_input_fn)
                 user_msg = Message(
-                    role="user", content=(TextBlock(text=str(reply)),))
+                    role="user", content=(TextBlock(text=reply),))
                 elog.append_user_message(agent_id=aid, message=user_msg)
-                next_prompt = str(reply)
+                next_prompt = reply
             elif rstate is ResumeState.MISSING_COMPLETE_STEP:
                 yield {"type": "error", "payload": {
                     "category": "agent_output_missing",
@@ -482,6 +487,27 @@ class CodexAgentRunner:
                     "message": "codex resume: turn ended without complete_step",
                     "detail": {"last_agent_text": last_text[:500]}}}
                 return
+        # §2 resume-entry drain: fold pending interject texts into the first
+        # resumed prompt (codex re-prompts with a string). AWAITING_USER already
+        # folded the reply above, so skip it here. Only runs on resume
+        # (balance_on_resume=True); fresh-entry has no queued interjects.
+        coordinator = invocation.coordinator
+        if coordinator is not None and invocation.balance_on_resume:
+            from imp.agents.classify import ResumeState as _RS
+            if rstate is not _RS.AWAITING_USER:
+                parts: list[str] = []
+                while True:
+                    t = coordinator.drain_interject()
+                    if t is None:
+                        break
+                    parts.append(t)
+                    elog.append_user_message(
+                        agent_id=aid,
+                        message=Message(role="user", content=(TextBlock(text=t),)))
+                    elog.append(agent_id=aid, type="user_interjected",
+                                payload={"text": t})
+                if parts:
+                    next_prompt = next_prompt + "\n\n" + "\n".join(parts)
         # AbortController for interrupt() — tolerate a fake/SDK without one.
         try:
             from openai_codex_sdk import (

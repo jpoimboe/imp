@@ -2,6 +2,8 @@
 """Tests for the narrative-tree model (src/imp/cli/narrative.py)."""
 from __future__ import annotations
 
+import pytest
+
 from imp.cli import narrative as nv
 from tests._event_fixtures import ev
 
@@ -624,6 +626,67 @@ def test_summarize_result_flattens_subagent_fold_outcome() -> None:
     assert "[{'" not in sub.outcome
 
 
+def test_task_result_present_canonical_close_carries_outcome_no_orphan() -> None:
+    # Present+matching (the anthropic/openai/codex shape AND post-Part-1
+    # claude_code): a `task` tool_call + tool_result sharing the same non-empty
+    # block id, with parent prose AFTER the result. The fold must close via the
+    # canonical _h_tool_result path carrying the outcome (is_error/glyph), NOT via
+    # resume-close, and there must be NO orphan "tool" burst line.
+    tree = nv.build_tree(_step_events(
+        _ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer", "task_description": "go"}),
+        _ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
+            model="m", system_prompt="SYS", tools_schema=[], params={},
+            max_tool_calls=50),
+        _ev("r1", "tool_result", agent_id="step:p/s", id="b1",
+            content="RuntimeError: boom", error=True),
+        _ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
+            stop_reason="end_turn", usage={}, raw={"content": [
+                {"type": "text", "text": "parent resumes"}]}),
+    ))
+    step = _only_step(tree)
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert sub.running is False
+    assert sub.outcome == "RuntimeError: boom"   # outcome-carrying canonical close
+    assert sub.is_error is True                  # glyph data preserved
+    # No orphan "tool" line: nothing in any burst names itself "tool".
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert all(call.name != "tool" for burst in bursts for call in burst.calls)
+    # Parent prose after the fold is a sibling, not swallowed.
+    after = [c for c in step.children if isinstance(c, nv.AgentTextNode)]
+    assert len(after) == 1 and after[0].text == "parent resumes"
+
+
+@pytest.mark.parametrize("block_id", ["", "toolu_minted"])
+def test_task_result_missing_salvaged_by_resume_close(block_id: str) -> None:
+    # Missing-result salvage: a `task` tool_call (parametrized over the empty-id
+    # legacy log AND a minted real id) opens a fold; subagent events stream; the
+    # PARENT resumes (same agent_id, here an llm_response) with NO task
+    # tool_result ever arriving. The resume-close fallback must still close the
+    # fold so the live status advances off the subagent.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id=block_id, name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    b.add(_ev("s1", "step_context", agent_id="sub:tk1", provider="anthropic",
+              model="m", system_prompt="SYS", tools_schema=[], params={},
+              max_tool_calls=50))
+    step = b._step_stack[-1]
+    sub = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert sub.running is True
+    # current_activity sits on the running subagent before the parent resumes.
+    assert "task → reviewer" in nv.activity_to_text(b.current_activity())
+    # Parent resumes (same agent_id) with NO task tool_result — resume-close fires.
+    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+              model="m", stop_reason="end_turn", usage={}, raw={"content": [
+                  {"type": "text", "text": "parent resumes"}]}))
+    assert sub.running is False
+    # Status line advanced off the subagent (no running fold left).
+    act = nv.activity_to_text(b.current_activity())
+    assert "task → reviewer" not in act
+
+
 def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     # Normal path: start_ts captured from the event's top-level timestamp.
     e1 = _ev("1", "step_started", step="spec", kind="agent", phase="design")
@@ -814,29 +877,33 @@ def test_real_prose_flushes_the_burst() -> None:
     assert b.current_burst is None
 
 
-def test_task_result_closes_fold_despite_id_mismatch() -> None:
-    # §11: a task tool_call with an EMPTY block id (the real claude_code bug) opens
-    # a SubagentFold keyed under ""; the closing task tool_result carries the REAL
-    # toolu_... id which never matches the empty key. The fold must still close.
+def test_task_result_with_matching_id_closes_fold_carrying_outcome() -> None:
+    # New contract (replaces the old §11 mismatched-id heuristic, removed when
+    # Part 1 made claude_code mint a real block id matching the call+result).
+    # The task tool_call and its tool_result share the SAME non-empty block id;
+    # the fold closes via _h_tool_result's block-id match, carrying the outcome.
     b = nv.NarrativeBuilder()
     b.add({"type": "step_started", "agent_id": None,
            "payload": {"step": "task-lead", "kind": "agent", "phase": "implement"},
            "id": "e1", "timestamp": "2026-06-03T00:00:00+00:00"})
-    # task tool_call with an EMPTY block id (the real claude_code bug)
-    b.add({"type": "tool_call", "agent_id": None,
-           "payload": {"name": "task", "id": "",
+    b.add({"type": "tool_call", "agent_id": "step:implement/task-lead",
+           "payload": {"name": "task", "id": "toolu_minted",
                        "input": {"subagent_name": "implementer", "task_description": "go"}},
            "id": "e2"})
     # Navigate: root -> PhaseNode -> StepNode -> children (SubagentFold lives here)
     step_children = b.tree.root.children[0].children[0].children
     folds = [c for c in step_children if isinstance(c, nv.SubagentFold)]
     assert folds and folds[0].running is True
-    # closing task tool_result carries the REAL id — must still close the fold
-    b.add({"type": "tool_result", "agent_id": None,
-           "payload": {"id": "toolu_real", "content": "ok"}, "id": "e3"})
+    # closing task tool_result carries the SAME id — block-id match closes it.
+    b.add({"type": "tool_result", "agent_id": "step:implement/task-lead",
+           "payload": {"id": "toolu_minted", "content": "ok"}, "id": "e3"})
     assert folds[0].running is False
     assert folds[0].outcome == "ok"   # _summarize_result("ok") returns "ok" verbatim
     assert folds[0].is_error is False
+    # No orphan "tool" burst line: the canonical close consumed the result, so no
+    # stray ToolBurstFold was created at step scope.
+    bursts = [c for c in step_children if isinstance(c, nv.ToolBurstFold)]
+    assert bursts == []
 
 
 def test_phase_elapsed_from_first_start_to_last_end() -> None:

@@ -48,6 +48,14 @@ def handle_slash_line(
     if cmd == "skills":
         _list(skills_dir, output_fn)
         return REPROMPT
+    if cmd == "continue":
+        # /continue is the §2 resume verb at the post-interrupt prompt. The
+        # session loop (cli/main) intercepts `/continue` BEFORE this dispatcher
+        # to map it to slash="continue" and resume the paused run. If it reaches
+        # here (typed at an ordinary wait_for_user solicit, where there is no run
+        # to resume), it is a no-op that re-prompts rather than a skill lookup.
+        output_fn("/continue resumes a paused run; there is nothing to resume here.")
+        return REPROMPT
 
     try:
         body = load_skill_body(skills_dir, cmd)
@@ -77,12 +85,54 @@ def _help(out: Callable[[str], None]) -> None:
     out("Available slash commands:")
     out("  /help              Show this message")
     out("  /skills            List loadable skills")
+    out("  /continue          Resume a paused run (at the post-interrupt prompt)")
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
     out("  Ctrl+C / Ctrl+D    Pause and exit; resume with `imp resume <id>`")
     out("  Up-arrow           Recall previous input")
     out("  Tab                Complete a /command or skill name")
+
+
+async def _ask_or_exit(prompt: Any, exit_evt: Any) -> str:
+    """Read a line, but cancel the prompt if the coordinator exit event fires
+    (SIGTERM / out-of-band SIGINT / escalation). On cancellation, raise
+    KeyboardInterrupt so the CLI's pause-and-exit arm finalizes status=paused.
+
+    The cancellation originates in THIS function's own inner task group, which
+    cancels itself; by the time anything downstream (e.g. a wait_for_user
+    solicit) observes a cancellation, it is the prompt's LOCAL scope unwinding,
+    not an ancestor scope. We do NOT swallow CancelledError here — we let the
+    scope unwind cleanly and synthesize KeyboardInterrupt only when the read
+    never produced a line.
+
+    The prompt's OWN exceptions (EOFError on Ctrl-D, KeyboardInterrupt on an
+    out-of-band SIGINT) are raised inside `_read`, so anyio wraps them in a
+    BaseExceptionGroup leaving the task group. We unwrap a lone such exception
+    and re-raise it BARE, so the caller's `except EOFError`/`except
+    KeyboardInterrupt` arms keep working (they'd miss a group)."""
+    import anyio
+
+    result: dict[str, str] = {}
+    try:
+        async with anyio.create_task_group() as tg:
+            async def _watch() -> None:
+                await exit_evt.wait()
+                tg.cancel_scope.cancel()
+
+            async def _read() -> None:
+                result["line"] = await prompt.ask_async()
+                tg.cancel_scope.cancel()
+
+            tg.start_soon(_watch)
+            tg.start_soon(_read)
+    except BaseExceptionGroup as eg:
+        if len(eg.exceptions) == 1:
+            raise eg.exceptions[0] from None  # bare EOFError / KeyboardInterrupt
+        raise
+    if "line" not in result:
+        raise KeyboardInterrupt  # exit-event won the race
+    return result["line"]
 
 
 async def ask_line_with_slash(
@@ -127,6 +177,13 @@ async def ask_line_with_slash(
     # Ctrl-C, so a later interrupt is never seen by InterruptCoordinator (a
     # process-group Ctrl-C then surfaces as a codex `unknown` error). Runs on
     # every return/exception path, including the at-prompt KeyboardInterrupt.
+    # Mark "at an interactive prompt" for the whole turn so an out-of-band SIGINT
+    # (handle_sigint=False on the prompt → lands in InterruptCoordinator's loop
+    # handler, NOT as a prompt_toolkit KBI) is routed through the coordinator exit
+    # path instead of signal_pause/runner-interrupt. Reset in the finally on every
+    # exit path (return, EOFError on Ctrl-D, KeyboardInterrupt, cancellation).
+    if coord is not None:
+        coord.set_at_prompt(True)
     try:
         async with _quiesce():
             # Hoist status.suspend() across the WHOLE solicit loop — one suspend
@@ -139,7 +196,29 @@ async def ask_line_with_slash(
                     while True:
                         if driver is not None:
                             driver.prepare_for_prompt()
-                        line: str = await prompt.ask_async()
+                        # _exit_event is None until C4 wires it; getattr is defensive
+                        # for pre-C4 builds, where the read takes the unraced path.
+                        exit_evt = getattr(coord, "_exit_event", None) if coord else None
+                        try:
+                            if exit_evt is None:
+                                line: str = await prompt.ask_async()
+                            else:
+                                line = await _ask_or_exit(prompt, exit_evt)
+                        except KeyboardInterrupt:
+                            # A KeyboardInterrupt reaching here is normally the
+                            # exit-event-won synthesis from _ask_or_exit: an out-of-band
+                            # SIGINT at the prompt now lands in the coordinator's loop
+                            # handler (handle_sigint=False), which (via _at_prompt) calls
+                            # request_exit("ctrl-c") → fires the exit event → _ask_or_exit
+                            # cancels the read and raises KeyboardInterrupt. The c-c key
+                            # binding handles TYPED Ctrl-C (no KBI). request_exit here is a
+                            # defensive idempotent re-assert (first-wins pause_reason keeps
+                            # "ctrl-c") covering any path that raises a bare KBI; we then
+                            # re-raise so the CLI's except-KeyboardInterrupt arm runs
+                            # pause_and_exit. The finally still resets _at_prompt.
+                            if coord is not None:
+                                coord.request_exit("ctrl-c")
+                            raise
                         if line.strip().lower() in ("exit", "quit"):
                             # Equivalent to Ctrl-D: save-and-exit. Raise EOFError so the
                             # run loop's existing EOFError handler (cli/main.py) pauses.
@@ -158,7 +237,13 @@ async def ask_line_with_slash(
                     if driver is not None:
                         driver.flush_deferred()
     finally:
-        # prompt_toolkit deleted SIGINT on prompt exit — restore it so a later
-        # mid-run Ctrl-C is still delivered to the coordinator (see above).
+        # Leave the at-prompt state so a SIGINT during a subsequent RUN takes the
+        # signal_pause path again (the headline mid-run Ctrl-C). Runs on every
+        # return/exception/cancellation path.
         if coord is not None:
+            coord.set_at_prompt(False)
+            # With handle_sigint=False prompt_toolkit no longer deletes the loop's
+            # SIGINT handler on prompt exit, so this is now a harmless defensive
+            # no-op — kept so a future provider that re-enables handle_sigint, or a
+            # nested prompt that does, still re-arms (see ask_async rationale).
             coord.rearm_signal_handlers()

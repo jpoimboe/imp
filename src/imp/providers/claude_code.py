@@ -59,6 +59,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
+from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
@@ -348,12 +349,19 @@ def _wrap_one(
             # bg._sweep_bg once for all sites.
             await _bg._sweep_bg(ctx)
             if name == "task":
-                # Append the task tool_call event INSIDE _impl using the
-                # synchronously-available __tool_use_id__. This is race-free:
+                # Append the task tool_call event INSIDE _impl. This is race-free:
                 # the receive loop processes AssistantMessage on a different
                 # async path and would create a duplicate if it also appended
                 # here. The receive loop SKIPS task tool_calls (see below).
-                tu_id = args.get("__tool_use_id__", "")
+                #
+                # Block id: mint our OWN uuid for the call+result PAIR rather than
+                # reuse the SDK's __tool_use_id__ (which is "" here) or the
+                # tool_call EVENT id (tc_ev["id"], the wrong id-space — narrative
+                # closes a fold by BLOCK id, not event id). A non-empty block id on
+                # BOTH the call and the matching result lets narrative's
+                # _h_tool_result close the fold deterministically WITH the outcome.
+                # This is event-log id-space ONLY; the SDK never sees `minted`.
+                minted = uuid.uuid4().hex
                 tc_event_id = ""
                 # ctx.event_log is always set by _run_loop before tools dispatch;
                 # this guard is defensive (no-log → tool_call_event_id="" →
@@ -365,15 +373,39 @@ def _wrap_one(
                     }
                     if args.get("tier"):
                         task_input["tier"] = args["tier"]
+                    # Log the call BEFORE dispatch_task — the subagent's parent
+                    # link (agent_id="sub:" + this event id) depends on it.
                     tc_ev = ctx.event_log.append_tool_call(
                         agent_id=state.agent_id,
-                        block=ToolUseBlock(id=tu_id, name="task", input=task_input))
+                        block=ToolUseBlock(id=minted, name="task", input=task_input))
                     tc_event_id = tc_ev["id"]
-                result = await dispatch_task(
-                    ctx, args["subagent_name"], args["task_description"],
-                    tool_call_event_id=tc_event_id,
-                    tier=args.get("tier"),
-                )
+                try:
+                    result = await dispatch_task(
+                        ctx, args["subagent_name"], args["task_description"],
+                        tool_call_event_id=tc_event_id,
+                        tier=args.get("tier"),
+                    )
+                except BaseException as exc:
+                    # Error / suspend path: still close the fold with the SAME
+                    # minted id so narrative's _h_tool_result gets a deterministic,
+                    # outcome-carrying close (running=False, is_error=True). Then
+                    # re-raise into the outer handlers (raise_if_suspended honesty
+                    # for a subagent-origin pause; otherwise the generic is_error
+                    # tool_result path below the task branch).
+                    if ctx.event_log is not None:
+                        err_text = f"{type(exc).__name__}: {exc}"
+                        ctx.event_log.append_tool_result(
+                            agent_id=state.agent_id,
+                            block=ToolResultBlock(minted, err_text, is_error=True))
+                    raise
+                if ctx.event_log is not None:
+                    # Success close: the canonical, outcome-carrying tool_result for
+                    # this task, keyed on the SAME minted block id as the call. The
+                    # receive-loop user branch SUPPRESSES the SDK's duplicate task
+                    # result (the toolu_… one) so this minted one stays canonical.
+                    ctx.event_log.append_tool_result(
+                        agent_id=state.agent_id,
+                        block=ToolResultBlock(minted, result, is_error=False))
                 return _tool_response(result, is_error=False)
             if name == "complete_step":
                 # Capture the args; return a "success" body so claude proceeds
@@ -949,13 +981,23 @@ class ClaudeCodeAgentRunner:
                 prompt = (wfu.input.get("prompt") if wfu else "") or ""
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": prompt})
-                reply = ctx.user_input_fn("")
-                if inspect.isawaitable(reply):
-                    reply = await reply
+                # §2 dangling-wait join (F5): queued interjects satisfy the wait
+                # directly (mirrors wait_for_user.py R6). Fall back to
+                # user_input_fn only when the queue is empty.
+                reply: str = await _resolve_wait_reply(
+                    invocation.coordinator, ctx.user_input_fn)
                 resolve_wait_for_user_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the now-balanced transcript
                 # drives the next LLM turn with the human's reply.
+            # §2 resume-entry drain: fold pending interjects into the history
+            # that feeds _stream_history(messages) on the first query. The SDK
+            # is queried with the WHOLE transcript as a stream, so appending
+            # user Messages here is sufficient — no separate string fold needed.
+            # Guarded for non-AWAITING_USER: the AWAITING_USER join is handled above.
+            if resume_state is not ResumeState.AWAITING_USER:
+                drain_all_interjects_at_resume(
+                    invocation.coordinator, messages, transcript, elog, aid)
         else:
             messages = []
             for m in invocation.initial_messages:
@@ -1138,8 +1180,9 @@ class ClaudeCodeAgentRunner:
                                         input=b.input, is_error=True)
                                     if canon == "task":
                                         # tool_call for task is appended inside the
-                                        # MCP wrapper (_impl) using __tool_use_id__,
-                                        # race-free. Don't double-append here.
+                                        # MCP wrapper (_impl) keyed on a minted uuid
+                                        # block id (see :356-362), race-free. Don't
+                                        # double-append here.
                                         continue
                                     elog.append_tool_call(
                                         agent_id=aid,
@@ -1157,10 +1200,26 @@ class ClaudeCodeAgentRunner:
                                         elog.append_tool_result(
                                             agent_id=aid, block=b, citations=cites)
                                         continue
-                                    elog.append_tool_result(agent_id=aid, block=b)
-                                    if b.tool_use_id in pending_tools:
-                                        pending_tools[b.tool_use_id].is_error = b.is_error
-                                        pending_tools[b.tool_use_id].result_preview = \
+                                    # SUPPRESS the SDK's duplicate `task` result.
+                                    # _impl already appended the canonical
+                                    # outcome-carrying result keyed on the minted
+                                    # block id; this incoming toolu_… result is the
+                                    # SAME logical close in the SDK id-space. Appending
+                                    # it too would double the tool_result (and feed
+                                    # narrative a second, fold-less close). Identify
+                                    # it by its tool_use_id ∈ pending_tools with
+                                    # name=="task" (canon tracked at the tool_use
+                                    # site). Still flip is_error on the task outcome
+                                    # below so a failed dispatch doesn't leave the
+                                    # ToolOutcome is_error=True → LoopGuard
+                                    # repeated_failure on identical re-dispatches.
+                                    pend = pending_tools.get(b.tool_use_id)
+                                    is_task = pend is not None and pend.name == "task"
+                                    if not is_task:
+                                        elog.append_tool_result(agent_id=aid, block=b)
+                                    if pend is not None:
+                                        pend.is_error = b.is_error
+                                        pend.result_preview = \
                                             _result_preview(b.content)
 
                     # Drain any bash kills detected by the MCP wrapper.

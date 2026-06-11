@@ -51,7 +51,11 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
-from imp.engine.agent_run import deliver_interject
+from imp.engine.agent_run import (
+    _resolve_wait_reply,
+    deliver_interject,
+    drain_all_interjects_at_resume,
+)
 from imp.providers import errors as perr
 from imp.providers._openai_schema import to_openai_strict
 from imp.providers.base import Provider
@@ -553,13 +557,20 @@ class OpenAIAgentRunner:
                 prompt = (wfu.input.get("prompt") if wfu else "") or ""
                 elog.append(agent_id=aid, type="awaiting_user_input",
                             payload={"prompt": prompt})
-                reply = ctx.user_input_fn("")
-                if inspect.isawaitable(reply):
-                    reply = await reply
+                # §2 dangling-wait join (F5): queued interjects satisfy the wait
+                # directly (mirrors wait_for_user.py R6). Fall back to
+                # user_input_fn only when the queue is empty.
+                reply: str = await _resolve_wait_reply(
+                    invocation.coordinator, ctx.user_input_fn)
                 resolve_wait_for_user_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the now-balanced transcript
                 # drives the next LLM turn with the human's reply.
+            # §2 resume-entry drain: mid-turn pending texts fold into the first
+            # request. (The AWAITING_USER dangling-wait join is handled above.)
+            if state is not ResumeState.AWAITING_USER:
+                drain_all_interjects_at_resume(
+                    invocation.coordinator, messages, transcript, elog, aid)
         else:
             messages = []
             for m in invocation.initial_messages:

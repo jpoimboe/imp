@@ -328,6 +328,114 @@ async def test_runs_subagent_via_task(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_sdk_task_result_echo_is_suppressed_and_flips_is_error(
+    tmp_path: Path,
+) -> None:
+    """Receive-loop suppression branch (claude_code.py, user-role ToolResultBlock
+    handling). When the SDK echoes the `task` tool_result back through the receive
+    loop, the runner must:
+      (a) SUPPRESS that echo — _impl already appended the canonical, minted
+          tool_result for the task, so the SDK's `toolu_…` echo must NOT be
+          appended a second time (one task → one tool_result event); AND
+      (b) STILL flip the task ToolOutcome.is_error to the echoed value, so a
+          successful dispatch isn't left at the default is_error=True and tripped
+          as a LoopGuard repeated_failure on identical re-dispatches (M1 regress).
+
+    The fake client bypasses MCP, so _impl is not invoked here; this test
+    pre-seeds the canonical minted call+result (as _impl would) on a DISTINCT
+    block id, then drives the SDK's `toolu_…` echo through the loop and asserts
+    suppression + the is_error flip (captured off the LoopGuard's TurnRecord).
+    """
+    import unittest.mock as _mock
+
+    from imp.agents.runner import ToolResultBlock as RealToolResultBlock
+    from imp.agents.runner import ToolUseBlock as RealToolUseBlock
+    from imp.providers import claude_code as cc
+    from tests.cc_fakes import FakeToolResultBlock, FakeUserMessage
+
+    (tmp_path / "art").mkdir()
+
+    parent_def = _agent_def(tools=frozenset({"complete_step", "task"}))
+    log = InMemoryEventLog()
+    inv = _inv(tmp_path, event_log=log)
+    inv = replace(inv, agent_def=parent_def)
+
+    # Simulate _impl having already logged the canonical task call+result on the
+    # MINTED block id (distinct from the SDK's toolu_… id-space).
+    minted_id = "minted-deadbeef"
+    sdk_id = "toolu_sdk_echo"
+    log.append_tool_call(
+        agent_id="step:p/s",
+        block=RealToolUseBlock(id=minted_id, name="task",
+                               input={"subagent_name": "sub",
+                                      "task_description": "do work"}))
+    log.append_tool_result(
+        agent_id="step:p/s",
+        block=RealToolResultBlock(minted_id, "sub done", is_error=False))
+
+    # Drive: assistant emits the `task` tool_use (id = SDK toolu_…); the SDK then
+    # echoes a user-role ToolResultBlock for that same id (is_error=False); the
+    # parent resumes and completes.
+    scripted = [
+        assistant(
+            text("dispatching"),
+            tool_use(sdk_id, "task",
+                     {"subagent_name": "sub", "task_description": "do work"}),
+        ),
+        FakeUserMessage(content=[
+            FakeToolResultBlock(tool_use_id=sdk_id, content="sub done",
+                                is_error=False),
+        ]),
+        assistant(
+            text("got result"),
+            tool_use("p2", "complete_step", {"status": "Success"}),
+        ),
+        result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    # Spy on the LoopGuard to capture the TurnRecord carrying the task outcome,
+    # so we can read the flipped is_error off the canonical accumulation path.
+    observed: list[Any] = []
+    real_observe = cc.LoopGuard.observe
+
+    def spy_observe(self: Any, record: Any) -> Any:
+        observed.append(record)
+        return real_observe(self, record)
+
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory,
+    )
+    with _mock.patch.object(cc.LoopGuard, "observe", spy_observe):
+        events = [ev async for ev in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_output"
+
+    # (a) Exactly ONE task tool_result in the log: the minted one. The SDK's
+    #     toolu_… echo was suppressed (else there would be two).
+    task_results = [
+        e for e in log.read()
+        if e["type"] == "tool_result"
+        and e["payload"]["id"] in (minted_id, sdk_id)
+    ]
+    assert len(task_results) == 1, task_results
+    assert task_results[0]["payload"]["id"] == minted_id
+    assert not any(e["payload"]["id"] == sdk_id for e in log.read()
+                   if e["type"] == "tool_result"), "SDK task echo was NOT suppressed"
+
+    # (b) The task ToolOutcome's is_error was flipped to the echoed value (False),
+    #     off the default True — proving the suppression branch still runs the flip.
+    task_outcomes = [
+        t for rec in observed for t in rec.tools if t.name == "task"
+    ]
+    assert task_outcomes, "no task ToolOutcome reached the LoopGuard"
+    assert all(t.is_error is False for t in task_outcomes), (
+        "task is_error not flipped to the echoed False (stuck at default True)")
+
+
+@pytest.mark.anyio
 async def test_awaiting_user_resume_fills_tool_result_then_continues(
     tmp_path: Path,
 ) -> None:

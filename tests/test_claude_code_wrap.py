@@ -155,6 +155,74 @@ async def test_wrap_task_routes_to_dispatch_task(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_wrap_task_emits_matching_call_and_result(tmp_path: Path) -> None:
+    # Part 1: dispatching `task` via _impl must mint a real block id and emit
+    # EXACTLY ONE task tool_call AND EXACTLY ONE task tool_result, BOTH carrying
+    # the SAME non-empty block id (not the empty __tool_use_id__). The matching id
+    # is what lets narrative's _h_tool_result close the fold carrying the outcome.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    sub_def = AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(
+                name="status", type="enum",
+                values=("Success", "Error"), required=True,
+            ),),
+            source=SourceLoc(file=Path("sub.md"), line=1),
+        ),
+        prompt_template_source="hi",
+        source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1),
+    )
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": sub_def}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.change_context = ChangeContext(
+        slug="test-change", title="Test Change", project_root=tmp_path,
+        workflow_dir=tmp_path / ".imp" / "change" / "workflow",
+    )
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _FakeRunner:
+        async def run(self, inv):
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one(
+        "task", make_task_tool(), ctx, state, _passthrough_decorator,
+    )
+    # The SDK passes the (empty) __tool_use_id__; the mint must ignore it.
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+    assert json.loads(out["content"][0]["text"]) == {"status": "Success"}
+
+    events = elog._events
+    calls = [e for e in events
+             if e["type"] == "tool_call" and e["payload"]["name"] == "task"]
+    assert len(calls) == 1, "expected exactly one task tool_call"
+    call_id = calls[0]["payload"]["id"]
+    assert call_id, "minted block id must be non-empty"
+    # Exactly one tool_result keyed on the SAME minted id as the call.
+    matching = [e for e in events
+                if e["type"] == "tool_result" and e["payload"]["id"] == call_id]
+    assert len(matching) == 1, "expected exactly one task tool_result with matching id"
+    assert matching[0]["payload"]["error"] is False
+
+
+@pytest.mark.anyio
 async def test_wrap_bash_killed_records_state(tmp_path: Path) -> None:
     """_impl wrapper records signal-killed bash invocations on _RunState
     so the receive loop can emit tool_killed events later."""
