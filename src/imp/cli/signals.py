@@ -15,9 +15,12 @@ wraps that call in `coord.tty_quiesced()`, which restores the tty's original
 termios for the duration of the prompt and re-arms cbreak on exit, so the two
 never hold the tty in raw/cbreak mode at once.
 
-prompt_toolkit's `prompt_async(handle_sigint=True)` installs its OWN SIGINT
-handler while the interactive prompt is active and raises KeyboardInterrupt
-there — handled in cli.main, separately from this coordinator.
+The CLI calls `prompt_async(handle_sigint=False)`, so prompt_toolkit does NOT
+own SIGINT during a prompt: an out-of-band SIGINT then lands in this
+coordinator's loop handler (`_dispatch_signal`) and — while a prompt is being
+awaited (`_at_prompt`) — is routed through the exit path, identical to SIGTERM.
+Typed Ctrl-C at a prompt is the `c-c` KEY binding (a key event, independent of
+`handle_sigint`); only OS signals are governed here.
 """
 
 from __future__ import annotations
@@ -120,7 +123,12 @@ class InterruptCoordinator:
         self._at_prompt = False
 
     def set_at_prompt(self, value: bool) -> None:
-        """Mark whether an interactive prompt is currently being awaited.
+        """Mark whether an interactive prompt is currently being awaited. A plain
+        boolean, NOT depth-counted: prompts are serialized (single controlling
+        tty; `router.begin_solicit`/`end_solicit`; the resume prompt runs only
+        after the run loop returns), so `ask_line_with_slash` calls never nest.
+        If a nested prompt site is ever added, make this depth-counted (like the
+        reader's `tty_quiesced`) so the inner reset does not clear it early.
         Routes an out-of-band SIGINT through the exit path while True
         (see _dispatch_signal)."""
         self._at_prompt = value
@@ -265,16 +273,16 @@ class InterruptCoordinator:
         """(Re)install SIGINT/SIGTERM handlers on the running loop. Idempotent —
         `add_signal_handler` overwrites any existing entry.
 
-        This is also the RE-ARM primitive. prompt_toolkit's
-        `prompt_async(handle_sigint=True)` calls `loop.remove_signal_handler(
-        SIGINT)` when the prompt exits, which DELETES the loop's SIGINT dispatch
-        entry. (Its `_restore_sigint_from_ctypes` restores the C-level handler,
-        so the wakeup byte is still written — but with no Handle the loop reads
-        the byte and dispatches nothing.) Without re-arming, the FIRST interactive
-        prompt permanently and silently disables mid-run Ctrl-C — the runner's
-        `coord.signal_pause` is never called again, so `_cancel`/`should_pause`
-        never flip and a process-group Ctrl-C surfaces as a codex-exec error
-        classified `unknown`. See `rearm_signal_handlers`."""
+        This is also the RE-ARM primitive — now DEFENSIVE-ONLY. With the CLI's
+        `prompt_async(handle_sigint=False)` prompt_toolkit no longer installs or
+        deletes a SIGINT handler, so imp's handler stays installed across a prompt
+        and the re-arm is a harmless no-op. It is kept so a future provider (or a
+        nested prompt) that re-enables `handle_sigint=True` still re-arms: that
+        path calls `loop.remove_signal_handler(SIGINT)` on prompt exit, DELETING
+        the loop's SIGINT dispatch entry (its `_restore_sigint_from_ctypes`
+        restores the C-level handler, so the wakeup byte is still written — but
+        with no Handle the loop dispatches nothing), which without re-arming would
+        permanently and silently disable mid-run Ctrl-C. See `rearm_signal_handlers`."""
         loop = self._loop
         if loop is None:
             return
