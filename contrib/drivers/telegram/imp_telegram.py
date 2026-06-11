@@ -167,3 +167,32 @@ def make_get_updates(token: str) -> Callable[[int], dict[str, Any]]:
     def get(offset: int) -> dict[str, Any]:
         return api_call(token, "getUpdates", get_updates_params(offset, _LONG_POLL_TIMEOUT))
     return get
+
+
+def handle_event(
+    event: Mapping[str, Any],
+    send: Callable[..., None],
+    chat_id: int,
+) -> bool:
+    """Curate one event and, if loud/silent, send it to the chat. Returns True
+    iff a message was sent (loud → notify, silent → disable_notification).
+    Dropped events return False without contacting Telegram."""
+    kind = curate(event.get("type"))
+    if kind is None:
+        return False
+    send(chat_id, format_event_message(event), silent=(kind == "silent"))
+    return True
+
+
+def poll_once(
+    get_updates: Callable[[int], Mapping[str, Any]],
+    chat_id: int,
+    offset: int,
+    write_reply: Callable[[str], None],
+) -> int:
+    """Run one getUpdates cycle: fetch from `offset`, write each allowlisted
+    reply via write_reply, and return the advanced offset for the next cycle."""
+    replies, new_offset = extract_replies(get_updates(offset), chat_id, offset)
+    for reply in replies:
+        write_reply(reply)
+    return new_offset
