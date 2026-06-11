@@ -731,3 +731,82 @@ async def test_resolve_wait_reply_restores_watchdog_on_exception() -> None:
         await ar._resolve_wait_reply(coord, _ainput)
     assert coord.events == ["begin", "end"]   # finally restored it on the exception
     assert coord.active is False
+
+
+@pytest.mark.anyio
+async def test_real_wait_for_user_solicit_is_not_torn_down_by_watchdog(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression for the live ~35-min loop: an attended agent blocked at the
+    REAL wait_for_user tool for far longer than the inactivity window is NOT
+    killed by the watchdog. Once the human replies the turn continues. Drives the
+    real drive_invocation -> _pull_with_inactivity_watchdog -> wait_for_user
+    bracket -> coordinator freeze, deterministically (no LLM)."""
+    import imp.engine.agent_run as ar
+    from imp.agents.tools.context import ToolContext
+    from imp.agents.tools.wait_for_user import make_wait_for_user_tool
+
+    monkeypatch.setattr(ar, "AGENT_INACTIVITY_TIMEOUT_S", 0.2)
+    coord = InterruptCoordinator()
+    release = anyio.Event()
+    interrupted = {"called": False}
+    captured = {"reply": None}
+
+    class _CaptureLog:
+        def __init__(self):
+            self.events = []
+
+        def append(self, *, agent_id, type, payload):
+            self.events.append({"type": type, "payload": payload})
+            return {"id": "e"}
+
+    log = _CaptureLog()
+
+    async def _blocking_input(_q):
+        await release.wait()          # block until the releaser fires (past window)
+        return "ship it"
+
+    class _SolicitRunner:
+        async def interrupt(self) -> None:
+            interrupted["called"] = True
+
+        async def run(self, invocation):
+            tool = make_wait_for_user_tool()
+            ctx = ToolContext(
+                project_root=tmp_path, fs_permissions=(),
+                events_path=tmp_path / "e.jsonl",
+                user_input_fn=_blocking_input, non_interactive=False,
+                event_log=log, agent_id="step:p/s", coordinator=coord)
+            captured["reply"] = await tool.async_invoke(ctx, {"prompt": "merge?"})
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    result_holder = {}
+
+    async def _releaser():
+        # Stay silent (no reply) for 3x the inactivity window: a pre-fix watchdog
+        # tears the solicit down here at ~1 window.
+        await anyio.sleep(0.6)
+        release.set()
+
+    async def _drive():
+        result_holder["r"] = await ar.drive_invocation(
+            _inv(tmp_path), _SolicitRunner(), coordinator=coord,
+            log=log, emit_events=True)
+
+    with anyio.fail_after(5):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_releaser)
+            tg.start_soon(_drive)
+
+    result = result_holder["r"]
+    assert result.errored is False
+    assert result.output == {"status": "Success"}
+    assert captured["reply"] == "ship it"          # turn continued after the reply
+    assert interrupted["called"] is False          # solicit never torn down
+    stalls = [
+        e for e in log.events
+        if e["type"] == "error"
+        and e["payload"].get("category") == "config"
+        and e["payload"].get("kind") == "stalled"
+    ]
+    assert stalls == []                            # no false config/stalled teardown
