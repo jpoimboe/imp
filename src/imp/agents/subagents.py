@@ -84,7 +84,13 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
         name="task",
         description=(
             "Dispatch a subtask to a named subagent. "
-            "Returns the subagent's structured output as a JSON string."
+            "Returns the subagent's structured output as a JSON string. "
+            "Independent subtasks issued as multiple task calls in ONE "
+            "assistant message run concurrently; issue dependent subtasks "
+            "sequentially across turns. The relative ordering of task "
+            "calls and non-task tools issued in the same message is "
+            "unspecified: do not place a non-task tool that depends on a "
+            "task's effects (or vice versa) in the same message as task calls."
         ),
         input_schema=schema,
         fn=_invoke,

@@ -825,3 +825,20 @@ async def test_dispatch_task_threads_sandbox_policy(tmp_path: Path) -> None:
 
     await dispatch_task(ctx, "helper", "do it")
     assert capture["inv"].sandbox_policy is pol
+
+
+def test_make_task_tool_description_has_parallel_guidance() -> None:
+    """§4/AC35: the single task description carries the parallel-dispatch
+    guidance every provider advertises (concurrency for independent subtasks,
+    sequencing for dependent ones, unspecified task-vs-non-task ordering)."""
+    desc = make_task_tool().description
+    # Still names what the tool does.
+    assert "subagent" in desc
+    # Independent subtasks in one message run concurrently.
+    assert "concurrently" in desc
+    # Dependent subtasks sequence across turns.
+    assert "sequentially across turns" in desc
+    # task-vs-non-task ordering within one message is not guaranteed.
+    assert "unspecified" in desc
+    # The tier-bearing variant shares the same description.
+    assert make_task_tool(("low", "high")).description == desc
