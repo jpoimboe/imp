@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """imp-telegram — reference remote driver for imp (spec Part B).
 
 Reads NDJSON events from imp on stdin, curates each into a Telegram message
