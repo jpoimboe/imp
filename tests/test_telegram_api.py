@@ -1,8 +1,8 @@
-# contrib/drivers/telegram/tests/test_api.py
 from __future__ import annotations
 
-import imp_telegram
 import pytest
+
+from imp.remote.drivers import telegram as imp_telegram
 
 
 def test_send_message_params_shape() -> None:

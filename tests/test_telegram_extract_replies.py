@@ -1,7 +1,6 @@
-# contrib/drivers/telegram/tests/test_extract_replies.py
 from __future__ import annotations
 
-import imp_telegram
+from imp.remote.drivers import telegram as imp_telegram
 
 
 def _update(update_id: int, chat_id: int, text: str | None) -> dict:

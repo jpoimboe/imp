@@ -187,7 +187,7 @@ def _parse_provider_envs(raw: Any, src: SourceLoc) -> dict[str, str]:
 
 
 _SANDBOX_BOOL_KEYS = ("enabled", "allow_unsandboxed", "network")
-_DRIVER_KNOWN_KEYS = {"command", "events", "startup_timeout", "reply_timeout"}
+_DRIVER_KNOWN_KEYS = {"name", "events", "startup_timeout", "reply_timeout"}
 _SANDBOX_LIST_KEYS = (
     "secret_paths", "writable_caches", "extra_readable", "extra_writable", "extra_env",
 )
@@ -216,9 +216,8 @@ def _parse_sandbox(raw: Any, src: SourceLoc) -> dict[str, Any]:
 
 
 def _parse_remote(raw: Any, src: SourceLoc) -> dict[str, Any]:
-    """Validate + normalize the optional `remote:` namespace. Only `remote.driver`
-    is recognized; every leaf is defaulted so a configured driver is fully
-    specified downstream. Validation errors surface through LoadError (spec §A)."""
+    from imp.remote.drivers import REGISTRY
+
     if not isinstance(raw, dict):
         raise LoadError(f"{src.file.name} 'remote:' must be a mapping", src)
     for k in raw:
@@ -228,39 +227,56 @@ def _parse_remote(raw: Any, src: SourceLoc) -> dict[str, Any]:
     driver = raw.get("driver")
     if driver is None:
         return {}
-    if not isinstance(driver, dict):
-        raise LoadError(f"{src.file.name} 'remote.driver:' must be a mapping", src)
-    for k in driver:
-        if k not in _DRIVER_KNOWN_KEYS:
+
+    overrides: dict[str, Any] = {}
+    if isinstance(driver, str):
+        name = driver
+    elif isinstance(driver, dict):
+        for k in driver:
+            if k not in _DRIVER_KNOWN_KEYS:
+                raise LoadError(
+                    f"remote.driver.{k!r} is not a known driver setting "
+                    f"(allowed: {sorted(_DRIVER_KNOWN_KEYS)})", src)
+        raw_name = driver.get("name")
+        if not isinstance(raw_name, str) or not raw_name:
             raise LoadError(
-                f"remote.driver.{k!r} is not a known driver setting", src)
-    command = driver.get("command")
-    if (not isinstance(command, list) or not command
-            or not all(isinstance(c, str) for c in command)):
+                "remote.driver requires a non-empty string 'name'", src)
+        name = raw_name
+        overrides = driver
+    else:
         raise LoadError(
-            "remote.driver.command must be a non-empty list of strings", src)
-    events = driver.get("events", ["all"])
-    if (not isinstance(events, list) or not events
-            or not all(isinstance(e, str) for e in events)):
+            f"{src.file.name} 'remote.driver:' must be a built-in name string "
+            "or a mapping with a 'name'", src)
+
+    if name not in REGISTRY:
         raise LoadError(
-            "remote.driver.events must be a non-empty list of strings (or [all])", src)
-    st = driver.get("startup_timeout", 10.0)
-    if not isinstance(st, (int, float)) or isinstance(st, bool) or st <= 0:
-        raise LoadError(
-            "remote.driver.startup_timeout must be a positive number of seconds", src)
-    rt = driver.get("reply_timeout", None)
-    if rt is not None and (
-            not isinstance(rt, (int, float)) or isinstance(rt, bool) or rt <= 0):
-        raise LoadError(
-            "remote.driver.reply_timeout must be null or a positive number", src)
-    return {
-        "driver": {
-            "command": list(command),
-            "events": list(events),
-            "startup_timeout": float(st),
-            "reply_timeout": float(rt) if rt is not None else None,
-        }
-    }
+            f"unknown remote driver {name!r} "
+            f"(available built-ins: {sorted(REGISTRY)})", src)
+
+    out: dict[str, Any] = {"name": name}
+    if "events" in overrides:
+        events = overrides["events"]
+        if (not isinstance(events, list) or not events
+                or not all(isinstance(e, str) for e in events)):
+            raise LoadError(
+                "remote.driver.events must be a non-empty list of strings (or [all])",
+                src)
+        out["events"] = list(events)
+    if "startup_timeout" in overrides:
+        st = overrides["startup_timeout"]
+        if not isinstance(st, (int, float)) or isinstance(st, bool) or st <= 0:
+            raise LoadError(
+                "remote.driver.startup_timeout must be a positive number of seconds",
+                src)
+        out["startup_timeout"] = float(st)
+    if "reply_timeout" in overrides:
+        rt = overrides["reply_timeout"]
+        if rt is not None and (
+                not isinstance(rt, (int, float)) or isinstance(rt, bool) or rt <= 0):
+            raise LoadError(
+                "remote.driver.reply_timeout must be null or a positive number", src)
+        out["reply_timeout"] = float(rt) if rt is not None else None
+    return {"driver": out}
 
 
 def _parse_var_overrides(raw: Any, src: SourceLoc) -> dict[str, object]:

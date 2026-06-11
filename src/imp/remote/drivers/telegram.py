@@ -3,8 +3,7 @@
 
 Reads NDJSON events from imp on stdin, curates each into a Telegram message
 (getUpdates is *outbound only* — no inbound port, tunnel, or hosting), and writes
-chat replies back to stdout for imp's input-race to pick up. Ships out-of-core
-under contrib/; its tests do not gate imp core.
+chat replies back to stdout for imp's input-race to pick up.
 
 Stdout is reserved for reply lines (one '\\n'-terminated line per reply); all
 diagnostics go to stderr.
