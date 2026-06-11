@@ -59,7 +59,7 @@ from imp.agents.transcript import (
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
-from imp.engine.agent_run import _join_pending_interjects, drain_all_interjects_at_resume
+from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
 from imp.engine.schema import validate_agent_output
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
@@ -953,13 +953,8 @@ class ClaudeCodeAgentRunner:
                 # §2 dangling-wait join (F5): queued interjects satisfy the wait
                 # directly (mirrors wait_for_user.py R6). Fall back to
                 # user_input_fn only when the queue is empty.
-                joined = _join_pending_interjects(invocation.coordinator)
-                if joined is not None:
-                    reply: str = joined
-                else:
-                    reply = ctx.user_input_fn("")
-                    if inspect.isawaitable(reply):
-                        reply = await reply
+                reply: str = await _resolve_wait_reply(
+                    invocation.coordinator, ctx.user_input_fn)
                 resolve_wait_for_user_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the now-balanced transcript

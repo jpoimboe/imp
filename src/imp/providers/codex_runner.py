@@ -46,7 +46,7 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
-from imp.engine.agent_run import _join_pending_interjects
+from imp.engine.agent_run import _resolve_wait_reply
 from imp.providers.codex_mcp import RunState, start_server
 
 _logger = logging.getLogger(__name__)
@@ -474,15 +474,8 @@ class CodexAgentRunner:
                 # §2 dangling-wait join (F5): queued interjects satisfy the wait
                 # directly (mirrors wait_for_user.py R6). Fall back to
                 # user_input_fn only when the queue is empty.
-                joined = _join_pending_interjects(invocation.coordinator)
-                if joined is not None:
-                    reply: str = joined
-                else:
-                    import inspect as _inspect
-                    _raw = invocation.user_input_fn("")
-                    if _inspect.isawaitable(_raw):
-                        _raw = await _raw
-                    reply = str(_raw)
+                reply: str = await _resolve_wait_reply(
+                    invocation.coordinator, invocation.user_input_fn)
                 user_msg = Message(
                     role="user", content=(TextBlock(text=reply),))
                 elog.append_user_message(agent_id=aid, message=user_msg)

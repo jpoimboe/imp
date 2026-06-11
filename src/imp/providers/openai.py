@@ -52,7 +52,7 @@ from imp.agents.transcript import (
     resolve_wait_for_user_on_resume,
 )
 from imp.engine.agent_run import (
-    _join_pending_interjects,
+    _resolve_wait_reply,
     deliver_interject,
     drain_all_interjects_at_resume,
 )
@@ -560,13 +560,8 @@ class OpenAIAgentRunner:
                 # §2 dangling-wait join (F5): queued interjects satisfy the wait
                 # directly (mirrors wait_for_user.py R6). Fall back to
                 # user_input_fn only when the queue is empty.
-                joined = _join_pending_interjects(invocation.coordinator)
-                if joined is not None:
-                    reply: str = joined
-                else:
-                    reply = ctx.user_input_fn("")
-                    if inspect.isawaitable(reply):
-                        reply = await reply
+                reply: str = await _resolve_wait_reply(
+                    invocation.coordinator, ctx.user_input_fn)
                 resolve_wait_for_user_on_resume(
                     messages, transcript, elog, aid, reply)
                 # Fall through (do NOT return): the now-balanced transcript

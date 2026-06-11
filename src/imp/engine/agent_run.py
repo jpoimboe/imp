@@ -162,6 +162,24 @@ def _join_pending_interjects(coordinator: Any) -> str | None:
     return "\n".join(parts) if parts else None
 
 
+async def _resolve_wait_reply(
+    coordinator: Any,
+    user_input_fn: Callable[[str], str | Awaitable[str]],
+) -> str:
+    """Satisfy a dangling wait_for_user on resume (§2 F5, R6 pending-satisfies-
+    solicit): if the interject queue is non-empty, drain+join it as the reply;
+    otherwise solicit via user_input_fn. Returns the reply string the caller
+    then journals + replays."""
+    import inspect
+    joined = _join_pending_interjects(coordinator)
+    if joined is not None:
+        return joined
+    raw = user_input_fn("")
+    if inspect.isawaitable(raw):
+        raw = await raw
+    return str(raw)
+
+
 def drain_all_interjects_at_resume(
     coordinator: Any, messages: Any, transcript: Any, elog: Any, agent_id: str,
 ) -> int:
