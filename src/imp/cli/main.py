@@ -599,6 +599,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
+    if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
+        print("imp: --tui needs an interactive terminal; streaming instead.",
+              file=sys.stderr)
+
+
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -640,6 +646,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             # prints the bold `#slug  title` workflow header as the opener, so a
             # second headline here would just duplicate it.
             non_interactive = bool(getattr(args, "non_interactive", False))
+            _warn_if_tui_unavailable(args, sys.stdout)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -770,6 +777,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     return 2
 
             non_interactive = bool(getattr(args, "non_interactive", False))
+            _warn_if_tui_unavailable(args, sys.stdout)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
