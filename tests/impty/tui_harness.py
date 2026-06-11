@@ -60,12 +60,13 @@ async def _main(scenario: str, result_path: str) -> None:
         return
 
     if scenario == "exit":
-        async def _later() -> None:
-            await asyncio.sleep(0.6)
+        # Gate exit on a keystroke the test sends, not a timer: a fixed timer
+        # races subprocess-startup latency against the idle-settle the test uses
+        # to observe the alt-screen, so it can exit before the test ever sees it.
+        @app._app.key_bindings.add("q")
+        def _(event: object) -> None:
             app.exit()
-        _task = asyncio.create_task(_later())
         await app.run_async()
-        await asyncio.gather(_task, return_exceptions=True)
         app.print_collapsed_transcript(sys.stdout)
         sys.stdout.flush()
         return
