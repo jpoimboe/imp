@@ -485,3 +485,152 @@ async def test_claude_code_resume_entry_drain_before_first_query(
     # Both interjects consumed (queue cleared).
     assert coord.drain_interject() is None
 
+
+@pytest.mark.anyio
+async def test_codex_resume_entry_drain_folds_into_first_prompt(
+    tmp_path: Path,
+) -> None:
+    """Interjects queued before codex resume must be folded into the FIRST
+    `run_streamed(next_prompt)` call, not one turn late. Unlike the
+    messages-list providers, codex re-prompts with a string, so the drain
+    must append the texts to `next_prompt` before the `while True` loop."""
+    import json
+    import subprocess
+
+    from imp.agents.runner import AgentInvocation, ChangeContext
+    from imp.engine.state import InMemoryEventLog
+    from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
+    from imp.providers.codex_runner import CodexAgentRunner
+    from tests.codex_fakes import (
+        FakeCodex,
+        agent_message,
+        mcp_call,
+        thread_started,
+        turn_completed,
+    )
+
+    _SRC = SourceLoc(file=Path("a.md"), line=1)
+
+    # Bootstrap a git repo so preflight() passes.
+    def _git_init(p: Path) -> None:
+        subprocess.run(["git", "init", "-q", str(p)], check=True)
+        subprocess.run(["git", "-C", str(p), "config", "user.email", "t@t.t"], check=True)
+        subprocess.run(["git", "-C", str(p), "config", "user.name", "T"], check=True)
+        (p / ".gitkeep").write_text("")
+        subprocess.run(["git", "-C", str(p), "add", ".gitkeep"], check=True)
+        subprocess.run(["git", "-C", str(p), "commit", "-q", "-m", "init"], check=True)
+
+    _git_init(tmp_path)
+    (tmp_path / "auth.json").write_text('{"auth_mode": "chatgpt", "tokens": {}}')
+    tx = tmp_path / "tx"
+    tx.mkdir(exist_ok=True)
+
+    # Pre-seed a rollout (so restore_rollout succeeds on the balance_on_resume path).
+    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-drain-1.jsonl"
+    (tx / "codex_thread.json").write_text(
+        json.dumps({"thread_id": "thr-drain-1", "rollout_relpath": rel}))
+    saved = tx / "codex_rollout" / rel
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text('{"id": "thr-drain-1"}\n')
+
+    # Seed events.jsonl with a complete_step tool_call so derive_codex_resume_state
+    # returns SEND_TO_LLM (not AWAITING_USER, not MISSING_COMPLETE_STEP).
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        json.dumps({"agent_id": "step:t", "type": "tool_call",
+                    "payload": {"name": "complete_step", "input": {}}}) + "\n" +
+        json.dumps({"agent_id": "step:t", "type": "llm_response",
+                    "payload": {"raw": {"content": [{"type": "text", "text": "done"}]}}}) + "\n"
+    )
+
+    agent_def = AgentDef(
+        name="t", description="",
+        tools=frozenset({"complete_step"}), subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="answer", type="string", required=True),),
+            source=_SRC),
+        prompt_template_source="", source_path=Path("a.md"),
+        source=_SRC, tier=None,
+    )
+
+    # Coordinator with two queued interjects.
+    class _FakeCoordinator:
+        def __init__(self) -> None:
+            self._q = ["interject-A", "interject-B"]
+
+        def drain_interject(self) -> str | None:
+            return self._q.pop(0) if self._q else None
+
+        def reset(self) -> None:
+            pass
+
+    coord = _FakeCoordinator()
+
+    # Scripted: one turn, completes with complete_step.
+    scripted = [[
+        thread_started("thr-drain-1"),
+        agent_message("resuming"),
+        mcp_call(name="complete_step", args={"answer": "ok"}, result="done", item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    log = InMemoryEventLog()
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: fake,
+    )
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = AgentInvocation(
+        agent_def=agent_def,
+        provider_name="codex",
+        model_name="gpt-5.5",
+        system_prompt="be terse",
+        initial_messages=(),
+        change_context=ChangeContext(
+            slug="s", title="t", project_root=tmp_path,
+            workflow_dir=tmp_path, id="c1"),
+        transcript_dir=tx,
+        fs_permissions=(FsRule(
+            operations=("read", "write"), paths=("**",),
+            mode="allow", source=_SRC),),
+        events_path=events_path,
+        agent_id="step:t",
+        event_log=log,
+        coordinator=coord,
+        balance_on_resume=True,
+    )
+
+    events = [e async for e in runner.run(inv)]
+
+    # Run completed successfully.
+    assert events[-1]["type"] == "agent_output", events
+
+    # There must have been exactly one run_streamed call (the first turn).
+    thread = fake.thread
+    assert thread is not None
+    assert thread.run_calls, "run_streamed was never called"
+
+    # The FIRST run_streamed argument must contain BOTH interject texts.
+    first_prompt = thread.run_calls[0][0]
+    assert isinstance(first_prompt, str), f"expected str prompt, got {type(first_prompt)}"
+    assert "interject-A" in first_prompt, (
+        f"interject-A missing from first prompt: {first_prompt!r}"
+    )
+    assert "interject-B" in first_prompt, (
+        f"interject-B missing from first prompt: {first_prompt!r}"
+    )
+
+    # Each interject text must appear exactly ONCE across all run_streamed calls
+    # (the entry drain cleared the queue; the turn-boundary drain is a no-op).
+    all_prompts = " ".join(call[0] for call in thread.run_calls if isinstance(call[0], str))
+    assert all_prompts.count("interject-A") == 1, (
+        f"interject-A delivered {all_prompts.count('interject-A')} times (expected 1)"
+    )
+    assert all_prompts.count("interject-B") == 1, (
+        f"interject-B delivered {all_prompts.count('interject-B')} times (expected 1)"
+    )
+
+    # Both interjects consumed (queue cleared).
+    assert coord.drain_interject() is None
+
