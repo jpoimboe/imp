@@ -682,3 +682,52 @@ async def test_pull_watchdog_restores_finite_window_after_end(monkeypatch) -> No
     assert stall["hit"] is True
     assert interrupted["called"] is True
     assert events == []
+
+
+class _RecordingCoord:
+    """Records begin/end_solicit_watchdog and the active flag; drains no
+    interjects (so _resolve_wait_reply falls through to soliciting)."""
+
+    def __init__(self):
+        self.events = []
+        self.active = False
+
+    def drain_interject(self):
+        return None
+
+    def begin_solicit_watchdog(self):
+        self.active = True
+        self.events.append("begin")
+
+    def end_solicit_watchdog(self):
+        self.active = False
+        self.events.append("end")
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_brackets_await_with_begin_end() -> None:
+    import imp.engine.agent_run as ar
+    coord = _RecordingCoord()
+
+    async def _ainput(_q):
+        assert coord.active is True   # watchdog frozen DURING the await
+        return "resumed reply"
+
+    result = await ar._resolve_wait_reply(coord, _ainput)
+    assert result == "resumed reply"
+    assert coord.events == ["begin", "end"]
+    assert coord.active is False
+
+
+@pytest.mark.anyio
+async def test_resolve_wait_reply_restores_watchdog_on_exception() -> None:
+    import imp.engine.agent_run as ar
+    coord = _RecordingCoord()
+
+    async def _ainput(_q):
+        raise RuntimeError("prompt torn down")
+
+    with pytest.raises(RuntimeError):
+        await ar._resolve_wait_reply(coord, _ainput)
+    assert coord.events == ["begin", "end"]   # finally restored it on the exception
+    assert coord.active is False

@@ -216,7 +216,17 @@ async def _resolve_wait_reply(
         return joined
     raw = user_input_fn("")
     if inspect.isawaitable(raw):
-        raw = await raw
+        # Resume-side blocked solicit (all four providers route here): freeze the
+        # inactivity watchdog for the duration of the await, symmetrical with
+        # wait_for_user. The finally ALWAYS restores it. Guard for legacy/test
+        # coordinators (None) with no watchdog to suspend.
+        if coordinator is not None:
+            coordinator.begin_solicit_watchdog()
+        try:
+            raw = await raw
+        finally:
+            if coordinator is not None:
+                coordinator.end_solicit_watchdog()
     return str(raw)
 
 
