@@ -372,6 +372,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.StepNode):
+        if node.quiet:
+            if node.quiet_line:
+                yield _line(node.quiet_line, depth, color,
+                            *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+            return
         # A step's content flows at the step's OWN indent (no +1): the header is a
         # label and its prose/breadcrumb align directly beneath it, rather than
         # indenting a further level and burying the agent's words. Phases still
