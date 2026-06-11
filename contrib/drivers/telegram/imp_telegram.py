@@ -75,3 +75,27 @@ def load_config(env: Mapping[str, str], file_text: str | None = None) -> Telegra
     if not token:
         raise ConfigError("IMP_TELEGRAM_TOKEN is required")
     return TelegramConfig(token=token, chat_id=chat_id)
+
+
+def extract_replies(
+    updates_response: Mapping[str, Any], chat_id: int, offset: int
+) -> tuple[list[str], int]:
+    """From a getUpdates response, return (reply_texts, new_offset). Only text
+    messages from the allowlisted chat_id become replies (security trust
+    boundary: a reply is injected straight into the agent's input). Every update
+    advances the offset past itself so the next poll never re-fetches it, which
+    is also how only post-startup messages surface (spec AC 10)."""
+    replies: list[str] = []
+    new_offset = offset
+    for upd in updates_response.get("result", []):
+        uid = upd.get("update_id")
+        if isinstance(uid, int) and uid >= new_offset:
+            new_offset = uid + 1
+        msg = upd.get("message") or {}
+        chat = msg.get("chat") or {}
+        if chat.get("id") != chat_id:
+            continue
+        text = msg.get("text")
+        if isinstance(text, str) and text:
+            replies.append(text)
+    return replies, new_offset
