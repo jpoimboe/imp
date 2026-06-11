@@ -1186,3 +1186,35 @@ def test_error_node_threads_full_summary_absent_tolerantly() -> None:
     b2.add(ev("e2", "error", category="api", message="boom"))   # no detail key
     err2 = next(k for k in b2.tree.root.children if isinstance(k, nv.ErrorNode))
     assert err2.detail == ""
+
+
+def test_incremental_equals_batch_for_wfu_and_grown_repr() -> None:
+    events = [
+        ev("2", "step_started", step="s", kind="agent", phase="p"),
+        ev("t0", "tool_call", agent_id="a", id="b1", name="bash",
+           input={"command": "ls"}, timestamp="2026-06-10T00:00:01"),
+        ev("r0", "tool_result", agent_id="a", id="b1", content="ok",
+           citations=[{"url": "https://a.test"}]),
+        ev("e1", "error", category="loop", message="x",
+           detail={"full_summary": "deep detail"}),
+    ]
+    # batch == incremental over the whole tree (structural_repr on root)
+    batch = nv.build_tree(events)
+    b = nv.NarrativeBuilder()
+    for e in events:
+        b.add(e)
+    assert nv.structural_repr(batch.root) == nv.structural_repr(b.tree.root)
+    # The above is a smoke test (both use the same NarrativeBuilder path).
+    # Positive assertions verify the GROWN FIELD VALUES in the structural repr:
+    repr_root = nv.structural_repr(batch.root)
+    # Navigate: root → PhaseNode → StepNode → [ToolBurstFold, ErrorNode]
+    phase = repr_root["children"][0]
+    step = phase["children"][0]
+    burst = next(c for c in step["children"] if c["t"] == "ToolBurstFold")
+    err = next(c for c in step["children"] if c["t"] == "ErrorNode")
+    # Task 3: citations_footer is non-empty (citations were parsed)
+    assert burst["calls"][0]["citations_footer"] != ""          # Task 3
+    # Task 12: ErrorNode.detail carries the full_summary string
+    assert err["detail"] == "deep detail"                       # Task 12
+    # Task 1: call_ts is excluded from call structural repr
+    assert "call_ts" not in burst["calls"][0]                   # Task 1

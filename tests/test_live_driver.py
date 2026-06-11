@@ -777,3 +777,19 @@ def test_flush_deferred_clears_prompt_active_for_liveness() -> None:
     # subsequent events print normally
     drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p"))
     assert "s" in out.getvalue()
+
+
+def test_wfu_submit_live_equals_imp_log() -> None:
+    drv, out = _driver()
+    events = [
+        ev("2", "step_started", step="s", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+        ev("aw", "awaiting_user_input", agent_id="a", prompt="continue?"),
+        ev("t1", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+           input={"prompt": "continue?"}, timestamp="2026-06-10T00:00:01"),
+        ev("t2", "tool_result", agent_id="a", id="w1", content="yes please"),
+    ]
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    assert _body(out) == _render_body(events)      # byte-identical to imp log
