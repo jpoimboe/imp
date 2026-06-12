@@ -115,6 +115,16 @@ async def _main(scenario: str, result_path: str) -> None:
         await _run_real_engine(app)
         return
 
+    if scenario == "theme":
+        from imp.cli import palette as pal
+        pal.set_theme(os.environ.get("IMP_THEME", "dark"))
+        app = TuiApp(coord=InterruptCoordinator(), color=True, width=80)
+        for e in _events(3):          # short narrative: header stays on-screen
+            app.on_event(e)
+        app._build_app()
+        await app.run_async()
+        return
+
     app = TuiApp(coord=InterruptCoordinator(), color=True, width=80)
     n_tools = 4 if scenario == "prompt" else 40  # promptscroll/view/exit need scrollback
     for e in _events(n_tools):
