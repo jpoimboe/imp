@@ -18,8 +18,13 @@ NOT make code changes).
 Report:
 - `built`: what was built, by plan/task, in prose.
 - `test_status`: the verification state (what passed; anything skipped/failing).
-- `open_items`: deferred Minor/Nit findings and carried followups from
-  progress.md.
+- `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
+  step recorded in `.imp/change/progress.md` and surface them as TWO labelled
+  subsections — **Fixed (FYI/veto):** every `fyi-fixed <commit>` item with its
+  commit, and **Still deferred (needs decision):** every `still-deferred: <reason>`
+  item. **Omit `silent-fixed` items entirely** — they were trivial, mechanical, and
+  behavior-preserving, and appear nowhere. Include any other carried followups under
+  Still deferred.
 - `next_steps`: suggested follow-on work.
 
 ## Integration outcome

@@ -163,3 +163,15 @@ def test_task_lead_pins_deferred_followups_line_format() -> None:
     assert "[scope:" in text
     assert "task-lead:" in text
     assert "deferred-sweep" in low      # the sweep, not the human, is the consumer
+
+
+SUMMARIZER = AGENTS_DIR / "summarizer.md"
+
+
+def test_summarizer_reads_sweep_dispositions() -> None:
+    low = SUMMARIZER.read_text().lower()
+    assert "fyi-fixed" in low
+    assert "still-deferred" in low
+    assert "silent-fixed" in low      # named only to exclude it
+    assert "fixed (fyi/veto)" in low or "fixed (fyi / veto)" in low
+    assert "still deferred" in low
