@@ -230,3 +230,15 @@ def test_new_tui_with_seed_warns(
 
     assert rc == 0
     assert "--tui does not deliver" in capsys.readouterr().err
+
+
+def test_spec_writer_prompt_has_seed_branch() -> None:
+    # tests/ sits directly under the repo root, so resolve the prompt relative
+    # to this file rather than depending on project-root discovery.
+    root = Path(__file__).resolve().parent.parent
+    prompt = (root / "src" / "imp" / "assets" / "workflows" / "default"
+              / "agents" / "spec-writer.md").read_text()
+    # Seed-marker invariant: the adopt branch must key on the SAME phrase the CLI
+    # prefixes (_build_seed). If either drifts, the branch stops firing.
+    assert cli_main.SPEC_SEED_MARKER in prompt
+    assert "## Seeded with a draft spec" in prompt
