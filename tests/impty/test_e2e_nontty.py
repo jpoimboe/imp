@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
-from tests.impty.e2e_support import seed_minimal_repo
+from tests.impty.e2e_support import clean_env, seed_minimal_repo
 
 
 def test_tui_falls_back_to_streaming_on_a_non_tty(tmp_path: Path) -> None:
@@ -19,7 +18,7 @@ def test_tui_falls_back_to_streaming_on_a_non_tty(tmp_path: Path) -> None:
     proc = subprocess.run(
         [sys.executable, "-m", "imp", "new", "demo", "--tui", "--non-interactive"],
         cwd=tmp_path,
-        env={**os.environ, "IMP_SCRIPTED_SCRIPT": str(script_path), "IMP_THEME": "ansi"},
+        env=clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi"),
         capture_output=True, text=True, timeout=120,
     )
 

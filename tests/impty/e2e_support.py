@@ -20,6 +20,14 @@ def can_pty() -> bool:
         return False
 
 
+def clean_env(**overrides: str) -> dict[str, str]:
+    """Inherited env with outer ``IMP_*`` stripped (so an imp-on-imp run can't leak
+    its engine vars into the spawned child), plus the given overrides."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("IMP_")}
+    env.update(overrides)
+    return env
+
+
 def write_imp_shim(directory: Path) -> str:
     """Write an executable `imp` shim that execs the working-tree CLI."""
     shim = directory / "imp"

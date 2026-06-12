@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -8,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from impty import Regime, TerminalSession
-from tests.impty.e2e_support import can_pty
+from tests.impty.e2e_support import can_pty, clean_env
 
 _HARNESS = str(Path(__file__).with_name("tui_harness.py"))
 
@@ -26,7 +25,7 @@ def test_dark_theme_accent_survives_into_the_png(tmp_path: Path) -> None:
     from tests.impty.snapshot import snapshot
 
     out = tmp_path / "theme.png"
-    env = {**os.environ, "IMP_THEME": "dark", "PROMPT_TOOLKIT_COLOR_DEPTH": "DEPTH_24_BIT"}
+    env = clean_env(IMP_THEME="dark", PROMPT_TOOLKIT_COLOR_DEPTH="DEPTH_24_BIT")
     with TerminalSession([sys.executable, _HARNESS, "theme", "/dev/null"],
                          cols=80, rows=24, env=env) as s:
         deadline = time.monotonic() + 12.0

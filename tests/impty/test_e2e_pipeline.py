@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +9,7 @@ import pytest
 from impty import TerminalSession
 from tests.impty.e2e_support import (
     can_pty,
+    clean_env,
     default_workflow_script,
     seed_default_repo,
     write_imp_shim,
@@ -31,7 +31,7 @@ def test_scripted_default_workflow_run_passes_the_dogfood_invariants(
     base_sha = subprocess.run(
         ["git", "-C", str(clone), "rev-parse", "HEAD"],
         check=True, capture_output=True, text=True).stdout.strip()
-    env = {**os.environ, "IMP_SCRIPTED_SCRIPT": str(script_path), "IMP_THEME": "ansi"}
+    env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
 
     # Drive the real binary through impty to completion + merge.
     with TerminalSession(
