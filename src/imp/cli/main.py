@@ -1732,8 +1732,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "Set up imp in the current git repository: create imp/ with the\n"
             "default workflow, write imp/project.yaml (the version-controlled\n"
             "workflow + project settings), detect your terminal theme, and\n"
-            "bootstrap your machine-local config (providers, theme, editing\n"
-            "mode). Creates files on disk only — never makes a git commit."
+            "bootstrap your machine-local config (providers and theme).\n"
+            "Only touches the filesystem — never makes a git commit."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
