@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import main as cli_main
 
 
@@ -78,3 +79,28 @@ def test_resolve_positional_file_and_message_mutually_exclusive(
     with pytest.raises(cli_main.SeedError):
         cli_main.resolve_spec_seed(
             _new_args(title=str(draft), message="hi"))
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_seed_reply_first_then_fallback() -> None:
+    async def _fallback() -> str:
+        return "interactive line"
+
+    reply = cli_main.make_seed_reply_fn("the seed", _fallback)
+    assert await reply() == "the seed"          # first solicit → seed
+    assert await reply() == "interactive line"  # later solicit → fallback
+    assert await reply() == "interactive line"  # still fallback on third call
+
+
+@pytest.mark.anyio
+async def test_seed_reply_then_headless_pause() -> None:
+    reply = cli_main.make_seed_reply_fn(
+        "the seed", cli_main.make_message_reply_fn(None))
+    assert await reply() == "the seed"          # first solicit → seed
+    with pytest.raises(AwaitingUserInput):       # headless fallback → pause
+        await reply()

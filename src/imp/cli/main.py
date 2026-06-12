@@ -182,6 +182,21 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
     return _reply
 
 
+def make_seed_reply_fn(
+    seed: str, fallback: Callable[[], Awaitable[str]],
+) -> Callable[[], Awaitable[str]]:
+    delivered = False
+
+    async def _reply(*_a: object, **_k: object) -> str:
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return seed
+        return await fallback()
+
+    return _reply
+
+
 def _maybe_build_channel(change: Change) -> RemoteChannel | None:
     """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
     behaves exactly as today). Title is captured at run start. A bad config is
