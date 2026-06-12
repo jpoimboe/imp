@@ -111,8 +111,8 @@ SPEC_SEED_MARKER = "Implement this spec"
 
 
 class SeedError(Exception):
-    """A bad spec-seed source (missing/unreadable --spec-file, or two seed sources
-    combined). The `new` command maps it to rc 2 with a stderr message."""
+    """A bad spec-seed source: a missing/unreadable --spec-file, or two seed
+    sources combined."""
 
 
 class SeedResolution(NamedTuple):
@@ -144,8 +144,8 @@ def _build_seed(path: str, content: str) -> str:
 def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
     """Resolve the first-turn seed source for `imp new`.
 
-    Raises SeedError (→ rc 2) on a missing/unreadable --spec-file or combined
-    seed sources."""
+    Raises SeedError on a missing/unreadable --spec-file or combined seed
+    sources."""
     title = args.title
     spec_file = getattr(args, "spec_file", None)
     message = getattr(args, "message", None)
@@ -196,6 +196,21 @@ def make_seed_reply_fn(
         return await fallback()
 
     return _reply
+
+
+def make_seed_gate(
+    seed: str,
+) -> Callable[[Callable[[], Awaitable[str]]], Awaitable[str]]:
+    delivered = False
+
+    async def _apply(fallback: Callable[[], Awaitable[str]]) -> str:
+        nonlocal delivered
+        if not delivered:
+            delivered = True
+            return seed
+        return await fallback()
+
+    return _apply
 
 
 def _maybe_build_channel(change: Change) -> RemoteChannel | None:
@@ -481,6 +496,7 @@ async def _run_change_session(
     non_interactive: bool,
     tg: Any,
     channel: Any = None,
+    seed_gate: Callable[[Callable[[], Awaitable[str]]], Awaitable[str]] | None = None,
 ) -> int:
     """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
     loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
@@ -524,6 +540,14 @@ async def _run_change_session(
                     # calls the live one.
                     _reply: Callable[[], Awaitable[str]] = effective_reply_fn(
                         reply_input_fn, channel, non_interactive=non_interactive)
+
+                    if seed_gate is not None:
+                        def _gated(
+                            _src: Callable[[], Awaitable[str]] = _reply,
+                        ) -> Awaitable[str]:
+                            return seed_gate(_src)
+
+                        _reply = _gated
 
                     def _chat(
                         _q: object,
@@ -742,6 +766,11 @@ def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> 
             + ansi(f" · {marker}", "dim", enabled=color))
 
 
+def _rewind_note_line(from_step: str | None, target: str, *, color: bool) -> str:
+    origin = from_step or "start"
+    return ansi(f"rewound from {origin} to {target}", "dim", enabled=color)
+
+
 def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
     if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
         print("imp: --tui needs an interactive terminal; streaming instead.",
@@ -789,7 +818,8 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
         loop.set_exception_handler(prev)
 
 
-async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
+async def _run_tui_session(
+        change: Change, *, args: argparse.Namespace, seed: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     # No EscKeyReader — TuiApp owns the tty exclusively.
@@ -797,8 +827,13 @@ async def _run_tui_session(change: Change, *, args: argparse.Namespace) -> int:
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
     channel = _maybe_build_channel(change)
 
-    async def _chat(_prompt: object) -> str:
+    async def _solicit(*_a: object, **_k: object) -> str:
         return await app.solicit(change)
+
+    # A spec seed (imp new <draft>) is delivered as the first solicit, exactly as
+    # in the non-TUI path; later solicits fall back to the interactive TuiApp.
+    _chat: Callable[..., Awaitable[str]] = (
+        make_seed_reply_fn(seed, _solicit) if seed is not None else _solicit)
 
     holder: dict[str, Any] = {}
     load_err: Exception | None = None
@@ -856,11 +891,6 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         print(f"imp: {e}", file=sys.stderr)
         return 2
 
-    if (seed.seed_text is not None and _tui_requested(args)
-            and not getattr(args, "non_interactive", False)):
-        print("imp: warning: a spec seed was provided but --tui does not deliver "
-              "it; run without --tui to seed the spec-writer", file=sys.stderr)
-
     block = _preflight_imp_init(control_root=control, project_root=control)
     if block is not None:
         print(f"imp: {block}", file=sys.stderr)
@@ -890,7 +920,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             non_interactive = bool(getattr(args, "non_interactive", False))
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
-                return await _run_tui_session(change, args=args)
+                return await _run_tui_session(change, args=args, seed=seed.seed_text)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -911,8 +941,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 _router, reply_input_fn = _build_interactive_input(
                     change, status, coord, esc_reader, driver)
 
-            if seed.seed_text is not None:
-                reply_input_fn = make_seed_reply_fn(seed.seed_text, reply_input_fn)
+            seed_gate = (
+                make_seed_gate(seed.seed_text)
+                if seed.seed_text is not None else None)
 
             try:
                 with _benign_interrupt_loop_handler(coord):
@@ -929,7 +960,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                         rc = await _run_change_session(
                             change, coord=coord, driver=driver, status=status,
                             esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                            non_interactive=non_interactive, tg=tg, channel=channel)
+                            non_interactive=non_interactive, tg=tg, channel=channel,
+                            seed_gate=seed_gate)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -1055,6 +1087,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 assert workflow is not None
                 recovery.apply_rewind(
                     rewind_plan, workflow, state, change.event_log())
+                print(_rewind_note_line(
+                    rewind_plan.from_step, rewind_plan.target,
+                    color=should_use_color(sys.stdout)))
             state.save(change.state_dir)
 
             if _tui_requested(args) and not non_interactive:
@@ -1093,7 +1128,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                         rc = await _run_change_session(
                             change, coord=coord, driver=driver, status=status,
                             esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                            non_interactive=non_interactive, tg=tg, channel=channel)
+                            non_interactive=non_interactive, tg=tg, channel=channel,
+                            seed_gate=None)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -1583,7 +1619,9 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
     return chosen if chosen is not None else 2
 
 
-def _abandon(control: Path, change_id: str) -> int:
+def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
+             interactive: bool | None = None,
+             input_fn: Callable[[str], str] = input) -> int:
     """Tear down a Change (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): journal BEFORE worktree removal (records
@@ -1599,6 +1637,22 @@ def _abandon(control: Path, change_id: str) -> int:
         worktree.delete_branch(control, change_id)
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
+
+    do_prompt = not assume_yes and (
+        _interactive() if interactive is None else interactive)
+    if do_prompt:
+        st = State.load(change.state_dir)
+        n = worktree.commit_count(control, change_id, change.base_branch)
+        print(f"Abandon {change_id}: {change.title!r} "
+              f"(status {st.status}, {n} commit{'s' if n != 1 else ''})?")
+        try:
+            ans = input_fn(
+                "Type 'y' to confirm, anything else to cancel: ").strip().lower()
+        except EOFError:
+            ans = ""
+        if ans not in ("y", "yes"):
+            print(f"Abandon cancelled; {change_id} left intact.")
+            return 1
 
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # timeout=0
@@ -1641,11 +1695,11 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon(control, hits[0])
+            return _abandon(control, hits[0], assume_yes=args.yes)
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         return 2
-    return _abandon(control, change_id)
+    return _abandon(control, change_id, assume_yes=args.yes)
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -1692,7 +1746,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
     if explain:
         render_explain(eff, explain, sys.stdout, color=should_use_color(sys.stdout))
     else:
-        render_config(eff, sys.stdout, color=should_use_color(sys.stdout))
+        render_config(eff, sys.stdout, color=should_use_color(sys.stdout),
+                      show_all=args.all)
     return 0
 
 
@@ -1729,7 +1784,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=False)
 
-    p_init = sub.add_parser("init")
+    p_init = sub.add_parser(
+        "init",
+        help="Scaffold imp in this git repository.",
+        description=(
+            "Set up imp in the current git repository: create imp/ with the\n"
+            "default workflow, write imp/project.yaml (the version-controlled\n"
+            "workflow + project settings), detect your terminal theme, and\n"
+            "bootstrap your machine-local config (providers and theme).\n"
+            "Only touches the filesystem — never makes a git commit."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_init.set_defaults(func=_cmd_init)
 
     p_new = sub.add_parser("new")
@@ -1797,6 +1863,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_config = sub.add_parser("config")
     p_config.add_argument("--explain", metavar="TIER", default=None,
                           help="trace one tier's bindings through the layers")
+    p_config.add_argument("--all", action="store_true",
+                          help="Show every provider x tier row "
+                               "(default: only configured providers).")
     p_config.set_defaults(func=_cmd_config)
 
     p_abandon = sub.add_parser(
@@ -1804,6 +1873,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a Change's worktree, branch, and state (logged).",
     )
     p_abandon.add_argument("token")
+    p_abandon.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     from imp.evals.cli import add_eval_parser
@@ -1850,12 +1922,16 @@ def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | No
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     parser = _build_parser()
-    result = _dispatch_meta(args, parser)
-    if result is not None:
-        return result
-    ns = parser.parse_args(args)
-    _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
+        result = _dispatch_meta(args, parser)
+        if result is not None:
+            # _dispatch_meta may have printed the overview/unknown-command
+            # error above; that write belongs inside the guard too. Flush here
+            # for the same buffered-pipe reason as the command path below.
+            sys.stdout.flush()
+            return result
+        ns = parser.parse_args(args)
+        _apply_theme()   # resolve dark/light/ansi once, before any command renders
         rc: int = ns.func(ns)
         # Flush here, inside the guard: output small enough to fit Python's
         # stdout buffer is otherwise flushed at interpreter shutdown, where a

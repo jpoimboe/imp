@@ -366,8 +366,12 @@ def _event_loop(stdin: Any, send: Callable[..., None], chat_id: int) -> None:
         except json.JSONDecodeError:
             continue
         try:
-            handle_event(event, send, chat_id)
-            gate.ok()
+            # Only a real delivery re-arms the gate. A dropped event never
+            # contacts Telegram, so it is neither a success nor a failure: if it
+            # re-armed, the edge-triggered WARNING would fire again on the next
+            # failing send (dropped events vastly outnumber sent ones).
+            if handle_event(event, send, chat_id):
+                gate.ok()
         except Exception as exc:  # best-effort: never die on a transient API error
             gate.fail(exc)
 

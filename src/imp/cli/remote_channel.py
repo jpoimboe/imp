@@ -262,6 +262,11 @@ class RemoteChannel:
                 list(self._command),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE)
+        except FileNotFoundError:
+            _log.debug("remote driver %r not found; notifications disabled",
+                       self._command[0])
+            self._proc = None
+            return False
         except OSError as exc:
             self._on_error(f"driver failed to spawn ({self._command[0]!r}): {exc}")
             self._proc = None

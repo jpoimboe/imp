@@ -11,21 +11,9 @@ from pathlib import Path
 import pytest
 
 from impty import Regime, TerminalSession
+from tests.impty.e2e_support import can_pty
 
-
-def _can_pty() -> bool:
-    try:
-        import pty
-
-        m, s = pty.openpty()
-        os.close(m)
-        os.close(s)
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _can_pty(), reason="pty not available")
+pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 
 def test_spawn_and_read_startup_output() -> None:

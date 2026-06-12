@@ -9,6 +9,8 @@ host promotes it to a visible log. A persistent send failure is reported once
 (edge-triggered), then suppressed until a send succeeds again."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from imp.remote.drivers import telegram as t
@@ -86,3 +88,26 @@ def test_send_gate_warns_once_then_suppresses_until_success(
     gate.ok()                                              # a success re-arms
     gate.fail(RuntimeError("z"))
     assert capsys.readouterr().err.startswith("WARNING:")
+
+
+def test_event_loop_warns_once_when_dropped_events_interleave_failures(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # During a network outage every *send* fails, but the event stream is mostly
+    # dropped events (thinking/tool_call) that never contact Telegram. A dropped
+    # event must not re-arm the failure gate — otherwise the edge-triggered
+    # WARNING fires again on the next real send, defeating suppression.
+    def send(chat_id: int, text: str, *, silent: bool) -> None:
+        raise OSError("No route to host")
+
+    stream = [
+        json.dumps({"type": "errored", "payload": {"reason": "boom"}}),
+        json.dumps({"type": "thinking", "payload": {}}),       # dropped: no send
+        json.dumps({"type": "tool_call", "payload": {}}),      # dropped: no send
+        json.dumps({"type": "merge_blocked", "payload": {"reason": "conflict"}}),
+    ]
+
+    t._event_loop(iter(stream), send, chat_id=5)
+
+    warnings = [ln for ln in capsys.readouterr().err.splitlines() if "WARNING" in ln]
+    assert len(warnings) == 1, f"expected one loud failure, got {len(warnings)}: {warnings}"

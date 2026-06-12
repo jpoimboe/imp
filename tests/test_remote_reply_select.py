@@ -75,6 +75,19 @@ async def test_attended_race_dead_channel_yields_to_local() -> None:
         assert await fn() == "from-tty"   # dead channel never wins the race
 
 
+@pytest.mark.anyio
+async def test_seed_gate_wraps_phone_only_source() -> None:
+    from imp.cli.main import make_seed_gate
+
+    ch = _FakeChannel("from-phone")
+    phone = effective_reply_fn(_local_never, ch, non_interactive=True)
+    gate = make_seed_gate("seed-line")
+
+    assert await gate(phone) == "seed-line"   # first solicit → seed
+    assert ch.timeout_seen == "unset"          # channel NOT consulted for the seed
+    assert await gate(phone) == "from-phone"  # later solicit → the phone source
+
+
 async def _local_never() -> str:
     await anyio.sleep_forever()
     raise AssertionError("unreachable")

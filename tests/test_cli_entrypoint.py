@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 from imp import __version__
-from imp.cli.main import main, render_overview
+from imp.cli.main import _OVERVIEW_COMMANDS, _build_parser, _command_names, main, render_overview
 
 
 def test_overview_lists_each_common_command_and_footer() -> None:
@@ -92,3 +92,35 @@ def test_known_command_still_dispatches(tmp_path, monkeypatch) -> None:
     (tmp_path / ".imp").mkdir()
     rc = main(["status"])
     assert rc == 0
+
+
+def test_overview_commands_are_real_subcommands() -> None:
+    """Drift guard: every name in the curated overview must be a live
+    subcommand. Catches a renamed/removed command leaving a stale overview
+    entry. The overview is intentionally a SUBSET (it omits e.g. `eval`,
+    `init`), so this is a subset check, not equality."""
+    real = _command_names(_build_parser())
+    overview = {name for name, _ in _OVERVIEW_COMMANDS}
+    stale = overview - real
+    assert not stale, f"overview lists non-existent command(s): {sorted(stale)}"
+
+
+def test_main_swallows_broken_pipe_on_overview(monkeypatch) -> None:
+    """The bare-`imp` overview path prints before the command dispatch, so it
+    must also sit inside main()'s BrokenPipeError guard: a reader closing the
+    pipe early returns the conventional 128+SIGPIPE status instead of escaping
+    as an uncatchable traceback. os.open/os.dup2 are stubbed so the handler's
+    stdout-fd redirect can't clobber pytest's own stdout."""
+    import signal
+
+    import imp.cli.main as m
+
+    def boom(_color: bool) -> str:
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(m, "render_overview", boom)
+    monkeypatch.setattr(m.os, "open", lambda *a, **k: 0)
+    monkeypatch.setattr(m.os, "dup2", lambda *a, **k: None)
+
+    rc = main([])
+    assert rc == 128 + signal.SIGPIPE
