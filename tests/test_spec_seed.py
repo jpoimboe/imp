@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import anyio
 import pytest
 
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import main as cli_main
+from imp.engine.executor import RunResult
+from tests.conftest import _seed_control
 
 
 def test_build_parser_new_accepts_spec_file() -> None:
@@ -104,3 +107,126 @@ async def test_seed_reply_then_headless_pause() -> None:
     assert await reply() == "the seed"          # first solicit → seed
     with pytest.raises(AwaitingUserInput):       # headless fallback → pause
         await reply()
+
+
+def test_new_positional_file_delivers_seed(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("# My draft\nGoal: do X\n")
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run(change: object, *, on_event: object,
+                        user_chat_input_fn: object, coordinator: object,
+                        non_interactive: object) -> RunResult:
+        captured["change"] = change
+        captured["reply"] = await user_chat_input_fn(None)  # type: ignore[operator]
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+
+    args = _new_args(title=str(draft), non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 0
+    reply = captured["reply"]
+    assert isinstance(reply, str)
+    assert reply.startswith("Implement this spec")
+    assert str(draft) in reply
+    assert "# My draft" in reply
+    assert captured["change"].title == ""  # type: ignore[union-attr]
+
+
+def test_new_spec_file_with_name_keeps_title(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("Goal: ship it\n")
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run(change: object, *, on_event: object,
+                        user_chat_input_fn: object, coordinator: object,
+                        non_interactive: object) -> RunResult:
+        captured["change"] = change
+        captured["reply"] = await user_chat_input_fn(None)  # type: ignore[operator]
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+
+    args = _new_args(title="my-name", spec_file=str(draft), non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 0
+    assert captured["change"].title == "my-name"  # type: ignore[union-attr]
+    assert "Goal: ship it" in captured["reply"]  # type: ignore[operator]
+
+
+def test_new_missing_spec_file_rc2_no_change(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    ran = {"called": False}
+
+    async def _fake_run(*_a: object, **_k: object) -> RunResult:
+        ran["called"] = True
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+
+    args = _new_args(spec_file=str(tmp_path / "nope.md"), non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 2
+    assert ran["called"] is False
+    assert "nope.md" in capsys.readouterr().err
+    worktrees = tmp_path / ".imp" / "worktrees"
+    assert not worktrees.exists() or not any(worktrees.iterdir())
+
+
+def test_new_spec_file_and_message_rc2(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("Goal: x\n")
+    ran = {"called": False}
+
+    async def _fake_run(*_a: object, **_k: object) -> RunResult:
+        ran["called"] = True
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+
+    args = _new_args(spec_file=str(draft), message="hi", non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 2
+    assert ran["called"] is False
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_new_tui_with_seed_warns(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("Goal: x\n")
+
+    async def _fake_tui(change: object, *, args: object) -> int:
+        return 0
+
+    monkeypatch.setattr(cli_main, "_run_tui_session", _fake_tui)
+    monkeypatch.setattr(cli_main, "_tui_requested", lambda _a: True)
+
+    args = _new_args(title=str(draft), tui=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 0
+    assert "--tui does not deliver" in capsys.readouterr().err

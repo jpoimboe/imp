@@ -849,6 +849,17 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         print(f"imp: {e}", file=sys.stderr)
         return 2
 
+    try:
+        seed = resolve_spec_seed(args)
+    except SeedError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+
+    if (seed.seed_text is not None and _tui_requested(args)
+            and not getattr(args, "non_interactive", False)):
+        print("imp: warning: a spec seed was provided but --tui does not deliver "
+              "it; run without --tui to seed the spec-writer", file=sys.stderr)
+
     block = _preflight_imp_init(control_root=control, project_root=control)
     if block is not None:
         print(f"imp: {block}", file=sys.stderr)
@@ -857,7 +868,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
     # names it via rename_change once intent is clear, or the user passes --title.
-    title = args.title if args.title is not None else ""
+    title = seed.title if seed.title is not None else ""
     try:
         change = Change.create(control, title=title, change_id=change_id,
                                base_branch=base)
@@ -898,6 +909,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 # router-flagged reply_input_fn. See _build_interactive_input.
                 _router, reply_input_fn = _build_interactive_input(
                     change, status, coord, esc_reader, driver)
+
+            if seed.seed_text is not None:
+                reply_input_fn = make_seed_reply_fn(seed.seed_text, reply_input_fn)
 
             try:
                 with _benign_interrupt_loop_handler(coord):
