@@ -92,3 +92,6 @@ symbols or branch paths into a playbook.
 - `before-after-playbook.md` — before/after visual showcase for an imp change: render the
   user-visible CLI/TUI surfaces it touched, before vs after, into one self-contained HTML page.
   A communication artifact, not a pass/fail test.
+- `dogfood-playbook.md` — run-to-completion outcome/e2e acceptance test: drive a full `imp new` run
+  to completion + merge, judge the produced work with fresh eyes, run `check_dogfood_invariants.py`,
+  and write a critical PASS/FAIL results report → `docs/bugs/`.
