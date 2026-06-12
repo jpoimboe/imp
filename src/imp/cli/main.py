@@ -16,7 +16,7 @@ import sys
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NamedTuple, NoReturn
 
 import anyio
 
@@ -104,6 +104,63 @@ class ReplyInterjectRouter:
                 self._reply_sink(line)
         else:
             self._coord.enqueue_interject(line)
+
+
+SPEC_SEED_MARKER = "Implement this spec"
+
+
+class SeedError(Exception):
+    """A bad spec-seed source (missing/unreadable --spec-file, or two seed sources
+    combined). The `new` command maps it to rc 2 with a stderr message."""
+
+
+class SeedResolution(NamedTuple):
+    title: str | None
+    seed_text: str | None
+
+
+def _is_readable_regular_file(path: str) -> bool:
+    p = Path(path)
+    return p.is_file() and os.access(p, os.R_OK)
+
+
+def _read_seed_file(path: str) -> str:
+    p = Path(path)
+    if not p.is_file():
+        raise SeedError(
+            f"spec file {path!r} does not exist or is not a regular file")
+    try:
+        return p.read_text(encoding="utf-8")
+    except (OSError, ValueError) as e:
+        raise SeedError(f"cannot read spec file {path!r}: {e}") from e
+
+
+def _build_seed(path: str, content: str) -> str:
+    return (f"{SPEC_SEED_MARKER} (the user provided it as a draft at "
+            f"`{path}`):\n\n{content}")
+
+
+def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
+    """Resolve the first-turn seed source for `imp new`.
+
+    Raises SeedError (→ rc 2) on a missing/unreadable --spec-file or combined
+    seed sources."""
+    title = args.title
+    spec_file = args.spec_file
+    message = args.message
+
+    if spec_file is not None:
+        if message is not None:
+            raise SeedError("--spec-file and --message are mutually exclusive")
+        return SeedResolution(title, _build_seed(spec_file, _read_seed_file(spec_file)))
+
+    if title is not None and _is_readable_regular_file(title):
+        if message is not None:
+            raise SeedError(
+                "a positional spec file and --message are mutually exclusive")
+        return SeedResolution(None, _build_seed(title, _read_seed_file(title)))
+
+    return SeedResolution(title, None)
 
 
 def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
