@@ -17,7 +17,7 @@ def test_handle_event_sends_loud_with_notification() -> None:
     chat_id, text, silent = sent[0]
     assert chat_id == 5
     assert silent is False                     # loud → notify
-    assert text == "[T] awaiting_user_input"
+    assert text == "[T] needs your input"
 
 
 def test_handle_event_sends_silent_narrative() -> None:

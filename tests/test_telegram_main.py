@@ -57,4 +57,4 @@ def test_main_routes_a_stdin_event_to_telegram(monkeypatch: pytest.MonkeyPatch) 
     assert get_offsets == [0]                  # drained pre-startup backlog once
     assert len(sent) == 1                       # the event was relayed
     assert sent[0][0] == 5
-    assert sent[0][1] == "[T] awaiting_user_input\nneed input"
+    assert sent[0][1] == "[T] needs your input\nneed input"

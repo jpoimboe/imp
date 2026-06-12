@@ -11,10 +11,11 @@ def test_format_awaiting_user_input_uses_real_prompt_payload() -> None:
     event = {
         "type": "awaiting_user_input",
         "change": {"title": "My Change", "id": "2026-06-11-abc"},
-        "payload": {"prompt": "need your input"},
+        "payload": {"prompt": "Which DB should I use?"},
     }
+    # The loud header is humanized — "needs your input", not the raw event type.
     assert imp_telegram.format_event_message(event) == (
-        "[My Change] awaiting_user_input\nneed your input")
+        "[My Change] needs your input\nWhich DB should I use?")
 
 
 def test_format_llm_response_renders_assistant_text_without_type_header() -> None:
@@ -41,12 +42,12 @@ def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
                     "detail": "CONFLICT (content): merge conflict in x.py"},
     }
     assert imp_telegram.format_event_message(event) == (
-        "[T] merge_blocked\nconflict\nCONFLICT (content): merge conflict in x.py")
+        "[T] merge blocked\nconflict\nCONFLICT (content): merge conflict in x.py")
 
 
 def test_format_falls_back_to_change_id_then_header_only() -> None:
     event = {"type": "errored", "change": {"id": "2026-06-11-abc"}, "payload": {}}
-    assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] errored"
+    assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] error"
 
 
 def test_emit_reply_collapses_to_a_single_flushed_line() -> None:
@@ -59,7 +60,7 @@ def test_emit_reply_collapses_to_a_single_flushed_line() -> None:
 
 def test_format_falls_back_to_imp_when_no_title_and_no_id() -> None:
     event = {"type": "errored", "change": {}, "payload": {}}
-    assert imp_telegram.format_event_message(event) == "[imp] errored"
+    assert imp_telegram.format_event_message(event) == "[imp] error"
 
 
 def test_format_uses_payload_message_key_as_body() -> None:
@@ -68,7 +69,7 @@ def test_format_uses_payload_message_key_as_body() -> None:
         "change": {"title": "T"},
         "payload": {"message": "something went wrong"},
     }
-    assert imp_telegram.format_event_message(event) == "[T] errored\nsomething went wrong"
+    assert imp_telegram.format_event_message(event) == "[T] error\nsomething went wrong"
 
 
 def test_emit_reply_plain_string() -> None:
@@ -109,4 +110,4 @@ def test_handle_event_keeps_bodyless_loud_event() -> None:
 
     event = {"type": "completed", "change": {"id": "c1"}, "payload": {}}
     assert imp_telegram.handle_event(event, send, chat_id=7) is True
-    assert sent == [(7, "[c1] completed", False)]
+    assert sent == [(7, "[c1] done", False)]
