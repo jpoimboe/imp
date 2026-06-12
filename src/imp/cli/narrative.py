@@ -572,6 +572,14 @@ def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str,
 NarrativeBuilder._HANDLERS["change_merged"] = _h_change_merged
 
 
+def _h_merge_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # _emit_merge_blocked already renders the friendly ⚠ block; suppress the raw fallthrough.
+    self._flush_burst()
+
+
+NarrativeBuilder._HANDLERS["merge_blocked"] = _h_merge_blocked
+
+
 def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
     """Derive the phase grouping from step_started.payload.phase. When the phase
     name changes from the current open one, lazily create a PhaseNode, append it

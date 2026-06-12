@@ -1350,3 +1350,14 @@ def test_change_merged_becomes_merged_node_not_fallback() -> None:
             walk(getattr(n, "children", []))
     walk(tree.root.children)
     assert all(f.event_type != "change_merged" for f in fbs)
+
+
+def test_merge_blocked_event_is_suppressed() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
+        _ev("2", "merge_blocked", reason="refused", base="master",
+            detail="error: Your local changes ... Aborting"),
+    ])
+    step = tree.root.children[0].children[0]
+    fbs = [c for c in step.children if isinstance(c, nv.FallbackLine)]
+    assert fbs == []
