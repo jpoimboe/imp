@@ -119,6 +119,23 @@ def test_abandon_prompts_and_proceeds_on_confirm(tmp_path: Path) -> None:
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
 
 
+def test_abandon_accepts_yes_spelled_out(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    rc = _abandon(tmp_path, "feat", interactive=True, input_fn=lambda _p: "yes")
+    assert rc == 0
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
+def test_abandon_non_interactive_skips_prompt(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    rc = _abandon(tmp_path, "feat", interactive=False,
+                  input_fn=lambda _p: (_ for _ in ()).throw(AssertionError("should not prompt")))
+    assert rc == 0
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
 def test_abandon_yes_skips_prompt(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     Change.create(tmp_path, title="x", change_id="feat", base_branch="main")

@@ -85,7 +85,7 @@ def commit_count(control_root: Path, change_id: str, base: str) -> int:
     proc = _git(control_root, "rev-list", "--count", f"{base}..imp/{change_id}")
     if proc.returncode != 0:
         return 0
-    return int(proc.stdout.strip() or "0")
+    return int(proc.stdout.strip())
 
 
 def create_worktree(control_root: Path, change_id: str, base: str) -> Path:

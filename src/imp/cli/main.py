@@ -1608,8 +1608,11 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         n = worktree.commit_count(control, change_id, change.base_branch)
         print(f"Abandon {change_id}: {change.title!r} "
               f"(status {st.status}, {n} commit{'s' if n != 1 else ''})?")
-        ans = input_fn(
-            "Type 'y' to confirm, anything else to cancel: ").strip().lower()
+        try:
+            ans = input_fn(
+                "Type 'y' to confirm, anything else to cancel: ").strip().lower()
+        except EOFError:
+            ans = ""
         if ans not in ("y", "yes"):
             print(f"Abandon cancelled; {change_id} left intact.")
             return 1
