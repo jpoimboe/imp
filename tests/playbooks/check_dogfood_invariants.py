@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -20,6 +21,10 @@ class Result:
     name: str
     ok: bool
     detail: str
+
+
+def _fmt(paths: list[str]) -> str:
+    return ", ".join(paths)
 
 
 def _git(repo: str, *args: str) -> subprocess.CompletedProcess[str]:
@@ -41,7 +46,7 @@ def check_no_imp_in_history(repo: str, base: str) -> Result:
     imp_paths = sorted({ln for ln in out.splitlines()
                         if ln.startswith(".imp/")})
     return Result("no_imp_state_in_history", not imp_paths,
-                  "none" if not imp_paths else f"committed: {imp_paths}")
+                  "none" if not imp_paths else f"committed: {_fmt(imp_paths)}")
 
 
 def sentinel_src_files(repo: str, sentinel: str) -> list[str]:
@@ -52,7 +57,7 @@ def sentinel_src_files(repo: str, sentinel: str) -> list[str]:
 def check_sentinel_in_src(repo: str, sentinel: str) -> Result:
     files = sentinel_src_files(repo, sentinel)
     return Result("sentinel_in_committed_src", bool(files),
-                  f"found in {files}" if files
+                  f"found in {_fmt(files)}" if files
                   else f"sentinel {sentinel!r} absent from committed src/")
 
 
@@ -67,8 +72,8 @@ def check_atomic_coder_commit(repo: str, base: str, sentinel: str) -> Result:
                    f"{base}..HEAD", "--", f).stdout
         commits.update(h for h in out.splitlines() if h.strip())
     return Result("atomic_coder_commit", bool(commits),
-                  f"{len(commits)} non-merge run commit(s) touch {files}"
-                  if commits else f"no run commit modifies {files}")
+                  f"{len(commits)} non-merge run commit(s) touch {_fmt(files)}"
+                  if commits else f"no run commit modifies {_fmt(files)}")
 
 
 def check_artifact(repo: str, base: str, name: str, pathspec: str) -> Result:
@@ -76,7 +81,7 @@ def check_artifact(repo: str, base: str, name: str, pathspec: str) -> Result:
                pathspec).stdout
     paths = [ln for ln in out.splitlines() if ln.strip()]
     return Result(name, bool(paths),
-                  f"committed: {paths}" if paths
+                  f"committed: {_fmt(paths)}" if paths
                   else f"no run-committed file matching {pathspec}")
 
 
@@ -105,7 +110,7 @@ def check_readback(repo: str, imp: str) -> Result:
     ids = journal_ids(repo)
     if len(ids) != 1:
         return Result("readback", False,
-                      f"expected exactly one journaled change, got {ids}")
+                      f"expected exactly one journaled change, got {_fmt(ids)}")
     cid = ids[0]
     token = _resume_token(cid)
     log = _imp(repo, imp, "log", cid)
@@ -125,21 +130,35 @@ def check_readback(repo: str, imp: str) -> Result:
                   f"id-in-status={token in status.stdout})")
 
 
+def _safe(name: str, thunk: Callable[[], Result]) -> Result:
+    """Run a check, turning a stalled git/imp command into a FAIL Result."""
+    try:
+        return thunk()
+    except subprocess.TimeoutExpired as e:
+        cmd = e.cmd[0] if isinstance(e.cmd, (list, tuple)) else e.cmd
+        return Result(name, False, f"{cmd} timed out after {e.timeout}s")
+
+
 def run_checks(repo: str, sentinel: str, base: str, imp: str) -> list[Result]:
     rp = _git(repo, "rev-parse", "--git-dir")
     if rp.returncode != 0:
         raise SystemExit(f"error: {repo!r} is not a git repository")
-    return [
-        check_clean_tree(repo),
-        check_no_imp_in_history(repo, base),
-        check_sentinel_in_src(repo, sentinel),
-        check_atomic_coder_commit(repo, base, sentinel),
-        check_artifact(repo, base, "spec_artifact_committed",
-                       "imp/specs/*.md"),
-        check_artifact(repo, base, "plan_artifact_committed",
-                       "imp/plans/*-plan-*.md"),
-        check_readback(repo, imp),
+    checks: list[tuple[str, Callable[[], Result]]] = [
+        ("clean_working_tree", lambda: check_clean_tree(repo)),
+        ("no_imp_state_in_history", lambda: check_no_imp_in_history(repo, base)),
+        ("sentinel_in_committed_src",
+         lambda: check_sentinel_in_src(repo, sentinel)),
+        ("atomic_coder_commit",
+         lambda: check_atomic_coder_commit(repo, base, sentinel)),
+        ("spec_artifact_committed",
+         lambda: check_artifact(repo, base, "spec_artifact_committed",
+                                "imp/specs/*.md")),
+        ("plan_artifact_committed",
+         lambda: check_artifact(repo, base, "plan_artifact_committed",
+                                "imp/plans/*-plan-*.md")),
+        ("readback", lambda: check_readback(repo, imp)),
     ]
+    return [_safe(name, thunk) for name, thunk in checks]
 
 
 def main(argv: list[str] | None = None) -> int:
