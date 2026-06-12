@@ -211,7 +211,7 @@ def test_new_spec_file_and_message_rc2(
     assert "mutually exclusive" in capsys.readouterr().err
 
 
-def test_new_tui_with_seed_warns(
+def test_new_tui_delivers_seed(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:
     _seed_control(tmp_path)
@@ -219,7 +219,10 @@ def test_new_tui_with_seed_warns(
     draft = tmp_path / "draft.md"
     draft.write_text("Goal: x\n")
 
-    async def _fake_tui(change: object, *, args: object) -> int:
+    captured: dict[str, object] = {}
+
+    async def _fake_tui(change: object, *, args: object, seed: str | None = None) -> int:
+        captured["seed"] = seed
         return 0
 
     monkeypatch.setattr(cli_main, "_run_tui_session", _fake_tui)
@@ -229,7 +232,12 @@ def test_new_tui_with_seed_warns(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    assert "--tui does not deliver" in capsys.readouterr().err
+    # The seed is delivered to the TUI session, not dropped with a warning.
+    seed_text = captured["seed"]
+    assert isinstance(seed_text, str)
+    assert seed_text.startswith("Implement this spec")
+    assert "Goal: x" in seed_text
+    assert "--tui does not deliver" not in capsys.readouterr().err
 
 
 def test_spec_writer_prompt_has_seed_branch() -> None:
@@ -239,6 +247,13 @@ def test_spec_writer_prompt_has_seed_branch() -> None:
     prompt = (root / "src" / "imp" / "assets" / "workflows" / "default"
               / "agents" / "spec-writer.md").read_text()
     # Seed-marker invariant: the adopt branch must key on the SAME phrase the CLI
-    # prefixes (_build_seed). If either drifts, the branch stops firing.
-    assert cli_main.SPEC_SEED_MARKER in prompt
-    assert "## Seeded with a draft spec" in prompt
+    # prefixes (_build_seed). If either drifts, the branch stops firing. The
+    # marker must live INSIDE the seeded section, not merely somewhere in the
+    # file — assert it appears after the heading (and before the next ## heading).
+    heading = "## Seeded with a draft spec"
+    assert heading in prompt
+    section = prompt[prompt.index(heading):]
+    next_heading = section.find("\n## ", len(heading))
+    if next_heading != -1:
+        section = section[:next_heading]
+    assert cli_main.SPEC_SEED_MARKER in section
