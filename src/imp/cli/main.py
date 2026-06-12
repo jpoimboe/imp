@@ -1717,7 +1717,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
     if explain:
         render_explain(eff, explain, sys.stdout, color=should_use_color(sys.stdout))
     else:
-        render_config(eff, sys.stdout, color=should_use_color(sys.stdout))
+        render_config(eff, sys.stdout, color=should_use_color(sys.stdout),
+                      show_all=getattr(args, "all", False))
     return 0
 
 
@@ -1804,6 +1805,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_config = sub.add_parser("config")
     p_config.add_argument("--explain", metavar="TIER", default=None,
                           help="trace one tier's bindings through the layers")
+    p_config.add_argument("--all", action="store_true",
+                          help="Show every provider x tier row "
+                               "(default: only configured providers).")
     p_config.set_defaults(func=_cmd_config)
 
     p_abandon = sub.add_parser(

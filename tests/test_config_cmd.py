@@ -26,7 +26,7 @@ def _eff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_render_shows_floor_provenance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     eff = _eff(tmp_path, monkeypatch)
     out = io.StringIO()
-    render_config(eff, out, color=False)
+    render_config(eff, out, color=False, show_all=True)
     text = out.getvalue()
     assert "provider default" in text   # floor leaves attributed to provider code
     assert "high" in text and "opus" in text
@@ -71,6 +71,27 @@ def test_render_lists_available_drivers(
     assert "IMP_TELEGRAM_TOKEN" in text and "IMP_TELEGRAM_CHAT_ID" in text
     assert "(available)" in text                 # per-driver state marker, not enabled
     assert "enabled" not in text
+
+
+def test_config_default_lists_only_configured_provider_tiers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)            # providers: [openai]
+    out = io.StringIO()
+    render_config(eff, out, color=False)         # default: show_all=False
+    text = out.getvalue()
+    assert "openai" in text
+    assert "anthropic" not in text               # non-configured vendor hidden
+
+
+def test_config_all_lists_full_provider_matrix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+    render_config(eff, out, color=False, show_all=True)
+    text = out.getvalue()
+    assert "openai" in text and "anthropic" in text
 
 
 def test_render_marks_enabled_driver(
