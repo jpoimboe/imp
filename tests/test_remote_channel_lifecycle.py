@@ -79,7 +79,7 @@ async def test_start_returns_false_when_driver_exits_immediately(
 @pytest.mark.anyio
 async def test_start_degrades_silently_when_command_missing(tmp_path: Path) -> None:
     # A configured-but-absent notifier binary must NOT print an error banner on
-    # every run (B1-incidental): start returns False (no notifications) quietly.
+    # every run: start returns False (no notifications) quietly.
     errors: list[str] = []
     ch = RemoteChannel(
         command=("/no/such/driver/binary",), events=("all",), startup_timeout=2.0,
@@ -89,6 +89,22 @@ async def test_start_degrades_silently_when_command_missing(tmp_path: Path) -> N
         assert await ch.start(tg) is False
         assert errors == []                  # degraded quietly, no spawn banner
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_start_emits_error_on_permission_denied(tmp_path: Path) -> None:
+    from unittest import mock
+
+    errors: list[str] = []
+    ch = RemoteChannel(
+        command=("/some/driver",), events=("all",), startup_timeout=2.0,
+        reply_timeout=None, id="2026-06-11-abc", title="t",
+        on_error=errors.append)
+    with mock.patch("subprocess.Popen", side_effect=PermissionError("denied")):
+        async with anyio.create_task_group() as tg:
+            assert await ch.start(tg) is False
+            assert any("spawn" in m for m in errors)   # banner emitted
+            tg.cancel_scope.cancel()
 
 
 @pytest.mark.anyio
