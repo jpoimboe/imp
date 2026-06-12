@@ -156,9 +156,10 @@ class ScriptedAgentRunner:
                     yield {"type": "tool_heartbeat", "payload": {}}
                 used = state.tool_calls_used
 
-                user_msg = Message(role="user", content=tuple(tool_results))
-                messages.append(user_msg)
-                transcript.append(user_msg)
+                if tool_results:
+                    user_msg = Message(role="user", content=tuple(tool_results))
+                    messages.append(user_msg)
+                    transcript.append(user_msg)
 
             yield {"type": "error", "payload": {
                 "category": "agent_output_missing",
