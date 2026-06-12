@@ -75,3 +75,20 @@ def test_imp_help_unknown_command_rc2(capsys) -> None:
     assert rc == 2
     assert "unknown command 'frobnicate'" in err
     assert "imp help" in err
+
+
+def test_unknown_command_friendly_rc2(capsys) -> None:
+    rc = main(["frobnicate"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "imp: unknown command 'frobnicate'. Run 'imp help'." in err
+    # Must NOT fall through to argparse's raw invalid-choice list.
+    assert "invalid choice" not in err.lower()
+
+
+def test_known_command_still_dispatches(tmp_path, monkeypatch) -> None:
+    # A real command is not swallowed by the unknown-command guard.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".imp").mkdir()
+    rc = main(["status"])
+    assert rc == 0

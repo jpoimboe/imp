@@ -1840,6 +1840,10 @@ def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | No
         return 0
     if args[0] == "help":
         return _help_command(args[1:], parser)
+    first = args[0]
+    if not first.startswith("-") and first not in _command_names(parser):
+        print(f"imp: unknown command {first!r}. Run 'imp help'.", file=sys.stderr)
+        return 2
     return None
 
 
