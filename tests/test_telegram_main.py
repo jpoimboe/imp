@@ -32,6 +32,9 @@ def test_main_routes_a_stdin_event_to_telegram(monkeypatch: pytest.MonkeyPatch) 
         return get
 
     monkeypatch.setattr(imp_telegram, "make_get_updates", fake_get_updates_factory)
+    # The startup self-check makes its own network calls; stub it out here so this
+    # test exercises only the stdin→Telegram relay path (self-check is tested apart).
+    monkeypatch.setattr(imp_telegram, "self_check", lambda *a, **k: None)
 
     # Stub the poll thread so the test stays deterministic (no background loop).
     class _NoThread:

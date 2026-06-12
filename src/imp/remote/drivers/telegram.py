@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -204,15 +205,99 @@ def poll_once(
     return new_offset
 
 
-def _log(msg: str) -> None:
-    """Diagnostics go to stderr; stdout is reserved for reply lines."""
-    print(f"imp-telegram: {msg}", file=sys.stderr, flush=True)
+def _log(msg: str, *, level: str = "debug") -> None:
+    """Diagnostics go to stderr; stdout is reserved for reply lines. A non-debug
+    `level` prefixes the line with an UPPER tag (e.g. ``WARNING:``) that the host
+    (remote_channel._classify_stderr_line) maps to that log level — the seam that
+    lets a structural failure escape the default-silent DEBUG channel."""
+    tag = f"{level.upper()}: " if level != "debug" else ""
+    print(f"{tag}imp-telegram: {msg}", file=sys.stderr, flush=True)
+
+
+def _probe(token: str, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    """Like `api_call`, but return Telegram's JSON body even on an HTTP error
+    status — a 4xx still carries ``{"ok": false, "description": ...}`` which is
+    exactly the structural diagnosis the self-check needs. Non-HTTP (network)
+    errors still raise, so the caller can treat them as transient."""
+    try:
+        return api_call(token, method, dict(params))
+    except urllib.error.HTTPError as exc:
+        try:
+            body: dict[str, Any] = json.loads(exc.read().decode("utf-8"))
+            return body
+        except Exception:
+            return {"ok": False, "error_code": exc.code, "description": f"HTTP {exc.code}"}
+
+
+def self_check(
+    token: str,
+    chat_id: int,
+    *,
+    probe: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]] = _probe,
+) -> None:
+    """Validate credentials once at startup and WARN (visibly) on a structural
+    failure, so a rejected token or unreachable chat is not swallowed in silence.
+    getMe validates the token; getChat validates that the bot can reach the
+    allowlisted chat. A transient network error is NOT a config problem, so it
+    stays quiet (DEBUG) — the poll/send loops will retry."""
+    try:
+        me = probe(token, "getMe", {})
+    except Exception as exc:  # network blip, not a config error → stay quiet
+        _log(f"startup check skipped (getMe unreachable: {exc})")
+        return
+    if not me.get("ok"):
+        why = me.get("description") or me.get("error_code")
+        _log(
+            f"bot token rejected by Telegram ({why}). Check IMP_TELEGRAM_TOKEN is a "
+            "full <id>:<auth> token from @BotFather — notifications will NOT be "
+            "delivered until this is fixed.",
+            level="warning")
+        return
+    try:
+        chat = probe(token, "getChat", {"chat_id": chat_id})
+    except Exception:  # transient: the poll/send loops will retry
+        return
+    if not chat.get("ok"):
+        why = chat.get("description") or chat.get("error_code")
+        _log(
+            f"chat {chat_id} is not reachable ({why}). A bot can only message a chat "
+            "that has messaged it first — open the bot in Telegram and send it /start, "
+            "or fix IMP_TELEGRAM_CHAT_ID. Notifications will NOT be delivered until "
+            "this is fixed.",
+            level="warning")
+
+
+class _SendGate:
+    """Edge-triggered failure reporting for the relay loop. The first failure
+    after a healthy stretch is loud (WARNING); subsequent failures are quiet
+    (DEBUG) to avoid one log line per event; a success re-arms the warning. This
+    keeps best-effort delivery (never raises) while making a *persistent*
+    breakage — e.g. the chat blocked the bot mid-run — visible."""
+
+    def __init__(self) -> None:
+        self._failing = False
+
+    def ok(self) -> None:
+        self._failing = False
+
+    def fail(self, exc: BaseException) -> None:
+        if self._failing:
+            _log(f"send failed: {exc}")
+            return
+        self._failing = True
+        _log(
+            f"delivery is failing ({exc}) — further failures are suppressed until a "
+            "send succeeds. Run `imp config` and check the Telegram credentials.",
+            level="warning")
 
 
 def _event_loop(stdin: Any, send: Callable[..., None], chat_id: int) -> None:
     """Read NDJSON events from imp on stdin and relay curated ones to Telegram.
     A send failure is logged and swallowed — the driver must never die on a
-    transient API error (and must never block imp)."""
+    transient API error (and must never block imp). The first failure after a
+    healthy stretch is reported at WARNING (a persistent breakage is visible);
+    repeats stay at DEBUG."""
+    gate = _SendGate()
     for raw in stdin:
         line = raw.strip()
         if not line:
@@ -223,8 +308,9 @@ def _event_loop(stdin: Any, send: Callable[..., None], chat_id: int) -> None:
             continue
         try:
             handle_event(event, send, chat_id)
+            gate.ok()
         except Exception as exc:  # best-effort: never die on a transient API error
-            _log(f"send failed: {exc}")
+            gate.fail(exc)
 
 
 def _poll_loop(
@@ -269,6 +355,10 @@ def main(
 
     send = make_send(cfg.token)
     get_updates = make_get_updates(cfg.token)
+
+    # Validate credentials loudly before relaying: a rejected token / unreachable
+    # chat is a structural failure the user must see, not a silent DEBUG line.
+    self_check(cfg.token, cfg.chat_id)
 
     # Skip the pre-startup backlog: drain once, keep only the advanced offset so
     # only post-startup messages surface (spec AC 10).
