@@ -1695,6 +1695,34 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+_OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("new", "Start a new Change (optional title; opens with the spec-writer)."),
+    ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
+    ("status", "List in-flight Changes (-a also shows completed and abandoned)."),
+    ("log", "Show a Change's narrative as plain text."),
+    ("abandon", "Tear down a Change's worktree, branch, and state."),
+    ("config", "Show the effective configuration."),
+)
+
+
+def render_overview(color: bool) -> str:
+    head = ansi("imp", "bold", enabled=color)
+    width = max(len(name) for name, _ in _OVERVIEW_COMMANDS)
+    lines = [
+        f"{head} — multi-agent software development workflow",
+        "",
+        "Common commands:",
+    ]
+    for name, desc in _OVERVIEW_COMMANDS:
+        lines.append(f"  {name.ljust(width)}  {desc}")
+    lines += [
+        "",
+        "New to a project? Run 'imp init' to get started.",
+        "Run 'imp <command> -h' for details.",
+    ]
+    return "\n".join(lines)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     sub = parser.add_subparsers(dest="cmd", required=True)
