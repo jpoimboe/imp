@@ -39,6 +39,41 @@ class SandboxPolicy:
     network: bool                             # True → no --unshare-net
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
 
+    def allows_read(self, path: Path) -> bool:
+        """In-process mirror of the sandbox's read exposure: the whole host is
+        readable (--ro-bind / /) EXCEPT the secret masks — secret_dirs as path
+        prefixes, secret_files as exact paths. Deliberately stricter than bwrap
+        (which serves empties for masked reads); see spec Decisions."""
+        if any(path.is_relative_to(Path(d)) for d in self.secret_dirs):
+            return False
+        return not any(path == Path(f) for f in self.secret_files)
+
+    def allows_write(self, path: Path) -> bool:
+        """In-process mirror of the sandbox's write exposure. Replays
+        build_sandbox_argv's bind sequence in EMIT ORDER; the LAST bind covering
+        `path` decides. Writable iff that last bind is writable; a read-only
+        overlay (git_ro_remask, extra_readable), a secret mask, or no covering
+        bind denies. The order is load-bearing: the two ro overlays are NOT
+        globally last-wins (a later writable bind re-exposes a path they cover),
+        only the secret masks are unconditionally last — mirror sandbox.py's
+        emit sequence exactly."""
+        sequence: list[tuple[str, str]] = [
+            ("/tmp", "rw"),
+            (self.worktree, "rw"),
+            (self.git_common_dir, "rw"),
+            *[(p, "ro") for p in self.git_ro_remask],
+            *[(c, "rw") for c in self.writable_caches],
+            *[(r, "ro") for r in self.extra_readable],
+            *[(w, "rw") for w in self.extra_writable],
+            *[(d, "mask") for d in self.secret_dirs],
+            *[(f, "mask") for f in self.secret_files],
+        ]
+        verdict: str | None = None
+        for bind, kind in sequence:
+            if path.is_relative_to(Path(bind)):
+                verdict = kind
+        return verdict == "rw"
+
 
 def build_sandbox_argv(
     command: str, *, cwd: str, policy: SandboxPolicy,
