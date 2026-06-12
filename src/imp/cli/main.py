@@ -741,6 +741,11 @@ def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> 
             + ansi(f" · {marker}", "dim", enabled=color))
 
 
+def _rewind_note_line(from_step: str | None, target: str, *, color: bool) -> str:
+    origin = from_step or "start"
+    return ansi(f"rewound from {origin} to {target}", "dim", enabled=color)
+
+
 def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
     if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
         print("imp: --tui needs an interactive terminal; streaming instead.",
@@ -1054,6 +1059,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 assert workflow is not None
                 recovery.apply_rewind(
                     rewind_plan, workflow, state, change.event_log())
+                print(_rewind_note_line(
+                    rewind_plan.from_step, rewind_plan.target,
+                    color=should_use_color(sys.stdout)))
             state.save(change.state_dir)
 
             if _tui_requested(args) and not non_interactive:

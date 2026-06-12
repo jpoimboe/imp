@@ -230,6 +230,15 @@ def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> N
     assert ran["called"] is False    # never ran a Change abandon finalized
 
 
+def test_rewind_note_line_states_from_and_to() -> None:
+    from imp.cli.main import _rewind_note_line
+    assert _rewind_note_line("plan", "spec", color=False) == \
+        "rewound from plan to spec"
+    # A None cursor (rewind to the very start) reads as 'start'.
+    assert _rewind_note_line(None, "spec", color=False) == \
+        "rewound from start to spec"
+
+
 def test_async_cmd_resume_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
     import argparse
     import contextlib
