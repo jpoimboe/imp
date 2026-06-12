@@ -277,7 +277,7 @@ def run_init(
         output_fn("Project already initialized — bootstrapped your machine's config.")
     else:
         output_fn("Created:")
-        output_fn("  imp/project.yaml     (committed — workflow + project settings)")
+        output_fn("  imp/project.yaml     (track in git — workflow + project settings)")
         output_fn("  imp/workflows/default/")
     output_fn(f"  {user_path}  (your machine: providers, theme)")
     output_fn("")
