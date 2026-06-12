@@ -11,6 +11,7 @@ import pytest
 
 import impty.mcp as mcp_mod
 from impty.mcp import _decode_keys
+from tests.impty.e2e_support import can_pty
 
 # A child that turns SIGINT into an async-signal-safe marker and exits via the
 # handler (mirrors tests/impty/test_session.py). Runs in RAW mode (tty.setraw =>
@@ -53,18 +54,6 @@ _ANIMATING_CHILD = (
 )
 
 
-def _can_pty() -> bool:
-    try:
-        import pty
-
-        m, s = pty.openpty()
-        os.close(m)
-        os.close(s)
-        return True
-    except Exception:
-        return False
-
-
 def test_decodes_carriage_return_so_enter_submits() -> None:
     # The send() contract documents Enter=\r; the agent→MCP JSON boundary
     # delivers a written "\r" as the two literal chars backslash + 'r', so the
@@ -94,7 +83,7 @@ def test_transcript_tool_is_removed_view_remains() -> None:
     assert {"start", "view", "send", "wait", "snapshot", "stop", "send_signal"} <= names
 
 
-@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_send_signal_tool_delivers_sigint_regardless_of_tty_mode() -> None:
     # The mode-independent escape hatch: send_signal() reaches the child's process
     # group directly, so a driver doesn't have to scrape the pid and `kill -INT`
@@ -112,7 +101,7 @@ def test_send_signal_tool_delivers_sigint_regardless_of_tty_mode() -> None:
         mcp_mod.stop()
 
 
-@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_start_passes_env_to_child() -> None:
     # The env param lets a driver set variables (e.g. API keys) WITHOUT a
     # `bash -lc "export …; exec …"` wrapper — which would otherwise put bash, not
@@ -126,7 +115,7 @@ def test_start_passes_env_to_child() -> None:
         mcp_mod.stop()
 
 
-@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_view_returns_current_screen_by_default_and_full_on_demand() -> None:
     prog = "import time\n[print('line', i) for i in range(40)]\ntime.sleep(1)"
     mcp_mod.start([sys.executable, "-c", prog])
@@ -141,7 +130,7 @@ def test_view_returns_current_screen_by_default_and_full_on_demand() -> None:
         mcp_mod.stop()
 
 
-@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_send_numeric_wait_settles_a_fixed_time_on_an_always_animating_app() -> None:
     # An app that repaints every 20ms NEVER goes quiet, so wait=True blocks the
     # whole settle cap on every keystroke (a live TUI / spinner). A numeric wait
@@ -159,7 +148,7 @@ def test_send_numeric_wait_settles_a_fixed_time_on_an_always_animating_app() -> 
         mcp_mod.stop()
 
 
-@pytest.mark.skipif(not _can_pty(), reason="pty not available")
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
 def test_default_settle_cap_is_short_not_fifteen_seconds() -> None:
     # The settle policy lives in TerminalSession (DEFAULT_SETTLE_HARD); the MCP
     # tools inherit it, they don't set their own. On a never-quiet app the default
