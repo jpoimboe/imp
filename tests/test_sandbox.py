@@ -495,3 +495,41 @@ def test_allows_read_masks_secrets_allows_rest():
     assert p.allows_read(Path("/home/u/.netrc")) is False        # secret file (exact)
     assert p.allows_read(Path("/usr/lib/x")) is True             # ordinary host path
     assert p.allows_read(Path("/wt/file")) is True               # worktree path
+
+
+def _parse_argv_binds(argv: list[str]) -> list[tuple[str, str]]:
+    """Recover the (path, kind) path-covering binds from a real build_sandbox_argv
+    emission — the inverse of build_sandbox_argv's kind→flag map. Scans the bind
+    block between the step-1 ro-floor (--ro-bind / /) and step-11 (--proc),
+    classifying each flag back to a bind_plan kind."""
+    i = argv.index("--ro-bind") + 3        # skip "bwrap" + the "--ro-bind / /" floor
+    stop = argv.index("--proc")
+    out: list[tuple[str, str]] = []
+    while i < stop:
+        flag = argv[i]
+        if flag == "--bind":
+            out.append((argv[i + 1], "rw"))
+            i += 3
+        elif flag == "--tmpfs":
+            out.append((argv[i + 1], "mask_dir"))
+            i += 2
+        elif flag == "--ro-bind" and argv[i + 1] == "/dev/null":
+            out.append((argv[i + 2], "mask_file"))
+            i += 3
+        elif flag == "--ro-bind":
+            out.append((argv[i + 1], "ro"))
+            i += 3
+        else:
+            raise AssertionError(f"unexpected token {flag!r} in bind block")
+    return out
+
+
+def test_argv_binds_match_bind_plan():
+    # Drift guard: the two consumers of the bind order — build_sandbox_argv's argv
+    # and policy.bind_plan() (which allows_write evaluates) — must agree exactly.
+    # Parsing the emitted argv back to (path, kind) and comparing to bind_plan()
+    # means a new bind added to the plan MUST surface in argv (and vice-versa), or
+    # this fails. _mirror_policy exercises every kind: rw / ro / mask_dir / mask_file.
+    p = _mirror_policy()
+    argv = build_sandbox_argv("x", cwd="/wt", policy=p, engine_env={})
+    assert _parse_argv_binds(argv) == p.bind_plan()
