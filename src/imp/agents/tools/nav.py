@@ -74,7 +74,7 @@ async def glob(ctx: ToolContext, pattern: str) -> str:
     # Wildcards (`*`/`**`) have no `..` component, so clean relative patterns pass.
     # Per-result p.resolve().is_relative_to(root) below is the second line of
     # defense for any result glob() produces via symlinks or dotdot traversal.
-    ctx.resolve_path(pattern)
+    ctx.resolve_path_strict(pattern)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
 
@@ -191,7 +191,7 @@ async def grep(
     eff_before = max(before, context)
     eff_after = max(after, context)
     ctx.check_fs_permission("read", path)
-    target = ctx.resolve_path(path)
+    target = ctx.resolve_path_strict(path)
     # A typo'd/stale path — or a fifo/socket/device — must not read as
     # "searched, nothing found".
     if not (target.is_file() or target.is_dir()):

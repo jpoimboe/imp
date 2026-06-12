@@ -8,17 +8,17 @@ def _ctx(tmp_path):
     return ToolContext(project_root=tmp_path, fs_permissions=(), events_path=tmp_path / "e.jsonl")
 
 
-def test_artifacts_path_rejected(tmp_path) -> None:
-    # Absolute paths escape the worktree root and are denied — there is no
-    # virtual namespace, so a bare `/artifacts/...` cannot silently resolve.
+def test_absolute_path_resolves_without_virtual_namespace(tmp_path) -> None:
+    # There is no virtual namespace: a bare absolute path resolves to its literal
+    # host location (bounded later by authorize_fs), never a fabricated mount.
     ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        ctx.resolve_path("/artifacts/spec.md")
+    from pathlib import Path
+    assert ctx.resolve_path("/artifacts/spec.md") == Path("/artifacts/spec.md")
 
 
-def test_project_path_rejected(tmp_path) -> None:
-    # `/project` is gone: it resolves as an ordinary absolute path, which
-    # escapes the worktree root and is denied (Part A — worktree-relative model).
+def test_strict_resolver_still_rejects_absolute(tmp_path) -> None:
     ctx = _ctx(tmp_path)
     with pytest.raises(PermissionDenied):
-        ctx.resolve_path("/project/a.py")
+        ctx.resolve_path_strict("/artifacts/spec.md")
+    with pytest.raises(PermissionDenied):
+        ctx.resolve_path_strict("/project/a.py")

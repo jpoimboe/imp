@@ -53,8 +53,7 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
         raise ValueError(f"offset must be an integer >= 1, got {offset!r}")
     if type(limit) is not int or limit < 1:
         raise ValueError(f"limit must be an integer >= 1, got {limit!r}")
-    ctx.check_fs_permission("read", path)
-    resolved = ctx.resolve_path(path)
+    resolved = ctx.authorize_fs(("read",), path)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
     try:
@@ -133,8 +132,7 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
     ),
 )
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
-    ctx.check_fs_permission("write", path)
-    resolved = ctx.resolve_path(path)
+    resolved = ctx.authorize_fs(("write",), path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(content)
     return f"wrote {len(content)} bytes to {path}"
@@ -216,9 +214,7 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
         # count("") > 1 uniqueness error blocked this, with a misleading
         # message; replace_all=True removes exactly that accident.)
         raise ValueError("old must not be empty")
-    ctx.check_fs_permission("read", path)
-    ctx.check_fs_permission("write", path)
-    resolved = ctx.resolve_path(path)
+    resolved = ctx.authorize_fs(("read", "write"), path)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
     # Bounded via the READ itself, not a stat-then-read guard (a file that

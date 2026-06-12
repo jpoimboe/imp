@@ -1,8 +1,10 @@
 """ToolContext (spec §6.6) — per-invocation state passed to every tool.
 
-Path model: files are addressed by paths RELATIVE to the worktree root. The
-shared `resolve_path` maps a relative path under `project_root` and enforces
-worktree containment (normalize-then-contain) for both read and write. There is
+Path model: in-worktree files are addressed by paths RELATIVE to the worktree
+root. `resolve_path` resolves both relative-under-root and absolute paths with NO
+containment raise; `authorize_fs` then bounds the result (fs_permissions
+in-worktree, the sandbox mirror outside) so the fs tools reach the same paths as
+`bash`. `resolve_path_strict` keeps worktree containment for glob/grep. There is
 no virtual `/project`/`/scratch` namespace and no in-memory scratch store; system
 paths are `bash`'s job, backstopped by the OS sandbox.
 """
@@ -114,23 +116,56 @@ class ToolContext:
         return f"bg{self._bg_counter}"
 
     def resolve_path(self, path: str) -> Path:
-        """Map a worktree-RELATIVE path under project_root, enforcing containment.
+        """Resolve an fs-tool path WITHOUT a worktree-containment raise.
 
-        normalize-then-contain (spec A.3.1): `(project_root / path).resolve()` must
-        be under `project_root.resolve()`, else PermissionDenied. This is NOT
-        `..`-string detection — a permission glob can *match* a traversal string
-        (permissions.py:_glob_to_regex), so this realpath check is the load-bearing
-        escape guard and EVERY FS/nav tool must funnel through it.
-
-        Caveat: a symlink INSIDE the worktree pointing OUTSIDE it is followed by the
-        OS — FS-tool symlink escapes are caught only by the sandbox (spec §9).
+        `(project_root / path).resolve()`: a relative path maps under
+        project_root; an absolute path replaces the root (pathlib join semantics)
+        and resolves to its literal host location. Out-of-worktree access is then
+        bounded by authorize_fs (fs_permissions in-worktree, the sandbox mirror
+        outside), matching `bash`. glob/grep use resolve_path_strict instead.
         """
+        return (self.project_root / path).resolve()
+
+    def resolve_path_strict(self, path: str) -> Path:
+        """Resolve `path` contained to the worktree root; raise PermissionDenied if it escapes."""
         root = self.project_root.resolve()
         resolved = (self.project_root / path).resolve()
         if resolved != root and not resolved.is_relative_to(root):
             raise PermissionDenied(
                 f"path {path!r} escapes the worktree root {root}"
             )
+        return resolved
+
+    def authorize_fs(
+        self, ops: tuple[Literal["read", "write"], ...], path: str,
+    ) -> Path:
+        """The single guard every fs tool funnels through. Resolve (loose), then
+        authorize each op: in-worktree paths pass through fs_permissions keyed by
+        the worktree-relative POSIX path (default-allow read, default-deny write);
+        out-of-worktree paths are NOT fs_permission-governed (bash isn't either) —
+        they go through the sandbox mirror: allowed when unsandboxed, else bounded
+        by SandboxPolicy.allows_read/allows_write. Raises PermissionDenied on any
+        denied op; returns the resolved Path.
+        """
+        resolved = self.resolve_path(path)
+        root = self.project_root.resolve()
+        if resolved == root or resolved.is_relative_to(root):
+            virtual = "." if resolved == root else resolved.relative_to(root).as_posix()
+            for op in ops:
+                self.check_fs_permission(op, virtual)
+            return resolved
+        policy = self.sandbox_policy
+        if policy is None or not policy.active:
+            return resolved
+        for op in ops:
+            allowed = (
+                policy.allows_read(resolved) if op == "read"
+                else policy.allows_write(resolved)
+            )
+            if not allowed:
+                raise PermissionDenied(
+                    f"{op} on {resolved} denied by the sandbox policy"
+                )
         return resolved
 
     def check_fs_permission(self, op: Literal["read", "write"], virtual: str) -> None:
