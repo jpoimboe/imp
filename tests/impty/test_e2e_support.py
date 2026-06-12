@@ -44,3 +44,37 @@ def test_write_imp_shim_is_executable_and_runs_imp(tmp_path: Path) -> None:
     out = subprocess.run([shim, "--help"], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0
     assert "usage: imp" in (out.stdout + out.stderr)
+
+
+def test_default_workflow_script_covers_the_fast_path_agents() -> None:
+    from tests.impty.e2e_support import default_workflow_script
+
+    script = default_workflow_script("IMP_DOGFOOD_t2t2t2")
+    steps = script["steps"]
+    # Every agent the trivial fast path invokes on the way to completion + merge.
+    for agent in ("spec-writer", "plan-writer", "task-lead",
+                  "code-reviewer", "summarizer", "final-review"):
+        assert agent in steps, f"{agent} missing from the default-workflow script"
+
+    # spec-writer marks the change trivial → fast path; task-lead writes the sentinel.
+    spec_done = steps["spec-writer"][0]["tools"][-1]["input"]
+    assert spec_done["complexity"] == "trivial"
+    lead_bash = steps["task-lead"][0]["tools"][0]["input"]["command"]
+    assert "IMP_DOGFOOD_t2t2t2" in lead_bash and "src/sentinel.py" in lead_bash
+    lead_done = steps["task-lead"][0]["tools"][-1]["input"]
+    assert lead_done["done"] is True
+    assert steps["final-review"][0]["tools"][-1]["input"]["decision"] == "merge"
+
+
+def test_seed_default_repo_installs_the_real_default_workflow(tmp_path: Path) -> None:
+    from tests.impty.e2e_support import default_workflow_script, seed_default_repo
+
+    script_path = seed_default_repo(
+        tmp_path, script=default_workflow_script("IMP_DOGFOOD_seed01"))
+    assert script_path.is_file()
+    # The shipped default workflow (with its gate scripts) was copied in.
+    wf = tmp_path / "imp" / "workflows" / "default"
+    assert (wf / "workflow.yaml").is_file()
+    assert (wf / "scripts" / "autosquash.sh").is_file()
+    assert (wf / "scripts" / "stamp-trailers.sh").is_file()
+    assert (wf / "agents" / "spec-writer.md").is_file()
