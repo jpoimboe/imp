@@ -20,6 +20,7 @@ from typing import Any, NamedTuple, NoReturn
 
 import anyio
 
+from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, resume_select
 from imp.cli import palette as pal
@@ -1695,9 +1696,38 @@ def _cmd_config(args: argparse.Namespace) -> int:
     return 0
 
 
+_OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("new", "Start a new Change (optional title; opens with the spec-writer)."),
+    ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
+    ("status", "List in-flight Changes (-a also shows completed and abandoned)."),
+    ("log", "Show a Change's narrative as plain text."),
+    ("abandon", "Tear down a Change's worktree, branch, and state."),
+    ("config", "Show the effective configuration."),
+)
+
+
+def render_overview(color: bool) -> str:
+    head = ansi("imp", "bold", enabled=color)
+    width = max(len(name) for name, _ in _OVERVIEW_COMMANDS)
+    lines = [
+        f"{head} — multi-agent software development workflow",
+        "",
+        "Common commands:",
+    ]
+    for name, desc in _OVERVIEW_COMMANDS:
+        lines.append(f"  {name.ljust(width)}  {desc}")
+    lines += [
+        "",
+        "New to a project? Run 'imp init' to get started.",
+        "Run 'imp <command> -h' for details.",
+    ]
+    return "\n".join(lines)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    parser.add_argument("--version", action="version", version=f"imp {__version__}")
+    sub = parser.add_subparsers(dest="cmd", required=False)
 
     p_init = sub.add_parser("init")
     p_init.set_defaults(func=_cmd_init)
@@ -1781,9 +1811,49 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _command_names(parser: argparse.ArgumentParser) -> set[str]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return set(action.choices)
+    return set()
+
+
+def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
+    if not rest:
+        _apply_theme()
+        print(render_overview(should_use_color(sys.stdout)))
+        return 0
+    cmd = rest[0]
+    if cmd not in _command_names(parser):
+        print(f"imp: unknown command {cmd!r}. Run 'imp help'.", file=sys.stderr)
+        return 2
+    # `imp help <cmd>` == `imp <cmd> -h`: argparse prints the subparser help and
+    # exits 0 (SystemExit), so control never returns past this line.
+    parser.parse_args([cmd, "-h"])
+    return 0
+
+
+def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | None:
+    if not args:
+        _apply_theme()
+        print(render_overview(should_use_color(sys.stdout)))
+        return 0
+    if args[0] == "help":
+        return _help_command(args[1:], parser)
+    first = args[0]
+    if not first.startswith("-") and first not in _command_names(parser):
+        print(f"imp: unknown command {first!r}. Run 'imp help'.", file=sys.stderr)
+        return 2
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    ns = _build_parser().parse_args(args)
+    parser = _build_parser()
+    result = _dispatch_meta(args, parser)
+    if result is not None:
+        return result
+    ns = parser.parse_args(args)
     _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
         rc: int = ns.func(ns)
