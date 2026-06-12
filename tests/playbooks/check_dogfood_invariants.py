@@ -10,6 +10,7 @@ check is location-agnostic — no pinned file, line, or commit count.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -96,19 +97,29 @@ def _imp(repo: str, imp: str, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+_MODERN_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-([a-z0-9]{6})$")
+
+
+def _resume_token(change_id: str) -> str:
+    """6-char suffix for modern YYYY-MM-DD-xxxxxx ids; full id for legacy slugs."""
+    m = _MODERN_ID.match(change_id)
+    return m.group(1) if m else change_id
+
+
 def check_readback(repo: str, imp: str) -> Result:
     ids = journal_ids(repo)
     if len(ids) != 1:
         return Result("readback", False,
                       f"expected exactly one journaled change, got {_fmt(ids)}")
     cid = ids[0]
+    token = _resume_token(cid)
     log = _imp(repo, imp, "log", cid)
     log_full = _imp(repo, imp, "log", cid, "--full")
     status = _imp(repo, imp, "status", "--all")
     ok = (
         log.returncode == 0 and bool(log.stdout.strip())
         and log_full.returncode == 0 and bool(log_full.stdout.strip())
-        and status.returncode == 0 and cid in status.stdout
+        and status.returncode == 0 and token in status.stdout
     )
     return Result("readback", ok,
                   f"id={cid}: log / log --full / status --all read it back"
@@ -116,7 +127,7 @@ def check_readback(repo: str, imp: str) -> Result:
                   f"id={cid}: readback failed "
                   f"(log rc={log.returncode}, full rc={log_full.returncode}, "
                   f"status rc={status.returncode}, "
-                  f"id-in-status={cid in status.stdout})")
+                  f"id-in-status={token in status.stdout})")
 
 
 def _safe(name: str, thunk: Callable[[], Result]) -> Result:

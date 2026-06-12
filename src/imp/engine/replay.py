@@ -45,6 +45,7 @@ _MESSAGE_PARSERS: dict[str, Callable[[dict[str, Any]], Message]] = {
     "openai": _parse_responses_message,
     "claude_code": _parse_claude_code_message,
     "codex": _parse_codex_message,
+    "scripted": _parse_anthropic_message,
 }
 
 _DIAGNOSTICS_EXTRACTORS: dict[str, Callable[[dict[str, Any]], Diagnostics]] = {
@@ -52,6 +53,7 @@ _DIAGNOSTICS_EXTRACTORS: dict[str, Callable[[dict[str, Any]], Diagnostics]] = {
     "openai": _extract_responses_diagnostics,
     "claude_code": _extract_claude_code_diagnostics,
     "codex": _extract_codex_diagnostics,
+    "scripted": _extract_anthropic_diagnostics,
 }
 
 
