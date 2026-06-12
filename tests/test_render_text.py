@@ -1290,3 +1290,9 @@ def test_merged_node_renders_friendly_footer() -> None:
     colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
     assert "✓ Merged 2026-06-12-run-x into master." in colored
     assert pal._ANSI["green"] in colored
+
+
+def test_panel_summary_renders_one_line() -> None:
+    node = nv.PanelSummaryNode(tally=nv.ReviewTally(approve=4, total=4, blocking=0, nits=2))
+    line = "\n".join(rt._render(node, depth=1, full=False, color=False, width=80))
+    assert line == "  panel: 4/4 approve · 2 nits"

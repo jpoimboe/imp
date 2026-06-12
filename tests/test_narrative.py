@@ -2,6 +2,8 @@
 """Tests for the narrative-tree model (src/imp/cli/narrative.py)."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from imp.cli import narrative as nv
@@ -747,6 +749,13 @@ def test_structural_repr_covers_new_node_types() -> None:
         "action": {"verb": "continue"}, "extras": ["status=Success"]}
 
 
+def test_panel_summary_node_structural_repr() -> None:
+    node = nv.PanelSummaryNode(tally=nv.ReviewTally(approve=4, total=4, blocking=0, nits=2))
+    r = nv.structural_repr(node)
+    assert r["t"] == "PanelSummaryNode"
+    assert r["tally"] == [4, 4, 0, 2]
+
+
 def test_current_activity_collapses_multiline_bash_command() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))
@@ -1405,3 +1414,92 @@ def test_distinct_trailing_narration_is_kept() -> None:
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
     assert len(agent_texts) == 1      # a genuinely different narration survives
     assert len(literals) == 1
+
+
+def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
+    bid = f"b{eid}"
+    return [
+        _ev(f"c{eid}", "tool_call", agent_id="step:review/review-panel", id=bid,
+            name="task", input={"subagent_name": f"member-{eid}",
+                                 "task_description": "review"}),
+        _ev(f"r{eid}", "tool_result", agent_id="step:review/review-panel", id=bid,
+            content=json.dumps(
+                {"status": "Success", "verdict": verdict, "findings": findings}),
+            error=False),
+    ]
+
+
+def test_clean_panel_collapses_to_summary_node() -> None:
+    events = [
+        _ev("1", "step_started", step="review-panel", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+    ]
+    events += _panel_member("1", "approve", "nit: rename foo")
+    events += _panel_member("2", "approve", "")
+    events += _panel_member("3", "approve", "nit: add a comment")
+    events += _panel_member("4", "approve", "")
+    events += [
+        _ev("ao", "agent_output", agent_id="step:review/review-panel",
+            status="Success", verdict="approve",
+            findings="### member-1\nnit: rename foo\n### member-3\nnit: add a comment"),
+        _ev("sc", "step_completed", step="review-panel", kind="agent",
+            action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
+    ]
+    tree = nv.build_tree(events)
+    step = tree.root.children[0].children[0]
+    summaries = [c for c in step.children if isinstance(c, nv.PanelSummaryNode)]
+    literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
+    assert len(summaries) == 1
+    assert literals == []                                  # the union prose is gone
+    t = summaries[0].tally
+    assert (t.approve, t.total, t.blocking, t.nits) == (4, 4, 0, 2)
+
+
+def test_blocking_panel_keeps_findings_prose() -> None:
+    events = [
+        _ev("1", "step_started", step="review-panel", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+    ]
+    events += _panel_member("1", "task_gap", "blocking: missing handler")
+    events += _panel_member("2", "approve", "")
+    events += [
+        _ev("ao", "agent_output", agent_id="step:review/review-panel",
+            status="Success", verdict="task_gap",
+            findings="### member-1 (task-level)\nblocking: missing handler that is "
+                     "reachable in normal usage and clearly blocks the merge gate"),
+        _ev("sc", "step_completed", step="review-panel", kind="agent",
+            action={"verb": "goto", "target": "implement"}, var_mutations={}),
+    ]
+    tree = nv.build_tree(events)
+    step = tree.root.children[0].children[0]
+    assert [c for c in step.children if isinstance(c, nv.PanelSummaryNode)] == []
+    literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
+    assert len(literals) == 1                              # findings prose expands inline
+    assert "missing handler" in literals[0].text
+
+
+def test_parse_member_outcome_error_fold() -> None:
+    fold = nv.SubagentFold(subagent_name="m", event_id="x", block_id="b",
+                           nested=nv.NarrativeBuilder(),
+                           outcome="some error text", is_error=True)
+    verdict, findings = nv._parse_member_outcome(fold)
+    assert verdict == "task_gap"
+    assert findings == "some error text"
+
+
+def test_parse_member_outcome_malformed_json() -> None:
+    fold = nv.SubagentFold(subagent_name="m", event_id="x", block_id="b",
+                           nested=nv.NarrativeBuilder(),
+                           outcome="not-json", is_error=False)
+    verdict, _ = nv._parse_member_outcome(fold)
+    assert verdict == "task_gap"
+
+
+def test_parse_member_outcome_valid() -> None:
+    fold = nv.SubagentFold(subagent_name="m", event_id="x", block_id="b",
+                           nested=nv.NarrativeBuilder(),
+                           outcome=json.dumps({"verdict": "approve", "findings": "nit: x"}),
+                           is_error=False)
+    verdict, findings = nv._parse_member_outcome(fold)
+    assert verdict == "approve"
+    assert findings == "nit: x"

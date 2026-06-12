@@ -200,7 +200,8 @@ def spaces_after(node: Any, *, full: bool) -> bool:
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
-                             nv.ErrorNode, nv.PauseNode, nv.RenameNode))
+                             nv.ErrorNode, nv.PauseNode, nv.RenameNode,
+                             nv.PanelSummaryNode))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
@@ -499,6 +500,12 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         ac = pal.accent_color(node.action)
         codes = (ac,) if ac else ()
         yield _line(f"→ {text}", depth, color, *codes, gutters=gutters)
+        return
+
+    if isinstance(node, nv.PanelSummaryNode):
+        t = node.tally
+        yield _line(f"panel: {t.approve}/{t.total} approve · {t.nits} nits",
+                    depth, color, *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
         return
 
     if isinstance(node, nv.BreadcrumbLine):
