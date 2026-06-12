@@ -43,3 +43,35 @@ def test_version_flag_prints_version_rc0() -> None:
     )
     assert r.returncode == 0
     assert r.stdout.strip() == f"imp {__version__}"
+
+
+def test_imp_help_prints_overview_rc0(capsys) -> None:
+    rc = main(["help"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Common commands:" in out
+    assert "Run 'imp <command> -h' for details." in out
+    assert "usage:" not in out.lower()
+    assert "error:" not in out.lower()
+
+
+def test_imp_help_command_equals_command_dash_h() -> None:
+    helped = subprocess.run(
+        [sys.executable, "-m", "imp", "help", "resume"],
+        capture_output=True, text=True, check=False,
+    )
+    direct = subprocess.run(
+        [sys.executable, "-m", "imp", "resume", "-h"],
+        capture_output=True, text=True, check=False,
+    )
+    assert helped.returncode == 0
+    assert direct.returncode == 0
+    assert helped.stdout == direct.stdout
+
+
+def test_imp_help_unknown_command_rc2(capsys) -> None:
+    rc = main(["help", "frobnicate"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "unknown command 'frobnicate'" in err
+    assert "imp help" in err

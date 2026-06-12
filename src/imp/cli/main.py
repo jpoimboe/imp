@@ -1811,11 +1811,35 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _command_names(parser: argparse.ArgumentParser) -> set[str]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return set(action.choices)
+    return set()
+
+
+def _help_command(rest: list[str], parser: argparse.ArgumentParser) -> int:
+    if not rest:
+        _apply_theme()
+        print(render_overview(should_use_color(sys.stdout)))
+        return 0
+    cmd = rest[0]
+    if cmd not in _command_names(parser):
+        print(f"imp: unknown command {cmd!r}. Run 'imp help'.", file=sys.stderr)
+        return 2
+    # `imp help <cmd>` == `imp <cmd> -h`: argparse prints the subparser help and
+    # exits 0 (SystemExit), so control never returns past this line.
+    parser.parse_args([cmd, "-h"])
+    return 0
+
+
 def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | None:
     if not args:
         _apply_theme()
         print(render_overview(should_use_color(sys.stdout)))
         return 0
+    if args[0] == "help":
+        return _help_command(args[1:], parser)
     return None
 
 
