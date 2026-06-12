@@ -97,6 +97,7 @@ class StepNode:
 class AgentTextNode:
     payload: dict[str, Any]            # the llm_response payload
     _cache: Any = field(default=None, repr=False)  # cached RenderedMessage (F5)
+    held: bool = False                 # True until resolved by agent_output, step_completed, or next llm_response
     collapsible = False
 
     @property
@@ -691,6 +692,11 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
     node = self._pop_step(p.get("step"))
     if node is not None:
+        # Un-hold any trailing held narration — agent_output won't fire for
+        # steps that end without a complete_step call.
+        narration_idx = _last_narration_index(node.children)
+        if narration_idx is not None:
+            node.children[narration_idx].held = False
         # Preserve StepNode.outcome (existing tests assert on the field); the
         # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
         node.outcome = OutcomeLine(action=action)
@@ -824,6 +830,30 @@ def _is_prose_field(key: str, value: Any) -> bool:
             and ("\n" in value or len(value) > _PROSE_THRESHOLD))
 
 
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _normalized_tokens(text: str) -> set[str]:
+    return set(_TOKEN_RE.findall(text.lower()))
+
+
+def _near_duplicate(a: str, b: str, *, threshold: float = 0.8) -> bool:
+    ta, tb = _normalized_tokens(a), _normalized_tokens(b)
+    if not ta or not tb:
+        return False
+    return len(ta & tb) / min(len(ta), len(tb)) >= threshold
+
+
+def _last_narration_index(children: list[Any]) -> int | None:
+    """Trailing AgentTextNode index, scanning past any trailing ToolBurstFold nodes."""
+    i = len(children) - 1
+    while i >= 0 and isinstance(children[i], ToolBurstFold):
+        i -= 1
+    if i >= 0 and isinstance(children[i], AgentTextNode):
+        return i
+    return None
+
+
 def _breadcrumb_extras(args: Any) -> list[str]:
     """Short scalar output fields (`status`, `verdict`, `*_path`, numbers, bools,
     short strings) folded into the breadcrumb as `key=value`. Prose fields and
@@ -916,6 +946,12 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     node = AgentTextNode(payload=p)
     if node.text.strip():
         self._flush_burst()
+        # Un-hold any trailing held narration — a new one is taking its place.
+        children = self._container().children
+        prev_idx = _last_narration_index(children)
+        if prev_idx is not None and children[prev_idx].held:
+            children[prev_idx].held = False
+        node.held = True
         self._append(node)
 
 
@@ -942,11 +978,20 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_burst()
     step = self._step_stack[-1]
     step.agent_output = p
+    children = self._container().children
+    narration_idx = _last_narration_index(children)
     for k, v in p.items():
         # `_is_prose_field` already screens most empties; the `.strip()` is
         # belt-and-suspenders for a whitespace-only multi-line field.
         if _is_prose_field(k, v) and v.strip():
+            if (narration_idx is not None
+                    and _near_duplicate(children[narration_idx].text, v)):
+                children.pop(narration_idx)
+                narration_idx = None
             self._append(LiteralTextNode(text=v))
+    # Un-hold the narration if it wasn't popped: it's now final for the live driver.
+    if narration_idx is not None:
+        children[narration_idx].held = False
 
 
 NarrativeBuilder._HANDLERS["user_message"] = _h_user_message

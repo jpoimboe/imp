@@ -224,7 +224,7 @@ class LiveDriver:
                 # final immediately.
                 return node.route is not None
             return True
-        return True
+        return not (isinstance(node, nv.AgentTextNode) and node.held)
 
     def _gutters(self) -> tuple[int, ...]:
         """Subagent boundary columns for the shared render helpers.

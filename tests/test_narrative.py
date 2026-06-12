@@ -1361,3 +1361,47 @@ def test_merge_blocked_event_is_suppressed() -> None:
     step = tree.root.children[0].children[0]
     fbs = [c for c in step.children if isinstance(c, nv.FallbackLine)]
     assert fbs == []
+
+
+def _reviewer_conclusion(narration: str, findings: str) -> nv.NarrativeTree:
+    return nv.build_tree([
+        _ev("1", "step_started", step="spec-reviewer", kind="agent", phase="spec",
+            model="m", provider="anthropic"),
+        _ev("2", "llm_response", agent_id="step:spec/spec-reviewer",
+            provider="anthropic", model="m", usage={},
+            raw={"content": [{"type": "text", "text": narration}]}),
+        _ev("3", "tool_call", agent_id="step:spec/spec-reviewer", id="cs1",
+            name="complete_step",
+            input={"status": "Success", "verdict": "approve", "findings": findings}),
+        _ev("4", "agent_output", agent_id="step:spec/spec-reviewer",
+            status="Success", verdict="approve", findings=findings),
+        _ev("5", "step_completed", step="spec-reviewer", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+
+
+def test_near_duplicate_trailing_narration_is_dropped() -> None:
+    tree = _reviewer_conclusion(
+        narration="No findings. Spec is complete and ready for planning.",
+        findings=("No findings. Spec is complete and ready for planning. "
+                  "All load-bearing claims were verified against the codebase."))
+    step = tree.root.children[0].children[0]
+    agent_texts = [c for c in step.children if isinstance(c, nv.AgentTextNode)]
+    literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert len(bursts) == 1           # the trailing complete_step burst is present
+    assert agent_texts == []          # the duplicate narration (behind it) is gone
+    assert len(literals) == 1         # exactly one conclusion remains
+    assert literals[0].text.startswith("No findings.")
+
+
+def test_distinct_trailing_narration_is_kept() -> None:
+    tree = _reviewer_conclusion(
+        narration="Let me know if you would like any changes before we proceed.",
+        findings=("No findings. Spec is complete and verified clean against the "
+                  "codebase, every claim checked."))
+    step = tree.root.children[0].children[0]
+    agent_texts = [c for c in step.children if isinstance(c, nv.AgentTextNode)]
+    literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
+    assert len(agent_texts) == 1      # a genuinely different narration survives
+    assert len(literals) == 1
