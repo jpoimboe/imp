@@ -38,6 +38,18 @@ def fmt_seconds(seconds: float | int | None) -> str:
     return f"{total // 60}m {total % 60}s"
 
 
+def merge_gate_block(tally: nv.ReviewTally | None, *, base: str) -> str:
+    """Deterministic merge-gate chrome: verdict summary + explicit instruction."""
+    target = base or "the base branch"
+    instruction = (f"→ type 'merge' to merge into {target}, "
+                   f"or describe what to rework.")
+    if tally is None:
+        return instruction
+    verdict = (f"Review: {tally.approve}/{tally.total} approve · "
+               f"{tally.blocking} blocking · {tally.nits} nits")
+    return f"{verdict}\n{instruction}"
+
+
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The

@@ -1503,3 +1503,62 @@ def test_parse_member_outcome_valid() -> None:
     verdict, findings = nv._parse_member_outcome(fold)
     assert verdict == "approve"
     assert findings == "nit: x"
+
+
+def test_review_tally_from_panel_members() -> None:
+    events = [
+        _ev("1", "step_started", step="review-panel", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+    ]
+    events += _panel_member("1", "approve", "nit: rename foo")
+    events += _panel_member("2", "approve", "")
+    events += _panel_member("3", "approve", "nit: tidy import")
+    events += _panel_member("4", "approve", "")
+    events += [
+        _ev("ao", "agent_output", agent_id="step:review/review-panel",
+            status="Success", verdict="approve", findings="..."),
+        _ev("sc", "step_completed", step="review-panel", kind="agent",
+            action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
+    ]
+    tally = nv.review_tally(nv.build_tree(events))
+    assert tally is not None
+    assert (tally.approve, tally.total, tally.blocking, tally.nits) == (4, 4, 0, 2)
+
+
+def test_review_tally_falls_back_to_recheck_on_fast_path() -> None:
+    # fast-path change: no panel ran, only the recheck reviewer.
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="recheck", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+        _ev("ao", "agent_output", agent_id="step:review/recheck",
+            status="Success", verdict="approve", findings="one small nit"),
+        _ev("sc", "step_completed", step="recheck", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+    tally = nv.review_tally(tree)
+    assert tally is not None
+    assert (tally.approve, tally.total, tally.blocking, tally.nits) == (1, 1, 0, 1)
+
+
+def test_review_tally_recheck_blocking_verdict() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="recheck", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+        _ev("ao", "agent_output", agent_id="step:review/recheck",
+            status="Success", verdict="task_gap", findings="blocking: something wrong"),
+        _ev("sc", "step_completed", step="recheck", kind="agent",
+            action={"verb": "goto", "target": "implement"}, var_mutations={}),
+    ])
+    tally = nv.review_tally(tree)
+    assert tally is not None
+    assert (tally.approve, tally.total, tally.blocking, tally.nits) == (0, 1, 1, 0)
+
+
+def test_review_tally_none_when_no_review_step() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="spec-writer", kind="agent", phase="spec",
+            model="m", provider="anthropic"),
+        _ev("2", "step_completed", step="spec-writer", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ])
+    assert nv.review_tally(tree) is None

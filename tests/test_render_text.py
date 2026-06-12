@@ -1296,3 +1296,23 @@ def test_panel_summary_renders_one_line() -> None:
     node = nv.PanelSummaryNode(tally=nv.ReviewTally(approve=4, total=4, blocking=0, nits=2))
     line = "\n".join(rt._render(node, depth=1, full=False, color=False, width=80))
     assert line == "  panel: 4/4 approve · 2 nits"
+
+
+def test_merge_gate_block_has_verdict_and_instruction() -> None:
+    tally = nv.ReviewTally(approve=4, total=4, blocking=0, nits=2)
+    block = rt.merge_gate_block(tally, base="master")
+    lines = block.split("\n")
+    assert lines[0] == "Review: 4/4 approve · 0 blocking · 2 nits"
+    assert lines[1] == "→ type 'merge' to merge into master, or describe what to rework."
+
+
+def test_merge_gate_block_changes_with_counts() -> None:
+    tally = nv.ReviewTally(approve=3, total=4, blocking=1, nits=0)
+    block = rt.merge_gate_block(tally, base="trunk")
+    assert "Review: 3/4 approve · 1 blocking · 0 nits" in block
+    assert "merge into trunk" in block
+
+
+def test_merge_gate_block_without_tally_is_instruction_only() -> None:
+    block = rt.merge_gate_block(None, base="master")
+    assert block == "→ type 'merge' to merge into master, or describe what to rework."

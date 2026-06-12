@@ -438,8 +438,6 @@ implement
   
     1 call · complete_step · 0s
   
-    1 call · complete_step · 0s
-  
   • Both plan tasks implemented and verified.
   
     Task 1 (commit 0e1b4c2 "feat: add _resolve_version helper for imp
@@ -714,5 +712,3 @@ review
     action.
   
   final-review complete · 42s
-  
-  change_merged  base=master commit=36faeecb9b6f777552d8a1bb6cc3cdd6271693d6

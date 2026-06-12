@@ -403,6 +403,11 @@ class NarrativeBuilder:
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
 
+    @property
+    def open_step_name(self) -> str | None:
+        """Name of the currently-open step, or None."""
+        return self._step_stack[-1].name if self._step_stack else None
+
     def current_activity(self) -> Activity | None:
         """Structured one-line description of current activity for the live status
         line (§3/§4). None when there is nothing to show."""
@@ -912,6 +917,43 @@ def panel_member_tally(step: StepNode) -> ReviewTally:
         else:
             blocking += 1
     return ReviewTally(approve=approve, total=total, blocking=blocking, nits=nits)
+
+
+def _find_last_step(root: WorkflowNode, name: str) -> StepNode | None:
+    found: StepNode | None = None
+
+    def walk(nodes: list[Any]) -> None:
+        nonlocal found
+        for n in nodes:
+            if isinstance(n, StepNode):
+                if n.name == name:
+                    found = n
+                walk(n.children)
+            elif isinstance(n, PhaseNode):
+                walk(n.children)
+    walk(root.children)
+    return found
+
+
+def _single_reviewer_tally(output: dict[str, Any]) -> ReviewTally:
+    verdict = str(output.get("verdict") or "")
+    findings = str(output.get("findings") or "")
+    if verdict == "approve":
+        return ReviewTally(approve=1, total=1, blocking=0,
+                           nits=1 if findings.strip() else 0)
+    return ReviewTally(approve=0, total=1, blocking=1, nits=0)
+
+
+def review_tally(tree: NarrativeTree) -> ReviewTally | None:
+    """Merge-gate verdict counts: panel member verdicts, or recheck on fast-path."""
+    panel = _find_last_step(tree.root, "review-panel")
+    if panel is not None and any(
+            isinstance(c, SubagentFold) for c in panel.children):
+        return panel_member_tally(panel)
+    recheck = _find_last_step(tree.root, "recheck")
+    if recheck is not None and isinstance(recheck.agent_output, dict):
+        return _single_reviewer_tally(recheck.agent_output)
+    return None
 
 
 def phase_elapsed(phase: PhaseNode) -> float | None:
