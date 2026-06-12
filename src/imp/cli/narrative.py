@@ -279,8 +279,9 @@ class BreadcrumbLine:
     output fields and a `· → <action>` suffix (omitted for a plain `continue`).
     Replaces the rendered OutcomeLine at step completion (issue 3)."""
     step_name: str
-    elapsed_s: float | None
-    action: Any                        # dict {verb, target?} from step_completed
+    kind: str | None = None
+    elapsed_s: float | None = None
+    action: Any = None                 # dict {verb, target?} from step_completed
     route: str | None = None           # resolved routing suffix, same semantics as
                                        # StepNode.quiet_line: None = unresolved,
                                        # "" = resolved-but-silent (same-phase skip),
@@ -696,7 +697,7 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
         node.end_ts = event.get("timestamp")
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
         breadcrumb = BreadcrumbLine(
-            step_name=node.name, elapsed_s=elapsed, action=action,
+            step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),
             interrupted=node.interrupted)
         node.children.append(breadcrumb)

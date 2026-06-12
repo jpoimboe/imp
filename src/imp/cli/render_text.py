@@ -502,22 +502,20 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.BreadcrumbLine):
-        # No checkmark: a completed step reads as `<name> complete · …` — the word
-        # carries the meaning, and dropping the glyph keeps the gray line quiet
-        # (the `✓` drew the eye to navigational chrome it shouldn't). The output
-        # args (status=…, *_path=…, plan counts) are detail the lean view doesn't
-        # need beside every step — they survive in --full only; the routing verb
-        # and elapsed time stay in both (they're outcome, not args).
+        act = node.action if isinstance(node.action, dict) else None
+        blocked = (node.kind == "merge" and act is not None
+                   and act.get("verb") == "pause")
         if node.interrupted:
             parts = [f"{node.step_name} interrupted"]
+        elif blocked:
+            parts = [f"{node.step_name} blocked"]
         else:
             parts = [f"{node.step_name} complete" if node.show_complete
                      else node.step_name]
         if full:
             parts.extend(node.extras)
-        act = node.action if isinstance(node.action, dict) else None
-        if node.interrupted:
-            pass                          # an interrupted step carries no routing suffix
+        if node.interrupted or blocked:
+            pass                          # no routing/verb suffix on these
         elif act is not None and act.get("verb") == "goto":
             if node.route:                # skip "" (same-phase) and None (unresolved)
                 parts.append(node.route)
@@ -527,9 +525,6 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                 parts.append(verb_text)
         if node.elapsed_s is not None:
             parts.append(fmt_seconds(node.elapsed_s))
-        # A step's completion line carries the step color (the same bold darker-blue
-        # as its header), so a step's open and close read as one unit — distinct from
-        # the dim gray of tool/skill chrome.
         yield _line(" · ".join(parts), depth, color, *pal.NODE_COLORS["step"],
                     gutters=gutters)
         return

@@ -1257,6 +1257,32 @@ def test_intentional_pause_still_renders_complete_pause() -> None:
     assert "interrupted" not in out
 
 
+def test_merge_step_pause_breadcrumb_reads_blocked() -> None:
+    bc = nv.BreadcrumbLine(step_name="merge-to-base", elapsed_s=None,
+                           action={"verb": "pause"}, extras=[], kind="merge")
+    line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert line == "  merge-to-base blocked"
+    assert "complete" not in line
+    # a NON-merge pause keeps the existing wording
+    bc2 = nv.BreadcrumbLine(step_name="autosquash", elapsed_s=None,
+                            action={"verb": "pause"}, extras=[], kind="script")
+    line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
+    assert line2 == "  autosquash complete · pause"
+
+
+def test_merge_step_pause_breadcrumb_pipeline() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
+        _ev("2", "step_completed", step="merge-to-base", kind="merge",
+            action={"verb": "pause"}, var_mutations={}),
+    ])
+    # The BreadcrumbLine produced through the pipeline must also read "blocked",
+    # not "complete · pause", verifying that kind=node.kind is wired in _h_step_completed.
+    rendered = "\n".join(rt.render_tree(tree, full=False, color=False, width=80))
+    assert "merge-to-base blocked" in rendered
+    assert "complete" not in rendered
+
+
 def test_merged_node_renders_friendly_footer() -> None:
     node = nv.MergedNode(change_id="2026-06-12-run-x", base="master")
     plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
