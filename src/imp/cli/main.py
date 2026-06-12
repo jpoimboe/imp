@@ -1718,7 +1718,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
         render_explain(eff, explain, sys.stdout, color=should_use_color(sys.stdout))
     else:
         render_config(eff, sys.stdout, color=should_use_color(sys.stdout),
-                      show_all=getattr(args, "all", False))
+                      show_all=args.all)
     return 0
 
 

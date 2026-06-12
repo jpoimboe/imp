@@ -94,6 +94,24 @@ def test_config_all_lists_full_provider_matrix(
     assert "openai" in text and "anthropic" in text
 
 
+def test_config_default_shows_full_matrix_when_no_providers_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # When no providers: key is set, cfg.providers is (), the "and configured"
+    # guard short-circuits to False, and the full matrix is shown even with
+    # show_all=False.
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    (xdg / "config.yaml").write_text("theme: ansi\n")  # no providers: key
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    out = io.StringIO()
+    render_config(eff, out, color=False)              # show_all=False (default)
+    text = out.getvalue()
+    assert "anthropic" in text
+    assert "openai" in text
+
+
 def test_render_marks_enabled_driver(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
