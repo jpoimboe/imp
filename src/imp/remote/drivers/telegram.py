@@ -114,19 +114,52 @@ def extract_replies(
     return replies, new_offset
 
 
-def format_event_message(event: Mapping[str, Any]) -> str:
-    """Render one imp event as Telegram message text: a '[title] type' header
-    plus any human-readable payload body. Title falls back to the change id, then
-    to 'imp'."""
+def _llm_response_text(payload: Mapping[str, Any]) -> str:
+    """Render the assistant's prose from an llm_response payload. The text lives
+    in payload['raw'] in a provider-specific shape, so reuse imp's own
+    provider-aware renderer (the single source of truth shared with `imp log` and
+    the live chat). Imported lazily so this module stays import-light, and guarded
+    so a parse failure degrades to an empty body instead of crashing the driver."""
+    try:
+        from imp.cli.render_helpers import render_llm_response
+        rendered = render_llm_response(dict(payload))
+    except Exception:
+        return ""
+    return "\n".join(t for t in rendered.texts if t and t.strip()).strip()
+
+
+def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
+    """Extract the human-readable body for one event. Events carry type-specific
+    payload schemas (not a uniform 'text' field), so map the known ones; fall back
+    to the generic text/message keys for everything else."""
+    if event_type == "awaiting_user_input":
+        return str(payload.get("prompt") or payload.get("text") or "")
+    if event_type == "llm_response":
+        return _llm_response_text(payload)
+    if event_type == "merge_blocked":
+        reason = str(payload.get("reason") or "").strip()
+        detail = str(payload.get("detail") or "").strip()
+        return f"{reason}\n{detail}".strip() if detail else reason
+    return str(payload.get("text") or payload.get("message") or "")
+
+
+def _compose_message(event: Mapping[str, Any], body: str) -> str:
+    """Join a '[title] type' header with an optional body. Title falls back to the
+    change id, then to 'imp'."""
     change = event.get("change") or {}
     title = change.get("title") or change.get("id") or "imp"
     etype = event.get("type") or "event"
     header = f"[{title}] {etype}"
-    payload = event.get("payload") or {}
-    body = payload.get("text") or payload.get("message") or ""
     if isinstance(body, str) and body.strip():
         return f"{header}\n{body.strip()}"
     return header
+
+
+def format_event_message(event: Mapping[str, Any]) -> str:
+    """Render one imp event as Telegram message text: a '[title] type' header plus
+    the event's human-readable body (resolved per event type)."""
+    payload = event.get("payload") or {}
+    return _compose_message(event, event_body(event.get("type"), payload))
 
 
 def emit_reply(text: str, stream: Any) -> None:
@@ -183,11 +216,20 @@ def handle_event(
 ) -> bool:
     """Curate one event and, if loud/silent, send it to the chat. Returns True
     iff a message was sent (loud → notify, silent → disable_notification).
-    Dropped events return False without contacting Telegram."""
+    Dropped events return False without contacting Telegram.
+
+    A silent narrative event with no human-readable body (e.g. a tool-only
+    llm_response) is dropped: a bare '[title] llm_response' is noise, not
+    narrative. Loud events keep their header-only form — the type name is itself
+    the signal (errored, completed, merge_blocked)."""
     kind = curate(event.get("type"))
     if kind is None:
         return False
-    send(chat_id, format_event_message(event), silent=(kind == "silent"))
+    payload = event.get("payload") or {}
+    body = event_body(event.get("type"), payload)
+    if kind == "silent" and not body.strip():
+        return False
+    send(chat_id, _compose_message(event, body), silent=(kind == "silent"))
     return True
 
 

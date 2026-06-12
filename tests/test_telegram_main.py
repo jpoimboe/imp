@@ -46,11 +46,15 @@ def test_main_routes_a_stdin_event_to_telegram(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(imp_telegram.threading, "Thread", _NoThread)
 
-    stdin = io.StringIO('{"type": "agent_output", "change": {"title": "T"}, "payload": {}}\n')
+    # A loud event with a real body exercises the full stdin→Telegram relay path.
+    stdin = io.StringIO(
+        '{"type": "awaiting_user_input", "change": {"title": "T"}, '
+        '"payload": {"prompt": "need input"}}\n')
     rc = imp_telegram.main(
         env={"IMP_TELEGRAM_TOKEN": "tok", "IMP_TELEGRAM_CHAT_ID": "5"},
         stdin=stdin, stdout=io.StringIO())
     assert rc == 0
     assert get_offsets == [0]                  # drained pre-startup backlog once
-    assert len(sent) == 1                       # the agent_output event was relayed
+    assert len(sent) == 1                       # the event was relayed
     assert sent[0][0] == 5
+    assert sent[0][1] == "[T] awaiting_user_input\nneed input"
