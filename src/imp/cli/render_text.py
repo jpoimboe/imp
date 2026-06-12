@@ -322,6 +322,8 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     if model:
         # Show the subagent's model on the row, the same way a step header does.
         label += f" · {model}"
+    if sub.retry_attempt >= 1:
+        label += f" · retrying ({sub.retry_attempt + 1})"
     if sub.running:
         label += " (running)"
     elif sub.terminal_state == "stalled":

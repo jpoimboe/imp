@@ -214,6 +214,7 @@ class SubagentFold:
     is_error: bool = False
     terminal_state: str | None = None  # 'stalled' (live via B.2); 'interrupted'
                                        # is forward-compat scaffolding; else None
+    retry_attempt: int = 0
     start_ts: str | None = None        # parent `task` tool_call.timestamp
     end_ts: str | None = None          # parent `task` tool_result.timestamp
     collapsible = True
@@ -347,6 +348,7 @@ class NarrativeBuilder:
         # open subagent folds keyed by tool_use block id (to close on the
         # parent's `task` tool_result, which carries the block id, not event id)
         self._open_sub_by_block: dict[str, SubagentFold] = {}
+        self._subagent_failures: dict[tuple[str | None, str], int] = {}
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
         # duplicating them (see Task 10B). Default False; goto loops never set it.
@@ -987,6 +989,9 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     fold = self._open_sub_by_block.pop(rid, None)
     if fold is not None:
         _close_subagent_fold(fold, p, ts)
+        if fold.is_error or fold.terminal_state in ("stalled", "interrupted"):
+            key = (fold.opener_agent_id, fold.subagent_name)
+            self._subagent_failures[key] = self._subagent_failures.get(key, 0) + 1
         return
 
     pending_prompt = self._pending_wfu.get(rid)
@@ -1249,6 +1254,8 @@ def _open_subagent_fold(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         event_id=event_id, block_id=block_id, nested=NarrativeBuilder(),
         opener_agent_id=agent_id if isinstance(agent_id, str) else None,
         start_ts=event.get("timestamp"))
+    fold.retry_attempt = self._subagent_failures.get(
+        (fold.opener_agent_id, fold.subagent_name), 0)
     self._append(fold)
     self._sub_by_agent_id[f"sub:{event_id}"] = fold
     # Key on block_id when present, else the (always-unique) event_id — so two

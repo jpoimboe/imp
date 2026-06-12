@@ -1287,3 +1287,38 @@ def test_call_args_line_strips_mcp_prefix_from_tool_name() -> None:
     ], full=True))
     assert "invoke" in out
     assert "mcp__" not in out
+
+
+def test_retried_subagent_shows_retrying_annotation() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="boom", error=True),
+        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "(failed)" in out          # the first attempt is still marked failed
+    assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
+
+
+def test_parallel_same_name_subagents_not_marked_retrying() -> None:
+    # Two reviewers dispatched concurrently (both open before either closes) is a
+    # panel, not a retry — neither row gets a retrying annotation.
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status": "Success"}', error=False),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "retrying" not in out
