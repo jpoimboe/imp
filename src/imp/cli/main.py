@@ -1582,7 +1582,9 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
     return chosen if chosen is not None else 2
 
 
-def _abandon(control: Path, change_id: str) -> int:
+def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
+             interactive: bool | None = None,
+             input_fn: Callable[[str], str] = input) -> int:
     """Tear down a Change (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): journal BEFORE worktree removal (records
@@ -1598,6 +1600,19 @@ def _abandon(control: Path, change_id: str) -> int:
         worktree.delete_branch(control, change_id)
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
+
+    do_prompt = not assume_yes and (
+        _interactive() if interactive is None else interactive)
+    if do_prompt:
+        st = State.load(change.state_dir)
+        n = worktree.commit_count(control, change_id, change.base_branch)
+        print(f"Abandon {change_id}: {change.title!r} "
+              f"(status {st.status}, {n} commit{'s' if n != 1 else ''})?")
+        ans = input_fn(
+            "Type 'y' to confirm, anything else to cancel: ").strip().lower()
+        if ans not in ("y", "yes"):
+            print(f"Abandon cancelled; {change_id} left intact.")
+            return 1
 
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # timeout=0
@@ -1640,11 +1655,11 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon(control, hits[0])
+            return _abandon(control, hits[0], assume_yes=args.yes)
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         return 2
-    return _abandon(control, change_id)
+    return _abandon(control, change_id, assume_yes=args.yes)
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -1774,6 +1789,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a Change's worktree, branch, and state (logged).",
     )
     p_abandon.add_argument("token")
+    p_abandon.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     from imp.evals.cli import add_eval_parser

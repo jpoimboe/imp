@@ -80,6 +80,14 @@ def branch_exists(control_root: Path, branch: str) -> bool:
     ).returncode == 0
 
 
+def commit_count(control_root: Path, change_id: str, base: str) -> int:
+    """Commits on imp/<id> not reachable from base — the Change's own work."""
+    proc = _git(control_root, "rev-list", "--count", f"{base}..imp/{change_id}")
+    if proc.returncode != 0:
+        return 0
+    return int(proc.stdout.strip() or "0")
+
+
 def create_worktree(control_root: Path, change_id: str, base: str) -> Path:
     """`git worktree add -b imp/<id> .imp/worktrees/<id> <base>` (spec §4).
     Branch collision surfaces as BranchExists — the caller reports a clean error
