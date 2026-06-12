@@ -240,6 +240,47 @@ def test_new_tui_delivers_seed(
     assert "--tui does not deliver" not in capsys.readouterr().err
 
 
+@pytest.mark.anyio
+async def test_seed_gate_first_then_per_call_fallback() -> None:
+    calls: list[str] = []
+
+    async def _f1() -> str:
+        calls.append("f1")
+        return "first-fallback"
+
+    async def _f2() -> str:
+        calls.append("f2")
+        return "second-fallback"
+
+    gate = cli_main.make_seed_gate("the seed")
+    assert await gate(_f1) == "the seed"           # first solicit → seed
+    assert calls == []                             # fallback never consulted
+    assert await gate(_f2) == "second-fallback"    # later solicit → per-call fallback
+    assert await gate(_f1) == "first-fallback"     # still defers, to the new per-call fn
+    assert calls == ["f2", "f1"]                    # exactly the fallbacks passed per call
+
+
+@pytest.mark.anyio
+async def test_seed_gate_over_attended_race_is_deterministic() -> None:
+    from imp.cli.remote_channel import effective_reply_fn
+
+    class _FakeChannel:
+        reply_timeout = None
+
+        async def next_reply(self, *, timeout: float | None = None) -> str:
+            return "from-driver"
+
+    async def _local_never() -> str:
+        await anyio.sleep_forever()
+        raise AssertionError("unreachable")
+
+    raced = effective_reply_fn(_local_never, _FakeChannel(), non_interactive=False)
+    gate = cli_main.make_seed_gate("the seed")
+    with anyio.fail_after(5):
+        assert await gate(raced) == "the seed"      # seed without winning a race
+        assert await gate(raced) == "from-driver"   # later solicit → race resolves
+
+
 def test_spec_writer_prompt_has_seed_branch() -> None:
     # tests/ sits directly under the repo root, so resolve the prompt relative
     # to this file rather than depending on project-root discovery.
