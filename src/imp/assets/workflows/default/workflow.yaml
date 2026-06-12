@@ -19,6 +19,8 @@ vars:
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   panel_done:             {type: bool, default: false}
+  multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the end-of-change integration pass
+  integration_pass:       {type: bool, default: false}   # true only during the trimmed end-of-change integration pass; review-panel runs the two cross-cutting slices only
   integration_needs_review: {type: bool, default: false}
   spec_confirm:           {type: bool, default: true}    # confirm-gate enable
   spec_unseen_changes:    {type: bool, default: false}   # some turn changed the spec without user direction

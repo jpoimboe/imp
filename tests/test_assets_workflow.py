@@ -453,6 +453,14 @@ def test_plan_writer_declares_wait_for_user() -> None:
     assert "wait_for_user" in wf.agents["plan-writer"].tools
 
 
+def test_per_plan_review_vars_declared_default_false() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    defaults = wf.vars.defaults()
+    assert defaults["multi_plan"] is False
+    assert defaults["integration_pass"] is False
+
+
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     # Acceptance #1/#2/#6: in this repo, imp/workflows/default must be a
     # symlink whose resolved target equals src/imp/assets/workflows/default.
