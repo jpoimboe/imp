@@ -77,7 +77,9 @@ async def test_start_returns_false_when_driver_exits_immediately(
 
 
 @pytest.mark.anyio
-async def test_start_returns_false_when_command_missing(tmp_path: Path) -> None:
+async def test_start_degrades_silently_when_command_missing(tmp_path: Path) -> None:
+    # A configured-but-absent notifier binary must NOT print an error banner on
+    # every run (B1-incidental): start returns False (no notifications) quietly.
     errors: list[str] = []
     ch = RemoteChannel(
         command=("/no/such/driver/binary",), events=("all",), startup_timeout=2.0,
@@ -85,7 +87,7 @@ async def test_start_returns_false_when_command_missing(tmp_path: Path) -> None:
         on_error=errors.append)
     async with anyio.create_task_group() as tg:
         assert await ch.start(tg) is False
-        assert any("spawn" in m for m in errors)
+        assert errors == []                  # degraded quietly, no spawn banner
         tg.cancel_scope.cancel()
 
 
