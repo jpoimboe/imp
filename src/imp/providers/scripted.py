@@ -60,6 +60,7 @@ def _build_tools(invocation: AgentInvocation) -> dict[str, Tool]:
 class ScriptedAgentRunner:
     def __init__(self, model_name: str) -> None:
         self.model = model_name
+        self._ctx: ToolContext | None = None
 
     async def run(
         self, invocation: AgentInvocation,
@@ -96,6 +97,7 @@ class ScriptedAgentRunner:
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
         ctx.event_log = elog
+        self._ctx = ctx
 
         try:
             messages: list[Message] = []
@@ -164,11 +166,19 @@ class ScriptedAgentRunner:
                 "message": "scripted runner exhausted script without complete_step",
             }}
         finally:
+            self._ctx = None
             with contextlib.suppress(Exception):
                 await terminate_background_processes(ctx)
 
     async def interrupt(self) -> None:
-        pass
+        from imp.agents.tools.bg import terminate_background_processes
+        from imp.agents.tools.context import terminate_running_processes
+        ctx = self._ctx
+        if ctx is not None:
+            with contextlib.suppress(Exception):
+                await terminate_running_processes(ctx)
+            with contextlib.suppress(Exception):
+                await terminate_background_processes(ctx)
 
 
 class ScriptedProvider:
