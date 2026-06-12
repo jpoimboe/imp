@@ -144,15 +144,22 @@ def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
 
 
 def _compose_message(event: Mapping[str, Any], body: str) -> str:
-    """Join a '[title] type' header with an optional body. Title falls back to the
-    change id, then to 'imp'."""
+    """Render the message text for an event.
+
+    Silent narrative events (the quiet running commentary — llm_response,
+    agent_output) are sent as their prose alone: the body *is* the message, so
+    there is no technical '[title] llm_response' header to leak the internal event
+    type into the chat. Loud lifecycle events keep a '[title] type' header — there
+    the type name is the signal (awaiting_user_input, merge_blocked, errored).
+    Title falls back to the change id, then to 'imp'."""
+    body = body.strip() if isinstance(body, str) else ""
+    if event.get("type") in _SILENT:
+        return body
     change = event.get("change") or {}
     title = change.get("title") or change.get("id") or "imp"
     etype = event.get("type") or "event"
     header = f"[{title}] {etype}"
-    if isinstance(body, str) and body.strip():
-        return f"{header}\n{body.strip()}"
-    return header
+    return f"{header}\n{body}" if body else header
 
 
 def format_event_message(event: Mapping[str, Any]) -> str:

@@ -17,9 +17,10 @@ def test_format_awaiting_user_input_uses_real_prompt_payload() -> None:
         "[My Change] awaiting_user_input\nneed your input")
 
 
-def test_format_llm_response_renders_assistant_text() -> None:
+def test_format_llm_response_renders_assistant_text_without_type_header() -> None:
     # llm_response carries the assistant turn under payload["raw"]; the prose must
-    # be rendered (provider-aware), not dropped to a bare "[title] llm_response".
+    # be rendered (provider-aware) and sent ALONE — no "[title] llm_response"
+    # header leaking the internal event type into a narrative message.
     event = {
         "type": "llm_response",
         "change": {"title": "T"},
@@ -29,8 +30,7 @@ def test_format_llm_response_renders_assistant_text() -> None:
             "usage": {}, "stop_reason": "end_turn",
         },
     }
-    assert imp_telegram.format_event_message(event) == (
-        "[T] llm_response\nHere is my answer.")
+    assert imp_telegram.format_event_message(event) == "Here is my answer."
 
 
 def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
