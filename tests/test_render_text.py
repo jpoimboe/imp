@@ -1306,6 +1306,25 @@ def test_retried_subagent_shows_retrying_annotation() -> None:
     assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
 
 
+def test_retried_subagent_after_interrupted_shows_retrying_annotation() -> None:
+    # An interrupted (not errored) first attempt still bumps the failure counter,
+    # so the re-dispatch is annotated "retrying (2)".
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="runner cancelled", error=False, kind="interrupted"),
+        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "(interrupted)" in out     # first attempt is marked interrupted
+    assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
+
+
 def test_parallel_same_name_subagents_not_marked_retrying() -> None:
     # Two reviewers dispatched concurrently (both open before either closes) is a
     # panel, not a retry — neither row gets a retrying annotation.

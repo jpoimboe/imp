@@ -315,8 +315,10 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     leading bullet: the row is indented two cols (like the tool-burst recap) to
     sit under the agent turn's words, and the magenta color marks it as subagent
     identity. A finished subagent appends `· {elapsed}` (how long it ran); an
-    abnormal terminal state (running-at-pause, failed, stalled) appends a plain
-    `(state)` tag so a subagent that didn't cleanly finish still stands out."""
+    abnormal terminal state (running-at-pause, failed, stalled, interrupted)
+    appends a plain `(state)` tag so a subagent that didn't cleanly finish still
+    stands out. A re-dispatched subagent (retry) appends `· retrying (n)` where
+    n is the attempt number (2 for the first retry, 3 for the second, etc.)."""
     label = f"  {sub.subagent_name}"
     model = _subagent_model(sub)
     if model:
