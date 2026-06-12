@@ -28,6 +28,16 @@ from typing import Any
 _LOUD = frozenset({"awaiting_user_input", "errored", "merge_blocked", "completed"})
 _SILENT = frozenset({"agent_output", "llm_response"})
 
+# Human-readable headers for loud events. The phone-buzzing notifications read as
+# plain English, not imp's internal snake_case event types. An unmapped type
+# falls back to its raw name (defensive — every loud type is mapped today).
+_EVENT_LABELS = {
+    "awaiting_user_input": "needs your input",
+    "merge_blocked": "merge blocked",
+    "errored": "error",
+    "completed": "done",
+}
+
 _API_BASE = "https://api.telegram.org"
 _LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
 _HTTP_TIMEOUT = 35        # seconds; urlopen ceiling, must exceed the long-poll
@@ -144,15 +154,22 @@ def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
 
 
 def _compose_message(event: Mapping[str, Any], body: str) -> str:
-    """Join a '[title] type' header with an optional body. Title falls back to the
-    change id, then to 'imp'."""
+    """Render the message text for an event.
+
+    Silent narrative events (the quiet running commentary — llm_response,
+    agent_output) are sent as their prose alone: the body *is* the message, so
+    there is no technical '[title] llm_response' header to leak the internal event
+    type into the chat. Loud lifecycle events keep a '[title] label' header — the
+    type name is the signal, humanized via _EVENT_LABELS (e.g. "needs your input",
+    "merge blocked"). Title falls back to the change id, then to 'imp'."""
+    body = body.strip() if isinstance(body, str) else ""
+    if event.get("type") in _SILENT:
+        return body
     change = event.get("change") or {}
     title = change.get("title") or change.get("id") or "imp"
     etype = event.get("type") or "event"
-    header = f"[{title}] {etype}"
-    if isinstance(body, str) and body.strip():
-        return f"{header}\n{body.strip()}"
-    return header
+    header = f"[{title}] {_EVENT_LABELS.get(etype, etype)}"
+    return f"{header}\n{body}" if body else header
 
 
 def format_event_message(event: Mapping[str, Any]) -> str:
