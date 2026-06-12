@@ -240,6 +240,98 @@ def test_new_tui_delivers_seed(
     assert "--tui does not deliver" not in capsys.readouterr().err
 
 
+@pytest.mark.anyio
+async def test_seed_gate_first_then_per_call_fallback() -> None:
+    calls: list[str] = []
+
+    async def _f1() -> str:
+        calls.append("f1")
+        return "first-fallback"
+
+    async def _f2() -> str:
+        calls.append("f2")
+        return "second-fallback"
+
+    gate = cli_main.make_seed_gate("the seed")
+    assert await gate(_f1) == "the seed"           # first solicit → seed
+    assert calls == []                             # fallback never consulted
+    assert await gate(_f2) == "second-fallback"    # later solicit → per-call fallback
+    assert await gate(_f1) == "first-fallback"     # still defers, to the new per-call fn
+    assert calls == ["f2", "f1"]                    # exactly the fallbacks passed per call
+
+
+@pytest.mark.anyio
+async def test_seed_gate_over_attended_race_is_deterministic() -> None:
+    from imp.cli.remote_channel import effective_reply_fn
+
+    class _FakeChannel:
+        reply_timeout = None
+
+        async def next_reply(self, *, timeout: float | None = None) -> str:
+            return "from-driver"
+
+    async def _local_never() -> str:
+        await anyio.sleep_forever()
+        raise AssertionError("unreachable")
+
+    raced = effective_reply_fn(_local_never, _FakeChannel(), non_interactive=False)
+    gate = cli_main.make_seed_gate("the seed")
+    with anyio.fail_after(5):
+        assert await gate(raced) == "the seed"      # seed without winning a race
+        assert await gate(raced) == "from-driver"   # later solicit → race resolves
+
+
+def test_new_non_interactive_channel_delivers_seed(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    draft = tmp_path / "draft.md"
+    draft.write_text("# My draft\nGoal: do X\n")
+
+    class _FakeChannel:
+        reply_timeout = None
+
+        def __init__(self) -> None:
+            self.stopped = False
+
+        async def start(self, _tg: object) -> bool:
+            return True
+
+        def on_event(self, _event: object) -> None:
+            pass
+
+        async def next_reply(self, *, timeout: float | None = None) -> str:
+            return "from-phone"
+
+        async def stop(self) -> None:
+            self.stopped = True
+
+    channel = _FakeChannel()
+    monkeypatch.setattr(cli_main, "_maybe_build_channel", lambda _c: channel)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run(change: object, *, on_event: object,
+                        user_chat_input_fn: object, coordinator: object,
+                        non_interactive: object) -> RunResult:
+        captured["first"] = await user_chat_input_fn(None)   # type: ignore[operator]
+        captured["second"] = await user_chat_input_fn(None)  # type: ignore[operator]
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+
+    args = _new_args(title=str(draft), non_interactive=True)
+    rc = anyio.run(cli_main._async_cmd_new, args)
+
+    assert rc == 0
+    first = captured["first"]
+    assert isinstance(first, str)
+    assert first.startswith("Implement this spec")  # seed delivered on first solicit
+    assert str(draft) in first
+    assert captured["second"] == "from-phone"        # channel reply AFTER the seed
+    assert channel.stopped is True                    # channel torn down
+
+
 def test_spec_writer_prompt_has_seed_branch() -> None:
     # tests/ sits directly under the repo root, so resolve the prompt relative
     # to this file rather than depending on project-root discovery.
