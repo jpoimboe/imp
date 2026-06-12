@@ -154,3 +154,12 @@ def test_task_lead_records_fixed_inline_nits_and_reserves_followups() -> None:
     assert "reserved for the judgment-call" in low
     # A bar-cleared nit is polish, not an open_items / degraded trigger.
     assert "cleared the fixability bar" in low
+
+
+def test_task_lead_pins_deferred_followups_line_format() -> None:
+    text = TASK_LEAD.read_text()
+    low = text.lower()
+    assert "- [ ] DEFERRED" in text
+    assert "[scope:" in text
+    assert "task-lead:" in text
+    assert "deferred-sweep" in low      # the sweep, not the human, is the consumer
