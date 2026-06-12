@@ -6,11 +6,11 @@ description: |
 # The tier menu is config.tiers.keys() (always low/medium/high in this design).
 # Single provider by design: review independence is by MODEL TIER (an opus panel
 # reviewing sonnet's work), not by vendor. `differ_from` is removed from the
-# review phase. The `review-panel` step is a sonnet coordinator that dispatches a
-# four-member opus discovery panel ONCE (guarded by `panel_done`); the `recheck`
-# step is a sonnet generalist re-review loop that iterates until clean. The opus
-# panel runs only on substantive changes: a `fast_path` (trivial) change skips it
-# at `panel-gate` and gets just the one cheap sonnet `recheck` whole-diff review.
+# review phase. The `review` step is a sonnet coordinator that runs INSIDE the
+# per-plan implement loop; it dispatches a four-member opus panel on first pass,
+# or just the generalist reviewer on re-entry (panel_done) or fast-path. The
+# deferred-sweep drains Minor/Nit observations after each plan. The review phase
+# runs a trimmed end-of-change integration pass only when >1 plan was needed.
 
 vars:
   ready_to_merge:         {type: bool, default: false}
@@ -136,31 +136,75 @@ phases:
         tier: medium
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          # implementer subagent inherits these. ** covers code and
-          # .imp/change/progress.md (** matches dotdirs, permissions.py:34-35).
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          - {if: {deviation: true}, resume: plan-writer, feedback: "The plan didn't match the codebase. Here's what the implementer found:"}    # plan was wrong
-          - {if: {done: false},     goto: task-lead}        # next task, fresh
-          - {else: true, continue: true}                    # plan implemented
+          - {if: {deviation: true}, resume: plan-writer, feedback: "The plan didn't match the codebase. Here's what the implementer found:"}
+          - {if: {done: false},     goto: task-lead}
+          - {else: true, continue: true}
 
       - name: commit-check
         quiet: true
         command: ./scripts/implement-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: task-lead}   # clean tree / trailers / 1-commit-per-task
+          - {else: true, resume: task-lead}
 
       - name: run-tests
         command: ./scripts/run-tests.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: task-lead}   # carries test stderr as feedback
+          - {else: true, resume: task-lead}
+
+      # ── autosquash + stamp-trailers move INTO the per-plan loop so each panel
+      #    reviews folded, one-commit-per-task diffs. They stay paired (stamp
+      #    immediately after autosquash) so they never drift apart.
+      - name: autosquash
+        quiet: true
+        command: ./scripts/autosquash.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, pause: true}
+
+      - name: stamp-trailers
+        quiet: true
+        command: ./scripts/stamp-trailers.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, pause: true}
+
+      # ── merged review-panel + recheck. The agent tiers INTERNALLY on vars:
+      #    first pass (panel_done false, not fast_path) = full opus 4-member panel;
+      #    fix-round re-entry (panel_done true) or fast_path = cheap sonnet re-verify.
+      - name: review
+        file: agents/review-panel.md
+        tier: medium
+        max_loops: 6
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: [".imp/change/**"], mode: allow}   # append deferred observations to progress.md
+        rules:
+          - {if: {verdict: task_gap}, set: {panel_done: true}, goto: task-lead, feedback: "The review found gaps to fix. Findings:"}
+          - {if: {verdict: plan_gap}, set: {panel_done: true}, goto: plan-writer, feedback: "The review found the plan needs revision. Findings:"}
+          - {else: true, set: {panel_done: true}, continue: true}
+
+      - name: deferred-sweep
+        file: agents/deferred-sweep.md
+        tier: medium
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["**"], mode: allow}
+        # no rules: continue-on-success. The sweep drains the list and never routes.
+
+      - name: sweep-tests
+        command: ./scripts/run-tests.sh
+        rules:
+          - {if: {exit: 0}, continue: true}
+          - {else: true, resume: deferred-sweep}
 
       - name: fast-path-cycle-gate
         quiet: true
         rules:
-          - {if: {fast_path: true}, goto: review}       # straight to autosquash/review
+          - {if: {fast_path: true}, goto: integration-gate}   # trivial: single-plan; integration-gate skips the pass and stamps sweep commits
           - {else: true, continue: true}
 
       - name: plan-cycle-check
@@ -168,85 +212,84 @@ phases:
         tier: medium        # Sonnet coverage judgment
         max_loops: 10                # plans-per-spec bound
         rules:
-          - {if: {more_plans: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}     # supercycle
+          - {if: {more_plans: true}, set: {panel_done: false, multi_plan: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}     # supercycle
           - {else: true, continue: true}
 
   - name: review
     steps:
-      - name: autosquash
+      # ── trimmed end-of-change integration pass: ONLY when >1 plan ran ──
+      - name: integration-gate
         quiet: true
-        command: ./scripts/autosquash.sh
+        rules:
+          - {if: {multi_plan: false}, goto: stamp-sweep-trailers}   # single plan: the per-plan pass WAS the whole-change pass; still stamp sweep commits
+          - {else: true, set: {integration_pass: true}, continue: true}
+
+      - name: integration-pass        # review-panel.md in integration_pass mode: completeness + boundaries slices over the whole-change diff
+        file: agents/review-panel.md
+        tier: medium
+        max_loops: 6
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: [".imp/change/**"], mode: allow}
+        rules:
+          - {if: {verdict: task_gap}, set: {integration_pass: false}, goto: task-lead, feedback: "The integration pass found cross-plan gaps. Findings:"}
+          - {if: {verdict: plan_gap}, set: {integration_pass: false}, goto: plan-writer, feedback: "The integration pass found the plan needs revision. Findings:"}
+          - {else: true, set: {integration_pass: false}, continue: true}
+
+      - name: integration-sweep       # cross-plan deferred sweep over the whole change
+        file: agents/deferred-sweep.md
+        tier: medium
+        fs_permissions:
+          - {operations: [read],  paths: ["**"], mode: allow}
+          - {operations: [write], paths: ["**"], mode: allow}
+
+      - name: integration-sweep-tests
+        command: ./scripts/run-tests.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, pause: true}   # rebase conflict → human resolves
+          - {else: true, resume: integration-sweep}
 
-      - name: stamp-trailers
+      - name: stamp-sweep-trailers     # idempotently stamp Change: on sweep commits the per-plan stamp-trailers could not reach
         quiet: true
         command: ./scripts/stamp-trailers.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, pause: true}   # self-verify failed → human resolves
-
-      - name: panel-gate           # guard the opus panel: skip it on re-entry AND on fast-path
-        quiet: true
-        rules:
-          - {if: {panel_done: true}, goto: recheck}         # panel already ran -> sonnet re-check only
-          - {if: {fast_path: true}, goto: recheck}          # trivial change -> skip the opus panel; one cheap sonnet whole-diff recheck still runs
-          - {else: true, continue: true}
-
-      - name: review-panel         # opus discovery panel behind a sonnet coordinator; runs ONCE
-        file: agents/review-panel.md
-        tier: medium               # sonnet coordinator (mechanical collapse, not judgment)
-        rules:
-          - {if: {verdict: task_gap}, set: {panel_done: true}, goto: implement, feedback: "The review panel found gaps to fix. Findings:"}
-          - {if: {verdict: plan_gap}, set: {panel_done: true}, goto: plan-writer, feedback: "The review panel found the plan needs revision. Findings:"}
-          - {else: true, set: {panel_done: true}, goto: integrate-merge}   # approve -> integrate (was: summarizer)
-
-      - name: recheck              # sonnet verification loop (reuses the generalist prompt)
-        file: agents/code-reviewer.md
-        tier: medium
-        max_loops: 5                 # combined task_gap + plan_gap budget
-        rules:
-          - {if: {verdict: task_gap}, goto: implement, feedback: "The code reviewer found gaps to fix. Findings:"}      # carries findings
-          - {if: {verdict: plan_gap}, goto: plan-writer, feedback: "The code reviewer found the plan needs revision. Findings:"}    # carries findings
-          - {else: true, continue: true}                    # approve
+          - {else: true, pause: true}
 
       # ── integrate base into the branch, before review folds into one decision ──
-      - name: integrate-merge        # B2: merge base into the branch, uncommitted
-        quiet: true                  # mechanical; the integrator/integration-review agents narrate
+      - name: integrate-merge
+        quiet: true
         command: ./scripts/integrate-merge.sh
         rules:
-          - {if: {exit: 2}, goto: summarizer}     # base already integrated -> skip integration
-          - {if: {exit: 0}, continue: true}        # clean or conflicted tree -> integrator
-          - {else: true, pause: true}              # exit 3 (bad base ref, R7) / exit 5 (dirty entry or merge refusal) [exit 4 re-integration limit added in B3]
+          - {if: {exit: 2}, goto: summarizer}
+          - {if: {exit: 0}, continue: true}
+          - {else: true, pause: true}
 
-      - name: integrator             # B2: resolve textual+semantic conflicts, commit a clean merge
+      - name: integrator
         file: agents/integrator.md
         tier: high
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
-          # R4: the integrator is the writer of integration_needs_review, set BOTH
-          # ways every round (a clean round after a flagged one resets it).
           - {if: {integration: review}, set: {integration_needs_review: true}, continue: true}
           - {else: true, set: {integration_needs_review: false}, continue: true}
 
-      - name: integrate-tests        # B2: reuse the wired IMP_TEST_COMMAND
+      - name: integrate-tests
         command: ./scripts/run-tests.sh
-        max_loops: 5                 # bound the integrator<->tests bounce (default is 1000)
+        max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, resume: integrator}       # post-merge failure (often IS the semantic conflict)
+          - {else: true, resume: integrator}
 
-      - name: integration-review     # B2/F2: review the integrator's resolutions (purpose-written reviewer)
+      - name: integration-review
         file: agents/integration-reviewer.md
         tier: high
         max_loops: 5
         rules:
           - {if: {verdict: task_gap}, resume: integrator, feedback: "Integration review found gaps in the merge resolution. Findings:"}
           - {if: {verdict: plan_gap}, resume: integrator, feedback: "Integration review flagged a deeper issue with the merge. Findings:"}
-          - {else: true, continue: true}            # approve
+          - {else: true, continue: true}
 
       - name: summarizer
         file: agents/summarizer.md
@@ -256,7 +299,7 @@ phases:
         quiet: true
         rules:
           - {if: {final_review: false}, set: {ready_to_merge: true}, goto: merge}
-          - {if: {ready_to_merge: true, integration_needs_review: false}, goto: merge}   # C2.1: approved + clean reviewed re-integration -> skip re-review
+          - {if: {ready_to_merge: true, integration_needs_review: false}, goto: merge}
           - {else: true, continue: true}
 
       - name: final-review
@@ -265,7 +308,7 @@ phases:
         max_loops: 20
         rules:
           - {if: {decision: merge},  set: {ready_to_merge: true}, continue: true}
-          - {if: {decision: rework}, goto: implement, feedback: "Here's the feedback to address:"}        # carries comments
+          - {if: {decision: rework}, goto: implement, feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
   # ── merge ───────────────────────────────────────────────────────────
