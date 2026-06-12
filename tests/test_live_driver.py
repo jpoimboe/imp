@@ -1017,3 +1017,22 @@ def test_is_final_loud_reworking_breadcrumb_is_emitted() -> None:
                                    "resume": False, "rework": True},
                            route=None)
     assert drv._is_final(bc, container=None) is True
+
+
+def test_change_merged_suppressed_in_live_path() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("0", "change_created", id="2026-06-12-run-x", slug="2026-06-12-run-x",
+           title="Run X"),
+        ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
+        ev("2", "step_completed", step="merge-to-base", kind="merge",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("3", "change_merged", base="master", commit="37dde900abc"),
+    ]:
+        drv.on_event(e)
+    drv.finish()
+    body = "\n".join(_body(out))
+    # neither the raw event nor the friendly footer is emitted by the live driver
+    # (the friendly line is owned by main.py _emit_completed).
+    assert "change_merged" not in body
+    assert "Merged 2026-06-12-run-x" not in body

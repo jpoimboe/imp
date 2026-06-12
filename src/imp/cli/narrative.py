@@ -59,6 +59,7 @@ _PROSE_THRESHOLD = 80  # issues 5/6: string output fields longer than this (or
 class WorkflowNode:
     slug: str | None = None
     title: str = ""
+    change_id: str | None = None
     status: str = "running"            # running | paused | completed
     children: list[Any] = field(default_factory=list)
     collapsible = False
@@ -301,6 +302,14 @@ class FallbackLine:
 
 
 @dataclass
+class MergedNode:
+    """Terminal change_merged event — rendered as the friendly footer in imp log only (F5)."""
+    change_id: str
+    base: str
+    collapsible = False
+
+
+@dataclass
 class TiersResolvedNode:
     """Run-level summary of once-per-run tier resolution (the tiers_resolved
     event). Each row: {tier, provider, model, differ_tier, differ_from}.
@@ -522,6 +531,7 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
 def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._root.slug = p.get("slug")
     self._root.title = p.get("title", "")
+    self._root.change_id = p.get("id")
 
 
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
@@ -548,6 +558,18 @@ def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 
 
 NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
+
+
+def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    self._root.status = "completed"
+    descriptor = self._root.change_id or _slug_descriptor(self._root.slug or "")
+    # Append at the WORKFLOW ROOT (not the still-open phase): the merged footer is a
+    # run-level terminal line that ends the whole transcript, after every phase.
+    self._root.children.append(MergedNode(change_id=descriptor, base=str(p.get("base", ""))))
+
+
+NarrativeBuilder._HANDLERS["change_merged"] = _h_change_merged
 
 
 def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
@@ -1262,7 +1284,8 @@ def structural_repr(node: Any) -> Any:
     t = type(node).__name__
     if isinstance(node, WorkflowNode):
         return {"t": t, "slug": node.slug, "title": node.title,
-                "status": node.status, "children": [structural_repr(c) for c in node.children]}
+                "change_id": node.change_id, "status": node.status,
+                "children": [structural_repr(c) for c in node.children]}
     if isinstance(node, PhaseNode):
         return {"t": t, "name": node.name, "closed": node.closed,
                 "children": [structural_repr(c) for c in node.children]}
@@ -1309,4 +1332,6 @@ def structural_repr(node: Any) -> Any:
                 "action": node.action, "extras": node.extras}
     if isinstance(node, FallbackLine):
         return {"t": t, "event_type": node.event_type, "payload": node.payload}
+    if isinstance(node, MergedNode):
+        return {"t": t, "change_id": node.change_id, "base": node.base}
     return {"t": t}

@@ -1325,3 +1325,28 @@ def test_non_interrupt_config_error_still_renders() -> None:
         return out
 
     assert len(_errors(tree.root)) == 1
+
+
+def test_change_merged_becomes_merged_node_not_fallback() -> None:
+    tree = nv.build_tree([
+        _ev("0", "change_created", id="2026-06-12-run-x", slug="2026-06-12-run-x",
+            title="Run X"),
+        _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
+        _ev("2", "step_completed", step="merge-to-base", kind="merge",
+            action={"verb": "continue"}, var_mutations={}),
+        _ev("3", "change_merged", base="master", commit="37dde900abc"),
+    ])
+    merged = [c for c in tree.root.children if isinstance(c, nv.MergedNode)]
+    assert len(merged) == 1
+    assert merged[0].change_id == "2026-06-12-run-x"
+    assert merged[0].base == "master"
+    # the raw event no longer leaks as a fallback line anywhere in the tree
+    fbs: list[nv.FallbackLine] = []
+
+    def walk(nodes: list) -> None:
+        for n in nodes:
+            if isinstance(n, nv.FallbackLine):
+                fbs.append(n)
+            walk(getattr(n, "children", []))
+    walk(tree.root.children)
+    assert all(f.event_type != "change_merged" for f in fbs)

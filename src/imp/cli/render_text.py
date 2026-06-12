@@ -216,7 +216,8 @@ def spaces_before(node: Any) -> bool:
     lands identically in `imp log` and the live view."""
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
-        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode))
+        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode,
+                             nv.MergedNode))
     )
 
 
@@ -593,6 +594,12 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                             depth, color, *dim, gutters=gutters)
             if r.get("warning"):
                 yield _line(f"    ⚠ {r['warning']}", depth, color, *dim, gutters=gutters)
+        return
+
+    if isinstance(node, nv.MergedNode):
+        mark = "✓ " if color else ""
+        yield _line(f"{mark}Merged {node.change_id} into {node.base}.", depth, color,
+                    "green", gutters=gutters)
         return
 
     if isinstance(node, nv.FallbackLine):

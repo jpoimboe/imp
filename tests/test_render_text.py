@@ -1255,3 +1255,12 @@ def test_intentional_pause_still_renders_complete_pause() -> None:
     ]))
     assert "spec-writer complete · pause" in out
     assert "interrupted" not in out
+
+
+def test_merged_node_renders_friendly_footer() -> None:
+    node = nv.MergedNode(change_id="2026-06-12-run-x", base="master")
+    plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    assert plain == "Merged 2026-06-12-run-x into master."
+    colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert "✓ Merged 2026-06-12-run-x into master." in colored
+    assert pal._ANSI["green"] in colored
