@@ -209,6 +209,16 @@ def test_initial_selection_empty_when_claude_code_absent() -> None:
     assert _initial_selection(["anthropic", "openai"]) == set()
 
 
+def test_init_help_describes_what_it_does(capsys: pytest.CaptureFixture[str]) -> None:
+    from imp.cli.main import _build_parser
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["init", "-h"])
+    help_text = capsys.readouterr().out
+    assert "default workflow" in help_text
+    assert "never makes a git commit" in help_text
+
+
 def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
@@ -219,3 +229,19 @@ def test_init_scaffolds_commented_remote_driver(tmp_path: Path) -> None:
     assert "# remote:" in text
     assert "#   driver: telegram" in text
     assert "IMP_TELEGRAM_TOKEN" in text and "IMP_TELEGRAM_CHAT_ID" in text
+
+
+def test_post_init_manifest_does_not_claim_project_yaml_committed(
+    tmp_path: Path,
+) -> None:
+    lines: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("anthropic"),
+        input_fn=_inputs(),
+        output_fn=lines.append,
+    )
+    manifest = "\n".join(lines)
+    assert "imp/project.yaml" in manifest
+    assert "committed" not in manifest          # no false "already committed" claim
+    assert "track in git" in manifest           # correct intent: user tracks it

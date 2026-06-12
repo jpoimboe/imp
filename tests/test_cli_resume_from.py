@@ -1,6 +1,8 @@
 import shutil
 from pathlib import Path
 
+import pytest
+
 from imp.assets import default_workflow_dir
 from imp.cli.main import main
 from imp.engine.change import Change
@@ -95,7 +97,9 @@ def test_resume_from_noop_appends_event_without_rewriting_history(
     assert any(e["type"] == "step_rewound" for e in ch.event_log().read())
 
 
-def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -> None:
+def test_resume_from_cli_seam_applies_rewind_before_run(
+    tmp_path, monkeypatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """End-to-end through _async_cmd_resume (with run_change faked): proves the
     argparse flags -> preflight -> apply_rewind wiring, incl. the workflow_resumed
     BEFORE step_rewound ordering and the persisted cursor/loop-count reset."""
@@ -123,6 +127,9 @@ def test_resume_from_cli_seam_applies_rewind_before_run(tmp_path, monkeypatch) -
     args = argparse.Namespace(token="feat", from_target="recheck", force=False)
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 0
+    out = capsys.readouterr().out
+    assert "rewound from" in out
+    assert "recheck" in out
 
     # Event ordering: workflow_resumed precedes step_rewound (no gates_bypassed,
     # this is a backward/self rewind).
@@ -228,6 +235,15 @@ def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> N
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 2
     assert ran["called"] is False    # never ran a Change abandon finalized
+
+
+def test_rewind_note_line_states_from_and_to() -> None:
+    from imp.cli.main import _rewind_note_line
+    assert _rewind_note_line("plan", "spec", color=False) == \
+        "rewound from plan to spec"
+    # A None cursor (rewind to the very start) reads as 'start'.
+    assert _rewind_note_line(None, "spec", color=False) == \
+        "rewound from start to spec"
 
 
 def test_async_cmd_resume_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
