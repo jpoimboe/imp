@@ -146,8 +146,8 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
     Raises SeedError (→ rc 2) on a missing/unreadable --spec-file or combined
     seed sources."""
     title = args.title
-    spec_file = args.spec_file
-    message = args.message
+    spec_file = getattr(args, "spec_file", None)
+    message = getattr(args, "message", None)
 
     if spec_file is not None:
         if message is not None:
