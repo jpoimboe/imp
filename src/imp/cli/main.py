@@ -742,6 +742,11 @@ def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> 
             + ansi(f" · {marker}", "dim", enabled=color))
 
 
+def _rewind_note_line(from_step: str | None, target: str, *, color: bool) -> str:
+    origin = from_step or "start"
+    return ansi(f"rewound from {origin} to {target}", "dim", enabled=color)
+
+
 def _warn_if_tui_unavailable(args: argparse.Namespace, stream: Any) -> None:
     if getattr(args, "tui", False) and not getattr(stream, "isatty", lambda: False)():
         print("imp: --tui needs an interactive terminal; streaming instead.",
@@ -1056,6 +1061,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 assert workflow is not None
                 recovery.apply_rewind(
                     rewind_plan, workflow, state, change.event_log())
+                print(_rewind_note_line(
+                    rewind_plan.from_step, rewind_plan.target,
+                    color=should_use_color(sys.stdout)))
             state.save(change.state_dir)
 
             if _tui_requested(args) and not non_interactive:
@@ -1584,7 +1592,9 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
     return chosen if chosen is not None else 2
 
 
-def _abandon(control: Path, change_id: str) -> int:
+def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
+             interactive: bool | None = None,
+             input_fn: Callable[[str], str] = input) -> int:
     """Tear down a Change (worktree, branch, state) as one logged operation.
 
     Order is pinned by git (spec §2): journal BEFORE worktree removal (records
@@ -1600,6 +1610,22 @@ def _abandon(control: Path, change_id: str) -> int:
         worktree.delete_branch(control, change_id)
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
+
+    do_prompt = not assume_yes and (
+        _interactive() if interactive is None else interactive)
+    if do_prompt:
+        st = State.load(change.state_dir)
+        n = worktree.commit_count(control, change_id, change.base_branch)
+        print(f"Abandon {change_id}: {change.title!r} "
+              f"(status {st.status}, {n} commit{'s' if n != 1 else ''})?")
+        try:
+            ans = input_fn(
+                "Type 'y' to confirm, anything else to cancel: ").strip().lower()
+        except EOFError:
+            ans = ""
+        if ans not in ("y", "yes"):
+            print(f"Abandon cancelled; {change_id} left intact.")
+            return 1
 
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # timeout=0
@@ -1642,11 +1668,11 @@ def _cmd_abandon(args: argparse.Namespace) -> int:
         hits = [cid for cid in ids if cid == token] or \
                [cid for cid in ids if cid.endswith(token)]
         if len(hits) == 1:
-            return _abandon(control, hits[0])
+            return _abandon(control, hits[0], assume_yes=args.yes)
         # Truly unknown (never existed, or ambiguous) — nothing to reap.
         print(f"imp: no Change matches {token!r}", file=sys.stderr)
         return 2
-    return _abandon(control, change_id)
+    return _abandon(control, change_id, assume_yes=args.yes)
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -1693,7 +1719,8 @@ def _cmd_config(args: argparse.Namespace) -> int:
     if explain:
         render_explain(eff, explain, sys.stdout, color=should_use_color(sys.stdout))
     else:
-        render_config(eff, sys.stdout, color=should_use_color(sys.stdout))
+        render_config(eff, sys.stdout, color=should_use_color(sys.stdout),
+                      show_all=args.all)
     return 0
 
 
@@ -1730,7 +1757,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"imp {__version__}")
     sub = parser.add_subparsers(dest="cmd", required=False)
 
-    p_init = sub.add_parser("init")
+    p_init = sub.add_parser(
+        "init",
+        help="Scaffold imp in this git repository.",
+        description=(
+            "Set up imp in the current git repository: create imp/ with the\n"
+            "default workflow, write imp/project.yaml (the version-controlled\n"
+            "workflow + project settings), detect your terminal theme, and\n"
+            "bootstrap your machine-local config (providers and theme).\n"
+            "Only touches the filesystem — never makes a git commit."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_init.set_defaults(func=_cmd_init)
 
     p_new = sub.add_parser("new")
@@ -1798,6 +1836,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_config = sub.add_parser("config")
     p_config.add_argument("--explain", metavar="TIER", default=None,
                           help="trace one tier's bindings through the layers")
+    p_config.add_argument("--all", action="store_true",
+                          help="Show every provider x tier row "
+                               "(default: only configured providers).")
     p_config.set_defaults(func=_cmd_config)
 
     p_abandon = sub.add_parser(
@@ -1805,6 +1846,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a Change's worktree, branch, and state (logged).",
     )
     p_abandon.add_argument("token")
+    p_abandon.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
 
     from imp.evals.cli import add_eval_parser

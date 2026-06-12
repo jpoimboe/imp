@@ -89,3 +89,58 @@ def test_abandon_already_gone_is_idempotent_and_reaps_branch(tmp_path: Path) -> 
     rc = _abandon(tmp_path, "feat")
     assert rc == 0                                              # not the rc=2 LoadError path
     assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # reaped
+
+
+def test_commit_count_reflects_branch_commits(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    # Fresh worktree sits on main with no new commits.
+    assert worktree.commit_count(tmp_path, "feat", "main") == 0
+    wt = tmp_path / ".imp" / "worktrees" / "feat"
+    (wt / "f.txt").write_text("x")
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-qm", "work")
+    assert worktree.commit_count(tmp_path, "feat", "main") == 1
+
+
+def test_abandon_prompts_and_cancels_on_decline(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    rc = _abandon(tmp_path, "feat", interactive=True, input_fn=lambda _p: "n")
+    assert rc == 1                                              # declined
+    assert (tmp_path / ".imp" / "worktrees" / "feat").exists()  # nothing removed
+
+
+def test_abandon_prompts_and_proceeds_on_confirm(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    rc = _abandon(tmp_path, "feat", interactive=True, input_fn=lambda _p: "y")
+    assert rc == 0
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
+def test_abandon_accepts_yes_spelled_out(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    rc = _abandon(tmp_path, "feat", interactive=True, input_fn=lambda _p: "yes")
+    assert rc == 0
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
+def test_abandon_non_interactive_skips_prompt(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    rc = _abandon(tmp_path, "feat", interactive=False,
+                  input_fn=lambda _p: (_ for _ in ()).throw(AssertionError("should not prompt")))
+    assert rc == 0
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
+def test_abandon_yes_skips_prompt(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    asked: list[int] = []
+    rc = _abandon(tmp_path, "feat", assume_yes=True, interactive=True,
+                  input_fn=lambda _p: (asked.append(1), "n")[1])
+    assert rc == 0 and not asked                                # prompt skipped
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()

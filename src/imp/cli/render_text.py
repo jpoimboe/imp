@@ -315,13 +315,17 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     leading bullet: the row is indented two cols (like the tool-burst recap) to
     sit under the agent turn's words, and the magenta color marks it as subagent
     identity. A finished subagent appends `· {elapsed}` (how long it ran); an
-    abnormal terminal state (running-at-pause, failed, stalled) appends a plain
-    `(state)` tag so a subagent that didn't cleanly finish still stands out."""
+    abnormal terminal state (running-at-pause, failed, stalled, interrupted)
+    appends a plain `(state)` tag so a subagent that didn't cleanly finish still
+    stands out. A re-dispatched subagent (retry) appends `· retrying (n)` where
+    n is the attempt number (2 for the first retry, 3 for the second, etc.)."""
     label = f"  {sub.subagent_name}"
     model = _subagent_model(sub)
     if model:
         # Show the subagent's model on the row, the same way a step header does.
         label += f" · {model}"
+    if sub.retry_attempt >= 1:
+        label += f" · retrying ({sub.retry_attempt + 1})"
     if sub.running:
         label += " (running)"
     elif sub.terminal_state == "stalled":
@@ -621,7 +625,7 @@ def _call_args_line(c: nv.ToolCall) -> str:
         if len(val) > _ARG_VALUE_CLIP:
             val = val[:_ARG_VALUE_CLIP] + "…"
         parts.append(f"{k}={val}")
-    head = f"· {c.name}{tag}"
+    head = f"· {nv.display_tool_name(c.name)}{tag}"
     return f"{head}  {'  '.join(parts)}".rstrip() if parts else head
 
 
@@ -638,7 +642,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     calls = nv.visible_calls(burst)
     if not calls:
         return None
-    names = list(dict.fromkeys(c.name for c in calls))
+    names = list(dict.fromkeys(nv.display_tool_name(c.name) for c in calls))
     shown = " · ".join(names[:4])
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
     n = len(calls)

@@ -27,11 +27,15 @@ def _arrow(out: TextIO, key: str, value: str, src_file: Path) -> None:
     out.write(f"  {key:<28} {value:<24} ← {_label(src_file)}\n")
 
 
-def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False) -> None:
+def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
+                  show_all: bool = False) -> None:
     cfg, prov = eff.config, eff.provenance
     out.write("tiers:\n")
+    configured = set(cfg.providers)
     for tier in sorted(cfg.tiers):
         for vendor in sorted(cfg.tiers[tier]):
+            if not show_all and configured and vendor not in configured:
+                continue
             src = prov.get(("tiers", tier, vendor), FLOOR_SRC)
             _arrow(out, f"{tier} {vendor}", cfg.tiers[tier][vendor], src.file)
     out.write("\nsettings:\n")
