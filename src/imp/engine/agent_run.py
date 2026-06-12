@@ -38,14 +38,17 @@ from imp.engine.types import AgentDef
 # Injected into the system prompt of every agent that has the `bash` tool (see
 # build_agent_invocation). This is a PROPERTY OF HOLDING `bash`, not something
 # each prompt author must remember to paste — code-reviewer and summarizer once
-# lacked path guidance and burned tool calls feeding bad paths to `ls`/`find`/
-# `head`/`sed`. The path model is worktree-relative (Part A): no `/project`.
+# lacked path guidance and burned tool calls feeding bad paths to `find`/
+# `head`/`sed`. The path model mirrors bash: sandbox-bounded, no virtual prefix.
 _BASH_VIRTUAL_PATHS_NOTE = """\
 ## Paths are relative to the project root
 
-Your file tools (`read_file`, `write_file`, `edit_file`, `grep`, `glob`, `ls`)
-take paths **relative to the project root** (e.g. `src/foo.py`, `imp/specs/x.md`).
-Absolute paths and `..` escapes outside the project root are rejected.
+`read_file`, `write_file`, and `edit_file` take paths **relative to the project
+root** (e.g. `src/foo.py`, `imp/specs/x.md`), and also accept absolute or
+out-of-worktree paths: those are bounded exactly like `bash` — unrestricted when
+the run is unsandboxed, and confined to the sandbox's readable/writable set when
+it is active (secrets stay masked). `grep` and `glob` stay worktree-relative and
+reject absolute paths and `..` escapes.
 
 The `bash` tool already runs with its working directory set to the project root,
 so use **relative paths** there too (`cat src/foo.py`, `cd src && ...`). When you

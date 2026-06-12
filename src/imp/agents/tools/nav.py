@@ -1,9 +1,10 @@
-"""glob, grep, ls (spec §6.6).
+"""glob, grep (spec §6.6).
 
-Read-only navigation over worktree-RELATIVE paths. Every tool funnels through
-ToolContext.resolve_path for the normalize-then-contain escape guard (spec H1):
-a `..`-escape or absolute-outside-root raises PermissionDenied. Reported paths
-are relative to the worktree root.
+Read-only navigation over worktree-RELATIVE paths. Every tool routes through
+ToolContext.resolve_path_strict for the normalize-then-contain escape guard
+(spec H1): a `..`-escape or absolute-outside-root raises PermissionDenied
+(unlike the fs ops, which allow out-of-worktree paths bounded by the sandbox).
+Reported paths are relative to the worktree root.
 """
 
 from __future__ import annotations

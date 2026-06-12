@@ -1,7 +1,9 @@
 """read_file, write_file, edit_file (spec §6.6).
 
-Permissions enforced inline (no backend layer). Paths are worktree-RELATIVE and
-resolved via ToolContext.resolve_path, which enforces worktree containment.
+Every call funnels through ToolContext.authorize_fs: in-worktree paths pass
+through fs_permissions (default-allow read, default-deny write); absolute and
+out-of-worktree paths are bounded by the sandbox mirror like `bash` (allowed when
+unsandboxed, confined to the policy's read/write set when active).
 """
 
 from __future__ import annotations
@@ -36,7 +38,9 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
         "a trailing [notice] says how to continue when more lines remain "
         "(output is also bounded at 50 KB, and only the first 5 MB of a file "
         "is readable). Paths are relative to the project root (e.g. "
-        "src/foo.py). IMPORTANT: the line-number prefix is display-only — "
+        "src/foo.py); absolute and out-of-worktree paths are also accepted, "
+        "bounded by the sandbox like bash. IMPORTANT: the line-number prefix "
+        "is display-only — "
         "never copy it into any write path (edit_file's `old`, write_file's "
         "`content`, or a bash heredoc); doing so writes numbered garbage and "
         "nothing errors. Two more display artifacts are not file content: "
@@ -126,7 +130,9 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
 @imp_tool(
     name="write_file",
     description=(
-        "Write (overwrite) a file. Creates parent dirs as needed. `content` "
+        "Write (overwrite) a file. Creates parent dirs as needed. Absolute and "
+        "out-of-worktree paths are accepted, bounded by the sandbox like bash. "
+        "`content` "
         "must be file-faithful text — never read_file's numbered display "
         "output (the `{lineno}<TAB>` prefixes would be written literally)."
     ),
@@ -194,7 +200,9 @@ def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> No
 @imp_tool(
     name="edit_file",
     description=(
-        "Replace `old` with `new` in `path`. Default: `old` must occur "
+        "Replace `old` with `new` in `path`. Absolute and out-of-worktree "
+        "paths are accepted, bounded by the sandbox like bash. Default: `old` "
+        "must occur "
         "exactly once (raises if absent or not unique). With "
         "`replace_all=true`: replaces every occurrence (raises only if "
         "absent). Refuses files larger than 5 MB and files that are not "

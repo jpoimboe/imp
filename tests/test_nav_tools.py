@@ -174,3 +174,8 @@ def test_grep_reports_relative_paths(tmp_path: Path) -> None:
     out = anyio.run(get_registry()["grep"].async_invoke, ctx,
                     {"pattern": "needle", "path": ".", "output_mode": "content"})
     assert out.startswith("a.txt:")          # relative, no /project prefix
+
+
+def test_nav_module_docstring_drops_ls() -> None:
+    import imp.agents.tools.nav as nav_mod
+    assert "ls" not in (nav_mod.__doc__ or "")
