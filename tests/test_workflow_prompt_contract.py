@@ -175,3 +175,15 @@ def test_summarizer_reads_sweep_dispositions() -> None:
     assert "silent-fixed" in low      # named only to exclude it
     assert "fixed (fyi/veto)" in low or "fixed (fyi / veto)" in low
     assert "still deferred" in low
+
+
+FINAL_REVIEW = AGENTS_DIR / "final-review.md"
+
+
+def test_final_review_presents_two_lists_without_dictating_veto() -> None:
+    low = FINAL_REVIEW.read_text().lower()
+    assert "fixed (fyi/veto)" in low or "fixed (fyi / veto)" in low
+    assert "still deferred" in low
+    assert "veto" in low
+    # The veto MECHANISM is intentionally left to the agents — not prescribed here.
+    assert "not prescribe" in low or "left to the agents" in low or "do not prescribe" in low
