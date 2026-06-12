@@ -621,7 +621,7 @@ def _call_args_line(c: nv.ToolCall) -> str:
         if len(val) > _ARG_VALUE_CLIP:
             val = val[:_ARG_VALUE_CLIP] + "…"
         parts.append(f"{k}={val}")
-    head = f"· {c.name}{tag}"
+    head = f"· {nv.display_tool_name(c.name)}{tag}"
     return f"{head}  {'  '.join(parts)}".rstrip() if parts else head
 
 
@@ -638,7 +638,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     calls = nv.visible_calls(burst)
     if not calls:
         return None
-    names = list(dict.fromkeys(c.name for c in calls))
+    names = list(dict.fromkeys(nv.display_tool_name(c.name) for c in calls))
     shown = " · ".join(names[:4])
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
     n = len(calls)

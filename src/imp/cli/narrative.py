@@ -163,6 +163,10 @@ def visible_calls(burst: ToolBurstFold) -> list[ToolCall]:
     return [c for c in burst.calls if c.name not in _OMIT]
 
 
+def display_tool_name(name: str) -> str:
+    return name.rsplit("__", 1)[-1] if name.startswith("mcp__") else name
+
+
 @dataclass
 class Activity:
     """The structured live-status description (§3): count phrase, gray detail
@@ -393,7 +397,7 @@ class NarrativeBuilder:
                 if named is not None:
                     arg = _sanitize_activity_arg(
                         next(iter((named.input or {}).values()), ""))
-                    detail = f"{named.name} {arg}".rstrip()
+                    detail = f"{display_tool_name(named.name)} {arg}".rstrip()
                 return Activity(count=count, detail=detail)
             # empty filtered basis → fall through to the per-kind rule
         if self._step_stack:

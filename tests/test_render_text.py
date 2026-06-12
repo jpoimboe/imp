@@ -1255,3 +1255,22 @@ def test_intentional_pause_still_renders_complete_pause() -> None:
     ]))
     assert "spec-writer complete · pause" in out
     assert "interrupted" not in out
+
+
+def test_display_tool_name_strips_mcp_namespace() -> None:
+    assert nv.display_tool_name("mcp__invoke") == "invoke"
+    assert nv.display_tool_name("mcp__imp__read_file") == "read_file"
+    assert nv.display_tool_name("bash") == "bash"
+
+
+def test_burst_recap_strips_mcp_prefix_from_tool_names() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1",
+            name="mcp__invoke", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="ok", error=False),
+    ]))
+    assert "invoke" in out
+    assert "mcp__" not in out
