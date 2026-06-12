@@ -1274,3 +1274,16 @@ def test_burst_recap_strips_mcp_prefix_from_tool_names() -> None:
     ]))
     assert "invoke" in out
     assert "mcp__" not in out
+
+
+def test_call_args_line_strips_mcp_prefix_from_tool_name() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1",
+            name="mcp__invoke", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="ok", error=False),
+    ], full=True))
+    assert "invoke" in out
+    assert "mcp__" not in out
