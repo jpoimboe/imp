@@ -28,6 +28,21 @@ _log = logging.getLogger("imp.remote")
 _CRASH_PROBE_SECONDS = 0.2   # bound on the spawn-then-immediately-crash check
 _TERM_GRACE_SECONDS = 2.0    # SIGTERM → grace → SIGKILL window at teardown
 
+# A driver's stderr is DEBUG by default (silent; keeps the --tui alt-screen clean),
+# but a driver may opt a structural failure into visibility by prefixing the line
+# with one of these tags. Each is matched only at the very start of the line.
+_STDERR_LEVEL_TAGS = (("ERROR:", logging.ERROR), ("WARNING:", logging.WARNING))
+
+
+def _classify_stderr_line(text: str) -> tuple[int, str]:
+    """Map one driver stderr line to (log_level, message). A leading severity tag
+    is promoted (and stripped); everything else stays DEBUG. Only a tag at the very
+    start of the line counts — a level word mid-message is not a marker."""
+    for tag, level in _STDERR_LEVEL_TAGS:
+        if text.startswith(tag):
+            return level, text[len(tag):].lstrip()
+    return logging.DEBUG, text
+
 
 @dataclass(frozen=True, slots=True)
 class DriverConfig:
@@ -269,7 +284,10 @@ class RemoteChannel:
         and interleaves with streaming output (and an undrained PIPE would fill and
         wedge a chatty driver). Lines go to the `imp.remote` logger at DEBUG —
         default-silent (imp installs no handler), recoverable with debug logging.
-        Teardown closes stderr (EOF) so the worker thread ends."""
+        A driver may tag a structural failure (`WARNING:`/`ERROR:`) to promote that
+        line to a level Python's lastResort handler surfaces by default (see
+        _classify_stderr_line). Teardown closes stderr (EOF) so the worker thread
+        ends."""
         proc = self._proc
         if proc is None or proc.stderr is None:
             return
@@ -278,8 +296,9 @@ class RemoteChannel:
                 raw = await anyio.to_thread.run_sync(proc.stderr.readline)
                 if raw == b"":
                     return
-                _log.debug("driver stderr: %s",
-                           raw.decode("utf-8", "replace").rstrip("\r\n"))
+                level, message = _classify_stderr_line(
+                    raw.decode("utf-8", "replace").rstrip("\r\n"))
+                _log.log(level, "driver stderr: %s", message)
         finally:
             with contextlib.suppress(Exception):
                 proc.stderr.close()

@@ -27,3 +27,23 @@ Credentials stay in the environment (never in config). Built-ins:
 | `telegram` | Drive an imp run from a Telegram chat (outbound getUpdates; stdlib-only). | `IMP_TELEGRAM_TOKEN`, `IMP_TELEGRAM_CHAT_ID` |
 
 Run `imp config` to see the available drivers and which one is enabled.
+
+### Telegram setup
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token. A bot
+   token has the form `<id>:<auth>` — exactly **one** colon. Pasting any extra
+   suffix makes every API call fail.
+2. Open your new bot in Telegram and send it `/start` (or any message). A bot can
+   only message a chat that has messaged it first.
+3. Find your numeric chat id (e.g. message [@userinfobot](https://t.me/userinfobot)),
+   then export both credentials:
+
+   ```bash
+   export IMP_TELEGRAM_TOKEN=123456789:AA...      # <id>:<auth>, one colon
+   export IMP_TELEGRAM_CHAT_ID=987654321          # your numeric chat id
+   ```
+
+A run validates these once at startup (a `getMe` / `getChat` self-check). A rejected
+token or unreachable chat is reported at **WARNING** with a fix hint — otherwise a
+broken credential fails silently and no notifications arrive. The driver's other
+diagnostics stay quiet unless you enable debug logging for the `imp.remote` logger.

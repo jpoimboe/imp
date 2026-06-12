@@ -5,19 +5,49 @@ import io
 from imp.remote.drivers import telegram as imp_telegram
 
 
-def test_format_includes_change_title_event_type_and_body() -> None:
+def test_format_awaiting_user_input_uses_real_prompt_payload() -> None:
+    # Every provider emits awaiting_user_input with payload {"prompt": ...} (NOT
+    # "text"/"message"), so the body must come from "prompt".
     event = {
         "type": "awaiting_user_input",
         "change": {"title": "My Change", "id": "2026-06-11-abc"},
-        "payload": {"text": "need your input"},
+        "payload": {"prompt": "Which DB should I use?"},
+    }
+    # The loud header is humanized — "needs your input", not the raw event type.
+    assert imp_telegram.format_event_message(event) == (
+        "[My Change] needs your input\nWhich DB should I use?")
+
+
+def test_format_llm_response_renders_assistant_text_without_type_header() -> None:
+    # llm_response carries the assistant turn under payload["raw"]; the prose must
+    # be rendered (provider-aware) and sent ALONE — no "[title] llm_response"
+    # header leaking the internal event type into a narrative message.
+    event = {
+        "type": "llm_response",
+        "change": {"title": "T"},
+        "payload": {
+            "provider": "anthropic", "model": "m",
+            "raw": {"content": [{"type": "text", "text": "Here is my answer."}]},
+            "usage": {}, "stop_reason": "end_turn",
+        },
+    }
+    assert imp_telegram.format_event_message(event) == "Here is my answer."
+
+
+def test_format_merge_blocked_surfaces_reason_and_detail() -> None:
+    event = {
+        "type": "merge_blocked",
+        "change": {"title": "T"},
+        "payload": {"reason": "conflict", "base": "main",
+                    "detail": "CONFLICT (content): merge conflict in x.py"},
     }
     assert imp_telegram.format_event_message(event) == (
-        "[My Change] awaiting_user_input\nneed your input")
+        "[T] merge blocked\nconflict\nCONFLICT (content): merge conflict in x.py")
 
 
 def test_format_falls_back_to_change_id_then_header_only() -> None:
     event = {"type": "errored", "change": {"id": "2026-06-11-abc"}, "payload": {}}
-    assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] errored"
+    assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] error"
 
 
 def test_emit_reply_collapses_to_a_single_flushed_line() -> None:
@@ -30,7 +60,7 @@ def test_emit_reply_collapses_to_a_single_flushed_line() -> None:
 
 def test_format_falls_back_to_imp_when_no_title_and_no_id() -> None:
     event = {"type": "errored", "change": {}, "payload": {}}
-    assert imp_telegram.format_event_message(event) == "[imp] errored"
+    assert imp_telegram.format_event_message(event) == "[imp] error"
 
 
 def test_format_uses_payload_message_key_as_body() -> None:
@@ -39,10 +69,45 @@ def test_format_uses_payload_message_key_as_body() -> None:
         "change": {"title": "T"},
         "payload": {"message": "something went wrong"},
     }
-    assert imp_telegram.format_event_message(event) == "[T] errored\nsomething went wrong"
+    assert imp_telegram.format_event_message(event) == "[T] error\nsomething went wrong"
 
 
 def test_emit_reply_plain_string() -> None:
     buf = io.StringIO()
     imp_telegram.emit_reply("ok", buf)
     assert buf.getvalue() == "ok\n"
+
+
+def test_handle_event_drops_bodyless_silent_narrative() -> None:
+    # A tool-only llm_response (no prose) is silent-narrative noise: dropping it
+    # beats buzzing a bare "[title] llm_response" type name.
+    sent: list[tuple[int, str, bool]] = []
+
+    def send(chat_id: int, text: str, *, silent: bool) -> None:
+        sent.append((chat_id, text, silent))
+
+    event = {
+        "type": "llm_response",
+        "change": {"title": "T"},
+        "payload": {
+            "provider": "anthropic", "model": "m",
+            "raw": {"content": [
+                {"type": "tool_use", "id": "t1", "name": "read_file", "input": {}}]},
+            "usage": {}, "stop_reason": "tool_use",
+        },
+    }
+    assert imp_telegram.handle_event(event, send, chat_id=7) is False
+    assert sent == []
+
+
+def test_handle_event_keeps_bodyless_loud_event() -> None:
+    # A loud event's type name is itself the signal, so a bodyless loud event
+    # still notifies (header-only) rather than being dropped.
+    sent: list[tuple[int, str, bool]] = []
+
+    def send(chat_id: int, text: str, *, silent: bool) -> None:
+        sent.append((chat_id, text, silent))
+
+    event = {"type": "completed", "change": {"id": "c1"}, "payload": {}}
+    assert imp_telegram.handle_event(event, send, chat_id=7) is True
+    assert sent == [(7, "[c1] done", False)]

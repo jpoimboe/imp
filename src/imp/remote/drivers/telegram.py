@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -26,6 +27,16 @@ from typing import Any
 # silent / dropped.
 _LOUD = frozenset({"awaiting_user_input", "errored", "merge_blocked", "completed"})
 _SILENT = frozenset({"agent_output", "llm_response"})
+
+# Human-readable headers for loud events. The phone-buzzing notifications read as
+# plain English, not imp's internal snake_case event types. An unmapped type
+# falls back to its raw name (defensive — every loud type is mapped today).
+_EVENT_LABELS = {
+    "awaiting_user_input": "needs your input",
+    "merge_blocked": "merge blocked",
+    "errored": "error",
+    "completed": "done",
+}
 
 _API_BASE = "https://api.telegram.org"
 _LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
@@ -113,19 +124,59 @@ def extract_replies(
     return replies, new_offset
 
 
-def format_event_message(event: Mapping[str, Any]) -> str:
-    """Render one imp event as Telegram message text: a '[title] type' header
-    plus any human-readable payload body. Title falls back to the change id, then
-    to 'imp'."""
+def _llm_response_text(payload: Mapping[str, Any]) -> str:
+    """Render the assistant's prose from an llm_response payload. The text lives
+    in payload['raw'] in a provider-specific shape, so reuse imp's own
+    provider-aware renderer (the single source of truth shared with `imp log` and
+    the live chat). Imported lazily so this module stays import-light, and guarded
+    so a parse failure degrades to an empty body instead of crashing the driver."""
+    try:
+        from imp.cli.render_helpers import render_llm_response
+        rendered = render_llm_response(dict(payload))
+    except Exception:
+        return ""
+    return "\n".join(t for t in rendered.texts if t and t.strip()).strip()
+
+
+def event_body(event_type: Any, payload: Mapping[str, Any]) -> str:
+    """Extract the human-readable body for one event. Events carry type-specific
+    payload schemas (not a uniform 'text' field), so map the known ones; fall back
+    to the generic text/message keys for everything else."""
+    if event_type == "awaiting_user_input":
+        return str(payload.get("prompt") or payload.get("text") or "")
+    if event_type == "llm_response":
+        return _llm_response_text(payload)
+    if event_type == "merge_blocked":
+        reason = str(payload.get("reason") or "").strip()
+        detail = str(payload.get("detail") or "").strip()
+        return f"{reason}\n{detail}".strip() if detail else reason
+    return str(payload.get("text") or payload.get("message") or "")
+
+
+def _compose_message(event: Mapping[str, Any], body: str) -> str:
+    """Render the message text for an event.
+
+    Silent narrative events (the quiet running commentary — llm_response,
+    agent_output) are sent as their prose alone: the body *is* the message, so
+    there is no technical '[title] llm_response' header to leak the internal event
+    type into the chat. Loud lifecycle events keep a '[title] label' header — the
+    type name is the signal, humanized via _EVENT_LABELS (e.g. "needs your input",
+    "merge blocked"). Title falls back to the change id, then to 'imp'."""
+    body = body.strip() if isinstance(body, str) else ""
+    if event.get("type") in _SILENT:
+        return body
     change = event.get("change") or {}
     title = change.get("title") or change.get("id") or "imp"
     etype = event.get("type") or "event"
-    header = f"[{title}] {etype}"
+    header = f"[{title}] {_EVENT_LABELS.get(etype, etype)}"
+    return f"{header}\n{body}" if body else header
+
+
+def format_event_message(event: Mapping[str, Any]) -> str:
+    """Render one imp event as Telegram message text: a '[title] type' header plus
+    the event's human-readable body (resolved per event type)."""
     payload = event.get("payload") or {}
-    body = payload.get("text") or payload.get("message") or ""
-    if isinstance(body, str) and body.strip():
-        return f"{header}\n{body.strip()}"
-    return header
+    return _compose_message(event, event_body(event.get("type"), payload))
 
 
 def emit_reply(text: str, stream: Any) -> None:
@@ -182,11 +233,20 @@ def handle_event(
 ) -> bool:
     """Curate one event and, if loud/silent, send it to the chat. Returns True
     iff a message was sent (loud → notify, silent → disable_notification).
-    Dropped events return False without contacting Telegram."""
+    Dropped events return False without contacting Telegram.
+
+    A silent narrative event with no human-readable body (e.g. a tool-only
+    llm_response) is dropped: a bare '[title] llm_response' is noise, not
+    narrative. Loud events keep their header-only form — the type name is itself
+    the signal (errored, completed, merge_blocked)."""
     kind = curate(event.get("type"))
     if kind is None:
         return False
-    send(chat_id, format_event_message(event), silent=(kind == "silent"))
+    payload = event.get("payload") or {}
+    body = event_body(event.get("type"), payload)
+    if kind == "silent" and not body.strip():
+        return False
+    send(chat_id, _compose_message(event, body), silent=(kind == "silent"))
     return True
 
 
@@ -204,15 +264,99 @@ def poll_once(
     return new_offset
 
 
-def _log(msg: str) -> None:
-    """Diagnostics go to stderr; stdout is reserved for reply lines."""
-    print(f"imp-telegram: {msg}", file=sys.stderr, flush=True)
+def _log(msg: str, *, level: str = "debug") -> None:
+    """Diagnostics go to stderr; stdout is reserved for reply lines. A non-debug
+    `level` prefixes the line with an UPPER tag (e.g. ``WARNING:``) that the host
+    (remote_channel._classify_stderr_line) maps to that log level — the seam that
+    lets a structural failure escape the default-silent DEBUG channel."""
+    tag = f"{level.upper()}: " if level != "debug" else ""
+    print(f"{tag}imp-telegram: {msg}", file=sys.stderr, flush=True)
+
+
+def _probe(token: str, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    """Like `api_call`, but return Telegram's JSON body even on an HTTP error
+    status — a 4xx still carries ``{"ok": false, "description": ...}`` which is
+    exactly the structural diagnosis the self-check needs. Non-HTTP (network)
+    errors still raise, so the caller can treat them as transient."""
+    try:
+        return api_call(token, method, dict(params))
+    except urllib.error.HTTPError as exc:
+        try:
+            body: dict[str, Any] = json.loads(exc.read().decode("utf-8"))
+            return body
+        except Exception:
+            return {"ok": False, "error_code": exc.code, "description": f"HTTP {exc.code}"}
+
+
+def self_check(
+    token: str,
+    chat_id: int,
+    *,
+    probe: Callable[[str, str, Mapping[str, Any]], Mapping[str, Any]] = _probe,
+) -> None:
+    """Validate credentials once at startup and WARN (visibly) on a structural
+    failure, so a rejected token or unreachable chat is not swallowed in silence.
+    getMe validates the token; getChat validates that the bot can reach the
+    allowlisted chat. A transient network error is NOT a config problem, so it
+    stays quiet (DEBUG) — the poll/send loops will retry."""
+    try:
+        me = probe(token, "getMe", {})
+    except Exception as exc:  # network blip, not a config error → stay quiet
+        _log(f"startup check skipped (getMe unreachable: {exc})")
+        return
+    if not me.get("ok"):
+        why = me.get("description") or me.get("error_code")
+        _log(
+            f"bot token rejected by Telegram ({why}). Check IMP_TELEGRAM_TOKEN is a "
+            "full <id>:<auth> token from @BotFather — notifications will NOT be "
+            "delivered until this is fixed.",
+            level="warning")
+        return
+    try:
+        chat = probe(token, "getChat", {"chat_id": chat_id})
+    except Exception:  # transient: the poll/send loops will retry
+        return
+    if not chat.get("ok"):
+        why = chat.get("description") or chat.get("error_code")
+        _log(
+            f"chat {chat_id} is not reachable ({why}). A bot can only message a chat "
+            "that has messaged it first — open the bot in Telegram and send it /start, "
+            "or fix IMP_TELEGRAM_CHAT_ID. Notifications will NOT be delivered until "
+            "this is fixed.",
+            level="warning")
+
+
+class _SendGate:
+    """Edge-triggered failure reporting for the relay loop. The first failure
+    after a healthy stretch is loud (WARNING); subsequent failures are quiet
+    (DEBUG) to avoid one log line per event; a success re-arms the warning. This
+    keeps best-effort delivery (never raises) while making a *persistent*
+    breakage — e.g. the chat blocked the bot mid-run — visible."""
+
+    def __init__(self) -> None:
+        self._failing = False
+
+    def ok(self) -> None:
+        self._failing = False
+
+    def fail(self, exc: BaseException) -> None:
+        if self._failing:
+            _log(f"send failed: {exc}")
+            return
+        self._failing = True
+        _log(
+            f"delivery is failing ({exc}) — further failures are suppressed until a "
+            "send succeeds. Run `imp config` and check the Telegram credentials.",
+            level="warning")
 
 
 def _event_loop(stdin: Any, send: Callable[..., None], chat_id: int) -> None:
     """Read NDJSON events from imp on stdin and relay curated ones to Telegram.
     A send failure is logged and swallowed — the driver must never die on a
-    transient API error (and must never block imp)."""
+    transient API error (and must never block imp). The first failure after a
+    healthy stretch is reported at WARNING (a persistent breakage is visible);
+    repeats stay at DEBUG."""
+    gate = _SendGate()
     for raw in stdin:
         line = raw.strip()
         if not line:
@@ -223,8 +367,9 @@ def _event_loop(stdin: Any, send: Callable[..., None], chat_id: int) -> None:
             continue
         try:
             handle_event(event, send, chat_id)
+            gate.ok()
         except Exception as exc:  # best-effort: never die on a transient API error
-            _log(f"send failed: {exc}")
+            gate.fail(exc)
 
 
 def _poll_loop(
@@ -269,6 +414,10 @@ def main(
 
     send = make_send(cfg.token)
     get_updates = make_get_updates(cfg.token)
+
+    # Validate credentials loudly before relaying: a rejected token / unreachable
+    # chat is a structural failure the user must see, not a silent DEBUG line.
+    self_check(cfg.token, cfg.chat_id)
 
     # Skip the pre-startup backlog: drain once, keep only the advanced offset so
     # only post-startup messages surface (spec AC 10).
