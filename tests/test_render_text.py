@@ -1316,3 +1316,89 @@ def test_merge_gate_block_changes_with_counts() -> None:
 def test_merge_gate_block_without_tally_is_instruction_only() -> None:
     block = rt.merge_gate_block(None, base="master")
     assert block == "→ type 'merge' to merge into master, or describe what to rework."
+
+
+def test_display_tool_name_strips_mcp_namespace() -> None:
+    assert nv.display_tool_name("mcp__invoke") == "invoke"
+    assert nv.display_tool_name("mcp__imp__read_file") == "read_file"
+    assert nv.display_tool_name("bash") == "bash"
+
+
+def test_burst_recap_strips_mcp_prefix_from_tool_names() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1",
+            name="mcp__invoke", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="ok", error=False),
+    ]))
+    assert "invoke" in out
+    assert "mcp__" not in out
+
+
+def test_call_args_line_strips_mcp_prefix_from_tool_name() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1",
+            name="mcp__invoke", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="ok", error=False),
+    ], full=True))
+    assert "invoke" in out
+    assert "mcp__" not in out
+
+
+def test_retried_subagent_shows_retrying_annotation() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="boom", error=True),
+        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "(failed)" in out          # the first attempt is still marked failed
+    assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
+
+
+def test_retried_subagent_after_interrupted_shows_retrying_annotation() -> None:
+    # An interrupted (not errored) first attempt still bumps the failure counter,
+    # so the re-dispatch is annotated "retrying (2)".
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="runner cancelled", error=False, kind="interrupted"),
+        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "(interrupted)" in out     # first attempt is marked interrupted
+    assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
+
+
+def test_parallel_same_name_subagents_not_marked_retrying() -> None:
+    # Two reviewers dispatched concurrently (both open before either closes) is a
+    # panel, not a retry — neither row gets a retrying annotation.
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status": "Success"}', error=False),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "retrying" not in out

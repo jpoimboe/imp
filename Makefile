@@ -75,14 +75,6 @@ test-live-quick: ## One-step live test for the first opted-in provider only.
 	      tests/test_default_workflow_e2e_live_openai.py \
 	      tests/test_default_workflow_e2e_live_claude_code.py
 
-.PHONY: test-dogfood
-test-dogfood: ## Dogfood imp on imp via --non-interactive against the first opted-in provider (costs real tokens).
-	IMP_RUN_DOGFOOD=1 $(PYTEST_PYTHONPATH) $(PYTEST) -q tests/test_default_workflow_dogfood_live.py
-
-.PHONY: test-dogfood-verbose
-test-dogfood-verbose: ## test-dogfood with -v and the imp new/resume output streamed live.
-	IMP_RUN_DOGFOOD=1 IMP_DOGFOOD_VERBOSE=1 $(PYTEST_PYTHONPATH) $(PYTEST) -v -s tests/test_default_workflow_dogfood_live.py
-
 .PHONY: test-eval
 test-eval: ## Run the eval harness live (costs real tokens; set IMP_RUN_EVALS=1).
 	IMP_RUN_EVALS=1 $(PYTEST) -q tests/evals/test_harness_live.py tests/evals/test_e2e_live.py
@@ -168,7 +160,6 @@ define _REQUIRE_PROVIDERS
     echo "  IMP_LIVE_PROVIDERS=anthropic,openai,claude_code  (combine as desired)" >&2; \
     echo "" >&2; \
     echo "Note: per-provider one-step tests run for every provider listed." >&2; \
-    echo "      The full dogfood test uses only the FIRST provider in the list." >&2; \
     exit 1; \
   fi; \
   IFS=',' read -r -a _provs <<< "$${IMP_LIVE_PROVIDERS}"; \

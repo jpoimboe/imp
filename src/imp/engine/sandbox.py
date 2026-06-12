@@ -39,6 +39,47 @@ class SandboxPolicy:
     network: bool                             # True → no --unshare-net
     note: str = ""                            # "" | "unsandboxed_by_config" | "sandbox_disabled"
 
+    def allows_read(self, path: Path) -> bool:
+        """In-process mirror of the sandbox's read exposure: the whole host is
+        readable (--ro-bind / /) EXCEPT the secret masks — secret_dirs as path
+        prefixes, secret_files as exact paths. Deliberately stricter than bwrap
+        (which serves empties for masked reads); see spec Decisions."""
+        if any(path.is_relative_to(Path(d)) for d in self.secret_dirs):
+            return False
+        return not any(path == Path(f) for f in self.secret_files)
+
+    def bind_plan(self) -> list[tuple[str, str]]:
+        """The ordered path-covering binds, in bwrap EMIT ORDER — the SINGLE
+        source of truth shared by build_sandbox_argv (which formats each entry to
+        argv) and allows_write (which evaluates last-covering-wins). kind is one
+        of rw / ro / mask_dir / mask_file; only rw grants write. The order is
+        load-bearing: the two ro overlays (git_ro_remask, extra_readable) are NOT
+        globally last-wins — a later writable bind re-exposes a path they cover —
+        only the secret masks are unconditionally last. Add a new bind here and
+        BOTH consumers pick it up; the argv-parity test enforces no drift."""
+        return [
+            ("/tmp", "rw"),
+            (self.worktree, "rw"),
+            (self.git_common_dir, "rw"),
+            *[(p, "ro") for p in self.git_ro_remask],
+            *[(c, "rw") for c in self.writable_caches],
+            *[(r, "ro") for r in self.extra_readable],
+            *[(w, "rw") for w in self.extra_writable],
+            *[(d, "mask_dir") for d in self.secret_dirs],
+            *[(f, "mask_file") for f in self.secret_files],
+        ]
+
+    def allows_write(self, path: Path) -> bool:
+        """In-process mirror of the sandbox's write exposure. Walks bind_plan()
+        in emit order; the LAST bind covering `path` decides. Writable iff that
+        last bind is rw; a read-only overlay (git_ro_remask, extra_readable), a
+        secret mask, or no covering bind denies."""
+        verdict: str | None = None
+        for bind, kind in self.bind_plan():
+            if path.is_relative_to(Path(bind)):
+                verdict = kind
+        return verdict == "rw"
+
 
 def build_sandbox_argv(
     command: str, *, cwd: str, policy: SandboxPolicy,
@@ -67,30 +108,23 @@ def build_sandbox_argv(
     argv: list[str] = ["bwrap"]
     # 1. whole host readable
     argv += ["--ro-bind", "/", "/"]
-    # 2. real host /tmp, writable — emitted EARLY (right after the ro floor) so the
-    #    later worktree/git binds, git RO-remask, and secret masks all win over it
-    #    (bwrap is last-wins). A late /tmp bind would re-expose .git escape vectors
-    #    for a repo under /tmp. /tmp is the agent's scratch, like a normal shell.
-    argv += ["--bind", "/tmp", "/tmp"]
-    # 3-4. worktree + git db writable (real paths)
-    argv += ["--bind", policy.worktree, policy.worktree]
-    argv += ["--bind", policy.git_common_dir, policy.git_common_dir]
-    # 5. re-mask git escape vectors RO (hooks/config/config.worktree incl. siblings)
-    for p in policy.git_ro_remask:
-        argv += ["--ro-bind", p, p]
-    # 6. writable toolchain caches
-    for c in policy.writable_caches:
-        argv += ["--bind", c, c]
-    # 7-8. config extra binds (readable then writable)
-    for r in policy.extra_readable:
-        argv += ["--ro-bind", r, r]
-    for w in policy.extra_writable:
-        argv += ["--bind", w, w]
-    # 9-10. secret masks — LAST, AFTER every bind (last-wins; spec L1-r5)
-    for d in policy.secret_dirs:
-        argv += ["--tmpfs", d]
-    for f in policy.secret_files:
-        argv += ["--ro-bind", "/dev/null", f]
+    # 2-10. path-covering binds, in emit order from policy.bind_plan() (the single
+    #    source shared with allows_write). Emit order is load-bearing and last-wins:
+    #    /tmp goes EARLY (right after the ro floor) so the later worktree/git binds,
+    #    git RO-remask, and secret masks all win over it — a late /tmp bind would
+    #    re-expose .git escape vectors for a repo under /tmp; secret masks go LAST.
+    #    /tmp is the agent's scratch, like a normal shell.
+    for bind, kind in policy.bind_plan():
+        if kind == "rw":
+            argv += ["--bind", bind, bind]
+        elif kind == "ro":
+            argv += ["--ro-bind", bind, bind]
+        elif kind == "mask_dir":
+            argv += ["--tmpfs", bind]
+        elif kind == "mask_file":
+            argv += ["--ro-bind", "/dev/null", bind]
+        else:  # unreachable; guards a future bind_plan kind from silently vanishing
+            raise AssertionError(f"unknown bind kind {kind!r} for {bind!r}")
     # 11. proc/dev
     argv += ["--proc", "/proc", "--dev", "/dev"]
     # 12. chdir

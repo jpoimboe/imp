@@ -11,6 +11,7 @@ from imp.agents.permissions import PermissionDenied
 from imp.agents.tools import get_registry
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import ToolAborted
+from imp.engine.sandbox import SandboxPolicy
 from imp.engine.types import FsRule, SourceLoc
 
 
@@ -44,6 +45,10 @@ def _read_file(ctx: ToolContext, **args: object) -> str:
 
 def _edit_file(ctx: ToolContext, **args: object) -> str:
     return anyio.run(get_registry()["edit_file"].async_invoke, ctx, args)
+
+
+def _write_file(ctx: ToolContext, **args: object) -> str:
+    return anyio.run(get_registry()["write_file"].async_invoke, ctx, args)
 
 
 def test_read_file_returns_numbered_contents(tmp_path: Path) -> None:
@@ -84,12 +89,6 @@ def test_write_file_default_denied(tmp_path: Path) -> None:
         get_registry()["write_file"].invoke(ctx, {"path": "x.txt", "content": "x"})
 
 
-def test_write_file_rejects_escape(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path, "write")
-    with pytest.raises(PermissionDenied):
-        get_registry()["write_file"].invoke(ctx, {"path": "../evil.txt", "content": "x"})
-
-
 def test_edit_file_unique_replacement(tmp_path: Path) -> None:
     (tmp_path / "x.py").write_text("def foo():\n    return 1\n")
     ctx = _ctx(tmp_path, "read", "write")
@@ -109,3 +108,28 @@ def test_edit_file_missing_raises(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path, "read", "write")
     with pytest.raises(ValueError, match="not found"):
         _edit_file(ctx, path="x.py", old="missing", new="x")
+
+
+def test_write_then_read_out_of_worktree_unsandboxed(tmp_path: Path) -> None:
+    # sandbox_policy is None (default) → bash parity: out-of-worktree writes ok.
+    ctx = _ctx(tmp_path, "read", "write")
+    out = tmp_path.parent / "imp_outside.txt"
+    try:
+        msg = _write_file(ctx, path=str(out), content="hi there")
+        assert out.read_text() == "hi there"
+        assert "hi there" in _read_file(ctx, path=str(out))
+        assert str(out) in msg
+    finally:
+        if out.exists():
+            out.unlink()
+
+
+def test_write_out_of_worktree_denied_when_sandboxed_and_uncovered(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path, "read", "write")
+    ctx.sandbox_policy = SandboxPolicy(
+        active=True, worktree=str(tmp_path), git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(), writable_caches=(), extra_readable=(), extra_writable=(),
+        secret_dirs=(), secret_files=(), setenv=(), network=True, note="",
+    )
+    with pytest.raises(PermissionDenied):
+        _write_file(ctx, path="/usr/lib/imp_should_not_write.txt", content="x")

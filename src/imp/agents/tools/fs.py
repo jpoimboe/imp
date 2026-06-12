@@ -1,7 +1,9 @@
 """read_file, write_file, edit_file (spec §6.6).
 
-Permissions enforced inline (no backend layer). Paths are worktree-RELATIVE and
-resolved via ToolContext.resolve_path, which enforces worktree containment.
+Every call funnels through ToolContext.authorize_fs: in-worktree paths pass
+through fs_permissions (default-allow read, default-deny write); absolute and
+out-of-worktree paths are bounded by the sandbox mirror like `bash` (allowed when
+unsandboxed, confined to the policy's read/write set when active).
 """
 
 from __future__ import annotations
@@ -36,7 +38,9 @@ from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_
         "a trailing [notice] says how to continue when more lines remain "
         "(output is also bounded at 50 KB, and only the first 5 MB of a file "
         "is readable). Paths are relative to the project root (e.g. "
-        "src/foo.py). IMPORTANT: the line-number prefix is display-only — "
+        "src/foo.py); absolute and out-of-worktree paths are also accepted, "
+        "bounded by the sandbox like bash. IMPORTANT: the line-number prefix "
+        "is display-only — "
         "never copy it into any write path (edit_file's `old`, write_file's "
         "`content`, or a bash heredoc); doing so writes numbered garbage and "
         "nothing errors. Two more display artifacts are not file content: "
@@ -53,8 +57,7 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
         raise ValueError(f"offset must be an integer >= 1, got {offset!r}")
     if type(limit) is not int or limit < 1:
         raise ValueError(f"limit must be an integer >= 1, got {limit!r}")
-    ctx.check_fs_permission("read", path)
-    resolved = ctx.resolve_path(path)
+    resolved = ctx.authorize_fs(("read",), path)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
     try:
@@ -127,14 +130,15 @@ async def read_file(ctx: ToolContext, path: str, *, offset: int = 1, limit: int 
 @imp_tool(
     name="write_file",
     description=(
-        "Write (overwrite) a file. Creates parent dirs as needed. `content` "
+        "Write (overwrite) a file. Creates parent dirs as needed. Absolute and "
+        "out-of-worktree paths are accepted, bounded by the sandbox like bash. "
+        "`content` "
         "must be file-faithful text — never read_file's numbered display "
         "output (the `{lineno}<TAB>` prefixes would be written literally)."
     ),
 )
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
-    ctx.check_fs_permission("write", path)
-    resolved = ctx.resolve_path(path)
+    resolved = ctx.authorize_fs(("write",), path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(content)
     return f"wrote {len(content)} bytes to {path}"
@@ -196,7 +200,9 @@ def _atomic_write_bytes(resolved: Path, data: bytes, *, display_path: str) -> No
 @imp_tool(
     name="edit_file",
     description=(
-        "Replace `old` with `new` in `path`. Default: `old` must occur "
+        "Replace `old` with `new` in `path`. Absolute and out-of-worktree "
+        "paths are accepted, bounded by the sandbox like bash. Default: `old` "
+        "must occur "
         "exactly once (raises if absent or not unique). With "
         "`replace_all=true`: replaces every occurrence (raises only if "
         "absent). Refuses files larger than 5 MB and files that are not "
@@ -216,9 +222,7 @@ async def edit_file(ctx: ToolContext, path: str, old: str, new: str, *,
         # count("") > 1 uniqueness error blocked this, with a misleading
         # message; replace_all=True removes exactly that accident.)
         raise ValueError("old must not be empty")
-    ctx.check_fs_permission("read", path)
-    ctx.check_fs_permission("write", path)
-    resolved = ctx.resolve_path(path)
+    resolved = ctx.authorize_fs(("read", "write"), path)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
     # Bounded via the READ itself, not a stat-then-read guard (a file that

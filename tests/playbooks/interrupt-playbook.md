@@ -381,6 +381,21 @@ After the matrix: run `RESUME-AND-VERIFY` on the last paused change. Then delive
 `send_signal(sig=15)` (SIGTERM) on a fresh `imp new` run mid-execution and verify
 `paused (sigterm)`.
 
+### 6a. Negative / edge-case checks (run at least once across the suite)
+
+These don't need to run at every point — fire each **at least once** somewhere in the suite.
+
+- **Double / mashed Ctrl-C (point B).** With the model streaming, deliver Ctrl-C *twice in
+  quick succession* — **CLI:** two `send_signal(2)` back-to-back; **TUI:** two `\x03`
+  keystrokes (`send("\x03", wait=False)` twice). Expect a **single clean pause**, not a
+  traceback, a double-pause, or a hang: one `paused (ctrl-c)` line, `alive=False`, resumable.
+- **Very-early interrupt (point A window).** Ctrl-C in the brief window right after spawning
+  imp, *before* the first prompt/agent appears — **CLI:** `send("\x03", wait=False)` immediately
+  after the §5 spawn without waiting for the prompt; **TUI:** the same keystroke before the
+  opening buffer is ready. Nothing is running, so expect **no `interrupted` event**. Record
+  whatever happens: a clean `paused`/exit is preferred; a traceback, a hang, or an unkillable
+  process is a bug.
+
 ---
 
 ## 7. Report
