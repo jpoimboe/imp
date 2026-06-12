@@ -1624,6 +1624,11 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Headless reply consumed by the first wait_for_user; "
                             "pause+resume with another --message. "
                             "Requires --non-interactive.")
+    p_new.add_argument("--spec-file", metavar="PATH", default=None,
+                       help="Seed the change from a draft spec file: its content "
+                            "becomes the spec-writer's opening intent. A missing or "
+                            "unreadable PATH is a hard error (rc 2). May be combined "
+                            "with a positional name, but not with --message.")
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
