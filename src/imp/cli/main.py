@@ -20,6 +20,7 @@ from typing import Any, NamedTuple, NoReturn
 
 import anyio
 
+from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import change_row, resume_select
 from imp.cli import palette as pal
@@ -1725,7 +1726,8 @@ def render_overview(color: bool) -> str:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    parser.add_argument("--version", action="version", version=f"imp {__version__}")
+    sub = parser.add_subparsers(dest="cmd", required=False)
 
     p_init = sub.add_parser("init")
     p_init.set_defaults(func=_cmd_init)
@@ -1809,9 +1811,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | None:
+    if not args:
+        _apply_theme()
+        print(render_overview(should_use_color(sys.stdout)))
+        return 0
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    ns = _build_parser().parse_args(args)
+    parser = _build_parser()
+    result = _dispatch_meta(args, parser)
+    if result is not None:
+        return result
+    ns = parser.parse_args(args)
     _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
         rc: int = ns.func(ns)
