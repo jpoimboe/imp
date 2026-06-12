@@ -1851,12 +1851,16 @@ def _dispatch_meta(args: list[str], parser: argparse.ArgumentParser) -> int | No
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     parser = _build_parser()
-    result = _dispatch_meta(args, parser)
-    if result is not None:
-        return result
-    ns = parser.parse_args(args)
-    _apply_theme()   # resolve dark/light/ansi once, before any command renders
     try:
+        result = _dispatch_meta(args, parser)
+        if result is not None:
+            # _dispatch_meta may have printed the overview/unknown-command
+            # error above; that write belongs inside the guard too. Flush here
+            # for the same buffered-pipe reason as the command path below.
+            sys.stdout.flush()
+            return result
+        ns = parser.parse_args(args)
+        _apply_theme()   # resolve dark/light/ansi once, before any command renders
         rc: int = ns.func(ns)
         # Flush here, inside the guard: output small enough to fit Python's
         # stdout buffer is otherwise flushed at interpreter shutdown, where a
