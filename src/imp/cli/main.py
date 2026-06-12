@@ -1725,7 +1725,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="imp")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_init = sub.add_parser("init")
+    p_init = sub.add_parser(
+        "init",
+        help="Scaffold imp in this git repository.",
+        description=(
+            "Set up imp in the current git repository: create imp/ with the\n"
+            "default workflow, write imp/project.yaml (the version-controlled\n"
+            "workflow + project settings), detect your terminal theme, and\n"
+            "bootstrap your machine-local config (providers, theme, editing\n"
+            "mode). Creates files on disk only — never makes a git commit."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p_init.set_defaults(func=_cmd_init)
 
     p_new = sub.add_parser("new")
