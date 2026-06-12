@@ -38,11 +38,13 @@ def test_resume_real_parser_accepts_from_and_force(tmp_path, monkeypatch) -> Non
     assert rc == 2          # returned (not raised) => flags parsed fine
 
 
-def test_no_fork_or_rebase_subcommand() -> None:
-    with pytest.raises(SystemExit):
-        main(["fork", "feat"])
-    with pytest.raises(SystemExit):
-        main(["rebase", "feat"])
+def test_no_fork_or_rebase_subcommand(capsys) -> None:
+    # `fork`/`rebase` are not real subcommands. Since imp-entrypoint-help-ux,
+    # an unknown command returns rc 2 with a friendly message (no SystemExit).
+    assert main(["fork", "feat"]) == 2
+    assert "unknown command 'fork'" in capsys.readouterr().err
+    assert main(["rebase", "feat"]) == 2
+    assert "unknown command 'rebase'" in capsys.readouterr().err
 
 
 def test_resume_from_rejects_nonresumable_status(tmp_path, monkeypatch) -> None:

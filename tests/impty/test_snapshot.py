@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -8,20 +7,9 @@ import pytest
 from PIL import Image
 
 from impty import TerminalSession
+from tests.impty.e2e_support import can_pty
 
-
-def _can_pty() -> bool:
-    try:
-        import pty
-        m, s = pty.openpty()
-        os.close(m)
-        os.close(s)
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(not _can_pty(), reason="pty not available")
+pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
 
 
 def test_snapshot_carries_a_truecolor_cell_into_the_png(tmp_path: Path) -> None:

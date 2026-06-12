@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import signal
 import sys
 from pathlib import Path
@@ -8,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from impty import TerminalSession
-from tests.impty.e2e_support import can_pty, seed_minimal_repo
+from tests.impty.e2e_support import can_pty, clean_env, seed_minimal_repo
 from tests.impty.matchers import assert_screen
 
 pytestmark = pytest.mark.skipif(not can_pty(), reason="pty not available")
@@ -21,7 +20,7 @@ def test_midrun_sigint_pauses_with_exit_130_and_a_resume_hint(tmp_path: Path) ->
         {"name": "complete_step", "input": {"status": "Success"}},
     ]}]}
     script_path = seed_minimal_repo(tmp_path, script=script)
-    env = {**os.environ, "IMP_SCRIPTED_SCRIPT": str(script_path), "IMP_THEME": "ansi"}
+    env = clean_env(IMP_SCRIPTED_SCRIPT=str(script_path), IMP_THEME="ansi")
 
     with TerminalSession(
         [sys.executable, "-m", "imp", "new", "demo", "--non-interactive"],
