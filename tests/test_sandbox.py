@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import types as _types
+from pathlib import Path
 
 import pytest
 
@@ -423,3 +424,74 @@ def test_build_sandbox_policy_active_path_builds_policy_silently(tmp_path, monke
     # active is the silent common case — no posture event is emitted.
     assert not any(e["type"] in ("sandbox_inactive", "sandbox_unavailable")
                    for e in log.events)
+
+
+def _mirror_policy() -> SandboxPolicy:
+    # A synthetic policy that exercises every bind class, including a remask
+    # under git_common_dir, a remask OUTSIDE all writable roots, and an
+    # extra_writable that overlaps a remask (to pin positional last-wins).
+    return _policy(
+        worktree="/wt",
+        git_common_dir="/ctl/.git",
+        git_ro_remask=("/ctl/.git/hooks", "/ctl/.git/config", "/elsewhere/ro"),
+        writable_caches=("/home/u/.cache",),
+        extra_readable=("/ro_extra",),
+        extra_writable=("/rw_extra",),
+        secret_dirs=("/home/u/.ssh", "/run/user/1000"),
+        secret_files=("/home/u/.netrc",),
+    )
+
+
+def test_allows_write_writable_roots():
+    p = _mirror_policy()
+    assert p.allows_write(Path("/wt/file")) is True
+    assert p.allows_write(Path("/ctl/.git/objects/x")) is True   # git_common_dir
+    assert p.allows_write(Path("/tmp/scratch.txt")) is True
+    assert p.allows_write(Path("/home/u/.cache/x")) is True      # writable cache
+    assert p.allows_write(Path("/rw_extra/x")) is True           # extra_writable
+
+
+def test_allows_write_uncovered_and_masked_denied():
+    p = _mirror_policy()
+    assert p.allows_write(Path("/usr/lib/x")) is False           # no covering bind
+    assert p.allows_write(Path("/home/u/.ssh/id_rsa")) is False  # secret dir mask
+    assert p.allows_write(Path("/home/u/.netrc")) is False       # secret file mask
+
+
+def test_allows_write_ro_remask_denied_both_positions():
+    p = _mirror_policy()
+    # Remask UNDER git_common_dir: the step-5 ro-bind wins over the step-4 git
+    # writable bind — a mirror that only subtracts the remask from git_common_dir
+    # would (wrongly) still pass this if it dropped the outside case below.
+    assert p.allows_write(Path("/ctl/.git/hooks/pre-commit")) is False
+    # Remask OUTSIDE all writable roots: covered only by the remask, denied.
+    assert p.allows_write(Path("/elsewhere/ro/x")) is False
+
+
+def test_allows_write_extra_readable_denied():
+    p = _mirror_policy()
+    # The symmetric read-only-overlay case (extra_readable, step 7).
+    assert p.allows_write(Path("/ro_extra/x")) is False
+
+
+def test_allows_write_later_writable_bind_reexposes_remask():
+    # Positional last-wins, NOT "ro overlay is globally last-wins": an
+    # extra_writable (step 8) covering a remask path (step 5) re-exposes it,
+    # exactly as bwrap would. A globally-last-wins mirror fails this. Built via
+    # _policy (SandboxPolicy is a frozen slots dataclass — construct, don't mutate).
+    p = _policy(
+        worktree="/wt", git_common_dir="/ctl/.git",
+        git_ro_remask=("/ctl/.git/hooks",),
+        extra_writable=("/ctl/.git/hooks",),
+        writable_caches=(), extra_readable=(),
+        secret_dirs=(), secret_files=(),
+    )
+    assert p.allows_write(Path("/ctl/.git/hooks/pre-commit")) is True
+
+
+def test_allows_read_masks_secrets_allows_rest():
+    p = _mirror_policy()
+    assert p.allows_read(Path("/home/u/.ssh/id_rsa")) is False   # secret dir
+    assert p.allows_read(Path("/home/u/.netrc")) is False        # secret file (exact)
+    assert p.allows_read(Path("/usr/lib/x")) is True             # ordinary host path
+    assert p.allows_read(Path("/wt/file")) is True               # worktree path

@@ -7,6 +7,7 @@ import pytest
 
 from imp.agents.permissions import PermissionDenied
 from imp.agents.tools.context import ToolContext
+from imp.engine.sandbox import SandboxPolicy
 from imp.engine.types import FsRule, SourceLoc
 
 
@@ -22,25 +23,6 @@ def test_resolve_project_path(tmp_path: Path) -> None:
     # Paths are now worktree-relative; /project/ prefix is gone.
     assert ctx.resolve_path("src/x.py") == (tmp_path / "src" / "x.py").resolve()
 
-
-def test_resolve_absolute_outside_root_rejected(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        ctx.resolve_path("/artifacts/spec.md")
-
-
-def test_resolve_scratch_denied(tmp_path: Path) -> None:
-    # /scratch is gone — absolute paths outside root are denied.
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        ctx.resolve_path("/scratch/notes.md")
-
-
-def test_unknown_prefix_raises(tmp_path: Path) -> None:
-    # Any absolute path outside the root raises PermissionDenied.
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        ctx.resolve_path("/elsewhere/x")
 
 
 def test_check_fs_permission_passthrough(tmp_path: Path) -> None:
@@ -183,41 +165,101 @@ def test_tool_context_tiers_defaults_empty(tmp_path) -> None:
     assert ctx.tiers == ("low", "high")
 
 
-# --- New containment tests (Part A1) ---
+# --- resolve_path / resolve_path_strict / authorize_fs tests ---
 
 def test_resolve_path_relative_maps_under_root(tmp_path):
     ctx = _ctx(tmp_path)
     assert ctx.resolve_path("src/foo.py") == (tmp_path / "src" / "foo.py").resolve()
 
 
-def test_resolve_path_rejects_parent_escape(tmp_path):
+def test_resolve_path_returns_out_of_worktree_without_raise(tmp_path: Path) -> None:
+    # New contract: resolve_path no longer fences the worktree — it resolves
+    # and returns. authorize_fs is the gate now.
+    ctx = _ctx(tmp_path)
+    assert ctx.resolve_path("/etc/passwd") == Path("/etc/passwd")
+    assert ctx.resolve_path("/artifacts/spec.md") == Path("/artifacts/spec.md")
+
+
+def test_resolve_path_relative_still_maps_under_root(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    assert ctx.resolve_path("src/x.py") == (tmp_path / "src" / "x.py").resolve()
+
+
+def test_resolve_path_strict_rejects_absolute_outside_root(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     with pytest.raises(PermissionDenied):
-        ctx.resolve_path("../../etc/passwd")
+        ctx.resolve_path_strict("/etc/passwd")
 
 
-def test_resolve_path_rejects_absolute_outside_root(tmp_path):
+def test_resolve_path_strict_rejects_parent_escape(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     with pytest.raises(PermissionDenied):
-        ctx.resolve_path("/etc/passwd")
+        ctx.resolve_path_strict("../../etc/passwd")
 
 
-def test_resolve_path_normalizes_embedded_traversal(tmp_path):
-    # A permission glob like imp/specs/** would *match* this string, so the
-    # ONLY thing blocking escape is normalize-then-contain (spec A.3.5).
+def test_resolve_path_strict_normalizes_embedded_traversal(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     with pytest.raises(PermissionDenied):
-        ctx.resolve_path("imp/specs/../../../etc/passwd")
+        ctx.resolve_path_strict("imp/specs/../../../etc/passwd")
 
 
-def test_resolve_path_no_scratch_or_project_prefix(tmp_path):
-    # /scratch and /project are GONE — they resolve as ordinary relative paths,
-    # which (being absolute) escape the root and are denied.
+def test_resolve_path_strict_maps_relative_under_root(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
+    assert ctx.resolve_path_strict("src/foo.py") == (tmp_path / "src" / "foo.py").resolve()
+
+
+def _active_policy(tmp_path: Path) -> SandboxPolicy:
+    return SandboxPolicy(
+        active=True,
+        worktree=str(tmp_path),
+        git_common_dir=str(tmp_path / ".git"),
+        git_ro_remask=(),
+        writable_caches=(),
+        extra_readable=(),
+        extra_writable=(),
+        secret_dirs=("/home/u/.ssh",),
+        secret_files=("/home/u/.netrc",),
+        setenv=(),
+        network=True,
+        note="",
+    )
+
+
+def test_authorize_fs_in_worktree_applies_fs_permissions(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)                       # no rules → default-deny write
+    ctx.authorize_fs(("read",), "a.txt")       # default-allow read: ok
     with pytest.raises(PermissionDenied):
-        ctx.resolve_path("/project/foo")
+        ctx.authorize_fs(("write",), "a.txt")  # default-deny write
+    ctx_w = _ctx(tmp_path, rules=(_allow(("write",), ("**",)),))
+    assert ctx_w.authorize_fs(("write",), "a.txt") == (tmp_path / "a.txt").resolve()
+
+
+def test_authorize_fs_out_of_worktree_unsandboxed_allows(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)                        # sandbox_policy is None → bash parity
+    out = tmp_path.parent / "outside.txt"
+    assert ctx.authorize_fs(("write",), str(out)) == out.resolve()
+    assert ctx.authorize_fs(("read",), str(out)) == out.resolve()
+
+
+def test_authorize_fs_out_of_worktree_sandboxed_read(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    ctx.sandbox_policy = _active_policy(tmp_path)
+    # secret-masked read denied; ordinary out-of-worktree read allowed
     with pytest.raises(PermissionDenied):
-        ctx.resolve_path("/scratch/foo")
+        ctx.authorize_fs(("read",), "/home/u/.ssh/id_rsa")
+    with pytest.raises(PermissionDenied):
+        ctx.authorize_fs(("read",), "/home/u/.netrc")
+    assert ctx.authorize_fs(("read",), "/usr/share/x") == Path("/usr/share/x")
+
+
+def test_authorize_fs_out_of_worktree_sandboxed_write(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    ctx.sandbox_policy = _active_policy(tmp_path)
+    assert ctx.authorize_fs(("write",), "/tmp/scratch.txt") == Path("/tmp/scratch.txt")
+    with pytest.raises(PermissionDenied):
+        ctx.authorize_fs(("write",), "/usr/lib/x")          # no writable bind
+    with pytest.raises(PermissionDenied):
+        ctx.authorize_fs(("write",), "/home/u/.ssh/id_rsa")  # secret mask
 
 
 def test_background_registry_and_bg_ids(tmp_path) -> None:

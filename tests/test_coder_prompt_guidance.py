@@ -33,3 +33,12 @@ def test_implementer_holds_bash_so_it_receives_the_note() -> None:
     # The note reaches the implementer because its frontmatter declares `bash`;
     # build_agent_invocation injects on tool presence (see test_agent_run.py).
     assert "bash" in IMPLEMENTER.read_text()
+
+
+def test_bash_paths_note_drops_ls_and_describes_sandbox_bound() -> None:
+    note = _BASH_VIRTUAL_PATHS_NOTE
+    assert "`ls`" not in note                       # the stray ls tool mention is gone
+    assert "sandbox" in note.lower()                # new out-of-worktree model named
+    assert "relative to the project root" in note   # preserved for the prompt contract
+    assert "grep" in note and "glob" in note     # nav tools named as worktree-relative
+    assert "worktree" in note.lower() or "worktree-relative" in note.lower()
