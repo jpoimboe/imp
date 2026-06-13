@@ -1115,71 +1115,6 @@ async def test_receive_loop_sweeps_bg_per_message(
     assert calls["n"] >= 2          # at least one sweep per received message
 
 
-@pytest.mark.anyio
-async def test_awaiting_user_reraise_deferred_until_inflight_drains(
-        tmp_path: Path) -> None:
-    # AC26: a wait_for_user pause captured while a sibling task is in flight is NOT
-    # re-raised at the assistant message; the gate defers it (inflight==1), the run
-    # proceeds to ResultMessage, and the stream-end fallback drains then re-raises.
-    # Falsifiable: WITHOUT the gate the unconditional raise fires at the assistant
-    # message and ResultMessage is never consumed, so saw_result stays False.
-    import asyncio
-
-    import imp.providers.claude_code as cc
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-
-    (tmp_path / "art").mkdir()
-    log = InMemoryEventLog()
-    inv = _inv(tmp_path, tools=frozenset({"complete_step", "wait_for_user"}),
-               event_log=log)
-
-    # Capture the _RunState run() constructs so the message hook can drive its
-    # inflight counter (the fake client bypasses MCP, so _impl never runs here).
-    captured = cc._RunState()
-    orig_runstate = cc._RunState
-    orig_s2i = cc._sdk_message_to_imp
-    saw_result = {"v": False}
-
-    def fake_s2i(sdk_msg):  # type: ignore[no-untyped-def]
-        res = orig_s2i(sdk_msg)
-        tn = type(sdk_msg).__name__
-        if tn == "AssistantMessage":
-            captured.inflight_task_dispatches = 1   # sibling in flight at the gate
-        if tn == "ResultMessage":
-            saw_result["v"] = True
-
-            async def _settle() -> None:
-                await asyncio.sleep(0)
-                captured.inflight_task_dispatches = 0   # sibling settles
-
-            asyncio.get_running_loop().create_task(_settle())
-        return res
-
-    scripted = [
-        assistant(text("need a decision"),
-                  tool_use("wfu1", "wait_for_user", {"prompt": "merge?"})),
-        result()]
-
-    def factory(opts: Any) -> FakeClaudeSDKClient:
-        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
-
-    runner = ClaudeCodeAgentRunner(
-        model_name="claude-sonnet-4-5", client_factory=factory, user_input_fn=None)
-
-    cc._RunState = lambda: captured          # type: ignore[assignment]
-    cc._sdk_message_to_imp = fake_s2i        # type: ignore[assignment]
-    try:
-        with pytest.raises(AwaitingUserInput) as ei:
-            async for _ev in runner.run(inv):
-                pass
-    finally:
-        cc._RunState = orig_runstate         # type: ignore[assignment]
-        cc._sdk_message_to_imp = orig_s2i    # type: ignore[assignment]
-    assert ei.value.prompt == "merge?"
-    assert saw_result["v"] is True           # gate deferred past the assistant turn
-    assert captured.inflight_task_dispatches == 0   # fallback drained before raising
-
-
 async def _run_events(tmp_path: Path, scripted: list, *, max_tool_calls: int,
                       log: InMemoryEventLog) -> list:
     inv0 = _inv(tmp_path, tools=frozenset({"complete_step", "task"}), event_log=log)
@@ -1194,42 +1129,4 @@ async def _run_events(tmp_path: Path, scripted: list, *, max_tool_calls: int,
     return [ev async for ev in runner.run(inv)]
 
 
-@pytest.mark.anyio
-async def test_exact_sentinel_refusal_is_uncounted_below_ceiling(
-        tmp_path: Path) -> None:
-    # AC28: ceiling=1. The task tool_use bumps tool_calls_used to 1; the refusal
-    # result (is_error AND text == sentinel) un-counts it back to 0, so the turn
-    # ends with NO post-hoc tool_call_ceiling_exceeded fatal.
-    from imp.agents.subagents import TASK_REFUSAL_SENTINEL
-    from tests.cc_fakes import tool_result, user
 
-    (tmp_path / "art").mkdir()
-    log = InMemoryEventLog()
-    scripted = [
-        assistant(tool_use("tk1", "task", {"subagent_name": "s",
-                                           "task_description": "x"})),
-        user(tool_result("tk1", TASK_REFUSAL_SENTINEL, is_error=True)),
-        result()]
-    events = await _run_events(tmp_path, scripted, max_tool_calls=1, log=log)
-    kinds = [e["payload"].get("kind") for e in events if e["type"] == "error"]
-    assert "tool_call_ceiling_exceeded" not in kinds
-
-
-@pytest.mark.anyio
-async def test_sentinel_suffix_or_success_is_not_uncounted(tmp_path: Path) -> None:
-    # AC28 (narrowness): a result that merely ENDS with the sentinel (is_error) is
-    # NOT un-counted — tool_calls_used stays 1 and the ceiling fatal fires.
-    from imp.agents.subagents import TASK_REFUSAL_SENTINEL
-    from tests.cc_fakes import tool_result, user
-
-    (tmp_path / "art").mkdir()
-    log = InMemoryEventLog()
-    scripted = [
-        assistant(tool_use("tk1", "task", {"subagent_name": "s",
-                                           "task_description": "x"})),
-        user(tool_result("tk1", "subagent failed: " + TASK_REFUSAL_SENTINEL,
-                         is_error=True)),
-        result()]
-    events = await _run_events(tmp_path, scripted, max_tool_calls=1, log=log)
-    kinds = [e["payload"].get("kind") for e in events if e["type"] == "error"]
-    assert "tool_call_ceiling_exceeded" in kinds

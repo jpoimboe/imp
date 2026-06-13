@@ -81,26 +81,8 @@ def test_reassemble_codex_turn_builds_full_turn_raw() -> None:
     ]}
 
 
-def test_reassemble_rekeys_task_tool_use_to_minted_id() -> None:
-    """AC24: a task tool_use block is re-keyed from its SDK item id to the minted
-    event id (from the audit map) so it pairs id-consistently with the live
-    tool_result keyed to that minted id; a non-task call keeps its SDK id."""
-    items = [
-        FakeMcpToolCallItem(tool="task", arguments={"subagent_name": "impl"},
-                            id="sdk-task-1"),
-        FakeMcpToolCallItem(tool="write_file", arguments={"path": "a.py"},
-                            id="sdk-wf-1"),
-    ]
-    audit = {"sdk-task-1": "MINTED-EVENT-7"}
-    raw = reassemble_codex_turn(items, audit=audit)
-    blocks = {b["name"]: b["id"] for b in raw["content"]}
-    assert blocks["task"] == "MINTED-EVENT-7"  # re-keyed
-    assert blocks["write_file"] == "sdk-wf-1"  # untouched
-
-
-def test_reassemble_without_audit_keeps_sdk_ids() -> None:
-    """Back-compat: with no audit map (or an absent entry) task blocks keep their
-    SDK item id — the default path the existing reassembly tests exercise."""
+def test_reassemble_task_tool_use_keeps_sdk_id() -> None:
+    """Task tool_use blocks keep their SDK item id."""
     items = [FakeMcpToolCallItem(tool="task", arguments={"subagent_name": "impl"},
                                  id="sdk-task-9")]
     raw = reassemble_codex_turn(items)

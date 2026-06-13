@@ -26,13 +26,11 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from imp.agents.parallel import max_parallel_tasks
-from imp.agents.subagents import TASK_REFUSAL_SENTINEL, TaskRefused
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.errors import FatalToolError
 from imp.agents.tools.wait_for_user import AwaitingUserInput
-from imp.engine.agent_run import SubagentSuspended
 
 # Bypass posture for the codex provider. This is the SAME value the ThreadOptions
 # builder feeds to approvalPolicy (codex_runner._build_thread_options); the task
@@ -79,67 +77,21 @@ class RunState:
     runtime_errors: list[str] = field(default_factory=list)
     fatal_tool_error: tuple[str, str] | None = None
     agent_id: str = "step:unnamed"
-    # Each entry is (minted tool_call event id, args fingerprint). On item
-    # arrival the runner match-and-removes the first entry whose fingerprint
-    # equals the item's args (design §2 re-key — replaces the old FIFO pop).
-    minted_task_ids: list[tuple[str, tuple[tuple[str, str], ...]]] = field(
-        default_factory=list)
-    # sdk_id -> minted event id, recorded when process_event fingerprint-matches.
-    # Audit reassembly re-keys the task tool_use block to the minted id so the
-    # tool_use/tool_result pair is id-consistent under out-of-order completion.
-    task_id_audit: dict[str, str] = field(default_factory=dict)
-    subagent_suspended: Any = None
     # Headless wait_for_user pause captured in the MCP wrapper (it can't raise
     # out of the in-process SDK handler). The runner detects awaiting_user after
     # process_event and re-raises AwaitingUserInput(awaiting_prompt) to unwind.
     awaiting_user: bool = False
     awaiting_prompt: str = ""
     killed_tool_uses: list[dict[str, Any]] = field(default_factory=list)
-    # In-flight `task` dispatch count (design §2 drain gate). Incremented before
-    # the dispatch await and decremented in finally on every exit; the runner
-    # defers a captured suspension / awaiting_user re-raise until this is 0.
-    inflight_task_dispatches: int = 0
-    # Mints whose child was skipped post-limiter (membership froze while queued).
-    # process_event resolves the arriving sentinel item against this list FIRST,
-    # closing the minted tool_call as a failed task (design §2 / AC29).
-    refused_task_mints: list[tuple[str, tuple[tuple[str, str], ...]]] = field(
-        default_factory=list)
     # Runner's event loop, recorded at runner entry. start_server raises on a
     # foreign loop (same-loop topology pin). None disables the check.
     runner_loop: Any = None
 
 
-def _cap_error_text(cap: int) -> str:
-    return (
-        f"tool_call_ceiling_exceeded (cap={cap}); run is being aborted. "
-        "No further tool calls will be honored."
-    )
 
-
-CODEX_SUSPEND_CAPTURE_TEXT = (
-    "subagent paused; run will pause; do not dispatch further tasks"
-)
 CODEX_AWAIT_CAPTURE_TEXT = (
     "awaiting user; run will pause; do not dispatch further tasks"
 )
-
-
-def _args_fingerprint(args: dict[str, Any]) -> tuple[tuple[str, str], ...]:
-    return tuple(sorted(
-        (k, json.dumps(v, sort_keys=True, default=str))
-        for k, v in args.items() if v is not None
-    ))
-
-
-def _task_membership_frozen(state: RunState, ctx: ToolContext) -> bool:
-    """codex membership-freeze predicate (design Decision 4): a captured
-    suspension, a captured headless wait, or a run-wide pause freezes the turn's
-    task membership so a NEW task is refused without dispatch."""
-    return (
-        state.subagent_suspended is not None
-        or state.awaiting_user
-        or (ctx.coordinator is not None and ctx.coordinator.should_pause)
-    )
 
 
 async def dispatch_tool(
@@ -158,17 +110,14 @@ async def dispatch_tool(
     # the RMW's two lines below stay adjacent and synchronous (their invariant
     # is about each other, not about preceding awaits).
     await _bg._sweep_bg(ctx)
-    # Task-refusal check (pinned dispatch-head order: sweep → task-refusal →
-    # cap RMW → arms). A frozen membership refuses a NEW task WITHOUT minting and
-    # WITHOUT burning a cap slot; FastMCP wraps the raise error-shaped and the
-    # runner matches it on the wire (design Decision 4 / §2).
-    if tool.name == "task" and _task_membership_frozen(state, ctx):
-        raise TaskRefused(TASK_REFUSAL_SENTINEL)
     # ── cap RMW (no await between read and decision) ──────────────────────────
     state.dispatch_count += 1
     if state.dispatch_count > state.cap:
         state.abort_requested = True
-        return _cap_error_text(state.cap)
+        return (
+            f"tool_call_ceiling_exceeded (cap={state.cap}); run is being aborted. "
+            "No further tool calls will be honored."
+        )
     # ─────────────────────────────────────────────────────────────────────────
     if tool.name == "complete_step":
         # Capture args; return OK so codex moves on to turn.completed. The
@@ -185,60 +134,21 @@ async def dispatch_tool(
         state.complete_step_args = {k: v for k, v in args.items() if v is not None}
         return "step complete"
     if tool.name == "task":
-        # task special-case (mirrors anthropic/openai/claude_code): the task
-        # tool must NOT go through async_invoke — its _invoke raises
-        # TaskMustBeAwaited by design. Dispatch the subagent directly and return
-        # its structured output JSON as the tool result. A task dispatch counts
-        # against the cap (RMW above), same as any tool call.
-        #
-        # SubagentSuspended is captured onto `state` (not re-raised) so the
-        # in-process MCP request handler returns cleanly to the SDK. The runner
-        # detects `state.subagent_suspended` after process_event and re-raises
-        # it to unwind the whole codex run (D4).
-        #
-        # The codex SDK emits the mcp_tool_call item only AFTER this MCP call
-        # returns, so no SDK-supplied event id is available yet. We mint a
-        # synthetic tool_call event synchronously here and pass its id to
-        # dispatch_task. process_event later re-keys the result to that id when
-        # it sees the real SDK item arrive (via state.minted_task_ids).
-        from imp.agents.runner import ToolUseBlock
-        from imp.agents.subagents import TaskDispatchSkipped, dispatch_task
-        tc_ev = ctx.event_log.append_tool_call(
-            agent_id=state.agent_id,
-            block=ToolUseBlock(id="", name="task", input=dict(args)),
+        # task special-case: never goes through async_invoke (its _invoke raises
+        # TaskMustBeAwaited by design). Run the subagent and return its structured
+        # output JSON. dispatch_tool does NOT touch the event log for the task
+        # tool_call/result pair — process_event owns that lifecycle, keyed on the
+        # SDK item id (item.started opens the fold, item.completed closes it). An
+        # exception (ordinary failure OR SubagentSuspended) propagates out of this
+        # handler; FastMCP wraps it as an isError tool result, so a batched child
+        # cannot pause the run (Change 1).
+        from imp.agents.subagents import dispatch_task
+        return await dispatch_task(
+            ctx,
+            args["subagent_name"],
+            args["task_description"],
+            tier=args.get("tier"),
         )
-        minted_entry = (tc_ev["id"], _args_fingerprint(dict(args)))
-        state.minted_task_ids.append(minted_entry)
-        # Drain counter: a capturing child decrements ITSELF in finally, so it is
-        # never counted as a draining sibling (design §2 drain gate).
-        state.inflight_task_dispatches += 1
-        try:
-            return await dispatch_task(
-                ctx,
-                args["subagent_name"],
-                args["task_description"],
-                tool_call_event_id=tc_ev["id"],
-                tier=args.get("tier"),
-                abort_dispatch=lambda: _task_membership_frozen(state, ctx),
-            )
-        except TaskDispatchSkipped as skip:
-            # Post-limiter skip: the child froze while queued behind the limiter.
-            # MOVE its mint so the arriving sentinel item closes the minted
-            # tool_call (one pair), then raise the sentinel so FastMCP wraps it
-            # error-shaped for the SDK (design §2 / AC29).
-            if minted_entry in state.minted_task_ids:
-                state.minted_task_ids.remove(minted_entry)
-            state.refused_task_mints.append(minted_entry)
-            raise TaskRefused(TASK_REFUSAL_SENTINEL) from skip
-        except Exception as exc:
-            if isinstance(exc, SubagentSuspended):
-                state.subagent_suspended = exc  # runner re-raises to unwind cleanly
-                return CODEX_SUSPEND_CAPTURE_TEXT
-            text = f"{type(exc).__name__}: {exc}"
-            state.runtime_errors.append(text)
-            return text
-        finally:
-            state.inflight_task_dispatches -= 1
     try:
         raw = await tool.async_invoke(ctx, args)
     except FatalToolError as fte:
