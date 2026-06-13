@@ -1753,8 +1753,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_init.set_defaults(func=_cmd_init)
 
-    p_new = sub.add_parser("new")
-    p_new.add_argument("title", nargs="?")
+    p_new = sub.add_parser(
+        "new", help="Start a new Change: run the workflow from an opening intent.")
+    p_new.add_argument(
+        "title", nargs="?",
+        help="Optional short title for the Change; the spec-writer names it if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Headless: no live prompt; supply the reply via --message.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
@@ -1771,8 +1774,11 @@ def _build_parser() -> argparse.ArgumentParser:
                             "(expanded steps); falls back to streaming on a non-tty.")
     p_new.set_defaults(func=_cmd_new)
 
-    p_resume = sub.add_parser("resume")
-    p_resume.add_argument("token", nargs="?")
+    p_resume = sub.add_parser(
+        "resume", help="Resume a paused or interrupted Change by id or token.")
+    p_resume.add_argument(
+        "token", nargs="?",
+        help="Change id or resume token identifying which Change to resume.")
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
@@ -1805,14 +1811,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_log.set_defaults(func=_cmd_log)
 
-    p_status = sub.add_parser("status")
+    p_status = sub.add_parser(
+        "status",
+        help="List in-flight Changes (use -a for completed and abandoned).")
     p_status.add_argument(
         "-a", "--all", action="store_true",
         help="Also list completed and abandoned Changes (default: in-flight only).",
     )
     p_status.set_defaults(func=_cmd_status)
 
-    p_config = sub.add_parser("config")
+    p_config = sub.add_parser(
+        "config", help="Show the effective config and per-setting provenance.")
     p_config.add_argument("--explain", metavar="TIER", default=None,
                           help="trace one tier's bindings through the layers")
     p_config.add_argument("--all", action="store_true",
