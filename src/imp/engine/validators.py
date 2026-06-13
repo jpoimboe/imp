@@ -39,6 +39,7 @@ def validate(
         _v_step_tier_configured(workflow, configured_tiers, errors)
     _v_differ_from_targets_exist(workflow, errors)
     _v_write_tool_needs_write_permission(workflow, errors)
+    _v_no_wait_for_user_in_parallel_dispatchable(workflow, errors)
 
     return errors, warnings
 
@@ -337,5 +338,26 @@ def _v_write_tool_needs_write_permission(
                     f"step/gate has no fs_permissions rule with "
                     f"mode=allow and operation=write",
                     step.source,
+                )
+            )
+
+
+def _v_no_wait_for_user_in_parallel_dispatchable(
+    workflow: Workflow, errors: list[LoadError]
+) -> None:
+    dispatchable: set[str] = set()
+    for agent in workflow.agents.values():
+        dispatchable.update(agent.subagents)
+    for name in sorted(dispatchable):
+        adef = workflow.agents.get(name)
+        if adef is None:
+            continue  # unknown-subagent reference reported elsewhere
+        if "wait_for_user" in adef.tools:
+            errors.append(
+                LoadError(
+                    f"subagent {name!r} is parallel-dispatchable (named in a "
+                    f"`subagents:` list) and declares 'wait_for_user'; a batched "
+                    f"subagent cannot pause the run",
+                    adef.source,
                 )
             )
