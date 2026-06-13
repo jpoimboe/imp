@@ -262,7 +262,8 @@ def run_init(
 
     # --- bootstrap user config (only if the machine has none) ---
     user_path = user_config_path()
-    if not user_path.exists():
+    wrote_user_config = not user_path.exists()
+    if wrote_user_config:
         user_path.parent.mkdir(parents=True, exist_ok=True)
         user_path.write_text(
             yaml.safe_dump(
@@ -280,7 +281,10 @@ def run_init(
 
     output_fn("")
     if already_initialized:
-        output_fn("Project already initialized — bootstrapped your machine's config.")
+        if wrote_user_config:
+            output_fn("Project already initialized — bootstrapped your machine's config.")
+        else:
+            output_fn("Project already initialized — your machine's config is already set up.")
     else:
         output_fn("Created:")
         output_fn("  imp/project.yaml     (track in git — workflow + project settings)")
