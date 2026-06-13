@@ -281,10 +281,9 @@ def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
 
 
 def _pause_lines(name: str, phase: str | None, token: str, *, color: bool) -> list[str]:
-    mark = "⏸  " if color else ""
     at = f"  at {phase}" if phase else ""
     return [
-        ansi(f"{mark}Paused  {name}{at}", "dim", enabled=color),
+        ansi(f"Paused  {name}{at}", "dim", enabled=color),
         ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
     ]
 

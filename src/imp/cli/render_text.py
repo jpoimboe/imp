@@ -534,11 +534,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.PauseNode):
-        # A resumable stop — dim `⏸ paused (reason)`, the same quiet treatment the
+        # A resumable stop — dim `paused (reason)`, the same quiet treatment the
         # live view gives every pause (_emit_paused / _emit_paused_summary), so a
         # pause never reads as an `error:` in `imp log`. The driving failure, if
         # any, was already shown as its own `error:` event above.
-        yield _line(f"⏸ paused ({node.reason})", depth, color,
+        yield _line(f"paused ({node.reason})", depth, color,
                     *pal.NODE_COLORS["metadata"], gutters=gutters)
         return
 

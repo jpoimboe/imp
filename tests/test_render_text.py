@@ -1243,7 +1243,8 @@ def test_interrupt_renders_interrupted_not_complete_pause() -> None:
     assert "complete · pause" not in out
     assert "error:" not in out
     assert "runner cancelled by interrupt" not in out
-    assert "⏸ paused (esc)" in out
+    assert "paused (esc)" in out
+    assert "⏸" not in out
 
 
 def test_intentional_pause_still_renders_complete_pause() -> None:
