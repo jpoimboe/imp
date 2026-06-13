@@ -425,7 +425,7 @@ def _handle_terminal_outcome(
 ) -> int:
     """Render the terminal outcome of a settled run and return its rc.
 
-    COMPLETED → green completion line (rc 0). PAUSED → merge_blocked /
+    COMPLETED → green completion line (rc 0). PAUSED → merge_blocked exits early (no summary);
     script-step remediation surfaced once, then the dim paused summary (rc 1).
     Shared by `new`/`resume` (relocated verbatim from the post-run `else` arm)."""
     if result is RunResult.COMPLETED:
@@ -444,10 +444,8 @@ def _handle_terminal_outcome(
                 mb_reason = payload.get("reason")
                 mb_detail = payload.get("detail")
         _emit_merge_blocked(change, mb_reason, mb_detail)
-    elif final_state.step is not None:
-        # Surface the LAST script_blocked for the paused step (keyed on step name
-        # to avoid stale events from earlier pauses that were subsequently
-        # resumed; emitted once).
+        return 1  # friendly block already carries the resume command; skip redundant summary
+    if final_state.step is not None:
         matched = _last_script_blocked(
             list(change.event_log().read()), final_state.step)
         if matched is not None:
@@ -925,7 +923,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
                                 width=_term_width(), status=status,
-                                suppress_opening_question=True)
+                                suppress_opening_question=True,
+                                base_branch=change.base_branch)
             coord = InterruptCoordinator()
             channel = _maybe_build_channel(change)
             rc = 0
@@ -1098,7 +1097,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
+                                width=_term_width(), status=status,
+                                base_branch=change.base_branch)
             coord = InterruptCoordinator()
             channel = _maybe_build_channel(change)
             rc = 0

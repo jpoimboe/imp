@@ -38,6 +38,18 @@ def fmt_seconds(seconds: float | int | None) -> str:
     return f"{total // 60}m {total % 60}s"
 
 
+def merge_gate_block(tally: nv.ReviewTally | None, *, base: str) -> str:
+    """Deterministic merge-gate chrome: verdict summary + explicit instruction."""
+    target = base or "the base branch"
+    instruction = (f"→ type 'merge' to merge into {target}, "
+                   f"or describe what to rework.")
+    if tally is None:
+        return instruction
+    verdict = (f"Review: {tally.approve}/{tally.total} approve · "
+               f"{tally.blocking} blocking · {tally.nits} nits")
+    return f"{verdict}\n{instruction}"
+
+
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The
@@ -200,7 +212,8 @@ def spaces_after(node: Any, *, full: bool) -> bool:
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
-                             nv.ErrorNode, nv.PauseNode, nv.RenameNode))
+                             nv.ErrorNode, nv.PauseNode, nv.RenameNode,
+                             nv.PanelSummaryNode))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
@@ -216,7 +229,8 @@ def spaces_before(node: Any) -> bool:
     lands identically in `imp log` and the live view."""
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
-        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode))
+        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode,
+                             nv.MergedNode))
     )
 
 
@@ -504,23 +518,27 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         yield _line(f"→ {text}", depth, color, *codes, gutters=gutters)
         return
 
+    if isinstance(node, nv.PanelSummaryNode):
+        t = node.tally
+        yield _line(f"panel: {t.approve}/{t.total} approve · {t.nits} nits",
+                    depth, color, *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+        return
+
     if isinstance(node, nv.BreadcrumbLine):
-        # No checkmark: a completed step reads as `<name> complete · …` — the word
-        # carries the meaning, and dropping the glyph keeps the gray line quiet
-        # (the `✓` drew the eye to navigational chrome it shouldn't). The output
-        # args (status=…, *_path=…, plan counts) are detail the lean view doesn't
-        # need beside every step — they survive in --full only; the routing verb
-        # and elapsed time stay in both (they're outcome, not args).
+        act = node.action if isinstance(node.action, dict) else None
+        blocked = (node.kind == "merge" and act is not None
+                   and act.get("verb") == "pause")
         if node.interrupted:
             parts = [f"{node.step_name} interrupted"]
+        elif blocked:
+            parts = [f"{node.step_name} blocked"]
         else:
             parts = [f"{node.step_name} complete" if node.show_complete
                      else node.step_name]
         if full:
             parts.extend(node.extras)
-        act = node.action if isinstance(node.action, dict) else None
-        if node.interrupted:
-            pass                          # an interrupted step carries no routing suffix
+        if node.interrupted or blocked:
+            pass                          # no routing/verb suffix on these
         elif act is not None and act.get("verb") == "goto":
             if node.route:                # skip "" (same-phase) and None (unresolved)
                 parts.append(node.route)
@@ -530,9 +548,6 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                 parts.append(verb_text)
         if node.elapsed_s is not None:
             parts.append(fmt_seconds(node.elapsed_s))
-        # A step's completion line carries the step color (the same bold darker-blue
-        # as its header), so a step's open and close read as one unit — distinct from
-        # the dim gray of tool/skill chrome.
         yield _line(" · ".join(parts), depth, color, *pal.NODE_COLORS["step"],
                     gutters=gutters)
         return
@@ -597,6 +612,12 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                             depth, color, *dim, gutters=gutters)
             if r.get("warning"):
                 yield _line(f"    ⚠ {r['warning']}", depth, color, *dim, gutters=gutters)
+        return
+
+    if isinstance(node, nv.MergedNode):
+        mark = "✓ " if color else ""
+        yield _line(f"{mark}Merged {node.change_id} into {node.base}.", depth, color,
+                    "green", gutters=gutters)
         return
 
     if isinstance(node, nv.FallbackLine):

@@ -1257,6 +1257,67 @@ def test_intentional_pause_still_renders_complete_pause() -> None:
     assert "interrupted" not in out
 
 
+def test_merge_step_pause_breadcrumb_reads_blocked() -> None:
+    bc = nv.BreadcrumbLine(step_name="merge-to-base", elapsed_s=None,
+                           action={"verb": "pause"}, extras=[], kind="merge")
+    line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert line == "  merge-to-base blocked"
+    assert "complete" not in line
+    # a NON-merge pause keeps the existing wording
+    bc2 = nv.BreadcrumbLine(step_name="autosquash", elapsed_s=None,
+                            action={"verb": "pause"}, extras=[], kind="script")
+    line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
+    assert line2 == "  autosquash complete · pause"
+
+
+def test_merge_step_pause_breadcrumb_pipeline() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
+        _ev("2", "step_completed", step="merge-to-base", kind="merge",
+            action={"verb": "pause"}, var_mutations={}),
+    ])
+    # The BreadcrumbLine produced through the pipeline must also read "blocked",
+    # not "complete · pause", verifying that kind=node.kind is wired in _h_step_completed.
+    rendered = "\n".join(rt.render_tree(tree, full=False, color=False, width=80))
+    assert "merge-to-base blocked" in rendered
+    assert "complete" not in rendered
+
+
+def test_merged_node_renders_friendly_footer() -> None:
+    node = nv.MergedNode(change_id="2026-06-12-run-x", base="master")
+    plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    assert plain == "Merged 2026-06-12-run-x into master."
+    colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert "✓ Merged 2026-06-12-run-x into master." in colored
+    assert pal._ANSI["green"] in colored
+
+
+def test_panel_summary_renders_one_line() -> None:
+    node = nv.PanelSummaryNode(tally=nv.ReviewTally(approve=4, total=4, blocking=0, nits=2))
+    line = "\n".join(rt._render(node, depth=1, full=False, color=False, width=80))
+    assert line == "  panel: 4/4 approve · 2 nits"
+
+
+def test_merge_gate_block_has_verdict_and_instruction() -> None:
+    tally = nv.ReviewTally(approve=4, total=4, blocking=0, nits=2)
+    block = rt.merge_gate_block(tally, base="master")
+    lines = block.split("\n")
+    assert lines[0] == "Review: 4/4 approve · 0 blocking · 2 nits"
+    assert lines[1] == "→ type 'merge' to merge into master, or describe what to rework."
+
+
+def test_merge_gate_block_changes_with_counts() -> None:
+    tally = nv.ReviewTally(approve=3, total=4, blocking=1, nits=0)
+    block = rt.merge_gate_block(tally, base="trunk")
+    assert "Review: 3/4 approve · 1 blocking · 0 nits" in block
+    assert "merge into trunk" in block
+
+
+def test_merge_gate_block_without_tally_is_instruction_only() -> None:
+    block = rt.merge_gate_block(None, base="master")
+    assert block == "→ type 'merge' to merge into master, or describe what to rework."
+
+
 def test_display_tool_name_strips_mcp_namespace() -> None:
     assert nv.display_tool_name("mcp__invoke") == "invoke"
     assert nv.display_tool_name("mcp__imp__read_file") == "read_file"

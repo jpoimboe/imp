@@ -14,6 +14,7 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -59,6 +60,7 @@ _PROSE_THRESHOLD = 80  # issues 5/6: string output fields longer than this (or
 class WorkflowNode:
     slug: str | None = None
     title: str = ""
+    change_id: str | None = None
     status: str = "running"            # running | paused | completed
     children: list[Any] = field(default_factory=list)
     collapsible = False
@@ -96,6 +98,7 @@ class StepNode:
 class AgentTextNode:
     payload: dict[str, Any]            # the llm_response payload
     _cache: Any = field(default=None, repr=False)  # cached RenderedMessage (F5)
+    held: bool = False  # True until agent_output, step_completed, or llm_response resolves it
     collapsible = False
 
     @property
@@ -278,13 +281,29 @@ class LiteralTextNode:
 
 
 @dataclass
+class ReviewTally:
+    approve: int
+    total: int
+    blocking: int
+    nits: int
+
+
+@dataclass
+class PanelSummaryNode:
+    """Collapsed one-line summary of a clean/unanimous review panel."""
+    tally: ReviewTally
+    collapsible = False
+
+
+@dataclass
 class BreadcrumbLine:
     """The merged per-step completion line: `✓ <step> · <N>s` with short scalar
     output fields and a `· → <action>` suffix (omitted for a plain `continue`).
     Replaces the rendered OutcomeLine at step completion (issue 3)."""
     step_name: str
-    elapsed_s: float | None
-    action: Any                        # dict {verb, target?} from step_completed
+    kind: str | None = None
+    elapsed_s: float | None = None
+    action: Any = None                 # dict {verb, target?} from step_completed
     route: str | None = None           # resolved routing suffix, same semantics as
                                        # StepNode.quiet_line: None = unresolved,
                                        # "" = resolved-but-silent (same-phase skip),
@@ -302,6 +321,14 @@ class BreadcrumbLine:
 class FallbackLine:
     event_type: str
     payload: dict[str, Any]
+    collapsible = False
+
+
+@dataclass
+class MergedNode:
+    """Terminal change_merged event — rendered as the friendly footer in imp log only (F5)."""
+    change_id: str
+    base: str
     collapsible = False
 
 
@@ -381,6 +408,11 @@ class NarrativeBuilder:
         """The open (still-accumulating) tool burst, or None. Public read-only
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
+
+    @property
+    def open_step_name(self) -> str | None:
+        """Name of the currently-open step, or None."""
+        return self._step_stack[-1].name if self._step_stack else None
 
     def current_activity(self) -> Activity | None:
         """Structured one-line description of current activity for the live status
@@ -528,6 +560,7 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
 def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._root.slug = p.get("slug")
     self._root.title = p.get("title", "")
+    self._root.change_id = p.get("id")
 
 
 NarrativeBuilder._HANDLERS["change_created"] = _h_change_created
@@ -554,6 +587,26 @@ def _h_change_renamed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
 
 
 NarrativeBuilder._HANDLERS["change_renamed"] = _h_change_renamed
+
+
+def _h_change_merged(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    self._flush_burst()
+    self._root.status = "completed"
+    descriptor = self._root.change_id or _slug_descriptor(self._root.slug or "")
+    # Append at the WORKFLOW ROOT (not the still-open phase): the merged footer is a
+    # run-level terminal line that ends the whole transcript, after every phase.
+    self._root.children.append(MergedNode(change_id=descriptor, base=str(p.get("base", ""))))
+
+
+NarrativeBuilder._HANDLERS["change_merged"] = _h_change_merged
+
+
+def _h_merge_blocked(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    # _emit_merge_blocked already renders the friendly ⚠ block; suppress the raw fallthrough.
+    self._flush_burst()
+
+
+NarrativeBuilder._HANDLERS["merge_blocked"] = _h_merge_blocked
 
 
 def _ensure_phase(self: NarrativeBuilder, name: str) -> None:
@@ -666,13 +719,18 @@ def _h_step_completed(self: NarrativeBuilder, event: dict[str, Any], p: dict[str
     action = p.get("action")          # dict {verb, target?}; var_mutations is a sibling
     node = self._pop_step(p.get("step"))
     if node is not None:
+        # Un-hold any trailing held narration — agent_output won't fire for
+        # steps that end without a complete_step call.
+        narration_idx = _last_narration_index(node.children)
+        if narration_idx is not None:
+            node.children[narration_idx].held = False
         # Preserve StepNode.outcome (existing tests assert on the field); the
         # RENDERED outcome is subsumed by the merged breadcrumb (issue 3).
         node.outcome = OutcomeLine(action=action)
         node.end_ts = event.get("timestamp")
         elapsed = _elapsed_seconds(node.start_ts, event.get("timestamp"))
         breadcrumb = BreadcrumbLine(
-            step_name=node.name, elapsed_s=elapsed, action=action,
+            step_name=node.name, kind=node.kind, elapsed_s=elapsed, action=action,
             extras=_breadcrumb_extras(node.agent_output),
             interrupted=node.interrupted)
         node.children.append(breadcrumb)
@@ -799,6 +857,30 @@ def _is_prose_field(key: str, value: Any) -> bool:
             and ("\n" in value or len(value) > _PROSE_THRESHOLD))
 
 
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _normalized_tokens(text: str) -> set[str]:
+    return set(_TOKEN_RE.findall(text.lower()))
+
+
+def _near_duplicate(a: str, b: str, *, threshold: float = 0.8) -> bool:
+    ta, tb = _normalized_tokens(a), _normalized_tokens(b)
+    if not ta or not tb:
+        return False
+    return len(ta & tb) / min(len(ta), len(tb)) >= threshold
+
+
+def _last_narration_index(children: list[Any]) -> int | None:
+    """Trailing AgentTextNode index, scanning past any trailing ToolBurstFold nodes."""
+    i = len(children) - 1
+    while i >= 0 and isinstance(children[i], ToolBurstFold):
+        i -= 1
+    if i >= 0 and isinstance(children[i], AgentTextNode):
+        return i
+    return None
+
+
 def _breadcrumb_extras(args: Any) -> list[str]:
     """Short scalar output fields (`status`, `verdict`, `*_path`, numbers, bools,
     short strings) folded into the breadcrumb as `key=value`. Prose fields and
@@ -812,6 +894,73 @@ def _breadcrumb_extras(args: Any) -> list[str]:
         if isinstance(v, (str, int, float, bool)):
             out.append(f"{k}={v}")
     return out
+
+
+def _parse_member_outcome(fold: SubagentFold) -> tuple[str, str]:
+    if fold.is_error:
+        return "task_gap", fold.outcome or ""
+    try:
+        data = json.loads(fold.outcome or "")
+    except (ValueError, TypeError):
+        return "task_gap", fold.outcome or ""
+    if not isinstance(data, dict):
+        return "task_gap", str(data)
+    return str(data.get("verdict") or ""), str(data.get("findings") or "")
+
+
+def panel_member_tally(step: StepNode) -> ReviewTally:
+    """Count a review-panel step's member verdicts."""
+    approve = total = blocking = nits = 0
+    for fold in step.children:
+        if not isinstance(fold, SubagentFold):
+            continue
+        total += 1
+        verdict, findings = _parse_member_outcome(fold)
+        if verdict == "approve":
+            approve += 1
+            if findings.strip():
+                nits += 1
+        else:
+            blocking += 1
+    return ReviewTally(approve=approve, total=total, blocking=blocking, nits=nits)
+
+
+def _find_last_step(root: WorkflowNode, name: str) -> StepNode | None:
+    found: StepNode | None = None
+
+    def walk(nodes: list[Any]) -> None:
+        nonlocal found
+        for n in nodes:
+            if isinstance(n, StepNode):
+                if n.name == name:
+                    found = n
+                walk(n.children)
+            elif isinstance(n, PhaseNode):
+                walk(n.children)
+    walk(root.children)
+    return found
+
+
+def _single_reviewer_tally(output: dict[str, Any]) -> ReviewTally:
+    verdict = str(output.get("verdict") or "")
+    findings = str(output.get("findings") or "")
+    if verdict == "approve":
+        return ReviewTally(approve=1, total=1, blocking=0,
+                           nits=1 if findings.strip() else 0)
+    return ReviewTally(approve=0, total=1, blocking=1, nits=0)
+
+
+def review_tally(tree: NarrativeTree) -> ReviewTally | None:
+    """Merge-gate verdict counts: panel member verdicts when the `review` step ran
+    its opus panel, else the single generalist reviewer on fast-path/re-entry."""
+    review = _find_last_step(tree.root, "review")
+    if review is None:
+        return None
+    if any(isinstance(c, SubagentFold) for c in review.children):
+        return panel_member_tally(review)
+    if isinstance(review.agent_output, dict):
+        return _single_reviewer_tally(review.agent_output)
+    return None
 
 
 def phase_elapsed(phase: PhaseNode) -> float | None:
@@ -891,6 +1040,12 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     node = AgentTextNode(payload=p)
     if node.text.strip():
         self._flush_burst()
+        # Un-hold any trailing held narration — a new one is taking its place.
+        children = self._container().children
+        prev_idx = _last_narration_index(children)
+        if prev_idx is not None and children[prev_idx].held:
+            children[prev_idx].held = False
+        node.held = True
         self._append(node)
 
 
@@ -917,11 +1072,28 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_burst()
     step = self._step_stack[-1]
     step.agent_output = p
+    if (step.name == "review" and p.get("verdict") == "approve"
+            and any(isinstance(c, SubagentFold) for c in step.children)):
+        # member detail survives in imp log --full via the expanded subagent folds
+        narration_idx = _last_narration_index(self._container().children)
+        if narration_idx is not None:
+            self._container().children[narration_idx].held = False
+        self._append(PanelSummaryNode(tally=panel_member_tally(step)))
+        return
+    children = self._container().children
+    narration_idx = _last_narration_index(children)
     for k, v in p.items():
         # `_is_prose_field` already screens most empties; the `.strip()` is
         # belt-and-suspenders for a whitespace-only multi-line field.
         if _is_prose_field(k, v) and v.strip():
+            if (narration_idx is not None
+                    and _near_duplicate(children[narration_idx].text, v)):
+                children.pop(narration_idx)
+                narration_idx = None
             self._append(LiteralTextNode(text=v))
+    # Un-hold the narration if it wasn't popped: it's now final for the live driver.
+    if narration_idx is not None:
+        children[narration_idx].held = False
 
 
 NarrativeBuilder._HANDLERS["user_message"] = _h_user_message
@@ -1273,7 +1445,8 @@ def structural_repr(node: Any) -> Any:
     t = type(node).__name__
     if isinstance(node, WorkflowNode):
         return {"t": t, "slug": node.slug, "title": node.title,
-                "status": node.status, "children": [structural_repr(c) for c in node.children]}
+                "change_id": node.change_id, "status": node.status,
+                "children": [structural_repr(c) for c in node.children]}
     if isinstance(node, PhaseNode):
         return {"t": t, "name": node.name, "closed": node.closed,
                 "children": [structural_repr(c) for c in node.children]}
@@ -1315,9 +1488,14 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "action": node.action}
     if isinstance(node, LiteralTextNode):
         return {"t": t, "text": node.text}
+    if isinstance(node, PanelSummaryNode):
+        t2 = node.tally
+        return {"t": t, "tally": [t2.approve, t2.total, t2.blocking, t2.nits]}
     if isinstance(node, BreadcrumbLine):
         return {"t": t, "step_name": node.step_name, "elapsed_s": node.elapsed_s,
                 "action": node.action, "extras": node.extras}
     if isinstance(node, FallbackLine):
         return {"t": t, "event_type": node.event_type, "payload": node.payload}
+    if isinstance(node, MergedNode):
+        return {"t": t, "change_id": node.change_id, "base": node.base}
     return {"t": t}
