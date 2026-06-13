@@ -14,6 +14,7 @@ import pytest
 
 from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import ChangeContext
+from imp.agents.subagents import make_task_tool
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
 from imp.engine.types import AgentDef, FsRule, OutputField, OutputSchema, SourceLoc
@@ -449,123 +450,37 @@ async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
-async def test_impl_inflight_counter_peaks_at_one_then_drains(tmp_path: Path) -> None:
-    # AC26: the inflight counter is 1 WHILE dispatch_task is awaiting and 0 after it
-    # returns. A slow fake spawn lets us observe the in-flight value mid-dispatch.
-    import anyio
-
-    from imp.agents.subagents import make_task_tool
+async def test_wrap_task_does_not_pass_abort_dispatch(tmp_path: Path) -> None:
+    import imp.providers.claude_code as cc_mod
     from imp.engine.state import InMemoryEventLog
 
-    ctx = _ctx(tmp_path)
-    ctx.subagent_defs = {"sub": _sub_def()}
-    ctx.parent_transcript_dir = tmp_path / "parent"
-    ctx.event_log = InMemoryEventLog()
+    seen: dict = {}
 
-    observed: dict[str, int] = {}
-
-    class _SlowRunner:
-        async def run(self, inv):
-            observed["during"] = state.inflight_task_dispatches
-            await anyio.sleep(0)
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        async def interrupt(self) -> None: ...
-
-    async def fake_spawn(_inv: object) -> object:
-        return _SlowRunner()
-
-    ctx.coordinator = None
-    ctx.spawn_subagent = fake_spawn
-    state = _RunState()
-    state.agent_id = "step:p/task-lead"
-
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
-    assert state.inflight_task_dispatches == 0      # before
-    await wrapped({"subagent_name": "sub", "task_description": "do",
-                  "__tool_use_id__": ""})
-    assert observed["during"] == 1                  # incremented around the await
-    assert state.inflight_task_dispatches == 0      # decremented in finally
-
-
-@pytest.mark.anyio
-async def test_impl_inflight_counter_decrements_on_dispatch_error(tmp_path: Path) -> None:
-    # AC26: a dispatch that raises an ordinary exception still decrements the counter
-    # (finally on the error path) — the degraded is_error response is returned.
-    from imp.agents.subagents import make_task_tool
-    from imp.engine.state import InMemoryEventLog
+    async def _fake(ctx2, name, desc, *, tool_call_event_id="", tier=None, **kwargs):
+        # **kwargs captures whatever extra kwargs the wrapper passes (old code
+        # passes abort_dispatch=; the new code must not).
+        seen["kwargs"] = kwargs
+        return '{"status": "Success"}'
 
     ctx = _ctx(tmp_path)
-    ctx.subagent_defs = {"sub": _sub_def()}
-    ctx.parent_transcript_dir = tmp_path / "parent"
-    ctx.event_log = InMemoryEventLog()
-
-    class _BoomRunner:
-        async def run(self, inv):
-            raise ValueError("kaboom")
-            yield  # pragma: no cover
-        async def interrupt(self) -> None: ...
-
-    async def fake_spawn(_inv: object) -> object:
-        return _BoomRunner()
-
-    ctx.coordinator = None
-    ctx.spawn_subagent = fake_spawn
-    state = _RunState()
-    state.agent_id = "step:p/task-lead"
-
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
-    out = await wrapped({"subagent_name": "sub", "task_description": "do",
-                        "__tool_use_id__": ""})
-    assert out.get("isError") is True
-    assert state.inflight_task_dispatches == 0      # decremented despite the raise
-
-
-@pytest.mark.anyio
-async def test_impl_refuses_task_when_membership_frozen(tmp_path: Path) -> None:
-    # AC29 (claude_code): with awaiting_user already set, a NEW task is refused
-    # WITHOUT dispatch — _impl emits the bare TASK_REFUSAL_SENTINEL as the minted
-    # fold-closing is_error result and returns it, producing exactly one
-    # tool_call + sentinel tool_result pair.
-    from imp.agents.subagents import TASK_REFUSAL_SENTINEL, make_task_tool
-    from imp.engine.state import InMemoryEventLog
-
-    ctx = _ctx(tmp_path)
-    ctx.subagent_defs = {"sub": _sub_def()}
-    ctx.parent_transcript_dir = tmp_path / "parent"
     elog = InMemoryEventLog()
     ctx.event_log = elog
-
-    spawned = {"n": 0}
-
-    class _Runner:
-        async def run(self, inv):
-            spawned["n"] += 1
-            yield {"type": "agent_output", "payload": {"status": "Success"}}
-        async def interrupt(self) -> None: ...
-
-    async def fake_spawn(_inv: object) -> object:
-        return _Runner()
-
-    ctx.coordinator = None
-    ctx.spawn_subagent = fake_spawn
     state = _RunState()
-    state.agent_id = "step:p/task-lead"
-    state.awaiting_user = True       # membership frozen by a prior wait_for_user
+    state.agent_id = "step:p/s"
+    state.awaiting_user = True   # would FREEZE membership in the old code
 
-    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
-    out = await wrapped({"subagent_name": "sub", "task_description": "do",
-                        "__tool_use_id__": ""})
-
-    assert spawned["n"] == 0                                    # never dispatched
-    assert out.get("isError") is True
-    assert out["content"][0]["text"] == TASK_REFUSAL_SENTINEL   # bare, unwrapped
-    calls = [e for e in elog.read() if e["type"] == "tool_call"]
+    monkey = cc_mod.dispatch_task
+    cc_mod.dispatch_task = _fake  # type: ignore[assignment]
+    try:
+        wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+        out = await wrapped({"subagent_name": "reviewer", "task_description": "go"})
+    finally:
+        cc_mod.dispatch_task = monkey  # type: ignore[assignment]
+    assert "abort_dispatch" not in seen["kwargs"]        # refusal apparatus gone
+    assert out.get("isError") is not True                # dispatched, not refused
+    assert not hasattr(state, "inflight_task_dispatches")  # counter field removed
     results = [e for e in elog.read() if e["type"] == "tool_result"]
-    assert len(calls) == 1 and len(results) == 1               # one pair
-    assert results[0]["payload"]["content"] == TASK_REFUSAL_SENTINEL
-    assert results[0]["payload"]["error"] is True
-    assert results[0]["payload"]["id_ns"] == "block"
-    assert state.inflight_task_dispatches == 0                 # finally still ran
+    assert results[-1]["payload"]["error"] is False      # success close is canonical
 
 
 @pytest.mark.anyio
