@@ -51,3 +51,20 @@ def extract_inbound(
             text=text,
             reply_to_message_id=rt_id if isinstance(rt_id, int) else None))
     return items, new_offset
+
+
+def resolve_change_id(
+    inbound: Inbound,
+    msg_to_change: dict[int, str],
+    handle_to_change: dict[str, str],
+) -> tuple[str | None, str]:
+    if inbound.reply_to_message_id is not None:
+        change_id = msg_to_change.get(inbound.reply_to_message_id)
+        if change_id is not None:
+            return change_id, inbound.text
+    handle, rest = parse_handle(inbound.text)
+    if handle is not None:
+        change_id = handle_to_change.get(handle)
+        if change_id is not None:
+            return change_id, rest
+    return None, inbound.text
