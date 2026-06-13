@@ -10,7 +10,7 @@ from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
 from imp.cli.tui_driver import TuiDriver
 from imp.cli.tui_viewport import ViewportState
 
-HINT = "PgUp/PgDn scroll · End follow · ^O verbosity · ESC pause · ^C interrupt"
+HINT = "PgUp/PgDn scroll · End follow · ^O verbosity · ESC/^C pause"
 
 
 class TuiApp:
