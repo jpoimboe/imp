@@ -474,8 +474,7 @@ class AnthropicAgentRunner:
         ctx.subagent_depth = invocation.subagent_depth
         ctx.coordinator = invocation.coordinator
         ctx.tiers = invocation.tiers
-        ctx.lint_command = invocation.lint_command
-        ctx.test_command = invocation.test_command
+        ctx.verify_command = invocation.verify_command
         ctx.non_interactive = invocation.non_interactive
         ctx.sandbox_policy = invocation.sandbox_policy
         ctx.event_log = elog                       # shared write instance

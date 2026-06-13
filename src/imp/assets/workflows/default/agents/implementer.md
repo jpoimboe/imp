@@ -14,8 +14,8 @@ You are implementing a task. The task-lead's dispatch message contains the full 
 
 {% if vars.fast_path %}
 This change was classified **trivial**: do **not** create or modify tests, and do
-**not** load the TDD skill. Make exactly the task's edits. Run the lint gate if
-`$IMP_LINT_COMMAND` is set and confirm it passes **before** you commit. Do **not**
+**not** load the TDD skill. Make exactly the task's edits. Run the verify gate if
+`$IMP_VERIFY_COMMAND` is set and confirm it passes **before** you commit. Do **not**
 run the project's full test suite yourself — the `run-tests` gate runs it after
 this phase, and a full run here would only duplicate it. If your edit could
 plausibly affect behavior that a specific existing test covers, run just **that
@@ -53,7 +53,7 @@ Once you're clear on requirements:
 3. Verify your change works by running **its focused tests** (the ones you wrote or
    the existing ones it touches) — not the project's full test suite, which the
    `run-tests` gate owns
-4. Commit your work with `git` (see Committing below) — but FIRST run the lint-clean gate if `$IMP_LINT_COMMAND` is set (see Self-Review); lint must pass *before* the commit, not after
+4. Commit your work with `git` (see Committing below) — but FIRST run the verify gate if `$IMP_VERIFY_COMMAND` is set (see Self-Review); it must pass *before* the commit, not after
 5. Self-review (see below)
 6. Report your results **by calling `complete_step`** (see Report Format) — a turn that ends in prose instead of a tool call is a failure, not a report.
 
@@ -157,7 +157,7 @@ Review your work with fresh eyes. Ask yourself:
 - Are tests comprehensive?
 
 **Lint-clean gate (before committing):**
-If `$IMP_LINT_COMMAND` is set, run it and ensure it passes on your changes
+If `$IMP_VERIFY_COMMAND` is set, run it and ensure it passes on your changes
 **before** you commit. This gate is **separate from the test suite** — run it
 even when the task description says to skip verification or tests. "Skip verification"
 scopes out the slow test suite; it never licenses a lint-dirty tree (e.g. an

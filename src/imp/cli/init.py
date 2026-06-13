@@ -247,9 +247,9 @@ def run_init(
         body = yaml.safe_dump(
             _build_project_config(), sort_keys=False, default_flow_style=False)
         lint_hint = (
-            "\n# Optional lint-clean gate: a command the implementer runs before each\n"
-            "# commit (separate from the test suite). Absent => no lint gate.\n"
-            '# lint_command: "make lint"\n'
+            "\n# Optional combined verify gate: a command the implementer runs before each\n"
+            "# commit (tests + lint + typecheck). Absent => no verify gate.\n"
+            '# verify_command: "make check"\n'
         )
         project_file.write_text(body + lint_hint)
     elif not (imp_dir / "workflows" / "default").is_dir():

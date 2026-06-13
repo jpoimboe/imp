@@ -44,7 +44,7 @@ def test_abandon_change_runs_imp_abandon_yes(monkeypatch: Any, tmp_path: Path) -
 
 def test_spawn_env_strips_engine_managed_vars(monkeypatch: Any, tmp_path: Path) -> None:
     calls = _capture(monkeypatch)
-    monkeypatch.setenv("IMP_LINT_COMMAND", "stale-lint")
+    monkeypatch.setenv("IMP_VERIFY_COMMAND", "stale-verify")
     spawn.resume_change(tmp_path, "2026-06-13-abc", "go")
     # A stale engine var from an outer imp must not leak into the spawned imp.
-    assert "IMP_LINT_COMMAND" not in calls[0]["env"]
+    assert "IMP_VERIFY_COMMAND" not in calls[0]["env"]

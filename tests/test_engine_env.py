@@ -22,68 +22,41 @@ def test_engine_env_exposes_change_id() -> None:
     assert env["IMP_CHANGE_ID"] == "2026-06-04-eee555"
 
 
-def test_engine_env_injects_lint_command_when_set() -> None:
+def test_engine_env_injects_verify_command_when_set() -> None:
     env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
-                     change_title="t", lint_command="make lint")
-    assert env["IMP_LINT_COMMAND"] == "make lint"
+                     change_title="t", verify_command="make check")
+    assert env["IMP_VERIFY_COMMAND"] == "make check"
 
 
-def test_engine_env_omits_lint_command_when_none() -> None:
+def test_engine_env_omits_verify_command_when_none() -> None:
     env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
                      change_title="t")
-    assert "IMP_LINT_COMMAND" not in env
+    assert "IMP_VERIFY_COMMAND" not in env
 
 
-def test_overlay_strips_inherited_lint_command_when_unset() -> None:
-    # engine_env is the authority: an inherited IMP_LINT_COMMAND must be dropped
-    # when the overlay (no lint_command) doesn't provide it — no ambient leak.
-    parent = {"IMP_LINT_COMMAND": "make stale", "PATH": "/usr/bin", "FOO": "bar"}
+def test_engine_env_omits_verify_command_when_empty() -> None:
+    # Falsy command (opted-out "") is treated as absent => var omitted => gate no-ops.
+    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                     change_title="t", verify_command="")
+    assert "IMP_VERIFY_COMMAND" not in env
+
+
+def test_overlay_strips_inherited_verify_command_when_unset() -> None:
+    parent = {"IMP_VERIFY_COMMAND": "make stale", "PATH": "/usr/bin", "FOO": "bar"}
     overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
                          change_slug="s", change_title="t")
     env = overlay_engine_env(parent, overlay)
-    assert "IMP_LINT_COMMAND" not in env      # inherited copy stripped
-    assert env["FOO"] == "bar"                # non-engine vars preserved
-    assert env["IMP_PROJECT_ROOT"] == "/wt"   # engine var applied from overlay
+    assert "IMP_VERIFY_COMMAND" not in env      # inherited copy stripped
+    assert env["FOO"] == "bar"
+    assert env["IMP_PROJECT_ROOT"] == "/wt"
 
 
-def test_overlay_configured_lint_command_overrides_inherited() -> None:
-    parent = {"IMP_LINT_COMMAND": "make stale"}
+def test_overlay_configured_verify_command_overrides_inherited() -> None:
+    parent = {"IMP_VERIFY_COMMAND": "make stale"}
     overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
-                         change_title="t", lint_command="make lint")
+                         change_title="t", verify_command="make check")
     env = overlay_engine_env(parent, overlay)
-    assert env["IMP_LINT_COMMAND"] == "make lint"   # overlay wins over inherited
-
-
-def test_engine_env_injects_test_command_when_set() -> None:
-    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
-                     change_title="t", test_command="make test")
-    assert env["IMP_TEST_COMMAND"] == "make test"
-
-
-def test_engine_env_omits_test_command_when_none() -> None:
-    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
-                     change_title="t")
-    assert "IMP_TEST_COMMAND" not in env
-
-
-def test_overlay_strips_inherited_test_command_when_unset() -> None:
-    # engine_env is the authority: an inherited IMP_TEST_COMMAND must be dropped
-    # when the overlay (no test_command) doesn't provide it — no ambient leak.
-    parent = {"IMP_TEST_COMMAND": "make stale", "PATH": "/usr/bin", "FOO": "bar"}
-    overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
-                         change_slug="s", change_title="t")
-    env = overlay_engine_env(parent, overlay)
-    assert "IMP_TEST_COMMAND" not in env      # inherited copy stripped
-    assert env["FOO"] == "bar"                # non-engine vars preserved
-    assert env["IMP_PROJECT_ROOT"] == "/wt"   # engine var applied from overlay
-
-
-def test_overlay_configured_test_command_overrides_inherited() -> None:
-    parent = {"IMP_TEST_COMMAND": "make stale"}
-    overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
-                         change_title="t", test_command="make test")
-    env = overlay_engine_env(parent, overlay)
-    assert env["IMP_TEST_COMMAND"] == "make test"   # overlay wins over inherited
+    assert env["IMP_VERIFY_COMMAND"] == "make check"
 
 
 def _make_imp_checkout(root: Path) -> None:

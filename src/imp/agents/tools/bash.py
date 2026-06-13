@@ -78,8 +78,7 @@ async def bash(
         change_id=src.id if src else "",
         change_slug=src.slug if src else "",
         change_title=src.title if src else "",
-        lint_command=ctx.lint_command,
-        test_command=ctx.test_command,
+        verify_command=ctx.verify_command,
     )
     env = overlay_engine_env(os.environ, eng)
     # POSIX: start_new_session=True makes the child a new session leader so

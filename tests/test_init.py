@@ -159,14 +159,14 @@ def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_init_scaffolds_commented_lint_command(tmp_path: Path) -> None:
+def test_init_scaffolds_commented_verify_command(tmp_path: Path) -> None:
     run_init(
         tmp_path, input_fn=lambda _p: "",
         output_fn=lambda _m: None,
         picker_fn=lambda _avail: ["anthropic"],
     )
     text = (tmp_path / "imp" / "project.yaml").read_text()
-    assert "# lint_command:" in text
+    assert "# verify_command:" in text
 
 
 def test_init_surfaces_bwrap_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

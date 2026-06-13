@@ -74,43 +74,24 @@ def test_bash_registers_and_clears_running_processes(tmp_path: Path) -> None:
     assert ctx.running_processes == []
 
 
-def test_bash_exposes_imp_lint_command(tmp_path: Path) -> None:
+def test_bash_exposes_imp_verify_command(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
-    ctx.lint_command = "make lint"
-    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_LINT_COMMAND"}))
+    ctx.verify_command = "make check"
+    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_VERIFY_COMMAND"}))
     assert out["returncode"] == 0
-    assert "make lint" in out["stdout"]
+    assert "make check" in out["stdout"]
 
 
-def test_bash_no_lint_command_means_empty(
+def test_bash_no_verify_command_means_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression (found by imp-on-imp dogfooding): a stale IMP_LINT_COMMAND in the
-    # ambient environment must NOT leak into the subprocess when the ctx has no
-    # lint_command. engine_env is authoritative; overlay_engine_env strips the
+    # Regression (found by imp-on-imp dogfooding): a stale IMP_VERIFY_COMMAND in
+    # the ambient environment must NOT leak into the subprocess when the ctx has no
+    # verify_command. engine_env is authoritative; overlay_engine_env strips the
     # inherited copy. Without that, `{**os.environ, ...}` would pass "make stale"
-    # straight through and falsely enable the lint gate.
-    monkeypatch.setenv("IMP_LINT_COMMAND", "make stale-lint")
-    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "echo [$IMP_LINT_COMMAND]"}))
-    assert "[]" in out["stdout"]
-
-
-def test_bash_exposes_imp_test_command(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    ctx.test_command = "make test"
-    out = json.loads(_run_bash(ctx, {"command": "echo $IMP_TEST_COMMAND"}))
-    assert out["returncode"] == 0
-    assert "make test" in out["stdout"]
-
-
-def test_bash_no_test_command_means_empty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A stale IMP_TEST_COMMAND in the ambient environment must NOT leak into the
-    # subprocess when the ctx has no test_command. engine_env is authoritative;
-    # overlay_engine_env strips the inherited copy.
-    monkeypatch.setenv("IMP_TEST_COMMAND", "make stale-test")
-    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "echo [$IMP_TEST_COMMAND]"}))
+    # straight through and falsely enable the verify gate.
+    monkeypatch.setenv("IMP_VERIFY_COMMAND", "make stale")
+    out = json.loads(_run_bash(_ctx(tmp_path), {"command": "echo [$IMP_VERIFY_COMMAND]"}))
     assert "[]" in out["stdout"]
 
 

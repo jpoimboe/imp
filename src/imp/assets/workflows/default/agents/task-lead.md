@@ -67,7 +67,7 @@ progress.md is your guide.)
 
    **State what was already verified.** In the reviewer's dispatch message, state
    what the implementer verified for this change — the focused tests it ran and,
-   **only when `$IMP_LINT_COMMAND` is configured**, "lint clean." Do **not** run
+   **only when `$IMP_VERIFY_COMMAND` is configured**, "verify clean." Do **not** run
    the project's full test suite yourself to produce this: the `run-tests` gate is
    the authoritative full-suite check and runs once after the implement phase, so a
    full run here only duplicates it. State only what was actually run — do not claim
@@ -77,7 +77,7 @@ progress.md is your guide.)
    **Fast-path: the spec waived tests.** When you dispatch the implementer for a
    fast-path task, state plainly in the dispatch message: "the spec waived **new**
    tests — do **not** add or modify tests; make exactly the task's edits, run the
-   lint gate if `$IMP_LINT_COMMAND` is set, then commit. Do **not** run the
+   verify gate if `$IMP_VERIFY_COMMAND` is set, then commit. Do **not** run the
    project's full test suite — the `run-tests` gate runs it after this phase."
    **One reviewer.** Dispatch ONLY `quality-reviewer` at the **`medium` tier**:
    `task(subagent_name="quality-reviewer", tier="medium", …)`. (Trivial diffs
