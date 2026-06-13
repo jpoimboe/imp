@@ -1,10 +1,11 @@
 """glob, grep (spec §6.6).
 
-Read-only navigation over worktree-RELATIVE paths. Every tool routes through
-ToolContext.resolve_path_strict for the normalize-then-contain escape guard
-(spec H1): a `..`-escape or absolute-outside-root raises PermissionDenied
-(unlike the fs ops, which allow out-of-worktree paths bounded by the sandbox).
-Reported paths are relative to the worktree root.
+Read-only navigation. Both glob and grep route their search root through
+ToolContext.authorize_fs(("read",), path) — the same gate the fs ops use —
+so they reach exactly the paths read_file/write_file/edit_file can: in-worktree
+paths via fs_permissions, out-of-worktree paths bounded by the sandbox mirror.
+In-worktree matches are reported relative to the worktree root; out-of-worktree
+matches as absolute paths.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import os
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import anyio
 
@@ -22,6 +23,7 @@ from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import (
     EXCLUDED_DIRS,
+    EXTERNAL_WALK_FILE_CAP,
     OUTPUT_TRUNCATION_MARKER,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
@@ -31,21 +33,32 @@ from imp.agents.tools.limits import (
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
 
 
-def _iter_files(target: Path) -> Iterator[Path]:
+def _iter_files(target: Path, policy: Any = None) -> Iterator[Path]:
     """Files under `target`, never descending into an excluded control/VCS dir
     (A3). `os.walk` with in-place `dirnames` pruning means the walk does not even
-    *enumerate* inside `.imp/`/`.git/`."""
+    *enumerate* inside `.imp/`/`.git/`. When `policy` is an active SandboxPolicy,
+    additionally prune directories and drop files whose resolved path fails
+    `policy.allows_read` — the in-process mirror of the bwrap secret masks, so the
+    search tool never out-reads `bash`-under-bwrap (a symlink into a masked dir is
+    dropped by resolving before the check)."""
     if target.is_file():
         yield target
         return
     if not target.is_dir():
         return
+    masking = policy is not None and policy.active
     for dirpath, dirnames, filenames in os.walk(target):
         # Sorted traversal (dirnames in-place so the walk itself is ordered):
         # files_with_matches + head_limit early exit make WHICH files the
         # agent sees depend on enumeration order — bless determinism, not the
-        # filesystem's whim. Still prunes excluded control/VCS dirs (A3).
-        dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDED_DIRS)
+        # filesystem's whim. Prunes excluded control/VCS dirs (A3) and, under
+        # an active policy, secret-masked dirs (pruned in place: never enumerated
+        # inside).
+        keep = sorted(d for d in dirnames if d not in EXCLUDED_DIRS)
+        if masking:
+            keep = [d for d in keep
+                    if policy.allows_read((Path(dirpath) / d).resolve())]
+        dirnames[:] = keep
         base = Path(dirpath)
         for name in sorted(filenames):
             p = base / name
@@ -55,39 +68,49 @@ def _iter_files(target: Path) -> Iterator[Path]:
             # wedging the whole call. Walk only regular files. (An EXPLICIT
             # non-regular path still errors loudly in grep — explicit path is
             # explicit intent.)
-            if p.is_file():
-                yield p
+            if not p.is_file():
+                continue
+            if masking and not policy.allows_read(p.resolve()):
+                continue
+            yield p
 
 
 @imp_tool(
     name="glob",
     description=(
         "List file paths matching a relative glob (e.g. **/*.py or "
-        "src/**/*.ts). Skips .imp/ and .git/. Uses pathlib glob semantics — "
-        "a bare *.py matches top-level files only; this differs from grep's "
-        "`glob` parameter, where * and ** cross /."
+        "src/**/*.ts) under an optional `path` base (default '.'). Absolute "
+        "and out-of-worktree bases are accepted, bounded by the sandbox like "
+        "bash; in-worktree matches are reported relative to the root, external "
+        "matches as absolute paths. Skips .imp/ and .git/. Uses pathlib glob "
+        "semantics — a bare *.py matches top-level files only; this differs "
+        "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
+        "stays relative; search elsewhere via `path`, not an absolute pattern."
     ),
 )
-async def glob(ctx: ToolContext, pattern: str) -> str:
-    ctx.check_fs_permission("read", pattern)
+async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
+    base = ctx.authorize_fs(("read",), path)
     root = ctx.project_root.resolve()
-    # Reject patterns with `..` or an absolute prefix before the glob runs.
-    # Wildcards (`*`/`**`) have no `..` component, so clean relative patterns pass.
-    # Per-result p.resolve().is_relative_to(root) below is the second line of
-    # defense for any result glob() produces via symlinks or dotdot traversal.
-    ctx.resolve_path_strict(pattern)
+    inside = base.is_relative_to(root)
+    policy = ctx.sandbox_policy
+    masking = policy is not None and policy.active
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
 
     out: list[str] = []
-    for p in sorted(root.glob(pattern)):
+    for p in sorted(base.glob(pattern)):
         await tool_checkpoint(coordinator, deadline)
-        if not p.resolve().is_relative_to(root):
-            continue                            # belt-and-suspenders vs symlinks
-        rel_parts = p.relative_to(root).parts
-        if any(part in EXCLUDED_DIRS for part in rel_parts):
+        resolved = p.resolve()
+        if inside:
+            if not resolved.is_relative_to(root):
+                continue                        # belt-and-suspenders vs symlinks
+            if masking and not policy.allows_read(resolved):
+                continue
+        elif masking and not policy.allows_read(resolved):
+            continue                            # masked secret behind a symlink/in-tree
+        if any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts):
             continue
-        out.append(p.relative_to(root).as_posix())
+        out.append(p.relative_to(root).as_posix() if inside else p.as_posix())
     return "\n".join(out) if out else "(no matches)"
 
 
@@ -118,7 +141,8 @@ def _compile_glob(pat: str) -> re.Pattern[str]:
     """ONE compiled union regex per grep call — never per candidate file.
     fnmatch.translate gives fnmatchCASE semantics (no os.path.normcase):
     case-sensitive, platform-independent, `*`/`**` cross `/`. Matched against
-    the worktree-relative POSIX path — NOT relative to grep's `path` arg."""
+    the worktree-relative POSIX path for in-worktree targets, or the absolute
+    path for external targets — NOT relative to grep's `path` arg."""
     return re.compile("|".join(
         "(?:" + fnmatch.translate(v) + ")" for v in _glob_variants(pat)))
 
@@ -136,7 +160,8 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "path:count for files with matches. before/after/context require "
         "content mode. head_limit caps result rows. case_insensitive applies "
         "to the REGEX only — the `glob` filter is always case-sensitive. "
-        "`glob` filters by the path relative to the project root (NOT "
+        "`glob` filters by the worktree-relative path for in-worktree targets, "
+        "or the absolute path for external targets (NOT "
         "relative to the `path` argument — use glob=\"src/a/*.py\" or a "
         "wildcard basename pattern like *.py), with fnmatch semantics where "
         "both * and ** cross "
@@ -147,7 +172,10 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "bytes) plus the invisible trailing \\r that IS content on CRLF "
         "lines — never paste rows into edit_file/write_file. "
         "Skips .imp/ and .git/; scans the first 5 MB per file; output capped "
-        "at 50 KB."
+        "at 50 KB. Absolute and out-of-worktree paths are accepted, bounded by "
+        "the sandbox like bash (in-worktree matches reported relative, external "
+        "matches as absolute paths); an external-directory search stops after a "
+        "fixed file-count cap, disclosed in the output."
     ),
 )
 async def grep(
@@ -191,13 +219,15 @@ async def grep(
     # effective context is max(side, context).
     eff_before = max(before, context)
     eff_after = max(after, context)
-    ctx.check_fs_permission("read", path)
-    target = ctx.resolve_path_strict(path)
+    target = ctx.authorize_fs(("read",), path)
     # A typo'd/stale path — or a fifo/socket/device — must not read as
     # "searched, nothing found".
     if not (target.is_file() or target.is_dir()):
         raise FileNotFoundError(f"no such path: {path}")
     root = ctx.project_root.resolve()
+    inside = target.is_relative_to(root)
+    external = not inside
+    policy = ctx.sandbox_policy
     rgx = re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
@@ -223,12 +253,18 @@ async def grep(
             capped = True
         return capped
 
-    for f in _iter_files(target):
+    files_scanned = 0
+    walk_capped = False
+    for f in _iter_files(target, policy):
         if capped or limit_hit:
             break
+        if external and files_scanned >= EXTERNAL_WALK_FILE_CAP:
+            walk_capped = True
+            break
+        files_scanned += 1
         await tool_checkpoint(coordinator, deadline)
-        rel_str = f.relative_to(root).as_posix()
-        if glob_rx is not None and glob_rx.match(rel_str) is None:
+        disp = f.relative_to(root).as_posix() if inside else f.as_posix()
+        if glob_rx is not None and glob_rx.match(disp) is None:
             continue  # applies uniformly — including when path names one file
         try:
             text, read_truncated = await read_text_capped(
@@ -243,21 +279,21 @@ async def grep(
             # read is already paid). A LISTED truncated file resolved itself;
             # an UNLISTED one is a potential false negative — note it.
             if any(rgx.search(line) for line in lines):
-                capped = emit(rel_str)
+                capped = emit(disp)
                 result_rows += 1
                 if head_limit is not None and result_rows >= head_limit:
                     limit_hit = True  # the row IS the block: stop scanning
             elif cap_truncated:
-                notes.append(f"[{rel_str}: scanned first 5 MB only]")
+                notes.append(f"[{disp}: scanned first 5 MB only]")
         elif output_mode == "count":
             n = sum(1 for line in lines if rgx.search(line))
             if n:  # non-zero rows only (ripgrep -c, not GNU grep's path:0 flood)
-                capped = emit(f"{rel_str}:{n}")
+                capped = emit(f"{disp}:{n}")
                 result_rows += 1
                 if head_limit is not None and result_rows >= head_limit:
                     limit_hit = True
             if cap_truncated:  # the count is a lower bound — always note
-                notes.append(f"[{rel_str}: scanned first 5 MB only]")
+                notes.append(f"[{disp}: scanned first 5 MB only]")
         else:  # content
             match_idxs = [i for i, line in enumerate(lines, start=1)
                           if rgx.search(line)]
@@ -269,7 +305,7 @@ async def grep(
                     if head_limit is not None and result_rows >= head_limit:
                         limit_hit = True
                         break
-                    capped = emit(f"{rel_str}:{m}:{truncate_line(lines[m - 1])}")
+                    capped = emit(f"{disp}:{m}:{truncate_line(lines[m - 1])}")
                     result_rows += 1
                     if capped:
                         break
@@ -307,7 +343,7 @@ async def grep(
                         # Context rows share the match rows' per-line cap —
                         # an uncapped 2 MB neighbor would eat the whole
                         # 50 KB budget as one row.
-                        capped = emit(f"{rel_str}{sep}{ln}{sep}{truncate_line(lines[ln - 1])}")
+                        capped = emit(f"{disp}{sep}{ln}{sep}{truncate_line(lines[ln - 1])}")
                         if capped:
                             break
                     # result_rows counts matches whose block BEGAN emitting
@@ -319,16 +355,18 @@ async def grep(
                         break
             if cap_truncated and not capped:
                 # Inline (as today), own bracketed line in every mode.
-                capped = emit(f"[{rel_str}: scanned first 5 MB only]")
+                capped = emit(f"[{disp}: scanned first 5 MB only]")
             if head_limit is not None and result_rows >= head_limit:
                 limit_hit = True  # end-of-file boundary: the row checks above
                 # only run for files WITH matches — without this, a limit
                 # landing exactly on a file's last match keeps scanning every
                 # remaining file and never emits the notice.
 
-    if result_rows == 0:
+    if result_rows == 0 and not walk_capped:
         # Sentinel keys on zero RESULT rows, not on empty output — a note
         # line must never suppress it (agents pattern-match on the sentinel).
+        # Suppressed when walk_capped: the truncated walk may have matches in
+        # unscanned files, so "(no matches)" would be a false certainty.
         out.insert(0, "(no matches)")
     if not capped:
         for note in notes:  # trailing modes: result rows, then notes
@@ -348,4 +386,9 @@ async def grep(
         # computing that would require the very scan the cap avoids.
         out.append(f"[further results omitted: head_limit={head_limit} reached "
                    f"— raise head_limit or narrow the pattern]")
+    if walk_capped:
+        out.append(
+            f"[external walk truncated: scanned first {EXTERNAL_WALK_FILE_CAP} "
+            f"files — narrow the search path]"
+        )
     return "\n".join(out)
