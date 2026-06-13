@@ -39,7 +39,6 @@ from imp.agents.loop_guard import (
     LoopGuard,
     ToolOutcome,
     TurnRecord,
-    _flatten_result_text,
     _result_preview,
 )
 from imp.agents.parallel import max_parallel_tasks
@@ -54,8 +53,6 @@ from imp.agents.runner import (
     ToolUseBlock,
 )
 from imp.agents.subagents import (
-    TASK_REFUSAL_SENTINEL,
-    TaskDispatchSkipped,
     dispatch_task,
     make_task_tool,
     raise_if_suspended,
@@ -252,11 +249,6 @@ class _RunState:
     # Set once at runner entry; read by the MCP wrapper to append the spawning
     # task tool_call on the parent's agent chain.
     agent_id: str = ""
-    # In-flight `task` dispatch count — the claude_code mirror of codex's
-    # RunState.inflight_task_dispatches (design §2 drain gate). _impl increments
-    # before the dispatch await and decrements in finally on every exit; the
-    # receive loop defers the awaiting_user re-raise until this is 0.
-    inflight_task_dispatches: int = 0
     # Runner's event loop, recorded at _run_loop entry. _impl raises on a foreign
     # loop (same-loop topology pin). None disables the check.
     runner_loop: Any = None
@@ -442,57 +434,36 @@ def _wrap_one(
                         agent_id=state.agent_id,
                         block=ToolUseBlock(id=minted, name="task", input=task_input))
                     tc_event_id = tc_ev["id"]
-                state.inflight_task_dispatches += 1
                 try:
-                    try:
-                        result = await dispatch_task(
-                            ctx, args["subagent_name"], args["task_description"],
-                            tool_call_event_id=tc_event_id,
-                            tier=args.get("tier"),
-                            abort_dispatch=lambda: (
-                                state.awaiting_user
-                                or (ctx.coordinator is not None
-                                    and ctx.coordinator.should_pause)),
-                        )
-                    except TaskDispatchSkipped:
-                        # Membership frozen (awaiting_user OR should_pause): refuse
-                        # WITHOUT dispatch. Close the minted fold with the BARE
-                        # sentinel (unwrapped — the runner's un-count matches it by
-                        # EXACT equality) and return it; no re-raise.
-                        if ctx.event_log is not None:
-                            ctx.event_log.append_tool_result(
-                                agent_id=state.agent_id,
-                                block=ToolResultBlock(
-                                    minted, TASK_REFUSAL_SENTINEL, is_error=True),
-                                id_ns="block")
-                        return _tool_response(TASK_REFUSAL_SENTINEL, is_error=True)
-                    except BaseException as exc:
-                        # Error / suspend path: still close the fold with the SAME
-                        # minted id so narrative's _h_tool_result gets a deterministic,
-                        # outcome-carrying close (running=False, is_error=True). Then
-                        # re-raise into the outer handlers (raise_if_suspended honesty
-                        # for a subagent-origin pause; otherwise the generic is_error
-                        # tool_result path below the task branch).
-                        if ctx.event_log is not None:
-                            err_text = f"{type(exc).__name__}: {exc}"
-                            ctx.event_log.append_tool_result(
-                                agent_id=state.agent_id,
-                                block=ToolResultBlock(minted, err_text, is_error=True),
-                                id_ns="block")
-                        raise
+                    result = await dispatch_task(
+                        ctx, args["subagent_name"], args["task_description"],
+                        tool_call_event_id=tc_event_id,
+                        tier=args.get("tier"),
+                    )
+                except BaseException as exc:
+                    # A batched child cannot pause the run. Close the fold with the
+                    # SAME minted id (deterministic, outcome-carrying close) and
+                    # re-raise; the outer except in _impl degrades it to an
+                    # is_error tool_response (a clean unwind through the SDK loop is
+                    # not reachable, so a child suspension becomes an is_error result
+                    # — the run is not paused).
                     if ctx.event_log is not None:
-                        # Success close: the canonical, outcome-carrying tool_result
-                        # for this task, keyed on the SAME minted block id as the
-                        # call. The receive-loop user branch SUPPRESSES the SDK's
-                        # duplicate task result (the toolu_… one) so this minted one
-                        # stays canonical.
+                        err_text = f"{type(exc).__name__}: {exc}"
                         ctx.event_log.append_tool_result(
                             agent_id=state.agent_id,
-                            block=ToolResultBlock(minted, result, is_error=False),
+                            block=ToolResultBlock(minted, err_text, is_error=True),
                             id_ns="block")
-                    return _tool_response(result, is_error=False)
-                finally:
-                    state.inflight_task_dispatches -= 1
+                    raise
+                if ctx.event_log is not None:
+                    # Success close: the canonical, outcome-carrying tool_result for
+                    # this task, keyed on the SAME minted block id as the call. The
+                    # receive-loop user branch SUPPRESSES the SDK's duplicate task
+                    # result so this minted one stays canonical.
+                    ctx.event_log.append_tool_result(
+                        agent_id=state.agent_id,
+                        block=ToolResultBlock(minted, result, is_error=False),
+                        id_ns="block")
+                return _tool_response(result, is_error=False)
             if name == "complete_step":
                 # Capture the args; return a "success" body so claude proceeds
                 # to ResultMessage cleanly. The runner sees the captured args
@@ -1313,10 +1284,6 @@ class ClaudeCodeAgentRunner:
                                     is_task = pend is not None and pend.name == "task"
                                     if not is_task:
                                         elog.append_tool_result(agent_id=aid, block=b)
-                                    if (is_task and b.is_error
-                                            and _flatten_result_text(b.content)
-                                            == TASK_REFUSAL_SENTINEL):
-                                        tool_calls_used -= 1
                                     if pend is not None:
                                         pend.is_error = b.is_error
                                         pend.result_preview = \
@@ -1348,19 +1315,10 @@ class ClaudeCodeAgentRunner:
                     # persisted transcript ends at the dangling wait_for_user
                     # tool_use with NO following tool_result (the real human reply
                     # on an attended resume resolves it).
-                    if state.awaiting_user and state.inflight_task_dispatches == 0:
+                    if state.awaiting_user:
                         raise AwaitingUserInput(state.awaiting_prompt)
 
                     if cls_name == "ResultMessage":
-                        # Stream-end drain-then-raise fallback (design §2 drain
-                        # gate): the turn ended with a wait_for_user pause captured
-                        # while a sibling task was in flight, so the in-loop gate
-                        # above deferred the re-raise. Await the in-flight drain,
-                        # then re-raise so run() pauses before returning.
-                        if state.awaiting_user:
-                            while state.inflight_task_dispatches > 0:
-                                await asyncio.sleep(0)
-                            raise AwaitingUserInput(state.awaiting_prompt)
                         # Loop guard: ResultMessage is the true end-of-turn
                         # marker, so flush the accumulated turn here EXACTLY ONCE
                         # (a turn ending in complete_step set pending_complete →
