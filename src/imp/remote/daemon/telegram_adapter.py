@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from imp.remote.drivers.telegram import (
     api_call,
+    curate,
+    event_body,
     format_event_message,
     send_message_params,
 )
@@ -88,3 +91,46 @@ def send_message(token: str, chat_id: int, text: str, *, silent: bool) -> int | 
     result = response.get("result") or {}
     message_id = result.get("message_id")
     return message_id if isinstance(message_id, int) else None
+
+
+class TelegramNorthAdapter:
+    """The daemon's single Telegram connection (spec Decision 4)."""
+
+    def __init__(
+        self,
+        *,
+        chat_id: int,
+        submit: Callable[[str, str], None],
+        send: Callable[[str, bool], int | None],
+        get_updates: Callable[[int], dict[str, Any]],
+    ) -> None:
+        self._chat_id = chat_id
+        self._submit = submit
+        self._send = send
+        self._get_updates = get_updates
+        self._offset = 0
+        self._msg_to_change: dict[int, str] = {}
+        self._handle_to_change: dict[str, str] = {}
+
+    def on_event(self, event: dict[str, Any]) -> None:
+        """Curate one event, send it with its handle, and record the reply maps."""
+        kind = curate(event.get("type"))
+        if kind is None:
+            return
+        body = event_body(event.get("type"), event.get("payload") or {})
+        if kind == "silent" and not body.strip():
+            return
+        change = event.get("change") or {}
+        change_id = change.get("id")
+        if not change_id:
+            return
+        handle = handle_for(change_id)
+        message_id = self._send(format_outbound(event, handle), kind == "silent")
+        if message_id is not None:
+            self._msg_to_change[message_id] = change_id
+        self._handle_to_change[handle] = change_id
+
+    def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
+        """Resolve one inbound reply to (change_id, text) against the recorded maps."""
+        return resolve_change_id(
+            inbound, self._msg_to_change, self._handle_to_change)
