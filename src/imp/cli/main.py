@@ -1596,12 +1596,13 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
 
+    token = change_row.resume_token(change_id)
     do_prompt = not assume_yes and (
         _interactive() if interactive is None else interactive)
     if do_prompt:
         st = State.load(change.state_dir)
         n = worktree.commit_count(control, change_id, change.base_branch)
-        print(f"Abandon {change_id}: {change.title!r} "
+        print(f"Abandon {token}: {change.title!r} "
               f"(status {st.status}, {n} commit{'s' if n != 1 else ''})?")
         try:
             ans = input_fn(
@@ -1609,7 +1610,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         except EOFError:
             ans = ""
         if ans not in ("y", "yes"):
-            print(f"Abandon cancelled; {change_id} left intact.")
+            print(f"Abandon cancelled; {token} left intact.")
             return 1
 
     try:
@@ -1634,7 +1635,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
 
     worktree.remove_worktree(control, change_id, force=True)      # (d)
     worktree.delete_branch(control, change_id)                    # (e)
-    print(f"Abandoned {change_id}.")
+    print(f"Abandoned {token}.")
     return 0
 
 

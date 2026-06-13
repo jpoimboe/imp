@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from imp.cli.main import _abandon, _completed_rows, _status_rows
 from imp.engine import journal, worktree
 from imp.engine.change import Change
@@ -144,3 +146,32 @@ def test_abandon_yes_skips_prompt(tmp_path: Path) -> None:
                   input_fn=lambda _p: (asked.append(1), "n")[1])
     assert rc == 0 and not asked                                # prompt skipped
     assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()
+
+
+def test_abandon_prompt_and_cancel_use_short_token(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="2026-06-13-yaitd7",
+                  base_branch="main")
+    rc = _abandon(tmp_path, "2026-06-13-yaitd7",
+                  interactive=True, input_fn=lambda _p: "n")
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "Abandon yaitd7: 'x' (status" in out          # prompt uses the token
+    assert "Abandon cancelled; yaitd7 left intact." in out
+    assert "2026-06-13-yaitd7" not in out                # full id never shown
+
+
+def test_abandon_confirmation_uses_short_token(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="2026-06-13-yaitd7",
+                  base_branch="main")
+    rc = _abandon(tmp_path, "2026-06-13-yaitd7",
+                  interactive=True, input_fn=lambda _p: "y")
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Abandoned yaitd7." in out
+    assert "2026-06-13-yaitd7" not in out
