@@ -120,8 +120,11 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 bash(lead_cmd),
                 done(done=True, deviation=False, summary="done"),
             ]}],
-            "code-reviewer": [{"text": "review", "tools": [
+            "review-panel": [{"text": "review", "tools": [
                 done(verdict="approve", findings=""),
+            ]}],
+            "deferred-sweep": [{"text": "sweep", "tools": [
+                done(summary="no deferred items"),
             ]}],
             "summarizer": [{"text": "summary", "tools": [
                 done(built="sentinel", test_status="n/a",
