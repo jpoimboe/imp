@@ -226,7 +226,8 @@ def test_implement_phase_stamps_trailers_after_autosquash() -> None:
     wf = load_workflow(default_workflow_dir())
     impl = next(p for p in wf.phases if p.name == "implement")
     names = [s.name for s in impl.steps]
-    assert names.index("stamp-trailers") == names.index("autosquash") + 1, names
+    assert names.index("autosquash") < names.index("stamp-trailers"), names
+    assert names.index("autosquash-verify") < names.index("stamp-trailers"), names
     assert names.index("stamp-trailers") < names.index("review"), names
 
 
