@@ -1716,7 +1716,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("new", "Start a new Change (optional title; opens with the spec-writer)."),
+    ("new", "Start a new Change (optional opening message; opens with the spec-writer)."),
     ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
     ("status", "List in-flight Changes (-a also shows completed and abandoned)."),
     ("log", "Show a Change's narrative as plain text."),
