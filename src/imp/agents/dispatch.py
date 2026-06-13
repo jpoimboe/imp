@@ -27,8 +27,6 @@ import anyio
 from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import ToolResultBlock, ToolUseBlock
 from imp.agents.subagents import (
-    SubagentSuspended,
-    TaskDispatchSkipped,
     dispatch_task,
     raise_if_suspended,
 )
@@ -46,7 +44,6 @@ class TurnState:
 
     tool_calls_used: int
     ceiling_tripped: bool = False
-    discarded_siblings: int = 0
 
 
 async def dispatch_one_tool_use(
@@ -176,10 +173,9 @@ async def dispatch_task_batch(
     After the group settles, yield one tool_heartbeat per task tu (dispatched AND
     backfilled).
 
-    Failure isolation (Decision 3): a child's ordinary exception becomes its own
-    is_error tool_result. A child's SubagentSuspended is captured into a
-    first-wins slot and re-raised only after all siblings settle; a run-wide
-    pause that freezes every child out raises a synthetic suspension.
+    Failure isolation: a child's exception — ordinary OR `SubagentSuspended` —
+    becomes its own `is_error` tool_result; only a run-wide hard-cancel tears
+    the whole batch down via the group.
     """
     # Sweep once before the batch — the parent's registry, not the children's
     # (each child sweeps its own fresh ToolContext inside its own drive loop).
@@ -199,30 +195,19 @@ async def dispatch_task_batch(
             tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
             dispatched.append((tu, tc_ev["id"]))
 
-    captured: list[SubagentSuspended] = []
-    skipped = 0
-
-    def _frozen() -> bool:
-        coord = getattr(ctx, "coordinator", None)
-        paused = coord is not None and coord.should_pause
-        return bool(captured) or paused
-
     async def _run_child(tu: ToolUseBlock, tcid: str) -> None:
-        nonlocal skipped
         try:
             result_str = await dispatch_task(
                 ctx, tu.input["subagent_name"], tu.input["task_description"],
                 tool_call_event_id=tcid, tier=tu.input.get("tier"),
-                abort_dispatch=_frozen,
             )
-        except TaskDispatchSkipped:
-            skipped += 1
-            return
-        except SubagentSuspended as susp:
-            if not captured:
-                captured.append(susp)
-            return
         except Exception as e:
+            # a batched child cannot pause the run. SubagentSuspended
+            # (backoff-ceiling exhaustion / mid-batch wait) is an Exception
+            # subclass, so it degrades to this child's own is_error tool_result
+            # alongside ordinary failures; siblings are unaffected. Only a
+            # run-wide Ctrl-C (a BaseException, propagated by the group) cancels
+            # the whole batch via the outer checkpoint.
             err_text = f"{type(e).__name__}: {e}"
             block = ToolResultBlock(tu.id, err_text, is_error=True)
             results[tu.id] = block
@@ -237,22 +222,14 @@ async def dispatch_task_batch(
             for tu, tcid in dispatched:
                 tg.start_soon(_run_child, tu, tcid)
     except BaseExceptionGroup as eg:
-        # anyio wraps even a single child failure in a group; no upstream
-        # consumer handles ExceptionGroup. Unwrap the single-exception case so
-        # the classifier sees today's exception forms; genuinely-multiple
-        # simultaneous failures re-raise as-is (a genuinely novel failure).
+        # A surrounding hard-cancel (watchdog / run-wide Ctrl-C) surfaces as a
+        # BaseException the children do NOT catch; anyio wraps even a single one
+        # in a group. Unwrap the single-exception case so the classifier sees
+        # today's exception forms; genuinely-multiple simultaneous failures
+        # re-raise as-is.
         if len(eg.exceptions) == 1:
             raise eg.exceptions[0] from None
         raise
-
-    state.discarded_siblings += skipped
-
-    if captured:
-        raise captured[0]
-    if skipped:
-        raise SubagentSuspended(
-            "task batch membership frozen during run-wide pause; "
-            "no dispatch completed")
 
     # Assemble in document order (NOT completion order): the API pairs by id, but
     # the assembled message order is imp's to choose and document order is the one

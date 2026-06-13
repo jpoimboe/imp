@@ -10,7 +10,7 @@ import imp.agents.dispatch as dispatch_mod
 from imp.agents.dispatch import TurnState, dispatch_task_batch
 from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import ChangeContext, ToolUseBlock
-from imp.agents.subagents import SubagentSuspended, TaskDispatchSkipped
+from imp.agents.subagents import SubagentSuspended
 from imp.agents.tools.context import ToolContext
 from imp.cli.signals import InterruptCoordinator
 from imp.engine.state import InMemoryEventLog
@@ -252,32 +252,6 @@ async def test_batch_children_get_distinct_subagent_ids(tmp_path: Path) -> None:
     reset_parallelism_cache()
 
 
-@pytest.mark.anyio
-async def test_batch_suspension_surfaces_bare(tmp_path: Path) -> None:
-    """A child SubagentSuspended unwinds the turn as a BARE SubagentSuspended (the
-    single-exception group is unwrapped), never as an ExceptionGroup."""
-    reset_parallelism_cache()
-
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
-        raise SubagentSuspended("child paused")
-
-    monkey = dispatch_mod.dispatch_task
-    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
-    try:
-        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
-        elog = InMemoryEventLog()
-        tool_results: list = []
-        state = TurnState(tool_calls_used=0)
-        with pytest.raises(SubagentSuspended):
-            async for _ in dispatch_task_batch(
-                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=[_task_tu("t1")],
-                    tool_results=tool_results, state=state, ceiling=None):
-                pass
-    finally:
-        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
-    assert tool_results == []                  # no batch tool_results on suspension
-    reset_parallelism_cache()
-
 
 @pytest.mark.anyio
 async def test_batch_child_body_bug_not_wrapped_in_group(tmp_path: Path) -> None:
@@ -320,26 +294,14 @@ async def test_dispatch_one_tool_use_rejects_task_tu(tmp_path: Path) -> None:
             state=TurnState(tool_calls_used=0), ceiling=None)
 
 
-@pytest.mark.anyio
-async def test_batch_captures_suspension_then_skips_queued_sibling(
-    tmp_path: Path,
-) -> None:
-    """AC4: t1 suspends; the membership freeze skips the still-running t2 via
-    TaskDispatchSkipped, so t2 is NEVER dispatched (no tool_result event); the
-    captured suspension re-raises after the batch settles, no batch tool_results
-    are assembled, and the discarded-sibling count is recorded. AC6: no
-    heartbeats on the suspension path."""
-    reset_parallelism_cache()
-    spawned: list = []
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
-                    abort_dispatch=None):
-        if desc == "suspend":
-            raise SubagentSuspended("t1 paused")   # captures on first scheduling
-        await anyio.sleep(0.02)                    # let t1 capture first
-        if abort_dispatch is not None and abort_dispatch():
-            raise TaskDispatchSkipped("frozen")
-        spawned.append(name)
+@pytest.mark.anyio
+async def test_batch_child_suspension_becomes_is_error(tmp_path: Path) -> None:
+    reset_parallelism_cache()
+
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, **kwargs):
+        if name == "paused":
+            raise SubagentSuspended("child paused")
         return json.dumps({"status": "Success"})
 
     monkey = dispatch_mod.dispatch_task
@@ -349,102 +311,19 @@ async def test_batch_captures_suspension_then_skips_queued_sibling(
         elog = InMemoryEventLog()
         tool_results: list = []
         state = TurnState(tool_calls_used=0)
-        tus = [_task_tu("t1", desc="suspend"), _task_tu("t2", desc="go")]
+        tus = [_task_tu("t1", name="paused"), _task_tu("t2", name="ok")]
         collected: list = []
-        with pytest.raises(SubagentSuspended) as ei:
-            async for ev in dispatch_task_batch(
-                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
-                    tool_results=tool_results, state=state, ceiling=None):
-                collected.append(ev)
+        async for ev in dispatch_task_batch(
+                ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
+                tool_results=tool_results, state=state, ceiling=None):
+            collected.append(ev)
     finally:
         dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
-    assert str(ei.value) == "t1 paused"            # captured suspension re-raised
-    assert spawned == []                           # t2 never dispatched
-    assert tool_results == []                      # no batch results on suspension
-    assert collected == []                         # AC6: zero heartbeats
-    rows = [e for e in elog.read() if e["agent_id"] == "step:p/s"]
-    t2_results = [e for e in rows if e["type"] == "tool_result"
-                  and e["payload"]["id"] == "t2"]
-    assert t2_results == []                        # AC4: no tool_result event for t2
-    assert state.discarded_siblings == 1
-    reset_parallelism_cache()
-
-
-@pytest.mark.anyio
-async def test_batch_runwide_pause_raises_synthetic_suspension(
-    tmp_path: Path,
-) -> None:
-    """AC5: should_pause set before the batch -> every child is frozen out on
-    entry (TaskDispatchSkipped), the suspension slot stays empty, and the batch
-    raises a SYNTHETIC SubagentSuspended after settle so the turn unwinds with no
-    unresolved tus. No child is dispatched; no tool_results; no heartbeats."""
-    reset_parallelism_cache()
-    spawned: list = []
-
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
-                    abort_dispatch=None):
-        if abort_dispatch is not None and abort_dispatch():
-            raise TaskDispatchSkipped("frozen")
-        spawned.append(name)
-        return json.dumps({"status": "Success"})
-
-    monkey = dispatch_mod.dispatch_task
-    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
-    try:
-        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
-        await ctx.coordinator.signal_pause()        # run-wide pause unwinding
-        elog = InMemoryEventLog()
-        tool_results: list = []
-        state = TurnState(tool_calls_used=0)
-        tus = [_task_tu("t1"), _task_tu("t2")]
-        collected: list = []
-        with pytest.raises(SubagentSuspended):
-            async for ev in dispatch_task_batch(
-                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
-                    tool_results=tool_results, state=state, ceiling=None):
-                collected.append(ev)
-    finally:
-        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
-    assert spawned == []                            # nothing dispatched
-    assert tool_results == []
-    assert collected == []                          # AC6
-    assert state.discarded_siblings == 2            # both skipped
-    reset_parallelism_cache()
-
-
-@pytest.mark.anyio
-async def test_batch_multi_suspension_first_captured_wins(tmp_path: Path) -> None:
-    """AC8: two children suspend for different reasons; the FIRST-captured wins
-    (exactly one raise), the second is discarded cleanly. AC6: the suspension
-    path yields ZERO heartbeats and assembles no tool_results."""
-    reset_parallelism_cache()
-
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
-                    abort_dispatch=None):
-        if name == "fast":
-            raise SubagentSuspended("fast paused")  # captures first
-        await anyio.sleep(0.02)
-        raise SubagentSuspended("slow paused")      # second; discarded
-
-    monkey = dispatch_mod.dispatch_task
-    dispatch_mod.dispatch_task = _fake  # type: ignore[assignment]
-    try:
-        ctx = _ctx(tmp_path, spawn=_slow_spawn({"active": 0, "peak": 0}, 0.0))
-        elog = InMemoryEventLog()
-        tool_results: list = []
-        state = TurnState(tool_calls_used=0)
-        tus = [_task_tu("t1", name="fast"), _task_tu("t2", name="slow")]
-        collected: list = []
-        with pytest.raises(SubagentSuspended) as ei:
-            async for ev in dispatch_task_batch(
-                    ctx=ctx, elog=elog, aid="step:p/s", task_tus=tus,
-                    tool_results=tool_results, state=state, ceiling=None):
-                collected.append(ev)
-    finally:
-        dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
-    assert str(ei.value) == "fast paused"           # first-captured wins
-    assert collected == []                          # AC6: zero heartbeats
-    assert tool_results == []
+    by_id = {b.tool_use_id: b for b in tool_results}
+    assert by_id["t1"].is_error is True
+    assert "SubagentSuspended" in by_id["t1"].content
+    assert by_id["t2"].is_error is False                # sibling intact
+    assert len(collected) == 2                          # one heartbeat per tu
     reset_parallelism_cache()
 
 

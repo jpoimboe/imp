@@ -193,18 +193,16 @@ async def test_kill_switch_inline_is_sequential(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_trailing_non_task_never_dispatched_on_suspension(
+async def test_trailing_non_task_dispatched_after_suspended_task(
     tmp_path: Path,
 ) -> None:
-    """AC10: [task1, noop] where task1 suspends -> the batch (at the first-task
-    position) raises and the trailing noop is NEVER dispatched (no noop tool_call
-    / tool_result event, no batch tool_results). Falsifiable: a regression that
-    ran non-task tools before the batch settled, or that swallowed the batch
-    raise, would log a noop event here."""
+    """[task1, noop] where task1's SubagentSuspended degrades to
+    is_error -> the batch settles normally, the trailing noop IS dispatched, and
+    t1 has an is_error result. Falsifiable: old code raised SubagentSuspended from
+    the batch, preventing the noop from ever running."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
-                    abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         raise SubagentSuspended("t1 paused")
 
     monkey = dispatch_mod.dispatch_task
@@ -214,13 +212,11 @@ async def test_trailing_non_task_never_dispatched_on_suspension(
         elog = InMemoryEventLog()
         tool_results: list = []
         tus = [_task_tu("t1"), _noop_tu("n1")]
-        with pytest.raises(SubagentSuspended):
-            await _drain(ctx, elog, tus, tool_results,
-                         TurnState(tool_calls_used=0), None)
+        await _drain(ctx, elog, tus, tool_results, TurnState(tool_calls_used=0), None)
     finally:
         dispatch_mod.dispatch_task = monkey  # type: ignore[assignment]
-    rows = [e for e in elog.read() if e["agent_id"] == "step:p/s"]
-    noop_rows = [e for e in rows if e["payload"].get("id") == "n1"]
-    assert noop_rows == []                          # noop never dispatched
-    assert tool_results == []
+    by_id = {b.tool_use_id: b for b in tool_results}
+    assert by_id["t1"].is_error is True              # suspension degraded to is_error
+    assert "SubagentSuspended" in by_id["t1"].content
+    assert by_id["n1"].is_error is False             # noop ran and succeeded
     reset_parallelism_cache()
