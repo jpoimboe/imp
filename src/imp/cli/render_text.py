@@ -155,6 +155,29 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     return out or [indent + bullet]
 
 
+def render_question_block(text: str, width: int, depth: int, color: bool,
+                          gutters: tuple[int, ...] = ()) -> list[str]:
+    import io
+
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.theme import Theme
+
+    inner = max(8, width - _INDENT_W * depth)
+    buf = io.StringIO()
+    console = Console(file=buf, width=inner, no_color=not color,
+                      color_system="standard" if color else None,
+                      force_terminal=color, soft_wrap=False, highlight=False,
+                      theme=Theme({"markdown.code": "cyan"}))
+    console.print(Markdown(text))
+    indent = _gutter_indent(depth, gutters, color)
+    out: list[str] = []
+    for raw in buf.getvalue().splitlines():
+        stripped = raw.rstrip()
+        out.append(indent + stripped if stripped else indent)
+    return out or [indent]
+
+
 def quiet_step_is_silent(node: nv.StepNode) -> bool:
     """Whether a quiet step keeps its quiet treatment (hidden, or a one-line
     routing arrow) rather than rendering its full block.
