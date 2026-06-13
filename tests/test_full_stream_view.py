@@ -92,3 +92,12 @@ def test_no_stall_invariant_final_breadcrumb_present() -> None:
         f"final step '{last_step}' completion breadcrumb missing from live output "
         f"— the live cursor may be wedged mid-stream (§11 stall regression)"
     )
+
+
+def test_live_log_body_parity() -> None:
+    # change_merged is intentionally suppressed in the live path (main.py owns
+    # that line), so exclude it from the parity comparison.
+    events = [e for e in _events() if e.get("type") != "change_merged"]
+    assert _live_body(events) == _log_body(events), (
+        "live and log bodies diverged — live/log parity invariant broken"
+    )

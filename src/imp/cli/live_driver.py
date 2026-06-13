@@ -81,12 +81,14 @@ def _container_closed(container: Any) -> bool:
 
 class LiveDriver:
     def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus,
-                 suppress_opening_question: bool = False) -> None:
+                 suppress_opening_question: bool = False,
+                 base_branch: str = "") -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
         self._width = width
         self._status = status
+        self._base_branch = base_branch
         # True after the last emitted block was agent prose, so the next prose
         # block gets one blank-line separator — matching render_text's lean spacing
         # so the live view and `imp log` look identical (design §5.4). Any non-prose
@@ -136,6 +138,9 @@ class LiveDriver:
 
     def take_pending_question(self) -> str:
         q, self._pending_question = self._pending_question, ""
+        if self._builder.open_step_name == "final-review":
+            return rt.merge_gate_block(
+                nv.review_tally(self._builder.tree), base=self._base_branch)
         if q and self._suppress_opening_question:
             self._suppress_opening_question = False   # only the opening one
             return ""
@@ -216,7 +221,15 @@ class LiveDriver:
             # bursts reach the live walk, so the owning builder is always the main
             # one — no reliance on the A2 drop.
             return node is not self._builder.current_burst
-        return True
+        if isinstance(node, nv.BreadcrumbLine):
+            act = node.action if isinstance(node.action, dict) else {}
+            if act.get("verb") == "goto" and not (act.get("resume") or act.get("rework")):
+                # forward goto: hold until the next step_started resolves the
+                # target phase (route). reworking / continue / other verbs are
+                # final immediately.
+                return node.route is not None
+            return True
+        return not (isinstance(node, nv.AgentTextNode) and node.held)
 
     def _gutters(self) -> tuple[int, ...]:
         """Subagent boundary columns for the shared render helpers.
@@ -231,6 +244,9 @@ class LiveDriver:
 
     def _emit_leaf(self, node: Any, depth: int,
                    gutters: tuple[int, ...] = ()) -> None:
+        if isinstance(node, nv.MergedNode):
+            # suppressed in live path — main.py _emit_completed owns the friendly line
+            return
         if rt.spaces_before(node):
             # A leaf that wants a blank line above it (an error) gets one even when
             # its predecessor wasn't a spaced block — mirrors render_text's

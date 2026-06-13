@@ -154,3 +154,36 @@ def test_task_lead_records_fixed_inline_nits_and_reserves_followups() -> None:
     assert "reserved for the judgment-call" in low
     # A bar-cleared nit is polish, not an open_items / degraded trigger.
     assert "cleared the fixability bar" in low
+
+
+def test_task_lead_pins_deferred_followups_line_format() -> None:
+    text = TASK_LEAD.read_text()
+    low = text.lower()
+    assert "- [ ] DEFERRED" in text
+    assert "[scope:" in text
+    assert "task-lead:" in text
+    assert "deferred-sweep" in low      # the sweep, not the human, is the consumer
+
+
+SUMMARIZER = AGENTS_DIR / "summarizer.md"
+
+
+def test_summarizer_reads_sweep_dispositions() -> None:
+    low = SUMMARIZER.read_text().lower()
+    assert "fyi-fixed" in low
+    assert "still-deferred" in low
+    assert "silent-fixed" in low      # named only to exclude it
+    assert "fixed (fyi/veto)" in low or "fixed (fyi / veto)" in low
+    assert "still deferred" in low
+
+
+FINAL_REVIEW = AGENTS_DIR / "final-review.md"
+
+
+def test_final_review_presents_two_lists_without_dictating_veto() -> None:
+    low = FINAL_REVIEW.read_text().lower()
+    assert "fixed (fyi/veto)" in low or "fixed (fyi / veto)" in low
+    assert "still deferred" in low
+    assert "veto" in low
+    # The veto MECHANISM is intentionally left to the agents — not prescribed here.
+    assert "not prescribe" in low or "left to the agents" in low or "do not prescribe" in low

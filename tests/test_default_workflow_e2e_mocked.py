@@ -430,13 +430,13 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
 
 @pytest.mark.anyio
-async def test_fast_path_skips_panel_but_runs_recheck(
+async def test_fast_path_skips_reviewers_and_runs_review(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
-    # complexity:trivial -> spec-writer sets fast_path=true; the spec and plan
-    # reviewers are skipped AND the expensive opus review-panel is skipped at
-    # panel-gate. The one cheap sonnet recheck whole-diff review still runs.
+    # complexity:trivial -> spec-writer sets fast_path=true; spec and plan reviewers
+    # are skipped; the merged `review` step still runs (cheap re-verify mode, which
+    # internally skips the opus panel — that tiering is prose, dogfood-verified).
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
 
     resolve.reset_providers_for_tests()
@@ -453,14 +453,12 @@ async def test_fast_path_skips_panel_but_runs_recheck(
         if rec["type"] == "step_started":
             started.append(rec["payload"]["step"])
 
-    result = await run_change(
-        change, on_event=on_event,
-    )
+    result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
     assert "spec-reviewer" not in started, started
     assert "plan-review" not in started, started
-    assert "review-panel" not in started, started   # opus panel skipped on fast-path
-    assert "recheck" in started, started             # cheap sonnet whole-diff review still runs
+    assert "recheck" not in started, started          # removed step
+    assert "review" in started, started               # merged review step runs
 
 
 @pytest.mark.anyio
@@ -471,28 +469,28 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
 
     change = _seed_default_workflow(tmp_path)
 
-    # Position the Change as if paused at a maxed-out recheck: its loop
-    # budget (max_loops 5) is exhausted at 6. apply_rewind must clear that count
+    # Position the Change as if paused at a maxed-out review: its loop
+    # budget (max_loops 6) is exhausted at 7. apply_rewind must clear that count
     # so a re-entry that loops back (a reject verdict) gets a fresh budget rather
     # than tripping the max_loops re-pause again. (On the approve path below the
     # gate advances via Continue, which pops the count regardless — so the reset
     # is guarded by the explicit assert on st.loop_counts, not by the COMPLETED
     # outcome; the runtime reset semantics are unit-tested in test_recovery.py.)
     st = State.load(change.state_dir)
-    st.step = "recheck"
+    st.step = "review"
     st.status = "paused"
-    st.loop_counts = {"recheck": 6}
+    st.loop_counts = {"review": 6}
     st.save(change.state_dir)
 
     wf = load_workflow(change.workflow_dir,
                        configured_tiers=load_effective_config(
                            project_root=tmp_path,
                            control_root=tmp_path).config.tier_names())
-    plan = recovery.plan_rewind(wf, st, "recheck", force=False)
+    plan = recovery.plan_rewind(wf, st, "review", force=False)
     recovery.apply_rewind(plan, wf, st, change.event_log())
     st.status = "running"
     st.save(change.state_dir)
-    assert "recheck" not in st.loop_counts          # the load-bearing reset guard
+    assert "review" not in st.loop_counts          # the load-bearing reset guard
 
     default = response(
         tool_use("c0", "complete_step", {
@@ -751,9 +749,9 @@ async def test_forced_rewind_to_merge_with_no_integrated_sha_merges_directly(
     _shutil.copy2(src, dst)
     dst.chmod(0o755)
 
-    # Position the Change as paused at recheck (typical forced-rewind source).
+    # Position the Change as paused at review (typical forced-rewind source).
     st = State.load(change.state_dir)
-    st.step = "recheck"
+    st.step = "review"
     st.status = "paused"
     st.save(change.state_dir)
 
@@ -856,6 +854,17 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
             f"quiet step {name!r} rendered a header line:\n" + "\n".join(body))
         assert not any(f"{name} complete" in ln for ln in body), (
             f"quiet step {name!r} rendered a completion breadcrumb:\n" + "\n".join(body))
+
+    # No raw control-flow leaks: humanize-routing replaces goto(<step>) / [resume]
+    # with the arrow forms on the loud breadcrumbs.
+    assert not any("goto(" in ln for ln in body), (
+        "raw goto(...) leaked into the transcript:\n" + "\n".join(body))
+    assert not any("[resume]" in ln for ln in body), (
+        "raw [resume] annotation leaked into the transcript:\n" + "\n".join(body))
+    # A loud clean forward goto renders the humanized target-phase arrow on its
+    # own breadcrumb: spec-reviewer -> plan-writer resolves to "→ plan".
+    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body), (
+        "expected the humanized spec-reviewer → plan breadcrumb:\n" + "\n".join(body))
 
 
 @pytest.mark.anyio

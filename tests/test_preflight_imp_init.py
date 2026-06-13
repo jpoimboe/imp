@@ -17,7 +17,6 @@ def _registry() -> None:
 def test_preflight_blocks_when_no_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # no user config
     for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     msg = _preflight_imp_init(control_root=tmp_path, project_root=tmp_path)

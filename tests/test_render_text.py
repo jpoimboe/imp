@@ -659,17 +659,33 @@ def test_breadcrumb_line_renders_check_step_and_seconds() -> None:
     line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
     assert line == "  spec complete · 12s"
     assert "→ continue" not in line
-    # non-continue action: extras and → suffix sit BEFORE elapsed (last field).
-    bc2 = nv.BreadcrumbLine(step_name="code-reviewer", elapsed_s=41.0,
-                            action={"verb": "goto", "target": "implement"},
-                            extras=["status=Success"])
+    # goto with a resolved route: the humanized arrow, NOT goto(...), before elapsed.
+    bc2 = nv.BreadcrumbLine(step_name="plan-review", elapsed_s=41.0,
+                            action={"verb": "goto", "target": "task-lead",
+                                    "resume": False, "rework": False},
+                            route="→ implement", extras=["status=Success"])
     line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
-    assert line2 == "  code-reviewer complete · goto(implement) · 41s"
-    # No elapsed (elapsed_s is None) → no trailing seconds field at all.
-    bc3 = nv.BreadcrumbLine(step_name="quick", elapsed_s=None,
-                            action={"verb": "continue"}, extras=[])
+    assert line2 == "  plan-review complete · → implement · 41s"
+    assert "goto(" not in line2
+    # goto with an UNRESOLVED route (None): no suffix at all.
+    bc3 = nv.BreadcrumbLine(step_name="held", elapsed_s=2.0,
+                            action={"verb": "goto", "target": "x",
+                                    "resume": False, "rework": False},
+                            route=None)
     line3 = "\n".join(rt._render(bc3, depth=1, full=False, color=False, width=80))
-    assert line3 == "  quick complete"
+    assert line3 == "  held complete · 2s"
+    # goto with a SILENT route (""): same-phase skip renders no suffix.
+    bc4 = nv.BreadcrumbLine(step_name="panel", elapsed_s=1.0,
+                            action={"verb": "goto", "target": "recheck",
+                                    "resume": False, "rework": False},
+                            route="")
+    line4 = "\n".join(rt._render(bc4, depth=1, full=False, color=False, width=80))
+    assert line4 == "  panel complete · 1s"
+    # a non-goto verb (pause) still renders its action_text.
+    bc5 = nv.BreadcrumbLine(step_name="autosquash", elapsed_s=None,
+                            action={"verb": "pause"}, extras=[])
+    line5 = "\n".join(rt._render(bc5, depth=1, full=False, color=False, width=80))
+    assert line5 == "  autosquash complete · pause"
 
 
 def _sub(outcome=None, *, is_error=False, name="reviewer"):
@@ -1211,3 +1227,178 @@ def test_error_detail_block_absent_in_lean() -> None:
             detail={"full_summary": "full detail here"}),
     ], full=False))
     assert "full detail here" not in out
+
+
+def test_interrupt_renders_interrupted_not_complete_pause() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="spec-writer", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("2", "error", category="config", kind="interrupted",
+            message="runner cancelled by interrupt"),
+        _ev("3", "step_completed", step="spec-writer", kind="agent",
+            action={"verb": "pause"}, var_mutations={}),
+        _ev("4", "workflow_paused", reason="interrupt", interrupt_reason="esc"),
+    ]))
+    assert "spec-writer interrupted" in out
+    assert "complete · pause" not in out
+    assert "error:" not in out
+    assert "runner cancelled by interrupt" not in out
+    assert "⏸ paused (esc)" in out
+
+
+def test_intentional_pause_still_renders_complete_pause() -> None:
+    out = "\n".join(_lines([
+        _ev("1", "step_started", step="spec-writer", kind="agent", phase="design",
+            model="m", provider="anthropic"),
+        _ev("2", "step_completed", step="spec-writer", kind="agent",
+            action={"verb": "pause"}, var_mutations={}),
+    ]))
+    assert "spec-writer complete · pause" in out
+    assert "interrupted" not in out
+
+
+def test_merge_step_pause_breadcrumb_reads_blocked() -> None:
+    bc = nv.BreadcrumbLine(step_name="merge-to-base", elapsed_s=None,
+                           action={"verb": "pause"}, extras=[], kind="merge")
+    line = "\n".join(rt._render(bc, depth=1, full=False, color=False, width=80))
+    assert line == "  merge-to-base blocked"
+    assert "complete" not in line
+    # a NON-merge pause keeps the existing wording
+    bc2 = nv.BreadcrumbLine(step_name="autosquash", elapsed_s=None,
+                            action={"verb": "pause"}, extras=[], kind="script")
+    line2 = "\n".join(rt._render(bc2, depth=1, full=False, color=False, width=80))
+    assert line2 == "  autosquash complete · pause"
+
+
+def test_merge_step_pause_breadcrumb_pipeline() -> None:
+    tree = nv.build_tree([
+        _ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
+        _ev("2", "step_completed", step="merge-to-base", kind="merge",
+            action={"verb": "pause"}, var_mutations={}),
+    ])
+    # The BreadcrumbLine produced through the pipeline must also read "blocked",
+    # not "complete · pause", verifying that kind=node.kind is wired in _h_step_completed.
+    rendered = "\n".join(rt.render_tree(tree, full=False, color=False, width=80))
+    assert "merge-to-base blocked" in rendered
+    assert "complete" not in rendered
+
+
+def test_merged_node_renders_friendly_footer() -> None:
+    node = nv.MergedNode(change_id="2026-06-12-run-x", base="master")
+    plain = "\n".join(rt._render(node, depth=0, full=False, color=False, width=80))
+    assert plain == "Merged 2026-06-12-run-x into master."
+    colored = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert "✓ Merged 2026-06-12-run-x into master." in colored
+    assert pal._ANSI["green"] in colored
+
+
+def test_panel_summary_renders_one_line() -> None:
+    node = nv.PanelSummaryNode(tally=nv.ReviewTally(approve=4, total=4, blocking=0, nits=2))
+    line = "\n".join(rt._render(node, depth=1, full=False, color=False, width=80))
+    assert line == "  panel: 4/4 approve · 2 nits"
+
+
+def test_merge_gate_block_has_verdict_and_instruction() -> None:
+    tally = nv.ReviewTally(approve=4, total=4, blocking=0, nits=2)
+    block = rt.merge_gate_block(tally, base="master")
+    lines = block.split("\n")
+    assert lines[0] == "Review: 4/4 approve · 0 blocking · 2 nits"
+    assert lines[1] == "→ type 'merge' to merge into master, or describe what to rework."
+
+
+def test_merge_gate_block_changes_with_counts() -> None:
+    tally = nv.ReviewTally(approve=3, total=4, blocking=1, nits=0)
+    block = rt.merge_gate_block(tally, base="trunk")
+    assert "Review: 3/4 approve · 1 blocking · 0 nits" in block
+    assert "merge into trunk" in block
+
+
+def test_merge_gate_block_without_tally_is_instruction_only() -> None:
+    block = rt.merge_gate_block(None, base="master")
+    assert block == "→ type 'merge' to merge into master, or describe what to rework."
+
+
+def test_display_tool_name_strips_mcp_namespace() -> None:
+    assert nv.display_tool_name("mcp__invoke") == "invoke"
+    assert nv.display_tool_name("mcp__imp__read_file") == "read_file"
+    assert nv.display_tool_name("bash") == "bash"
+
+
+def test_burst_recap_strips_mcp_prefix_from_tool_names() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1",
+            name="mcp__invoke", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="ok", error=False),
+    ]))
+    assert "invoke" in out
+    assert "mcp__" not in out
+
+
+def test_call_args_line_strips_mcp_prefix_from_tool_name() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1",
+            name="mcp__invoke", input={}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="ok", error=False),
+    ], full=True))
+    assert "invoke" in out
+    assert "mcp__" not in out
+
+
+def test_retried_subagent_shows_retrying_annotation() -> None:
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="boom", error=True),
+        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "(failed)" in out          # the first attempt is still marked failed
+    assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
+
+
+def test_retried_subagent_after_interrupted_shows_retrying_annotation() -> None:
+    # An interrupted (not errored) first attempt still bumps the failure counter,
+    # so the re-dispatch is annotated "retrying (2)".
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_result", agent_id="step:p/s", id="b1",
+            content="runner cancelled", error=False, kind="interrupted"),
+        _ev("5", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "(interrupted)" in out     # first attempt is marked interrupted
+    assert "retrying (2)" in out      # the re-dispatch reads as a routine retry
+
+
+def test_parallel_same_name_subagents_not_marked_retrying() -> None:
+    # Two reviewers dispatched concurrently (both open before either closes) is a
+    # panel, not a retry — neither row gets a retrying annotation.
+    out = "\n".join(_lines([
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "tool_call", agent_id="step:p/s", id="b1", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b2", name="task",
+            input={"subagent_name": "reviewer"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1",
+            content='{"status": "Success"}', error=False),
+        _ev("6", "tool_result", agent_id="step:p/s", id="b2",
+            content='{"status": "Success"}', error=False),
+    ]))
+    assert "retrying" not in out

@@ -106,3 +106,86 @@ def test_loud_step_has_no_quiet_line() -> None:
     node = _steps(tree)["spec-writer"]
     assert node.quiet is False
     assert node.quiet_line is None
+
+
+def _breadcrumb(node: nv.StepNode) -> nv.BreadcrumbLine:
+    return next(c for c in node.children if isinstance(c, nv.BreadcrumbLine))
+
+
+def test_loud_forward_goto_route_resolves_to_target_phase() -> None:
+    # spec-reviewer (loud, spec phase) clean-approves with a plain forward goto to
+    # plan-writer (plan phase, no feedback). The breadcrumb route names the TARGET
+    # phase, known only once plan-writer's step_started arrives.
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "step_completed", step="spec-reviewer", kind="agent",
+           action={"verb": "goto", "target": "plan-writer",
+                   "resume": False, "rework": False},
+           var_mutations={}),
+        ev("4", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+    ])
+    node = _steps(tree)["spec-reviewer"]
+    assert _breadcrumb(node).route == "→ plan"
+    assert node.quiet_line is None        # a loud step does not touch quiet_line
+
+
+def test_loud_same_phase_forward_goto_route_is_silent() -> None:
+    # review-panel (loud, review phase) clean-approves with a forward goto to
+    # integrate-merge, which is ALSO in the review phase: an internal skip, not a
+    # phase transition -> the resolved-but-silent "" sentinel (no arrow).
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="review-panel", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("3", "step_completed", step="review-panel", kind="agent",
+           action={"verb": "goto", "target": "integrate-merge",
+                   "resume": False, "rework": False},
+           var_mutations={}),
+        ev("4", "step_started", step="integrate-merge", kind="script",
+           phase="review", quiet=True),
+    ])
+    assert _breadcrumb(_steps(tree)["review-panel"]).route == ""
+
+
+def test_loud_reviewer_rework_via_plain_goto_resolves_to_reworking() -> None:
+    # A loud reviewer rework is a plain goto to an earlier phase carrying feedback
+    # (rework=True), NOT a resume edge. It must read as "→ reworking" immediately,
+    # never deferring to name the earlier phase.
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="plan-review", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("3", "step_completed", step="plan-review", kind="agent",
+           action={"verb": "goto", "target": "plan-writer",
+                   "resume": False, "rework": True},
+           var_mutations={}),
+    ])
+    assert _breadcrumb(_steps(tree)["plan-review"]).route == "→ reworking"
+
+
+def test_loud_resume_edge_resolves_to_reworking() -> None:
+    # A true resume edge (integration-review -> integrator) reads "→ reworking".
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="integration-review", kind="agent",
+           phase="review", model="m", provider="anthropic"),
+        ev("3", "step_completed", step="integration-review", kind="agent",
+           action={"verb": "goto", "target": "integrator",
+                   "resume": True, "rework": True},
+           var_mutations={}),
+    ])
+    assert _breadcrumb(_steps(tree)["integration-review"]).route == "→ reworking"
+
+
+def test_loud_continue_has_no_route() -> None:
+    tree = nv.build_tree([
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="summarizer", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("3", "step_completed", step="summarizer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ])
+    assert _breadcrumb(_steps(tree)["summarizer"]).route is None

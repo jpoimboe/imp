@@ -53,6 +53,32 @@ you want?".
 
 **Research with web_search sparingly.** You MAY use `web_search` to check whether a library exists, verify current best practice, or look up an API — but prefer reading the actual codebase first. Do not over-research a clear request.
 
+## Seeded with a draft spec
+
+Sometimes the user already wrote a draft spec and started the change with
+`imp new <file>` or `imp new --spec-file <file>`. The engine delivers that file's
+content inline as your **opening message**, prefixed with `Implement this spec`
+(followed by the original file path and the spec body). When the opening message
+begins with `Implement this spec`, you are in **adopt-with-light-review** mode —
+do **not** run the opening brainstorm question:
+
+- **Skip the mandatory opening `wait_for_user`.** The intent is already in hand;
+  re-asking "what do you want to build?" is wrong on this path.
+- **Explore only to validate.** Read the codebase to confirm the draft fits and to
+  flesh out obvious gaps — not to re-brainstorm or redesign.
+- **Name the change** (`rename_change`, or the name from the opening line if one
+  was supplied), then write `imp/specs/<slug>.md` adopting the draft. Normalize
+  just enough to imp's structure: ensure a **Goal** and **Acceptance criteria**
+  are present. Do not invent Scope or rewrite the draft wholesale.
+- **Self-review and commit** exactly as in "Writing the Spec" (the same pre-commit
+  self-review and commit shape), then `complete_step`.
+- **Escalate only at the high bar.** The seeded path typically asks zero
+  clarifying questions; call `wait_for_user` only at the existing "Ask vs. decide"
+  bar — a genuine fork in user intent the draft and codebase do not settle.
+
+Complexity classification is unchanged (see "Classifying complexity"): a large
+draft is still `standard` even though you asked nothing.
+
 ## Naming the Change (imp-specific)
 
 This Change may be **unnamed**. As soon as the user's intent is clear (typically

@@ -203,3 +203,47 @@ def test_build_messages_reconstructs_settled_subset_with_dangling_siblings() -> 
     assert [m.role for m in msgs] == ["user", "assistant", "user"]
     settled = [b.tool_use_id for b in msgs[2].content]
     assert settled == ["t2"]
+
+
+def test_trailing_dangling_tool_use_drops_empty_assistant_turn() -> None:
+    log = InMemoryEventLog()
+    log.append_user_message(
+        agent_id="step:p/s",
+        message=Message(role="user", content=(TextBlock(text="begin"),)))
+    log.append_llm_response(
+        agent_id="step:p/s", provider="anthropic", model="m",
+        raw={"content": [{"type": "tool_use", "id": "t1",
+                          "name": "read_file", "input": {"p": "x"}}],
+             "stop_reason": "tool_use", "usage": {}},
+        usage={}, stop_reason="tool_use")
+    # No tool_result event for t1 → the trailing tool_use is dangling.
+    msgs = build_messages_from_events(list(log.read()), agent_id="step:p/s")
+    # The assistant turn held ONLY the dangling tool_use, so it is dropped whole.
+    assert [m.role for m in msgs] == ["user"]
+
+
+def test_trailing_dangling_tool_use_drops_block_but_keeps_text() -> None:
+    log = InMemoryEventLog()
+    log.append_user_message(
+        agent_id="step:p/s",
+        message=Message(role="user", content=(TextBlock(text="begin"),)))
+    log.append_llm_response(
+        agent_id="step:p/s", provider="anthropic", model="m",
+        raw={"content": [{"type": "text", "text": "hold on"},
+                         {"type": "tool_use", "id": "t1",
+                          "name": "read_file", "input": {}}],
+             "stop_reason": "tool_use", "usage": {}},
+        usage={}, stop_reason="tool_use")
+    msgs = build_messages_from_events(list(log.read()), agent_id="step:p/s")
+    # The assistant turn survives with its text; only the dangling block is gone.
+    assert [m.role for m in msgs] == ["user", "assistant"]
+    assert msgs[-1].content == (TextBlock(text="hold on"),)
+
+
+def test_well_formed_transcript_reconstructs_unchanged() -> None:
+    log = InMemoryEventLog()
+    _agent_stream(log, "step:p/s")     # every tool_use is matched by a tool_result
+    msgs = build_messages_from_events(list(log.read()), agent_id="step:p/s")
+    assert [m.role for m in msgs] == ["user", "assistant", "user", "assistant"]
+    # The matched tool_use is preserved (not stripped) in the assistant turn.
+    assert any(isinstance(b, ToolUseBlock) for b in msgs[1].content)

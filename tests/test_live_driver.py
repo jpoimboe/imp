@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 from imp.cli import narrative as nv
 from imp.cli.live_driver import LiveDriver
@@ -50,10 +51,13 @@ def test_burst_recap_streams_then_prose_in_live_path() -> None:
     drv.on_event(ev("8", "llm_response", agent_id="a",
                     raw={"content": [{"type": "text", "text": "done"}]},
                     usage={}))
+    # The closed burst is final immediately; prose is held until step_completed
+    # (F3 dedup: the trailing narration is held so agent_output can dedup it).
+    assert any("2 calls · read_file · glob" in ln for ln in _body(out))
+    drv.on_event(ev("9", "step_completed", step="spec", kind="agent",
+                    action={"verb": "continue"}, var_mutations={}))
     body = _body(out)
-    # point 8: the closed burst leaves a single dark-gray recap line, then prose.
-    assert any("2 calls · read_file · glob" in ln for ln in body)
-    assert any("done" in ln for ln in body)        # prose still streams after it
+    assert any("done" in ln for ln in body)        # prose streams at step_completed
 
 
 def test_burst_recap_then_prose_kept_in_order() -> None:
@@ -66,6 +70,8 @@ def test_burst_recap_then_prose_kept_in_order() -> None:
         ev("5", "tool_result", agent_id="a", id="b1", content="ok"),
         ev("6", "llm_response", agent_id="a",
            raw={"content": [{"type": "text", "text": "the answer"}]}, usage={}),
+        ev("7", "step_completed", step="spec", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
     ]:
         drv.on_event(e)
     body = _body(out)
@@ -386,9 +392,9 @@ def test_subagent_closing_with_open_nested_burst_emits_only_status_row() -> None
 
 def test_phase_b_streams_live_without_finish() -> None:
     """Real mid-run state: phase A completes, phase B starts and emits prose,
-    and NO finish() is called. Phase B's header + prose must stream live. Before
-    the _ensure_phase close-fix the cursor froze in phase A and phase B never
-    appeared until finish()."""
+    and NO finish() is called. Phase B's header must stream live immediately;
+    prose streams at step_completed (F3 dedup hold). Before the _ensure_phase
+    close-fix the cursor froze in phase A and phase B never appeared until finish()."""
     drv, out = _driver()
     events = [
         ev("1", "change_created", change_id=1, title="x"),
@@ -405,8 +411,13 @@ def test_phase_b_streams_live_without_finish() -> None:
         drv.on_event(e)
     # Deliberately NO drv.finish() — assert content streamed during the run.
     body = _body(out)
-    assert any("implement" in ln for ln in body)    # phase B header streamed
-    assert any("building now" in ln for ln in body)  # phase B prose streamed
+    assert any("implement" in ln for ln in body)    # phase B header streamed live
+    # Prose is held until step_completed (F3 dedup: trailing narration held for
+    # agent_output dedup decision); it streams at step_completed, not finish().
+    drv.on_event(ev("6", "step_completed", step="build", kind="agent",
+                    action={"verb": "continue"}, var_mutations={}))
+    body = _body(out)
+    assert any("building now" in ln for ln in body)  # phase B prose at step_completed
 
 
 def _driver_color():
@@ -952,3 +963,184 @@ def test_compose_status_returns_activity_content() -> None:
     assert "bash ls" in result
     assert "1 call" in result
     assert "\x1b[90m" in result    # gray detail segment
+
+
+def test_interrupt_breadcrumb_in_live_path() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="design",
+           model="m", provider="anthropic"),
+        ev("3", "error", category="config", kind="interrupted",
+           message="runner cancelled by interrupt"),
+        ev("4", "step_completed", step="spec-writer", kind="agent",
+           action={"verb": "pause"}, var_mutations={}),
+    ]:
+        drv.on_event(e)
+    drv.finish()
+    body = "\n".join(_body(out))
+    assert "spec-writer interrupted" in body
+    assert "complete · pause" not in body
+    assert "error:" not in body
+
+
+def test_loud_forward_goto_breadcrumb_held_until_phase_resolves() -> None:
+    # A loud step (spec-reviewer) clean-approves with a plain forward goto to
+    # plan-writer. Its breadcrumb route ("→ plan") is unknown until plan-writer's
+    # step_started arrives, so the live driver must HOLD the breadcrumb and emit it
+    # just before the new phase — matching imp log line-for-line.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
+           raw={"content": [{"type": "text", "text": "approved"}]}, usage={}),
+        ev("4", "step_completed", step="spec-reviewer", kind="agent",
+           action={"verb": "goto", "target": "plan-writer",
+                   "resume": False, "rework": False}, var_mutations={}),
+        ev("5", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("6", "llm_response", agent_id="step:plan/plan-writer",
+           raw={"content": [{"type": "text", "text": "planning"}]}, usage={}),
+        ev("7", "step_completed", step="plan-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    # Before plan-writer's step_started, the breadcrumb is held: no arrow yet.
+    for e in events[:4]:
+        drv.on_event(e)
+    assert not any("→ plan" in ln for ln in _body(out))
+    for e in events[4:]:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    assert any("spec-reviewer complete" in ln and "→ plan" in ln for ln in body)
+    assert not any("goto(" in ln for ln in body)
+    assert body == _render_body(events)   # live == imp log, line for line
+
+
+def test_is_final_loud_reworking_breadcrumb_is_emitted() -> None:
+    # A loud reviewer rework (goto + rework) is final immediately — the live cursor
+    # must not block on it the way it blocks an unresolved forward goto.
+    drv, _ = _driver()
+    bc = nv.BreadcrumbLine(step_name="plan-review", elapsed_s=1.0,
+                           action={"verb": "goto", "target": "plan-writer",
+                                   "resume": False, "rework": True},
+                           route=None)
+    assert drv._is_final(bc, container=None) is True
+
+
+def test_change_merged_suppressed_in_live_path() -> None:
+    drv, out = _driver()
+    for e in [
+        ev("0", "change_created", id="2026-06-12-run-x", slug="2026-06-12-run-x",
+           title="Run X"),
+        ev("1", "step_started", step="merge-to-base", kind="merge", phase="review"),
+        ev("2", "step_completed", step="merge-to-base", kind="merge",
+           action={"verb": "continue"}, var_mutations={}),
+        ev("3", "change_merged", base="master", commit="37dde900abc"),
+    ]:
+        drv.on_event(e)
+    drv.finish()
+    body = "\n".join(_body(out))
+    # neither the raw event nor the friendly footer is emitted by the live driver
+    # (the friendly line is owned by main.py _emit_completed).
+    assert "change_merged" not in body
+    assert "Merged 2026-06-12-run-x" not in body
+
+
+def _panel_member_ev(eid: str, verdict: str, findings: str = "") -> list:
+    bid = f"b{eid}"
+    return [
+        ev(f"c{eid}", "tool_call", agent_id="step:review/review", id=bid,
+           name="task", input={"subagent_name": f"member-{eid}",
+                               "task_description": "review"}),
+        ev(f"r{eid}", "tool_result", agent_id="step:review/review", id=bid,
+           content=json.dumps({"status": "Success", "verdict": verdict,
+                               "findings": findings}), error=False),
+    ]
+
+
+def test_final_review_gate_block_returned_from_pending_question() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     base_branch="master")
+    events = [
+        ev("0", "change_created", id="2026-06-12-run-x", slug="2026-06-12-run-x",
+           title="Run X"),
+        ev("1", "step_started", step="review", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+    ]
+    events += _panel_member_ev("1", "approve", "nit: a")
+    events += _panel_member_ev("2", "approve", "")
+    events += _panel_member_ev("3", "approve", "nit: b")
+    events += _panel_member_ev("4", "approve", "")
+    events += [
+        ev("ao", "agent_output", agent_id="step:review/review",
+           status="Success", verdict="approve", findings="..."),
+        ev("sc", "step_completed", step="review", kind="agent",
+           action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
+        ev("fs", "step_started", step="final-review", kind="agent", phase="review",
+           model="m", provider="anthropic"),
+        ev("aw", "awaiting_user_input", agent_id="step:review/final-review",
+           prompt="What's your call?"),
+    ]
+    for e in events:
+        drv.on_event(e)
+    block = drv.take_pending_question()
+    assert "Review: 4/4 approve · 0 blocking · 2 nits" in block
+    assert "type 'merge' to merge into master" in block
+
+
+def test_non_final_review_solicit_returns_plain_question() -> None:
+    out = _Pipe()
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
+                     base_branch="master")
+    for e in [
+        ev("1", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("aw", "awaiting_user_input", agent_id="step:spec/spec-writer",
+           prompt="Prefer A or B?"),
+    ]:
+        drv.on_event(e)
+    assert drv.take_pending_question() == "Prefer A or B?"
+
+
+def test_near_duplicate_narration_held_and_deduped_live() -> None:
+    # The live driver must hold the trailing AgentTextNode until agent_output
+    # resolves, dedup it when agent_output near-duplicates it, and emit the
+    # complete_step burst without skipping it.
+    narration = "No findings. Spec is complete and ready for planning."
+    findings = ("No findings. Spec is complete and ready for planning. "
+                "All load-bearing claims were verified against the codebase.")
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-reviewer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="step:spec/spec-reviewer",
+           provider="anthropic", model="m", usage={},
+           raw={"content": [{"type": "text", "text": narration}]}),
+        ev("4", "tool_call", agent_id="step:spec/spec-reviewer", id="cs1",
+           name="complete_step",
+           input={"status": "Success", "result": "DONE", "findings": findings}),
+        ev("5", "tool_result", agent_id="step:spec/spec-reviewer", id="cs1",
+           content="ok"),
+        ev("6", "agent_output", agent_id="step:spec/spec-reviewer",
+           status="Success", result="DONE", findings=findings),
+        ev("7", "step_completed", step="spec-reviewer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    drv.finish()
+    body = _body(out)
+    full = out.getvalue()
+    # The near-duplicate narration must be deduped — findings appear exactly once.
+    # "load-bearing" is unique to the findings text, not in the narration.
+    assert full.count("load-bearing") == 1
+    # The narration was a near-duplicate and must not appear separately — the
+    # findings supersede it, so we see "No findings." only once (inside findings).
+    assert full.count("No findings.") == 1
+    # Live and log must be byte-identical (parity invariant).
+    assert body == _render_body(events)

@@ -11,6 +11,7 @@ from imp.providers import anthropic as _anthropic
 from imp.providers import claude_code as _claude_code  # Task 24 lands this
 from imp.providers import codex as _codex
 from imp.providers import openai as _openai
+from imp.providers import scripted as _scripted
 from imp.providers.resolve import register_provider
 
 
@@ -35,6 +36,10 @@ def register_builtin_providers() -> None:
     register_provider(
         "codex", env_check=_codex._env_check, factory=_codex._factory,
         tier_defaults=_codex.TIER_DEFAULTS, env_var=_codex.ENV_VAR,
+    )
+    register_provider(
+        "scripted", env_check=_scripted._env_check, factory=_scripted._factory,
+        tier_defaults=_scripted.TIER_DEFAULTS, env_var=_scripted.ENV_VAR,
     )
 
 

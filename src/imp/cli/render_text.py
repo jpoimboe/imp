@@ -38,6 +38,18 @@ def fmt_seconds(seconds: float | int | None) -> str:
     return f"{total // 60}m {total % 60}s"
 
 
+def merge_gate_block(tally: nv.ReviewTally | None, *, base: str) -> str:
+    """Deterministic merge-gate chrome: verdict summary + explicit instruction."""
+    target = base or "the base branch"
+    instruction = (f"→ type 'merge' to merge into {target}, "
+                   f"or describe what to rework.")
+    if tally is None:
+        return instruction
+    verdict = (f"Review: {tally.approve}/{tally.total} approve · "
+               f"{tally.blocking} blocking · {tally.nits} nits")
+    return f"{verdict}\n{instruction}"
+
+
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
                 width: int = 80) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The
@@ -200,7 +212,8 @@ def spaces_after(node: Any, *, full: bool) -> bool:
         is_prose_leaf(node)
         or isinstance(node, (nv.UserMessageNode, nv.SkillLoadNode, nv.SubagentFold,
                              nv.PhaseNode, nv.StepNode, nv.BreadcrumbLine,
-                             nv.ErrorNode, nv.PauseNode, nv.RenameNode))
+                             nv.ErrorNode, nv.PauseNode, nv.RenameNode,
+                             nv.PanelSummaryNode))
         or (isinstance(node, nv.ToolBurstFold) and not full and node.calls)
     )
 
@@ -216,7 +229,8 @@ def spaces_before(node: Any) -> bool:
     lands identically in `imp log` and the live view."""
     return bool(
         (isinstance(node, nv.StepNode) and node.interactive)
-        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode))
+        or isinstance(node, (nv.PhaseNode, nv.ErrorNode, nv.PauseNode, nv.RenameNode,
+                             nv.MergedNode))
     )
 
 
@@ -315,13 +329,17 @@ def subagent_status_row(sub: nv.SubagentFold, *, depth: int, color: bool,
     leading bullet: the row is indented two cols (like the tool-burst recap) to
     sit under the agent turn's words, and the magenta color marks it as subagent
     identity. A finished subagent appends `· {elapsed}` (how long it ran); an
-    abnormal terminal state (running-at-pause, failed, stalled) appends a plain
-    `(state)` tag so a subagent that didn't cleanly finish still stands out."""
+    abnormal terminal state (running-at-pause, failed, stalled, interrupted)
+    appends a plain `(state)` tag so a subagent that didn't cleanly finish still
+    stands out. A re-dispatched subagent (retry) appends `· retrying (n)` where
+    n is the attempt number (2 for the first retry, 3 for the second, etc.)."""
     label = f"  {sub.subagent_name}"
     model = _subagent_model(sub)
     if model:
         # Show the subagent's model on the row, the same way a step header does.
         label += f" · {model}"
+    if sub.retry_attempt >= 1:
+        label += f" · retrying ({sub.retry_attempt + 1})"
     if sub.running:
         label += " (running)"
     elif sub.terminal_state == "stalled":
@@ -500,24 +518,36 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         yield _line(f"→ {text}", depth, color, *codes, gutters=gutters)
         return
 
+    if isinstance(node, nv.PanelSummaryNode):
+        t = node.tally
+        yield _line(f"panel: {t.approve}/{t.total} approve · {t.nits} nits",
+                    depth, color, *pal.NODE_COLORS["breadcrumb"], gutters=gutters)
+        return
+
     if isinstance(node, nv.BreadcrumbLine):
-        # No checkmark: a completed step reads as `<name> complete · …` — the word
-        # carries the meaning, and dropping the glyph keeps the gray line quiet
-        # (the `✓` drew the eye to navigational chrome it shouldn't). The output
-        # args (status=…, *_path=…, plan counts) are detail the lean view doesn't
-        # need beside every step — they survive in --full only; the routing verb
-        # and elapsed time stay in both (they're outcome, not args).
-        parts = [f"{node.step_name} complete" if node.show_complete else node.step_name]
+        act = node.action if isinstance(node.action, dict) else None
+        blocked = (node.kind == "merge" and act is not None
+                   and act.get("verb") == "pause")
+        if node.interrupted:
+            parts = [f"{node.step_name} interrupted"]
+        elif blocked:
+            parts = [f"{node.step_name} blocked"]
+        else:
+            parts = [f"{node.step_name} complete" if node.show_complete
+                     else node.step_name]
         if full:
             parts.extend(node.extras)
-        verb_text = pal.action_text(node.action) if node.action is not None else None
-        if verb_text and verb_text != "continue":
-            parts.append(verb_text)
+        if node.interrupted or blocked:
+            pass                          # no routing/verb suffix on these
+        elif act is not None and act.get("verb") == "goto":
+            if node.route:                # skip "" (same-phase) and None (unresolved)
+                parts.append(node.route)
+        else:
+            verb_text = pal.action_text(node.action) if node.action is not None else None
+            if verb_text and verb_text != "continue":
+                parts.append(verb_text)
         if node.elapsed_s is not None:
             parts.append(fmt_seconds(node.elapsed_s))
-        # A step's completion line carries the step color (the same bold darker-blue
-        # as its header), so a step's open and close read as one unit — distinct from
-        # the dim gray of tool/skill chrome.
         yield _line(" · ".join(parts), depth, color, *pal.NODE_COLORS["step"],
                     gutters=gutters)
         return
@@ -584,6 +614,12 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
                 yield _line(f"    ⚠ {r['warning']}", depth, color, *dim, gutters=gutters)
         return
 
+    if isinstance(node, nv.MergedNode):
+        mark = "✓ " if color else ""
+        yield _line(f"{mark}Merged {node.change_id} into {node.base}.", depth, color,
+                    "green", gutters=gutters)
+        return
+
     if isinstance(node, nv.FallbackLine):
         kv = " ".join(f"{k}={v}" for k, v in node.payload.items())
         yield _line(f"{node.event_type}  {kv}".rstrip(), depth, color,
@@ -610,7 +646,7 @@ def _call_args_line(c: nv.ToolCall) -> str:
         if len(val) > _ARG_VALUE_CLIP:
             val = val[:_ARG_VALUE_CLIP] + "…"
         parts.append(f"{k}={val}")
-    head = f"· {c.name}{tag}"
+    head = f"· {nv.display_tool_name(c.name)}{tag}"
     return f"{head}  {'  '.join(parts)}".rstrip() if parts else head
 
 
@@ -627,7 +663,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     calls = nv.visible_calls(burst)
     if not calls:
         return None
-    names = list(dict.fromkeys(c.name for c in calls))
+    names = list(dict.fromkeys(nv.display_tool_name(c.name) for c in calls))
     shown = " · ".join(names[:4])
     more = f" +{len(names) - 4}" if len(names) > 4 else ""
     n = len(calls)
