@@ -26,12 +26,14 @@ sweep's work:
 
 Silently-fixed items appear in neither list.
 
-Present the summary, then ask the user whether to **merge** or go **back to
-implement** with feedback by calling `wait_for_user` with a `prompt` that presents
-the summary and asks for their decision. The human's reply comes back as the tool
-result; do not end your turn with plain text and no tool call (a bare turn-end is
-treated as a bug and will nudge you). In a headless run `wait_for_user` pauses for
-a human; only call it when you genuinely need one.
+Present the summary, then call `wait_for_user` with a `prompt` that presents the
+summary and makes the merge-vs-rework affordance explicit: state that this is the
+final **merge gate**, and tell the user how to respond — reply **merge** to merge
+into the base branch, or describe the **rework** to send the change back to
+implement. The human's reply comes back as the tool result; do not end your turn
+with plain text and no tool call (a bare turn-end is treated as a bug and will nudge
+you). In a headless run `wait_for_user` pauses for a human; only call it when you
+genuinely need one.
 
 When the user has decided (their reply is in the `wait_for_user` tool result):
 - Merge → `complete_step(decision="merge", comments="<any notes>")`.

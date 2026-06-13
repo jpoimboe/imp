@@ -183,36 +183,6 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
     return _reply
 
 
-def make_seed_reply_fn(
-    seed: str, fallback: Callable[[], Awaitable[str]],
-) -> Callable[[], Awaitable[str]]:
-    delivered = False
-
-    async def _reply(*_a: object, **_k: object) -> str:
-        nonlocal delivered
-        if not delivered:
-            delivered = True
-            return seed
-        return await fallback()
-
-    return _reply
-
-
-def make_seed_gate(
-    seed: str,
-) -> Callable[[Callable[[], Awaitable[str]]], Awaitable[str]]:
-    delivered = False
-
-    async def _apply(fallback: Callable[[], Awaitable[str]]) -> str:
-        nonlocal delivered
-        if not delivered:
-            delivered = True
-            return seed
-        return await fallback()
-
-    return _apply
-
-
 def _maybe_build_channel(change: Change) -> RemoteChannel | None:
     """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
     behaves exactly as today). Title is captured at run start. A bad config is
@@ -496,7 +466,7 @@ async def _run_change_session(
     non_interactive: bool,
     tg: Any,
     channel: Any = None,
-    seed_gate: Callable[[Callable[[], Awaitable[str]]], Awaitable[str]] | None = None,
+    seed_opening: str | None = None,
 ) -> int:
     """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
     loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
@@ -531,6 +501,7 @@ async def _run_change_session(
         reader_armed = (
             bool(esc_reader and esc_reader._armed) if not non_interactive else False)
         result: RunResult | None = None
+        seed_opening_pending = seed_opening
         while True:
             run_scope_holder["scope"] = anyio.CancelScope()
             try:
@@ -541,14 +512,6 @@ async def _run_change_session(
                     _reply: Callable[[], Awaitable[str]] = effective_reply_fn(
                         reply_input_fn, channel, non_interactive=non_interactive)
 
-                    if seed_gate is not None:
-                        def _gated(
-                            _src: Callable[[], Awaitable[str]] = _reply,
-                        ) -> Awaitable[str]:
-                            return seed_gate(_src)
-
-                        _reply = _gated
-
                     def _chat(
                         _q: object,
                         _fn: Callable[[], Awaitable[str]] = _reply,
@@ -558,7 +521,9 @@ async def _run_change_session(
                     result = await run_change(
                         change, on_event=run_on_event,
                         user_chat_input_fn=_chat,
-                        coordinator=coord, non_interactive=non_interactive)
+                        coordinator=coord, non_interactive=non_interactive,
+                        seed_opening=seed_opening_pending)
+                    seed_opening_pending = None
             except EOFError:
                 return _finalize_paused_exit(change, driver, coord, "ctrl-d")
             except KeyboardInterrupt:
@@ -819,7 +784,7 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 
 
 async def _run_tui_session(
-        change: Change, *, args: argparse.Namespace, seed: str | None = None) -> int:
+        change: Change, *, args: argparse.Namespace, seed_opening: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     # No EscKeyReader — TuiApp owns the tty exclusively.
@@ -829,11 +794,6 @@ async def _run_tui_session(
 
     async def _solicit(*_a: object, **_k: object) -> str:
         return await app.solicit(change)
-
-    # A spec seed (imp new <draft>) is delivered as the first solicit, exactly as
-    # in the non-TUI path; later solicits fall back to the interactive TuiApp.
-    _chat: Callable[..., Awaitable[str]] = (
-        make_seed_reply_fn(seed, _solicit) if seed is not None else _solicit)
 
     holder: dict[str, Any] = {}
     load_err: Exception | None = None
@@ -850,8 +810,9 @@ async def _run_tui_session(
                 async def _run() -> None:
                     try:
                         holder["result"] = await run_change(
-                            change, on_event=run_on_event, user_chat_input_fn=_chat,
-                            coordinator=coord, non_interactive=False)
+                            change, on_event=run_on_event, user_chat_input_fn=_solicit,
+                            coordinator=coord, non_interactive=False,
+                            seed_opening=seed_opening)
                     finally:
                         app.exit()
 
@@ -920,13 +881,13 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             non_interactive = bool(getattr(args, "non_interactive", False))
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
-                return await _run_tui_session(change, args=args, seed=seed.seed_text)
+                return await _run_tui_session(
+                    change, args=args, seed_opening=seed.seed_text)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
                                 width=_term_width(), status=status,
-                                suppress_opening_question=True,
-                                base_branch=change.base_branch)
+                                suppress_opening_question=True)
             coord = InterruptCoordinator()
             channel = _maybe_build_channel(change)
             rc = 0
@@ -941,10 +902,6 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 # router-flagged reply_input_fn. See _build_interactive_input.
                 _router, reply_input_fn = _build_interactive_input(
                     change, status, coord, esc_reader, driver)
-
-            seed_gate = (
-                make_seed_gate(seed.seed_text)
-                if seed.seed_text is not None else None)
 
             try:
                 with _benign_interrupt_loop_handler(coord):
@@ -962,7 +919,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                             change, coord=coord, driver=driver, status=status,
                             esc_reader=esc_reader, reply_input_fn=reply_input_fn,
                             non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_gate=seed_gate)
+                            seed_opening=seed.seed_text)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -1061,8 +1018,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     return 2
                 try:
                     rewind_plan = recovery.plan_rewind(
-                        workflow, state, from_target,
-                        force=bool(getattr(args, "force", False)))
+                        workflow, state, from_target)
                 except (recovery.RewindError, recovery.GateBypassRequired) as e:
                     # str(e) bare (not the usual f"imp: {e}"): these messages
                     # already embed the "imp:" prefix and are multi-line (they
@@ -1080,8 +1036,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             change.event_log().append(
                 agent_id=None, type="workflow_resumed", payload={})
             state.status = "running"
-            # Apply the rewind AFTER the resume marker so step_rewound (+ any
-            # gates_bypassed) follow workflow_resumed in the append-only log.
+            # Apply the rewind AFTER the resume marker so step_rewound follows
+            # workflow_resumed in the append-only log.
             if rewind_plan is not None:
                 # workflow is set whenever rewind_plan is (both assigned only
                 # inside `if from_target is not None`); assert narrows for mypy.
@@ -1099,8 +1055,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status,
-                                base_branch=change.base_branch)
+                                width=_term_width(), status=status)
             coord = InterruptCoordinator()
             channel = _maybe_build_channel(change)
             rc = 0
@@ -1131,7 +1086,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                             change, coord=coord, driver=driver, status=status,
                             esc_reader=esc_reader, reply_input_fn=reply_input_fn,
                             non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_gate=None)
+                            seed_opening=None)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -1843,10 +1798,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--from", dest="from_target", metavar="TARGET",
         help="Rewind/jump the step cursor to TARGET (a step or phase name) and "
              "re-run forward, appending new events (never rewriting history).")
-    p_resume.add_argument(
-        "--force", action="store_true",
-        help="Permit a forward --from jump that skips gate steps "
-             "(land the Change as-is; sets ready_to_merge).")
+
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(
