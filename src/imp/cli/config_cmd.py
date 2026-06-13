@@ -23,6 +23,25 @@ def _label(src_file: Path) -> str:
     return f"{src_file} (user)"
 
 
+def _layer(src_file: Path) -> str:
+    if src_file == FLOOR_SRC.file:
+        return "default"
+    name = src_file.name
+    if name == "project.yaml":
+        return "project"
+    if name == "config.yaml" and src_file.parent.name == ".imp":
+        return "local"
+    return "user"
+
+
+_LAYER_COLOR = {
+    "default": "gray",
+    "user": "cyan",
+    "local": "yellow",
+    "project": "magenta",
+}
+
+
 def _arrow(out: TextIO, key: str, value: str, src_file: Path) -> None:
     out.write(f"  {key:<28} {value:<24} ← {_label(src_file)}\n")
 
@@ -79,11 +98,21 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
 
 
 def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool = False) -> None:
+    from imp.cli import palette as pal
+
     cfg, prov = eff.config, eff.provenance
     if tier not in cfg.tiers:
         out.write(f"unknown tier {tier!r} (known: {sorted(cfg.tiers)})\n")
         return
     out.write(f"tier {tier}:\n")
-    for vendor in sorted(cfg.tiers[tier]):
-        src = prov.get(("tiers", tier, vendor), FLOOR_SRC)
-        _arrow(out, vendor, cfg.tiers[tier][vendor], src.file)
+    rows = [
+        (vendor, cfg.tiers[tier][vendor],
+         prov.get(("tiers", tier, vendor), FLOOR_SRC).file)
+        for vendor in sorted(cfg.tiers[tier])
+    ]
+    differ = len({src_file for _, _, src_file in rows}) > 1
+    for vendor, value, src_file in rows:
+        label = _label(src_file)
+        if color and differ:
+            label = pal.ansi(label, _LAYER_COLOR[_layer(src_file)], enabled=color)
+        out.write(f"  {vendor:<28} {value:<24} ← {label}\n")
