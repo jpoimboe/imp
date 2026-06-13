@@ -234,6 +234,17 @@ def test_glob_external_per_result_symlink_into_masked_dir_dropped(tmp_path: Path
     assert "link" not in out                   # symlink into masked dir must be dropped
 
 
+def test_glob_inworktree_masked_file_dropped(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    (wt / "ok.txt").write_text("")
+    (wt / "secret.txt").write_text("")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_files=(str(wt / "secret.txt"),))
+    out = _glob(ctx, pattern="*.txt")
+    assert "ok.txt" in out
+    assert "secret.txt" not in out          # in-worktree masked file must be dropped
+
+
 def test_glob_description_documents_path_and_sandbox() -> None:
     desc = get_registry()["glob"].description
     assert "path" in desc

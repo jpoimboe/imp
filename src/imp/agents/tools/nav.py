@@ -93,6 +93,7 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
     root = ctx.project_root.resolve()
     inside = base.is_relative_to(root)
     policy = ctx.sandbox_policy
+    masking = policy is not None and policy.active
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
 
@@ -103,7 +104,9 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
         if inside:
             if not resolved.is_relative_to(root):
                 continue                        # belt-and-suspenders vs symlinks
-        elif policy is not None and policy.active and not policy.allows_read(resolved):
+            if masking and not policy.allows_read(resolved):
+                continue
+        elif masking and not policy.allows_read(resolved):
             continue                            # masked secret behind a symlink/in-tree
         if any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts):
             continue
