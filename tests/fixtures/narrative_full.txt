@@ -48,4 +48,4 @@ implement
   
   phase_exhausted  phase=implement
   
-  ⏸ paused (ctrl-c)
+  paused (ctrl-c)

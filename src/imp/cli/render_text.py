@@ -107,6 +107,20 @@ def _line(text: str, depth: int, color: bool, *codes: str,
     return _gutter_indent(depth, gutters, color) + pal.ansi(text, *codes, enabled=color)
 
 
+def _markdown_to_ansi(text: str, width: int, color: bool) -> str:
+    import io
+
+    from rich.console import Console
+    from rich.markdown import Markdown
+    from rich.theme import Theme
+    buf = io.StringIO()
+    Console(file=buf, width=width, no_color=not color,
+            color_system="standard" if color else None,
+            force_terminal=color, soft_wrap=False, highlight=False,
+            theme=Theme({"markdown.code": "cyan"})).print(Markdown(text))
+    return buf.getvalue()
+
+
 def _render_markdown_block(text: str, width: int, depth: int, color: bool,
                            gutters: tuple[int, ...] = ()) -> list[str]:
     """Render one finalized prose block as markdown→ANSI at inner width, then
@@ -118,12 +132,6 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     drop the bold and dark bg by setting it to plain `cyan` so inline `code`
     sits calmly in the prose. Fenced blocks (`markdown.code_block`) keep
     rich's default formatting."""
-    import io
-
-    from rich.console import Console
-    from rich.markdown import Markdown
-    from rich.theme import Theme
-
     # An agent turn is marked with a leading bold "• " bullet and hang-indented:
     # the bullet sits at the base column and every wrapped/continuation line aligns
     # 2 cols in, under the first word. (A bold dot — heavier than the small
@@ -131,17 +139,11 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
     # cols narrower to leave room for the hang, then place the bullet on the first
     # non-blank line and the hang on the rest.
     inner = max(8, width - _INDENT_W * depth - 2)
-    buf = io.StringIO()
-    console = Console(file=buf, width=inner, no_color=not color,
-                      color_system="standard" if color else None,
-                      force_terminal=color, soft_wrap=False, highlight=False,
-                      theme=Theme({"markdown.code": "cyan"}))
-    console.print(Markdown(text))
     indent = _gutter_indent(depth, gutters, color)
     bullet = pal.ansi("• ", "bold", enabled=color)   # bold dot marks the turn
     out: list[str] = []
     first = True
-    for raw in buf.getvalue().splitlines():
+    for raw in _markdown_to_ansi(text, inner, color).splitlines():
         stripped = raw.rstrip()
         if not stripped:
             # Blank line inside the prose block — emit the bare gutter-indent
@@ -153,6 +155,17 @@ def _render_markdown_block(text: str, width: int, depth: int, color: bool,
         else:
             out.append(indent + "  " + stripped)
     return out or [indent + bullet]
+
+
+def render_question_block(text: str, width: int, depth: int, color: bool,
+                          gutters: tuple[int, ...] = ()) -> list[str]:
+    inner = max(8, width - _INDENT_W * depth)
+    indent = _gutter_indent(depth, gutters, color)
+    out: list[str] = []
+    for raw in _markdown_to_ansi(text, inner, color).splitlines():
+        stripped = raw.rstrip()
+        out.append(indent + stripped if stripped else indent)
+    return out or [indent]
 
 
 def quiet_step_is_silent(node: nv.StepNode) -> bool:
@@ -448,8 +461,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # renders as a quiet line ABOVE the reply caret, so the recorded
         # transcript shows what the human was asked before what they typed.
         if node.pending_question:
-            yield from _wrap(node.pending_question, width, depth, color,
-                             *pal.NODE_COLORS["metadata"], gutters=gutters)
+            yield from render_question_block(
+                node.pending_question, width, depth, color, gutters)
         bg = pal.user_bg_open(enabled=color)
         if color:
             caret = pal.sgr(*pal.NODE_COLORS["user"], enabled=True) + pal.CARET + "\x1b[39m"
@@ -534,11 +547,11 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         return
 
     if isinstance(node, nv.PauseNode):
-        # A resumable stop — dim `⏸ paused (reason)`, the same quiet treatment the
+        # A resumable stop — dim `paused (reason)`, the same quiet treatment the
         # live view gives every pause (_emit_paused / _emit_paused_summary), so a
         # pause never reads as an `error:` in `imp log`. The driving failure, if
         # any, was already shown as its own `error:` event above.
-        yield _line(f"⏸ paused ({node.reason})", depth, color,
+        yield _line(f"paused ({node.reason})", depth, color,
                     *pal.NODE_COLORS["metadata"], gutters=gutters)
         return
 

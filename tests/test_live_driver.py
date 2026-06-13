@@ -1,6 +1,7 @@
 # tests/test_live_driver.py
 from __future__ import annotations
 
+import inspect
 import io
 import json
 
@@ -821,33 +822,18 @@ def test_driver_has_no_question_without_a_solicit() -> None:
     assert drv.take_pending_question() == ""
 
 
-def test_new_run_swallows_only_the_opening_question() -> None:
-    # `imp new` opens on the workflow's first wait_for_user; that opening
-    # question is not surfaced as a label above the first `>`. Every later
-    # solicit still shows its question.
+def test_live_driver_has_no_opening_question_suppression() -> None:
+    params = inspect.signature(LiveDriver.__init__).parameters
+    assert "suppress_opening_question" not in params
+
+
+def test_opening_question_is_surfaced_not_swallowed() -> None:
     out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
-                     suppress_opening_question=True)
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     drv.on_event(ev("1", "change_created", change_id=1, title="x"))
     drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
                     prompt="What change would you like to make?"))
-    assert drv.take_pending_question() == ""          # opening: swallowed
-    drv.on_event(ev("3", "awaiting_user_input", agent_id="a",
-                    prompt="Pick A or B?"))
-    assert drv.take_pending_question() == "Pick A or B?"   # later: shown
-
-
-def test_suppression_skips_empty_takes_until_a_real_question() -> None:
-    # An empty take (a solicit with no pending question) must NOT consume the
-    # one-shot suppression — only the first real question is swallowed.
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
-                     suppress_opening_question=True)
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
-    assert drv.take_pending_question() == ""          # nothing pending yet
-    drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
-                    prompt="What change would you like to make?"))
-    assert drv.take_pending_question() == ""          # opening still swallowed
+    assert drv.take_pending_question() == "What change would you like to make?"
 
 
 def test_quiet_continue_is_silent_live_and_matches_log() -> None:

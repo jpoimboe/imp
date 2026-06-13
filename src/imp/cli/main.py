@@ -283,10 +283,9 @@ def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
 
 
 def _pause_lines(name: str, phase: str | None, token: str, *, color: bool) -> list[str]:
-    mark = "⏸  " if color else ""
     at = f"  at {phase}" if phase else ""
     return [
-        ansi(f"{mark}Paused  {name}{at}", "dim", enabled=color),
+        ansi(f"Paused  {name}{at}", "dim", enabled=color),
         ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
     ]
 
@@ -300,7 +299,7 @@ def _pause_facts(change: Change) -> tuple[str, str | None, str]:
 
 
 def _emit_paused(change: Change) -> None:
-    """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim, ⏸."""
+    """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim."""
     color = should_use_color(sys.stdout)
     name, phase, token = _pause_facts(change)
     print("\n" + "\n".join(_pause_lines(name, phase, token, color=color)))
@@ -725,10 +724,10 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> str:
-    display = slug.strip() or change_id
-    return (ansi(display, *pal.NODE_COLORS["workflow"], enabled=color)
-            + ansi(f" · {marker}", "dim", enabled=color))
+def _run_header_line(change_id: str, title: str, marker: str, *, color: bool) -> str:
+    label = f": {title.strip()!r}" if title.strip() else ""
+    return (ansi(change_id, *pal.NODE_COLORS["workflow"], enabled=color)
+            + ansi(f"{label} · {marker}", "dim", enabled=color))
 
 
 def _rewind_note_line(from_step: str | None, target: str, *, color: bool) -> str:
@@ -877,7 +876,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(_run_header_line(
-                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+                change.id, change.title, "new", color=should_use_color(sys.stdout)))
             non_interactive = bool(getattr(args, "non_interactive", False))
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
@@ -886,8 +885,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status,
-                                suppress_opening_question=True)
+                                width=_term_width(), status=status)
             coord = InterruptCoordinator()
             channel = _maybe_build_channel(change)
             rc = 0
@@ -989,11 +987,11 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                 )
                 return 2
             # Resume gets no `change_created` event, so the driver won't print the
-            # workflow header — emit a matching one here (bold `#slug  title`) with
-            # a dim resuming marker, so a resumed run opens like a fresh one. A
-            # title-less change defers its header too (Option B), matching new.
+            # workflow header — emit a matching one here with a dim resuming marker,
+            # so a resumed run opens like a fresh one. A title-less change defers
+            # its header too (Option B), matching new.
             print(_run_header_line(
-                change.slug, change.id, "resuming",
+                change.id, change.title, "resuming",
                 color=should_use_color(sys.stdout)))
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
@@ -1765,8 +1763,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_init.set_defaults(func=_cmd_init)
 
-    p_new = sub.add_parser("new")
-    p_new.add_argument("title", nargs="?")
+    p_new = sub.add_parser(
+        "new", help="Start a new Change: run the workflow from an opening intent.")
+    p_new.add_argument(
+        "title", nargs="?",
+        help="Optional short title for the Change; the spec-writer names it if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Headless: no live prompt; supply the reply via --message.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
@@ -1783,8 +1784,11 @@ def _build_parser() -> argparse.ArgumentParser:
                             "(expanded steps); falls back to streaming on a non-tty.")
     p_new.set_defaults(func=_cmd_new)
 
-    p_resume = sub.add_parser("resume")
-    p_resume.add_argument("token", nargs="?")
+    p_resume = sub.add_parser(
+        "resume", help="Resume a paused or interrupted Change by id or token.")
+    p_resume.add_argument(
+        "token", nargs="?",
+        help="Change id or resume token identifying which Change to resume.")
     p_resume.add_argument("--non-interactive", action="store_true",
                           help="Headless: no live prompt; supply the reply via --message.")
     p_resume.add_argument("--message", metavar="TEXT", default=None,
@@ -1817,14 +1821,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_log.set_defaults(func=_cmd_log)
 
-    p_status = sub.add_parser("status")
+    p_status = sub.add_parser(
+        "status",
+        help="List in-flight Changes (use -a for completed and abandoned).")
     p_status.add_argument(
         "-a", "--all", action="store_true",
         help="Also list completed and abandoned Changes (default: in-flight only).",
     )
     p_status.set_defaults(func=_cmd_status)
 
-    p_config = sub.add_parser("config")
+    p_config = sub.add_parser(
+        "config", help="Show the effective config and per-setting provenance.")
     p_config.add_argument("--explain", metavar="TIER", default=None,
                           help="trace one tier's bindings through the layers")
     p_config.add_argument("--all", action="store_true",

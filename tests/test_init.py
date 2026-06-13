@@ -245,3 +245,36 @@ def test_post_init_manifest_does_not_claim_project_yaml_committed(
     assert "imp/project.yaml" in manifest
     assert "committed" not in manifest          # no false "already committed" claim
     assert "track in git" in manifest           # correct intent: user tracks it
+
+
+def test_already_initialized_with_existing_user_config_claims_no_write(
+    tmp_path: Path,
+) -> None:
+    # Both the committed project file AND the machine user config already exist.
+    (tmp_path / "imp").mkdir()
+    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    imp_config_dir = tmp_path / "xdg" / "imp"
+    imp_config_dir.mkdir(parents=True)
+    (imp_config_dir / "config.yaml").write_text("providers: [anthropic]\n")
+
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path, picker_fn=_picks("anthropic"),
+        input_fn=_inputs(), output_fn=msgs.append,
+    )
+    text = "\n".join(msgs)
+    # Must NOT claim a write that did not happen; user config is untouched.
+    assert "bootstrapped" not in text
+    assert "already set up" in text
+    assert (imp_config_dir / "config.yaml").read_text() == "providers: [anthropic]\n"
+
+
+def test_picker_cursor_uses_render_safe_caret() -> None:
+    from imp.cli.init import _picker_rows
+
+    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    active = rows[1][1]
+    inactive = rows[2][1]
+    assert active.startswith("> ")
+    assert "❯" not in active
+    assert inactive.startswith("  ")

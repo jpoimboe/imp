@@ -30,7 +30,7 @@ Present the summary, then call `wait_for_user` with a `prompt` that presents the
 summary and makes the merge-vs-rework affordance explicit: state that this is the
 final **merge gate**, and tell the user how to respond — reply **merge** to merge
 into the base branch, or describe the **rework** to send the change back to
-implement. The human's reply comes back as the tool result; do not end your turn
+implement. Separate sections with a blank line or a short label — do **not** draw full-width horizontal rules (`---` or `===`); they render as a loud rule across the terminal. The human's reply comes back as the tool result; do not end your turn
 with plain text and no tool call (a bare turn-end is treated as a bug and will nudge
 you). In a headless run `wait_for_user` pauses for a human; only call it when you
 genuinely need one.

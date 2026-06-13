@@ -93,7 +93,8 @@ def _help(out: Callable[[str], None]) -> None:
     out("  Tab                Complete a /command or skill name")
 
 
-async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "") -> str:
+async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "",
+                       width: int = 80) -> str:
     """Read a line, but cancel the prompt if the coordinator exit event fires
     (SIGTERM / out-of-band SIGINT / escalation). On cancellation, raise
     KeyboardInterrupt so the CLI's pause-and-exit arm finalizes status=paused.
@@ -120,7 +121,7 @@ async def _ask_or_exit(prompt: Any, exit_evt: Any, *, question: str = "") -> str
                 tg.cancel_scope.cancel()
 
             async def _read() -> None:
-                result["line"] = await prompt.ask_async(question=question)
+                result["line"] = await prompt.ask_async(question=question, width=width)
                 tg.cancel_scope.cancel()
 
             tg.start_soon(_watch)
@@ -202,10 +203,11 @@ async def ask_line_with_slash(
                         exit_evt = getattr(coord, "_exit_event", None) if coord else None
                         try:
                             if exit_evt is None:
-                                line: str = await prompt.ask_async(question=question)
+                                line: str = await prompt.ask_async(
+                                    question=question, width=width)
                             else:
                                 line = await _ask_or_exit(
-                                    prompt, exit_evt, question=question)
+                                    prompt, exit_evt, question=question, width=width)
                             question = ""  # only the first prompt shows the label
                         except KeyboardInterrupt:
                             # A KeyboardInterrupt reaching here is normally the

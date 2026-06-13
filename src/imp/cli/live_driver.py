@@ -80,8 +80,7 @@ def _container_closed(container: Any) -> bool:
 
 
 class LiveDriver:
-    def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus,
-                 suppress_opening_question: bool = False) -> None:
+    def __init__(self, *, stream: Any, color: bool, width: int, status: LiveStatus) -> None:
         self._builder = nv.NarrativeBuilder()
         self._stream = stream
         self._color = color
@@ -93,13 +92,6 @@ class LiveDriver:
         # output resets it; an empty emission leaves it untouched.
         self._prev_prose = False
         self._pending_question = ""
-        # `imp new` opens on the workflow's first wait_for_user. That opening
-        # question is the run's premise, not a reply solicit, and surfacing it as
-        # a label above the very first `>` resurfaces a question that was never
-        # shown in prose (its proper display is handled elsewhere). Swallow the
-        # first non-empty pending question on the new path only; resume keeps the
-        # label so the in-progress question is resurfaced as the user expects.
-        self._suppress_opening_question = suppress_opening_question
         self._prompt_active = False        # defer _print_lines while a prompt owns the screen
         self._separator_emitted = False    # prepare_for_prompt printed the leading blank
         self._deferred: list[tuple[list[str], bool, str]] = []
@@ -111,7 +103,7 @@ class LiveDriver:
     def on_event(self, event: Any) -> None:
         self._builder.add(event)
         if isinstance(event, dict) and event.get("type") == "awaiting_user_input":
-            self._pending_question = (event.get("payload") or {}).get("prompt", "")
+            self._pending_question = (event.get("payload") or {}).get("prompt") or ""
         if isinstance(event, dict) and event.get("type") in (
                 "step_started", "user_message"):
             # §7: time-the-agent-working-since-the-last-user-reply. Reset on
@@ -136,9 +128,6 @@ class LiveDriver:
 
     def take_pending_question(self) -> str:
         q, self._pending_question = self._pending_question, ""
-        if q and self._suppress_opening_question:
-            self._suppress_opening_question = False   # only the opening one
-            return ""
         return q
 
     # -- emission -------------------------------------------------------------

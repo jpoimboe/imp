@@ -17,9 +17,9 @@ def test_pause_lines_without_a_phase_drop_the_at_clause() -> None:
     assert lines[0] == "Paused  add-version-flag"
 
 
-def test_pause_lines_color_dims_both_lines_and_marks_the_pause() -> None:
+def test_pause_lines_color_dims_both_lines_without_a_glyph() -> None:
     lines = _pause_lines("add-version-flag", "implement", "yaitd7", color=True)
-    assert lines[0] == "\x1b[2m⏸  Paused  add-version-flag  at implement\x1b[0m"
+    assert lines[0] == "\x1b[2mPaused  add-version-flag  at implement\x1b[0m"
     assert lines[1] == "\x1b[2m   resume:  imp resume yaitd7\x1b[0m"
 
 

@@ -1243,7 +1243,8 @@ def test_interrupt_renders_interrupted_not_complete_pause() -> None:
     assert "complete · pause" not in out
     assert "error:" not in out
     assert "runner cancelled by interrupt" not in out
-    assert "⏸ paused (esc)" in out
+    assert "paused (esc)" in out
+    assert "⏸" not in out
 
 
 def test_intentional_pause_still_renders_complete_pause() -> None:
@@ -1398,3 +1399,16 @@ def test_parallel_same_name_subagents_not_marked_retrying() -> None:
             content='{"status": "Success"}', error=False),
     ]))
     assert "retrying" not in out
+
+
+def test_pending_question_renders_markdown_above_the_reply() -> None:
+    from imp.cli import narrative as nv
+    from imp.cli import render_text as rt
+
+    node = nv.UserMessageNode(
+        text="merge", interactive=True,
+        pending_question="Reply **merge** to merge.")
+    out = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
+    assert "\x1b[1m" in out      # bold for **merge** in the question line
+    assert "**" not in out       # asterisks consumed by markdown
+    assert out.count("merge") >= 2   # once in the question, once as the reply text

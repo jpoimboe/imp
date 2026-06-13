@@ -17,7 +17,9 @@ NOT make code changes).
 
 Report:
 - `built`: what was built, by plan/task, in prose.
-- `test_status`: the verification state (what passed; anything skipped/failing).
+- `test_status`: the verification state (what passed; anything skipped/failing),
+  in plain user terms — never surface internal gate jargon (e.g. "gate failure",
+  "gate exit 2", raw exit codes).
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `.imp/change/progress.md` and surface them as TWO labelled
   subsections — **Fixed (FYI/veto):** every `fyi-fixed <commit>` item with its
@@ -33,8 +35,9 @@ If `.imp/change/integration-notes.md` exists, read it and fold its content into
 your summary: mention in `built` that base was integrated (e.g. "Merged base (N
 commits); resolved X conflicts — Y flagged uncertain; M semantic concerns"), and
 surface any flagged-uncertain resolutions or semantic concerns under
-`open_items`. If the file is **absent**, there was no base integration this change
-— do not treat that as an error and do not mention integration.
+`open_items`. If the file is **absent**, there were no base changes to integrate —
+phrase that as a plain no-op ("no base changes to integrate"), never as an error
+or a gate/exit code, and do not otherwise mention integration.
 
 This lands in the event log and is queryable via `imp log {{ change.slug }}`.
 Do not write files; do not commit.

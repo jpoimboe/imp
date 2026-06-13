@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import TextIO
 
+from imp.cli import palette as pal
 from imp.providers.effective import FLOOR_SRC, EffectiveConfig
 from imp.providers.resolve import iter_provider_defaults
 from imp.remote.drivers import REGISTRY
@@ -13,14 +14,29 @@ from imp.remote.drivers import REGISTRY
 
 def _label(src_file: Path) -> str:
     """Human label for a leaf's source file (the right-hand side of `←`)."""
-    if src_file == FLOOR_SRC.file:
+    layer = _layer(src_file)
+    if layer == "default":
         return "provider default"
+    return f"{src_file} ({layer})"
+
+
+def _layer(src_file: Path) -> str:
+    if src_file == FLOOR_SRC.file:
+        return "default"
     name = src_file.name
     if name == "project.yaml":
-        return f"{src_file} (project)"
+        return "project"
     if name == "config.yaml" and src_file.parent.name == ".imp":
-        return f"{src_file} (local)"
-    return f"{src_file} (user)"
+        return "local"
+    return "user"
+
+
+_LAYER_COLOR = {
+    "default": "gray",
+    "user": "cyan",
+    "local": "yellow",
+    "project": "magenta",
+}
 
 
 def _arrow(out: TextIO, key: str, value: str, src_file: Path) -> None:
@@ -84,6 +100,14 @@ def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool 
         out.write(f"unknown tier {tier!r} (known: {sorted(cfg.tiers)})\n")
         return
     out.write(f"tier {tier}:\n")
-    for vendor in sorted(cfg.tiers[tier]):
-        src = prov.get(("tiers", tier, vendor), FLOOR_SRC)
-        _arrow(out, vendor, cfg.tiers[tier][vendor], src.file)
+    rows = [
+        (vendor, cfg.tiers[tier][vendor],
+         prov.get(("tiers", tier, vendor), FLOOR_SRC).file)
+        for vendor in sorted(cfg.tiers[tier])
+    ]
+    differ = len({src_file for _, _, src_file in rows}) > 1
+    for vendor, value, src_file in rows:
+        label = _label(src_file)
+        if color and differ:
+            label = pal.ansi(label, _LAYER_COLOR[_layer(src_file)], enabled=color)
+        out.write(f"  {vendor:<28} {value:<24} ← {label}\n")

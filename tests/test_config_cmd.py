@@ -126,3 +126,55 @@ def test_render_marks_enabled_driver(
     render_config(eff, out, color=False)
     assert "telegram" in out.getvalue()
     assert "(enabled)" in out.getvalue()         # the configured driver's state marker
+
+
+def test_explain_colors_sources_when_layers_differ(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    # User overrides only the openai binding of `high`; anthropic stays at the
+    # provider-default floor — so the two rows' sources differ.
+    (xdg / "config.yaml").write_text(
+        "providers: [anthropic, openai]\n"
+        "tiers:\n"
+        "  high:\n"
+        "    openai: gpt-5-custom\n"
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    out = io.StringIO()
+    render_explain(eff, "high", out, color=True)
+    assert "\x1b[" in out.getvalue()   # labels colored because sources diverge
+    output = out.getvalue()
+    anthropic_line = next(ln for ln in output.splitlines() if "anthropic" in ln)
+    openai_line = next(ln for ln in output.splitlines() if "openai" in ln)
+    assert "\x1b[90m" in anthropic_line  # default layer → gray
+    assert "\x1b[36m" in openai_line     # user layer → cyan
+
+
+def test_explain_uncolored_when_layers_match(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)   # no tier overrides → all floor
+    out = io.StringIO()
+    render_explain(eff, "high", out, color=True)
+    assert "\x1b[" not in out.getvalue()   # matching sources → no coloring
+
+
+def test_explain_never_colors_under_no_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg" / "imp"
+    xdg.mkdir(parents=True)
+    (xdg / "config.yaml").write_text(
+        "providers: [anthropic, openai]\n"
+        "tiers:\n"
+        "  high:\n"
+        "    openai: gpt-5-custom\n"
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    eff = load_effective_config(project_root=None, control_root=None)
+    out = io.StringIO()
+    render_explain(eff, "high", out, color=False)
+    assert "\x1b[" not in out.getvalue()
