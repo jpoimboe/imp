@@ -291,6 +291,20 @@ def test_already_initialized_with_existing_user_config_claims_no_write(
     assert (imp_config_dir / "config.yaml").read_text() == "providers: [anthropic]\n"
 
 
+def test_init_suggestion_reads_as_opening_message(tmp_path: Path) -> None:
+    msgs: list[str] = []
+    run_init(
+        project_root=tmp_path,
+        picker_fn=_picks("anthropic"),
+        input_fn=_inputs(),
+        output_fn=msgs.append,
+        detect_theme_fn=lambda: "ansi",
+    )
+    blob = "\n".join(msgs)
+    assert 'imp new "Add a dark-mode toggle"' in blob
+    assert "Your first change" not in blob
+
+
 def test_picker_cursor_uses_render_safe_caret() -> None:
     from imp.cli.init import _picker_rows
 

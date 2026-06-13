@@ -105,6 +105,12 @@ def test_overview_commands_are_real_subcommands() -> None:
     assert not stale, f"overview lists non-existent command(s): {sorted(stale)}"
 
 
+def test_overview_new_summary_reads_as_opening_message() -> None:
+    summary = dict(_OVERVIEW_COMMANDS)["new"]
+    assert "opening message" in summary
+    assert "title" not in summary
+
+
 def test_main_swallows_broken_pipe_on_overview(monkeypatch) -> None:
     """The bare-`imp` overview path prints before the command dispatch, so it
     must also sit inside main()'s BrokenPipeError guard: a reader closing the
