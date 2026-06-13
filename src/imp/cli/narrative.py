@@ -498,17 +498,19 @@ class NarrativeBuilder:
         #
         #     H1 GUARD (essential): the task tool_result is ITSELF a parent-agent_id
         #     event. SKIP resume-close when the current event is a `tool_result`
-        #     whose payload id MATCHES an open fold's block_id — let _h_tool_result
-        #     do the outcome-carrying close. Popping here first would leave
-        #     _h_tool_result nothing to close (no outcome + an orphan "tool" line,
-        #     regressing every provider). Keep the guard PRECISE: skip only for a
-        #     MATCHING tool_result, never a non-matching orphan (which must still
-        #     trigger resume-close, else an old fold re-freezes).
+        #     whose payload id MATCHES an open fold (block- OR event-keyed; both
+        #     dicts are probed below) — let _h_tool_result do the outcome-carrying
+        #     close. Popping here first would leave _h_tool_result nothing to close
+        #     (no outcome + an orphan "tool" line, regressing every provider). Keep
+        #     the guard PRECISE: skip only for a MATCHING tool_result, never a
+        #     non-matching orphan (which must still trigger resume-close, else an
+        #     old fold re-freezes).
         #
         #     IGNORE agent_id-None events (tiers_resolved, workflow_*): they don't
-        #     belong to any opener and must not close a sibling's fold. Run the
-        #     close BEFORE the type dispatch so a back-to-back `task` dispatch
-        #     closes the previous fold before opening the next.
+        #     belong to any opener and must not close a sibling's fold. A `task`
+        #     tool_call is excluded below (is_task_call): concurrent batched siblings
+        #     must NOT resume-close each other — a back-to-back/parallel `task`
+        #     dispatch keeps prior folds open until their own results close them.
         if isinstance(agent_id, str) and (self._open_sub_by_block or self._open_sub_by_event):
             rid_ = str(payload.get("id", ""))
             # A `task` tool_call is a concurrent sibling dispatch in a batch, not
@@ -788,6 +790,11 @@ def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
     for fold in self._open_sub_by_event.values():
         fold.running = False
         fold.terminal_state = "interrupted"
+        # Drop the interrupted fold's membership entry too — otherwise a late
+        # `sub:` event for it would still route in (exact-membership above) and
+        # keep accumulating onto an interrupted fold, the very thing this
+        # finalize exists to stop. Settled pre-pause folds keep their entries.
+        self._sub_by_agent_id.pop(f"sub:{fold.event_id}", None)
     self._open_sub_by_block.clear()
     self._open_sub_by_event.clear()
     self._resuming = True                # open the re-entry window

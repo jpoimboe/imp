@@ -1413,6 +1413,30 @@ def test_workflow_resumed_finalizes_dangling_folds_as_interrupted() -> None:
     assert len(fresh) == 1 and fresh[0].running is True
 
 
+def test_resume_drops_interrupted_fold_membership_so_late_events_dont_reattach() -> None:
+    # A dangling fold finalized as interrupted on workflow_resumed must also lose
+    # its `_sub_by_agent_id` membership entry — otherwise a late `sub:` event for
+    # it would still route in by exact membership and keep accumulating onto an
+    # interrupted fold, the very thing the finalize exists to stop.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="b1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    step = b._step_stack[-1]
+    dangling = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    assert "sub:tk1" in b._sub_by_agent_id
+
+    b.add(_ev("p1", "workflow_paused", interrupt_reason="interrupt"))
+    b.add(_ev("r1", "workflow_resumed"))
+    assert "sub:tk1" not in b._sub_by_agent_id          # membership dropped
+    count_before = dangling.event_count
+
+    # A late event carrying the interrupted fold's sub: id must NOT reattach.
+    b.add(_ev("late", "llm_response", agent_id="sub:tk1", usage={}))
+    assert dangling.event_count == count_before
+
+
 def test_current_activity_suffix_counts_extra_running_subagents() -> None:
     # AC40: one running fold → no suffix; two → "(+1 more subagent)"; three →
     # "(+2 more subagents)" (singular/plural). The named detail is the FIRST

@@ -133,8 +133,8 @@ def test_plan_writer_recognition_taxonomy_full_strings() -> None:
         "No blocking issues — integrate these minor improvements; a final review follows:",
         "The plan didn't match the codebase. Here's what the implementer found:",
         "More plans are needed for this spec. Coverage assessment:",
-        "The review panel found the plan needs revision. Findings:",
-        "The code reviewer found the plan needs revision. Findings:",
+        "The review found the plan needs revision. Findings:",
+        "The integration pass found the plan needs revision. Findings:",
         "Your previous attempt completed but was not accepted",
         "previous step output recorded; superseded by the feedback below",
     ):
