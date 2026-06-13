@@ -144,40 +144,7 @@ async def test_cancel_raised_inside_continuation_yields_interrupted(tmp_path: Pa
     assert events[-1]["payload"]["kind"] == "interrupted"
 
 
-@pytest.mark.anyio
-async def test_subagent_suspended_unwinds_out_of_run(tmp_path: Path) -> None:
-    from imp.engine.agent_run import SubagentSuspended
-    auth = _seed_git_and_auth(tmp_path)
-    elog = InMemoryEventLog()
-    from tests.codex_fakes import agent_message, mcp_call, thread_started, turn_completed
 
-    scripted = [[thread_started("t"), agent_message("dispatching"),
-                 mcp_call(name="task", args={"subagent_name": "impl",
-                                             "task_description": "x"},
-                          result="ignored", item_id="sdk-1"),
-                 turn_completed(output_tokens=1)]]
-
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
-    runner._canonical_auth_override = auth
-
-    # Inject the captured suspend by patching process_event to set it on the
-    # RunState the runner creates; assert run() re-raises it.
-    import imp.providers.codex_runner as cr
-    orig = cr.process_event
-    def _patched(*a: Any, **k: Any) -> None:
-        rs = k.get("run_state")
-        if rs is not None and getattr(a[0], "type", None) == "turn.completed":
-            rs.subagent_suspended = SubagentSuspended("paused")
-        return orig(*a, **k)
-    cr.process_event = _patched
-    try:
-        with pytest.raises(SubagentSuspended):
-            async for _ev in runner.run(_invocation(tmp_path, event_log=elog)):
-                pass
-    finally:
-        cr.process_event = orig
 
 
 @pytest.mark.anyio
@@ -255,57 +222,7 @@ async def test_killed_tools_drained_to_tool_killed_events(tmp_path: Path) -> Non
     assert not any(e.get("type") == "tool_killed" for e in events)
 
 
-@pytest.mark.anyio
-async def test_suspension_reraise_deferred_until_inflight_drains(
-    tmp_path: Path,
-) -> None:
-    """AC25: a suspension captured while a sibling is in flight is NOT re-raised
-    at that event; it is deferred until inflight drains to 0 (here at the next
-    event). Falsifiable: the turn.completed llm_response — emitted by process_event
-    BEFORE the deferred re-raise — is in the log; an ungated raise would fire at
-    the task item, before that response exists."""
-    from imp.engine.agent_run import SubagentSuspended
-    auth = _seed_git_and_auth(tmp_path)
-    elog = InMemoryEventLog()
-    from tests.codex_fakes import agent_message, mcp_call, thread_started, turn_completed
 
-    scripted = [[thread_started("t"), agent_message("dispatching"),
-                 mcp_call(name="task",
-                          args={"subagent_name": "impl",
-                                "task_description": "x"},
-                          result="ok", item_id="sdk-1"),
-                 turn_completed(output_tokens=1)]]
-
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
-    runner._canonical_auth_override = auth
-
-    import imp.providers.codex_runner as cr
-    orig = cr.process_event
-
-    def _patched(*a: Any, **k: Any) -> None:
-        rs = k.get("run_state")
-        ev = a[0]
-        if rs is not None:
-            item = getattr(ev, "item", None)
-            if getattr(item, "type", None) == "mcp_tool_call":
-                # Capture lands while a sibling is still in flight.
-                rs.subagent_suspended = SubagentSuspended("paused")
-                rs.inflight_task_dispatches = 1
-            if getattr(ev, "type", None) == "turn.completed":
-                rs.inflight_task_dispatches = 0  # sibling settles
-        return orig(*a, **k)
-
-    cr.process_event = _patched
-    try:
-        with pytest.raises(SubagentSuspended):
-            async for _ev in runner.run(_invocation(tmp_path, event_log=elog)):
-                pass
-    finally:
-        cr.process_event = orig
-
-    assert any(e.get("type") == "llm_response" for e in elog.read())
 
 
 @pytest.mark.anyio
@@ -360,85 +277,4 @@ async def test_awaiting_user_resume_injects_reply_not_system_prompt(
     assert "you are a test agent" not in str(first_prompt)
 
 
-@pytest.mark.anyio
-async def test_stream_end_drains_then_reraises_suspension(
-    tmp_path: Path,
-) -> None:
-    """AC25: the stream ends with a suspension captured while a sibling is still
-    in flight (in-loop raise gated off). The fallback awaits the drain, then
-    re-raises — without it run() returns normally and pytest.raises fails."""
-    import asyncio
 
-    from imp.engine.agent_run import SubagentSuspended
-    auth = _seed_git_and_auth(tmp_path)
-    elog = InMemoryEventLog()
-    from tests.codex_fakes import agent_message, thread_started, turn_completed
-
-    scripted = [[thread_started("t"), agent_message("x"),
-                 turn_completed(output_tokens=1)]]
-
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
-    runner._canonical_auth_override = auth
-
-    import imp.providers.codex_runner as cr
-    orig = cr.process_event
-
-    def _patched(*a: Any, **k: Any) -> None:
-        rs = k.get("run_state")
-        if rs is not None and getattr(a[0], "type", None) == "turn.completed":
-            rs.subagent_suspended = SubagentSuspended("paused")
-            rs.inflight_task_dispatches = 1  # sibling in flight at the gate
-
-            async def _settle() -> None:
-                await asyncio.sleep(0)
-                rs.inflight_task_dispatches = 0
-
-            asyncio.get_running_loop().create_task(_settle())
-        return orig(*a, **k)
-
-    cr.process_event = _patched
-    try:
-        with pytest.raises(SubagentSuspended):
-            async for _ev in runner.run(_invocation(tmp_path, event_log=elog)):
-                pass
-    finally:
-        cr.process_event = orig
-
-
-@pytest.mark.anyio
-async def test_dual_capture_suspension_takes_precedence(tmp_path: Path) -> None:
-    # AC33: both subagent_suspended AND awaiting_user are captured in one drain
-    # window (inflight==0). The runner re-raises the SUSPENSION (pinned precedence
-    # over awaiting_user), not AwaitingUserInput.
-    from imp.engine.agent_run import SubagentSuspended
-    auth = _seed_git_and_auth(tmp_path)
-    elog = InMemoryEventLog()
-    from tests.codex_fakes import agent_message, thread_started, turn_completed
-
-    scripted = [[thread_started("t"), agent_message("x"),
-                 turn_completed(output_tokens=1)]]
-    runner = CodexAgentRunner(
-        model_name="gpt-5.5",
-        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted))
-    runner._canonical_auth_override = auth
-
-    import imp.providers.codex_runner as cr
-    orig = cr.process_event
-
-    def _patched(*a: Any, **k: Any) -> None:
-        rs = k.get("run_state")
-        if rs is not None and getattr(a[0], "type", None) == "turn.completed":
-            rs.subagent_suspended = SubagentSuspended("paused")
-            rs.awaiting_user = True
-            rs.inflight_task_dispatches = 0   # both settled in one window
-        return orig(*a, **k)
-
-    cr.process_event = _patched
-    try:
-        with pytest.raises(SubagentSuspended):
-            async for _ev in runner.run(_invocation(tmp_path, event_log=elog)):
-                pass
-    finally:
-        cr.process_event = orig

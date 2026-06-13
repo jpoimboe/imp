@@ -9,8 +9,8 @@ import pytest
 from imp.agents.subagents import make_task_tool
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
-from imp.engine.agent_run import SubagentSuspended
-from imp.providers.codex_mcp import RunState, _args_fingerprint, dispatch_tool
+from imp.engine.state import InMemoryEventLog
+from imp.providers.codex_mcp import RunState, dispatch_tool
 
 
 @pytest.fixture
@@ -63,7 +63,7 @@ def test_dispatch_complete_step_captures_args(tmp_path: Path) -> None:
     out = asyncio.run(dispatch_tool(
         tool=cs, args={"answer": "done"}, ctx=ctx, state=state))
     assert state.complete_step_args == {"answer": "done"}
-    assert state.complete_step_called is True  # ADD THIS LINE
+    assert state.complete_step_called is True
     assert "step complete" in out
     assert state.dispatch_count == 1
 
@@ -177,174 +177,66 @@ def test_complete_step_preserves_non_none_optional_arg(tmp_path: Path) -> None:
 # ── task tool special-case tests ─────────────────────────────────────────────
 
 
-def test_dispatch_task_happy_path_returns_subagent_output(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+def test_task_dispatch_returns_output_and_appends_no_tool_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """dispatch_tool with tool.name=='task' must await dispatch_task directly
-    and return its output — NOT go through async_invoke (which raises
-    TaskMustBeAwaited by design)."""
-    expected = '{"status": "done", "summary": "all tests passed"}'
-
-    async def _stub_dispatch_task(
-        ctx: Any, subagent_name: str, task_description: str,
-        *, tool_call_event_id: str = "", tier: Any = None,
-        abort_dispatch: Any = None,
-    ) -> str:
-        assert subagent_name == "impl"
-        assert task_description == "do it"
-        return expected
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
-
-    from imp.engine.state import InMemoryEventLog
-    task_tool = make_task_tool()
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    state = RunState(cap=50)
-
-    result = asyncio.run(dispatch_tool(
-        tool=task_tool,
-        args={"subagent_name": "impl", "task_description": "do it", "tier": None},
-        ctx=ctx,
-        state=state,
-    ))
-    assert result == expected
-    assert state.dispatch_count == 1
-
-
-def test_dispatch_task_subagent_suspended_captured_not_reraised(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """SubagentSuspended must be captured onto RunState (for the runner to
-    re-raise cleanly), NOT re-raised directly out of dispatch_tool — doing so
-    would propagate through the in-process MCP boundary instead of letting the
-    runner unwind the whole codex run in a controlled way."""
-
-    async def _stub_dispatch_task(
-        ctx: Any, subagent_name: str, task_description: str,
-        *, tool_call_event_id: str = "", tier: Any = None,
-        abort_dispatch: Any = None,
-    ) -> str:
-        raise SubagentSuspended("paused by coordinator")
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
-
-    from imp.engine.state import InMemoryEventLog
-    task_tool = make_task_tool()
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    state = RunState(cap=50)
-
-    # Must NOT raise — must capture onto state and return benign text.
-    out = asyncio.run(dispatch_tool(
-        tool=task_tool,
-        args={"subagent_name": "coder", "task_description": "write code"},
-        ctx=ctx,
-        state=state,
-    ))
-    assert isinstance(out, str)
-    assert state.subagent_suspended is not None
-    assert isinstance(state.subagent_suspended, SubagentSuspended)
-
-
-def test_dispatch_task_generic_error_becomes_is_error_text(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A non-suspend exception from dispatch_task is converted to an error
-    string (returned as the tool result) and recorded in state.runtime_errors."""
-
-    async def _stub_dispatch_task(
-        ctx: Any, subagent_name: str, task_description: str,
-        *, tool_call_event_id: str = "", tier: Any = None,
-        abort_dispatch: Any = None,
-    ) -> str:
-        raise ValueError("boom")
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
-
-    from imp.engine.state import InMemoryEventLog
-    task_tool = make_task_tool()
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    state = RunState(cap=50)
-
-    result = asyncio.run(dispatch_tool(
-        tool=task_tool,
-        args={"subagent_name": "reviewer", "task_description": "review code"},
-        ctx=ctx,
-        state=state,
-    ))
-    assert "ValueError" in result
-    assert "boom" in result
-    assert any("ValueError" in e and "boom" in e for e in state.runtime_errors)
-
-
-def test_task_dispatch_mints_parent_tool_call_and_passes_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """dispatch_tool's task branch mints the parent tool_call event up front,
-    pushes its id onto state.minted_task_ids (FIFO), and passes it to
-    dispatch_task as tool_call_event_id."""
-    from imp.engine.state import InMemoryEventLog
-
-    seen: dict[str, Any] = {}
-
-    async def _stub_dispatch_task(
-        ctx: Any, subagent_name: str, task_description: str,
-        *, tool_call_event_id: str = "", tier: Any = None,
-        abort_dispatch: Any = None,
-    ) -> str:
-        seen["tool_call_event_id"] = tool_call_event_id
-        return '{"answer": "ok"}'
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub_dispatch_task)
-
+    """Change 2: dispatch_tool runs the subagent and returns its output; it does
+    NOT touch the event log for the task tool_call/result pair (process_event owns
+    that now)."""
     elog = InMemoryEventLog()
     ctx = _ctx(tmp_path)
     ctx.event_log = elog  # type: ignore[attr-defined]
-    state = RunState(cap=50, agent_id="step:t")
 
-    asyncio.run(dispatch_tool(
-        tool=make_task_tool(),
-        args={"subagent_name": "impl", "task_description": "do it"},
-        ctx=ctx, state=state))
+    async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
+        return '{"status": "Success"}'
 
-    # A tool_call event was minted, and its id was both queued and passed down.
-    calls = [e for e in list(elog.read()) if e.get("type") == "tool_call"]
-    assert len(calls) == 1
-    minted_id = calls[0]["id"]
-    assert seen["tool_call_event_id"] == minted_id
-    # Mint now carries (event_id, fingerprint) so an out-of-order item can pair
-    # by args, not by FIFO position (AC24).
-    assert state.minted_task_ids == [
-        (minted_id, _args_fingerprint({"subagent_name": "impl",
-                                       "task_description": "do it"}))]
-
-
-def test_task_subagent_suspended_captured_on_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A SubagentSuspended from dispatch_task is captured onto RunState (so the
-    runner can re-raise it) rather than swallowed into is_error text."""
-    from imp.engine.state import InMemoryEventLog
-
-    async def _stub(*a: Any, **k: Any) -> str:
-        raise SubagentSuspended("paused by coordinator")
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    state = RunState(cap=50, agent_id="step:t")
-
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    state = RunState(cap=100)
     out = asyncio.run(dispatch_tool(
         tool=make_task_tool(),
         args={"subagent_name": "impl", "task_description": "x"},
         ctx=ctx, state=state))
+    assert out == '{"status": "Success"}'
+    assert [e for e in elog.read() if e["type"] == "tool_call"] == []
 
-    assert state.subagent_suspended is not None
-    assert isinstance(state.subagent_suspended, SubagentSuspended)
-    # Returns benign text to the SDK; the real signal is on state.
-    assert isinstance(out, str)
+
+def test_task_dispatch_suspension_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Change 1: a subagent-origin pause propagates out of dispatch_tool so FastMCP
+    wraps it as an isError tool result — dispatch_tool no longer captures it."""
+    from imp.engine.agent_run import SubagentSuspended
+
+    async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
+        raise SubagentSuspended("paused")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    state = RunState(cap=100)
+    with pytest.raises(SubagentSuspended):
+        asyncio.run(dispatch_tool(
+            tool=make_task_tool(),
+            args={"subagent_name": "impl", "task_description": "x"},
+            ctx=ctx, state=state))
+
+
+def test_task_dispatch_generic_failure_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A subagent failure propagates out of dispatch_tool (FastMCP → isError)."""
+    async def _fake(ctx2: Any, name: str, desc: str, *, tier: Any = None) -> str:
+        raise RuntimeError("subagent 'impl' failed (api)")
+
+    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _fake)
+    ctx = _ctx(tmp_path)
+    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
+    state = RunState(cap=100)
+    with pytest.raises(RuntimeError):
+        asyncio.run(dispatch_tool(
+            tool=make_task_tool(),
+            args={"subagent_name": "impl", "task_description": "x"},
+            ctx=ctx, state=state))
 
 
 def test_fatal_tool_error_captured_on_state(tmp_path: Path) -> None:
@@ -412,7 +304,7 @@ def test_dispatch_sweeps_bg_before_tool(
     calls = {"n": 0}
     real = bg_mod._sweep_bg
 
-    async def counting(ctx):
+    async def counting(ctx: Any) -> None:
         calls["n"] += 1
         await real(ctx)
 
@@ -429,110 +321,10 @@ def test_dispatch_sweeps_bg_before_tool(
     assert calls["n"] == 2
 
 
-def test_args_fingerprint_drops_none_so_tier_omitted_matches_tier_none() -> None:
-    """The mint side carries tier=None (FastMCP injects it for the omitted
-    optional); the item side omits tier entirely. Dropping None-valued keys makes
-    the two fingerprints equal — the load-bearing normalization for re-key (AC24)."""
-    mint_side = _args_fingerprint(
-        {"subagent_name": "impl", "task_description": "do it", "tier": None})
-    item_side = _args_fingerprint(
-        {"subagent_name": "impl", "task_description": "do it"})
-    assert mint_side == item_side
-
-
-def test_args_fingerprint_is_key_order_independent() -> None:
-    """Fingerprint must not depend on dict insertion order — sorted canonical form."""
-    a = _args_fingerprint({"subagent_name": "impl", "task_description": "x"})
-    b = _args_fingerprint({"task_description": "x", "subagent_name": "impl"})
-    assert a == b
-
-
-def test_args_fingerprint_distinguishes_different_args() -> None:
-    """Distinct task_description values yield distinct fingerprints — so two
-    concurrent same-subagent dispatches with different descriptions pair correctly."""
-    a = _args_fingerprint({"subagent_name": "impl", "task_description": "review A"})
-    b = _args_fingerprint({"subagent_name": "impl", "task_description": "review B"})
-    assert a != b
-
-
-def test_task_dispatch_increments_inflight_during_and_clears_after(
-    tmp_path: Path, monkeypatch: Any,
-) -> None:
-    """The in-flight counter reads 1 while the dispatch await is live and drops
-    back to 0 once it returns — the drain gate's settle signal (AC25)."""
-    from imp.engine.state import InMemoryEventLog
-    state = RunState(cap=10)
-    seen: dict[str, int] = {}
-
-    async def _stub(ctx: Any, subagent_name: str, task_description: str,
-                    **_kw: Any) -> str:
-        seen["during"] = state.inflight_task_dispatches
-        return "ok"
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    out = asyncio.run(dispatch_tool(
-        tool=make_task_tool(),
-        args={"subagent_name": "impl", "task_description": "do it"},
-        ctx=ctx, state=state))
-    assert out == "ok"
-    assert seen["during"] == 1
-    assert state.inflight_task_dispatches == 0
-
-
-def test_task_dispatch_decrements_inflight_on_suspension_capture(
-    tmp_path: Path, monkeypatch: Any,
-) -> None:
-    """A child that captures a suspension decrements its own in-flight slot in
-    finally, so it is NOT counted as a draining sibling (AC25)."""
-    from imp.engine.state import InMemoryEventLog
-    state = RunState(cap=10)
-
-    async def _stub(ctx: Any, subagent_name: str, task_description: str,
-                    **_kw: Any) -> str:
-        raise SubagentSuspended("paused")
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    asyncio.run(dispatch_tool(
-        tool=make_task_tool(),
-        args={"subagent_name": "impl", "task_description": "x"},
-        ctx=ctx, state=state))
-    assert state.subagent_suspended is not None
-    assert state.inflight_task_dispatches == 0
-
-
-def test_suspension_capture_text_carries_stop_guidance(
-    tmp_path: Path, monkeypatch: Any,
-) -> None:
-    """On a captured suspension the wrapper returns the named constant whose text
-    tells the model to stop dispatching (membership-freeze guidance, §2)."""
-    from imp.engine.state import InMemoryEventLog
-    from imp.providers.codex_mcp import CODEX_SUSPEND_CAPTURE_TEXT
-    state = RunState(cap=10)
-
-    async def _stub(ctx: Any, subagent_name: str, task_description: str,
-                    **_kw: Any) -> str:
-        raise SubagentSuspended("paused")
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    out = asyncio.run(dispatch_tool(
-        tool=make_task_tool(),
-        args={"subagent_name": "impl", "task_description": "x"},
-        ctx=ctx, state=state))
-    assert out == CODEX_SUSPEND_CAPTURE_TEXT
-    assert out.endswith("; do not dispatch further tasks")
-
-
 def test_awaiting_capture_text_carries_stop_guidance(tmp_path: Path) -> None:
     """A headless wait captured from a non-task tool returns the named awaiting
     constant carrying the same stop guidance (§2)."""
     from imp.agents.tools.wait_for_user import AwaitingUserInput
-    from imp.engine.state import InMemoryEventLog
     from imp.providers.codex_mcp import CODEX_AWAIT_CAPTURE_TEXT
 
     async def _afn(ctx: Any) -> str:
@@ -542,140 +334,8 @@ def test_awaiting_capture_text_carries_stop_guidance(tmp_path: Path) -> None:
                 input_schema={"type": "object", "properties": {}}, fn=_afn)
     state = RunState(cap=10)
     ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
     out = asyncio.run(dispatch_tool(tool=tool, args={}, ctx=ctx, state=state))
     assert out == CODEX_AWAIT_CAPTURE_TEXT
     assert out.endswith("; do not dispatch further tasks")
     assert state.awaiting_user is True
     assert state.awaiting_prompt == "answer me"
-
-
-def test_head_refusal_raises_sentinel_when_suspension_captured(
-    tmp_path: Path, monkeypatch: Any,
-) -> None:
-    """AC25/AC29: a NEW task call while a suspension is captured is refused at the
-    dispatch head — TaskRefused(sentinel) is raised BEFORE any mint or cap slot,
-    and dispatch_task is never reached."""
-    from imp.agents.subagents import TASK_REFUSAL_SENTINEL, TaskRefused
-    from imp.engine.state import InMemoryEventLog
-    state = RunState(cap=10)
-    state.subagent_suspended = SubagentSuspended("a sibling already paused")
-    called = {"dispatch_task": False}
-
-    async def _stub(ctx: Any, subagent_name: str, task_description: str,
-                    **_kw: Any) -> str:
-        called["dispatch_task"] = True
-        return "should not run"
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    with pytest.raises(TaskRefused) as ei:
-        asyncio.run(dispatch_tool(
-            tool=make_task_tool(),
-            args={"subagent_name": "impl", "task_description": "new work"},
-            ctx=ctx, state=state))
-    assert str(ei.value) == TASK_REFUSAL_SENTINEL
-    assert called["dispatch_task"] is False
-    assert state.minted_task_ids == []          # nothing minted
-    assert state.dispatch_count == 0            # no cap slot burned
-
-
-def test_head_refusal_fires_on_should_pause_alone(
-    tmp_path: Path, monkeypatch: Any,
-) -> None:
-    """AC29: an arm-entry refusal on should_pause alone burns no slot and mints
-    nothing — the predicate also reads ctx.coordinator.should_pause."""
-    from types import SimpleNamespace
-
-    from imp.agents.subagents import TaskRefused
-    from imp.engine.state import InMemoryEventLog
-    state = RunState(cap=10)
-
-    async def _stub(ctx: Any, subagent_name: str, task_description: str,
-                    **_kw: Any) -> str:
-        return "should not run"
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    ctx.coordinator = SimpleNamespace(should_pause=True)
-    with pytest.raises(TaskRefused):
-        asyncio.run(dispatch_tool(
-            tool=make_task_tool(),
-            args={"subagent_name": "impl", "task_description": "x"},
-            ctx=ctx, state=state))
-    assert state.minted_task_ids == []
-    assert state.dispatch_count == 0
-
-
-def test_post_limiter_skip_moves_mint_to_refused_and_raises_sentinel(
-    tmp_path: Path, monkeypatch: Any,
-) -> None:
-    """AC29: a child that froze while queued behind the limiter raises
-    TaskDispatchSkipped; dispatch_tool MOVES its mint to refused_task_mints and
-    raises the sentinel (so the sentinel item later closes that minted event)."""
-    from imp.agents.subagents import (
-        TASK_REFUSAL_SENTINEL,
-        TaskDispatchSkipped,
-        TaskRefused,
-    )
-    from imp.engine.state import InMemoryEventLog
-    from imp.providers.codex_mcp import _args_fingerprint
-    state = RunState(cap=10)
-
-    async def _stub(ctx: Any, subagent_name: str, task_description: str,
-                    **_kw: Any) -> str:
-        raise TaskDispatchSkipped("froze while queued")
-
-    monkeypatch.setattr("imp.agents.subagents.dispatch_task", _stub)
-    ctx = _ctx(tmp_path)
-    ctx.event_log = InMemoryEventLog()  # type: ignore[attr-defined]
-    args = {"subagent_name": "impl", "task_description": "queued work"}
-    with pytest.raises(TaskRefused) as ei:
-        asyncio.run(dispatch_tool(
-            tool=make_task_tool(), args=args, ctx=ctx, state=state))
-    assert str(ei.value) == TASK_REFUSAL_SENTINEL
-    # The mint was minted (head check passed) then MOVED, not left dangling.
-    assert state.minted_task_ids == []
-    assert len(state.refused_task_mints) == 1
-    moved_id, moved_fp = state.refused_task_mints[0]
-    assert moved_fp == _args_fingerprint(args)
-    assert moved_id  # a real minted event id
-    # The drain counter returned to 0 (finally) so the skip did not wedge it.
-    assert state.inflight_task_dispatches == 0
-
-
-@pytest.mark.anyio
-async def test_run_wide_pause_freezes_task_membership(tmp_path: Path) -> None:
-    # AC31: a run-wide pause (coordinator.should_pause) freezes membership, so a
-    # NEW task is refused WITHOUT dispatch (raises TaskRefused with the sentinel).
-    from imp.agents.subagents import TASK_REFUSAL_SENTINEL, TaskRefused
-
-    class _Coord:
-        should_pause = True
-
-    ctx = _ctx(tmp_path)
-    ctx.coordinator = _Coord()
-    state = RunState(cap=10)
-    with pytest.raises(TaskRefused) as ei:
-        await dispatch_tool(tool=make_task_tool(),
-                            args={"subagent_name": "s", "task_description": "x"},
-                            ctx=ctx, state=state)
-    assert str(ei.value) == TASK_REFUSAL_SENTINEL
-    assert state.dispatch_count == 0       # refused before the cap RMW
-
-
-@pytest.mark.anyio
-async def test_non_task_tool_runs_during_a_drain_window(tmp_path: Path) -> None:
-    # AC32: a captured suspension + an in-flight sibling (drain window) freezes only
-    # `task`; a NON-task tool still executes to completion (membership freeze is
-    # task-scoped).
-    ctx = _ctx(tmp_path)
-    ctx.coordinator = None
-    state = RunState(cap=10)
-    state.subagent_suspended = SubagentSuspended("paused")
-    state.inflight_task_dispatches = 1     # a sibling task still draining
-    out = await dispatch_tool(tool=_echo_tool(), args={"text": "hi"},
-                              ctx=ctx, state=state)
-    assert out == "echo:hi"
