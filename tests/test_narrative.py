@@ -1359,6 +1359,59 @@ def test_stamped_result_missing_its_namespace_renders_warning_not_close() -> Non
     assert all(call.name != "tool" for burst in bursts for call in burst.calls)
 
 
+def test_late_result_after_resume_close_is_benign_not_a_warning() -> None:
+    # Regression: a task fold provisionally closed by the resume-close fallback
+    # (a non-matching PARENT event arrived before the canonical result) must NOT
+    # warn "matched no open fold" when its real id_ns="block" result lands late.
+    # It is the AUTHORITATIVE close: the outcome-free salvage close is upgraded.
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="m1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    step = b._step_stack[-1]
+    fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    # A non-matching parent event triggers the resume-close fallback (pops m1).
+    b.add(_ev("a1", "llm_response", agent_id="step:p/s", provider="anthropic",
+              model="m", stop_reason="end_turn", usage={},
+              raw={"content": [{"type": "text", "text": "hmm"}]}))
+    assert fold.running is False                     # provisionally closed
+    assert fold.outcome != '{"status":"Success"}'    # outcome-free salvage close
+    # The canonical close arrives late, stamped id_ns="block".
+    b.add(_ev("r1", "tool_result", agent_id="step:p/s", id="m1", id_ns="block",
+              content='{"status":"Success"}', error=False))
+    warnings = [c for c in step.children
+                if isinstance(c, nv.ErrorNode) and c.is_warning]
+    assert warnings == []                            # benign race, no warning
+    assert fold.outcome == '{"status":"Success"}'    # outcome upgraded
+    # No orphan "tool" burst entry was created for the late result.
+    bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
+    assert all(call.name != "tool" for burst in bursts for call in burst.calls)
+
+
+def test_late_result_after_pause_resume_finalize_is_benign() -> None:
+    # Regression sibling: a fold finalized "interrupted" by pause/resume whose
+    # dispatch outlived the pause still logs its canonical result afterward. That
+    # result must be recognised (no warning); the interrupted terminal state is
+    # preserved (a success result does not un-interrupt a finalized fold).
+    b = nv.NarrativeBuilder()
+    b.add(_ev("st", "step_started", step="s", kind="agent", phase="p",
+              model="m", provider="anthropic"))
+    b.add(_ev("tk1", "tool_call", agent_id="step:p/s", id="m1", name="task",
+              input={"subagent_name": "reviewer", "task_description": "go"}))
+    step = b._step_stack[-1]
+    fold = next(c for c in step.children if isinstance(c, nv.SubagentFold))
+    b.add(_ev("p1", "workflow_paused", reason="ctrl-c"))
+    b.add(_ev("rs1", "workflow_resumed"))
+    assert fold.terminal_state == "interrupted"
+    b.add(_ev("r1", "tool_result", agent_id="step:p/s", id="m1", id_ns="block",
+              content='{"status":"Success"}', error=False))
+    warnings = [c for c in step.children
+                if isinstance(c, nv.ErrorNode) and c.is_warning]
+    assert warnings == []
+    assert fold.terminal_state == "interrupted"      # not un-interrupted
+
+
 def test_unstamped_legacy_result_closes_via_ordered_two_dict_probe() -> None:
     # AC38: a legacy (id_ns absent) result still closes its fold via the ordered
     # block-id-then-event-id probe — no regression for pre-upgrade logs.
