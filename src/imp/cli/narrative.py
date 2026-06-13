@@ -406,6 +406,10 @@ class NarrativeBuilder:
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
 
+    def pending_question(self) -> str:
+        """Prompt text of the pending wait_for_user solicit; '' when none."""
+        return self._pending_question
+
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
         running = [f for f in self._open_sub_by_event.values() if f.running]

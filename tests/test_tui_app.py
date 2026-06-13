@@ -236,3 +236,66 @@ async def test_solicit_shows_prompt_returns_submitted_line(tmp_path: Path) -> No
         await app.run_async()
 
     assert result["line"] == "go ahead"
+
+
+def test_status_line_reads_your_turn_during_solicit_not_spinner() -> None:
+    app = _app()
+    app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    app.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "ls"}))
+    app._prompt_visible = True
+    line = app.status_line()
+    assert "your turn" in line
+    assert "bash ls" not in line            # the spinner activity is replaced
+    assert line.endswith(HINT)
+
+
+def test_prompt_window_shows_caret_and_question() -> None:
+    from prompt_toolkit.formatted_text import ANSI
+    from prompt_toolkit.layout.processors import BeforeInput
+
+    from imp.cli import palette as pal
+
+    app = _app()
+    app._build_app()
+    procs = app._prompt_control.input_processors
+    assert any(isinstance(p, BeforeInput) and p.text == pal.CARET for p in procs)
+
+    app._solicit_question = "Really deploy to prod?"
+    got = app._question_control.text()
+    assert isinstance(got, ANSI) and "Really deploy to prod?" in got.value
+
+
+@pytest.mark.anyio
+async def test_solicit_captures_question_and_shows_your_turn(tmp_path: Path) -> None:
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input.defaults import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    app = TuiApp(coord=_FakeCoord(), color=False, width=80)
+    app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    app.on_event(ev("2", "awaiting_user_input", agent_id="step:p/s",
+                    prompt="Ship it?"))
+    change = _FakeChange(tmp_path)
+    captured: dict[str, str] = {}
+
+    with create_pipe_input() as pin, create_app_session(input=pin, output=DummyOutput()):
+        app._build_app()
+
+        async def _ask() -> None:
+            await app.solicit(change)
+            app.exit()
+
+        async def _drive() -> None:
+            await asyncio.sleep(0.05)
+            captured["question"] = app._solicit_question
+            captured["status"] = app.status_line()
+            pin.send_text("yes\r")
+
+        asyncio.ensure_future(_ask())   # noqa: RUF006
+        asyncio.ensure_future(_drive())  # noqa: RUF006
+        await app.run_async()
+
+    assert captured["question"] == "Ship it?"
+    assert "your turn" in captured["status"]
+    assert app._solicit_question == ""      # reset after solicit returns
