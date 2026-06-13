@@ -56,6 +56,36 @@ def test_hide_preserves_session_timer_reset_does_not() -> None:
     assert s.getvalue().endswith("e0")     # timer restarted after reset
 
 
+def test_suspend_resets_session_timer_on_exit() -> None:
+    """The suspended interval is the interactive prompt — the human owns the
+    terminal, the agent is NOT working. A wait_for_user reply returns as a
+    tool_result (no user_message event, so the driver's restart_span never fires
+    for it); the span must reset on suspend exit instead. Otherwise the resumed
+    'thinking' line counts the human's read/type time — the `imp new` first-turn
+    "thinking 26s instead of 0s" bug."""
+    t, now = _clock()
+    s = _TTY()
+    ls = LiveStatus(s, now=now)
+    ls.update(lambda f, e: f"e{int(e)}")     # session starts at t=0
+    t["v"] = 26.0                            # human spends 26s typing at the prompt
+    with ls.suspend():
+        pass                                 # ... reply submitted, prompt closes
+    ls.update(lambda f, e: f"e{int(e)}")
+    assert s.getvalue().endswith("e0")       # resumed elapsed counts from the reply
+
+
+def test_suspend_does_not_start_an_unstarted_timer() -> None:
+    """When no span is running (session timer never started), suspend exit must
+    leave it unstarted — update() owns first-start, not suspend()."""
+    t, now = _clock()
+    s = _TTY()
+    ls = LiveStatus(s, now=now)
+    t["v"] = 9.0
+    with ls.suspend():
+        pass
+    assert ls._session_start is None
+
+
 def test_non_tty_writes_nothing() -> None:
     _t, now = _clock()
     s = _Pipe()
