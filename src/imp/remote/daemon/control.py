@@ -2,22 +2,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.server import SouthHub
 
 
 class ControlPlane:
     def __init__(
         self,
         *,
-        hub: Any,
+        hub: SouthHub,
         resume: Callable[[str, str], None],
         create: Callable[[str], None],
         abandon: Callable[[str], None],
         list_changes: Callable[[], list[ChangeInfo]],
     ) -> None:
-        self._hub = hub
+        self._hub: SouthHub = hub
         self._resume = resume
         self._create = create
         self._abandon = abandon
