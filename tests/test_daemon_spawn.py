@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from imp.remote.daemon import spawn
-from imp.remote.daemon.discover import socket_path
 
 
 def _capture(monkeypatch: Any) -> list[dict[str, Any]]:
@@ -27,13 +26,13 @@ def test_resume_change_runs_imp_resume_with_message(monkeypatch: Any, tmp_path: 
     assert calls[0]["cwd"] == tmp_path
 
 
-def test_create_change_carries_socket(monkeypatch: Any, tmp_path: Path) -> None:
+def test_create_change_spawns_imp_new(monkeypatch: Any, tmp_path: Path) -> None:
     calls = _capture(monkeypatch)
     spawn.create_change(tmp_path, "add dark mode")
     assert calls[0]["argv"] == [
         sys.executable, "-m", "imp", "new", "--non-interactive",
         "--message", "add dark mode"]
-    assert calls[0]["env"]["IMP_REMOTE_CONTROL_SOCK"] == str(socket_path(tmp_path))
+    assert "IMP_REMOTE_CONTROL_SOCK" not in calls[0]["env"]
 
 
 def test_abandon_change_runs_imp_abandon_yes(monkeypatch: Any, tmp_path: Path) -> None:
