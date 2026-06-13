@@ -693,6 +693,41 @@ def _preflight_imp_init(*, control_root: Path, project_root: Path) -> str | None
     return None
 
 
+def _verify_command_nudge(
+    *, project_root: Path, control_root: Path, non_interactive: bool,
+    input_fn: Callable[[str], str], output_fn: Callable[[str], None],
+    err_fn: Callable[[str], None],
+    detect_fn: Callable[[Path], str | None] | None = None,
+) -> None:
+    """`imp new` backstop: nudge when verify_command is absent and a command is detected."""
+    from imp.cli.verify_detect import (
+        detect_verify_command,
+        format_verify_command_yaml,
+        resolve_verify_choice,
+    )
+    from imp.providers.effective import load_effective_config
+    detect = detect_fn or detect_verify_command
+    try:
+        cfg = load_effective_config(
+            project_root=project_root, control_root=control_root).config
+    except (LoadError, LoadErrors):
+        return
+    if cfg.verify_command is not None:
+        return
+    suggested = detect(project_root)
+    if suggested is None:
+        return
+    project_file = project_root / "imp" / "project.yaml"
+    if non_interactive:
+        err_fn(
+            f"imp: no verify_command configured; detected `{suggested}`. Set "
+            f"verify_command in {project_file} to gate regressions in-loop.")
+        return
+    chosen = resolve_verify_choice(suggested, input_fn, output_fn)
+    with project_file.open("a") as f:
+        f.write(format_verify_command_yaml(chosen))
+
+
 def _apply_theme() -> None:
     """Pick the active color theme once, before any command renders. `IMP_THEME`
     overrides everything; otherwise the value detected and persisted at `imp init`
@@ -855,6 +890,12 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     if block is not None:
         print(f"imp: {block}", file=sys.stderr)
         return 2
+
+    _verify_command_nudge(
+        project_root=control, control_root=control,
+        non_interactive=bool(getattr(args, "non_interactive", False)),
+        input_fn=input, output_fn=print,
+        err_fn=lambda m: print(m, file=sys.stderr))
 
     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
