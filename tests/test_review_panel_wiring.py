@@ -22,7 +22,6 @@ _BASE_VARS = {
     "spec_minors_integrated": False, "plan_minors_integrated": False,
     "panel_done": False, "integration_needs_review": False,
     "spec_confirm": True, "spec_unseen_changes": False,
-    "spec_gate_pending": False, "spec_gate_passed": False,
     "multi_plan": False, "integration_pass": False,
 }
 

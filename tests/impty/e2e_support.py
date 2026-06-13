@@ -112,6 +112,9 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 done(phase="written", spec_path="imp/specs/SCRIPTED-STUB.md",
                      complexity="trivial", unseen_changes=False),
             ]}],
+            "spec-reviewer": [{"text": "review", "tools": [
+                done(findings="No findings.", blocking=False, has_minor_findings=False),
+            ]}],
             "plan-writer": [{"text": "plan", "tools": [
                 bash(plan_cmd),
                 done(plan_path="imp/plans/SCRIPTED-STUB-plan-1.md", plan_number=1),

@@ -7,7 +7,7 @@ from imp.engine.loader import load_workflow
 _QUIET = {
     # spec/plan/implement plumbing
     "spec-verify-commit", "plan-verify-commit", "commit-check",
-    "spec-exit-gate", "fast-path-plan-gate", "fast-path-cycle-gate",
+    "fast-path-plan-gate", "fast-path-cycle-gate",
     # review/merge plumbing: mechanical git scripts + pure routing gates
     "autosquash", "stamp-trailers", "integration-gate", "stamp-sweep-trailers",
     "final-review-gate", "base-fresh-check", "integrate-merge",

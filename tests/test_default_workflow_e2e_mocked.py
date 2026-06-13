@@ -434,9 +434,10 @@ async def test_fast_path_skips_reviewers_and_runs_review(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
-    # complexity:trivial -> spec-writer sets fast_path=true; spec and plan reviewers
-    # are skipped; the merged `review` step still runs (cheap re-verify mode, which
-    # internally skips the opus panel — that tiering is prose, dogfood-verified).
+    # complexity:trivial -> spec-writer sets fast_path=true; spec-reviewer runs but
+    # routes straight to plan-writer (no unseen changes); plan-review is skipped via
+    # fast-path-plan-gate; the merged `review` step still runs (cheap re-verify mode,
+    # which internally skips the opus panel — that tiering is prose, dogfood-verified).
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
 
     resolve.reset_providers_for_tests()
@@ -455,7 +456,6 @@ async def test_fast_path_skips_reviewers_and_runs_review(
 
     result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
-    assert "spec-reviewer" not in started, started
     assert "plan-review" not in started, started
     assert "recheck" not in started, started          # removed step
     assert "review" in started, started               # merged review step runs

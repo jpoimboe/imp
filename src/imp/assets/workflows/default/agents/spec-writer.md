@@ -166,13 +166,14 @@ the full feedback strings:
 
 | Shape | Arrives as | Behavior |
 |---|---|---|
-| Script-gate failure | "Your previous attempt completed but was not accepted." + "Gate `…` failed (exit N)…" | Fix the mechanical failure and re-emit `phase: written` — including when the failed completion was a gated `confirmed` (the grant is gone; the content flows through re-review). `unseen_changes: false` for a mechanics-only or user-directed fix; true only if the fix changed spec content the user didn't direct. |
+| Script-gate failure | "Your previous attempt completed but was not accepted." + "Gate `…` failed (exit N)…" | Fix the mechanical failure and re-emit `phase: written`. `unseen_changes: false` for a mechanics-only or user-directed fix; true only if the fix changed spec content the user didn't direct. |
 | Reviewer rework | "Here's review feedback to address:" + `findings:` / `blocking: True` | Rework protocol (verify findings, fix, amend; ask-vs-decide applies). |
 | Minors pass | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol, non-soliciting. |
-| Confirm gate | "The review cycle is complete and the spec is accepted. Surface any significant decisions made during review to the user and confirm before finalizing:" + the verification review's fields | Confirm-and-finalize protocol (see that section). |
+| Confirm changes | "The user reviewed the spec and requested changes. Address them:" + the user's requested changes | Apply the requested changes (rework protocol), re-emit `phase: written`, `unseen_changes: false` (user-directed). The change re-flows through `spec-verify-commit` and re-review. |
 
-The `blocking: false` cue alone no longer disambiguates: it matches BOTH the
-minors pass and the confirm gate. Use the preamble to tell them apart.
+The `blocking: false` cue marks the minors pass. A resume whose preamble begins
+"The user reviewed the spec and requested changes." is the confirm-changes shape —
+apply the user's directed edits and re-emit `phase: written`.
 
 **Verify each finding before acting on it.** A reviewer finding can rest on a
 false premise — a misread of the spec, or a claim about the code that isn't true.
@@ -276,57 +277,6 @@ not flip it.
 `complete_step` call. This pass exists to incorporate the reviewer's advice, not to
 reopen the brainstorm.
 
-## Confirm and finalize
-
-Recognized by the confirm preamble (see the resume taxonomy): *"The review
-cycle is complete and the spec is accepted. Surface any significant decisions
-made during review to the user and confirm before finalizing:"*. The
-verification review's `findings:` (Minor/Nit) ride this resume but were
-already dropped by the one-pass protocol — do **not** integrate or present
-them.
-
-**Scope:** the decisions made since the last confirm turn (or since the
-brainstorm, on the first gate), **excluding** decisions the user already
-answered via escalation ("*(user-confirmed during review)*"). Repeated gates
-must not re-present confirmed items.
-
-**Significance bar — the same test as "Ask vs. decide."** "Significant" here is
-not a lower bar than escalation: surface a decision **only** if it would have
-qualified for `wait_for_user` during rework (drops/alters/adds a user-stated
-requirement, or a real fork in user intent the brainstorm/spec/codebase doesn't
-settle). Two reminders that catch the common over-trigger:
-
-- A **self-correcting factual fix** — a wrong call corrected to match what the
-  code/spec already demands, deliverable unchanged — stays silent. The source
-  settled it; don't spend the user's attention rubber-stamping it.
-- **A scope change is not itself significant** — only one that drops a stated
-  requirement or opens an intent fork is. Factual narrowing where the deliverable
-  holds steady (e.g. the cleanup list shrank by a file that turned out to need the
-  line) is the silent case.
-
-When nothing trips the bar, prefer the silent confirm.
-
-- **Nothing in scope is significant?** Call
-  `complete_step(phase="confirmed", spec_path="imp/specs/<slug>.md",
-  complexity="<first-pass value>", unseen_changes=false)` immediately — do
-  **not** solicit. This silent confirm is the common minors-only case.
-- **Something is worth surfacing?** Call `wait_for_user` with ONE compact
-  message: a bulleted list of the in-scope decisions (each bullet the
-  decision plus its one-line why, mirroring the Decisions-summary entries),
-  ending with "proceed to planning, or should any of these change?". One
-  message, not one question per decision. The conversation may reopen the
-  brainstorm — multiple `wait_for_user` rounds are fine; apply brainstorm
-  discipline (one question at a time, narrow quickly, aim for ≤3 rounds).
-- **If the discussion produces spec edits:** edit and amend (subject to the
-  amend precondition below), then emit `phase: written`,
-  `unseen_changes: false` — the change flows back through
-  `spec-verify-commit` and re-review. `phase: confirmed` is the only exit to
-  planning from a confirm turn, and it **must never carry uncommitted edits**
-  (the verify gate's clean-spec-path check enforces this).
-
-Re-emit the SAME `complexity` you sent on the original `written` turn, and
-re-emit `spec_path`.
-
 **Amend precondition (all spec-writer amend sites — rework, minors, confirm).**
 Before any `git commit --amend`, verify HEAD is still the spec commit (its
 subject is `docs: add spec for <slug>`). The change worktree is private, so a
@@ -390,8 +340,9 @@ Per turn it is the OR over that turn's changes:
 
 - `phase: written` — spec is written, committed, and ready for review (or sent
   back through review after a rework, minors, or gate-discussion edit)
-- `phase: confirmed` — the confirm gate fired and the spec-writer finalized
-  without further edits; only honored under a live `spec_gate_pending` grant
+- `phase: confirmed` — no longer produced by the spec-writer. The forward
+  `spec-confirm` step now owns the user confirmation; this value remains in the
+  output enum only for schema stability and is never emitted here.
 
 ---
 

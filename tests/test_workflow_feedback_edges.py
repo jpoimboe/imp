@@ -10,6 +10,7 @@ from imp.engine.types import Goto
 
 FINDINGS_TARGETS = {  # (source_step, target) pairs that MUST carry a preamble
     ("spec-reviewer", "spec-writer"),
+    ("spec-confirm", "spec-writer"),
     ("plan-review", "plan-writer"),
     ("task-lead", "plan-writer"),
     ("plan-cycle-check", "plan-writer"),

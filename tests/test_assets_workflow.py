@@ -19,7 +19,6 @@ _BASE_VARS = {
     "spec_minors_integrated": False, "plan_minors_integrated": False,
     "panel_done": False, "integration_needs_review": False,
     "spec_confirm": True, "spec_unseen_changes": False,
-    "spec_gate_pending": False, "spec_gate_passed": False,
     "multi_plan": False, "integration_pass": False,
 }
 
@@ -116,23 +115,6 @@ def test_minors_integrated_vars_declared_default_false() -> None:
     assert defaults["plan_minors_integrated"] is False
 
 
-def test_spec_exit_gate_precedes_reviewer_in_order() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    spec = next(p for p in wf.phases if p.name == "spec")
-    names = [s.name for s in spec.steps]
-    # the separate final-review gate is gone (the reviewer now owns termination);
-    # the fast-path gate still precedes the reviewer
-    assert "spec-final-review-gate" not in names
-    assert names.index("spec-exit-gate") < names.index("spec-reviewer")
-
-
-def test_spec_exit_gate_fast_path_skips_to_plan_writer() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    gate = _steps(wf)["spec-exit-gate"].rules[1]   # rule 0 is now spec_gate_passed
-    assert isinstance(gate.action, Goto) and gate.action.target == "plan-writer"
-
 
 def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import default_workflow_dir
@@ -194,7 +176,7 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is False
-    assert m.var_mutations == {"spec_unseen_changes": False}
+    assert m.var_mutations == {"spec_minors_integrated": False, "spec_unseen_changes": False}
 
 
 def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
