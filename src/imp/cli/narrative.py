@@ -14,7 +14,6 @@ tree-structure tests pull nothing heavy.
 """
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -277,21 +276,6 @@ class LiteralTextNode:
     as bold agent-style prose. Distinct from AgentTextNode, which holds a provider
     payload and lazily parses it — this node carries a ready string (issues 5/6)."""
     text: str
-    collapsible = False
-
-
-@dataclass
-class ReviewTally:
-    approve: int
-    total: int
-    blocking: int
-    nits: int
-
-
-@dataclass
-class PanelSummaryNode:
-    """Collapsed one-line summary of a clean/unanimous review panel."""
-    tally: ReviewTally
     collapsible = False
 
 
@@ -918,73 +902,6 @@ def _breadcrumb_extras(args: Any) -> list[str]:
     return out
 
 
-def _parse_member_outcome(fold: SubagentFold) -> tuple[str, str]:
-    if fold.is_error:
-        return "task_gap", fold.outcome or ""
-    try:
-        data = json.loads(fold.outcome or "")
-    except (ValueError, TypeError):
-        return "task_gap", fold.outcome or ""
-    if not isinstance(data, dict):
-        return "task_gap", str(data)
-    return str(data.get("verdict") or ""), str(data.get("findings") or "")
-
-
-def panel_member_tally(step: StepNode) -> ReviewTally:
-    """Count a review-panel step's member verdicts."""
-    approve = total = blocking = nits = 0
-    for fold in step.children:
-        if not isinstance(fold, SubagentFold):
-            continue
-        total += 1
-        verdict, findings = _parse_member_outcome(fold)
-        if verdict == "approve":
-            approve += 1
-            if findings.strip():
-                nits += 1
-        else:
-            blocking += 1
-    return ReviewTally(approve=approve, total=total, blocking=blocking, nits=nits)
-
-
-def _find_last_step(root: WorkflowNode, name: str) -> StepNode | None:
-    found: StepNode | None = None
-
-    def walk(nodes: list[Any]) -> None:
-        nonlocal found
-        for n in nodes:
-            if isinstance(n, StepNode):
-                if n.name == name:
-                    found = n
-                walk(n.children)
-            elif isinstance(n, PhaseNode):
-                walk(n.children)
-    walk(root.children)
-    return found
-
-
-def _single_reviewer_tally(output: dict[str, Any]) -> ReviewTally:
-    verdict = str(output.get("verdict") or "")
-    findings = str(output.get("findings") or "")
-    if verdict == "approve":
-        return ReviewTally(approve=1, total=1, blocking=0,
-                           nits=1 if findings.strip() else 0)
-    return ReviewTally(approve=0, total=1, blocking=1, nits=0)
-
-
-def review_tally(tree: NarrativeTree) -> ReviewTally | None:
-    """Merge-gate verdict counts: panel member verdicts when the `review` step ran
-    its opus panel, else the single generalist reviewer on fast-path/re-entry."""
-    review = _find_last_step(tree.root, "review")
-    if review is None:
-        return None
-    if any(isinstance(c, SubagentFold) for c in review.children):
-        return panel_member_tally(review)
-    if isinstance(review.agent_output, dict):
-        return _single_reviewer_tally(review.agent_output)
-    return None
-
-
 def phase_elapsed(phase: PhaseNode) -> float | None:
     """Phase duration derived from its steps: first step start_ts → last step
     end_ts. No phase_started/phase_completed events exist (§7) — phase timing is
@@ -1094,14 +1011,6 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_burst()
     step = self._step_stack[-1]
     step.agent_output = p
-    if (step.name == "review" and p.get("verdict") == "approve"
-            and any(isinstance(c, SubagentFold) for c in step.children)):
-        # member detail survives in imp log --full via the expanded subagent folds
-        narration_idx = _last_narration_index(self._container().children)
-        if narration_idx is not None:
-            self._container().children[narration_idx].held = False
-        self._append(PanelSummaryNode(tally=panel_member_tally(step)))
-        return
     children = self._container().children
     narration_idx = _last_narration_index(children)
     for k, v in p.items():
@@ -1537,9 +1446,6 @@ def structural_repr(node: Any) -> Any:
         return {"t": t, "action": node.action}
     if isinstance(node, LiteralTextNode):
         return {"t": t, "text": node.text}
-    if isinstance(node, PanelSummaryNode):
-        t2 = node.tally
-        return {"t": t, "tally": [t2.approve, t2.total, t2.blocking, t2.nits]}
     if isinstance(node, BreadcrumbLine):
         return {"t": t, "step_name": node.step_name, "elapsed_s": node.elapsed_s,
                 "action": node.action, "extras": node.extras}
