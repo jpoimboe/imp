@@ -749,13 +749,6 @@ def test_structural_repr_covers_new_node_types() -> None:
         "action": {"verb": "continue"}, "extras": ["status=Success"]}
 
 
-def test_panel_summary_node_structural_repr() -> None:
-    node = nv.PanelSummaryNode(tally=nv.ReviewTally(approve=4, total=4, blocking=0, nits=2))
-    r = nv.structural_repr(node)
-    assert r["t"] == "PanelSummaryNode"
-    assert r["tally"] == [4, 4, 0, 2]
-
-
 def test_current_activity_collapses_multiline_bash_command() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))
@@ -1597,7 +1590,7 @@ def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
     ]
 
 
-def test_clean_panel_collapses_to_summary_node() -> None:
+def test_clean_panel_renders_findings_prose_generically() -> None:
     events = [
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
@@ -1609,18 +1602,17 @@ def test_clean_panel_collapses_to_summary_node() -> None:
     events += [
         _ev("ao", "agent_output", agent_id="step:review/review",
             status="Success", verdict="approve",
-            findings="### member-1\nnit: rename foo\n### member-3\nnit: add a comment"),
+            findings="all four approve; two nits were noted\n(foo rename, comment style)"),
         _ev("sc", "step_completed", step="review", kind="agent",
             action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
     ]
     tree = nv.build_tree(events)
     step = tree.root.children[0].children[0]
-    summaries = [c for c in step.children if isinstance(c, nv.PanelSummaryNode)]
+    folds = [c for c in step.children if isinstance(c, nv.SubagentFold)]
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
-    assert len(summaries) == 1
-    assert literals == []                                  # the union prose is gone
-    t = summaries[0].tally
-    assert (t.approve, t.total, t.blocking, t.nits) == (4, 4, 0, 2)
+    assert len(folds) == 4
+    assert any("two nits were noted" in lit.text for lit in literals)
+    assert not hasattr(nv, "PanelSummaryNode")
 
 
 def test_blocking_panel_keeps_findings_prose() -> None:
@@ -1640,93 +1632,6 @@ def test_blocking_panel_keeps_findings_prose() -> None:
     ]
     tree = nv.build_tree(events)
     step = tree.root.children[0].children[0]
-    assert [c for c in step.children if isinstance(c, nv.PanelSummaryNode)] == []
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
     assert len(literals) == 1                              # findings prose expands inline
     assert "missing handler" in literals[0].text
-
-
-def test_parse_member_outcome_error_fold() -> None:
-    fold = nv.SubagentFold(subagent_name="m", event_id="x", block_id="b",
-                           nested=nv.NarrativeBuilder(),
-                           outcome="some error text", is_error=True)
-    verdict, findings = nv._parse_member_outcome(fold)
-    assert verdict == "task_gap"
-    assert findings == "some error text"
-
-
-def test_parse_member_outcome_malformed_json() -> None:
-    fold = nv.SubagentFold(subagent_name="m", event_id="x", block_id="b",
-                           nested=nv.NarrativeBuilder(),
-                           outcome="not-json", is_error=False)
-    verdict, _ = nv._parse_member_outcome(fold)
-    assert verdict == "task_gap"
-
-
-def test_parse_member_outcome_valid() -> None:
-    fold = nv.SubagentFold(subagent_name="m", event_id="x", block_id="b",
-                           nested=nv.NarrativeBuilder(),
-                           outcome=json.dumps({"verdict": "approve", "findings": "nit: x"}),
-                           is_error=False)
-    verdict, findings = nv._parse_member_outcome(fold)
-    assert verdict == "approve"
-    assert findings == "nit: x"
-
-
-def test_review_tally_from_panel_members() -> None:
-    events = [
-        _ev("1", "step_started", step="review", kind="agent", phase="review",
-            model="m", provider="anthropic"),
-    ]
-    events += _panel_member("1", "approve", "nit: rename foo")
-    events += _panel_member("2", "approve", "")
-    events += _panel_member("3", "approve", "nit: tidy import")
-    events += _panel_member("4", "approve", "")
-    events += [
-        _ev("ao", "agent_output", agent_id="step:review/review",
-            status="Success", verdict="approve", findings="..."),
-        _ev("sc", "step_completed", step="review", kind="agent",
-            action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
-    ]
-    tally = nv.review_tally(nv.build_tree(events))
-    assert tally is not None
-    assert (tally.approve, tally.total, tally.blocking, tally.nits) == (4, 4, 0, 2)
-
-
-def test_review_tally_falls_back_to_single_reviewer_on_fast_path() -> None:
-    # fast-path/re-entry: the review step ran only the single generalist reviewer.
-    tree = nv.build_tree([
-        _ev("1", "step_started", step="review", kind="agent", phase="review",
-            model="m", provider="anthropic"),
-        _ev("ao", "agent_output", agent_id="step:review/review",
-            status="Success", verdict="approve", findings="one small nit"),
-        _ev("sc", "step_completed", step="review", kind="agent",
-            action={"verb": "continue"}, var_mutations={}),
-    ])
-    tally = nv.review_tally(tree)
-    assert tally is not None
-    assert (tally.approve, tally.total, tally.blocking, tally.nits) == (1, 1, 0, 1)
-
-
-def test_review_tally_single_reviewer_blocking_verdict() -> None:
-    tree = nv.build_tree([
-        _ev("1", "step_started", step="review", kind="agent", phase="review",
-            model="m", provider="anthropic"),
-        _ev("ao", "agent_output", agent_id="step:review/review",
-            status="Success", verdict="task_gap", findings="blocking: something wrong"),
-        _ev("sc", "step_completed", step="review", kind="agent",
-            action={"verb": "goto", "target": "implement"}, var_mutations={}),
-    ])
-    tally = nv.review_tally(tree)
-    assert tally is not None
-    assert (tally.approve, tally.total, tally.blocking, tally.nits) == (0, 1, 1, 0)
-
-
-def test_review_tally_none_when_no_review_step() -> None:
-    tree = nv.build_tree([
-        _ev("1", "step_started", step="spec-writer", kind="agent", phase="spec",
-            model="m", provider="anthropic"),
-        _ev("2", "step_completed", step="spec-writer", kind="agent",
-            action={"verb": "continue"}, var_mutations={}),
-    ])
-    assert nv.review_tally(tree) is None

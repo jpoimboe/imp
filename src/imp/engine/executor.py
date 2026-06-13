@@ -139,6 +139,7 @@ async def run_change(
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None = None,
     coordinator: Any = None,  # cli.signals.InterruptCoordinator | None
     non_interactive: bool = False,
+    seed_opening: str | None = None,
 ) -> RunResult:
     on_event = on_event or (lambda _e: None)
     if coordinator is None:
@@ -176,6 +177,7 @@ async def run_change(
 
         flat = workflow.flat_steps()
         index_of = {s.name: i for i, s in enumerate(flat)}
+        pending_seed = seed_opening  # one-shot: consumed by the first fresh agent step
 
         while True:
             if state.completion_pending:
@@ -189,6 +191,11 @@ async def run_change(
             step = flat[idx]
             is_resume = (state.resume_pending == state.step)
 
+            seed_for_step = (
+                pending_seed
+                if pending_seed is not None
+                and step.kind == "agent" and not is_resume
+                else None)
             # var_mutations was ALREADY applied to state.vars and logged inside the
             # _route_* body — run_change receives it for visibility only and must NOT
             # re-apply it (double-apply trap). The third element is otherwise unused.
@@ -198,7 +205,10 @@ async def run_change(
                 lint_command=config.lint_command,
                 test_command=config.test_command,
                 non_interactive=non_interactive,
-                sandbox_policy=sandbox_policy)
+                sandbox_policy=sandbox_policy,
+                seed_opening=seed_for_step)
+            if seed_for_step is not None:
+                pending_seed = None
 
             if isinstance(action, Retry):
                 raise AssertionError("Retry must not escape _dispatch_step")
@@ -345,6 +355,7 @@ async def _dispatch_step(
     test_command: str | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
+    seed_opening: str | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Returns (action, feedback_text, var_mutations)."""
     wrapper_text: str | None = None
@@ -366,7 +377,7 @@ async def _dispatch_step(
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
         wrapper_text=wrapper_text, is_resume=is_resume, lint_command=lint_command,
         test_command=test_command, non_interactive=non_interactive,
-        sandbox_policy=sandbox_policy)
+        sandbox_policy=sandbox_policy, seed_opening=seed_opening)
 
 
 def _step_started_payload(step: Step) -> dict[str, Any]:
@@ -508,6 +519,7 @@ async def _route_agent(
     test_command: str | None = None,
     non_interactive: bool = False,  # §10/§12: consumed by the headless wall-clock retry ceiling
     sandbox_policy: Any = None,
+    seed_opening: str | None = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
@@ -523,7 +535,8 @@ async def _route_agent(
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = False
         retry_wrapper: str | None = None
-        initial: tuple[Message, ...] = _seed_messages(change, wrapper_text)
+        opening = seed_opening if seed_opening is not None else wrapper_text
+        initial: tuple[Message, ...] = _seed_messages(change, opening)
     else:  # keep the transcript, balance a trailing complete_step
         transcript_dir.mkdir(parents=True, exist_ok=True)
         balance = True
@@ -621,7 +634,8 @@ async def _route_agent(
                                   is_resume=is_resume, lint_command=lint_command,
                                   test_command=test_command,
                                   non_interactive=non_interactive,
-                                  sandbox_policy=sandbox_policy)
+                                  sandbox_policy=sandbox_policy,
+                                  seed_opening=seed_opening)
 
     state.step_attempt = 0
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)

@@ -27,15 +27,22 @@ def _seed_control_default(root: Path) -> None:
     _git(root, "commit", "-qm", "imp setup (default workflow)")
 
 
-def test_resume_real_parser_accepts_from_and_force(tmp_path, monkeypatch) -> None:
-    # Drive the REAL main() parser. argparse errors raise SystemExit; our code
-    # paths return an int. A nonexistent slug on a paused-precondition path
-    # returns 2 (LoadError), proving the parser accepted --from/--force without
-    # an argparse SystemExit.
+def test_resume_real_parser_accepts_from(tmp_path, monkeypatch) -> None:
+    # Drive the REAL main() parser. A nonexistent slug on a paused-precondition
+    # path returns 2 (LoadError), proving the parser accepted --from without an
+    # argparse SystemExit.
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-    rc = main(["resume", "nope", "--from", "code-reviewer", "--force"])
-    assert rc == 2          # returned (not raised) => flags parsed fine
+    rc = main(["resume", "nope", "--from", "code-reviewer"])
+    assert rc == 2          # returned (not raised) => --from parsed fine
+
+
+def test_resume_parser_rejects_removed_force_flag(tmp_path, monkeypatch) -> None:
+    # --force was removed; argparse rejects the unknown option with SystemExit.
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit):
+        main(["resume", "nope", "--from", "code-reviewer", "--force"])
 
 
 def test_no_fork_or_rebase_subcommand(capsys) -> None:
@@ -88,7 +95,7 @@ def test_resume_from_noop_appends_event_without_rewriting_history(
                        configured_tiers=load_effective_config(
                            project_root=tmp_path,
                            control_root=tmp_path).config.tier_names())
-    plan = plan_rewind(wf, st, st.step, force=False)   # no-op: --from current step
+    plan = plan_rewind(wf, st, st.step)   # no-op: --from current step
     apply_rewind(plan, wf, st, ch.event_log())
     st.save(ch.state_dir)
 
@@ -124,7 +131,7 @@ def test_resume_from_cli_seam_applies_rewind_before_run(
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     monkeypatch.setattr(m, "run_change", fake_run_change)
 
-    args = argparse.Namespace(token="feat", from_target="review", force=False)
+    args = argparse.Namespace(token="feat", from_target="review")
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 0
     out = capsys.readouterr().out
@@ -143,51 +150,6 @@ def test_resume_from_cli_seam_applies_rewind_before_run(
     assert final.step == "review"
     assert final.loop_counts == {"task-lead": 2}     # review reset, upstream kept
 
-
-def test_resume_from_cli_seam_forced_forward_lands_as_is(tmp_path, monkeypatch) -> None:
-    """The --force forward path through the real CLI seam: --from merge --force
-    from a paused integrate-merge emits gates_bypassed (after workflow_resumed),
-    sets ready_to_merge, and lands the cursor at the merge phase entry
-    (base-fresh-check) so the engine-native merge step runs (B3 cutover)."""
-    import argparse
-
-    import anyio
-
-    import imp.cli.main as m
-    from imp.engine.executor import RunResult
-
-    _seed_control_default(tmp_path)
-    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
-    st = State.load(ch.state_dir)
-    st.step = "integrate-merge"
-    st.status = "paused"
-    st.save(ch.state_dir)
-
-    async def fake_run_change(change, **kwargs):
-        return RunResult.COMPLETED
-
-    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
-    monkeypatch.setattr(m, "run_change", fake_run_change)
-
-    args = argparse.Namespace(token="feat", from_target="merge", force=True)
-    rc = anyio.run(m._async_cmd_resume, args)
-    assert rc == 0
-
-    # Ordering: workflow_resumed < gates_bypassed < step_rewound; gates named.
-    events = list(ch.event_log().read())
-    types = [e["type"] for e in events]
-    assert types.index("workflow_resumed") < types.index("gates_bypassed")
-    assert types.index("gates_bypassed") < types.index("step_rewound")
-    bypassed = next(e for e in events if e["type"] == "gates_bypassed")
-    assert bypassed["payload"]["gates"] == [
-        "integrate-merge", "integrate-tests", "integration-review", "final-review",
-    ]
-
-    # Persisted: cursor lands at the merge phase entry + ready_to_merge set
-    # (land as-is). The merge phase's engine-native steps run the merge (B3).
-    final = State.load(ch.state_dir)
-    assert final.step == "base-fresh-check"
-    assert final.vars["ready_to_merge"] is True
 
 
 def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> None:
@@ -230,7 +192,7 @@ def test_resume_rechecks_abandoned_status_under_lock(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(m, "run_change", fake_run_change)
     monkeypatch.setattr(m.State, "load", classmethod(fake_load))
 
-    args = argparse.Namespace(token="feat", from_target=None, force=False)
+    args = argparse.Namespace(token="feat", from_target=None)
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 2
     assert ran["called"] is False    # never ran a Change abandon finalized
@@ -277,7 +239,7 @@ def test_async_cmd_resume_installs_benign_loop_handler(tmp_path, monkeypatch) ->
     monkeypatch.setattr(m, "_benign_interrupt_loop_handler", fake_handler)
 
     args = argparse.Namespace(
-        token="feat", from_target=None, force=False, tui=False,
+        token="feat", from_target=None, tui=False,
         non_interactive=True, message="go")
     rc = anyio.run(m._async_cmd_resume, args)
     assert rc == 0

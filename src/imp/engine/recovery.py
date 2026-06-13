@@ -19,8 +19,8 @@ class RewindError(Exception):
 
 
 class GateBypassRequired(Exception):
-    """A forward --from jump would skip one or more gate steps and --force was
-    not given. gate_steps are the skipped gates (for the message + tests)."""
+    """A forward --from jump that would skip one or more gate steps. It is always
+    rejected. gate_steps are the skipped gates (for the message + tests)."""
 
     def __init__(self, gate_steps: tuple[str, ...], message: str) -> None:
         self.gate_steps = gate_steps
@@ -60,8 +60,6 @@ class RewindPlan:
     from_step: str | None           # cursor before the rewind (nullable)
     to_step: str | None             # None => terminal (re-enter _complete)
     target_idx: int                 # resolve_goto(target)
-    bypass_gates: tuple[str, ...]   # () unless a forced forward jump skips gates
-    set_ready_to_merge: bool
 
 
 def _unknown_target_message(workflow: Workflow, target: str) -> str:
@@ -72,11 +70,10 @@ def _unknown_target_message(workflow: Workflow, target: str) -> str:
             f"  valid steps:  {steps}")
 
 
-def plan_rewind(workflow: Workflow, state: State, target: str,
-                *, force: bool) -> RewindPlan:
+def plan_rewind(workflow: Workflow, state: State, target: str) -> RewindPlan:
     """Resolve target, decide direction, compute bypassed gates. Raises
     RewindError (unknown target) or GateBypassRequired (forward jump skipping a
-    gate without --force). Performs NO mutation and emits NO events."""
+    gate). Performs NO mutation and emits NO events."""
     flat = workflow.flat_steps()
     index_of = {s.name: i for i, s in enumerate(flat)}
     try:
@@ -90,18 +87,17 @@ def plan_rewind(workflow: Workflow, state: State, target: str,
     bypass_gates: tuple[str, ...] = ()
     if target_idx > cursor_idx:                      # forward jump
         bypass_gates = gate_steps_in_span(workflow, cursor_idx, target_idx - 1)
-        if bypass_gates and not force:
+        if bypass_gates:
             raise GateBypassRequired(
                 bypass_gates,
                 f"imp: --from {target!r} would skip gate step(s): "
                 f"{', '.join(bypass_gates)}.\n"
-                f"  re-run with --force to land the Change as-is.")
+                f"  this jump is not allowed; the gate step(s) must run.")
 
     to_step = None if target_idx >= len(flat) else flat[target_idx].name
     return RewindPlan(
         target=target, from_step=state.step, to_step=to_step,
-        target_idx=target_idx, bypass_gates=bypass_gates,
-        set_ready_to_merge=bool(bypass_gates))
+        target_idx=target_idx)
 
 
 def apply_rewind(plan: RewindPlan, workflow: Workflow, state: State,
@@ -122,11 +118,6 @@ def apply_rewind(plan: RewindPlan, workflow: Workflow, state: State,
     state.resume_pending = None
     state.step_attempt = 0
 
-    if plan.set_ready_to_merge:
-        state.vars["ready_to_merge"] = True
-        log.append(agent_id=None, type="gates_bypassed",
-                   payload={"gates": list(plan.bypass_gates),
-                            "to_target": plan.target})
     log.append(agent_id=None, type="step_rewound",
                payload={"from_step": plan.from_step, "to_target": plan.target,
                         "reason": "resume --from"})
