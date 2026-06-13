@@ -60,7 +60,6 @@ class RewindPlan:
     from_step: str | None           # cursor before the rewind (nullable)
     to_step: str | None             # None => terminal (re-enter _complete)
     target_idx: int                 # resolve_goto(target)
-    bypass_gates: tuple[str, ...]   # () unless a forward jump skips gates (then it raises)
 
 
 def _unknown_target_message(workflow: Workflow, target: str) -> str:
@@ -98,7 +97,7 @@ def plan_rewind(workflow: Workflow, state: State, target: str) -> RewindPlan:
     to_step = None if target_idx >= len(flat) else flat[target_idx].name
     return RewindPlan(
         target=target, from_step=state.step, to_step=to_step,
-        target_idx=target_idx, bypass_gates=bypass_gates)
+        target_idx=target_idx)
 
 
 def apply_rewind(plan: RewindPlan, workflow: Workflow, state: State,

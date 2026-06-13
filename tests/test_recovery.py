@@ -65,7 +65,6 @@ def test_plan_rewind_backward_to_step() -> None:
     plan = plan_rewind(_wf(), _state("review"), "review")
     assert plan.to_step == "review"
     assert plan.target_idx == 13
-    assert plan.bypass_gates == ()
     assert plan.from_step == "review"
 
 
@@ -91,7 +90,6 @@ def test_plan_rewind_merge_blocked_reentry_no_gates() -> None:
     plan = plan_rewind(_wf(), st, "merge")
     assert plan.to_step == "base-fresh-check"        # B3: re-enters the merge phase
     assert plan.from_step is None                    # nullable from a None cursor
-    assert plan.bypass_gates == ()                   # backward jump (target < terminal cursor)
 
 
 def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
@@ -126,4 +124,3 @@ def test_plan_rewind_forward_no_gate_allowed() -> None:
     # final-review-gate, both non-gates -> a forward jump bypassing no gate.
     plan = plan_rewind(_wf(), _state("summarizer"), "final-review")
     assert plan.to_step == "final-review"
-    assert plan.bypass_gates == ()
