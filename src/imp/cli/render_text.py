@@ -471,8 +471,8 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # renders as a quiet line ABOVE the reply caret, so the recorded
         # transcript shows what the human was asked before what they typed.
         if node.pending_question:
-            yield from _wrap(node.pending_question, width, depth, color,
-                             *pal.NODE_COLORS["metadata"], gutters=gutters)
+            yield from render_question_block(
+                node.pending_question, width, depth, color, gutters)
         bg = pal.user_bg_open(enabled=color)
         if color:
             caret = pal.sgr(*pal.NODE_COLORS["user"], enabled=True) + pal.CARET + "\x1b[39m"
