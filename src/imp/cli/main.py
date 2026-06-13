@@ -120,11 +120,6 @@ class SeedResolution(NamedTuple):
     seed_text: str | None
 
 
-def _is_readable_regular_file(path: str) -> bool:
-    p = Path(path)
-    return p.is_file() and os.access(p, os.R_OK)
-
-
 def _read_seed_file(path: str) -> str:
     p = Path(path)
     if not p.is_file():
@@ -144,22 +139,26 @@ def _build_seed(path: str, content: str) -> str:
 def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
     """Resolve the first-turn seed source for `imp new`.
 
-    Raises SeedError on a missing/unreadable --spec-file or combined seed
-    sources."""
-    title = args.title
+    A positional MESSAGE is the user's verbatim opening intent (delivered
+    unwrapped); --spec-file delivers a wrapped draft. The two are mutually
+    exclusive. Raises SeedError on a missing/unreadable --spec-file or combined
+    seed sources."""
+    title = getattr(args, "title", None)
+    opening = getattr(args, "opening", None)
     spec_file = getattr(args, "spec_file", None)
     message = getattr(args, "message", None)
 
     if spec_file is not None:
+        if opening is not None:
+            raise SeedError(
+                "a positional MESSAGE and --spec-file are mutually exclusive")
         if message is not None:
             raise SeedError("--spec-file and --message are mutually exclusive")
-        return SeedResolution(title, _build_seed(spec_file, _read_seed_file(spec_file)))
+        return SeedResolution(
+            title, _build_seed(spec_file, _read_seed_file(spec_file)))
 
-    if title is not None and _is_readable_regular_file(title):
-        if message is not None:
-            raise SeedError(
-                "a positional spec file and --message are mutually exclusive")
-        return SeedResolution(None, _build_seed(title, _read_seed_file(title)))
+    if opening is not None:
+        return SeedResolution(title, opening)
 
     return SeedResolution(title, None)
 
@@ -1766,8 +1765,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new = sub.add_parser(
         "new", help="Start a new Change: run the workflow from an opening intent.")
     p_new.add_argument(
-        "title", nargs="?",
-        help="Optional short title for the Change; the spec-writer names it if omitted.")
+        "opening", nargs="?", metavar="MESSAGE",
+        help="Opening intent handed verbatim to the spec-writer as its first "
+             "message; omit to start with an interactive prompt. Distinct from "
+             "--message, which is a headless reply to the first solicit.")
+    p_new.add_argument("--title", metavar="TEXT", default=None,
+                       help="Set the Change title explicitly; the spec-writer "
+                            "names the Change if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Headless: no live prompt; supply the reply via --message.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
@@ -1777,8 +1781,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--spec-file", metavar="PATH", default=None,
                        help="Seed the change from a draft spec file: its content "
                             "becomes the spec-writer's opening intent. A missing or "
-                            "unreadable PATH is a hard error (rc 2). May be combined "
-                            "with a positional name, but not with --message.")
+                            "unreadable PATH is a hard error (rc 2). Mutually "
+                            "exclusive with a positional MESSAGE and with --message.")
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")

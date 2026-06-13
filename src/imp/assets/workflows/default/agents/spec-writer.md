@@ -37,7 +37,10 @@ they want to build. Do NOT read any files, do NOT explore the codebase, do NOT
 propose any design before the user has answered. The reply comes back as the
 tool result and carries the intent for the change. When instead the opening
 message begins with `Implement this spec`, skip this entirely — you are on the
-seeded path and the intent is already in hand.
+seeded path and the intent is already in hand. When the opening message is plain
+prose (neither `<imp:begin/>` nor `Implement this spec`), the opening question
+is likewise skipped — you have the user's verbatim intent in hand; explore the
+codebase and proceed directly into brainstorming.
 
 **If the user hands you context instead of intent.** Sometimes the opening reply
 is a pasted log, a design-doc path, an error, or other material rather than a
