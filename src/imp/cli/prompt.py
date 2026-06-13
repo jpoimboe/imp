@@ -21,12 +21,14 @@ from pathlib import Path
 from typing import Any
 
 
-def _prompt_message_text(question: str, *, color: bool) -> str:
+def _prompt_message_text(question: str, *, color: bool, width: int = 80) -> str:
     from imp.cli import palette as pal
+    from imp.cli.render_text import render_question_block
     q = question.strip()
     if not q:
         return pal.caret(enabled=color)
-    return pal.ansi(q, "dim", enabled=color) + "\n" + pal.caret(enabled=color)
+    lines = render_question_block(q, width, 0, color)
+    return "\n".join(lines) + "\n" + pal.caret(enabled=color)
 
 
 def _placeholder_text(*, color: bool) -> str:
@@ -147,7 +149,7 @@ class Prompt:
         return str(result) if result is not None else ""
 
     async def ask_async(self, prompt_text: str | None = None, *,
-                        question: str = "") -> str:
+                        question: str = "", width: int = 80) -> str:
         """Async version of ask() — uses prompt_toolkit's native prompt_async()
         so it shares the outer event loop instead of calling asyncio.run()
         internally (which would crash inside anyio.run()).
@@ -170,8 +172,8 @@ class Prompt:
         from prompt_toolkit.formatted_text import ANSI
 
         if question.strip():
-            msg: Any = (ANSI(_prompt_message_text(question, color=True))
-                        if self._color else _prompt_message_text(question, color=False))
+            rendered = _prompt_message_text(question, color=self._color, width=width)
+            msg: Any = ANSI(rendered) if self._color else rendered
         else:
             msg = self._message(prompt_text)
         placeholder = ANSI(_placeholder_text(color=True)) if self._color else None

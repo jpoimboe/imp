@@ -101,10 +101,24 @@ def test_message_strips_question_whitespace_plain() -> None:
     assert _prompt_message_text("  Pick A or B?  ", color=False) == "Pick A or B?\n> "
 
 
-def test_message_color_dims_question_and_blues_caret() -> None:
-    msg = _prompt_message_text("Pick A or B?", color=True)
-    assert msg.startswith("\x1b[2mPick A or B?\x1b[0m\n")   # dim question line
-    assert msg.endswith("\x1b[94m> \x1b[0m")                # bright-blue caret
+def test_message_renders_markdown_question_above_the_caret() -> None:
+    msg = _prompt_message_text("Reply **merge** to merge.", color=True, width=80)
+    assert "\x1b[1m" in msg                          # bold for **merge**
+    assert "**" not in msg                           # asterisks consumed
+    assert msg.endswith("\x1b[94m> \x1b[0m")          # bright-blue caret last
+
+
+def test_message_no_color_renders_markdown_without_ansi() -> None:
+    msg = _prompt_message_text("Reply **merge** to merge.", color=False, width=80)
+    assert "**" not in msg      # asterisks consumed by markdown
+    assert "\x1b[" not in msg   # no ANSI codes on the no-color path
+    assert "merge" in msg       # content present
+    assert msg.endswith("> ")   # plain caret last
+
+
+def test_message_plain_question_still_sits_above_the_caret() -> None:
+    assert _prompt_message_text("Pick A or B?", color=False, width=80) \
+        == "Pick A or B?\n> "
 
 
 def test_placeholder_hint_is_the_dim_reply_prompt() -> None:
