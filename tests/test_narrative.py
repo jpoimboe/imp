@@ -38,6 +38,17 @@ def test_tokentotals_add_usage_tolerates_missing_keys() -> None:
     assert (tt.input, tt.output, tt.cache_read, tt.cache_creation) == (15, 3, 2, 1)
 
 
+def test_pending_question_exposes_awaiting_prompt() -> None:
+    from imp.cli.narrative import NarrativeBuilder
+    from tests._event_fixtures import ev
+
+    b = NarrativeBuilder()
+    assert b.pending_question() == ""                 # idle
+    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    b.add(ev("2", "awaiting_user_input", agent_id="step:p/s", prompt="Ship it?"))
+    assert b.pending_question() == "Ship it?"
+
+
 def test_build_tree_empty_yields_root_only() -> None:
     tree = nv.build_tree([])
     assert isinstance(tree.root, nv.WorkflowNode)

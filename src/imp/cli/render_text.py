@@ -39,13 +39,13 @@ def fmt_seconds(seconds: float | int | None) -> str:
 
 
 def render_tree(tree: nv.NarrativeTree, *, full: bool, color: bool,
-                width: int = 80) -> Iterator[str]:
+                width: int = 80, live_viewer: bool = False) -> Iterator[str]:
     # No slug/title header: the transcript opens directly on the first turn. The
     # change id/title belong to `imp` chrome (the run header, `imp list`), not the
     # narrative body — so live and log both start with content, not a banner.
     root = tree.root
     yield from _render_children(root.children, depth=0, full=full, color=color, width=width,
-                                gutters=())
+                                gutters=(), live_viewer=live_viewer)
 
 
 def _gutter_indent(depth: int, gutters: tuple[int, ...], color: bool) -> str:
@@ -236,7 +236,7 @@ def spaces_before(node: Any) -> bool:
 
 def _render_children(children: list[Any], *, depth: int, full: bool, color: bool,
                      width: int, gutters: tuple[int, ...] = (),
-                     prime: bool = False) -> Iterator[str]:
+                     prime: bool = False, live_viewer: bool = False) -> Iterator[str]:
     """Render a container's children in order, inserting ONE blank line between
     a prose block and ANY following emission. A child that renders nothing
     (lean-mode thinking / empty tool burst) leaves the prose-adjacency state
@@ -249,7 +249,7 @@ def _render_children(children: list[Any], *, depth: int, full: bool, color: bool
     prev_prose = prime
     for child in children:
         lines = list(_render(child, depth=depth, full=full, color=color, width=width,
-                             gutters=gutters))
+                             gutters=gutters, live_viewer=live_viewer))
         if not lines:
             continue
         if prev_prose or spaces_before(child):
@@ -393,7 +393,8 @@ def subagent_outcome_lines(sub: nv.SubagentFold, *, depth: int, color: bool,
 
 
 def _render(node: Any, *, depth: int, full: bool, color: bool,
-            width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
+            width: int, gutters: tuple[int, ...] = (),
+            live_viewer: bool = False) -> Iterator[str]:
     if isinstance(node, nv.PhaseNode):
         # The phase start line is surrounded by blank lines: the blank ABOVE comes
         # from the root walk (spaces_before(PhaseNode)); the blank BELOW comes from
@@ -401,7 +402,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         yield header_line(node, depth=depth, color=color, gutters=gutters)
         yield from _render_children(node.children, depth=depth + 1, full=full,
                                     color=color, width=width, gutters=gutters,
-                                    prime=True)
+                                    prime=True, live_viewer=live_viewer)
         if node.closed and nv.phase_elapsed(node) is not None:
             # Blank ABOVE the phase-complete line (it's surrounded too); the blank
             # BELOW comes from the root walk (spaces_after(PhaseNode)).
@@ -430,7 +431,7 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # doubled one.
         yield from _render_children(node.children, depth=depth, full=full,
                                     color=color, width=width, gutters=gutters,
-                                    prime=True)
+                                    prime=True, live_viewer=live_viewer)
         return
 
     if isinstance(node, nv.AgentTextNode):
@@ -503,12 +504,12 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
 
     if isinstance(node, nv.SubagentFold):
         yield from _render_subagent(node, depth=depth, full=full, color=color, width=width,
-                                    gutters=gutters)
+                                    gutters=gutters, live_viewer=live_viewer)
         return
 
     if isinstance(node, nv.StepContextNode):
         yield from _render_step_context(node, depth=depth, full=full, color=color, width=width,
-                                        gutters=gutters)
+                                        gutters=gutters, live_viewer=live_viewer)
         return
 
     if isinstance(node, nv.OutcomeLine):
@@ -720,7 +721,8 @@ def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
 
 def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
                      color: bool, width: int,
-                     gutters: tuple[int, ...] = ()) -> Iterator[str]:
+                     gutters: tuple[int, ...] = (),
+                     live_viewer: bool = False) -> Iterator[str]:
     if not full:
         # Lean: ONE status row, no children, no outcome (Part D). Structurally
         # eliminates the SDK cancellation-sentinel leak — lean renders no subagent
@@ -733,14 +735,18 @@ def _render_subagent(sub: nv.SubagentFold, *, depth: int, full: bool,
     yield _line(f"{pal.fold_glyph(expanded=True)} {sub.subagent_name}",
                 depth, color, *pal.NODE_COLORS["subagent"], gutters=gutters)
     yield from _render_children(sub.tree.root.children, depth=depth + 1, full=full,
-                                color=color, width=width, gutters=(*gutters, depth))
+                                color=color, width=width, gutters=(*gutters, depth),
+                                live_viewer=live_viewer)
     yield from subagent_outcome_lines(sub, depth=depth + 1, color=color, width=width,
                                       gutters=(*gutters, depth))
 
 
 def _render_step_context(ctx: nv.StepContextNode, *, depth: int, full: bool,
                          color: bool, width: int,
-                         gutters: tuple[int, ...] = ()) -> Iterator[str]:
+                         gutters: tuple[int, ...] = (),
+                         live_viewer: bool = False) -> Iterator[str]:
+    if live_viewer:
+        return
     p = ctx.payload
     provider = p.get("provider", "?")
     model = p.get("model", "?")

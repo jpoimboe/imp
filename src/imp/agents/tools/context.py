@@ -4,7 +4,7 @@ Path model: in-worktree files are addressed by paths RELATIVE to the worktree
 root. `resolve_path` resolves both relative-under-root and absolute paths with NO
 containment raise; `authorize_fs` then bounds the result (fs_permissions
 in-worktree, the sandbox mirror outside) so the fs tools reach the same paths as
-`bash`. `resolve_path_strict` keeps worktree containment for glob/grep. There is
+`bash`. There is
 no virtual `/project`/`/scratch` namespace and no in-memory scratch store; system
 paths are `bash`'s job, backstopped by the OS sandbox.
 """
@@ -137,19 +137,9 @@ class ToolContext:
         project_root; an absolute path replaces the root (pathlib join semantics)
         and resolves to its literal host location. Out-of-worktree access is then
         bounded by authorize_fs (fs_permissions in-worktree, the sandbox mirror
-        outside), matching `bash`. glob/grep use resolve_path_strict instead.
+        outside), matching `bash`.
         """
         return (self.project_root / path).resolve()
-
-    def resolve_path_strict(self, path: str) -> Path:
-        """Resolve `path` contained to the worktree root; raise PermissionDenied if it escapes."""
-        root = self.project_root.resolve()
-        resolved = (self.project_root / path).resolve()
-        if resolved != root and not resolved.is_relative_to(root):
-            raise PermissionDenied(
-                f"path {path!r} escapes the worktree root {root}"
-            )
-        return resolved
 
     def authorize_fs(
         self, ops: tuple[Literal["read", "write"], ...], path: str,

@@ -17,7 +17,7 @@ def test_render_full_matches_render_tree_full() -> None:
     for e in SAMPLE:
         drv.on_event(e)
     expected = "\n".join(render_tree(build_tree(SAMPLE), full=True,
-                                     color=False, width=80))
+                                     color=False, width=80, live_viewer=True))
     assert drv.render(full=True) == expected
 
 
@@ -26,7 +26,7 @@ def test_render_lean_matches_render_tree_lean() -> None:
     for e in SAMPLE:
         drv.on_event(e)
     expected = "\n".join(render_tree(build_tree(SAMPLE), full=False,
-                                     color=False, width=80))
+                                     color=False, width=80, live_viewer=True))
     assert drv.render(full=False) == expected
 
 
@@ -37,7 +37,7 @@ def test_print_collapsed_transcript_emits_full_false_with_trailing_newline() -> 
     buf = io.StringIO()
     drv.print_collapsed_transcript(buf)
     expected = "\n".join(render_tree(build_tree(SAMPLE), full=False,
-                                     color=False, width=80)) + "\n"
+                                     color=False, width=80, live_viewer=True)) + "\n"
     assert buf.getvalue() == expected
 
 
@@ -61,3 +61,36 @@ def test_status_text_present_during_activity() -> None:
     txt = drv.status_text(0, 1.0)
     assert txt is not None
     assert "bash ls" in txt
+
+
+def test_pending_question_surfaced_after_awaiting_event() -> None:
+    drv = _drv()
+    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    drv.on_event(ev("2", "awaiting_user_input", agent_id="step:p/s",
+                    prompt="Deploy to prod?"))
+    assert drv.pending_question() == "Deploy to prod?"
+
+
+def test_render_full_suppresses_system_prompt_in_live_viewer() -> None:
+    drv = _drv()
+    drv.on_event(ev("2", "step_started", step="s", kind="agent", phase="p",
+                    model="m", provider="anthropic"))
+    drv.on_event(ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
+                    model="claude", system_prompt="SECRET SYSTEM PROMPT",
+                    tools_schema=[{"name": "bash"}], params={}, max_tool_calls=50))
+    out = drv.render(full=True)
+    assert "SECRET SYSTEM PROMPT" not in out
+    assert "- bash" not in out
+    buf = io.StringIO()
+    drv.print_collapsed_transcript(buf)
+    transcript = buf.getvalue()
+    assert "SECRET SYSTEM PROMPT" not in transcript
+    # imp log --full (live_viewer default False) still renders it.
+    log = "\n".join(render_tree(build_tree([
+        ev("2", "step_started", step="s", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+        ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
+           model="claude", system_prompt="SECRET SYSTEM PROMPT",
+           tools_schema=[{"name": "bash"}], params={}, max_tool_calls=50),
+    ]), full=True, color=False, width=80))
+    assert "SECRET SYSTEM PROMPT" in log

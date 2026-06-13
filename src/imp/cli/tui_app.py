@@ -2,15 +2,29 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
 from typing import Any, cast
 
+from imp.cli import palette as pal
 from imp.cli.prompt import SlashCompleter
 from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
 from imp.cli.tui_driver import TuiDriver
 from imp.cli.tui_viewport import ViewportState
 
-HINT = "PgUp/PgDn scroll · End follow · ^O verbosity · ESC pause · ^C interrupt"
+HINT = "PgUp/PgDn scroll · End follow · ^O verbosity · ESC/^C pause"
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_STATUS_SEP = "   "
+
+
+def _elide_to_width(text: str, budget: int) -> str:
+    if budget <= 0:
+        return ""
+    visible = _ANSI_RE.sub("", text)
+    if len(visible) <= budget:
+        return text
+    return visible[:budget - 1] + "…"
 
 
 class TuiApp:
@@ -18,7 +32,7 @@ class TuiApp:
         self._coord = coord
         self._color = color
         self._width = width
-        self._full = True
+        self._full = False
         self._frame = 0
         self._start = time.monotonic()
         self._viewport = ViewportState()
@@ -32,6 +46,9 @@ class TuiApp:
         self._prompt_visible = False
         self._prompt_future: Any = None
         self._slash_lines: list[str] = []
+        self._solicit_question: str = ""
+        self._question_control: Any = None
+        self._prompt_control: Any = None
 
     # -- event intake ---------------------------------------------------------
     def on_event(self, event: Any) -> None:
@@ -51,8 +68,12 @@ class TuiApp:
         return time.monotonic() - self._start
 
     def status_line(self) -> str:
-        activity = self._driver.status_text(self._frame, self._elapsed())
-        return f"{activity}   {HINT}" if activity else HINT
+        left = ("your turn" if self._prompt_visible
+                else self._driver.status_text(self._frame, self._elapsed()))
+        if not left:
+            return HINT
+        budget = self._width - len(HINT) - len(_STATUS_SEP)
+        return f"{_elide_to_width(left, budget)}{_STATUS_SEP}{HINT}"
 
     def _invalidate(self) -> None:
         self._narrative_text = None
@@ -194,6 +215,7 @@ class TuiApp:
         from prompt_toolkit.layout import HSplit, Layout, Window
         from prompt_toolkit.layout.containers import ConditionalContainer
         from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+        from prompt_toolkit.layout.processors import BeforeInput
 
         self._body = Window(
             content=FormattedTextControl(
@@ -208,15 +230,23 @@ class TuiApp:
         self._buffer = Buffer(
             accept_handler=lambda buf: self._accept(buf),
             multiline=False)
+        self._prompt_control = BufferControl(
+            buffer=self._buffer, input_processors=[BeforeInput(pal.CARET)])
         prompt_win = ConditionalContainer(
-            Window(BufferControl(buffer=self._buffer), height=1),
+            Window(self._prompt_control, height=1),
             filter=Condition(lambda: self._prompt_visible))
+        self._question_control = FormattedTextControl(
+            text=lambda: ANSI(self._solicit_question))
+        question_win = ConditionalContainer(
+            Window(self._question_control),
+            filter=Condition(
+                lambda: self._prompt_visible and bool(self._solicit_question)))
         slash_win = ConditionalContainer(
             Window(FormattedTextControl(
                 text=lambda: ANSI("\n".join(self._slash_lines)))),
             filter=Condition(lambda: self._prompt_visible and bool(self._slash_lines)))
         layout = Layout(
-            HSplit([self._body, slash_win, status, prompt_win]),
+            HSplit([self._body, slash_win, status, question_win, prompt_win]),
             focused_element=self._body)
         self._app = Application(
             layout=layout, key_bindings=self._key_bindings(),
@@ -250,6 +280,7 @@ class TuiApp:
     async def solicit(self, change: Any) -> str:
         self._change = change
         self._slash_lines = []
+        self._solicit_question = self._driver.pending_question()
         self._buffer.completer = SlashCompleter(change.workflow_dir / "skills")
         self._prompt_future = asyncio.get_running_loop().create_future()
         self._prompt_visible = True
@@ -259,6 +290,7 @@ class TuiApp:
             return cast(str, await self._prompt_future)
         finally:
             self._prompt_visible = False
+            self._solicit_question = ""
             self._app.layout.focus(self._body)
             self._invalidate()
 

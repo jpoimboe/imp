@@ -28,14 +28,16 @@ def test_narrative_reflects_verbosity_and_matches_render_tree() -> None:
     app = _app()
     for e in SAMPLE:
         app.on_event(e)
-    full = "\n".join(render_tree(build_tree(SAMPLE), full=True, color=False, width=80))
-    lean = "\n".join(render_tree(build_tree(SAMPLE), full=False, color=False, width=80))
+    full = "\n".join(render_tree(build_tree(SAMPLE), full=True, color=False,
+                                 width=80, live_viewer=True))
+    lean = "\n".join(render_tree(build_tree(SAMPLE), full=False, color=False,
+                                 width=80, live_viewer=True))
     assert full != lean                       # the fixture distinguishes the modes
-    assert app.narrative() == full            # full=True initially
-    app.toggle_verbosity()
-    assert app.narrative() == lean
+    assert app.narrative() == lean            # full=False initially (lean default)
     app.toggle_verbosity()
     assert app.narrative() == full
+    app.toggle_verbosity()
+    assert app.narrative() == lean
 
 
 def test_status_line_is_hint_only_when_idle() -> None:
@@ -43,13 +45,23 @@ def test_status_line_is_hint_only_when_idle() -> None:
 
 
 def test_status_line_includes_activity_and_hint_during_a_call() -> None:
-    app = _app()
+    app = TuiApp(coord=_FakeCoord(), color=False, width=120)
     app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
     app.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                     input={"command": "ls"}))
     line = app.status_line()
-    assert "bash ls" in line
-    assert HINT in line
+    assert "bash ls" in line          # short activity fits at width 120; shown in full
+    assert line.endswith(HINT)        # hint occupies the reserved tail
+
+
+def test_long_activity_elides_to_preserve_hint_slot() -> None:
+    app = TuiApp(coord=_FakeCoord(), color=False, width=80)
+    app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    app.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "x" * 120}))
+    line = app.status_line()
+    assert line.endswith(HINT)        # hint occupies the reserved tail, in full
+    assert len(line) <= 80            # color off → visible length == len; nothing overflows
 
 
 def test_scroll_page_up_disengages_follow() -> None:
@@ -129,7 +141,7 @@ async def test_run_async_pageup_disengages_follow_and_ctrl_o_toggles() -> None:
         await app.run_async()
 
     assert app._viewport.follow is False      # PageUp disengaged auto-follow
-    assert app._full is False                 # Ctrl-O toggled verbosity
+    assert app._full is True                  # Ctrl-O toggled verbosity off the lean default
 
 
 @pytest.fixture
@@ -224,3 +236,66 @@ async def test_solicit_shows_prompt_returns_submitted_line(tmp_path: Path) -> No
         await app.run_async()
 
     assert result["line"] == "go ahead"
+
+
+def test_status_line_reads_your_turn_during_solicit_not_spinner() -> None:
+    app = _app()
+    app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    app.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "ls"}))
+    app._prompt_visible = True
+    line = app.status_line()
+    assert "your turn" in line
+    assert "bash ls" not in line            # the spinner activity is replaced
+    assert line.endswith(HINT)
+
+
+def test_prompt_window_shows_caret_and_question() -> None:
+    from prompt_toolkit.formatted_text import ANSI
+    from prompt_toolkit.layout.processors import BeforeInput
+
+    from imp.cli import palette as pal
+
+    app = _app()
+    app._build_app()
+    procs = app._prompt_control.input_processors
+    assert any(isinstance(p, BeforeInput) and p.text == pal.CARET for p in procs)
+
+    app._solicit_question = "Really deploy to prod?"
+    got = app._question_control.text()
+    assert isinstance(got, ANSI) and "Really deploy to prod?" in got.value
+
+
+@pytest.mark.anyio
+async def test_solicit_captures_question_and_shows_your_turn(tmp_path: Path) -> None:
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input.defaults import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    app = TuiApp(coord=_FakeCoord(), color=False, width=80)
+    app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    app.on_event(ev("2", "awaiting_user_input", agent_id="step:p/s",
+                    prompt="Ship it?"))
+    change = _FakeChange(tmp_path)
+    captured: dict[str, str] = {}
+
+    with create_pipe_input() as pin, create_app_session(input=pin, output=DummyOutput()):
+        app._build_app()
+
+        async def _ask() -> None:
+            await app.solicit(change)
+            app.exit()
+
+        async def _drive() -> None:
+            await asyncio.sleep(0.05)
+            captured["question"] = app._solicit_question
+            captured["status"] = app.status_line()
+            pin.send_text("yes\r")
+
+        asyncio.ensure_future(_ask())   # noqa: RUF006
+        asyncio.ensure_future(_drive())  # noqa: RUF006
+        await app.run_async()
+
+    assert captured["question"] == "Ship it?"
+    assert "your turn" in captured["status"]
+    assert app._solicit_question == ""      # reset after solicit returns
