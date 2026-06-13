@@ -436,7 +436,7 @@ async def test_fast_path_skips_reviewers_and_runs_review(
     change = _seed_default_workflow(tmp_path)
     # complexity:trivial -> spec-writer sets fast_path=true; spec-reviewer runs but
     # routes straight to plan-writer (no unseen changes); plan-review is skipped via
-    # fast-path-plan-gate; the merged `review` step still runs (cheap re-verify mode,
+    # fast-path rule on plan-verify-commit; the merged `review` step still runs (cheap re-verify mode,
     # which internally skips the opus panel — that tiering is prose, dogfood-verified).
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
 

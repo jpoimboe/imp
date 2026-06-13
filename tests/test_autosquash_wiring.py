@@ -41,5 +41,5 @@ def test_autosquash_exit0_skips_the_resolver() -> None:
     else_rule = next(r for r in step.rules if r.is_else)
     assert isinstance(exit2_rule.action, Continue)  # conflict/re-resolve -> autosquash-resolve
     assert isinstance(exit0_rule.action, Goto)
-    assert exit0_rule.action.target == "stamp-trailers"   # clean fold / verified -> skip resolver
+    assert exit0_rule.action.target == "review"   # clean fold / verified -> skip resolver
     assert isinstance(else_rule.action, Pause)

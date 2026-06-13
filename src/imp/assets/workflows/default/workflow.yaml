@@ -9,8 +9,9 @@ description: |
 # review phase. The `review` step is a sonnet coordinator that runs INSIDE the
 # per-plan implement loop; it dispatches a four-member opus panel on first pass,
 # or just the generalist reviewer on re-entry (panel_done) or fast-path. The
-# deferred-sweep drains Minor/Nit observations after each plan. The review phase
-# runs a trimmed end-of-change integration pass only when >1 plan was needed.
+# deferred-sweep drains Minor/Nit observations after each plan. When >1 plan ran,
+# `plan-cycle-check` routes to `review` again with `review_scope=change` for a
+# whole-change pass before `integrate-merge`.
 
 vars:
   ready_to_merge:         {type: bool, default: false}
@@ -19,9 +20,9 @@ vars:
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   panel_done:             {type: bool, default: false}
-  multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the end-of-change integration pass
-  integration_pass:       {type: bool, default: false}   # true only during the trimmed end-of-change integration pass; review-panel runs the two cross-cutting slices only
+  multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the whole-change review pass
   integration_needs_review: {type: bool, default: false}
+  review_scope:           {type: string, default: plan}  # plan | change — one review path, scoped per-plan or over the whole change
   spec_confirm:           {type: bool, default: true}    # confirm-gate enable
   spec_unseen_changes:    {type: bool, default: false}   # some turn changed the spec without user direction
 
@@ -99,14 +100,9 @@ phases:
         quiet: true
         command: ./scripts/plan-commit-verify.sh
         rules:
+          - {if: {exit: 0, fast_path: true}, goto: task-lead}   # trivial change: skip plan review entirely
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
-
-      - name: fast-path-plan-gate      # trivial change -> skip plan review entirely
-        quiet: true
-        rules:
-          - {if: {fast_path: true}, goto: task-lead}   # skip plan-review on fast-path
-          - {else: true, continue: true}
 
       - name: plan-review
         file: agents/plan-reviewer.md
@@ -149,15 +145,15 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: task-lead}
 
-      # ── autosquash + stamp-trailers run INSIDE the per-plan loop so each panel
-      #    reviews folded, one-commit-per-task diffs. autosquash.sh folds AND (on
-      #    re-entry after autosquash-resolve) verifies the fold preserved the tree,
-      #    in one script. The clean fold is a pure deterministic step (no agent).
+      # ── autosquash runs INSIDE the per-plan loop so each panel reviews folded,
+      #    one-commit-per-task diffs. autosquash.sh folds AND (on re-entry after
+      #    autosquash-resolve) verifies the fold preserved the tree, in one script.
+      #    The clean fold is a pure deterministic step (no agent).
       - name: autosquash
         quiet: true
         command: ./scripts/autosquash.sh
         rules:
-          - {if: {exit: 0}, goto: stamp-trailers}  # clean fold / verified resolution: skip the resolver
+          - {if: {exit: 0}, goto: review}          # clean fold / verified resolution: skip the resolver, go to the panel
           - {if: {exit: 2}, continue: true}        # resolvable fold conflict / verify failed -> autosquash-resolve
           - {else: true, pause: true}              # hard failure (exit 1) / verify bound exhausted -> human
 
@@ -170,13 +166,6 @@ phases:
           - {operations: [write], paths: ["**"], mode: allow}
         rules:
           - {else: true, goto: autosquash}         # re-run autosquash.sh -> verify-mode (before-tree sentinel present)
-
-      - name: stamp-trailers
-        quiet: true
-        command: ./scripts/stamp-trailers.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
-          - {else: true, pause: true}
 
       # ── merged review-panel + recheck. The agent tiers INTERNALLY on vars:
       #    first pass (panel_done false, not fast_path) = full opus 4-member panel;
@@ -207,61 +196,28 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: deferred-sweep}
 
-      - name: fast-path-cycle-gate
-        quiet: true
-        rules:
-          - {if: {fast_path: true}, goto: integration-gate}   # trivial: single-plan; integration-gate skips the pass and stamps sweep commits
-          - {else: true, continue: true}
-
-      - name: plan-cycle-check
-        file: agents/plan-cycle-check.md
-        tier: medium        # Sonnet coverage judgment
-        max_loops: 10                # plans-per-spec bound
-        rules:
-          - {if: {more_plans: true}, set: {panel_done: false, multi_plan: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}     # supercycle
-          - {else: true, continue: true}
-
-  - name: review
-    steps:
-      # ── trimmed end-of-change integration pass: ONLY when >1 plan ran ──
-      - name: integration-gate
-        quiet: true
-        rules:
-          - {if: {multi_plan: false}, goto: stamp-sweep-trailers}   # single plan: the per-plan pass WAS the whole-change pass; still stamp sweep commits
-          - {else: true, set: {integration_pass: true}, continue: true}
-
-      - name: integration-pass        # review-panel.md in integration_pass mode: completeness + boundaries slices over the whole-change diff
-        file: agents/review-panel.md
-        tier: medium
-        max_loops: 6
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/**"], mode: allow}
-        rules:
-          - {if: {verdict: task_gap}, set: {integration_pass: false}, goto: task-lead, feedback: "The integration pass found cross-plan gaps. Findings:"}
-          - {if: {verdict: plan_gap}, set: {integration_pass: false}, goto: plan-writer, feedback: "The integration pass found the plan needs revision. Findings:"}
-          - {else: true, set: {integration_pass: false}, continue: true}
-
-      - name: integration-sweep       # cross-plan deferred sweep over the whole change
-        file: agents/deferred-sweep.md
-        tier: medium
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["**"], mode: allow}
-
-      - name: integration-sweep-tests
-        command: ./scripts/run-tests.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
-          - {else: true, resume: integration-sweep}
-
-      - name: stamp-sweep-trailers     # idempotently stamp Change: on sweep commits the per-plan stamp-trailers could not reach
+      # One idempotent stamp of all run commits — task commits AND the sweep commits
+      # the panel/deferred-sweep just produced — before plan-cycle-check. Re-running it
+      # under the whole-change pass (review_scope=change) is a no-op on already-stamped
+      # commits (trailer.ifexists=doNothing).
+      - name: stamp-trailers
         quiet: true
         command: ./scripts/stamp-trailers.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
 
+      - name: plan-cycle-check
+        file: agents/plan-cycle-check.md
+        tier: medium        # Sonnet coverage judgment
+        max_loops: 10                # plans-per-spec bound
+        rules:
+          - {if: {more_plans: true}, set: {panel_done: false, multi_plan: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}   # supercycle
+          - {if: {multi_plan: true, review_scope: plan}, set: {review_scope: "'change'", panel_done: false}, goto: review}   # one whole-change review pass over the full diff
+          - {else: true, goto: integrate-merge}   # single-plan, or the whole-change pass already ran (review_scope=change is the one-shot guard)
+
+  - name: review
+    steps:
       # ── integrate base into the branch, before review folds into one decision ──
       - name: integrate-merge
         quiet: true
