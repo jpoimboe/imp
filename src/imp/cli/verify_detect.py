@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 # Make/just target or recipe header: `name:` at the start of a line.
@@ -70,3 +71,24 @@ def detect_verify_command(project_root: Path) -> str | None:
         if cmd:
             return cmd
     return None
+
+
+def resolve_verify_choice(
+    suggested: str,
+    input_fn: Callable[[str], str],
+    output_fn: Callable[[str], None],
+) -> str:
+    output_fn(
+        f"Detected `{suggested}` — use it as your verification gate? [Y / edit / skip]"
+    )
+    ans = input_fn("").strip().lower()
+    if ans in ("e", "edit"):
+        entered = input_fn("verify command: ").strip()
+        return entered or suggested
+    if ans in ("s", "skip", "n", "no"):
+        return ""
+    return suggested
+
+
+def format_verify_command_yaml(command: str) -> str:
+    return f"verify_command: {json.dumps(command)}\n"
