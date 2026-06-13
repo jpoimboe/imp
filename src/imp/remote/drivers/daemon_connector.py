@@ -32,7 +32,7 @@ def _pump_socket_to_stdout(sock: socket.socket, stdout: Any) -> None:
         for raw in reader:
             stdout.write(raw.decode("utf-8", "replace"))
             stdout.flush()
-    except OSError:
+    except (OSError, ValueError):
         pass
     finally:
         with contextlib.suppress(OSError):
