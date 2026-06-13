@@ -13,7 +13,9 @@ import subprocess
 from pathlib import Path
 
 AUTOSQUASH = Path("src/imp/assets/workflows/default/scripts/autosquash.sh").resolve()
-VERIFY = Path("src/imp/assets/workflows/default/scripts/autosquash-verify.sh").resolve()
+# autosquash-verify.sh folded INTO autosquash.sh: a present before-tree sentinel
+# selects verify-mode, so the verify-behavior fixtures drive autosquash.sh itself.
+VERIFY = AUTOSQUASH
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:

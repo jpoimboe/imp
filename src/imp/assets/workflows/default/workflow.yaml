@@ -155,32 +155,27 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: task-lead}
 
-      # ── autosquash + stamp-trailers move INTO the per-plan loop so each panel
-      #    reviews folded, one-commit-per-task diffs. They stay paired (stamp
-      #    immediately after autosquash) so they never drift apart.
+      # ── autosquash + stamp-trailers run INSIDE the per-plan loop so each panel
+      #    reviews folded, one-commit-per-task diffs. autosquash.sh folds AND (on
+      #    re-entry after autosquash-resolve) verifies the fold preserved the tree,
+      #    in one script. The clean fold is a pure deterministic step (no agent).
       - name: autosquash
         quiet: true
         command: ./scripts/autosquash.sh
         rules:
-          - {if: {exit: 2}, continue: true}        # agent-resolvable fold conflict -> autosquash-resolve (next step)
-          - {if: {exit: 0}, goto: stamp-trailers}  # clean fold / nothing to fold: skip the resolve+verify steps
-          - {else: true, pause: true}              # hard failure (exit 1) / merge-path refusal (unchanged)
+          - {if: {exit: 0}, goto: stamp-trailers}  # clean fold / verified resolution: skip the resolver
+          - {if: {exit: 2}, continue: true}        # resolvable fold conflict / verify failed -> autosquash-resolve
+          - {else: true, pause: true}              # hard failure (exit 1) / verify bound exhausted -> human
 
       - name: autosquash-resolve
         file: agents/autosquash-resolve.md
         tier: high
+        max_loops: 6                               # defensive backstop; the script's 3-attempt bound aborts first
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
-
-      - name: autosquash-verify
-        quiet: true
-        command: ./scripts/autosquash-verify.sh
-        max_loops: 5                               # defensive backstop only; the script's own bound aborts first
         rules:
-          - {if: {exit: 0}, continue: true}                         # verified -> stamp-trailers
-          - {if: {exit: 2}, resume: autosquash-resolve, feedback: "The autosquash fold resolution did not verify. Address the failure below and re-resolve so the fold preserves the pre-autosquash tree:"}
-          - {else: true, pause: true}                               # exit 1: script already restored pristine
+          - {else: true, goto: autosquash}         # re-run autosquash.sh -> verify-mode (before-tree sentinel present)
 
       - name: stamp-trailers
         quiet: true

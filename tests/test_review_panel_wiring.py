@@ -39,7 +39,7 @@ def test_implement_phase_is_the_per_plan_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
         "task-lead", "commit-check", "run-tests",
-        "autosquash", "autosquash-resolve", "autosquash-verify", "stamp-trailers",
+        "autosquash", "autosquash-resolve", "stamp-trailers",
         "review", "deferred-sweep", "sweep-tests",
         "fast-path-cycle-gate", "plan-cycle-check",
     ]

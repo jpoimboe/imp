@@ -15,11 +15,11 @@ def test_gate_steps_in_span_review_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [20..25] = integration-gate, integration-pass, integration-sweep,
-    # integration-sweep-tests, stamp-sweep-trailers, integrate-merge. Gates:
+    # Span [20..25] = integration-pass, integration-sweep, integration-sweep-tests,
+    # stamp-sweep-trailers, integrate-merge, integrator. Gates:
     # integration-pass (goto task-lead backward), integration-sweep-tests (resume),
     # stamp-sweep-trailers (pause), integrate-merge (pause). integration-gate
-    # (forward goto) and integration-sweep (continue-only) are NOT gates.
+    # (forward goto, now at 19) and integration-sweep (continue-only) are NOT gates.
     assert gate_steps_in_span(wf, 20, 25) == (
         "integration-pass", "integration-sweep-tests",
         "stamp-sweep-trailers", "integrate-merge",
@@ -29,10 +29,10 @@ def test_gate_steps_in_span_review_phase() -> None:
 def test_gate_steps_in_span_detects_pause_only_gates() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
-    # autosquash(11)/stamp-trailers(14) gate via `pause: true` (no goto);
-    # the autosquash-resolve/verify steps (12,13) now sit between them.
+    # autosquash(11)/stamp-trailers(13) gate via `pause: true` (no goto);
+    # autosquash-resolve (12) sits between them (no separate verify step).
     assert gate_steps_in_span(_wf(), 11, 11) == ("autosquash",)
-    assert gate_steps_in_span(_wf(), 14, 14) == ("stamp-trailers",)
+    assert gate_steps_in_span(_wf(), 13, 13) == ("stamp-trailers",)
 
 
 def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:
@@ -66,7 +66,7 @@ def test_plan_rewind_backward_to_step() -> None:
 
     plan = plan_rewind(_wf(), _state("review"), "review")
     assert plan.to_step == "review"
-    assert plan.target_idx == 15
+    assert plan.target_idx == 14
     assert plan.from_step == "review"
 
 
@@ -98,7 +98,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # review (15) maxed; task-lead (8) upstream; final-review (31) downstream.
+    # review (14) maxed; task-lead (8) upstream; final-review (30) downstream.
     st = _state("review",
                 loop_counts={"task-lead": 2, "review": 6, "final-review": 1})
     log = InMemoryEventLog()
@@ -122,7 +122,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
 def test_plan_rewind_forward_no_gate_allowed() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # summarizer (29) -> final-review (31): span [29,30] = summarizer +
+    # summarizer (28) -> final-review (30): span [28,29] = summarizer +
     # final-review-gate, both non-gates -> a forward jump bypassing no gate.
     plan = plan_rewind(_wf(), _state("summarizer"), "final-review")
     assert plan.to_step == "final-review"

@@ -227,7 +227,6 @@ def test_implement_phase_stamps_trailers_after_autosquash() -> None:
     impl = next(p for p in wf.phases if p.name == "implement")
     names = [s.name for s in impl.steps]
     assert names.index("autosquash") < names.index("stamp-trailers"), names
-    assert names.index("autosquash-verify") < names.index("stamp-trailers"), names
     assert names.index("stamp-trailers") < names.index("review"), names
 
 

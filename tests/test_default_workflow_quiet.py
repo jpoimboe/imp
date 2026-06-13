@@ -10,7 +10,7 @@ _QUIET = {
     "spec-exit-gate", "fast-path-plan-gate", "fast-path-cycle-gate",
     # review/merge plumbing: mechanical git scripts + pure routing gates
     "autosquash", "stamp-trailers", "integration-gate", "stamp-sweep-trailers",
-    "final-review-gate", "base-fresh-check", "integrate-merge", "autosquash-verify",
+    "final-review-gate", "base-fresh-check", "integrate-merge",
 }
 
 
