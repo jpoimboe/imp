@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import queue
 import signal
@@ -13,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+
+_log = logging.getLogger("imp.daemon")
 
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.control import ControlPlane
@@ -108,7 +111,10 @@ async def _relay_replies(
         if result is None:
             return
         change_id, text = result
-        await control.reply(change_id, text)
+        try:
+            await control.reply(change_id, text)
+        except Exception:
+            _log.warning("reply failed for change %s", change_id, exc_info=True)
 
 
 async def _await_shutdown_signals(shutdown: anyio.Event) -> None:
