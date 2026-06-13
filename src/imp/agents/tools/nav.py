@@ -1,10 +1,11 @@
 """glob, grep (spec §6.6).
 
-Read-only navigation over worktree-RELATIVE paths. Every tool routes through
-ToolContext.resolve_path_strict for the normalize-then-contain escape guard
-(spec H1): a `..`-escape or absolute-outside-root raises PermissionDenied
-(unlike the fs ops, which allow out-of-worktree paths bounded by the sandbox).
-Reported paths are relative to the worktree root.
+Read-only navigation. Both glob and grep route their search root through
+ToolContext.authorize_fs(("read",), path) — the same gate the fs ops use —
+so they reach exactly the paths read_file/write_file/edit_file can: in-worktree
+paths via fs_permissions, out-of-worktree paths bounded by the sandbox mirror.
+In-worktree matches are reported relative to the worktree root; out-of-worktree
+matches as absolute paths.
 """
 
 from __future__ import annotations
@@ -63,31 +64,35 @@ def _iter_files(target: Path) -> Iterator[Path]:
     name="glob",
     description=(
         "List file paths matching a relative glob (e.g. **/*.py or "
-        "src/**/*.ts). Skips .imp/ and .git/. Uses pathlib glob semantics — "
-        "a bare *.py matches top-level files only; this differs from grep's "
-        "`glob` parameter, where * and ** cross /."
+        "src/**/*.ts) under an optional `path` base (default '.'). Absolute "
+        "and out-of-worktree bases are accepted, bounded by the sandbox like "
+        "bash; in-worktree matches are reported relative to the root, external "
+        "matches as absolute paths. Skips .imp/ and .git/. Uses pathlib glob "
+        "semantics — a bare *.py matches top-level files only; this differs "
+        "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
+        "stays relative; search elsewhere via `path`, not an absolute pattern."
     ),
 )
-async def glob(ctx: ToolContext, pattern: str) -> str:
-    ctx.check_fs_permission("read", pattern)
+async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
+    base = ctx.authorize_fs(("read",), path)
     root = ctx.project_root.resolve()
-    # Reject patterns with `..` or an absolute prefix before the glob runs.
-    # Wildcards (`*`/`**`) have no `..` component, so clean relative patterns pass.
-    # Per-result p.resolve().is_relative_to(root) below is the second line of
-    # defense for any result glob() produces via symlinks or dotdot traversal.
-    ctx.resolve_path_strict(pattern)
+    inside = base.is_relative_to(root)
+    policy = ctx.sandbox_policy
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
 
     out: list[str] = []
-    for p in sorted(root.glob(pattern)):
+    for p in sorted(base.glob(pattern)):
         await tool_checkpoint(coordinator, deadline)
-        if not p.resolve().is_relative_to(root):
-            continue                            # belt-and-suspenders vs symlinks
-        rel_parts = p.relative_to(root).parts
-        if any(part in EXCLUDED_DIRS for part in rel_parts):
+        resolved = p.resolve()
+        if inside:
+            if not resolved.is_relative_to(root):
+                continue                        # belt-and-suspenders vs symlinks
+        elif policy is not None and policy.active and not policy.allows_read(resolved):
+            continue                            # masked secret behind a symlink/in-tree
+        if any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts):
             continue
-        out.append(p.relative_to(root).as_posix())
+        out.append(p.relative_to(root).as_posix() if inside else p.as_posix())
     return "\n".join(out) if out else "(no matches)"
 
 

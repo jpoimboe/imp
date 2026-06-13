@@ -126,6 +126,14 @@ def test_glob_excludes_imp_and_git(tmp_path: Path) -> None:
     assert ".git" not in out
 
 
+def test_glob_in_worktree_subpath_is_root_relative(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "foo.py").write_text("")
+    ctx = _ctx(tmp_path)
+    out = _glob(ctx, pattern="*.py", path="src")
+    assert out == "src/foo.py"                 # relative to root, not just "foo.py"
+
+
 def test_glob_aborts_promptly_on_pause(tmp_path: Path) -> None:
     for i in range(50):
         (tmp_path / f"f{i}.txt").write_text("x")
@@ -138,6 +146,29 @@ def test_glob_aborts_promptly_on_pause(tmp_path: Path) -> None:
 # --- Containment / escape-guard tests (Task A2, spec H1) ---
 
 from imp.agents.permissions import PermissionDenied  # noqa: E402
+from imp.engine.sandbox import SandboxPolicy  # noqa: E402
+
+
+def _policy(
+    worktree: Path,
+    *,
+    secret_dirs: tuple[str, ...] = (),
+    secret_files: tuple[str, ...] = (),
+) -> SandboxPolicy:
+    return SandboxPolicy(
+        active=True,
+        worktree=str(worktree),
+        git_common_dir=str(worktree / ".git"),
+        git_ro_remask=(),
+        writable_caches=(),
+        extra_readable=(),
+        extra_writable=(),
+        secret_dirs=secret_dirs,
+        secret_files=secret_files,
+        setenv=(),
+        network=True,
+        note="",
+    )
 
 
 def test_grep_rejects_parent_escape(tmp_path: Path) -> None:
@@ -154,18 +185,54 @@ def test_grep_rejects_absolute_project_escape(tmp_path: Path) -> None:
                   {"pattern": "root", "path": "/project/../../etc"})
 
 
-def test_glob_rejects_absolute_pattern(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        anyio.run(get_registry()["glob"].async_invoke, ctx,
-                  {"pattern": "/project/**/*.py"})
+def test_glob_default_path_is_relative(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("")
+    out = _glob(_ctx(tmp_path), pattern="*.py", path=".")
+    assert out == "a.py"                       # byte-for-byte: relative, no prefix
 
 
-def test_glob_rejects_dotdot_pattern(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
+def test_glob_external_path_absolute_output(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    (ext / "a.py").write_text("")
+    ctx = _ctx(wt)                             # no sandbox_policy → external accepted
+    out = _glob(ctx, pattern="*.py", path=str(ext))
+    assert out == (ext / "a.py").as_posix()    # absolute-form output for external base
+
+
+def test_glob_external_masked_base_denied_when_policy_active(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    secret = tmp_path / "secret"
+    secret.mkdir()
+    (secret / "id_rsa").write_text("")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
     with pytest.raises(PermissionDenied):
-        anyio.run(get_registry()["glob"].async_invoke, ctx,
-                  {"pattern": "../../etc/**"})
+        _glob(ctx, pattern="*", path=str(secret))
+
+
+def test_glob_external_per_result_symlink_into_masked_dir_dropped(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    ext = tmp_path / "ext"; ext.mkdir()
+    secret = tmp_path / "secret"; secret.mkdir()
+    (secret / "id_rsa").write_text("")
+    # symlink inside the allowed ext/ base pointing into the masked secret/ dir
+    (ext / "link").symlink_to(secret / "id_rsa")
+    (ext / "ok.txt").write_text("")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
+    out = _glob(ctx, pattern="*", path=str(ext))
+    assert "ok.txt" in out
+    assert "link" not in out                   # symlink into masked dir must be dropped
+
+
+def test_glob_description_documents_path_and_sandbox() -> None:
+    desc = get_registry()["glob"].description
+    assert "path" in desc
+    assert "bounded by the sandbox like bash" in desc
 
 
 def test_grep_reports_relative_paths(tmp_path: Path) -> None:
