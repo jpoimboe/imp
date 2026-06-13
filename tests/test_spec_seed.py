@@ -6,7 +6,6 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import main as cli_main
 from imp.engine.executor import RunResult
 from tests.conftest import _seed_control
@@ -82,31 +81,6 @@ def test_resolve_positional_file_and_message_mutually_exclusive(
     with pytest.raises(cli_main.SeedError):
         cli_main.resolve_spec_seed(
             _new_args(title=str(draft), message="hi"))
-
-
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.mark.anyio
-async def test_seed_reply_first_then_fallback() -> None:
-    async def _fallback() -> str:
-        return "interactive line"
-
-    reply = cli_main.make_seed_reply_fn("the seed", _fallback)
-    assert await reply() == "the seed"          # first solicit → seed
-    assert await reply() == "interactive line"  # later solicit → fallback
-    assert await reply() == "interactive line"  # still fallback on third call
-
-
-@pytest.mark.anyio
-async def test_seed_reply_then_headless_pause() -> None:
-    reply = cli_main.make_seed_reply_fn(
-        "the seed", cli_main.make_message_reply_fn(None))
-    assert await reply() == "the seed"          # first solicit → seed
-    with pytest.raises(AwaitingUserInput):       # headless fallback → pause
-        await reply()
 
 
 def test_new_positional_file_delivers_seed(
@@ -221,8 +195,9 @@ def test_new_tui_delivers_seed(
 
     captured: dict[str, object] = {}
 
-    async def _fake_tui(change: object, *, args: object, seed: str | None = None) -> int:
-        captured["seed"] = seed
+    async def _fake_tui(change: object, *, args: object,
+                        seed_opening: str | None = None) -> int:
+        captured["seed_opening"] = seed_opening
         return 0
 
     monkeypatch.setattr(cli_main, "_run_tui_session", _fake_tui)
@@ -232,11 +207,10 @@ def test_new_tui_delivers_seed(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    # The seed is delivered to the TUI session, not dropped with a warning.
-    seed_text = captured["seed"]
-    assert isinstance(seed_text, str)
-    assert seed_text.startswith("Implement this spec")
-    assert "Goal: x" in seed_text
+    seed = captured["seed_opening"]
+    assert isinstance(seed, str)
+    assert seed.startswith("Implement this spec")
+    assert "Goal: x" in seed
     assert "--tui does not deliver" not in capsys.readouterr().err
 
 

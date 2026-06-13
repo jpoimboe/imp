@@ -183,21 +183,6 @@ def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
     return _reply
 
 
-def make_seed_reply_fn(
-    seed: str, fallback: Callable[[], Awaitable[str]],
-) -> Callable[[], Awaitable[str]]:
-    delivered = False
-
-    async def _reply(*_a: object, **_k: object) -> str:
-        nonlocal delivered
-        if not delivered:
-            delivered = True
-            return seed
-        return await fallback()
-
-    return _reply
-
-
 def _maybe_build_channel(change: Change) -> RemoteChannel | None:
     """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
     behaves exactly as today). Title is captured at run start. A bad config is
@@ -797,7 +782,7 @@ def _benign_interrupt_loop_handler(coord: Any) -> Iterator[None]:
 
 
 async def _run_tui_session(
-        change: Change, *, args: argparse.Namespace, seed: str | None = None) -> int:
+        change: Change, *, args: argparse.Namespace, seed_opening: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
     # No EscKeyReader — TuiApp owns the tty exclusively.
@@ -807,11 +792,6 @@ async def _run_tui_session(
 
     async def _solicit(*_a: object, **_k: object) -> str:
         return await app.solicit(change)
-
-    # A spec seed (imp new <draft>) is delivered as the first solicit, exactly as
-    # in the non-TUI path; later solicits fall back to the interactive TuiApp.
-    _chat: Callable[..., Awaitable[str]] = (
-        make_seed_reply_fn(seed, _solicit) if seed is not None else _solicit)
 
     holder: dict[str, Any] = {}
     load_err: Exception | None = None
@@ -828,8 +808,9 @@ async def _run_tui_session(
                 async def _run() -> None:
                     try:
                         holder["result"] = await run_change(
-                            change, on_event=run_on_event, user_chat_input_fn=_chat,
-                            coordinator=coord, non_interactive=False)
+                            change, on_event=run_on_event, user_chat_input_fn=_solicit,
+                            coordinator=coord, non_interactive=False,
+                            seed_opening=seed_opening)
                     finally:
                         app.exit()
 
@@ -898,7 +879,8 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             non_interactive = bool(getattr(args, "non_interactive", False))
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
-                return await _run_tui_session(change, args=args, seed=seed.seed_text)
+                return await _run_tui_session(
+                    change, args=args, seed_opening=seed.seed_text)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
