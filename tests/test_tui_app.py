@@ -45,13 +45,23 @@ def test_status_line_is_hint_only_when_idle() -> None:
 
 
 def test_status_line_includes_activity_and_hint_during_a_call() -> None:
-    app = _app()
+    app = TuiApp(coord=_FakeCoord(), color=False, width=120)
     app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
     app.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
                     input={"command": "ls"}))
     line = app.status_line()
-    assert "bash ls" in line
-    assert HINT in line
+    assert "bash ls" in line          # short activity fits at width 120; shown in full
+    assert line.endswith(HINT)        # hint occupies the reserved tail
+
+
+def test_long_activity_elides_to_preserve_hint_slot() -> None:
+    app = TuiApp(coord=_FakeCoord(), color=False, width=80)
+    app.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
+    app.on_event(ev("t1", "tool_call", agent_id="a", id="c1", name="bash",
+                    input={"command": "x" * 120}))
+    line = app.status_line()
+    assert line.endswith(HINT)        # hint occupies the reserved tail, in full
+    assert len(line) <= 80            # color off → visible length == len; nothing overflows
 
 
 def test_scroll_page_up_disengages_follow() -> None:

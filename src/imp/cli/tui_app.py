@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
 from typing import Any, cast
 
@@ -11,6 +12,18 @@ from imp.cli.tui_driver import TuiDriver
 from imp.cli.tui_viewport import ViewportState
 
 HINT = "PgUp/PgDn scroll · End follow · ^O verbosity · ESC/^C pause"
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_STATUS_SEP = "   "
+
+
+def _elide_to_width(text: str, budget: int) -> str:
+    if budget <= 0:
+        return ""
+    visible = _ANSI_RE.sub("", text)
+    if len(visible) <= budget:
+        return text
+    return visible[:budget - 1] + "…"
 
 
 class TuiApp:
@@ -52,7 +65,10 @@ class TuiApp:
 
     def status_line(self) -> str:
         activity = self._driver.status_text(self._frame, self._elapsed())
-        return f"{activity}   {HINT}" if activity else HINT
+        if not activity:
+            return HINT
+        budget = self._width - len(HINT) - len(_STATUS_SEP)
+        return f"{_elide_to_width(activity, budget)}{_STATUS_SEP}{HINT}"
 
     def _invalidate(self) -> None:
         self._narrative_text = None
