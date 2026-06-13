@@ -362,6 +362,16 @@ class NarrativeBuilder:
         # event id (empty block), in-process by block id.
         self._open_sub_by_block: dict[str, SubagentFold] = {}
         self._open_sub_by_event: dict[str, SubagentFold] = {}
+        # Folds closed PROVISIONALLY by a salvage path (resume-close fallback or
+        # pause/resume finalize) before their canonical task tool_result arrived.
+        # Keyed the same two ways as the open registry so a late stamped result can
+        # recognise its already-closed fold (benign race) instead of warning
+        # "matched no open fold". The late result is then the AUTHORITATIVE close:
+        # it upgrades the outcome-free salvage close. Only salvage paths populate
+        # these — a normal close never does, so a true duplicate canonical result
+        # (which the providers suppress) still surfaces as a malformed-log warning.
+        self._closed_sub_by_block: dict[str, SubagentFold] = {}
+        self._closed_sub_by_event: dict[str, SubagentFold] = {}
         self._subagent_failures: dict[tuple[str | None, str], int] = {}
         # True for the window between a workflow_resumed event and the first
         # re-emitted step_started, so resume re-entry can reuse nodes instead of
@@ -441,7 +451,17 @@ class NarrativeBuilder:
         for fold in to_close:
             self._open_sub_by_block.pop(fold.block_id, None)
             self._open_sub_by_event.pop(fold.event_id, None)
+            self._remember_salvage_closed(fold)
             _close_subagent_fold(fold, {}, ts)
+
+    def _remember_salvage_closed(self, fold: SubagentFold) -> None:
+        """Record a provisionally-closed fold so its late canonical tool_result is
+        recognised (benign race) rather than warned on. Mirror the open registry's
+        keying: by block id only when non-empty (codex mints empty block ids and
+        keys by event id; "" must not collide)."""
+        if fold.block_id:
+            self._closed_sub_by_block[fold.block_id] = fold
+        self._closed_sub_by_event[fold.event_id] = fold
 
     def add(self, event: Any) -> None:
         if not isinstance(event, dict) or "type" not in event:
@@ -774,6 +794,9 @@ def _h_workflow_resumed(self: NarrativeBuilder, event: dict[str, Any], p: dict[s
         # keep accumulating onto an interrupted fold, the very thing this
         # finalize exists to stop. Settled pre-pause folds keep their entries.
         self._sub_by_agent_id.pop(f"sub:{fold.event_id}", None)
+        # Remember it: a task whose dispatch outlived the pause may still log its
+        # canonical result after resume; recognise it then instead of warning.
+        self._remember_salvage_closed(fold)
     self._open_sub_by_block.clear()
     self._open_sub_by_event.clear()
     self._resuming = True                # open the re-entry window
@@ -1108,6 +1131,36 @@ def _take_subagent_fold(
     return (None, "unstamped") if id_ns is None else (None, "stamped_miss")
 
 
+def _take_closed_fold(
+    self: NarrativeBuilder, rid: str, id_ns: Any,
+) -> SubagentFold | None:
+    """Probe the SALVAGE-closed registry for rid in the id_ns namespace; remove it
+    so a late canonical result is applied at most once. Stamped namespaces only —
+    an unstamped legacy result never reaches this path (it has its own probe)."""
+    if id_ns == "event":
+        fold = self._closed_sub_by_event.get(rid)
+    elif id_ns == "block":
+        fold = self._closed_sub_by_block.get(rid)
+    else:
+        return None
+    if fold is not None:
+        self._closed_sub_by_block.pop(fold.block_id, None)
+        self._closed_sub_by_event.pop(fold.event_id, None)
+    return fold
+
+
+def _apply_close_outcome(
+    self: NarrativeBuilder, fold: SubagentFold, p: dict[str, Any], ts: str | None,
+) -> None:
+    """Stamp a fold's outcome from a task tool_result and count a failed/terminal
+    subagent for the retry-annotation tally. Shared by the in-time close and the
+    late authoritative close of a provisionally salvage-closed fold."""
+    _close_subagent_fold(fold, p, ts)
+    if fold.is_error or fold.terminal_state in ("stalled", "interrupted"):
+        key = (fold.opener_agent_id, fold.subagent_name)
+        self._subagent_failures[key] = self._subagent_failures.get(key, 0) + 1
+
+
 def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     rid = str(p.get("id", ""))
     ts = event.get("timestamp")
@@ -1120,12 +1173,17 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
     # an arbitrary fold close; unstamped legacy results take the ordered probe.
     fold, status = _take_subagent_fold(self, rid, p.get("id_ns"))
     if fold is not None:
-        _close_subagent_fold(fold, p, ts)
-        if fold.is_error or fold.terminal_state in ("stalled", "interrupted"):
-            key = (fold.opener_agent_id, fold.subagent_name)
-            self._subagent_failures[key] = self._subagent_failures.get(key, 0) + 1
+        _apply_close_outcome(self, fold, p, ts)
         return
     if status == "stamped_miss":
+        # Before warning: is this the AUTHORITATIVE result for a fold a salvage
+        # path already closed provisionally (lost-result fallback / pause-resume
+        # finalize)? If so it's a benign race, not a malformed log — apply the
+        # real outcome to the already-closed fold and stay quiet.
+        late = _take_closed_fold(self, rid, p.get("id_ns"))
+        if late is not None:
+            _apply_close_outcome(self, late, p, ts)
+            return
         self._append(ErrorNode(
             message=f"task result {rid!r} (id_ns={p.get('id_ns')!r}) matched no open fold",
             is_warning=True))
