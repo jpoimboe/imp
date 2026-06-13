@@ -5,6 +5,7 @@ import json
 import os
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import anyio
 import pytest
@@ -13,6 +14,7 @@ from imp.agents.runner import AgentInvocation, AgentRunner, Event
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_change
+from imp.engine.state import State
 from tests.conftest import _git
 
 
@@ -162,6 +164,96 @@ def test_seed_messages_unnamed_has_no_name_block(tmp_path: Path) -> None:
     blocks = msgs[0].content
     assert len(blocks) == 1
     assert blocks[0].text == "<imp:begin/>"       # exactly the begin token, nothing else
+
+
+class _RecordingRunner:
+    """Fake runner: records the invocation's opening (initial_messages) keyed by
+    agent_id, then completes without ever calling wait_for_user."""
+
+    def __init__(self, sink: dict[str, Any]) -> None:
+        self._sink = sink
+
+    async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+        self._sink[invocation.agent_id] = invocation.initial_messages
+        yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+class _RecordingProvider:
+    name = "anthropic"
+
+    def __init__(self, sink: dict[str, Any], model: str = "m") -> None:
+        self.model = model
+        self._sink = sink
+
+    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+        return _RecordingRunner(self._sink)
+
+
+@pytest.mark.anyio
+async def test_seed_opening_first_step_only(tmp_path: Path, provider_registry) -> None:
+    sink: dict[str, Any] = {}
+    provider_registry("anthropic", lambda: True,
+                      lambda model: _RecordingProvider(sink, model))
+    _seed_two_step_control(tmp_path)
+    ch = Change.create(tmp_path, title="",
+                       change_id="2026-06-13-aaa111", base_branch="main")
+
+    events: list[dict[str, Any]] = []
+    result = await run_change(
+        ch, on_event=events.append,
+        seed_opening="Implement this spec X", non_interactive=True)
+
+    assert result is RunResult.COMPLETED
+    assert sink["step:p/s1"][0].content[0].text == "Implement this spec X"
+    assert sink["step:p/s2"][0].content[0].text == "<imp:begin/>"
+    assert not any(e["type"] == "awaiting_user_input" for e in events)
+
+
+@pytest.mark.anyio
+async def test_run_change_none_seed_opening_uses_begin_token(
+    tmp_path: Path, provider_registry
+) -> None:
+    sink: dict[str, Any] = {}
+    provider_registry("anthropic", lambda: True,
+                      lambda model: _RecordingProvider(sink, model))
+    _seed_two_step_control(tmp_path)
+    ch = Change.create(tmp_path, title="",
+                       change_id="2026-06-13-bbb222", base_branch="main")
+
+    result = await run_change(
+        ch, on_event=lambda _e: None, seed_opening=None, non_interactive=True)
+
+    assert result is RunResult.COMPLETED
+    assert sink["step:p/s1"][0].content[0].text == "<imp:begin/>"
+
+
+@pytest.mark.anyio
+async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
+    tmp_path: Path, provider_registry
+) -> None:
+    sink: dict[str, Any] = {}
+    provider_registry("anthropic", lambda: True,
+                      lambda model: _RecordingProvider(sink, model))
+    _seed_two_step_control(tmp_path)
+    ch = Change.create(tmp_path, title="",
+                       change_id="2026-06-13-ccc333", base_branch="main")
+
+    state = State.load(ch.state_dir)
+    state.resume_pending = state.step  # simulate a paused-then-resumed first step
+    state.save(ch.state_dir)
+
+    result = await run_change(
+        ch, on_event=lambda _e: None,
+        seed_opening="Implement this spec SHOULD NOT APPEAR",
+        non_interactive=True)
+
+    assert result is RunResult.COMPLETED
+    # On a resumed step the executor passes initial_messages=() — no seed injected
+    assert sink["step:p/s1"] == ()
+    assert sink["step:p/s2"][0].content[0].text == "Implement this spec SHOULD NOT APPEAR"
 
 
 @pytest.fixture

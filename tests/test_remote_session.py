@@ -152,3 +152,65 @@ async def test_channel_receives_events_during_run(tmp_path: Path) -> None:
     assert log.exists() and log.read_text().strip()
     types = {json.loads(ln)["type"] for ln in log.read_text().splitlines()}
     assert "step_started" in types     # run events were framed to the driver
+
+
+@pytest.mark.anyio
+async def test_seed_opening_with_channel_does_not_park(tmp_path: Path) -> None:
+    """Seeded headless run WITH a driver configured: the seed is delivered as the
+    opening message, the agent never solicits, the run completes, and no
+    awaiting_user_input event is emitted (no park) — spec AC."""
+    change = _seed_single_agent(tmp_path)
+    seen: dict[str, object] = {}
+    events: list[dict] = []
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            seen["opening"] = inv.initial_messages[0].content[0].text
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None: ...
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    _register_fake(lambda _m: _P())
+
+    class _RecordingDriver:
+        def on_event(self, e: dict) -> None:
+            events.append(e)
+        def finish(self) -> None: ...
+
+    coord = InterruptCoordinator()
+    coord._esc_reader = object()
+    channel = RemoteChannel(
+        command=tuple(fake_driver_command(tmp_path, reply="unused phone reply")),
+        events=("all",), startup_timeout=2.0, reply_timeout=None,
+        id=change.id, title=change.title)
+
+    async def _never_local() -> str:
+        await anyio.sleep_forever()
+        raise AssertionError("unreachable")
+
+    rc_holder: dict[str, int] = {}
+
+    async def _runner() -> None:
+        async with anyio.create_task_group() as tg:
+            rc_holder["rc"] = await _run_change_session(
+                change, coord=coord, driver=_RecordingDriver(),
+                status=_StubStatus(), esc_reader=None,
+                reply_input_fn=_never_local, non_interactive=True, tg=tg,
+                channel=channel, seed_opening="Implement this spec SEEDED")
+
+    with anyio.fail_after(20):
+        await _runner()
+
+    assert rc_holder["rc"] == 0
+    # _seed_single_agent builds a NAMED change (slug "c"), so _seed_messages
+    # appends "\n\nThis Change is named `c`." after the seed — assert the seed is
+    # the opening's leading text, not exact equality.
+    assert seen["opening"].startswith("Implement this spec SEEDED")  # seed leads
+    assert not any(e["type"] == "awaiting_user_input" for e in events)  # no park
+    assert State.load(change.state_dir).status == "completed"

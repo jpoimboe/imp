@@ -6,7 +6,6 @@ from pathlib import Path
 import anyio
 import pytest
 
-from imp.agents.tools.wait_for_user import AwaitingUserInput
 from imp.cli import main as cli_main
 from imp.engine.executor import RunResult
 from tests.conftest import _seed_control
@@ -84,31 +83,6 @@ def test_resolve_positional_file_and_message_mutually_exclusive(
             _new_args(title=str(draft), message="hi"))
 
 
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.mark.anyio
-async def test_seed_reply_first_then_fallback() -> None:
-    async def _fallback() -> str:
-        return "interactive line"
-
-    reply = cli_main.make_seed_reply_fn("the seed", _fallback)
-    assert await reply() == "the seed"          # first solicit → seed
-    assert await reply() == "interactive line"  # later solicit → fallback
-    assert await reply() == "interactive line"  # still fallback on third call
-
-
-@pytest.mark.anyio
-async def test_seed_reply_then_headless_pause() -> None:
-    reply = cli_main.make_seed_reply_fn(
-        "the seed", cli_main.make_message_reply_fn(None))
-    assert await reply() == "the seed"          # first solicit → seed
-    with pytest.raises(AwaitingUserInput):       # headless fallback → pause
-        await reply()
-
-
 def test_new_positional_file_delivers_seed(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_control(tmp_path)
@@ -120,9 +94,9 @@ def test_new_positional_file_delivers_seed(
 
     async def _fake_run(change: object, *, on_event: object,
                         user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object) -> RunResult:
+                        non_interactive: object, seed_opening: object) -> RunResult:
         captured["change"] = change
-        captured["reply"] = await user_chat_input_fn(None)  # type: ignore[operator]
+        captured["seed_opening"] = seed_opening
         return RunResult.COMPLETED
 
     monkeypatch.setattr(cli_main, "run_change", _fake_run)
@@ -131,11 +105,11 @@ def test_new_positional_file_delivers_seed(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    reply = captured["reply"]
-    assert isinstance(reply, str)
-    assert reply.startswith("Implement this spec")
-    assert str(draft) in reply
-    assert "# My draft" in reply
+    seed = captured["seed_opening"]
+    assert isinstance(seed, str)
+    assert seed.startswith("Implement this spec")
+    assert str(draft) in seed
+    assert "# My draft" in seed
     assert captured["change"].title == ""  # type: ignore[union-attr]
 
 
@@ -150,9 +124,9 @@ def test_new_spec_file_with_name_keeps_title(
 
     async def _fake_run(change: object, *, on_event: object,
                         user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object) -> RunResult:
+                        non_interactive: object, seed_opening: object) -> RunResult:
         captured["change"] = change
-        captured["reply"] = await user_chat_input_fn(None)  # type: ignore[operator]
+        captured["seed_opening"] = seed_opening
         return RunResult.COMPLETED
 
     monkeypatch.setattr(cli_main, "run_change", _fake_run)
@@ -162,7 +136,7 @@ def test_new_spec_file_with_name_keeps_title(
 
     assert rc == 0
     assert captured["change"].title == "my-name"  # type: ignore[union-attr]
-    assert "Goal: ship it" in captured["reply"]  # type: ignore[operator]
+    assert "Goal: ship it" in captured["seed_opening"]  # type: ignore[operator]
 
 
 def test_new_missing_spec_file_rc2_no_change(
@@ -221,8 +195,9 @@ def test_new_tui_delivers_seed(
 
     captured: dict[str, object] = {}
 
-    async def _fake_tui(change: object, *, args: object, seed: str | None = None) -> int:
-        captured["seed"] = seed
+    async def _fake_tui(change: object, *, args: object,
+                        seed_opening: str | None = None) -> int:
+        captured["seed_opening"] = seed_opening
         return 0
 
     monkeypatch.setattr(cli_main, "_run_tui_session", _fake_tui)
@@ -232,53 +207,12 @@ def test_new_tui_delivers_seed(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    # The seed is delivered to the TUI session, not dropped with a warning.
-    seed_text = captured["seed"]
-    assert isinstance(seed_text, str)
-    assert seed_text.startswith("Implement this spec")
-    assert "Goal: x" in seed_text
+    seed = captured["seed_opening"]
+    assert isinstance(seed, str)
+    assert seed.startswith("Implement this spec")
+    assert "Goal: x" in seed
     assert "--tui does not deliver" not in capsys.readouterr().err
 
-
-@pytest.mark.anyio
-async def test_seed_gate_first_then_per_call_fallback() -> None:
-    calls: list[str] = []
-
-    async def _f1() -> str:
-        calls.append("f1")
-        return "first-fallback"
-
-    async def _f2() -> str:
-        calls.append("f2")
-        return "second-fallback"
-
-    gate = cli_main.make_seed_gate("the seed")
-    assert await gate(_f1) == "the seed"           # first solicit → seed
-    assert calls == []                             # fallback never consulted
-    assert await gate(_f2) == "second-fallback"    # later solicit → per-call fallback
-    assert await gate(_f1) == "first-fallback"     # still defers, to the new per-call fn
-    assert calls == ["f2", "f1"]                    # exactly the fallbacks passed per call
-
-
-@pytest.mark.anyio
-async def test_seed_gate_over_attended_race_is_deterministic() -> None:
-    from imp.cli.remote_channel import effective_reply_fn
-
-    class _FakeChannel:
-        reply_timeout = None
-
-        async def next_reply(self, *, timeout: float | None = None) -> str:
-            return "from-driver"
-
-    async def _local_never() -> str:
-        await anyio.sleep_forever()
-        raise AssertionError("unreachable")
-
-    raced = effective_reply_fn(_local_never, _FakeChannel(), non_interactive=False)
-    gate = cli_main.make_seed_gate("the seed")
-    with anyio.fail_after(5):
-        assert await gate(raced) == "the seed"      # seed without winning a race
-        assert await gate(raced) == "from-driver"   # later solicit → race resolves
 
 
 def test_new_non_interactive_channel_delivers_seed(
@@ -313,9 +247,9 @@ def test_new_non_interactive_channel_delivers_seed(
 
     async def _fake_run(change: object, *, on_event: object,
                         user_chat_input_fn: object, coordinator: object,
-                        non_interactive: object) -> RunResult:
-        captured["first"] = await user_chat_input_fn(None)   # type: ignore[operator]
-        captured["second"] = await user_chat_input_fn(None)  # type: ignore[operator]
+                        non_interactive: object, seed_opening: object) -> RunResult:
+        captured["seed_opening"] = seed_opening
+        captured["solicit"] = await user_chat_input_fn(None)  # type: ignore[operator]
         return RunResult.COMPLETED
 
     monkeypatch.setattr(cli_main, "run_change", _fake_run)
@@ -324,12 +258,22 @@ def test_new_non_interactive_channel_delivers_seed(
     rc = anyio.run(cli_main._async_cmd_new, args)
 
     assert rc == 0
-    first = captured["first"]
-    assert isinstance(first, str)
-    assert first.startswith("Implement this spec")  # seed delivered on first solicit
-    assert str(draft) in first
-    assert captured["second"] == "from-phone"        # channel reply AFTER the seed
-    assert channel.stopped is True                    # channel torn down
+    seed = captured["seed_opening"]
+    assert isinstance(seed, str)
+    assert seed.startswith("Implement this spec")  # seed delivered as opening message
+    assert str(draft) in seed
+    assert captured["solicit"] == "from-phone"      # reply channel free for real solicits
+    assert channel.stopped is True                   # channel torn down
+
+
+def test_spec_writer_opening_conditioned_on_message() -> None:
+    root = Path(__file__).resolve().parent.parent
+    prompt = (root / "src" / "imp" / "assets" / "workflows" / "default"
+              / "agents" / "spec-writer.md").read_text()
+    # Opening behavior must branch on the opening message: the unseeded branch
+    # keys on the begin token, the seeded branch on the seed marker. The begin
+    # token is absent from the pre-rework prompt, so this fails until reworked.
+    assert "<imp:begin/>" in prompt
 
 
 def test_spec_writer_prompt_has_seed_branch() -> None:
