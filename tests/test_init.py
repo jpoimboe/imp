@@ -159,14 +159,36 @@ def test_empty_picker_result_is_rejected(tmp_path: Path) -> None:
         )
 
 
-def test_init_scaffolds_commented_verify_command(tmp_path: Path) -> None:
+def test_init_no_verify_line_when_nothing_detected(tmp_path: Path) -> None:
+    # A bare project (no Makefile/package.json/etc.) → no detection, no prompt,
+    # no verify_command line (stays undecided; the `imp new` backstop covers it).
     run_init(
-        tmp_path, input_fn=lambda _p: "",
-        output_fn=lambda _m: None,
+        tmp_path, input_fn=_inputs(), output_fn=lambda _m: None,
         picker_fn=lambda _avail: ["anthropic"],
     )
     text = (tmp_path / "imp" / "project.yaml").read_text()
-    assert "# verify_command:" in text
+    assert "verify_command" not in text
+    assert "lint_command" not in text
+
+
+def test_init_writes_verify_command_on_yes(tmp_path: Path) -> None:
+    run_init(
+        tmp_path, input_fn=_inputs("y"), output_fn=lambda _m: None,
+        picker_fn=_picks("anthropic"),
+        detect_verify_fn=lambda _root: "make check",
+    )
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["verify_command"] == "make check"
+
+
+def test_init_writes_optout_on_skip(tmp_path: Path) -> None:
+    run_init(
+        tmp_path, input_fn=_inputs("skip"), output_fn=lambda _m: None,
+        picker_fn=_picks("anthropic"),
+        detect_verify_fn=lambda _root: "make check",
+    )
+    data = yaml.safe_load((tmp_path / "imp" / "project.yaml").read_text())
+    assert data["verify_command"] == ""
 
 
 def test_init_surfaces_bwrap_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

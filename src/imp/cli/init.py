@@ -23,6 +23,11 @@ from typing import Any
 import yaml
 
 from imp.assets import default_workflow_dir
+from imp.cli.verify_detect import (
+    detect_verify_command,
+    format_verify_command_yaml,
+    resolve_verify_choice,
+)
 from imp.engine.sandbox import sandbox_available
 from imp.remote.drivers import REGISTRY
 
@@ -194,6 +199,7 @@ def run_init(
     output_fn: Callable[[str], None],
     picker_fn: Callable[[list[str]], list[str]] | None = None,
     detect_theme_fn: Callable[[], str] | None = None,
+    detect_verify_fn: Callable[[Path], str | None] | None = None,
 ) -> None:
     from imp.providers.effective import user_config_path
 
@@ -246,12 +252,17 @@ def run_init(
         shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
         body = yaml.safe_dump(
             _build_project_config(), sort_keys=False, default_flow_style=False)
-        lint_hint = (
-            "\n# Optional combined verify gate: a command the implementer runs before each\n"
-            "# commit (tests + lint + typecheck). Absent => no verify gate.\n"
-            '# verify_command: "make check"\n'
-        )
-        project_file.write_text(body + lint_hint)
+        verify_detect = detect_verify_fn or detect_verify_command
+        suggested = verify_detect(project_root)
+        verify_block = ""
+        if suggested is not None:
+            chosen = resolve_verify_choice(suggested, input_fn, output_fn)
+            verify_block = (
+                "\n# Verification gate: a command imp runs after each implement loop\n"
+                "# to catch regressions (tests + lint + typecheck). Empty string opts out.\n"
+                + format_verify_command_yaml(chosen)
+            )
+        project_file.write_text(body + verify_block)
     elif not (imp_dir / "workflows" / "default").is_dir():
         # Belt-and-suspenders (finding L2): a real teammate clone has project.yaml
         # AND workflows committed together, so the gate above is correct. But a
