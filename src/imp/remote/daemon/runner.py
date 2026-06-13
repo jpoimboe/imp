@@ -194,7 +194,7 @@ def start_daemon(control_root: Path) -> int:
         anyio.run(run_daemon, control_root)
     except ConfigError as exc:
         print(f"imp: remote-control not configured: {exc}", file=sys.stderr)
-        return 1
+        return 2
     return 0
 
 
