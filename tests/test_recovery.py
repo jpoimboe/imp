@@ -16,12 +16,12 @@ def test_gate_steps_in_span_review_phase() -> None:
 
     wf = _wf()
     # Span [20..25] = integration-gate, integration-pass, integration-sweep,
-    # integration-sweep-tests, stamp-sweep-trailers, integrate-merge. Gates:
-    # integration-pass (goto task-lead backward), integration-sweep-tests (resume),
+    # integration-sweep-verify, stamp-sweep-trailers, integrate-merge. Gates:
+    # integration-pass (goto task-lead backward), integration-sweep-verify (resume),
     # stamp-sweep-trailers (pause), integrate-merge (pause). integration-gate
     # (forward goto) and integration-sweep (continue-only) are NOT gates.
     assert gate_steps_in_span(wf, 20, 25) == (
-        "integration-pass", "integration-sweep-tests",
+        "integration-pass", "integration-sweep-verify",
         "stamp-sweep-trailers", "integrate-merge",
     )
 
@@ -76,7 +76,7 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("integrate-merge"), "merge")
     assert exc.value.gate_steps == (
-        "integrate-merge", "integrate-tests", "integration-review", "final-review",
+        "integrate-merge", "integrate-verify", "integration-review", "final-review",
     )
     msg = str(exc.value)
     assert "integrate-merge" in msg

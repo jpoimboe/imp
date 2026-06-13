@@ -53,7 +53,7 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert isinstance(by["spec-verify-commit"].rules[-1].action, Goto)
     assert by["spec-verify-commit"].rules[-1].action.resume is True   # -> spec-writer
     assert by["plan-verify-commit"].rules[-1].action.resume is True   # -> plan-writer
-    assert by["run-tests"].rules[-1].action.resume is True            # -> task-lead
+    assert by["verify"].rules[-1].action.resume is True            # -> task-lead
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
     # phase jumps clear (plain goto)
     assert by["review"].rules[1].action.resume is False   # plan_gap -> plan-writer (plain goto)

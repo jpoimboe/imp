@@ -202,8 +202,7 @@ async def run_change(
             action, feedback_text, _var_mutations = await _dispatch_step(
                 step, workflow, change, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
-                lint_command=config.lint_command,
-                test_command=config.test_command,
+                verify_command=config.verify_command,
                 non_interactive=non_interactive,
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step)
@@ -351,8 +350,7 @@ async def _dispatch_step(
     step: Step, workflow: Workflow, change: Change,
     state: State, log: EventLog, *, is_resume: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
-    coordinator: Any, lint_command: str | None = None,
-    test_command: str | None = None,
+    coordinator: Any, verify_command: str | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
@@ -370,13 +368,13 @@ async def _dispatch_step(
     if step.kind == "merge":
         return _route_merge(step, change, state, log)
     if step.kind == "script":
-        return _route_script(step, change, state, log, lint_command=lint_command,
-                             test_command=test_command, sandbox_policy=sandbox_policy)
+        return _route_script(step, change, state, log, verify_command=verify_command,
+                             sandbox_policy=sandbox_policy)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
-        wrapper_text=wrapper_text, is_resume=is_resume, lint_command=lint_command,
-        test_command=test_command, non_interactive=non_interactive,
+        wrapper_text=wrapper_text, is_resume=is_resume, verify_command=verify_command,
+        non_interactive=non_interactive,
         sandbox_policy=sandbox_policy, seed_opening=seed_opening)
 
 
@@ -413,8 +411,7 @@ def _route_branch(
 
 def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
-    *, lint_command: str | None = None,
-    test_command: str | None = None,
+    *, verify_command: str | None = None,
     sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step)
@@ -423,8 +420,7 @@ def _route_script(
                                           change_id=change.id,
                                           change_slug=change.slug,
                                           change_title=change.title,
-                                          lint_command=lint_command,
-                                          test_command=test_command),
+                                          verify_command=verify_command),
                      policy=sandbox_policy)
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
@@ -515,8 +511,7 @@ async def _route_agent(
     state: State, log: EventLog, *,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, wrapper_text: str | None, is_resume: bool,
-    lint_command: str | None = None,
-    test_command: str | None = None,
+    verify_command: str | None = None,
     non_interactive: bool = False,  # §10/§12: consumed by the headless wall-clock retry ceiling
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
@@ -563,8 +558,7 @@ async def _route_agent(
             retry_feedback=retry_wrapper if backoff == 0 else None,
             balance_on_resume=balance,
             initial_messages=initial, is_resume=is_resume,
-            lint_command=lint_command,
-            test_command=test_command, non_interactive=non_interactive,
+            verify_command=verify_command, non_interactive=non_interactive,
             sandbox_policy=sandbox_policy)
         if result.delay is None:
             break
@@ -631,8 +625,7 @@ async def _route_agent(
         return await _route_agent(step, workflow, change, state, log,
                                   user_chat_input_fn=user_chat_input_fn,
                                   coordinator=coordinator, wrapper_text=wrapper_text,
-                                  is_resume=is_resume, lint_command=lint_command,
-                                  test_command=test_command,
+                                  is_resume=is_resume, verify_command=verify_command,
                                   non_interactive=non_interactive,
                                   sandbox_policy=sandbox_policy,
                                   seed_opening=seed_opening)
@@ -680,8 +673,7 @@ async def _run_agent_invocation(
     prior_backoff_attempts: int = 0,
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
-    lint_command: str | None = None,
-    test_command: str | None = None,
+    verify_command: str | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
 ) -> AgentRunResult:
@@ -768,8 +760,7 @@ async def _run_agent_invocation(
         retry_feedback=retry_feedback,
         balance_on_resume=balance_on_resume,
         log=log,
-        lint_command=lint_command,
-        test_command=test_command,
+        verify_command=verify_command,
         non_interactive=non_interactive,
         sandbox_policy=sandbox_policy,
     )
@@ -822,7 +813,7 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
         os.environ,
         engine_env(project_root=change.project_root, change_id=change.id,
                    change_slug=change.slug, change_title=change.title,
-                   lint_command=config.lint_command, test_command=config.test_command),
+                   verify_command=config.verify_command),
     )
     try:
         policy = resolve_policy(

@@ -87,12 +87,9 @@ class ToolContext:
     # provider. dispatch_task passes it to drive_invocation so a subagent gets
     # pause detection + interrupt attachment. None for legacy/test contexts.
     coordinator: Any = None
-    # Optional lint-clean gate command (config.lint_command). Threaded onto the
-    # subprocess env (IMP_LINT_COMMAND) by the bash tool. None => no lint gate.
-    lint_command: str | None = None
-    # Optional test-run gate command (config.test_command). Threaded onto the
-    # subprocess env (IMP_TEST_COMMAND) by the bash tool. None => no test gate.
-    test_command: str | None = None
+    # Optional combined verify gate command (config.verify_command). Threaded onto
+    # the subprocess env (IMP_VERIFY_COMMAND) by the bash tool. None => no verify gate.
+    verify_command: str | None = None
     # Resolved SandboxPolicy for shell wrapping (spec Part B). None => bare sh -c
     # (no sandbox), preserving pre-sandbox behavior. Set by the runner from
     # invocation.sandbox_policy.

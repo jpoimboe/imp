@@ -44,7 +44,7 @@ def _canned_anthropic(**overrides):
         "done": True, "deviation": False, "summary": "ok",
         "more_plans": False, "rationale": "ok",
         "blocking": False, "has_minor_findings": False,
-        "built": "stub", "test_status": "ok",
+        "built": "stub", "verify_status": "ok",
         "open_items": "", "next_steps": "",
         "result": "DONE", "report": "ok",
         "integration": "clean",
@@ -214,7 +214,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             "has_minor_findings": False,
             # summarizer
             "built": "stub",
-            "test_status": "ok",
+            "verify_status": "ok",
             "open_items": "",
             "next_steps": "",
             # implementer
@@ -280,7 +280,7 @@ async def test_full_default_workflow_completes_with_canned_openai(
             "done": True, "deviation": False, "summary": "ok",
             "more_plans": False, "rationale": "ok",
             "blocking": False, "has_minor_findings": False,
-            "built": "stub", "test_status": "ok",
+            "built": "stub", "verify_status": "ok",
             "open_items": "", "next_steps": "",
             "result": "DONE", "report": "ok",
             "integration": "clean",
@@ -343,7 +343,7 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "done": True, "deviation": False, "summary": "ok",
                     "more_plans": False, "rationale": "ok",
                     "blocking": False, "has_minor_findings": False,
-                    "built": "stub", "test_status": "ok",
+                    "built": "stub", "verify_status": "ok",
                     "open_items": "", "next_steps": "",
                     "result": "DONE", "report": "ok",
                     "integration": "clean",
@@ -504,7 +504,7 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
             "done": True, "deviation": False, "summary": "ok",
             "more_plans": False, "rationale": "ok",
             "blocking": False,
-            "built": "stub", "test_status": "ok",
+            "built": "stub", "verify_status": "ok",
             "open_items": "", "next_steps": "",
             "result": "DONE", "report": "ok",
             "integration": "clean",
@@ -628,11 +628,11 @@ async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> No
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
     # The four new steps appear, in order, before summarizer.
-    for name in ("integrate-merge", "integrator", "integrate-tests", "integration-review"):
+    for name in ("integrate-merge", "integrator", "integrate-verify", "integration-review"):
         assert name in steps, f"{name} did not run"
     assert (steps.index("integrate-merge")
             < steps.index("integrator")
-            < steps.index("integrate-tests")
+            < steps.index("integrate-verify")
             < steps.index("integration-review")
             < steps.index("summarizer"))
 

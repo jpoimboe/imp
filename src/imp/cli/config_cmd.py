@@ -59,8 +59,8 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
         ("providers", ", ".join(cfg.providers) or "(none)"),
         ("theme", cfg.theme),
         ("editing_mode", cfg.editing_mode),
-        ("lint_command", cfg.lint_command or "(unset)"),
-        ("test_command", cfg.test_command or "(unset)"),
+        ("verify_command", "(disabled)" if cfg.verify_command == ""
+         else (cfg.verify_command or "(unset)")),
     ):
         leaf_src = prov.get((key,))
         label = _label(leaf_src.file) if leaf_src is not None else "default"

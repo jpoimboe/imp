@@ -149,8 +149,8 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: task-lead}
 
-      - name: run-tests
-        command: ./scripts/run-tests.sh
+      - name: verify
+        command: ./scripts/run-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: task-lead}
@@ -212,8 +212,8 @@ phases:
           - {operations: [write], paths: ["**"], mode: allow}
         # no rules: continue-on-success. The sweep drains the list and never routes.
 
-      - name: sweep-tests
-        command: ./scripts/run-tests.sh
+      - name: sweep-verify
+        command: ./scripts/run-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: deferred-sweep}
@@ -260,8 +260,8 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
 
-      - name: integration-sweep-tests
-        command: ./scripts/run-tests.sh
+      - name: integration-sweep-verify
+        command: ./scripts/run-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: integration-sweep}
@@ -292,8 +292,8 @@ phases:
           - {if: {integration: review}, set: {integration_needs_review: true}, continue: true}
           - {else: true, set: {integration_needs_review: false}, continue: true}
 
-      - name: integrate-tests
-        command: ./scripts/run-tests.sh
+      - name: integrate-verify
+        command: ./scripts/run-verify.sh
         max_loops: 5
         rules:
           - {if: {exit: 0}, continue: true}

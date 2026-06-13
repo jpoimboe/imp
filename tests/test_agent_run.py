@@ -161,7 +161,7 @@ def test_build_agent_invocation_wires_user_input_unconditionally(
     assert inv.user_input_fn is not None
 
 
-def test_build_agent_invocation_threads_lint_command(tmp_path: Path) -> None:
+def test_build_agent_invocation_threads_verify_command(tmp_path: Path) -> None:
     from imp.engine.agent_run import build_agent_invocation
 
     inv = build_agent_invocation(
@@ -173,24 +173,8 @@ def test_build_agent_invocation_threads_lint_command(tmp_path: Path) -> None:
         subagent_defs={}, tiers=(), max_tool_calls=None,
         agent_id="step:p/s", event_log=None, change_state=None,
         first_event_parent_id=None, resolved_tiers=None, coordinator=None,
-        lint_command="make lint")
-    assert inv.lint_command == "make lint"
-
-
-def test_build_agent_invocation_threads_test_command(tmp_path: Path) -> None:
-    from imp.engine.agent_run import build_agent_invocation
-
-    inv = build_agent_invocation(
-        agent_def=_agent(), provider_name="anthropic", model_name="m",
-        rendered_system_prompt="BODY", initial_messages=(),
-        change_context=_cc(tmp_path),
-        user_chat_input_fn=None, transcript_dir=tmp_path / "td",
-        fs_permissions=(), events_path=tmp_path / "e.jsonl",
-        subagent_defs={}, tiers=(), max_tool_calls=None,
-        agent_id="step:p/s", event_log=None, change_state=None,
-        first_event_parent_id=None, resolved_tiers=None, coordinator=None,
-        test_command="make test")
-    assert inv.test_command == "make test"
+        verify_command="make check")
+    assert inv.verify_command == "make check"
 
 
 def _inv(tmp_path: Path):

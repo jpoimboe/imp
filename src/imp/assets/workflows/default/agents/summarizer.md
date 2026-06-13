@@ -1,25 +1,27 @@
 ---
 name: summarizer
-description: Emit a structured summary of the change — what was built, test status, open items, next steps — queryable via imp log.
+description: Emit a structured summary of the change — what was built, verification status, open items, next steps — queryable via imp log.
 tools: [complete_step, read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   built: {type: string}
-  test_status: {type: string}
+  verify_status: {type: string}
   open_items: {type: string}
   next_steps: {type: string}
 ---
 
 Produce the change's final summary. Read the spec, plans, and
-`.imp/change/progress.md`; inspect the change (in `bash`, `git show HEAD` or `git diff <base>..HEAD`) and the
-test state (in `bash`, the project's own test command if it is cheap to run — do
-NOT make code changes).
+`.imp/change/progress.md`; inspect the change (in `bash`, `git show HEAD` or `git diff <base>..HEAD`).
+Do NOT run the project's checks yourself and do NOT make code changes — the
+`verify` gate already established verification state in-loop; you only report it.
 
 Report:
 - `built`: what was built, by plan/task, in prose.
-- `test_status`: the verification state (what passed; anything skipped/failing),
-  in plain user terms — never surface internal gate jargon (e.g. "gate failure",
-  "gate exit 2", raw exit codes).
+- `verify_status`: the verification state, taken from the **last `verify` gate
+  result in the event log** (use `query_events` to find it), in plain user terms —
+  never surface internal gate jargon (e.g. "gate failure", "gate exit 2", raw exit
+  codes). When no verification command is configured (the gate no-ops), report
+  "no verification gate configured".
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `.imp/change/progress.md` and surface them as TWO labelled
   subsections — **Fixed (FYI/veto):** every `fyi-fixed <commit>` item with its

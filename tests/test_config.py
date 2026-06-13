@@ -98,32 +98,25 @@ def test_provider_envs_override(tmp_path: Path) -> None:
     assert layer["provider_envs"] == {"openai": "OAI_KEY"}
 
 
-def test_parses_lint_command(tmp_path: Path) -> None:
-    layer = _layer(tmp_path, "lint_command: \"make lint\"\n" + _OK_BODY)
-    assert layer["lint_command"] == "make lint"
+def test_parses_verify_command(tmp_path: Path) -> None:
+    layer = _layer(tmp_path, "verify_command: \"make check\"\n" + _OK_BODY)
+    assert layer["verify_command"] == "make check"
 
 
-def test_lint_command_absent_omitted(tmp_path: Path) -> None:
-    assert "lint_command" not in _layer(tmp_path, _OK_BODY)
+def test_verify_command_empty_string_preserved(tmp_path: Path) -> None:
+    # Tri-state opt-out: an explicit empty string parses to "" (NOT dropped),
+    # distinct from key-absent — the gate no-ops but never nudges again.
+    layer = _layer(tmp_path, "verify_command: \"\"\n" + _OK_BODY)
+    assert layer["verify_command"] == ""
 
 
-def test_lint_command_not_string_raises(tmp_path: Path) -> None:
-    with pytest.raises(LoadError, match="lint_command"):
-        _layer(tmp_path, "lint_command: [make, lint]\n" + _OK_BODY)
+def test_verify_command_absent_omitted(tmp_path: Path) -> None:
+    assert "verify_command" not in _layer(tmp_path, _OK_BODY)
 
 
-def test_parses_test_command(tmp_path: Path) -> None:
-    layer = _layer(tmp_path, "test_command: \"make test\"\n" + _OK_BODY)
-    assert layer["test_command"] == "make test"
-
-
-def test_test_command_absent_omitted(tmp_path: Path) -> None:
-    assert "test_command" not in _layer(tmp_path, _OK_BODY)
-
-
-def test_test_command_not_string_raises(tmp_path: Path) -> None:
-    with pytest.raises(LoadError, match="test_command"):
-        _layer(tmp_path, "test_command: [make, test]\n" + _OK_BODY)
+def test_verify_command_not_string_raises(tmp_path: Path) -> None:
+    with pytest.raises(LoadError, match="verify_command"):
+        _layer(tmp_path, "verify_command: [make, check]\n" + _OK_BODY)
 
 
 def test_editing_mode_absent_omitted(tmp_path: Path) -> None:
