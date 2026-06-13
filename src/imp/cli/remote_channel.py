@@ -17,8 +17,9 @@ import logging
 import os
 import subprocess
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, MutableMapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 import anyio
@@ -66,6 +67,36 @@ def driver_config_from(config: Any) -> DriverConfig | None:
         events=tuple(raw.get("events", entry.default_events)),
         startup_timeout=float(raw.get("startup_timeout", 10.0)),
         reply_timeout=raw.get("reply_timeout", None),
+    )
+
+
+def select_driver_config(
+    config: Any,
+    *,
+    control_root: Path,
+    change_id: str,
+    title: str,
+    env: MutableMapping[str, str],
+) -> DriverConfig | None:
+    """Choose the driver for one terminal Change (spec auto-attach)."""
+    from imp.remote.daemon.discover import socket_is_live, socket_path
+    from imp.remote.drivers import REGISTRY
+
+    dc = driver_config_from(config)
+    if dc is None:
+        return None
+    spath = socket_path(control_root)
+    if not socket_is_live(spath):
+        return dc
+    env["IMP_REMOTE_CONTROL_SOCK"] = str(spath)
+    env["IMP_REMOTE_CONTROL_CHANGE_ID"] = change_id
+    env["IMP_REMOTE_CONTROL_TITLE"] = title
+    entry = REGISTRY["daemon-connector"]
+    return DriverConfig(
+        command=(sys.executable, "-m", entry.module),
+        events=dc.events,
+        startup_timeout=dc.startup_timeout,
+        reply_timeout=dc.reply_timeout,
     )
 
 

@@ -32,8 +32,8 @@ from imp.cli.prompt import Prompt
 from imp.cli.remote_channel import (
     RemoteChannel,
     compose_on_event,
-    driver_config_from,
     effective_reply_fn,
+    select_driver_config,
 )
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
@@ -195,7 +195,9 @@ def _maybe_build_channel(change: Change) -> RemoteChannel | None:
             control_root=change.control_root).config
     except (LoadError, LoadErrors):
         return None
-    dc = driver_config_from(config)
+    dc = select_driver_config(
+        config, control_root=change.control_root,
+        change_id=change.id, title=change.title, env=os.environ)
     if dc is None:
         return None
     return RemoteChannel.from_driver_config(dc, id=change.id, title=change.title)
@@ -1635,6 +1637,16 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
     return 0
 
 
+def _cmd_remote_control_start(args: argparse.Namespace) -> int:
+    from imp.remote.daemon.runner import start_daemon
+    return start_daemon(_control_root())
+
+
+def _cmd_remote_control_stop(args: argparse.Namespace) -> int:
+    from imp.remote.daemon.runner import stop_daemon
+    return stop_daemon(_control_root())
+
+
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
     try:
@@ -1829,6 +1841,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
     p_abandon.set_defaults(func=_cmd_abandon)
+
+    p_rc = sub.add_parser(
+        "remote-control",
+        help="Run the optional per-repo daemon that relays all Changes to one transport.",
+    )
+    rc_sub = p_rc.add_subparsers(dest="rc_action", required=True)
+    p_rc_start = rc_sub.add_parser(
+        "start", help="Start the remote-control daemon for this repo (foreground).")
+    p_rc_start.set_defaults(func=_cmd_remote_control_start)
+    p_rc_stop = rc_sub.add_parser(
+        "stop", help="Stop the running remote-control daemon (SIGTERM).")
+    p_rc_stop.set_defaults(func=_cmd_remote_control_stop)
 
     from imp.evals.cli import add_eval_parser
     add_eval_parser(sub)
