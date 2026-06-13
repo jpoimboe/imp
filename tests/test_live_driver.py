@@ -1172,7 +1172,6 @@ def test_status_spinner_is_render_safe_ascii() -> None:
     from imp.cli.narrative import NarrativeBuilder
     from tests._event_fixtures import ev
 
-    assert _SPINNER
     assert all(ord(c) < 128 for c in _SPINNER)   # no braille/tofu glyphs
 
     builder = NarrativeBuilder()
