@@ -820,6 +820,17 @@ def _h_awaiting_user_input(
         self._step_stack[-1].interactive = True
     self._awaiting_reply = True
     self._pending_question = str(p.get("prompt") or "")
+    # Un-hold any held narration in the current container: the prose carried by
+    # the llm_response that called wait_for_user is the context the human must
+    # read to answer, and the agent is now blocked for that reply — so it is
+    # settled, NOT a trailing narration that could still fold into a step
+    # conclusion. Without this the live _walk blocks on the held node
+    # (_is_final is False for a held AgentTextNode) and the message surfaces only
+    # after the user replies (the next llm_response un-holds it). Mirrors the
+    # un-hold-all loop in _h_llm_response.
+    for c in self._container().children:
+        if isinstance(c, AgentTextNode) and c.held:
+            c.held = False
     return None
 
 
