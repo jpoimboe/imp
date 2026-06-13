@@ -34,6 +34,10 @@ def test_expanded_render_and_pageup_scroll_and_ctrl_o_toggle() -> None:
     with _session("view") as s:
         s.wait_idle(idle=0.3, hard=8.0)
         assert s.is_alt_screen() is True                 # alternate screen (criterion 2/8)
+
+        since = time.monotonic()
+        s.send("\x0f")                                     # Ctrl-O -> full mode (lean is default)
+        s.wait_idle(idle=0.3, hard=5.0, since=since)
         win = "\n".join(s.lines(limit=s.rows))
         assert "command=echo" in win                     # expanded (full=True) (criterion 2)
         assert "echo 0" not in win                        # tail-pinned: earliest off-screen
@@ -99,6 +103,10 @@ def test_scroll_and_ctrl_o_reach_viewport_during_active_solicit(tmp_path) -> Non
         s.wait_idle(idle=0.3, hard=8.0)
         _, y = s.cursor()
         assert y == s.rows - 1                        # solicit prompt active at the bottom
+
+        since = time.monotonic()
+        s.send("\x0f")                                     # Ctrl-O -> full mode *during solicit*
+        s.wait_idle(idle=0.3, hard=5.0, since=since)
         win = "\n".join(s.lines(limit=s.rows))
         assert "command=echo" in win                  # expanded + tail-pinned
         assert "echo 0" not in win                    # earliest is off-screen

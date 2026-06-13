@@ -1412,3 +1412,34 @@ def test_pending_question_renders_markdown_above_the_reply() -> None:
     assert "\x1b[1m" in out      # bold for **merge** in the question line
     assert "**" not in out       # asterisks consumed by markdown
     assert out.count("merge") >= 2   # once in the question, once as the reply text
+
+
+def test_live_viewer_suppresses_step_context_block_even_in_full() -> None:
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p",
+            model="m", provider="anthropic"),
+        _ev("3", "step_context", agent_id="step:p/s", provider="anthropic",
+            model="claude", system_prompt="SYSTEM PROMPT TEXT",
+            tools_schema=[{"name": "bash"}], params={}, max_tool_calls=50),
+    ]
+    live = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
+                                 width=80, live_viewer=True))
+    assert "SYSTEM PROMPT TEXT" not in live
+    assert "- bash" not in live
+    assert "context ·" not in live          # the whole fold (header included) is gone
+    log = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
+                                width=80))
+    assert "SYSTEM PROMPT TEXT" in log and "- bash" in log   # imp log --full unchanged
+
+
+def test_live_viewer_keeps_raw_tool_output_in_full() -> None:
+    events = [
+        _ev("2", "step_started", step="s", kind="agent", phase="p", model="m"),
+        _ev("4", "tool_call", agent_id="step:p/s", id="b1", name="bash",
+            input={"command": "ls -la"}),
+        _ev("5", "tool_result", agent_id="step:p/s", id="b1",
+            content="RAW-FILE-OUTPUT", error=False),
+    ]
+    live = "\n".join(render_tree(nv.build_tree(events), full=True, color=False,
+                                 width=80, live_viewer=True))
+    assert "RAW-FILE-OUTPUT" in live      # raw tool output still renders (AC3)

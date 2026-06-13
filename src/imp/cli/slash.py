@@ -88,7 +88,7 @@ def _help(out: Callable[[str], None]) -> None:
     out("  /<name> [args]     Load a skill (trailing args appended to it)")
     out("")
     out("Keybindings:")
-    out("  Ctrl+C / Ctrl+D    Pause and exit; resume with `imp resume <id>`")
+    out("  Esc / Ctrl+C / Ctrl+D    Pause and exit; resume with `imp resume <id>`")
     out("  Up-arrow           Recall previous input")
     out("  Tab                Complete a /command or skill name")
 
