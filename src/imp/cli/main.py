@@ -32,8 +32,8 @@ from imp.cli.prompt import Prompt
 from imp.cli.remote_channel import (
     RemoteChannel,
     compose_on_event,
-    driver_config_from,
     effective_reply_fn,
+    select_driver_config,
 )
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
@@ -225,7 +225,9 @@ def _maybe_build_channel(change: Change) -> RemoteChannel | None:
             control_root=change.control_root).config
     except (LoadError, LoadErrors):
         return None
-    dc = driver_config_from(config)
+    dc = select_driver_config(
+        config, control_root=change.control_root,
+        change_id=change.id, title=change.title, env=os.environ)
     if dc is None:
         return None
     return RemoteChannel.from_driver_config(dc, id=change.id, title=change.title)
