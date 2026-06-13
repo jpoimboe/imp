@@ -231,7 +231,7 @@ async def test_run_change_none_seed_opening_uses_begin_token(
 
 
 @pytest.mark.anyio
-async def test_seed_opening_not_reinjected_on_resume(
+async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
     tmp_path: Path, provider_registry
 ) -> None:
     sink: dict[str, Any] = {}
