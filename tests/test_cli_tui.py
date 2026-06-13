@@ -189,7 +189,7 @@ async def test_run_tui_session_streams_no_esc_reader_then_handles_outcome(
             captured.append(self)
 
     async def _fake_run_change(change, *, on_event, user_chat_input_fn,
-                               coordinator, non_interactive):
+                               coordinator, non_interactive, seed_opening=None):
         on_event({"id": "1", "agent_id": None, "type": "change_created",
                   "payload": {"slug": "s", "title": "t"}})
         return RunResult.COMPLETED

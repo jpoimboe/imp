@@ -1292,30 +1292,26 @@ def test_merged_node_renders_friendly_footer() -> None:
     assert pal._ANSI["green"] in colored
 
 
-def test_panel_summary_renders_one_line() -> None:
-    node = nv.PanelSummaryNode(tally=nv.ReviewTally(approve=4, total=4, blocking=0, nits=2))
-    line = "\n".join(rt._render(node, depth=1, full=False, color=False, width=80))
-    assert line == "  panel: 4/4 approve · 2 nits"
-
-
-def test_merge_gate_block_has_verdict_and_instruction() -> None:
-    tally = nv.ReviewTally(approve=4, total=4, blocking=0, nits=2)
-    block = rt.merge_gate_block(tally, base="master")
-    lines = block.split("\n")
-    assert lines[0] == "Review: 4/4 approve · 0 blocking · 2 nits"
-    assert lines[1] == "→ type 'merge' to merge into master, or describe what to rework."
-
-
-def test_merge_gate_block_changes_with_counts() -> None:
-    tally = nv.ReviewTally(approve=3, total=4, blocking=1, nits=0)
-    block = rt.merge_gate_block(tally, base="trunk")
-    assert "Review: 3/4 approve · 1 blocking · 0 nits" in block
-    assert "merge into trunk" in block
-
-
-def test_merge_gate_block_without_tally_is_instruction_only() -> None:
-    block = rt.merge_gate_block(None, base="master")
-    assert block == "→ type 'merge' to merge into master, or describe what to rework."
+def test_clean_review_panel_renders_findings_no_panel_chrome() -> None:
+    events = [
+        _ev("1", "step_started", step="review", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+        _ev("c1", "tool_call", agent_id="step:review/review", id="b1",
+            name="task", input={"subagent_name": "code-reviewer",
+                                "task_description": "review"}),
+        _ev("r1", "tool_result", agent_id="step:review/review", id="b1",
+            content=json.dumps({"status": "Success", "verdict": "approve",
+                                "findings": ""}), error=False),
+        _ev("ao", "agent_output", agent_id="step:review/review",
+            status="Success", verdict="approve",
+            findings="review complete: one nit\nno blocking issues"),
+        _ev("sc", "step_completed", step="review", kind="agent",
+            action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
+    ]
+    out = "\n".join(_lines(events))
+    assert "panel:" not in out
+    assert "code-reviewer" in out
+    assert "one nit" in out
 
 
 def test_display_tool_name_strips_mcp_namespace() -> None:
