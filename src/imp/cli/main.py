@@ -297,7 +297,7 @@ def _pause_facts(change: Change) -> tuple[str, str | None, str]:
 
 
 def _emit_paused(change: Change) -> None:
-    """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim, ⏸."""
+    """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim."""
     color = should_use_color(sys.stdout)
     name, phase, token = _pause_facts(change)
     print("\n" + "\n".join(_pause_lines(name, phase, token, color=color)))

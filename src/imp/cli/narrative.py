@@ -244,7 +244,7 @@ class ErrorNode:
 class PauseNode:
     """A workflow pause — a resumable stop, NOT an error, whatever drove it
     (ctrl-c / ctrl-d / interrupt, or an error category like api / max_loops /
-    retry_ceiling). Renders as a quiet dim `⏸ paused (reason)` line, mirroring the
+    retry_ceiling). Renders as a quiet dim `paused (reason)` line, mirroring the
     live `_emit_paused` / `_emit_paused_summary` chrome, so `imp log` and the live
     view agree. For an error-driven pause the underlying failure already appears as
     its own `error:` event just above this line."""
@@ -747,9 +747,9 @@ NarrativeBuilder._HANDLERS["step_completed"] = _h_step_completed
 
 def _h_workflow_paused(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # EVERY pause is a pause, not an error — a resumable stop. Live frames them all
-    # the same way (_emit_paused / _emit_paused_summary print a dim `⏸ … paused`),
+    # the same way (_emit_paused / _emit_paused_summary print a dim `paused`),
     # so `imp log` renders a matching PauseNode rather than an `error:` line. The
-    # reason that drove it (ctrl-c, api, max_loops, retry_ceiling, …) rides the ⏸
+    # reason that drove it (ctrl-c, api, max_loops, retry_ceiling, …) appears on the
     # line; for an error-driven pause the underlying failure was already shown as
     # its own `error:` event just above, so re-stating it as an error here would
     # both double up and mismatch the live view (the bug this fixes).
