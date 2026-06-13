@@ -1818,7 +1818,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "Tip: imp log <id> --full | grep ... for line-oriented scripting."
         ),
     )
-    p_log.add_argument("token", nargs="?")
+    p_log.add_argument(
+        "token", nargs="?",
+        help="Change id or its short token (omit for the most recent Change).")
     p_log.add_argument(
         "--full", action="store_true",
         help="Render every event (no tool-burst collapse).",
