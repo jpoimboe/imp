@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
+from typing import Any
 
 _MODERN_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-([a-z0-9]{6})$")
 
@@ -18,3 +20,34 @@ def parse_handle(text: str) -> tuple[str | None, str]:
         head, _, rest = text.partition(" ")
         return head[1:], rest.lstrip()
     return None, text
+
+
+@dataclass(frozen=True)
+class Inbound:
+    text: str
+    reply_to_message_id: int | None
+
+
+def extract_inbound(
+    updates_response: dict[str, Any], chat_id: int, offset: int
+) -> tuple[list[Inbound], int]:
+    """Extract allowlisted text messages from getUpdates; advance offset past every update."""
+    items: list[Inbound] = []
+    new_offset = offset
+    for upd in updates_response.get("result", []):
+        uid = upd.get("update_id")
+        if isinstance(uid, int) and uid >= new_offset:
+            new_offset = uid + 1
+        msg = upd.get("message") or {}
+        chat = msg.get("chat") or {}
+        if chat.get("id") != chat_id:
+            continue
+        text = msg.get("text")
+        if not (isinstance(text, str) and text):
+            continue
+        reply_to = msg.get("reply_to_message") or {}
+        rt_id = reply_to.get("message_id")
+        items.append(Inbound(
+            text=text,
+            reply_to_message_id=rt_id if isinstance(rt_id, int) else None))
+    return items, new_offset
