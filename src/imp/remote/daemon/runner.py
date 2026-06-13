@@ -87,6 +87,7 @@ def _adapter_worker(
     while not stop.is_set():
         drain_outbound(adapter, outbound)
         adapter.poll_once()
+    drain_outbound(adapter, outbound)  # flush events queued before stop
 
 
 async def _relay_replies(
