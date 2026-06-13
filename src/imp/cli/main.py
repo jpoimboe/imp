@@ -1058,8 +1058,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                     return 2
                 try:
                     rewind_plan = recovery.plan_rewind(
-                        workflow, state, from_target,
-                        force=bool(getattr(args, "force", False)))
+                        workflow, state, from_target)
                 except (recovery.RewindError, recovery.GateBypassRequired) as e:
                     # str(e) bare (not the usual f"imp: {e}"): these messages
                     # already embed the "imp:" prefix and are multi-line (they
@@ -1077,8 +1076,8 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             change.event_log().append(
                 agent_id=None, type="workflow_resumed", payload={})
             state.status = "running"
-            # Apply the rewind AFTER the resume marker so step_rewound (+ any
-            # gates_bypassed) follow workflow_resumed in the append-only log.
+            # Apply the rewind AFTER the resume marker so step_rewound follows
+            # workflow_resumed in the append-only log.
             if rewind_plan is not None:
                 # workflow is set whenever rewind_plan is (both assigned only
                 # inside `if from_target is not None`); assert narrows for mypy.
@@ -1829,10 +1828,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--from", dest="from_target", metavar="TARGET",
         help="Rewind/jump the step cursor to TARGET (a step or phase name) and "
              "re-run forward, appending new events (never rewriting history).")
-    p_resume.add_argument(
-        "--force", action="store_true",
-        help="Permit a forward --from jump that skips gate steps "
-             "(land the Change as-is; sets ready_to_merge).")
+
     p_resume.set_defaults(func=_cmd_resume)
 
     p_log = sub.add_parser(
