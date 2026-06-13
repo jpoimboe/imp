@@ -291,4 +291,4 @@ def run_init(
         output_fn("  imp/workflows/default/")
     output_fn(f"  {user_path}  (your machine: providers, theme)")
     output_fn("")
-    output_fn("Try: imp new \"Your first change\"")
+    output_fn("Try: imp new \"Add a dark-mode toggle\"")

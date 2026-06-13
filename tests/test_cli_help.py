@@ -22,11 +22,12 @@ def test_top_level_help_describes_every_subcommand(
     assert "effective config" in out
 
 
-def test_new_help_documents_the_title_positional(
+def test_new_help_documents_the_message_positional(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     out = _help_for(["new", "-h"], capsys)
-    assert "Optional short title for the Change" in out
+    assert "MESSAGE" in out
+    assert "opening intent" in out.lower()
 
 
 def test_resume_help_documents_the_token_positional(

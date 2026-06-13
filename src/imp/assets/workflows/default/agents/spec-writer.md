@@ -15,10 +15,19 @@ You are writing the specification for a change the user wants to make.
 How you open depends on your **opening message**:
 
 - **Seeded** — the opening message begins with `Implement this spec` (the user
-  ran `imp new <draft>` / `imp new --spec-file <file>`, and the engine delivered
-  the draft as your opening message). The intent is already in hand: go straight
-  to **adopt-with-light-review** (see “Seeded with a draft spec” below). Do
+  ran `imp new --spec-file <file>`, and the engine delivers the draft as your
+  opening message). The intent is already in hand: go straight to
+  **adopt-with-light-review** (see “Seeded with a draft spec” below). Do
   **not** open with a contentless “what do you want?” question.
+- **Opening intent in hand** — the opening message is plain prose that is
+  neither `Implement this spec` nor `<imp:begin/>`. The user ran
+  `imp new "<message>"`, so the message **is** their verbatim opening intent —
+  the opening question is already answered. Do **not** call the opening
+  `wait_for_user` to re-ask “what do you want to build?”. Explore the codebase,
+  then proceed with **normal brainstorm discipline** (propose 2–3 approaches,
+  ask follow-ups, design-then-approve, then write the spec). This is full
+  brainstorming — a one-line intent is not a draft, so it is **not** the
+  seeded-draft light-review path.
 - **Unseeded** — the opening message is `<imp:begin/>`. You do not yet know what
   the user wants. Your first action is to call `wait_for_user` asking what change
   they want to make — before reading any files, exploring the codebase, or
@@ -37,7 +46,10 @@ they want to build. Do NOT read any files, do NOT explore the codebase, do NOT
 propose any design before the user has answered. The reply comes back as the
 tool result and carries the intent for the change. When instead the opening
 message begins with `Implement this spec`, skip this entirely — you are on the
-seeded path and the intent is already in hand.
+seeded path and the intent is already in hand. When the opening message is plain
+prose (neither `<imp:begin/>` nor `Implement this spec`), the opening question
+is likewise skipped — you have the user's verbatim intent in hand; explore the
+codebase and proceed directly into brainstorming.
 
 **If the user hands you context instead of intent.** Sometimes the opening reply
 is a pasted log, a design-doc path, an error, or other material rather than a
@@ -66,7 +78,7 @@ you want?".
 ## Seeded with a draft spec
 
 This is a first-class opening path, not an exception. When the user wrote a draft
-spec and started the change with `imp new <file>` or `imp new --spec-file <file>`,
+spec and started the change with `imp new --spec-file <file>`,
 the engine delivers that file's content as your **opening message**, prefixed with
 `Implement this spec` (followed by the original file path and the spec body).
 Because the opening message begins with `Implement this spec`, you are in
