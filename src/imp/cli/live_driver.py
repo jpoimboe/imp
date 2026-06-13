@@ -103,7 +103,7 @@ class LiveDriver:
     def on_event(self, event: Any) -> None:
         self._builder.add(event)
         if isinstance(event, dict) and event.get("type") == "awaiting_user_input":
-            self._pending_question = (event.get("payload") or {}).get("prompt", "")
+            self._pending_question = (event.get("payload") or {}).get("prompt") or ""
         if isinstance(event, dict) and event.get("type") in (
                 "step_started", "user_message"):
             # §7: time-the-agent-working-since-the-last-user-reply. Reset on
