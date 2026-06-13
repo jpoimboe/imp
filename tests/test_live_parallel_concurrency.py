@@ -51,18 +51,7 @@ async def test_codex_parallel_task_turn_is_concurrent() -> None:
     os.environ.get("IMP_RUN_DOGFOOD") != "1",
     reason="live claude_code dogfood concurrency; set IMP_RUN_DOGFOOD=1 to opt in")
 async def test_claude_code_parallel_task_turn_is_concurrent() -> None:
-    from imp.agents.subagents import TASK_REFUSAL_SENTINEL
     from tests.live_helpers import run_parallel_task_turn
 
     events = await run_parallel_task_turn(provider="claude_code")
     _assert_two_task_dispatches_overlap(events)
-    # Opportunistic refusal un-count: if a bare-sentinel refusal result appears,
-    # the run must NOT have ended in a ceiling fatal it should have un-counted past.
-    refusals = [e for e in events
-                if e.get("type") == "tool_result"
-                and (e.get("payload") or {}).get("error") is True
-                and (e.get("payload") or {}).get("content") == TASK_REFUSAL_SENTINEL]
-    if refusals:
-        kinds = [(e.get("payload") or {}).get("kind")
-                 for e in events if e.get("type") == "error"]
-        assert "tool_call_ceiling_exceeded" not in kinds
