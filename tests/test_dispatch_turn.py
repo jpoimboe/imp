@@ -78,7 +78,7 @@ async def test_mixed_turn_results_in_document_order(tmp_path: Path) -> None:
     order [task1, noop, task2] even though task2 completes before task1."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         await anyio.sleep(0.04 if desc == "slow" else 0.0)
         return json.dumps({"status": "Success", "echo": desc})
 
@@ -103,7 +103,7 @@ async def test_leading_non_task_completes_before_batch(tmp_path: Path) -> None:
     logged before either task's tool_call event)."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         return json.dumps({"status": "Success"})
 
     monkey = dispatch_mod.dispatch_task
@@ -134,7 +134,7 @@ async def test_mixed_turn_ceiling_reordering(tmp_path: Path) -> None:
     (over-ceiling), the pinned slot-reordering vs today's task1+noop."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         return json.dumps({"status": "Success"})
 
     monkey = dispatch_mod.dispatch_task
@@ -167,7 +167,7 @@ async def test_kill_switch_inline_is_sequential(tmp_path: Path) -> None:
     monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
     gate = {"active": 0, "peak": 0}
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         gate["active"] += 1
         gate["peak"] = max(gate["peak"], gate["active"])
         try:

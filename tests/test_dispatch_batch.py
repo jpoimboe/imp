@@ -108,7 +108,7 @@ async def test_batch_assembles_results_in_document_order(tmp_path: Path) -> None
     [t1, t2] — proving the batch keys assembly off task_tus order, not arrival."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         await anyio.sleep(0.04 if desc == "slow" else 0.0)
         return json.dumps({"status": "Success", "echo": desc})
 
@@ -135,7 +135,7 @@ async def test_batch_failure_isolation(tmp_path: Path) -> None:
     """AC3: child 'bad' raises, child 'good' succeeds -> bad is_error, good intact."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         if name == "bad":
             raise RuntimeError("boom")
         return json.dumps({"status": "Success"})
@@ -168,7 +168,7 @@ async def test_batch_over_ceiling_backfill_shape(tmp_path: Path) -> None:
     tool_result; both tool_call events precede either tool_result (pre-group)."""
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         return json.dumps({"status": "Success"})
 
     monkey = dispatch_mod.dispatch_task
@@ -262,7 +262,7 @@ async def test_batch_child_body_bug_not_wrapped_in_group(tmp_path: Path) -> None
     class _Boom(BaseException):
         pass
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         raise _Boom("wrapper bug")
 
     monkey = dispatch_mod.dispatch_task
@@ -337,8 +337,7 @@ async def test_batch_cancellation_cancels_children_cleanly(tmp_path: Path) -> No
     reset_parallelism_cache()
     finals = {"count": 0}
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None,
-                    abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         try:
             await anyio.sleep(10)
             return json.dumps({"status": "Success"})
@@ -371,7 +370,7 @@ async def test_batch_success_and_error_results_stamp_id_ns_block(tmp_path: Path)
     # result each carry id_ns="block" (fold opened by a non-empty block id).
     reset_parallelism_cache()
 
-    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None, abort_dispatch=None):
+    async def _fake(ctx, name, desc, *, tool_call_event_id="", tier=None):
         if desc == "boom":
             raise ValueError("kaboom")
         return json.dumps({"status": "Success", "echo": desc})
