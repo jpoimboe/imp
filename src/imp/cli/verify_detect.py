@@ -53,12 +53,12 @@ def detect_verify_command(project_root: Path) -> str | None:
     is detected. First probe that yields a non-empty command wins."""
     makefile = project_root / "Makefile"
     if makefile.is_file():
-        cmd = _from_makefile(makefile.read_text())
+        cmd = _from_makefile(makefile.read_text(errors="ignore"))
         if cmd:
             return cmd
     pkg = project_root / "package.json"
     if pkg.is_file():
-        cmd = _from_package_json(pkg.read_text())
+        cmd = _from_package_json(pkg.read_text(errors="ignore"))
         if cmd:
             return cmd
     if (project_root / "Cargo.toml").is_file():
@@ -67,7 +67,7 @@ def detect_verify_command(project_root: Path) -> str | None:
         return "go vet ./... && go test ./..."
     justfile = project_root / "justfile"
     if justfile.is_file():
-        cmd = _from_justfile(justfile.read_text())
+        cmd = _from_justfile(justfile.read_text(errors="ignore"))
         if cmd:
             return cmd
     return None
