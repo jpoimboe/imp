@@ -42,7 +42,8 @@ class SouthHub:
             change_id, _title = parse_hello(hello)
             self._conns[change_id] = stream
             while True:
-                await buf.receive_until(b"\n", _MAX_FRAME)
+                line = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
+                self._on_event(change_id, line)
         except (anyio.IncompleteRead, anyio.EndOfStream,
                 anyio.ClosedResourceError, anyio.DelimiterNotFound,
                 anyio.BrokenResourceError,
