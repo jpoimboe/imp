@@ -807,6 +807,35 @@ def test_wfu_submit_live_equals_imp_log() -> None:
     assert _body(out) == _render_body(events)      # byte-identical to imp log
 
 
+def test_prose_before_wait_for_user_emitted_before_the_prompt() -> None:
+    # The narration in the SAME llm_response that calls wait_for_user is the
+    # context the human must read to answer. It is created held=True (so a
+    # trailing narration can fold into a step conclusion), but nothing un-held it
+    # at the solicit boundary, so the live _walk blocked on it and the prose only
+    # surfaced after the user replied (the next llm_response un-held it). Drive
+    # events ONLY up to awaiting_user_input (the moment the prompt draws) — and do
+    # NOT call finish(), which would force-flush and mask the stall — and assert
+    # the prose is already visible.
+    drv, out = _driver()
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="s", kind="agent", phase="p",
+           model="m", provider="anthropic"),
+        ev("3", "llm_response", agent_id="a",
+           raw={"content": [{"type": "text",
+                             "text": "Here are two options. Which do you prefer?"}]},
+           usage={}),
+        ev("4", "tool_call", agent_id="a", id="w1", name="wait_for_user",
+           input={"prompt": "Which do you prefer?"}),
+        ev("5", "awaiting_user_input", agent_id="a", prompt="Which do you prefer?"),
+    ]
+    for e in events:
+        drv.on_event(e)
+    assert any("Which do you prefer?" in ln for ln in _body(out)), (
+        "pre-question narration must be emitted before the prompt draws, "
+        f"not held until after the user answers; body={_body(out)}")
+
+
 def test_driver_takes_pending_wait_for_user_question() -> None:
     drv, _ = _driver()
     drv.on_event(ev("1", "change_created", change_id=1, title="x"))
