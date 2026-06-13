@@ -134,7 +134,15 @@ progress.md is your guide.)
    task can be re-found for a fixup), and any deviation note. **Record qualifying
    nits you fixed inline as fixed-inline** — they rode the task's fixup and need no
    follow-up. The **Deferred Followups** list is reserved for the judgment-call /
-   out-of-scope findings the fixability bar deferred. **Record an `open_items` note
+   out-of-scope findings the fixability bar deferred.
+
+   **Pin the format.** Each deferred finding is one line under a
+   `## Deferred Followups` heading, in this EXACT shape so the `deferred-sweep` step
+   can parse it (the sweep, not the human, is now the consumer of this list):
+
+   `- [ ] DEFERRED task-lead: <one-line description> [scope: task]`
+
+   **Record an `open_items` note
    whenever a round was NOT clean on first pass** — any of: a reviewer raised a
    blocking (Critical/Major) finding; a gate (`commit-check` / `run-tests`) failed
    and resumed you; or a fixup had to be made for **correctness** (not polish). A

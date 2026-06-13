@@ -20,6 +20,7 @@ _BASE_VARS = {
     "panel_done": False, "integration_needs_review": False,
     "spec_confirm": True, "spec_unseen_changes": False,
     "spec_gate_pending": False, "spec_gate_passed": False,
+    "multi_plan": False, "integration_pass": False,
 }
 
 
@@ -55,7 +56,7 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["run-tests"].rules[-1].action.resume is True            # -> task-lead
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
     # phase jumps clear (plain goto)
-    assert by["recheck"].rules[1].action.resume is False    # rework -> plan-writer
+    assert by["review"].rules[1].action.resume is False   # plan_gap -> plan-writer (plain goto)
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "merge"
@@ -63,25 +64,20 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["merge-to-base"].kind == "merge"
 
 
-def test_review_phase_has_no_differ_from():
-    # Single provider by design: differ_from is removed from the review phase.
+def test_review_step_has_no_differ_from():
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["review-panel"].differ_from is None
-    assert by["recheck"].differ_from is None
+    assert by["review"].differ_from is None
 
 
-def test_review_steps_declare_tiers():
-    # review-panel coordinator + recheck loop are both sonnet (tier: medium); the
-    # opus members are dispatched by the coordinator at runtime tier="high".
+def test_review_step_declares_medium_tier():
     from imp.assets import default_workflow_dir
     from imp.engine.loader import load_workflow
     wf = load_workflow(default_workflow_dir())
     by = {s.name: s for s in wf.flat_steps()}
-    assert by["review-panel"].tier == "medium"
-    assert by["recheck"].tier == "medium"
+    assert by["review"].tier == "medium"
 
 
 def test_default_workflow_loads() -> None:
@@ -225,14 +221,13 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_review_phase_stamps_trailers_after_autosquash() -> None:
+def test_implement_phase_stamps_trailers_after_autosquash() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
-    review = next(p for p in wf.phases if p.name == "review")
-    names = [s.name for s in review.steps]
-    assert "stamp-trailers" in names, names
+    impl = next(p for p in wf.phases if p.name == "implement")
+    names = [s.name for s in impl.steps]
     assert names.index("stamp-trailers") == names.index("autosquash") + 1, names
-    assert names.index("stamp-trailers") < names.index("panel-gate"), names
+    assert names.index("stamp-trailers") < names.index("review"), names
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
@@ -257,8 +252,9 @@ def test_fast_path_gates_skip_depth_keep_safety() -> None:
     plan_gate = steps["fast-path-plan-gate"].rules[0]
     assert isinstance(plan_gate.action, Goto) and plan_gate.action.target == "task-lead"
     cycle_gate = steps["fast-path-cycle-gate"].rules[0]
-    assert isinstance(cycle_gate.action, Goto) and cycle_gate.action.target == "review"
-    assert "review-panel" in steps and "recheck" in steps
+    assert isinstance(cycle_gate.action, Goto) and cycle_gate.action.target == "integration-gate"
+    assert "review" in steps and "deferred-sweep" in steps
+    assert "panel-gate" not in steps and "recheck" not in steps
     assert wf.phases[-1].name == "merge"
 
 
@@ -451,6 +447,14 @@ def test_plan_writer_declares_wait_for_user() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     assert "wait_for_user" in wf.agents["plan-writer"].tools
+
+
+def test_per_plan_review_vars_declared_default_false() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    defaults = wf.vars.defaults()
+    assert defaults["multi_plan"] is False
+    assert defaults["integration_pass"] is False
 
 
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:

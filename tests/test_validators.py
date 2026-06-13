@@ -70,7 +70,9 @@ def test_goto_unknown_target_is_error(tmp_path: Path) -> None:
         load_workflow(wf)
 
 
-def test_step_name_collides_with_phase_name_is_error(tmp_path: Path) -> None:
+def test_step_name_collides_with_phase_name_no_goto_is_allowed(tmp_path: Path) -> None:
+    # A step sharing a name with its own phase is now allowed when no goto targets
+    # the ambiguous name (resolve_goto prioritises step, so the collision is harmless).
     wf = _wf(tmp_path, """\
         name: t
         description: t
@@ -80,6 +82,26 @@ def test_step_name_collides_with_phase_name_is_error(tmp_path: Path) -> None:
               - name: review
                 rules:
                   - {else: true, continue: true}
+        """)
+    load_workflow(wf)  # must NOT raise
+
+
+def test_step_name_collides_with_phase_name_with_ambiguous_goto_is_error(tmp_path: Path) -> None:
+    # A goto targeting the colliding name is ambiguous (step vs. phase?), so it IS an error.
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: review
+            steps:
+              - name: review
+                rules:
+                  - {else: true, continue: true}
+          - name: other
+            steps:
+              - name: doer
+                rules:
+                  - {else: true, goto: review}
         """)
     with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf)
