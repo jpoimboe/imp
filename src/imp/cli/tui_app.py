@@ -18,7 +18,7 @@ class TuiApp:
         self._coord = coord
         self._color = color
         self._width = width
-        self._full = True
+        self._full = False
         self._frame = 0
         self._start = time.monotonic()
         self._viewport = ViewportState()

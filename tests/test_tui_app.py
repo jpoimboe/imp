@@ -28,14 +28,16 @@ def test_narrative_reflects_verbosity_and_matches_render_tree() -> None:
     app = _app()
     for e in SAMPLE:
         app.on_event(e)
-    full = "\n".join(render_tree(build_tree(SAMPLE), full=True, color=False, width=80))
-    lean = "\n".join(render_tree(build_tree(SAMPLE), full=False, color=False, width=80))
+    full = "\n".join(render_tree(build_tree(SAMPLE), full=True, color=False,
+                                 width=80, live_viewer=True))
+    lean = "\n".join(render_tree(build_tree(SAMPLE), full=False, color=False,
+                                 width=80, live_viewer=True))
     assert full != lean                       # the fixture distinguishes the modes
-    assert app.narrative() == full            # full=True initially
-    app.toggle_verbosity()
-    assert app.narrative() == lean
+    assert app.narrative() == lean            # full=False initially (lean default)
     app.toggle_verbosity()
     assert app.narrative() == full
+    app.toggle_verbosity()
+    assert app.narrative() == lean
 
 
 def test_status_line_is_hint_only_when_idle() -> None:
@@ -129,7 +131,7 @@ async def test_run_async_pageup_disengages_follow_and_ctrl_o_toggles() -> None:
         await app.run_async()
 
     assert app._viewport.follow is False      # PageUp disengaged auto-follow
-    assert app._full is False                 # Ctrl-O toggled verbosity
+    assert app._full is True                  # Ctrl-O toggled verbosity off the lean default
 
 
 @pytest.fixture
