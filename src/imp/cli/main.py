@@ -120,11 +120,6 @@ class SeedResolution(NamedTuple):
     seed_text: str | None
 
 
-def _is_readable_regular_file(path: str) -> bool:
-    p = Path(path)
-    return p.is_file() and os.access(p, os.R_OK)
-
-
 def _read_seed_file(path: str) -> str:
     p = Path(path)
     if not p.is_file():
@@ -144,22 +139,26 @@ def _build_seed(path: str, content: str) -> str:
 def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
     """Resolve the first-turn seed source for `imp new`.
 
-    Raises SeedError on a missing/unreadable --spec-file or combined seed
-    sources."""
-    title = args.title
+    A positional MESSAGE is the user's verbatim opening intent (delivered
+    unwrapped); --spec-file delivers a wrapped draft. The two are mutually
+    exclusive. Raises SeedError on a missing/unreadable --spec-file or combined
+    seed sources."""
+    title = getattr(args, "title", None)
+    opening = getattr(args, "opening", None)
     spec_file = getattr(args, "spec_file", None)
     message = getattr(args, "message", None)
 
     if spec_file is not None:
+        if opening is not None:
+            raise SeedError(
+                "a positional MESSAGE and --spec-file are mutually exclusive")
         if message is not None:
             raise SeedError("--spec-file and --message are mutually exclusive")
-        return SeedResolution(title, _build_seed(spec_file, _read_seed_file(spec_file)))
+        return SeedResolution(
+            title, _build_seed(spec_file, _read_seed_file(spec_file)))
 
-    if title is not None and _is_readable_regular_file(title):
-        if message is not None:
-            raise SeedError(
-                "a positional spec file and --message are mutually exclusive")
-        return SeedResolution(None, _build_seed(title, _read_seed_file(title)))
+    if opening is not None and opening.strip():
+        return SeedResolution(title, opening)
 
     return SeedResolution(title, None)
 
@@ -724,10 +723,13 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_header_line(change_id: str, title: str, marker: str, *, color: bool) -> str:
-    label = f": {title.strip()!r}" if title.strip() else ""
-    return (ansi(change_id, *pal.NODE_COLORS["workflow"], enabled=color)
-            + ansi(f"{label} · {marker}", "dim", enabled=color))
+def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> str:
+    from imp.cli.narrative import _slug_descriptor
+    token = change_row.resume_token(change_id)
+    display_slug = _slug_descriptor(slug)
+    tail = f" · {display_slug} · {marker}" if display_slug else f" · {marker}"
+    return (ansi(token, *pal.NODE_COLORS["workflow"], enabled=color)
+            + ansi(tail, "dim", enabled=color))
 
 
 def _rewind_note_line(from_step: str | None, target: str, *, color: bool) -> str:
@@ -876,7 +878,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(_run_header_line(
-                change.id, change.title, "new", color=should_use_color(sys.stdout)))
+                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
             non_interactive = bool(getattr(args, "non_interactive", False))
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
@@ -991,7 +993,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # so a resumed run opens like a fresh one. A title-less change defers
             # its header too (Option B), matching new.
             print(_run_header_line(
-                change.id, change.title, "resuming",
+                change.slug, change.id, "resuming",
                 color=should_use_color(sys.stdout)))
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
@@ -1593,12 +1595,13 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         print(f"Change {change_id} already gone; ensured branch imp/{change_id} is removed.")
         return 0
 
+    token = change_row.resume_token(change_id)
     do_prompt = not assume_yes and (
         _interactive() if interactive is None else interactive)
     if do_prompt:
         st = State.load(change.state_dir)
         n = worktree.commit_count(control, change_id, change.base_branch)
-        print(f"Abandon {change_id}: {change.title!r} "
+        print(f"Abandon {token}: {change.title!r} "
               f"(status {st.status}, {n} commit{'s' if n != 1 else ''})?")
         try:
             ans = input_fn(
@@ -1606,7 +1609,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         except EOFError:
             ans = ""
         if ans not in ("y", "yes"):
-            print(f"Abandon cancelled; {change_id} left intact.")
+            print(f"Abandon cancelled; {token} left intact.")
             return 1
 
     try:
@@ -1631,7 +1634,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
 
     worktree.remove_worktree(control, change_id, force=True)      # (d)
     worktree.delete_branch(control, change_id)                    # (e)
-    print(f"Abandoned {change_id}.")
+    print(f"Abandoned {token}.")
     return 0
 
 
@@ -1717,7 +1720,7 @@ def _cmd_config(args: argparse.Namespace) -> int:
 
 
 _OVERVIEW_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("new", "Start a new Change (optional title; opens with the spec-writer)."),
+    ("new", "Start a new Change (optional opening message; opens with the spec-writer)."),
     ("resume", "Continue an in-flight Change (the sole resumable one, else a picker)."),
     ("status", "List in-flight Changes (-a also shows completed and abandoned)."),
     ("log", "Show a Change's narrative as plain text."),
@@ -1766,8 +1769,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new = sub.add_parser(
         "new", help="Start a new Change: run the workflow from an opening intent.")
     p_new.add_argument(
-        "title", nargs="?",
-        help="Optional short title for the Change; the spec-writer names it if omitted.")
+        "opening", nargs="?", metavar="MESSAGE",
+        help="Opening intent handed verbatim to the spec-writer as its first "
+             "message; omit to start with an interactive prompt. Distinct from "
+             "--message, which is a headless reply to the first solicit.")
+    p_new.add_argument("--title", metavar="TEXT", default=None,
+                       help="Set the Change title explicitly; the spec-writer "
+                            "names the Change if omitted.")
     p_new.add_argument("--non-interactive", action="store_true",
                        help="Headless: no live prompt; supply the reply via --message.")
     p_new.add_argument("--message", metavar="TEXT", default=None,
@@ -1777,8 +1785,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--spec-file", metavar="PATH", default=None,
                        help="Seed the change from a draft spec file: its content "
                             "becomes the spec-writer's opening intent. A missing or "
-                            "unreadable PATH is a hard error (rc 2). May be combined "
-                            "with a positional name, but not with --message.")
+                            "unreadable PATH is a hard error (rc 2). Mutually "
+                            "exclusive with a positional MESSAGE and with --message.")
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
@@ -1814,7 +1822,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "Tip: imp log <id> --full | grep ... for line-oriented scripting."
         ),
     )
-    p_log.add_argument("token", nargs="?")
+    p_log.add_argument(
+        "token", nargs="?",
+        help="Change id or its short token (omit for the most recent Change).")
     p_log.add_argument(
         "--full", action="store_true",
         help="Render every event (no tool-burst collapse).",
