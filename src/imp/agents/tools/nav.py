@@ -141,7 +141,8 @@ def _compile_glob(pat: str) -> re.Pattern[str]:
     """ONE compiled union regex per grep call — never per candidate file.
     fnmatch.translate gives fnmatchCASE semantics (no os.path.normcase):
     case-sensitive, platform-independent, `*`/`**` cross `/`. Matched against
-    the worktree-relative POSIX path — NOT relative to grep's `path` arg."""
+    the worktree-relative POSIX path for in-worktree targets, or the absolute
+    path for external targets — NOT relative to grep's `path` arg."""
     return re.compile("|".join(
         "(?:" + fnmatch.translate(v) + ")" for v in _glob_variants(pat)))
 
