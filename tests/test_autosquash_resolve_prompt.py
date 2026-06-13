@@ -3,20 +3,26 @@ complete_step, point at the tree oracle, instruct to drive the rebase to complet
 and forbid aborting/skipping (which would fail the verify gate)."""
 from __future__ import annotations
 
+import pytest
 from pathlib import Path
 
 PROMPT = Path("src/imp/assets/workflows/default/agents/autosquash-resolve.md")
 
 
-def test_autosquash_resolve_prompt_contract() -> None:
+@pytest.mark.parametrize("needle,case_fold", [
+    ("complete_step", False),          # terminal contract
+    ("autosquash-before-tree", False), # names the oracle sentinel
+    ("rebase --continue", True),       # drive to completion
+    ("tree-preserving", True),         # the hard constraint
+    ("do not", True),                  # forbids aborting the fold
+    ("--abort", False),                # forbids aborting the fold
+    ("--skip", False),                 # forbids skipping a commit
+    ("GIT_EDITOR=true", False),        # must pin editor or wedge in editor-less envs
+    ("autosquash-before-head", False), # names the per-path content oracle
+    ("Error", False),                  # honest error reporting: status Error when unable
+    ("cannot", True),                  # honest error reporting: names inability
+])
+def test_autosquash_resolve_prompt_contract(needle: str, case_fold: bool) -> None:
     text = PROMPT.read_text()
-    low = text.lower()
-    assert "complete_step" in text                          # terminal contract
-    assert "autosquash-before-tree" in text                 # names the oracle sentinel
-    assert "rebase --continue" in low                       # drive to completion
-    assert "tree-preserving" in low                         # the hard constraint
-    assert "do not" in low and "--abort" in text            # forbids aborting the fold
-    assert "--skip" in text                                 # forbids skipping a commit
-    assert "GIT_EDITOR=true" in text                        # must pin editor or wedge in editor-less envs
-    assert "autosquash-before-head" in text                 # names the per-path content oracle
-    assert "Error" in text and "cannot" in low              # honest error reporting: status Error when unable
+    haystack = text.lower() if case_fold else text
+    assert needle in haystack
