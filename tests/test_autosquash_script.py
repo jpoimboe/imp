@@ -318,3 +318,56 @@ def test_autosquash_folds_squash_only_no_fixup(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert not any(
         s.startswith(("fixup!", "squash!", "amend!")) for s in _subjects(pr))
+
+
+def _build_plain_conflict(pr: Path) -> str:
+    """No integration merge in range. A target commit edits a.txt; an intervening
+    commit edits the SAME line; a fixup!->target edits it again. Autosquash reorders
+    the fixup under its target, which conflicts on the fold (and again when the
+    intervening commit replays). Returns the pre-autosquash HEAD sha."""
+    _init(pr)
+    _record_change(pr)
+    _git(pr, "checkout", "-b", "imp/x")
+    (pr / "a.txt").write_text("orig\n")
+    _git(pr, "add", "a.txt")
+    _git(pr, "commit", "-m", "target")
+    target = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    (pr / "a.txt").write_text("intervened\n")
+    _git(pr, "add", "a.txt")
+    _git(pr, "commit", "-m", "intervening")
+    (pr / "a.txt").write_text("fixed\n")
+    _git(pr, "add", "a.txt")
+    _git(pr, "commit", f"--fixup={target}")
+    return _git(pr, "rev-parse", "HEAD").stdout.strip()
+
+
+def test_plain_path_hands_off_conflict_with_exit_2(tmp_path: Path) -> None:
+    """A fixup that conflicts on reorder (no merge in range) is handed off: exit 2,
+    the rebase is left IN PROGRESS with unmerged paths (NOT aborted), and the
+    pre-autosquash HEAD + tree are persisted to the change-dir sentinels."""
+    pr = tmp_path / "wt"
+    before_head = _build_plain_conflict(pr)
+    before_tree = _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip()
+
+    result = _run(pr)
+    assert result.returncode == 2, result.stderr
+    rebase_dir = _git(pr, "rev-parse", "--git-path", "rebase-merge").stdout.strip()
+    assert (pr / rebase_dir).is_dir()                       # rebase left in progress
+    assert _git(pr, "ls-files", "-u").stdout.strip() != ""  # unmerged paths present
+    state = pr / ".imp" / "change" / "state"
+    assert (state / "autosquash-before-tree").read_text().strip() == before_tree
+    assert (state / "autosquash-before-head").read_text().strip() == before_head
+
+
+def test_plain_path_non_conflict_failure_exits_1(tmp_path: Path) -> None:
+    """A non-conflict rebase failure (a stale rebase-merge directory makes git
+    refuse to start the rebase: non-zero exit, NO unmerged paths) is a hard failure,
+    NOT a fold conflict — it exits 1 (routes to pause) and writes NO oracle sentinel."""
+    pr = tmp_path / "wt"
+    _build_plain_conflict(pr)
+    rebase_dir = _git(pr, "rev-parse", "--git-path", "rebase-merge").stdout.strip()
+    (pr / rebase_dir).mkdir(parents=True, exist_ok=True)    # stale: git will refuse
+
+    result = _run(pr)
+    assert result.returncode == 1, result.stderr
+    assert not (pr / ".imp" / "change" / "state" / "autosquash-before-tree").exists()

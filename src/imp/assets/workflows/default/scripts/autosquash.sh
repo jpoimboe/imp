@@ -159,6 +159,12 @@ if [ -n "$MERGE" ]; then
 fi
 
 # No integration merge in range: ordinary autosquash from the fork point.
+# Capture the pre-autosquash HEAD + tree BEFORE starting the rebase. A fixup! fold is
+# tree-preserving by definition, so these are the oracle the later autosquash-verify
+# step checks the agent's resolution against — and the HEAD it resets to on a pristine
+# abort. Persist them only when we actually hand off a conflict (exit 2).
+BEFORE=$(git rev-parse HEAD)
+BEFORE_TREE=$(git rev-parse "HEAD^{tree}")
 # GIT_SEQUENCE_EDITOR=true accepts the todo list --autosquash has already reordered
 # (fixups placed under their targets); GIT_EDITOR=true accepts the concatenated
 # message a squash! fold opens the editor for (else editor-less envs wedge).
@@ -169,7 +175,21 @@ if GIT_SEQUENCE_EDITOR=true GIT_EDITOR=true git rebase -i --autosquash "$FORK"; 
   fi
   echo "autosquash: folded fixups into their targets"
 else
+  # The rebase exited non-zero. Distinguish a genuine fold CONFLICT (agent-resolvable)
+  # from any other hard failure: a fold conflict has BOTH a rebase in progress AND
+  # unmerged paths. Anything else (abnormal leftover, refused start, an empty-commit
+  # stop) is a hard failure that must NOT burn an agent resolve loop.
+  if [ -d "$(git rev-parse --git-path rebase-merge)" ] && [ -n "$(git ls-files -u)" ]; then
+    # Fold conflict: hand off. Do NOT --abort; leave the rebase in progress with the
+    # conflict markers, exactly as integrate-merge.sh leaves a tree for the integrator.
+    mkdir -p .imp/change/state
+    printf '%s\n' "$BEFORE_TREE" > .imp/change/state/autosquash-before-tree
+    printf '%s\n' "$BEFORE" > .imp/change/state/autosquash-before-head
+    echo "autosquash: fixup fold conflicted; handing to autosquash-resolve (rebase left in progress)" >&2
+    exit 2
+  fi
+  # Hard failure: best-effort restore to pristine, then pause (unchanged behavior).
   git rebase --abort 2>/dev/null || true
-  echo "autosquash rebase conflicted; branch left intact for human resolution" >&2
+  echo "autosquash rebase failed with no resolvable fold conflict; branch left intact for human resolution" >&2
   exit 1
 fi
