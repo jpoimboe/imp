@@ -628,11 +628,11 @@ async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> No
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
     # The four new steps appear, in order, before summarizer.
-    for name in ("integrate-merge", "integrator", "integrate-tests", "integration-review"):
+    for name in ("integrate-merge", "integrator", "integrate-verify", "integration-review"):
         assert name in steps, f"{name} did not run"
     assert (steps.index("integrate-merge")
             < steps.index("integrator")
-            < steps.index("integrate-tests")
+            < steps.index("integrate-verify")
             < steps.index("integration-review")
             < steps.index("summarizer"))
 

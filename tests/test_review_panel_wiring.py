@@ -1,6 +1,6 @@
 """Per-plan review wiring: autosquash/stamp-trailers + a single merged `review`
 step (review-panel.md) run INSIDE the per-plan implement loop, followed by
-deferred-sweep + a post-sweep run-tests; the review phase begins with a trimmed
+deferred-sweep + a post-sweep sweep-verify; the review phase begins with a trimmed
 end-of-change integration pass gated on multi_plan. The standalone panel-gate/
 recheck steps are gone; the review step tiers internally on workflow vars
 (panel_done/fast_path/integration_pass), which is prose and dogfood-verified."""
@@ -38,9 +38,9 @@ def _steps(wf):
 def test_implement_phase_is_the_per_plan_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
-        "task-lead", "commit-check", "run-tests",
+        "task-lead", "commit-check", "verify",
         "autosquash", "autosquash-resolve", "autosquash-verify", "stamp-trailers",
-        "review", "deferred-sweep", "sweep-tests",
+        "review", "deferred-sweep", "sweep-verify",
         "fast-path-cycle-gate", "plan-cycle-check",
     ]
 
@@ -49,7 +49,7 @@ def test_review_phase_runs_integration_pass_then_merge() -> None:
     review = next(p for p in _wf().phases if p.name == "review")
     assert [s.name for s in review.steps][:6] == [
         "integration-gate", "integration-pass", "integration-sweep",
-        "integration-sweep-tests", "stamp-sweep-trailers", "integrate-merge",
+        "integration-sweep-verify", "stamp-sweep-trailers", "integrate-merge",
     ]
 
 
@@ -116,8 +116,8 @@ def test_deferred_sweep_step_then_sweep_tests() -> None:
     sweep = steps["deferred-sweep"]
     assert sweep.kind == "agent" and sweep.file.name == "deferred-sweep.md"
     assert any(r.mode == "allow" and "write" in r.operations for r in sweep.fs_permissions)
-    st = steps["sweep-tests"]
-    assert st.kind == "script" and st.command.endswith("run-tests.sh")
+    st = steps["sweep-verify"]
+    assert st.kind == "script" and st.command.endswith("run-verify.sh")
     assert isinstance(st.rules[-1].action, Goto)
     assert st.rules[-1].action.target == "deferred-sweep" and st.rules[-1].action.resume is True
 
@@ -155,8 +155,8 @@ def test_integration_pass_uses_review_panel_and_routes_task_gap() -> None:
 def test_integration_sweep_reuses_deferred_sweep_and_stamps() -> None:
     steps = _steps(_wf())
     assert steps["integration-sweep"].file.name == "deferred-sweep.md"
-    st = steps["integration-sweep-tests"]
-    assert st.command.endswith("run-tests.sh")
+    st = steps["integration-sweep-verify"]
+    assert st.command.endswith("run-verify.sh")
     assert st.rules[-1].action.target == "integration-sweep"
     stamp = steps["stamp-sweep-trailers"]
     assert stamp.kind == "script" and stamp.command.endswith("stamp-trailers.sh")
