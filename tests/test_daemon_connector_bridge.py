@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import socket
 import threading
 from pathlib import Path
@@ -46,18 +47,16 @@ def test_main_sends_hello_forwards_stdin_and_relays_reply(tmp_path: Path) -> Non
     t.start()
     try:
         out = io.StringIO()
-        # stdin EOFs after one event line, so main returns once forwarding is done.
-        rc = main(
-            env=_env(path),
-            stdin=io.StringIO('{"type": "agent_output", "payload": {"k": "v"}}\n'),
-            stdout=out,
-        )
+        r_fd, w_fd = os.pipe()
+        event_line = b'{"type": "agent_output", "payload": {"k": "v"}}\n'
+        os.write(w_fd, event_line)
+        os.close(w_fd)   # EOF after the one event line
+        with os.fdopen(r_fd) as stdin_pipe:
+            rc = main(env=_env(path), stdin=stdin_pipe, stdout=out)
         t.join(timeout=5)
         assert not t.is_alive(), "server thread did not finish in time"
         assert rc == 0
-        # The reply the daemon sent reached the Change via stdout.
         assert out.getvalue() == "do the thing\n"
-        # The hello frame named the Change, and the event was forwarded verbatim.
         assert parse_hello(received[0]) == ("2026-06-13-abc", "Add dark mode")
         assert received[1] == '{"type": "agent_output", "payload": {"k": "v"}}'
     finally:

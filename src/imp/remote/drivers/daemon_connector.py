@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import select
 import socket
 import sys
 import threading
@@ -23,9 +24,6 @@ def dial(path: str) -> socket.socket | None:
     return sock
 
 
-_JOIN_TIMEOUT = 5.0
-
-
 def _pump_socket_to_stdout(sock: socket.socket, stdout: Any) -> None:
     reader = sock.makefile("rb")
     try:
@@ -37,6 +35,34 @@ def _pump_socket_to_stdout(sock: socket.socket, stdout: Any) -> None:
     finally:
         with contextlib.suppress(OSError):
             reader.close()
+
+
+def _pump_stdin_to_sock(
+    sock: socket.socket, stdin_fd: int, cancel_r: int
+) -> None:
+    """Forward stdin lines to sock; exits when stdin closes or cancel_r becomes readable."""
+    buf = b""
+    try:
+        while True:
+            r, _, _ = select.select([stdin_fd, cancel_r], [], [])
+            if cancel_r in r:
+                break
+            if stdin_fd not in r:
+                continue
+            chunk = os.read(stdin_fd, 4096)
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                sock.sendall(line + b"\n")
+    except OSError:
+        pass
+    finally:
+        with contextlib.suppress(OSError):
+            sock.shutdown(socket.SHUT_WR)
+        with contextlib.suppress(OSError):
+            os.close(cancel_r)
 
 
 def main(
@@ -58,25 +84,25 @@ def main(
 
     change_id = env.get("IMP_REMOTE_CONTROL_CHANGE_ID", "")
     title = env.get("IMP_REMOTE_CONTROL_TITLE", "")
+    cancel_r, cancel_w = os.pipe()
     reader = threading.Thread(
         target=_pump_socket_to_stdout, args=(sock, stdout), daemon=True
     )
-    reader_started = False
+    writer = threading.Thread(
+        target=_pump_stdin_to_sock, args=(sock, stdin.fileno(), cancel_r), daemon=True
+    )
     try:
         sock.sendall((make_hello(change_id, title) + "\n").encode("utf-8"))
         reader.start()
-        reader_started = True
-        for line in stdin:
-            if not line.endswith("\n"):
-                line += "\n"
-            sock.sendall(line.encode("utf-8"))
+        writer.start()
+        reader.join()  # return when socket closes (daemon crash or normal shutdown)
     except OSError:
         pass
     finally:
         with contextlib.suppress(OSError):
-            sock.shutdown(socket.SHUT_WR)
-        if reader_started:
-            reader.join(timeout=_JOIN_TIMEOUT)
+            os.close(cancel_w)  # wake the writer; writer closes cancel_r
+        with contextlib.suppress(OSError):
+            os.close(cancel_r)  # guard: close if writer never ran or already closed by writer
         with contextlib.suppress(OSError):
             sock.close()
     return 0
