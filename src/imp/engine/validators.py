@@ -359,5 +359,6 @@ def _v_no_wait_for_user_in_parallel_dispatchable(
                     f"`subagents:` list) and declares 'wait_for_user'; a batched "
                     f"subagent cannot pause the run",
                     adef.source,
+                    hint="remove 'wait_for_user' from tools, or make the subagent sequential",
                 )
             )

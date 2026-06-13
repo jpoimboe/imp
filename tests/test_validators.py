@@ -617,6 +617,26 @@ def test_top_level_wait_for_user_agent_not_dispatched_is_allowed(tmp_path: Path)
     load_workflow(wf)  # must not raise
 
 
+def test_dual_role_agent_as_step_and_subagent_with_wait_for_user_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s1
+                file: agents/waiter.md
+              - name: s2
+                file: agents/lead.md
+        """, agents={"lead": _LEAD_WITH_WAITER_SUB, "waiter": _WAITER_SUBAGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert any(
+        "waiter" in str(e) and "wait_for_user" in str(e)
+        for e in ei.value.errors
+    )
+
+
 def test_resume_in_defaults_on_max_retries_to_non_agent_is_rejected(tmp_path: Path) -> None:
     wf = _wf(tmp_path, """\
         name: t
