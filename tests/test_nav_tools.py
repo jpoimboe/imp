@@ -143,7 +143,7 @@ def test_glob_aborts_promptly_on_pause(tmp_path: Path) -> None:
     assert ei.value.reason == "interrupted"
 
 
-# --- Containment / escape-guard tests (Task A2, spec H1) ---
+# --- Reachability-parity tests ---
 
 from imp.agents.permissions import PermissionDenied  # noqa: E402
 from imp.engine.sandbox import SandboxPolicy  # noqa: E402
@@ -171,18 +171,23 @@ def _policy(
     )
 
 
-def test_grep_rejects_parent_escape(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        anyio.run(get_registry()["grep"].async_invoke, ctx,
-                  {"pattern": "root", "path": "../../etc"})
+def test_grep_external_accepted_when_policy_inactive(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    ext = tmp_path / "ext"; ext.mkdir()
+    (ext / "n.txt").write_text("needle here\n")
+    ctx = _ctx(wt)                             # no sandbox_policy → external accepted
+    out = _grep(ctx, pattern="needle", path=str(ext), output_mode="content")
+    assert (ext / "n.txt").as_posix() in out   # absolute-form path in output
 
 
-def test_grep_rejects_absolute_project_escape(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
+def test_grep_external_masked_target_denied_when_policy_active(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    secret = tmp_path / "secret"; secret.mkdir()
+    (secret / "id_rsa").write_text("KEY\n")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
     with pytest.raises(PermissionDenied):
-        anyio.run(get_registry()["grep"].async_invoke, ctx,
-                  {"pattern": "root", "path": "/project/../../etc"})
+        _grep(ctx, pattern="KEY", path=str(secret))
 
 
 def test_glob_default_path_is_relative(tmp_path: Path) -> None:

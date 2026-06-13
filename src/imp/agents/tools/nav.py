@@ -196,13 +196,13 @@ async def grep(
     # effective context is max(side, context).
     eff_before = max(before, context)
     eff_after = max(after, context)
-    ctx.check_fs_permission("read", path)
-    target = ctx.resolve_path_strict(path)
+    target = ctx.authorize_fs(("read",), path)
     # A typo'd/stale path — or a fifo/socket/device — must not read as
     # "searched, nothing found".
     if not (target.is_file() or target.is_dir()):
         raise FileNotFoundError(f"no such path: {path}")
     root = ctx.project_root.resolve()
+    inside = target.is_relative_to(root)
     rgx = re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
@@ -232,8 +232,8 @@ async def grep(
         if capped or limit_hit:
             break
         await tool_checkpoint(coordinator, deadline)
-        rel_str = f.relative_to(root).as_posix()
-        if glob_rx is not None and glob_rx.match(rel_str) is None:
+        disp = f.relative_to(root).as_posix() if inside else f.as_posix()
+        if glob_rx is not None and glob_rx.match(disp) is None:
             continue  # applies uniformly — including when path names one file
         try:
             text, read_truncated = await read_text_capped(
@@ -248,21 +248,21 @@ async def grep(
             # read is already paid). A LISTED truncated file resolved itself;
             # an UNLISTED one is a potential false negative — note it.
             if any(rgx.search(line) for line in lines):
-                capped = emit(rel_str)
+                capped = emit(disp)
                 result_rows += 1
                 if head_limit is not None and result_rows >= head_limit:
                     limit_hit = True  # the row IS the block: stop scanning
             elif cap_truncated:
-                notes.append(f"[{rel_str}: scanned first 5 MB only]")
+                notes.append(f"[{disp}: scanned first 5 MB only]")
         elif output_mode == "count":
             n = sum(1 for line in lines if rgx.search(line))
             if n:  # non-zero rows only (ripgrep -c, not GNU grep's path:0 flood)
-                capped = emit(f"{rel_str}:{n}")
+                capped = emit(f"{disp}:{n}")
                 result_rows += 1
                 if head_limit is not None and result_rows >= head_limit:
                     limit_hit = True
             if cap_truncated:  # the count is a lower bound — always note
-                notes.append(f"[{rel_str}: scanned first 5 MB only]")
+                notes.append(f"[{disp}: scanned first 5 MB only]")
         else:  # content
             match_idxs = [i for i, line in enumerate(lines, start=1)
                           if rgx.search(line)]
@@ -274,7 +274,7 @@ async def grep(
                     if head_limit is not None and result_rows >= head_limit:
                         limit_hit = True
                         break
-                    capped = emit(f"{rel_str}:{m}:{truncate_line(lines[m - 1])}")
+                    capped = emit(f"{disp}:{m}:{truncate_line(lines[m - 1])}")
                     result_rows += 1
                     if capped:
                         break
@@ -312,7 +312,7 @@ async def grep(
                         # Context rows share the match rows' per-line cap —
                         # an uncapped 2 MB neighbor would eat the whole
                         # 50 KB budget as one row.
-                        capped = emit(f"{rel_str}{sep}{ln}{sep}{truncate_line(lines[ln - 1])}")
+                        capped = emit(f"{disp}{sep}{ln}{sep}{truncate_line(lines[ln - 1])}")
                         if capped:
                             break
                     # result_rows counts matches whose block BEGAN emitting
@@ -324,7 +324,7 @@ async def grep(
                         break
             if cap_truncated and not capped:
                 # Inline (as today), own bracketed line in every mode.
-                capped = emit(f"[{rel_str}: scanned first 5 MB only]")
+                capped = emit(f"[{disp}: scanned first 5 MB only]")
             if head_limit is not None and result_rows >= head_limit:
                 limit_hit = True  # end-of-file boundary: the row checks above
                 # only run for files WITH matches — without this, a limit
