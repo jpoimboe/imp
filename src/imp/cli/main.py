@@ -724,7 +724,10 @@ def _verify_command_nudge(
             f"verify_command in {project_file} to gate regressions in-loop.")
         return
     chosen = resolve_verify_choice(suggested, input_fn, output_fn)
+    existing = project_file.read_text()
     with project_file.open("a") as f:
+        if existing and not existing.endswith("\n"):
+            f.write("\n")
         f.write(format_verify_command_yaml(chosen))
 
 
