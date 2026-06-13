@@ -73,6 +73,11 @@ def test_resolve_no_args_is_empty() -> None:
     assert res == cli_main.SeedResolution(title=None, seed_text=None)
 
 
+def test_resolve_whitespace_only_positional_is_empty() -> None:
+    res = cli_main.resolve_spec_seed(_new_args(opening="   "))
+    assert res == cli_main.SeedResolution(title=None, seed_text=None)
+
+
 def test_resolve_positional_and_spec_file_mutually_exclusive(
         tmp_path: Path) -> None:
     draft = tmp_path / "draft.md"

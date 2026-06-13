@@ -157,7 +157,7 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
         return SeedResolution(
             title, _build_seed(spec_file, _read_seed_file(spec_file)))
 
-    if opening is not None:
+    if opening is not None and opening.strip():
         return SeedResolution(title, opening)
 
     return SeedResolution(title, None)
