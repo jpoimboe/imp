@@ -130,3 +130,25 @@ def test_inmemory_matches_jsonl_shape(tmp_path: Path) -> None:
     jl_ev = next(iter(jl.read()))
     assert set(mem_ev) == set(jl_ev)
     assert mem_ev["type"] == jl_ev["type"] == "step_context"
+
+
+def test_append_tool_result_stamps_id_ns_when_provided() -> None:
+    # AC38 (plumbing): the optional id_ns keyword stamps the tool_result payload;
+    # omitting it leaves the payload shape unchanged (no "id_ns" key) so legacy
+    # and non-task results stay byte-identical.
+    from imp.agents.runner import ToolResultBlock
+    from imp.engine.state import InMemoryEventLog
+
+    elog = InMemoryEventLog()
+    elog.append_tool_result(
+        agent_id="step:p/s",
+        block=ToolResultBlock("b1", '{"status":"Success"}', is_error=False),
+        id_ns="block")
+    elog.append_tool_result(
+        agent_id="step:p/s",
+        block=ToolResultBlock("b2", "ok", is_error=False))
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    by_id = {e["payload"]["id"]: e["payload"] for e in results}
+    assert by_id["b1"]["id_ns"] == "block"      # stamped
+    assert "id_ns" not in by_id["b2"]           # omitted → absent, not None

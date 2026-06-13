@@ -26,7 +26,7 @@ from typing import Any, cast
 import anyio
 
 from imp.agents.classify import ResumeState, classify_resume
-from imp.agents.dispatch import TurnState, dispatch_one_tool_use
+from imp.agents.dispatch import TurnState, dispatch_turn_tool_uses
 from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
 from imp.agents.runner import (
     AgentInvocation,
@@ -629,6 +629,11 @@ class OpenAIAgentRunner:
                         tools=openai_tools,
                         store=False,
                         prompt_cache_key=prompt_cache_key,
+                        # §4: enable parallel tool calls so multiple `task` tus can
+                        # arrive in one turn. Tools stay strict:True; the weakened
+                        # parallel-turn schema guarantee is backstopped by imp's
+                        # invoke-time arg validation (is_error on malformed input).
+                        parallel_tool_calls=True,
                     )
             finally:
                 # N3: reset even on a genuine API error so a later interrupt()
@@ -707,20 +712,18 @@ class OpenAIAgentRunner:
 
             tool_results: list[ToolResultBlock] = []
             turn = TurnState(tool_calls_used=tool_calls_used)
-            for tu in tool_uses:
-                terminal = await dispatch_one_tool_use(
+            # §1: ALL `task` tus fan out concurrently as one batch at the first
+            # task position; non-task tus stay strict sequential document-order.
+            # The turn dispatcher yields one tool_heartbeat per processed tu and
+            # any terminal event (yield it and stop); SubagentSuspended /
+            # AwaitingUserInput propagate (terminal — no heartbeat).
+            async for ev in dispatch_turn_tool_uses(
                     ctx=ctx, elog=elog, aid=aid, invocation=invocation,
-                    tools=tools, tu=tu, tool_results=tool_results,
-                    state=turn, ceiling=ceiling)
-                if terminal is not None:
-                    yield terminal
-                    return
-                # Heartbeat contract (pinned): exactly one per tool_use
-                # processed that does not terminate the invocation — uniform
-                # across all arms (dispatch success, is_error, task, unknown
-                # tool, ceiling backfill). Terminal arms end the generator and
-                # never reach this yield.
-                yield {"type": "tool_heartbeat", "payload": {}}
+                    tools=tools, tool_uses=tool_uses, tool_results=tool_results,
+                    state=turn, ceiling=ceiling):
+                yield ev
+                if ev.get("type") != "tool_heartbeat":
+                    return  # terminal event already yielded; stop the loop
             tool_calls_used = turn.tool_calls_used
             ceiling_tripped = turn.ceiling_tripped
 

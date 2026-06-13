@@ -117,3 +117,22 @@ def test_implementer_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
     # standard path: TDD skill loaded; fast-path constraints absent.
     assert "test-driven-development" in slow
     assert "do **not** create or modify tests" not in slow
+
+
+def test_events_render_skips_torn_trailing_line(tmp_path: Path) -> None:
+    """AC7: torn trailing events-file line is skipped; prior good event still renders."""
+    path = tmp_path / "events.jsonl"
+    log = _log(
+        path,
+        [
+            ("step_started", {"step": "spec-writer"}),
+            ("agent_output", {"status": "Success", "summary": "good"}),
+        ],
+    )
+    # Simulate a crash mid-append: a partial JSON line, no trailing newline.
+    with path.open("a") as f:
+        f.write('{"type": "agent_output", "payload": {"summa')
+    ctx = build_context(change_slug="t", change_title="t", event_log=log)
+    assert render_prompt(
+        "Prev: {{ events['spec-writer'].summary }}", ctx,
+    ) == "Prev: good"

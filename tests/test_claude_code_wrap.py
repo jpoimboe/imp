@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.parallel import reset_parallelism_cache
 from imp.agents.runner import ChangeContext
 from imp.agents.tools.complete_step import make_complete_step_tool
 from imp.agents.tools.context import ToolContext
@@ -40,7 +41,7 @@ def _ctx(tmp_path: Path) -> ToolContext:
     return ctx
 
 
-def _passthrough_decorator(name: str, description: str, schema):  # type: ignore[no-untyped-def]
+def _passthrough_decorator(name, description, schema, annotations=None):  # type: ignore[no-untyped-def]
     """Stub `claude_agent_sdk.tool` — returns the function unchanged."""
     def _inner(fn):  # type: ignore[no-untyped-def]
         fn.__sdk_tool_name__ = name  # marker for assertions
@@ -283,3 +284,312 @@ async def test_wrapper_sweeps_bg_on_every_dispatch(
     out = await wrapped({"path": "f.txt"})
     assert "data" in out["content"][0]["text"]
     assert calls["n"] == 1
+
+
+def test_cc_task_tool_annotated_readonly_when_parallel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC23: claude_code wraps `task` with ToolAnnotations(readOnlyHint=True) via the
+    real claude_agent_sdk.tool annotations= parameter, at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is not None
+        assert wrapped.annotations.readOnlyHint is True
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_non_task_tool_not_annotated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC23: ONLY `task` is annotated — read_file wraps with annotations=None."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.tools import get_registry
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "read_file", get_registry()["read_file"], _ctx(tmp_path),
+            _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_task_annotation_dropped_by_kill_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC21 (bridge half): IMP_MAX_PARALLEL_TASKS=1 drops the readOnlyHint at the
+    claude_code registration site."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.setenv("IMP_MAX_PARALLEL_TASKS", "1")
+    reset_parallelism_cache()
+    try:
+        wrapped = _wrap_one(
+            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def test_cc_task_annotation_derived_from_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AC23: the annotation is DERIVED from the allowlist-mode flag, not hardcoded —
+    flip CLAUDE_CODE_ALLOWLIST_MODE off and the hint disappears even at width > 1."""
+    from claude_agent_sdk import tool as sdk_tool
+
+    from imp.agents.subagents import make_task_tool
+    monkeypatch.delenv("IMP_MAX_PARALLEL_TASKS", raising=False)
+    reset_parallelism_cache()
+    monkeypatch.setattr(
+        "imp.providers.claude_code.CLAUDE_CODE_ALLOWLIST_MODE", False)
+    try:
+        wrapped = _wrap_one(
+            "task", make_task_tool(), _ctx(tmp_path), _RunState(), sdk_tool)
+        assert wrapped.annotations is None
+    finally:
+        reset_parallelism_cache()
+
+
+def _sub_def() -> AgentDef:
+    return AgentDef(
+        name="sub", description="", tools=frozenset({"complete_step"}),
+        subagents=(),
+        output_schema=OutputSchema(
+            fields=(OutputField(name="status", type="enum",
+                                values=("Success", "Error"), required=True),),
+            source=SourceLoc(file=Path("sub.md"), line=1)),
+        prompt_template_source="hi", source_path=Path("sub.md"),
+        source=SourceLoc(file=Path("sub.md"), line=1))
+
+
+@pytest.mark.anyio
+async def test_wrap_task_success_result_stamps_id_ns_block(tmp_path: Path) -> None:
+    # AC38 (production): _impl's canonical SUCCESS task tool_result (keyed on the
+    # minted non-empty block id) stamps id_ns="block".
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _FakeRunner:
+        async def run(self, inv):
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _FakeRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+    assert json.loads(out["content"][0]["text"]) == {"status": "Success"}
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is False
+    assert results[0]["payload"]["id_ns"] == "block"
+
+
+@pytest.mark.anyio
+async def test_wrap_task_error_result_stamps_id_ns_block(tmp_path: Path) -> None:
+    # AC38 (production): _impl's error-close task tool_result (dispatch raises an
+    # ordinary exception) also stamps id_ns="block" on the same minted block id.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    class _BoomRunner:
+        async def run(self, inv):
+            raise ValueError("kaboom")
+            yield  # pragma: no cover  (make it an async generator)
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _BoomRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                         "__tool_use_id__": ""})
+    assert out.get("isError") is True
+
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert results[0]["payload"]["error"] is True
+    assert results[0]["payload"]["id_ns"] == "block"
+
+
+@pytest.mark.anyio
+async def test_impl_inflight_counter_peaks_at_one_then_drains(tmp_path: Path) -> None:
+    # AC26: the inflight counter is 1 WHILE dispatch_task is awaiting and 0 after it
+    # returns. A slow fake spawn lets us observe the in-flight value mid-dispatch.
+    import anyio
+
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.event_log = InMemoryEventLog()
+
+    observed: dict[str, int] = {}
+
+    class _SlowRunner:
+        async def run(self, inv):
+            observed["during"] = state.inflight_task_dispatches
+            await anyio.sleep(0)
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _SlowRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    assert state.inflight_task_dispatches == 0      # before
+    await wrapped({"subagent_name": "sub", "task_description": "do",
+                  "__tool_use_id__": ""})
+    assert observed["during"] == 1                  # incremented around the await
+    assert state.inflight_task_dispatches == 0      # decremented in finally
+
+
+@pytest.mark.anyio
+async def test_impl_inflight_counter_decrements_on_dispatch_error(tmp_path: Path) -> None:
+    # AC26: a dispatch that raises an ordinary exception still decrements the counter
+    # (finally on the error path) — the degraded is_error response is returned.
+    from imp.agents.subagents import make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    ctx.event_log = InMemoryEventLog()
+
+    class _BoomRunner:
+        async def run(self, inv):
+            raise ValueError("kaboom")
+            yield  # pragma: no cover
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _BoomRunner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                        "__tool_use_id__": ""})
+    assert out.get("isError") is True
+    assert state.inflight_task_dispatches == 0      # decremented despite the raise
+
+
+@pytest.mark.anyio
+async def test_impl_refuses_task_when_membership_frozen(tmp_path: Path) -> None:
+    # AC29 (claude_code): with awaiting_user already set, a NEW task is refused
+    # WITHOUT dispatch — _impl emits the bare TASK_REFUSAL_SENTINEL as the minted
+    # fold-closing is_error result and returns it, producing exactly one
+    # tool_call + sentinel tool_result pair.
+    from imp.agents.subagents import TASK_REFUSAL_SENTINEL, make_task_tool
+    from imp.engine.state import InMemoryEventLog
+
+    ctx = _ctx(tmp_path)
+    ctx.subagent_defs = {"sub": _sub_def()}
+    ctx.parent_transcript_dir = tmp_path / "parent"
+    elog = InMemoryEventLog()
+    ctx.event_log = elog
+
+    spawned = {"n": 0}
+
+    class _Runner:
+        async def run(self, inv):
+            spawned["n"] += 1
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+        async def interrupt(self) -> None: ...
+
+    async def fake_spawn(_inv: object) -> object:
+        return _Runner()
+
+    ctx.coordinator = None
+    ctx.spawn_subagent = fake_spawn
+    state = _RunState()
+    state.agent_id = "step:p/task-lead"
+    state.awaiting_user = True       # membership frozen by a prior wait_for_user
+
+    wrapped = _wrap_one("task", make_task_tool(), ctx, state, _passthrough_decorator)
+    out = await wrapped({"subagent_name": "sub", "task_description": "do",
+                        "__tool_use_id__": ""})
+
+    assert spawned["n"] == 0                                    # never dispatched
+    assert out.get("isError") is True
+    assert out["content"][0]["text"] == TASK_REFUSAL_SENTINEL   # bare, unwrapped
+    calls = [e for e in elog.read() if e["type"] == "tool_call"]
+    results = [e for e in elog.read() if e["type"] == "tool_result"]
+    assert len(calls) == 1 and len(results) == 1               # one pair
+    assert results[0]["payload"]["content"] == TASK_REFUSAL_SENTINEL
+    assert results[0]["payload"]["error"] is True
+    assert results[0]["payload"]["id_ns"] == "block"
+    assert state.inflight_task_dispatches == 0                 # finally still ran
+
+
+@pytest.mark.anyio
+async def test_impl_raises_when_dispatched_off_the_runner_loop(
+        tmp_path: Path) -> None:
+    # AC34: _impl raises if it runs on a loop other than the one the runner
+    # recorded (state.runner_loop). A production check, exercised by setting a
+    # mismatched runner_loop.
+    import asyncio
+
+    from imp.agents.subagents import make_task_tool
+
+    foreign = asyncio.new_event_loop()
+    try:
+        ctx = _ctx(tmp_path)
+        ctx.subagent_defs = {"sub": _sub_def()}
+        ctx.parent_transcript_dir = tmp_path / "parent"
+        state = _RunState()
+        state.agent_id = "step:p/task-lead"
+        state.runner_loop = foreign      # not the loop this test runs on
+        wrapped = _wrap_one("task", make_task_tool(), ctx, state,
+                            _passthrough_decorator)
+        with pytest.raises(RuntimeError, match="runner loop"):
+            await wrapped({"subagent_name": "sub", "task_description": "do",
+                          "__tool_use_id__": ""})
+    finally:
+        foreign.close()
