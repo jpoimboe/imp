@@ -1125,3 +1125,57 @@ def test_near_duplicate_narration_held_and_deduped_live() -> None:
     assert full.count("No findings.") == 1
     # Live and log must be byte-identical (parity invariant).
     assert body == _render_body(events)
+
+
+def test_interleaved_narration_does_not_permanently_hold_live_cursor() -> None:
+    """Regression: a narration block followed by a thinking/tool turn and THEN a
+    second narration must not stay `held` forever and freeze the live emit cursor.
+
+    The opening narration of imp's first step ("I'll start by asking...") is held
+    so a trailing narration can fold into the step conclusion. The un-hold used to
+    only target `_last_narration_index`, which scans past trailing ToolBurstFold
+    nodes ONLY — so a ThinkingFold / UserMessageNode between two narrations made it
+    return None and the earlier narration was never un-held. A held node blocks the
+    live walk, so the FIRST stuck-held narration froze the whole run at step one
+    (no steps rendered beyond the opener until finish() force-flushed). Replays
+    WITHOUT finish() to assert the real-time (mid-run) view, not the flushed one.
+    """
+    events = [
+        ev("1", "change_created", change_id=1, title="x"),
+        ev("2", "step_started", step="spec-writer", kind="agent", phase="spec",
+           model="m", provider="anthropic"),
+        # First narration — held.
+        ev("3", "llm_response", agent_id="step:spec/spec-writer",
+           raw={"content": [{"type": "text", "text": "First narration."}]}),
+        # A thinking turn + a tool burst separate it from the next narration —
+        # exactly what `_last_narration_index` cannot scan past.
+        ev("4", "thinking", agent_id="step:spec/spec-writer", content="hmm"),
+        ev("5", "tool_call", agent_id="step:spec/spec-writer", id="b1",
+           name="grep", input={"q": "x"}),
+        ev("6", "tool_result", agent_id="step:spec/spec-writer", id="b1",
+           content="ok"),
+        # Second narration — the new trailing block; must un-hold the first.
+        ev("7", "llm_response", agent_id="step:spec/spec-writer",
+           raw={"content": [{"type": "text", "text": "Second narration."}]}),
+        ev("8", "tool_call", agent_id="step:spec/spec-writer", id="cs1",
+           name="complete_step", input={"status": "Success"}),
+        ev("9", "tool_result", agent_id="step:spec/spec-writer", id="cs1",
+           content="ok"),
+        ev("10", "agent_output", agent_id="step:spec/spec-writer", status="Success"),
+        ev("11", "step_completed", step="spec-writer", kind="agent",
+           action={"verb": "continue"}, var_mutations={}),
+        # A SECOND step. Before the fix its header never rendered live because the
+        # held opening narration blocked the cursor.
+        ev("12", "step_started", step="plan-writer", kind="agent", phase="plan",
+           model="m", provider="anthropic"),
+        ev("13", "llm_response", agent_id="step:plan/plan-writer",
+           raw={"content": [{"type": "text", "text": "Planning."}]}),
+    ]
+    drv, out = _driver()
+    for e in events:
+        drv.on_event(e)
+    # NO finish(): assert the LIVE, mid-run state.
+    body = out.getvalue()
+    assert "First narration." in body          # the opener un-held and emitted
+    assert "spec-writer complete" in body       # step one concluded live
+    assert "plan-writer" in body                # step two rendered live (not frozen)
