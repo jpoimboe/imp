@@ -18,4 +18,6 @@ def make_hello(change_id: str, title: str) -> str:
 def parse_hello(line: str) -> tuple[str, str]:
     """Recover (change_id, title) from a hello line (newline already stripped)."""
     obj = json.loads(line)
+    if obj.get("type") != "hello":
+        raise ValueError(f"expected hello frame, got {obj.get('type')!r}")
     return obj["change_id"], obj["title"]

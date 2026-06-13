@@ -29,3 +29,10 @@ def test_parse_hello_tolerates_empty_title() -> None:
 
 def test_parse_hello_works_on_literal_json() -> None:
     assert parse_hello('{"type": "hello", "change_id": "x", "title": "y"}') == ("x", "y")
+
+
+def test_parse_hello_raises_on_wrong_type() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="expected hello frame"):
+        parse_hello('{"type": "bye", "change_id": "x", "title": "t"}')
