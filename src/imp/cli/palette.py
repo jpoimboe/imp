@@ -108,7 +108,7 @@ def active_theme() -> str:
     return _active_theme
 
 
-def ansi(text: str, *codes: str, enabled: bool) -> str:
+def ansi(text: str, *codes: str, enabled: bool = True) -> str:
     if not enabled or not codes:
         return text
     prefix = "".join(_ANSI[c] for c in codes)

@@ -32,10 +32,10 @@ def _layer(src_file: Path) -> str:
 
 
 _LAYER_COLOR = {
-    "default": "gray",
+    "default": "dim",
     "user": "cyan",
     "local": "yellow",
-    "project": "magenta",
+    "project": "green",
 }
 
 
@@ -105,9 +105,9 @@ def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool 
          prov.get(("tiers", tier, vendor), FLOOR_SRC).file)
         for vendor in sorted(cfg.tiers[tier])
     ]
-    differ = len({src_file for _, _, src_file in rows}) > 1
     for vendor, value, src_file in rows:
-        label = _label(src_file)
-        if color and differ:
-            label = pal.ansi(label, _LAYER_COLOR[_layer(src_file)], enabled=color)
-        out.write(f"  {vendor:<28} {value:<24} ← {label}\n")
+        annotation = f"← {_label(src_file)}"
+        if color:
+            annotation = pal.ansi(
+                annotation, _LAYER_COLOR[_layer(src_file)])
+        out.write(f"  {vendor:<28} {value:<24} {annotation}\n")
