@@ -198,21 +198,6 @@ def make_seed_reply_fn(
     return _reply
 
 
-def make_seed_gate(
-    seed: str,
-) -> Callable[[Callable[[], Awaitable[str]]], Awaitable[str]]:
-    delivered = False
-
-    async def _apply(fallback: Callable[[], Awaitable[str]]) -> str:
-        nonlocal delivered
-        if not delivered:
-            delivered = True
-            return seed
-        return await fallback()
-
-    return _apply
-
-
 def _maybe_build_channel(change: Change) -> RemoteChannel | None:
     """Build a RemoteChannel iff a `remote.driver` is configured, else None (imp
     behaves exactly as today). Title is captured at run start. A bad config is
@@ -494,7 +479,7 @@ async def _run_change_session(
     non_interactive: bool,
     tg: Any,
     channel: Any = None,
-    seed_gate: Callable[[Callable[[], Awaitable[str]]], Awaitable[str]] | None = None,
+    seed_opening: str | None = None,
 ) -> int:
     """The shared run+handle block for `new`/`resume`, wrapped in the §2 session
     loop: a user-interrupt pause (ESC / Ctrl-C) re-prompts in place instead of
@@ -529,6 +514,7 @@ async def _run_change_session(
         reader_armed = (
             bool(esc_reader and esc_reader._armed) if not non_interactive else False)
         result: RunResult | None = None
+        seed_opening_pending = seed_opening
         while True:
             run_scope_holder["scope"] = anyio.CancelScope()
             try:
@@ -539,14 +525,6 @@ async def _run_change_session(
                     _reply: Callable[[], Awaitable[str]] = effective_reply_fn(
                         reply_input_fn, channel, non_interactive=non_interactive)
 
-                    if seed_gate is not None:
-                        def _gated(
-                            _src: Callable[[], Awaitable[str]] = _reply,
-                        ) -> Awaitable[str]:
-                            return seed_gate(_src)
-
-                        _reply = _gated
-
                     def _chat(
                         _q: object,
                         _fn: Callable[[], Awaitable[str]] = _reply,
@@ -556,7 +534,9 @@ async def _run_change_session(
                     result = await run_change(
                         change, on_event=run_on_event,
                         user_chat_input_fn=_chat,
-                        coordinator=coord, non_interactive=non_interactive)
+                        coordinator=coord, non_interactive=non_interactive,
+                        seed_opening=seed_opening_pending)
+                    seed_opening_pending = None
             except EOFError:
                 return _finalize_paused_exit(change, driver, coord, "ctrl-d")
             except KeyboardInterrupt:
@@ -940,10 +920,6 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                 _router, reply_input_fn = _build_interactive_input(
                     change, status, coord, esc_reader, driver)
 
-            seed_gate = (
-                make_seed_gate(seed.seed_text)
-                if seed.seed_text is not None else None)
-
             try:
                 with _benign_interrupt_loop_handler(coord):
                     async with anyio.create_task_group() as tg:
@@ -960,7 +936,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                             change, coord=coord, driver=driver, status=status,
                             esc_reader=esc_reader, reply_input_fn=reply_input_fn,
                             non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_gate=seed_gate)
+                            seed_opening=seed.seed_text)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -1129,7 +1105,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
                             change, coord=coord, driver=driver, status=status,
                             esc_reader=esc_reader, reply_input_fn=reply_input_fn,
                             non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_gate=None)
+                            seed_opening=None)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
