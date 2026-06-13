@@ -50,8 +50,8 @@ class SouthHub:
                 json.JSONDecodeError, KeyError, ValueError):
             pass
         finally:
-            if change_id is not None:
-                self._conns.pop(change_id, None)
+            if change_id is not None and self._conns.get(change_id) is stream:
+                self._conns.pop(change_id)
             await stream.aclose()
 
     async def send_reply(self, change_id: str, text: str) -> bool:
