@@ -22,9 +22,9 @@ def _steps(wf):
 
 # All declared workflow vars at their defaults — a realistic evaluate_rules env.
 _BASE_VARS = {
-    "ready_to_merge": False, "final_review": True, "fast_path": False,
+    "fast_path": False,
     "spec_minors_integrated": False, "plan_minors_integrated": False,
-    "panel_done": False, "integration_needs_review": False,
+    "panel_done": False,
     "spec_confirm": True, "spec_unseen_changes": False,
 }
 

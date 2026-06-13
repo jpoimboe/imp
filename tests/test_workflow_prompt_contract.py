@@ -10,7 +10,7 @@ AGENTS_DIR = Path("src/imp/assets/workflows/default/agents")
 SUBAGENT_FILES = ["implementer.md", "quality-reviewer.md"]
 # Interactive STEPS: the executor wires their resume hooks, so a turn-ending
 # question is correct for them. Exempt from the no-bare-question rule.
-INTERACTIVE_STEP_FILES = ["spec-writer.md", "final-review.md"]
+INTERACTIVE_STEP_FILES = ["spec-writer.md", "finalize.md"]
 
 SKILLS_DIR = Path("src/imp/assets/workflows/default/skills")
 
@@ -80,7 +80,7 @@ def test_spec_writer_infers_intent_from_pasted_context() -> None:
 
 TURN_TERMINAL_REVIEWERS = [
     "code-reviewer.md", "quality-reviewer.md", "plan-reviewer.md",
-    "spec-reviewer.md", "integration-reviewer.md", "completeness-slice.md",
+    "spec-reviewer.md", "completeness-slice.md",
     "boundaries-slice.md", "spec-compliance-slice.md", "plan-cycle-check.md",
     "review-panel.md",
 ]
@@ -165,11 +165,11 @@ def test_task_lead_pins_deferred_followups_line_format() -> None:
     assert "deferred-sweep" in low      # the sweep, not the human, is the consumer
 
 
-SUMMARIZER = AGENTS_DIR / "summarizer.md"
+FINALIZE = AGENTS_DIR / "finalize.md"
 
 
-def test_summarizer_reads_sweep_dispositions() -> None:
-    low = SUMMARIZER.read_text().lower()
+def test_finalize_reads_sweep_dispositions() -> None:
+    low = FINALIZE.read_text().lower()
     assert "fyi-fixed" in low
     assert "still-deferred" in low
     assert "silent-fixed" in low      # named only to exclude it
@@ -177,20 +177,18 @@ def test_summarizer_reads_sweep_dispositions() -> None:
     assert "still deferred" in low
 
 
-FINAL_REVIEW = AGENTS_DIR / "final-review.md"
-
-
-def test_final_review_presents_two_lists_without_dictating_veto() -> None:
-    low = FINAL_REVIEW.read_text().lower()
+def test_finalize_presents_two_lists_without_dictating_veto() -> None:
+    low = FINALIZE.read_text().lower()
     assert "fixed (fyi/veto)" in low or "fixed (fyi / veto)" in low
     assert "still deferred" in low
     assert "veto" in low
-    # The veto MECHANISM is intentionally left to the agents — not prescribed here.
-    assert "not prescribe" in low or "left to the agents" in low or "do not prescribe" in low
+    # The veto MECHANISM is intentionally left to the implementer — not prescribed here.
+    assert ("not prescribe" in low or "left to the agents" in low
+            or "do not prescribe" in low or "left to the implementer" in low)
 
 
-def test_final_review_prompt_states_merge_gate_affordance() -> None:
-    low = FINAL_REVIEW.read_text().lower()
+def test_finalize_prompt_states_merge_gate_affordance() -> None:
+    low = FINALIZE.read_text().lower()
     assert "merge gate" in low
     assert "rework" in low
     assert "reply" in low

@@ -14,14 +14,11 @@ description: |
 # whole-change pass before `integrate-merge`.
 
 vars:
-  ready_to_merge:         {type: bool, default: false}
-  final_review:           {type: bool, default: true}
   fast_path:              {type: bool, default: false}
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   panel_done:             {type: bool, default: false}
   multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the whole-change review pass
-  integration_needs_review: {type: bool, default: false}
   review_scope:           {type: string, default: plan}  # plan | change — one review path, scoped per-plan or over the whole change
   spec_confirm:           {type: bool, default: true}    # confirm-gate enable
   spec_unseen_changes:    {type: bool, default: false}   # some turn changed the spec without user direction
@@ -223,8 +220,8 @@ phases:
         quiet: true
         command: ./scripts/integrate-merge.sh
         rules:
-          - {if: {exit: 2}, goto: summarizer}
-          - {if: {exit: 0}, continue: true}
+          - {if: {exit: 2}, goto: finalize}   # base already ancestor: no merge to resolve -> finalize
+          - {if: {exit: 0}, continue: true}   # real base merge -> integrator
           - {else: true, pause: true}
 
       - name: integrator
@@ -233,9 +230,7 @@ phases:
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
-        rules:
-          - {if: {integration: review}, set: {integration_needs_review: true}, continue: true}
-          - {else: true, set: {integration_needs_review: false}, continue: true}
+        # no rules: continue-on-success. finalize always reviews the resolution.
 
       - name: integrate-tests
         command: ./scripts/run-tests.sh
@@ -244,32 +239,12 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: integrator}
 
-      - name: integration-review
-        file: agents/integration-reviewer.md
+      - name: finalize
+        file: agents/finalize.md
         tier: high
-        max_loops: 5
-        rules:
-          - {if: {verdict: task_gap}, resume: integrator, feedback: "Integration review found gaps in the merge resolution. Findings:"}
-          - {if: {verdict: plan_gap}, resume: integrator, feedback: "Integration review flagged a deeper issue with the merge. Findings:"}
-          - {else: true, continue: true}
-
-      - name: summarizer
-        file: agents/summarizer.md
-        tier: high
-
-      - name: final-review-gate
-        quiet: true
-        rules:
-          - {if: {final_review: false}, set: {ready_to_merge: true}, goto: merge}
-          - {if: {ready_to_merge: true, integration_needs_review: false}, goto: merge}
-          - {else: true, continue: true}
-
-      - name: final-review
-        file: agents/final-review.md
-        tier: medium
         max_loops: 20
         rules:
-          - {if: {decision: merge},  set: {ready_to_merge: true}, continue: true}
+          - {if: {decision: merge},  goto: merge}
           - {if: {decision: rework}, goto: implement, feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 

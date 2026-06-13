@@ -16,7 +16,7 @@ FINDINGS_TARGETS = {  # (source_step, target) pairs that MUST carry a preamble
     ("plan-cycle-check", "plan-writer"),
     ("review", "task-lead"),
     ("review", "plan-writer"),
-    ("final-review", "implement"),
+    ("finalize", "implement"),
 }
 
 

@@ -66,7 +66,7 @@ append) — it must reflect ONLY the current integrated state; prior rounds live
 the event journal. If there is nothing to note (a clean mechanical merge), write a
 one-line file saying so. For each uncertain resolution and each semantic concern,
 record: the file and line, what base changed, what you did, and why it's
-uncertain. `summarizer` reads this file and folds it into the change summary.
+uncertain. `finalize` reads this file and folds it into the change summary.
 
 ## Commit
 
