@@ -245,3 +245,14 @@ def test_post_init_manifest_does_not_claim_project_yaml_committed(
     assert "imp/project.yaml" in manifest
     assert "committed" not in manifest          # no false "already committed" claim
     assert "track in git" in manifest           # correct intent: user tracks it
+
+
+def test_picker_cursor_uses_render_safe_caret() -> None:
+    from imp.cli.init import _picker_rows
+
+    rows = _picker_rows(["claude_code", "anthropic"], cursor=0, selected={0})
+    active = rows[1][1]
+    inactive = rows[2][1]
+    assert active.startswith("> ")
+    assert "❯" not in active
+    assert inactive.startswith("  ")

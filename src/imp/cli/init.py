@@ -95,6 +95,24 @@ def _initial_selection(available: list[str]) -> set[int]:
     return set()
 
 
+def _picker_rows(
+    available: list[str], cursor: int, selected: set[int],
+) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = [
+        ("bold", "Which providers do you want to enable?\n"),
+    ]
+    for i, name in enumerate(available):
+        arrow = "> " if i == cursor else "  "
+        box = "[x] " if i in selected else "[ ] "
+        style = "ansicyan bold" if i == cursor else ""
+        out.append((style, f"{arrow}{box}{name}\n"))
+    out.append((
+        "ansibrightblack",
+        "↑↓ move · space toggle · enter confirm · esc cancel",
+    ))
+    return out
+
+
 def _interactive_provider_picker(available: list[str]) -> list[str]:
     """Inline cursor picker rendered with prompt_toolkit.
 
@@ -123,19 +141,7 @@ def _interactive_provider_picker(available: list[str]) -> list[str]:
     selected: set[int] = _initial_selection(available)  # pre-select the recommended default
 
     def _render() -> list[tuple[str, str]]:
-        out: list[tuple[str, str]] = [
-            ("bold", "Which providers do you want to enable?\n"),
-        ]
-        for i, name in enumerate(available):
-            arrow = "❯ " if i == cursor else "  "
-            box = "[x] " if i in selected else "[ ] "
-            style = "ansicyan bold" if i == cursor else ""
-            out.append((style, f"{arrow}{box}{name}\n"))
-        out.append((
-            "ansibrightblack",
-            "↑↓ move · space toggle · enter confirm · esc cancel",
-        ))
-        return out
+        return _picker_rows(available, cursor, selected)
 
     kb = KeyBindings()
 
