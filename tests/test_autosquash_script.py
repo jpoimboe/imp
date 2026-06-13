@@ -323,8 +323,8 @@ def test_autosquash_folds_squash_only_no_fixup(tmp_path: Path) -> None:
 def _build_plain_conflict(pr: Path) -> str:
     """No integration merge in range. A target commit edits a.txt; an intervening
     commit edits the SAME line; a fixup!->target edits it again. Autosquash reorders
-    the fixup under its target, which conflicts on the fold (and again when the
-    intervening commit replays). Returns the pre-autosquash HEAD sha."""
+    the fixup under its target, which conflicts on the fold.
+    Returns the pre-autosquash HEAD sha."""
     _init(pr)
     _record_change(pr)
     _git(pr, "checkout", "-b", "imp/x")

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Fold every `fixup!` commit into its target so the merged branch is one clean
 # commit per unit (Resolution 6). Runs once at review-phase entry. No-op when
-# there are no fixups. A rebase CONFLICT can't be resolved by an agent, so on
-# conflict we abort and exit non-zero → the engine pauses for a human.
+# there are no fixups. A plain-path fold conflict is handed to autosquash-resolve (exit 2); other
+# failures abort and exit non-zero → the engine pauses for a human.
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")
