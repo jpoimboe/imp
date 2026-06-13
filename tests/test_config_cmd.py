@@ -146,6 +146,11 @@ def test_explain_colors_sources_when_layers_differ(
     out = io.StringIO()
     render_explain(eff, "high", out, color=True)
     assert "\x1b[" in out.getvalue()   # labels colored because sources diverge
+    output = out.getvalue()
+    anthropic_line = next(ln for ln in output.splitlines() if "anthropic" in ln)
+    openai_line = next(ln for ln in output.splitlines() if "openai" in ln)
+    assert "\x1b[90m" in anthropic_line  # default layer → gray
+    assert "\x1b[36m" in openai_line     # user layer → cyan
 
 
 def test_explain_uncolored_when_layers_match(
