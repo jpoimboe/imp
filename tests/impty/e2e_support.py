@@ -127,7 +127,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 done(summary="no deferred items"),
             ]}],
             "summarizer": [{"text": "summary", "tools": [
-                done(built="sentinel", test_status="n/a",
+                done(built="sentinel", verify_status="n/a",
                      open_items="none", next_steps="none"),
             ]}],
             "final-review": [{"text": "final", "tools": [

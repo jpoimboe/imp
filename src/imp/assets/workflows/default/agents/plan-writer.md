@@ -277,7 +277,7 @@ After writing the complete plan, check it against the spec and prior plans with 
 
 **4. Bite-size check:** Could any task be split to give a natural commit boundary? Could any step be clarified without inflating the plan?
 
-**5. Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only. It never licenses a lint-dirty tree: if `$IMP_VERIFY_COMMAND` is configured, the implementer still runs it before committing.
+**5. Lint vs. test scope:** A "skip verification / no tests needed" instruction scopes out the **slow test suite** only — it never licenses a lint-dirty or type-dirty tree. The mechanical `verify` gate (the project's `verify_command`) runs after the implement phase and routes back on any failure, so even a waived-tests task is still lint/typecheck-gated there.
 
 **6. Falsifiability:** For each test, would it fail if the implementation were wrong or
 absent? A test whose expected value is just the literal the implementation returns is a

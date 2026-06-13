@@ -108,11 +108,11 @@ def test_implementer_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
         build_context(change_slug="t", change_title="t", event_log=log,
                       vars={"fast_path": False}),
     )
-    # fast-path: no new tests, TDD skill NOT loaded; the implementer runs the lint
-    # gate but NOT the project's full test suite (the run-tests gate owns that).
+    # fast-path: no new tests, TDD skill NOT loaded; the implementer does NOT run
+    # the suite or a lint gate itself — the phase-level verify gate owns that.
     assert "do **not** create or modify tests" in fast
-    assert "IMP_VERIFY_COMMAND" in fast
-    assert "full test suite yourself" in fast
+    assert "IMP_LINT_COMMAND" not in fast
+    assert "phase-level" in fast
     assert "test-driven-development" not in fast
     # standard path: TDD skill loaded; fast-path constraints absent.
     assert "test-driven-development" in slow

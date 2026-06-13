@@ -26,7 +26,7 @@ sides correctly, lose nothing, and break nothing?
 - **Integrator's notes:** `.imp/change/integration-notes.md` — the resolutions the
   integrator flagged as reasoned-but-uncertain, and any semantic concerns. These
   are exactly the spots most likely to be wrong; read them first and check each one.
-- **History:** `query_events` for prior integration / integrate-tests rounds if you
+- **History:** `query_events` for prior integration / integrate-verify rounds if you
   need to understand how the tree reached this state.
 
 ## What to Check
@@ -39,7 +39,7 @@ of BOTH the base change and the branch change — not just one.
 renamed or removed a symbol the branch still calls, changed a function signature,
 moved a file, or shifted an invariant the branch relies on. Read the base-side
 incoming diff and verify the branch's code still makes sense against it. The
-`integrate-tests` gate already confirmed the suite passes — but a passing suite
+`integrate-verify` gate already confirmed the checks pass — but a passing gate
 does not prove an untested semantic conflict was caught, so reason about it
 yourself; you may re-run the project's own test tooling via `bash` to spot-check.
 

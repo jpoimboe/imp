@@ -14,13 +14,12 @@ You are implementing a task. The task-lead's dispatch message contains the full 
 
 {% if vars.fast_path %}
 This change was classified **trivial**: do **not** create or modify tests, and do
-**not** load the TDD skill. Make exactly the task's edits. Run the verify gate if
-`$IMP_VERIFY_COMMAND` is set and confirm it passes **before** you commit. Do **not**
-run the project's full test suite yourself — the `run-tests` gate runs it after
-this phase, and a full run here would only duplicate it. If your edit could
-plausibly affect behavior that a specific existing test covers, run just **that
-focused test** with the project's own test tooling; otherwise commit and let the
-gate verify.
+**not** load the TDD skill. Make exactly the task's edits, then commit. Do **not**
+run the project's full test suite or any lint/typecheck yourself — the phase-level
+`verify` gate runs the project's combined checks after this phase and routes back
+to fix anything that fails. If your edit could plausibly affect behavior that a
+specific existing test covers, run just **that focused test** with the project's
+own test tooling; otherwise commit and let the gate verify.
 {% else %}
 Load the TDD discipline first:
 
@@ -51,9 +50,9 @@ Once you're clear on requirements:
 1. Implement exactly what the task specifies
 2. If the task calls for tests, write them test-first per TDD (write the failing test first, then make it pass); if the plan waives tests, do **not** add them
 3. Verify your change works by running **its focused tests** (the ones you wrote or
-   the existing ones it touches) — not the project's full test suite, which the
-   `run-tests` gate owns
-4. Commit your work with `git` (see Committing below) — but FIRST run the verify gate if `$IMP_VERIFY_COMMAND` is set (see Self-Review); it must pass *before* the commit, not after
+   the existing ones it touches) — not the project's full suite or lint/typecheck,
+   which the phase-level `verify` gate owns
+4. Commit your work with `git` (see Committing below)
 5. Self-review (see below)
 6. Report your results **by calling `complete_step`** (see Report Format) — a turn that ends in prose instead of a tool call is a failure, not a report.
 
@@ -156,12 +155,11 @@ Review your work with fresh eyes. Ask yourself:
 - If the task called for tests, did I follow TDD — and did I avoid adding tests the plan waived?
 - Are tests comprehensive?
 
-**Lint-clean gate (before committing):**
-If `$IMP_VERIFY_COMMAND` is set, run it and ensure it passes on your changes
-**before** you commit. This gate is **separate from the test suite** — run it
-even when the task description says to skip verification or tests. "Skip verification"
-scopes out the slow test suite; it never licenses a lint-dirty tree (e.g. an
-unused import / F401).
+**Verification is the gate's job, not yours:**
+Do **not** run the project's full suite, lint, or typecheck before committing — the
+phase-level `verify` gate runs the project's combined `verify_command` after this
+phase and routes back if anything (a failing test, a lint error, a type error)
+breaks. Run only the *focused* tests for your change to catch obvious mistakes early.
 
 If you find issues during self-review, fix them now before reporting.
 
