@@ -134,3 +134,11 @@ class TelegramNorthAdapter:
         """Resolve one inbound reply to (change_id, text) against the recorded maps."""
         return resolve_change_id(
             inbound, self._msg_to_change, self._handle_to_change)
+
+    def poll_once(self) -> None:
+        response = self._get_updates(self._offset)
+        items, self._offset = extract_inbound(response, self._chat_id, self._offset)
+        for item in items:
+            change_id, text = self.resolve(item)
+            if change_id is not None:
+                self._submit(change_id, text)
