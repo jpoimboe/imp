@@ -38,7 +38,6 @@ def resume_change(control_root: Path, change_id: str, text: str) -> None:
 
 
 def create_change(control_root: Path, prompt: str) -> None:
-    """Spawn a new headless Change, carrying the socket path so it dials back over the same per-repo socket."""
     env = {**_base_env(), "IMP_REMOTE_CONTROL_SOCK": str(socket_path(control_root))}
     _spawn_detached(
         _imp("new", "--non-interactive", "--message", prompt), env, control_root)
