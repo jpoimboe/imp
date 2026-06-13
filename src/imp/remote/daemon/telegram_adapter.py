@@ -11,6 +11,8 @@ from imp.remote.drivers.telegram import (
     curate,
     event_body,
     format_event_message,
+    load_config,
+    make_get_updates,
     send_message_params,
 )
 
@@ -111,6 +113,24 @@ class TelegramNorthAdapter:
         self._offset = 0
         self._msg_to_change: dict[int, str] = {}
         self._handle_to_change: dict[str, str] = {}
+
+    @classmethod
+    def from_env(
+        cls,
+        env: dict[str, str],
+        submit: Callable[[str, str], None],
+        *,
+        file_text: str | None = None,
+    ) -> TelegramNorthAdapter:
+        config = load_config(env, file_text)
+
+        def send(text: str, silent: bool) -> int | None:
+            return send_message(config.token, config.chat_id, text, silent=silent)
+
+        get_updates = make_get_updates(config.token)
+
+        return cls(chat_id=config.chat_id, submit=submit,
+                   send=send, get_updates=get_updates)
 
     def on_event(self, event: dict[str, Any]) -> None:
         """Curate one event, send it with its handle, and record the reply maps."""
