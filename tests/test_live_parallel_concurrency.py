@@ -2,10 +2,7 @@
 
 codex: IMP_RUN_CODEX=1. claude_code: IMP_RUN_DOGFOOD=1. Each runs ONE turn that
 fans out two task calls and asserts the two subagent dispatches overlapped in
-wall-clock (both tool_call events precede either tool_result event). The dogfood
-variant additionally makes the OPPORTUNISTIC refusal un-count assertion: if a
-refusal organically appears in the log it must show its un-count; if none appears
-the assertion is vacuously satisfied (a standing residual, never a failure).
+wall-clock (both tool_call events precede either tool_result event).
 """
 from __future__ import annotations
 

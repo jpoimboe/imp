@@ -58,7 +58,7 @@ def _e2e_agent_def(name, *, tools, subagents=()):
 
 
 @pytest.mark.anyio
-async def test_pause_propagates_through_dispatch_task_and_task_wrapper(tmp_path) -> None:
+async def test_batched_child_suspension_degrades_to_is_error(tmp_path) -> None:
     from imp.agents.runner import ChangeContext, Message, TextBlock
     from imp.cli.signals import InterruptCoordinator
     from imp.providers import resolve
@@ -108,10 +108,19 @@ async def test_pause_propagates_through_dispatch_task_and_task_wrapper(tmp_path)
                                                   tools={"complete_step"})},
         agent_id="step:p/s", coordinator=coord)
 
-    # The pause unwinds as an exception out of run(), NOT an is_error event.
-    with pytest.raises(SubagentSuspended):
-        async for _ in runner.run(inv):
-            pass
+    # The batched child's SubagentSuspended is degraded to an is_error tool_result;
+    # run() completes normally rather than propagating the exception.
+    async for _ in runner.run(inv):
+        pass
+
+    events = [json.loads(line) for line in inv.events_path.read_text().splitlines() if line]
+    error_results = [
+        e for e in events
+        if e["type"] == "tool_result"
+        and e["payload"].get("error") is True
+        and "SubagentSuspended" in (e["payload"].get("content") or "")
+    ]
+    assert error_results, "expected an is_error tool_result containing SubagentSuspended"
 
 
 def _seed_single_step(root: Path) -> Change:
