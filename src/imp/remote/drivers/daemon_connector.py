@@ -101,6 +101,8 @@ def main(
     finally:
         with contextlib.suppress(OSError):
             os.close(cancel_w)  # wake the writer; writer closes cancel_r
+        if writer.is_alive():
+            writer.join()
         with contextlib.suppress(OSError):
             os.close(cancel_r)  # guard: close if writer never ran or already closed by writer
         with contextlib.suppress(OSError):
