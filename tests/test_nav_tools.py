@@ -126,6 +126,14 @@ def test_glob_excludes_imp_and_git(tmp_path: Path) -> None:
     assert ".git" not in out
 
 
+def test_glob_in_worktree_subpath_is_root_relative(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "foo.py").write_text("")
+    ctx = _ctx(tmp_path)
+    out = _glob(ctx, pattern="*.py", path="src")
+    assert out == "src/foo.py"                 # relative to root, not just "foo.py"
+
+
 def test_glob_aborts_promptly_on_pause(tmp_path: Path) -> None:
     for i in range(50):
         (tmp_path / f"f{i}.txt").write_text("x")
@@ -135,37 +143,112 @@ def test_glob_aborts_promptly_on_pause(tmp_path: Path) -> None:
     assert ei.value.reason == "interrupted"
 
 
-# --- Containment / escape-guard tests (Task A2, spec H1) ---
+# --- Reachability-parity tests ---
 
 from imp.agents.permissions import PermissionDenied  # noqa: E402
+from imp.engine.sandbox import SandboxPolicy  # noqa: E402
 
 
-def test_grep_rejects_parent_escape(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
+def _policy(
+    worktree: Path,
+    *,
+    secret_dirs: tuple[str, ...] = (),
+    secret_files: tuple[str, ...] = (),
+) -> SandboxPolicy:
+    return SandboxPolicy(
+        active=True,
+        worktree=str(worktree),
+        git_common_dir=str(worktree / ".git"),
+        git_ro_remask=(),
+        writable_caches=(),
+        extra_readable=(),
+        extra_writable=(),
+        secret_dirs=secret_dirs,
+        secret_files=secret_files,
+        setenv=(),
+        network=True,
+        note="",
+    )
+
+
+def test_grep_external_accepted_when_policy_inactive(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    ext = tmp_path / "ext"; ext.mkdir()
+    (ext / "n.txt").write_text("needle here\n")
+    ctx = _ctx(wt)                             # no sandbox_policy → external accepted
+    out = _grep(ctx, pattern="needle", path=str(ext), output_mode="content")
+    assert (ext / "n.txt").as_posix() in out   # absolute-form path in output
+
+
+def test_grep_external_masked_target_denied_when_policy_active(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    secret = tmp_path / "secret"; secret.mkdir()
+    (secret / "id_rsa").write_text("KEY\n")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
     with pytest.raises(PermissionDenied):
-        anyio.run(get_registry()["grep"].async_invoke, ctx,
-                  {"pattern": "root", "path": "../../etc"})
+        _grep(ctx, pattern="KEY", path=str(secret))
 
 
-def test_grep_rejects_absolute_project_escape(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
+def test_glob_default_path_is_relative(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("")
+    out = _glob(_ctx(tmp_path), pattern="*.py", path=".")
+    assert out == "a.py"                       # byte-for-byte: relative, no prefix
+
+
+def test_glob_external_path_absolute_output(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    (ext / "a.py").write_text("")
+    ctx = _ctx(wt)                             # no sandbox_policy → external accepted
+    out = _glob(ctx, pattern="*.py", path=str(ext))
+    assert out == (ext / "a.py").as_posix()    # absolute-form output for external base
+
+
+def test_glob_external_masked_base_denied_when_policy_active(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    secret = tmp_path / "secret"
+    secret.mkdir()
+    (secret / "id_rsa").write_text("")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
     with pytest.raises(PermissionDenied):
-        anyio.run(get_registry()["grep"].async_invoke, ctx,
-                  {"pattern": "root", "path": "/project/../../etc"})
+        _glob(ctx, pattern="*", path=str(secret))
 
 
-def test_glob_rejects_absolute_pattern(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        anyio.run(get_registry()["glob"].async_invoke, ctx,
-                  {"pattern": "/project/**/*.py"})
+def test_glob_external_per_result_symlink_into_masked_dir_dropped(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    ext = tmp_path / "ext"; ext.mkdir()
+    secret = tmp_path / "secret"; secret.mkdir()
+    (secret / "id_rsa").write_text("")
+    # symlink inside the allowed ext/ base pointing into the masked secret/ dir
+    (ext / "link").symlink_to(secret / "id_rsa")
+    (ext / "ok.txt").write_text("")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
+    out = _glob(ctx, pattern="*", path=str(ext))
+    assert "ok.txt" in out
+    assert "link" not in out                   # symlink into masked dir must be dropped
 
 
-def test_glob_rejects_dotdot_pattern(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        anyio.run(get_registry()["glob"].async_invoke, ctx,
-                  {"pattern": "../../etc/**"})
+def test_glob_inworktree_masked_file_dropped(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    (wt / "ok.txt").write_text("")
+    (wt / "secret.txt").write_text("")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_files=(str(wt / "secret.txt"),))
+    out = _glob(ctx, pattern="*.txt")
+    assert "ok.txt" in out
+    assert "secret.txt" not in out          # in-worktree masked file must be dropped
+
+
+def test_glob_description_documents_path_and_sandbox() -> None:
+    desc = get_registry()["glob"].description
+    assert "path" in desc
+    assert "bounded by the sandbox like bash" in desc
 
 
 def test_grep_reports_relative_paths(tmp_path: Path) -> None:
@@ -179,3 +262,65 @@ def test_grep_reports_relative_paths(tmp_path: Path) -> None:
 def test_nav_module_docstring_drops_ls() -> None:
     import imp.agents.tools.nav as nav_mod
     assert "ls" not in (nav_mod.__doc__ or "")
+
+
+def test_grep_external_walk_prunes_masked_dir(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    (ext / "ok.txt").write_text("SECRET ok\n")
+    sub = ext / "sshlike"
+    sub.mkdir()
+    (sub / "id_rsa").write_text("SECRET key\n")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(sub),))
+    out = _grep(ctx, pattern="SECRET", path=str(ext))
+    assert (ext / "ok.txt").as_posix() in out
+    assert "id_rsa" not in out                 # masked dir pruned, file never scanned
+
+
+def test_grep_external_walk_symlink_into_masked_dir_dropped(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    ext = tmp_path / "ext"; ext.mkdir()
+    secret = tmp_path / "secret"; secret.mkdir()
+    (secret / "id_rsa").write_text("KEY\n")
+    # symlink inside the allowed ext/ walk pointing into the masked secret/ dir
+    (ext / "link").symlink_to(secret / "id_rsa")
+    (ext / "ok.txt").write_text("KEY ok\n")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
+    out = _grep(ctx, pattern="KEY", path=str(ext))
+    assert (ext / "ok.txt").as_posix() in out
+    assert "link" not in out                   # symlink into masked dir dropped
+
+
+def test_grep_external_walk_cap_truncates(tmp_path: Path, monkeypatch) -> None:
+    import imp.agents.tools.nav as nav_mod
+    monkeypatch.setattr(nav_mod, "EXTERNAL_WALK_FILE_CAP", 3)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    for i in range(10):
+        (ext / f"f{i}.txt").write_text("nomatch\n")
+    out = _grep(_ctx(wt), pattern="ZZZ", path=str(ext))
+    assert "external walk truncated" in out
+    assert "scanned first 3 files" in out
+    assert "(no matches)" not in out
+
+
+def test_grep_inworktree_never_walk_capped(tmp_path: Path, monkeypatch) -> None:
+    import imp.agents.tools.nav as nav_mod
+    monkeypatch.setattr(nav_mod, "EXTERNAL_WALK_FILE_CAP", 3)
+    for i in range(10):
+        (tmp_path / f"f{i}.txt").write_text("nomatch\n")
+    out = _grep(_ctx(tmp_path), pattern="ZZZ", path=".")
+    assert "external walk truncated" not in out
+    assert out == "(no matches)"
+
+
+def test_grep_description_notes_sandbox_and_walk_cap() -> None:
+    desc = get_registry()["grep"].description
+    assert "bounded by the sandbox like bash" in desc
+    assert "external" in desc and "cap" in desc
