@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from imp.engine.env import overlay_engine_env
-from imp.remote.daemon.discover import socket_path
 
 
 def _base_env() -> dict[str, str]:
@@ -38,9 +37,8 @@ def resume_change(control_root: Path, change_id: str, text: str) -> None:
 
 
 def create_change(control_root: Path, prompt: str) -> None:
-    env = {**_base_env(), "IMP_REMOTE_CONTROL_SOCK": str(socket_path(control_root))}
     _spawn_detached(
-        _imp("new", "--non-interactive", "--message", prompt), env, control_root)
+        _imp("new", "--non-interactive", "--message", prompt), _base_env(), control_root)
 
 
 def abandon_change(control_root: Path, change_id: str) -> None:
