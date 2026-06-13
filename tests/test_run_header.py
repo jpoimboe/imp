@@ -15,8 +15,8 @@ def test_titleless_change_shows_only_token_and_marker_plain() -> None:
 
 
 def test_legacy_id_token_is_the_full_id() -> None:
-    line = _run_header_line("legacy-slug", "legacy-slug", "new", color=False)
-    assert line == "legacy-slug · legacy-slug · new"
+    line = _run_header_line("2026-01-15-my-feature", "2026-01-15-my-feature", "new", color=False)
+    assert line == "2026-01-15-my-feature · my-feature · new"
 
 
 def test_color_wraps_token_bold_magenta_and_tail_dim() -> None:
