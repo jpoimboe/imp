@@ -359,6 +359,20 @@ def test_plain_path_hands_off_conflict_with_exit_2(tmp_path: Path) -> None:
     assert (state / "autosquash-before-head").read_text().strip() == before_head
 
 
+def test_plain_path_clears_stale_attempts_file(tmp_path: Path) -> None:
+    """A fresh plain-path handoff must reset the attempt counter so a prior
+    interrupted run's stale count cannot cause premature exhaustion."""
+    pr = tmp_path / "wt"
+    _build_plain_conflict(pr)
+    state = pr / ".imp" / "change" / "state"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "autosquash-resolve-attempts").write_text("2\n")  # stale from prior run
+
+    result = _run(pr)
+    assert result.returncode == 2, result.stderr
+    assert not (state / "autosquash-resolve-attempts").exists()
+
+
 def test_plain_path_non_conflict_failure_exits_1(tmp_path: Path) -> None:
     """A non-conflict rebase failure (a stale rebase-merge directory makes git
     refuse to start the rebase: non-zero exit, NO unmerged paths) is a hard failure,

@@ -183,6 +183,7 @@ else
     # Fold conflict: hand off. Do NOT --abort; leave the rebase in progress with the
     # conflict markers, exactly as integrate-merge.sh leaves a tree for the integrator.
     mkdir -p .imp/change/state
+    rm -f .imp/change/state/autosquash-resolve-attempts
     printf '%s\n' "$BEFORE_TREE" > .imp/change/state/autosquash-before-tree
     printf '%s\n' "$BEFORE" > .imp/change/state/autosquash-before-head
     echo "autosquash: fixup fold conflicted; handing to autosquash-resolve (rebase left in progress)" >&2
