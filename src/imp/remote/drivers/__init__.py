@@ -26,4 +26,11 @@ REGISTRY: dict[str, BuiltinDriver] = {
         required_env=("IMP_TELEGRAM_TOKEN", "IMP_TELEGRAM_CHAT_ID"),
         default_events=("all",),
     ),
+    "daemon-connector": BuiltinDriver(
+        name="daemon-connector",
+        module="imp.remote.drivers.daemon_connector",
+        description="Bridge a Change's stdio to the per-repo remote-control daemon socket.",
+        required_env=("IMP_REMOTE_CONTROL_SOCK",),
+        default_events=("all",),
+    ),
 }
