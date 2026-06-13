@@ -15,7 +15,7 @@ import os
 import re
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import anyio
 
@@ -23,6 +23,7 @@ from imp.agents.tools import imp_tool
 from imp.agents.tools.context import ToolContext
 from imp.agents.tools.limits import (
     EXCLUDED_DIRS,
+    EXTERNAL_WALK_FILE_CAP,
     OUTPUT_TRUNCATION_MARKER,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
@@ -32,21 +33,32 @@ from imp.agents.tools.limits import (
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
 
 
-def _iter_files(target: Path) -> Iterator[Path]:
+def _iter_files(target: Path, policy: Any = None) -> Iterator[Path]:
     """Files under `target`, never descending into an excluded control/VCS dir
     (A3). `os.walk` with in-place `dirnames` pruning means the walk does not even
-    *enumerate* inside `.imp/`/`.git/`."""
+    *enumerate* inside `.imp/`/`.git/`. When `policy` is an active SandboxPolicy,
+    additionally prune directories and drop files whose resolved path fails
+    `policy.allows_read` — the in-process mirror of the bwrap secret masks, so the
+    search tool never out-reads `bash`-under-bwrap (a symlink into a masked dir is
+    dropped by resolving before the check)."""
     if target.is_file():
         yield target
         return
     if not target.is_dir():
         return
+    masking = policy is not None and policy.active
     for dirpath, dirnames, filenames in os.walk(target):
         # Sorted traversal (dirnames in-place so the walk itself is ordered):
         # files_with_matches + head_limit early exit make WHICH files the
         # agent sees depend on enumeration order — bless determinism, not the
-        # filesystem's whim. Still prunes excluded control/VCS dirs (A3).
-        dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDED_DIRS)
+        # filesystem's whim. Prunes excluded control/VCS dirs (A3) and, under
+        # an active policy, secret-masked dirs (pruned in place: never enumerated
+        # inside).
+        keep = sorted(d for d in dirnames if d not in EXCLUDED_DIRS)
+        if masking:
+            keep = [d for d in keep
+                    if policy.allows_read((Path(dirpath) / d).resolve())]
+        dirnames[:] = keep
         base = Path(dirpath)
         for name in sorted(filenames):
             p = base / name
@@ -56,8 +68,11 @@ def _iter_files(target: Path) -> Iterator[Path]:
             # wedging the whole call. Walk only regular files. (An EXPLICIT
             # non-regular path still errors loudly in grep — explicit path is
             # explicit intent.)
-            if p.is_file():
-                yield p
+            if not p.is_file():
+                continue
+            if masking and not policy.allows_read(p.resolve()):
+                continue
+            yield p
 
 
 @imp_tool(
@@ -152,7 +167,10 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "bytes) plus the invisible trailing \\r that IS content on CRLF "
         "lines — never paste rows into edit_file/write_file. "
         "Skips .imp/ and .git/; scans the first 5 MB per file; output capped "
-        "at 50 KB."
+        "at 50 KB. Absolute and out-of-worktree paths are accepted, bounded by "
+        "the sandbox like bash (in-worktree matches reported relative, external "
+        "matches as absolute paths); an external-directory search stops after a "
+        "fixed file-count cap, disclosed in the output."
     ),
 )
 async def grep(
@@ -203,6 +221,8 @@ async def grep(
         raise FileNotFoundError(f"no such path: {path}")
     root = ctx.project_root.resolve()
     inside = target.is_relative_to(root)
+    external = not inside
+    policy = ctx.sandbox_policy
     rgx = re.compile(pattern, re.IGNORECASE if case_insensitive else 0)
     coordinator = getattr(ctx, "coordinator", None)
     deadline = anyio.current_time() + TOOL_WALLCLOCK_TIMEOUT_S
@@ -228,9 +248,15 @@ async def grep(
             capped = True
         return capped
 
-    for f in _iter_files(target):
+    files_scanned = 0
+    walk_capped = False
+    for f in _iter_files(target, policy):
         if capped or limit_hit:
             break
+        if external and files_scanned >= EXTERNAL_WALK_FILE_CAP:
+            walk_capped = True
+            break
+        files_scanned += 1
         await tool_checkpoint(coordinator, deadline)
         disp = f.relative_to(root).as_posix() if inside else f.as_posix()
         if glob_rx is not None and glob_rx.match(disp) is None:
@@ -331,9 +357,11 @@ async def grep(
                 # landing exactly on a file's last match keeps scanning every
                 # remaining file and never emits the notice.
 
-    if result_rows == 0:
+    if result_rows == 0 and not walk_capped:
         # Sentinel keys on zero RESULT rows, not on empty output — a note
         # line must never suppress it (agents pattern-match on the sentinel).
+        # Suppressed when walk_capped: the truncated walk may have matches in
+        # unscanned files, so "(no matches)" would be a false certainty.
         out.insert(0, "(no matches)")
     if not capped:
         for note in notes:  # trailing modes: result rows, then notes
@@ -353,4 +381,9 @@ async def grep(
         # computing that would require the very scan the cap avoids.
         out.append(f"[further results omitted: head_limit={head_limit} reached "
                    f"— raise head_limit or narrow the pattern]")
+    if walk_capped:
+        out.append(
+            f"[external walk truncated: scanned first {EXTERNAL_WALK_FILE_CAP} "
+            f"files — narrow the search path]"
+        )
     return "\n".join(out)

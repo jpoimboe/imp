@@ -251,3 +251,65 @@ def test_grep_reports_relative_paths(tmp_path: Path) -> None:
 def test_nav_module_docstring_drops_ls() -> None:
     import imp.agents.tools.nav as nav_mod
     assert "ls" not in (nav_mod.__doc__ or "")
+
+
+def test_grep_external_walk_prunes_masked_dir(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    (ext / "ok.txt").write_text("SECRET ok\n")
+    sub = ext / "sshlike"
+    sub.mkdir()
+    (sub / "id_rsa").write_text("SECRET key\n")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(sub),))
+    out = _grep(ctx, pattern="SECRET", path=str(ext))
+    assert (ext / "ok.txt").as_posix() in out
+    assert "id_rsa" not in out                 # masked dir pruned, file never scanned
+
+
+def test_grep_external_walk_symlink_into_masked_dir_dropped(tmp_path: Path) -> None:
+    wt = tmp_path / "wt"; wt.mkdir()
+    ext = tmp_path / "ext"; ext.mkdir()
+    secret = tmp_path / "secret"; secret.mkdir()
+    (secret / "id_rsa").write_text("KEY\n")
+    # symlink inside the allowed ext/ walk pointing into the masked secret/ dir
+    (ext / "link").symlink_to(secret / "id_rsa")
+    (ext / "ok.txt").write_text("KEY ok\n")
+    ctx = _ctx(wt)
+    ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
+    out = _grep(ctx, pattern="KEY", path=str(ext))
+    assert (ext / "ok.txt").as_posix() in out
+    assert "link" not in out                   # symlink into masked dir dropped
+
+
+def test_grep_external_walk_cap_truncates(tmp_path: Path, monkeypatch) -> None:
+    import imp.agents.tools.nav as nav_mod
+    monkeypatch.setattr(nav_mod, "EXTERNAL_WALK_FILE_CAP", 3)
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    for i in range(10):
+        (ext / f"f{i}.txt").write_text("nomatch\n")
+    out = _grep(_ctx(wt), pattern="ZZZ", path=str(ext))
+    assert "external walk truncated" in out
+    assert "scanned first 3 files" in out
+    assert "(no matches)" not in out
+
+
+def test_grep_inworktree_never_walk_capped(tmp_path: Path, monkeypatch) -> None:
+    import imp.agents.tools.nav as nav_mod
+    monkeypatch.setattr(nav_mod, "EXTERNAL_WALK_FILE_CAP", 3)
+    for i in range(10):
+        (tmp_path / f"f{i}.txt").write_text("nomatch\n")
+    out = _grep(_ctx(tmp_path), pattern="ZZZ", path=".")
+    assert "external walk truncated" not in out
+    assert out == "(no matches)"
+
+
+def test_grep_description_notes_sandbox_and_walk_cap() -> None:
+    desc = get_registry()["grep"].description
+    assert "bounded by the sandbox like bash" in desc
+    assert "external" in desc and "cap" in desc

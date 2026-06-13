@@ -26,6 +26,13 @@ READ_CHUNK_BYTES = 65_536                # cooperative read granularity
 # skeletons and their tests in lockstep.
 OUTPUT_TRUNCATION_MARKER = "\n... [output truncated at 50 KB] ..."
 
+# grep ONLY: an external-target walk halts after this many files SCANNED (not
+# matched) and discloses a truncation notice. A performance brake (bounds work),
+# not a security one — applies whenever the target is external, sandbox or not.
+# In-worktree walks never observe it. glob is cap-exempt (it does not use
+# _iter_files); the 30-min wall-clock deadline is the ultimate backstop for both.
+EXTERNAL_WALK_FILE_CAP = 20_000
+
 # --- Watchdog / teardown timing (distinct from HEADLESS_RETRY_CEILING_SECONDS,
 # backoff.py:17, which is also 1800s but a cumulative-backoff cap) -----------
 TOOL_WALLCLOCK_TIMEOUT_S = 1800.0        # B.1: per-tool-call deadline (30 min)
