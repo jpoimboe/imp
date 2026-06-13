@@ -49,7 +49,6 @@ if (( rc == 124 )); then
 fi
 
 if (( rc == 0 )) && [[ -n "$tree" ]]; then
-  mkdir -p .imp/change
-  echo "$tree" > "$cache"
+  mkdir -p .imp/change && echo "$tree" > "$cache" || true
 fi
 exit "$rc"
