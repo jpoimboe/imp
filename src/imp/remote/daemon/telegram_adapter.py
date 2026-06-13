@@ -29,7 +29,9 @@ def parse_handle(text: str) -> tuple[str | None, str]:
     """Split a leading `@handle` off an inbound reply; returns (handle, rest) or (None, text)."""
     if text.startswith("@"):
         head, _, rest = text.partition(" ")
-        return head[1:], rest.lstrip()
+        rest = rest.lstrip()
+        if rest:
+            return head[1:], rest
     return None, text
 
 
