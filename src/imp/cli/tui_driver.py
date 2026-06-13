@@ -25,7 +25,8 @@ class TuiDriver:
 
     def render(self, *, full: bool) -> str:
         return "\n".join(rt.render_tree(
-            self._builder.tree, full=full, color=self._color, width=self._width))
+            self._builder.tree, full=full, color=self._color, width=self._width,
+            live_viewer=True))
 
     def status_text(self, frame: int, elapsed: float) -> str | None:
         return compose_activity_status(
@@ -33,6 +34,7 @@ class TuiDriver:
 
     def print_collapsed_transcript(self, stream: Any) -> None:
         for line in rt.render_tree(
-                self._builder.tree, full=False, color=self._color, width=self._width):
+                self._builder.tree, full=False, color=self._color,
+                width=self._width, live_viewer=True):
             stream.write(line + "\n")
         stream.flush()
