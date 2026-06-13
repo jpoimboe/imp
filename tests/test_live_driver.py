@@ -1061,41 +1061,22 @@ def _panel_member_ev(eid: str, verdict: str, findings: str = "") -> list:
     ]
 
 
-def test_final_review_gate_block_returned_from_pending_question() -> None:
+def test_final_review_solicit_returns_verbatim_prompt() -> None:
     out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
-                     base_branch="master")
-    events = [
-        ev("0", "change_created", id="2026-06-12-run-x", slug="2026-06-12-run-x",
-           title="Run X"),
-        ev("1", "step_started", step="review", kind="agent", phase="review",
-           model="m", provider="anthropic"),
-    ]
-    events += _panel_member_ev("1", "approve", "nit: a")
-    events += _panel_member_ev("2", "approve", "")
-    events += _panel_member_ev("3", "approve", "nit: b")
-    events += _panel_member_ev("4", "approve", "")
-    events += [
-        ev("ao", "agent_output", agent_id="step:review/review",
-           status="Success", verdict="approve", findings="..."),
-        ev("sc", "step_completed", step="review", kind="agent",
-           action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
+    for e in [
         ev("fs", "step_started", step="final-review", kind="agent", phase="review",
            model="m", provider="anthropic"),
         ev("aw", "awaiting_user_input", agent_id="step:review/final-review",
-           prompt="What's your call?"),
-    ]
-    for e in events:
+           prompt="Merge or rework?"),
+    ]:
         drv.on_event(e)
-    block = drv.take_pending_question()
-    assert "Review: 4/4 approve · 0 blocking · 2 nits" in block
-    assert "type 'merge' to merge into master" in block
+    assert drv.take_pending_question() == "Merge or rework?"
 
 
 def test_non_final_review_solicit_returns_plain_question() -> None:
     out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out),
-                     base_branch="master")
+    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     for e in [
         ev("1", "step_started", step="spec-writer", kind="agent", phase="spec",
            model="m", provider="anthropic"),

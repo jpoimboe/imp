@@ -412,11 +412,6 @@ class NarrativeBuilder:
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
 
-    @property
-    def open_step_name(self) -> str | None:
-        """Name of the currently-open step, or None."""
-        return self._step_stack[-1].name if self._step_stack else None
-
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
         running = [f for f in self._open_sub_by_event.values() if f.running]

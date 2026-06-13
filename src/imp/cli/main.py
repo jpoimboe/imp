@@ -923,8 +923,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
                                 width=_term_width(), status=status,
-                                suppress_opening_question=True,
-                                base_branch=change.base_branch)
+                                suppress_opening_question=True)
             coord = InterruptCoordinator()
             channel = _maybe_build_channel(change)
             rc = 0
@@ -1097,8 +1096,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status,
-                                base_branch=change.base_branch)
+                                width=_term_width(), status=status)
             coord = InterruptCoordinator()
             channel = _maybe_build_channel(change)
             rc = 0
