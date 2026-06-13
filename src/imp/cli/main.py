@@ -724,10 +724,13 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_header_line(change_id: str, title: str, marker: str, *, color: bool) -> str:
-    label = f": {title.strip()!r}" if title.strip() else ""
-    return (ansi(change_id, *pal.NODE_COLORS["workflow"], enabled=color)
-            + ansi(f"{label} · {marker}", "dim", enabled=color))
+def _run_header_line(slug: str, change_id: str, marker: str, *, color: bool) -> str:
+    from imp.cli.narrative import _slug_descriptor
+    token = change_row.resume_token(change_id)
+    display_slug = _slug_descriptor(slug)
+    tail = f" · {display_slug} · {marker}" if display_slug else f" · {marker}"
+    return (ansi(token, *pal.NODE_COLORS["workflow"], enabled=color)
+            + ansi(tail, "dim", enabled=color))
 
 
 def _rewind_note_line(from_step: str | None, target: str, *, color: bool) -> str:
@@ -876,7 +879,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     try:
         with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
             print(_run_header_line(
-                change.id, change.title, "new", color=should_use_color(sys.stdout)))
+                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
             non_interactive = bool(getattr(args, "non_interactive", False))
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
@@ -991,7 +994,7 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # so a resumed run opens like a fresh one. A title-less change defers
             # its header too (Option B), matching new.
             print(_run_header_line(
-                change.id, change.title, "resuming",
+                change.slug, change.id, "resuming",
                 color=should_use_color(sys.stdout)))
 
             # spec 2026-06-04: --from rewind preflight, before any run. Resolve
