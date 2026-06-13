@@ -5,6 +5,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from imp.remote.drivers.telegram import (
+    api_call,
+    format_event_message,
+    send_message_params,
+)
+
 _MODERN_ID = re.compile(r"^\d{4}-\d{2}-\d{2}-([a-z0-9]{6})$")
 
 
@@ -68,3 +74,17 @@ def resolve_change_id(
         if change_id is not None:
             return change_id, rest
     return None, inbound.text
+
+
+def format_outbound(event: dict[str, Any], handle: str) -> str:
+    """Render one event as outbound chat text, appending the reply handle."""
+    return f"{format_event_message(event)}\n↩ @{handle}"
+
+
+def send_message(token: str, chat_id: int, text: str, *, silent: bool) -> int | None:
+    """POST one sendMessage and return the created message's id, or None if absent."""
+    response = api_call(token, "sendMessage", send_message_params(
+        chat_id, text, silent=silent))
+    result = response.get("result") or {}
+    message_id = result.get("message_id")
+    return message_id if isinstance(message_id, int) else None
