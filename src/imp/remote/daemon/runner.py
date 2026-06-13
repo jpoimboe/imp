@@ -6,6 +6,7 @@ import json
 import os
 import queue
 import signal
+import sys
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -171,3 +172,39 @@ async def run_daemon(
         with contextlib.suppress(FileNotFoundError):
             spath.unlink()
         remove_pid(control_root)
+
+
+def start_daemon(control_root: Path) -> int:
+    """`imp remote-control start`: reject a second live daemon, then run in foreground."""
+    from imp.remote.drivers.telegram import ConfigError
+    try:
+        check_not_running(control_root)
+    except DaemonAlreadyRunning:
+        print("imp: a remote-control daemon is already running for this repo",
+              file=sys.stderr)
+        return 2
+    try:
+        anyio.run(run_daemon, control_root)
+    except ConfigError as exc:
+        print(f"imp: remote-control not configured: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def stop_daemon(control_root: Path) -> int:
+    """`imp remote-control stop`: SIGTERM the recorded daemon pid."""
+    pid = read_pid(control_root)
+    if pid is None:
+        print("imp: no remote-control daemon running for this repo", file=sys.stderr)
+        return 1
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        remove_pid(control_root)
+        print("imp: no remote-control daemon running for this repo", file=sys.stderr)
+        return 1
+    except PermissionError:
+        print(f"imp: no permission to signal the daemon (pid {pid})", file=sys.stderr)
+        return 1
+    print(f"Sent SIGTERM to remote-control daemon (pid {pid}).")
+    return 0
