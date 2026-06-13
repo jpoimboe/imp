@@ -5,6 +5,8 @@ import signal
 import socket
 from pathlib import Path
 
+import pytest
+
 from imp.cli.main import (
     _build_parser,
     _cmd_remote_control_start,
@@ -49,3 +51,17 @@ def test_stop_daemon_signals_the_recorded_pid(tmp_path: Path) -> None:
     assert runner.stop_daemon(tmp_path) == 0
     _, status = os.waitpid(pid, 0)
     assert os.WIFSIGNALED(status) and os.WTERMSIG(status) == signal.SIGTERM
+
+
+def test_start_daemon_returns_rc2_for_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from imp.remote.drivers.telegram import ConfigError
+
+    (tmp_path / ".imp").mkdir()
+
+    def _raise_config_error(*_a: object, **_kw: object) -> None:
+        raise ConfigError("no token configured")
+
+    monkeypatch.setattr(runner.anyio, "run", _raise_config_error)
+    assert runner.start_daemon(tmp_path) == 2
