@@ -1067,11 +1067,19 @@ def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     node = AgentTextNode(payload=p)
     if node.text.strip():
         self._flush_burst()
-        # Un-hold any trailing held narration — a new one is taking its place.
+        # A new narration is taking its place, so every EARLIER narration in this
+        # container is now settled (only the TRAILING one can still fold into the
+        # step conclusion). Un-hold them ALL — not just the immediately-adjacent
+        # one. The old `_last_narration_index`-only un-hold silently skipped any
+        # narration separated from the newcomer by a ThinkingFold / UserMessageNode
+        # (i.e. a normal tool/think turn — `_last_narration_index` only scans past
+        # ToolBurstFold), so interleaved prose left permanently-held nodes. In the
+        # live view a held node blocks the emit cursor, so a single stuck-held
+        # opening narration froze the whole run at its first step.
         children = self._container().children
-        prev_idx = _last_narration_index(children)
-        if prev_idx is not None and children[prev_idx].held:
-            children[prev_idx].held = False
+        for c in children:
+            if isinstance(c, AgentTextNode) and c.held:
+                c.held = False
         node.held = True
         self._append(node)
 
