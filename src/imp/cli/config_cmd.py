@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import TextIO
 
+from imp.cli import palette as pal
 from imp.providers.effective import FLOOR_SRC, EffectiveConfig
 from imp.providers.resolve import iter_provider_defaults
 from imp.remote.drivers import REGISTRY
@@ -13,14 +14,10 @@ from imp.remote.drivers import REGISTRY
 
 def _label(src_file: Path) -> str:
     """Human label for a leaf's source file (the right-hand side of `←`)."""
-    if src_file == FLOOR_SRC.file:
+    layer = _layer(src_file)
+    if layer == "default":
         return "provider default"
-    name = src_file.name
-    if name == "project.yaml":
-        return f"{src_file} (project)"
-    if name == "config.yaml" and src_file.parent.name == ".imp":
-        return f"{src_file} (local)"
-    return f"{src_file} (user)"
+    return f"{src_file} ({layer})"
 
 
 def _layer(src_file: Path) -> str:
@@ -98,8 +95,6 @@ def render_config(eff: EffectiveConfig, out: TextIO, *, color: bool = False,
 
 
 def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool = False) -> None:
-    from imp.cli import palette as pal
-
     cfg, prov = eff.config, eff.provenance
     if tier not in cfg.tiers:
         out.write(f"unknown tier {tier!r} (known: {sorted(cfg.tiers)})\n")
