@@ -951,14 +951,15 @@ def _single_reviewer_tally(output: dict[str, Any]) -> ReviewTally:
 
 
 def review_tally(tree: NarrativeTree) -> ReviewTally | None:
-    """Merge-gate verdict counts: panel member verdicts, or recheck on fast-path."""
-    panel = _find_last_step(tree.root, "review-panel")
-    if panel is not None and any(
-            isinstance(c, SubagentFold) for c in panel.children):
-        return panel_member_tally(panel)
-    recheck = _find_last_step(tree.root, "recheck")
-    if recheck is not None and isinstance(recheck.agent_output, dict):
-        return _single_reviewer_tally(recheck.agent_output)
+    """Merge-gate verdict counts: panel member verdicts when the `review` step ran
+    its opus panel, else the single generalist reviewer on fast-path/re-entry."""
+    review = _find_last_step(tree.root, "review")
+    if review is None:
+        return None
+    if any(isinstance(c, SubagentFold) for c in review.children):
+        return panel_member_tally(review)
+    if isinstance(review.agent_output, dict):
+        return _single_reviewer_tally(review.agent_output)
     return None
 
 
@@ -1071,7 +1072,8 @@ def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
     self._flush_burst()
     step = self._step_stack[-1]
     step.agent_output = p
-    if step.name == "review-panel" and p.get("verdict") == "approve":
+    if (step.name == "review" and p.get("verdict") == "approve"
+            and any(isinstance(c, SubagentFold) for c in step.children)):
         # member detail survives in imp log --full via the expanded subagent folds
         narration_idx = _last_narration_index(self._container().children)
         if narration_idx is not None:

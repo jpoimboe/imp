@@ -1419,10 +1419,10 @@ def test_distinct_trailing_narration_is_kept() -> None:
 def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
     bid = f"b{eid}"
     return [
-        _ev(f"c{eid}", "tool_call", agent_id="step:review/review-panel", id=bid,
+        _ev(f"c{eid}", "tool_call", agent_id="step:review/review", id=bid,
             name="task", input={"subagent_name": f"member-{eid}",
                                  "task_description": "review"}),
-        _ev(f"r{eid}", "tool_result", agent_id="step:review/review-panel", id=bid,
+        _ev(f"r{eid}", "tool_result", agent_id="step:review/review", id=bid,
             content=json.dumps(
                 {"status": "Success", "verdict": verdict, "findings": findings}),
             error=False),
@@ -1431,7 +1431,7 @@ def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
 
 def test_clean_panel_collapses_to_summary_node() -> None:
     events = [
-        _ev("1", "step_started", step="review-panel", kind="agent", phase="review",
+        _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
     ]
     events += _panel_member("1", "approve", "nit: rename foo")
@@ -1439,10 +1439,10 @@ def test_clean_panel_collapses_to_summary_node() -> None:
     events += _panel_member("3", "approve", "nit: add a comment")
     events += _panel_member("4", "approve", "")
     events += [
-        _ev("ao", "agent_output", agent_id="step:review/review-panel",
+        _ev("ao", "agent_output", agent_id="step:review/review",
             status="Success", verdict="approve",
             findings="### member-1\nnit: rename foo\n### member-3\nnit: add a comment"),
-        _ev("sc", "step_completed", step="review-panel", kind="agent",
+        _ev("sc", "step_completed", step="review", kind="agent",
             action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
     ]
     tree = nv.build_tree(events)
@@ -1457,17 +1457,17 @@ def test_clean_panel_collapses_to_summary_node() -> None:
 
 def test_blocking_panel_keeps_findings_prose() -> None:
     events = [
-        _ev("1", "step_started", step="review-panel", kind="agent", phase="review",
+        _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
     ]
     events += _panel_member("1", "task_gap", "blocking: missing handler")
     events += _panel_member("2", "approve", "")
     events += [
-        _ev("ao", "agent_output", agent_id="step:review/review-panel",
+        _ev("ao", "agent_output", agent_id="step:review/review",
             status="Success", verdict="task_gap",
             findings="### member-1 (task-level)\nblocking: missing handler that is "
                      "reachable in normal usage and clearly blocks the merge gate"),
-        _ev("sc", "step_completed", step="review-panel", kind="agent",
+        _ev("sc", "step_completed", step="review", kind="agent",
             action={"verb": "goto", "target": "implement"}, var_mutations={}),
     ]
     tree = nv.build_tree(events)
@@ -1507,7 +1507,7 @@ def test_parse_member_outcome_valid() -> None:
 
 def test_review_tally_from_panel_members() -> None:
     events = [
-        _ev("1", "step_started", step="review-panel", kind="agent", phase="review",
+        _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
     ]
     events += _panel_member("1", "approve", "nit: rename foo")
@@ -1515,9 +1515,9 @@ def test_review_tally_from_panel_members() -> None:
     events += _panel_member("3", "approve", "nit: tidy import")
     events += _panel_member("4", "approve", "")
     events += [
-        _ev("ao", "agent_output", agent_id="step:review/review-panel",
+        _ev("ao", "agent_output", agent_id="step:review/review",
             status="Success", verdict="approve", findings="..."),
-        _ev("sc", "step_completed", step="review-panel", kind="agent",
+        _ev("sc", "step_completed", step="review", kind="agent",
             action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
     ]
     tally = nv.review_tally(nv.build_tree(events))
@@ -1525,14 +1525,14 @@ def test_review_tally_from_panel_members() -> None:
     assert (tally.approve, tally.total, tally.blocking, tally.nits) == (4, 4, 0, 2)
 
 
-def test_review_tally_falls_back_to_recheck_on_fast_path() -> None:
-    # fast-path change: no panel ran, only the recheck reviewer.
+def test_review_tally_falls_back_to_single_reviewer_on_fast_path() -> None:
+    # fast-path/re-entry: the review step ran only the single generalist reviewer.
     tree = nv.build_tree([
-        _ev("1", "step_started", step="recheck", kind="agent", phase="review",
+        _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
-        _ev("ao", "agent_output", agent_id="step:review/recheck",
+        _ev("ao", "agent_output", agent_id="step:review/review",
             status="Success", verdict="approve", findings="one small nit"),
-        _ev("sc", "step_completed", step="recheck", kind="agent",
+        _ev("sc", "step_completed", step="review", kind="agent",
             action={"verb": "continue"}, var_mutations={}),
     ])
     tally = nv.review_tally(tree)
@@ -1540,13 +1540,13 @@ def test_review_tally_falls_back_to_recheck_on_fast_path() -> None:
     assert (tally.approve, tally.total, tally.blocking, tally.nits) == (1, 1, 0, 1)
 
 
-def test_review_tally_recheck_blocking_verdict() -> None:
+def test_review_tally_single_reviewer_blocking_verdict() -> None:
     tree = nv.build_tree([
-        _ev("1", "step_started", step="recheck", kind="agent", phase="review",
+        _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
-        _ev("ao", "agent_output", agent_id="step:review/recheck",
+        _ev("ao", "agent_output", agent_id="step:review/review",
             status="Success", verdict="task_gap", findings="blocking: something wrong"),
-        _ev("sc", "step_completed", step="recheck", kind="agent",
+        _ev("sc", "step_completed", step="review", kind="agent",
             action={"verb": "goto", "target": "implement"}, var_mutations={}),
     ])
     tally = nv.review_tally(tree)

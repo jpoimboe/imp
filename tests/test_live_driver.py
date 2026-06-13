@@ -1052,10 +1052,10 @@ def test_change_merged_suppressed_in_live_path() -> None:
 def _panel_member_ev(eid: str, verdict: str, findings: str = "") -> list:
     bid = f"b{eid}"
     return [
-        ev(f"c{eid}", "tool_call", agent_id="step:review/review-panel", id=bid,
+        ev(f"c{eid}", "tool_call", agent_id="step:review/review", id=bid,
            name="task", input={"subagent_name": f"member-{eid}",
                                "task_description": "review"}),
-        ev(f"r{eid}", "tool_result", agent_id="step:review/review-panel", id=bid,
+        ev(f"r{eid}", "tool_result", agent_id="step:review/review", id=bid,
            content=json.dumps({"status": "Success", "verdict": verdict,
                                "findings": findings}), error=False),
     ]
@@ -1068,7 +1068,7 @@ def test_final_review_gate_block_returned_from_pending_question() -> None:
     events = [
         ev("0", "change_created", id="2026-06-12-run-x", slug="2026-06-12-run-x",
            title="Run X"),
-        ev("1", "step_started", step="review-panel", kind="agent", phase="review",
+        ev("1", "step_started", step="review", kind="agent", phase="review",
            model="m", provider="anthropic"),
     ]
     events += _panel_member_ev("1", "approve", "nit: a")
@@ -1076,9 +1076,9 @@ def test_final_review_gate_block_returned_from_pending_question() -> None:
     events += _panel_member_ev("3", "approve", "nit: b")
     events += _panel_member_ev("4", "approve", "")
     events += [
-        ev("ao", "agent_output", agent_id="step:review/review-panel",
+        ev("ao", "agent_output", agent_id="step:review/review",
            status="Success", verdict="approve", findings="..."),
-        ev("sc", "step_completed", step="review-panel", kind="agent",
+        ev("sc", "step_completed", step="review", kind="agent",
            action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
         ev("fs", "step_started", step="final-review", kind="agent", phase="review",
            model="m", provider="anthropic"),

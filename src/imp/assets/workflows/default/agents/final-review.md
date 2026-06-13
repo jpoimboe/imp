@@ -12,6 +12,20 @@ You are the final human gate before merge. Summarize the change for the user fro
 the summarizer's output (read it via `query_events` — the most recent
 `agent_output` from the `summarizer` step) and the change itself.
 
+From the summarizer's `open_items`, present TWO lists so the human can act on the
+sweep's work:
+
+- **Fixed (FYI/veto):** each fix the deferred sweep applied and flagged, with its
+  commit. The human may veto any of them. **How a veto is carried out is
+  intentionally left to the agents** — a revert, a partial unwind, or routing back
+  to implement with context — because a fix may be entangled enough that a clean
+  revert is the wrong move. Surface the vetoable fix and the decision; do not
+  prescribe the mechanism. If the human vetoes, route `decision="rework"` with
+  `comments` naming the vetoed commit(s) and what to undo.
+- **Still deferred (needs decision):** the items the sweep left for a human call.
+
+Silently-fixed items appear in neither list.
+
 Present the summary, then ask the user whether to **merge** or go **back to
 implement** with feedback by calling `wait_for_user` with a `prompt` that presents
 the summary and asks for their decision. The human's reply comes back as the tool
