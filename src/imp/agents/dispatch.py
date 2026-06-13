@@ -18,11 +18,20 @@ Only the providers import this module.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
+import anyio
+
+from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import ToolResultBlock, ToolUseBlock
-from imp.agents.subagents import dispatch_task, raise_if_suspended
+from imp.agents.subagents import (
+    SubagentSuspended,
+    TaskDispatchSkipped,
+    dispatch_task,
+    raise_if_suspended,
+)
 from imp.agents.tools import Tool
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import StepComplete
@@ -37,6 +46,7 @@ class TurnState:
 
     tool_calls_used: int
     ceiling_tripped: bool = False
+    discarded_siblings: int = 0
 
 
 async def dispatch_one_tool_use(
@@ -59,6 +69,14 @@ async def dispatch_one_tool_use(
     subagent-suspension exceptions propagate (terminal — no heartbeat; the
     generator ends by raising).
     """
+    if tu.name == "task":
+        # §1: task tus route through dispatch_task_batch (concurrent path) or the
+        # kill-switch inline path, never here. raise (NOT assert) so a routing
+        # regression is caught even under `python -O`.
+        raise RuntimeError(
+            "task tu reached dispatch_one_tool_use; tasks must route through "
+            "dispatch_task_batch / the inline kill-switch path (dispatch.py)")
+
     # Decision 10 sweep site: EVERY tool dispatch — all tools, not just the
     # bash family. An agent that backgrounds a server and then spends the
     # invocation in read_file/grep/edit_file must still be swept. Module-attr
@@ -75,29 +93,7 @@ async def dispatch_one_tool_use(
         return None
     state.tool_calls_used += 1
 
-    tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
-
-    # task special-case: bypasses the sync Tool.invoke path entirely — go
-    # straight to the async dispatcher. Use the persisted tool_call event id
-    # for the durable parent link.
-    if tu.name == "task":
-        try:
-            result_str = await dispatch_task(
-                ctx, tu.input["subagent_name"], tu.input["task_description"],
-                tool_call_event_id=tc_ev["id"],
-                tier=tu.input.get("tier"),
-            )
-        except Exception as e:
-            raise_if_suspended(e)  # unwind a subagent-origin pause
-            err_text = f"{type(e).__name__}: {e}"
-            block = ToolResultBlock(tu.id, err_text, is_error=True)
-            tool_results.append(block)
-            elog.append_tool_result(agent_id=aid, block=block)
-            return None
-        block = ToolResultBlock(tu.id, result_str)
-        tool_results.append(block)
-        elog.append_tool_result(agent_id=aid, block=block)
-        return None
+    elog.append_tool_call(agent_id=aid, block=tu)
 
     tool = tools.get(tu.name)
     if tool is None:
@@ -157,3 +153,235 @@ async def dispatch_one_tool_use(
     tool_results.append(block)
     elog.append_tool_result(agent_id=aid, block=block)
     return None
+
+
+async def dispatch_task_batch(
+    *,
+    ctx: Any,
+    elog: Any,
+    aid: str,
+    task_tus: list[ToolUseBlock],
+    tool_results: list[ToolResultBlock],
+    state: TurnState,
+    ceiling: int | None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Dispatch every `task` tu of one turn CONCURRENTLY in an anyio task group
+    (design §1). Sweep ONCE before the batch (children sweep their own
+    registries); claim ceiling slots synchronously in document order
+    (over-ceiling tus get the backfill is_error tool_result event with NO
+    tool_call event — today's result-without-call shape); append each dispatched
+    tu's tool_call event before the group starts; run the children; append each
+    child's tool_result at its own completion. Results are assembled into
+    tool_results in DOCUMENT order (keyed off task_tus, not completion arrival).
+    After the group settles, yield one tool_heartbeat per task tu (dispatched AND
+    backfilled).
+
+    Failure isolation (Decision 3): a child's ordinary exception becomes its own
+    is_error tool_result. A child's SubagentSuspended is captured into a
+    first-wins slot and re-raised only after all siblings settle; a run-wide
+    pause that freezes every child out raises a synthetic suspension.
+    """
+    # Sweep once before the batch — the parent's registry, not the children's
+    # (each child sweeps its own fresh ToolContext inside its own drive loop).
+    await _bg._sweep_bg(ctx)
+
+    dispatched: list[tuple[ToolUseBlock, str]] = []
+    results: dict[str, ToolResultBlock] = {}
+    for tu in task_tus:
+        if ceiling is not None and state.tool_calls_used >= ceiling:
+            err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
+            block = ToolResultBlock(tu.id, err_text, is_error=True)
+            results[tu.id] = block
+            elog.append_tool_result(agent_id=aid, block=block)
+            state.ceiling_tripped = True
+        else:
+            state.tool_calls_used += 1
+            tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
+            dispatched.append((tu, tc_ev["id"]))
+
+    captured: list[SubagentSuspended] = []
+    skipped = 0
+
+    def _frozen() -> bool:
+        coord = getattr(ctx, "coordinator", None)
+        paused = coord is not None and coord.should_pause
+        return bool(captured) or paused
+
+    async def _run_child(tu: ToolUseBlock, tcid: str) -> None:
+        nonlocal skipped
+        try:
+            result_str = await dispatch_task(
+                ctx, tu.input["subagent_name"], tu.input["task_description"],
+                tool_call_event_id=tcid, tier=tu.input.get("tier"),
+                abort_dispatch=_frozen,
+            )
+        except TaskDispatchSkipped:
+            skipped += 1
+            return
+        except SubagentSuspended as susp:
+            if not captured:
+                captured.append(susp)
+            return
+        except Exception as e:
+            err_text = f"{type(e).__name__}: {e}"
+            block = ToolResultBlock(tu.id, err_text, is_error=True)
+            results[tu.id] = block
+            elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
+            return
+        block = ToolResultBlock(tu.id, result_str)
+        results[tu.id] = block
+        elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
+
+    try:
+        async with anyio.create_task_group() as tg:
+            for tu, tcid in dispatched:
+                tg.start_soon(_run_child, tu, tcid)
+    except BaseExceptionGroup as eg:
+        # anyio wraps even a single child failure in a group; no upstream
+        # consumer handles ExceptionGroup. Unwrap the single-exception case so
+        # the classifier sees today's exception forms; genuinely-multiple
+        # simultaneous failures re-raise as-is (a genuinely novel failure).
+        if len(eg.exceptions) == 1:
+            raise eg.exceptions[0] from None
+        raise
+
+    state.discarded_siblings += skipped
+
+    if captured:
+        raise captured[0]
+    if skipped:
+        raise SubagentSuspended(
+            "task batch membership frozen during run-wide pause; "
+            "no dispatch completed")
+
+    # Assemble in document order (NOT completion order): the API pairs by id, but
+    # the assembled message order is imp's to choose and document order is the one
+    # §3's reconstruction mirrors.
+    for tu in task_tus:
+        b = results.get(tu.id)
+        if b is not None:
+            tool_results.append(b)
+
+    # Heartbeat contract: exactly one per task tu, after the batch (including
+    # over-ceiling backfilled tus); the generator cannot yield while suspended in
+    # the group await, so they land together here.
+    for _ in task_tus:
+        yield {"type": "tool_heartbeat", "payload": {}}
+
+
+def _reorder_results_to_document_order(
+    tool_results: list[ToolResultBlock], tool_uses: list[ToolUseBlock],
+) -> None:
+    """Reorder the turn's tool_results in place to match tool_use DOCUMENT order
+    (design §1/§3). Batch execution is completion-ordered, but the turn's final
+    user message pairs results to tool_uses by id, and document order is the one
+    §3's reconstruction mirrors. Stable sort; an unknown id (defensive) sorts
+    last."""
+    order = {tu.id: i for i, tu in enumerate(tool_uses)}
+    tool_results.sort(key=lambda b: order.get(b.tool_use_id, len(order)))
+
+
+async def _dispatch_one_task_inline(
+    *,
+    ctx: Any,
+    elog: Any,
+    aid: str,
+    tu: ToolUseBlock,
+    tool_results: list[ToolResultBlock],
+    state: TurnState,
+    ceiling: int | None,
+) -> None:
+    """Kill-switch inline dispatch of ONE task tu — today's sequential shapes
+    exactly (sweep, ceiling, tool_call, dispatch_task, tool_result). Reconstructs
+    the task arm removed from dispatch_one_tool_use; a SubagentSuspended unwinds
+    the turn as it does today (raise_if_suspended re-raises)."""
+    await _bg._sweep_bg(ctx)
+    if ceiling is not None and state.tool_calls_used >= ceiling:
+        err_text = f"tool_call_ceiling_exceeded (ceiling={ceiling})"
+        block = ToolResultBlock(tu.id, err_text, is_error=True)
+        tool_results.append(block)
+        elog.append_tool_result(agent_id=aid, block=block)
+        state.ceiling_tripped = True
+        return
+    state.tool_calls_used += 1
+    tc_ev = elog.append_tool_call(agent_id=aid, block=tu)
+    try:
+        result_str = await dispatch_task(
+            ctx, tu.input["subagent_name"], tu.input["task_description"],
+            tool_call_event_id=tc_ev["id"], tier=tu.input.get("tier"),
+        )
+    except Exception as e:
+        raise_if_suspended(e)
+        err_text = f"{type(e).__name__}: {e}"
+        block = ToolResultBlock(tu.id, err_text, is_error=True)
+        tool_results.append(block)
+        elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
+        return
+    block = ToolResultBlock(tu.id, result_str)
+    tool_results.append(block)
+    elog.append_tool_result(agent_id=aid, block=block, id_ns="block")
+
+
+async def dispatch_turn_tool_uses(
+    *,
+    ctx: Any,
+    elog: Any,
+    aid: str,
+    invocation: Any,
+    tools: dict[str, Tool],
+    tool_uses: list[ToolUseBlock],
+    tool_results: list[ToolResultBlock],
+    state: TurnState,
+    ceiling: int | None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Dispatch one assistant turn's tool_use blocks (design §1). Partition: ALL
+    `task` tus run as one concurrent batch at the FIRST task tu's document
+    position; every non-task tu flows through `dispatch_one_tool_use` in document
+    order; the batch never overlaps a non-task tool. After all dispatch, the
+    turn's tool_results are reordered to document order. Yields one tool_heartbeat
+    per processed tu plus any terminal event dict (the caller yields it and
+    stops). SubagentSuspended / AwaitingUserInput propagate (terminal — no
+    heartbeat; the generator ends by raising)."""
+    if max_parallel_tasks() == 1:
+        # Kill switch (Decision 5): inline document-order path, no task group —
+        # today's shapes exactly. Each tu (task and non-task) dispatches
+        # sequentially in document order; results are already document-ordered, so
+        # no reorder is applied (and none is needed).
+        for tu in tool_uses:
+            if tu.name == "task":
+                await _dispatch_one_task_inline(
+                    ctx=ctx, elog=elog, aid=aid, tu=tu,
+                    tool_results=tool_results, state=state, ceiling=ceiling)
+            else:
+                terminal = await dispatch_one_tool_use(
+                    ctx=ctx, elog=elog, aid=aid, invocation=invocation,
+                    tools=tools, tu=tu, tool_results=tool_results,
+                    state=state, ceiling=ceiling)
+                if terminal is not None:
+                    yield terminal
+                    return
+            yield {"type": "tool_heartbeat", "payload": {}}
+        return
+
+    task_tus = [tu for tu in tool_uses if tu.name == "task"]
+    batch_started = False
+    for tu in tool_uses:
+        if tu.name == "task":
+            if not batch_started:
+                batch_started = True
+                async for ev in dispatch_task_batch(
+                        ctx=ctx, elog=elog, aid=aid, task_tus=task_tus,
+                        tool_results=tool_results, state=state, ceiling=ceiling):
+                    yield ev
+            # later task tus are already handled by the single batch
+            continue
+        terminal = await dispatch_one_tool_use(
+            ctx=ctx, elog=elog, aid=aid, invocation=invocation,
+            tools=tools, tu=tu, tool_results=tool_results,
+            state=state, ceiling=ceiling)
+        if terminal is not None:
+            yield terminal
+            return
+        yield {"type": "tool_heartbeat", "payload": {}}
+
+    _reorder_results_to_document_order(tool_results, tool_uses)

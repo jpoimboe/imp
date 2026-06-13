@@ -31,7 +31,7 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import raise_if_suspended
+from imp.agents.subagents import TASK_REFUSAL_SENTINEL, raise_if_suspended
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.context import ToolContext, terminate_running_processes
 from imp.agents.tools.wait_for_user import AwaitingUserInput
@@ -47,7 +47,12 @@ from imp.providers.codex_config import (
     sweep_stale_codex_homes,
     teardown_codex_home,
 )
-from imp.providers.codex_mcp import RunState, start_server
+from imp.providers.codex_mcp import (
+    CODEX_APPROVAL_POLICY,
+    RunState,
+    _args_fingerprint,
+    start_server,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -264,6 +269,7 @@ class CodexAgentRunner:
         self._ctx = ctx
 
         state = RunState(cap=invocation.max_tool_calls or 1000, agent_id=aid)
+        state.runner_loop = asyncio.get_running_loop()
         # Shared event-processing state (process_event keys).
         proc_state: dict[str, Any] = {
             "thread_id": None, "complete_step_args": None,
@@ -573,7 +579,8 @@ class CodexAgentRunner:
 
                 # A subagent-origin pause captured in the MCP handler must
                 # unwind the whole codex run cleanly (not classify as an error).
-                if state.subagent_suspended is not None:
+                if (state.subagent_suspended is not None
+                        and state.inflight_task_dispatches == 0):
                     if self._abort_controller is not None:
                         with contextlib.suppress(Exception):
                             self._abort_controller.abort()
@@ -583,7 +590,7 @@ class CodexAgentRunner:
                 # likewise unwind the whole codex run cleanly. Mirrors the
                 # subagent-suspend escalation, but raises AwaitingUserInput so
                 # drive_invocation marks the step resumable (awaiting_user=True).
-                if state.awaiting_user:
+                if state.awaiting_user and state.inflight_task_dispatches == 0:
                     if self._abort_controller is not None:
                         with contextlib.suppress(Exception):
                             self._abort_controller.abort()
@@ -665,6 +672,11 @@ class CodexAgentRunner:
                             return
                         yield {"type": "agent_output", "payload": args}
                         return
+                    # Suspension or user-wait captured while the in-loop raise
+                    # was gated by in-flight siblings — break to the stream-end
+                    # fallback which drains then re-raises.
+                    if state.subagent_suspended is not None or state.awaiting_user:
+                        break
                     # Not captured: classified provider-error text wins over
                     # both nudge and `no_complete_step`. Auth/quota substrings
                     # must short-circuit nudge attempts (a nudge to a quota'd
@@ -692,6 +704,19 @@ class CodexAgentRunner:
                                     "complete_step"),
                         "detail": {"last_agent_text": last_text[:500]}}}
                     return
+            # Stream-end drain-then-raise fallback: the stream ended with a
+            # capture pending and the gated in-loop raise never fired (e.g. a
+            # silent stream death with a sibling still in flight). Await the
+            # in-flight drain, then re-raise — suspension takes precedence.
+            if state.subagent_suspended is not None or state.awaiting_user:
+                while state.inflight_task_dispatches > 0:
+                    await asyncio.sleep(0)
+                if self._abort_controller is not None:
+                    with contextlib.suppress(Exception):
+                        self._abort_controller.abort()
+                if state.subagent_suspended is not None:
+                    raise state.subagent_suspended
+                raise AwaitingUserInput(state.awaiting_prompt)
             # Stream ended (possibly silently) after a cancel without the
             # in-loop check firing — classify it as a clean interrupt.
             if self._is_cancelled():
@@ -788,7 +813,7 @@ class CodexAgentRunner:
         return ThreadOptions(
             model=self.model,
             sandboxMode="danger-full-access",
-            approvalPolicy="never",
+            approvalPolicy=CODEX_APPROVAL_POLICY,
             networkAccessEnabled=False,
         )
 
@@ -882,7 +907,14 @@ def _serialize_mcp_result(result: Any) -> str:
     return str(result)
 
 
-def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
+TASK_TURN_BOUNDARY_CLOSE = (
+    "imp: task tool_call closed at turn boundary; no result observed"
+)
+
+
+def reassemble_codex_turn(
+    items: list[Any], *, audit: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Reassemble one codex turn's ``item.completed`` items into a full-turn
     ``llm_response.raw`` (``{"content": [...]}``) carrying text + tool_use
     blocks.  This raw IS emitted live as the turn's single ``llm_response`` at
@@ -906,9 +938,15 @@ def reassemble_codex_turn(items: list[Any]) -> dict[str, Any]:
         elif itype == "mcp_tool_call":
             name = (getattr(item, "tool", "")
                     or getattr(item, "name", "") or "")
+            sdk_id = getattr(item, "id", "") or ""
+            # Re-key a task block to its minted event id (design §2 audit re-key)
+            # so the reassembled tool_use pairs id-consistently with the live
+            # tool_result. Non-task calls and absent-from-audit task items keep
+            # the SDK id.
+            block_id = audit.get(sdk_id, sdk_id) if (name == "task" and audit) else sdk_id
             content.append({
                 "type": "tool_use",
-                "id": getattr(item, "id", "") or "",
+                "id": block_id,
                 "name": name,
                 "input": getattr(item, "arguments", None) or {},
             })
@@ -1007,21 +1045,24 @@ def process_event(
             name = getattr(item, "tool", "") or getattr(item, "name", "") or ""
             args = getattr(item, "arguments", None) or {}
             sdk_id = getattr(item, "id", "") or ""
-            if name == "task" and run_state is not None and run_state.minted_task_ids:
-                # dispatch_tool already minted the parent tool_call; FIFO-pop the
-                # id (dispatch order == completion order) and key the result to it.
-                call_id = run_state.minted_task_ids.pop(0)
+            # Fingerprint match-and-remove (design §2 re-key — replaces FIFO pop).
+            # Concurrent task completions arrive in arbitrary order, so pair each
+            # item with the mint whose args fingerprint it matches. Parse a
+            # string-shaped `arguments` to a dict first; an unparseable string
+            # degrades to no-match (never an exception). NO FIFO fallback: an
+            # unminted item (e.g. a cap-tripped task) with no fingerprint match
+            # takes the sdk-keyed path and never steals a live sibling's mint.
+            match_args: dict[str, Any] | None
+            if isinstance(args, str):
+                try:
+                    parsed = json.loads(args)
+                except (ValueError, TypeError):
+                    parsed = None
+                match_args = parsed if isinstance(parsed, dict) else None
+            elif isinstance(args, dict):
+                match_args = args
             else:
-                # Fallback: either a non-`task` tool call, or a `task` item that
-                # arrived with no prior mint (a protocol-ordering violation that
-                # shouldn't happen — `dispatch_tool` always mints before the SDK
-                # emits the item). In either case, emit a tool_call/result pair
-                # keyed to the SDK item id directly.
-                call_id = sdk_id
-                elog.append_tool_call(
-                    agent_id=agent_id,
-                    block=ToolUseBlock(id=call_id, name=name, input=args),
-                )
+                match_args = None
             err = getattr(item, "error", None)
             status = getattr(item, "status", "completed")
             is_error = err is not None or status not in ("completed", "succeeded")
@@ -1029,11 +1070,44 @@ def process_event(
                 content = getattr(err, "message", "") or str(err)
             else:
                 content = _serialize_mcp_result(getattr(item, "result", None))
+            matched_id: str | None = None
+            if (name == "task" and run_state is not None
+                    and match_args is not None):
+                fp = _args_fingerprint(match_args)
+                if (is_error and content.endswith(TASK_REFUSAL_SENTINEL)
+                        and run_state.refused_task_mints):
+                    for idx, (ev_id, ent_fp) in enumerate(
+                            run_state.refused_task_mints):
+                        if ent_fp == fp:
+                            matched_id = ev_id
+                            del run_state.refused_task_mints[idx]
+                            run_state.task_id_audit[sdk_id] = ev_id
+                            break
+                if matched_id is None and run_state.minted_task_ids:
+                    for idx, (ev_id, ent_fp) in enumerate(
+                            run_state.minted_task_ids):
+                        if ent_fp == fp:
+                            matched_id = ev_id
+                            del run_state.minted_task_ids[idx]
+                            run_state.task_id_audit[sdk_id] = ev_id
+                            break
+            if matched_id is not None:
+                call_id = matched_id
+            else:
+                # Non-task tool, or a task item with no minted match: emit a
+                # tool_call/result pair keyed to the SDK item id directly.
+                call_id = sdk_id
+                elog.append_tool_call(
+                    agent_id=agent_id,
+                    block=ToolUseBlock(id=call_id, name=name, input=args),
+                )
+            task_id_ns = "event" if (name == "task" and matched_id is not None) else None
             elog.append_tool_result(
                 agent_id=agent_id,
                 block=ToolResultBlock(
                     tool_use_id=call_id, content=content, is_error=is_error,
                 ),
+                id_ns=task_id_ns,
             )
             if name == "complete_step":
                 # Fallback capture from the RAW SDK item args, which carry no
@@ -1042,13 +1116,14 @@ def process_event(
                 # RunState capture ran, the consume loop's mirror overwrites
                 # proc_state with its already-filtered args; this write is the
                 # fallback for when that path didn't run.
-                state["complete_step_args"] = dict(args)
+                state["complete_step_args"] = match_args if match_args is not None else {}
                 state["complete_step_called"] = True
             # Accumulate tool outcome for the per-turn LoopGuard record.
             # codex item tool names are already bare (no mcp__imp__ prefix),
             # so no stripping is needed.
             state.setdefault("turn_tool_outcomes", []).append(
-                ToolOutcome(name=name, tool_use_id=call_id, input=dict(args),
+                ToolOutcome(name=name, tool_use_id=call_id,
+                            input=match_args if match_args is not None else {},
                             is_error=is_error,
                             result_preview=_result_preview(content)))
             # Buffer for the full-turn llm_response reassembly (Unit F).
@@ -1131,12 +1206,28 @@ def process_event(
         # carrying the tool_use blocks paired with their tool_results.
         items = state.pop("turn_items", [])
         if items:
-            raw = reassemble_codex_turn(items)
+            raw = reassemble_codex_turn(
+                items,
+                audit=run_state.task_id_audit if run_state is not None else None)
             elog.append_llm_response(
                 agent_id=agent_id, provider=provider, model=model,
                 raw=raw, usage={}, stop_reason=None,
                 auth_mode=state.get("auth_mode"),
             )
+        if run_state is not None and run_state.inflight_task_dispatches == 0:
+            for ev_id, _fp in (
+                    list(run_state.minted_task_ids)
+                    + list(run_state.refused_task_mints)):
+                elog.append_tool_result(
+                    agent_id=agent_id,
+                    block=ToolResultBlock(
+                        tool_use_id=ev_id,
+                        content=TASK_TURN_BOUNDARY_CLOSE, is_error=True),
+                    id_ns="event",
+                )
+            run_state.minted_task_ids.clear()
+            run_state.refused_task_mints.clear()
+            run_state.task_id_audit.clear()
         usage = getattr(event, "usage", None)
         if usage is None:
             return

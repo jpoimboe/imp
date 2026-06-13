@@ -717,3 +717,22 @@ async def test_runner_outer_except_unknown_when_cancel_unset(
     errors = [e for e in events if e.get("type") == "error"]
     assert len(errors) == 1
     assert errors[0]["payload"]["category"] == "unknown"
+
+
+@pytest.mark.anyio
+async def test_request_carries_parallel_tool_calls_true(tmp_path: Path) -> None:
+    """§4/AC41: every openai Responses request explicitly enables parallel tool calls."""
+    (tmp_path / "art").mkdir()
+    fake = FakeResponsesClient([
+        resp_response(
+            resp_function_call("c1", "complete_step",
+                               '{"status": "Success", "note": "ok"}'),
+        ),
+    ])
+    log = InMemoryEventLog()
+    runner = OpenAIAgentRunner(model_name="gpt-4o-mini",
+                               client_factory=lambda: fake)
+    async for _ in runner.run(_inv(tmp_path, event_log=log)):
+        pass
+    only_call = fake.responses.calls[0]
+    assert only_call["parallel_tool_calls"] is True

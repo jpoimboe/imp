@@ -23,6 +23,7 @@ SDK `_internal/transport/subprocess_cli.py`).
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import json
@@ -34,7 +35,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from imp.agents.classify import ResumeState, classify_resume
-from imp.agents.loop_guard import LoopGuard, ToolOutcome, TurnRecord, _result_preview
+from imp.agents.loop_guard import (
+    LoopGuard,
+    ToolOutcome,
+    TurnRecord,
+    _flatten_result_text,
+    _result_preview,
+)
+from imp.agents.parallel import max_parallel_tasks
 from imp.agents.runner import (
     AgentInvocation,
     AgentRunner,
@@ -45,7 +53,13 @@ from imp.agents.runner import (
     ToolResultBlock,
     ToolUseBlock,
 )
-from imp.agents.subagents import dispatch_task, make_task_tool, raise_if_suspended
+from imp.agents.subagents import (
+    TASK_REFUSAL_SENTINEL,
+    TaskDispatchSkipped,
+    dispatch_task,
+    make_task_tool,
+    raise_if_suspended,
+)
 from imp.agents.tools import Tool, get_registry
 from imp.agents.tools import bg as _bg
 from imp.agents.tools.complete_step import make_complete_step_tool
@@ -238,6 +252,14 @@ class _RunState:
     # Set once at runner entry; read by the MCP wrapper to append the spawning
     # task tool_call on the parent's agent chain.
     agent_id: str = ""
+    # In-flight `task` dispatch count — the claude_code mirror of codex's
+    # RunState.inflight_task_dispatches (design §2 drain gate). _impl increments
+    # before the dispatch await and decrements in finally on every exit; the
+    # receive loop defers the awaiting_user re-raise until this is 0.
+    inflight_task_dispatches: int = 0
+    # Runner's event loop, recorded at _run_loop entry. _impl raises on a foreign
+    # loop (same-loop topology pin). None disables the check.
+    runner_loop: Any = None
 
 
 # ── Tool registry shimming ───────────────────────────────────────────────────
@@ -338,6 +360,27 @@ def _python_schema_for_tool(t: Tool) -> dict[str, Any]:
     return {name: _python_type_for_property(spec) for name, spec in props.items()}
 
 
+# Bypass posture for the claude_code provider: the imp tools are exposed through a
+# strict allowlist (allowed_tools=[mcp__imp__…], strict_mcp_config=True in
+# _build_options), so a task readOnlyHint cannot grant read-only auto-approval
+# beyond imp's own permission layer. The hint below is DERIVED from this flag so a
+# future interactive/approval mode that flips it drops the hint automatically
+# (design §2 honesty note); a test pins the derivation.
+CLAUDE_CODE_ALLOWLIST_MODE = True
+
+
+def _task_annotations() -> Any | None:
+    """ToolAnnotations(readOnlyHint=True) for the task tool ONLY, and only when the
+    allowlist posture is on AND the width knob permits parallelism. readOnlyHint is
+    not literally true; its only operative effect here is unlocking the CLI's MCP
+    parallel scheduling. Width gate: IMP_MAX_PARALLEL_TASKS=1 drops the hint
+    (Decision 5 kill switch)."""
+    from mcp.types import ToolAnnotations
+    if CLAUDE_CODE_ALLOWLIST_MODE and max_parallel_tasks() > 1:
+        return ToolAnnotations(readOnlyHint=True)
+    return None
+
+
 def _wrap_one(
     name: str, t: Tool, ctx: ToolContext, state: _RunState, sdk_tool: Any,
 ) -> Any:
@@ -356,6 +399,11 @@ def _wrap_one(
     schema: Any = t.input_schema
 
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
+        if (state.runner_loop is not None
+                and asyncio.get_running_loop() is not state.runner_loop):
+            raise RuntimeError(
+                "claude_code MCP tool dispatched off the runner loop "
+                "(same-loop topology pin)")
         try:
             # Decision 10 sweep site: EVERY tool dispatch — the claude_code
             # analog of agents/dispatch.py's first-statement sweep. Inside the
@@ -394,34 +442,57 @@ def _wrap_one(
                         agent_id=state.agent_id,
                         block=ToolUseBlock(id=minted, name="task", input=task_input))
                     tc_event_id = tc_ev["id"]
+                state.inflight_task_dispatches += 1
                 try:
-                    result = await dispatch_task(
-                        ctx, args["subagent_name"], args["task_description"],
-                        tool_call_event_id=tc_event_id,
-                        tier=args.get("tier"),
-                    )
-                except BaseException as exc:
-                    # Error / suspend path: still close the fold with the SAME
-                    # minted id so narrative's _h_tool_result gets a deterministic,
-                    # outcome-carrying close (running=False, is_error=True). Then
-                    # re-raise into the outer handlers (raise_if_suspended honesty
-                    # for a subagent-origin pause; otherwise the generic is_error
-                    # tool_result path below the task branch).
+                    try:
+                        result = await dispatch_task(
+                            ctx, args["subagent_name"], args["task_description"],
+                            tool_call_event_id=tc_event_id,
+                            tier=args.get("tier"),
+                            abort_dispatch=lambda: (
+                                state.awaiting_user
+                                or (ctx.coordinator is not None
+                                    and ctx.coordinator.should_pause)),
+                        )
+                    except TaskDispatchSkipped:
+                        # Membership frozen (awaiting_user OR should_pause): refuse
+                        # WITHOUT dispatch. Close the minted fold with the BARE
+                        # sentinel (unwrapped — the runner's un-count matches it by
+                        # EXACT equality) and return it; no re-raise.
+                        if ctx.event_log is not None:
+                            ctx.event_log.append_tool_result(
+                                agent_id=state.agent_id,
+                                block=ToolResultBlock(
+                                    minted, TASK_REFUSAL_SENTINEL, is_error=True),
+                                id_ns="block")
+                        return _tool_response(TASK_REFUSAL_SENTINEL, is_error=True)
+                    except BaseException as exc:
+                        # Error / suspend path: still close the fold with the SAME
+                        # minted id so narrative's _h_tool_result gets a deterministic,
+                        # outcome-carrying close (running=False, is_error=True). Then
+                        # re-raise into the outer handlers (raise_if_suspended honesty
+                        # for a subagent-origin pause; otherwise the generic is_error
+                        # tool_result path below the task branch).
+                        if ctx.event_log is not None:
+                            err_text = f"{type(exc).__name__}: {exc}"
+                            ctx.event_log.append_tool_result(
+                                agent_id=state.agent_id,
+                                block=ToolResultBlock(minted, err_text, is_error=True),
+                                id_ns="block")
+                        raise
                     if ctx.event_log is not None:
-                        err_text = f"{type(exc).__name__}: {exc}"
+                        # Success close: the canonical, outcome-carrying tool_result
+                        # for this task, keyed on the SAME minted block id as the
+                        # call. The receive-loop user branch SUPPRESSES the SDK's
+                        # duplicate task result (the toolu_… one) so this minted one
+                        # stays canonical.
                         ctx.event_log.append_tool_result(
                             agent_id=state.agent_id,
-                            block=ToolResultBlock(minted, err_text, is_error=True))
-                    raise
-                if ctx.event_log is not None:
-                    # Success close: the canonical, outcome-carrying tool_result for
-                    # this task, keyed on the SAME minted block id as the call. The
-                    # receive-loop user branch SUPPRESSES the SDK's duplicate task
-                    # result (the toolu_… one) so this minted one stays canonical.
-                    ctx.event_log.append_tool_result(
-                        agent_id=state.agent_id,
-                        block=ToolResultBlock(minted, result, is_error=False))
-                return _tool_response(result, is_error=False)
+                            block=ToolResultBlock(minted, result, is_error=False),
+                            id_ns="block")
+                    return _tool_response(result, is_error=False)
+                finally:
+                    state.inflight_task_dispatches -= 1
             if name == "complete_step":
                 # Capture the args; return a "success" body so claude proceeds
                 # to ResultMessage cleanly. The runner sees the captured args
@@ -469,7 +540,10 @@ def _wrap_one(
             state.runtime_errors.append(text)
             return _tool_response(text, is_error=True)
 
-    return sdk_tool(name, t.description, schema)(_impl)
+    # task ONLY — derived from the allowlist posture + width knob (Decision 5 /
+    # §2 annotation). Every other tool wraps unannotated.
+    annotations = _task_annotations() if name == "task" else None
+    return sdk_tool(name, t.description, schema, annotations=annotations)(_impl)
 
 
 def _tool_response(text: str, *, is_error: bool) -> dict[str, Any]:
@@ -923,6 +997,7 @@ class ClaudeCodeAgentRunner:
 
         state = _RunState()
         state.agent_id = aid
+        state.runner_loop = asyncio.get_running_loop()
         sdk_tools = _make_sdk_tools(tools, ctx, state)
 
         # In-process MCP server hosting imp tools. The real SDK call:
@@ -1238,6 +1313,10 @@ class ClaudeCodeAgentRunner:
                                     is_task = pend is not None and pend.name == "task"
                                     if not is_task:
                                         elog.append_tool_result(agent_id=aid, block=b)
+                                    if (is_task and b.is_error
+                                            and _flatten_result_text(b.content)
+                                            == TASK_REFUSAL_SENTINEL):
+                                        tool_calls_used -= 1
                                     if pend is not None:
                                         pend.is_error = b.is_error
                                         pend.result_preview = \
@@ -1269,10 +1348,19 @@ class ClaudeCodeAgentRunner:
                     # persisted transcript ends at the dangling wait_for_user
                     # tool_use with NO following tool_result (the real human reply
                     # on an attended resume resolves it).
-                    if state.awaiting_user:
+                    if state.awaiting_user and state.inflight_task_dispatches == 0:
                         raise AwaitingUserInput(state.awaiting_prompt)
 
                     if cls_name == "ResultMessage":
+                        # Stream-end drain-then-raise fallback (design §2 drain
+                        # gate): the turn ended with a wait_for_user pause captured
+                        # while a sibling task was in flight, so the in-loop gate
+                        # above deferred the re-raise. Await the in-flight drain,
+                        # then re-raise so run() pauses before returning.
+                        if state.awaiting_user:
+                            while state.inflight_task_dispatches > 0:
+                                await asyncio.sleep(0)
+                            raise AwaitingUserInput(state.awaiting_prompt)
                         # Loop guard: ResultMessage is the true end-of-turn
                         # marker, so flush the accumulated turn here EXACTLY ONCE
                         # (a turn ending in complete_step set pending_complete →

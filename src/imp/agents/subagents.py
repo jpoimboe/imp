@@ -10,13 +10,21 @@ deadlock that would otherwise hit.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 
+from imp.agents.parallel import emit_parallelism_warning_once
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
-from imp.engine.agent_run import SubagentSuspended, build_agent_invocation, drive_invocation
+from imp.engine.agent_run import (
+    SubagentSuspended as SubagentSuspended,
+)
+from imp.engine.agent_run import (
+    build_agent_invocation,
+    drive_invocation,
+)
 from imp.engine.backoff import (
     HEADLESS_RETRY_CEILING_SECONDS as _HEADLESS_RETRY_CEILING_SECONDS,
 )
@@ -39,6 +47,25 @@ TASK_TOOL_SCHEMA: dict[str, Any] = {
 
 class TaskMustBeAwaited(Exception):
     """Sentinel raised if the runner forgets the special-case dispatch."""
+
+
+class TaskDispatchSkipped(Exception):
+    """Raised by dispatch_task when its abort_dispatch predicate reports the
+    turn's task membership has FROZEN — a sibling captured a suspension, or a
+    run-wide pause is unwinding (design Decision 4, membership-freeze section).
+    The child must NOT spawn and must NOT emit a tool_result; the caller
+    (dispatch_task_batch / the bridges) catches this and discards the tu
+    silently. Distinct from SubagentSuspended: a skip means "never dispatched",
+    not "dispatched then paused"."""
+
+
+TASK_REFUSAL_SENTINEL = "imp: task refused — turn membership frozen"
+
+
+class TaskRefused(RuntimeError):
+    """Raised to refuse a task without dispatch; its message is
+    TASK_REFUSAL_SENTINEL so the codex bridge's FastMCP layer wraps it into an
+    error-shaped tool result the runner matches by is_error AND suffix-equals."""
 
 
 def raise_if_suspended(exc: BaseException) -> None:
@@ -84,7 +111,13 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
         name="task",
         description=(
             "Dispatch a subtask to a named subagent. "
-            "Returns the subagent's structured output as a JSON string."
+            "Returns the subagent's structured output as a JSON string. "
+            "Independent subtasks issued as multiple task calls in ONE "
+            "assistant message run concurrently; issue dependent subtasks "
+            "sequentially across turns. The relative ordering of task "
+            "calls and non-task tools issued in the same message is "
+            "unspecified: do not place a non-task tool that depends on a "
+            "task's effects (or vice versa) in the same message as task calls."
         ),
         input_schema=schema,
         fn=_invoke,
@@ -94,7 +127,12 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
 async def dispatch_task(
     ctx: ToolContext, subagent_name: str, task_description: str,
     *, tool_call_event_id: str = "", tier: str | None = None,
+    abort_dispatch: Callable[[], bool] | None = None,
 ) -> str:
+    if abort_dispatch is not None and abort_dispatch():
+        raise TaskDispatchSkipped(
+            f"task dispatch to {subagent_name!r} skipped on entry: "
+            "membership already frozen")
     if subagent_name not in ctx.subagent_defs:
         raise ValueError(
             f"subagent {subagent_name!r} not declared; available: "
@@ -213,41 +251,56 @@ async def dispatch_task(
     #   2. Headless ceiling — when ctx.non_interactive is True and cumulative
     #      backoff would exceed _HEADLESS_RETRY_CEILING_SECONDS, stop retrying
     #      and raise SubagentSuspended (unwinds as a clean pause).
-    backoff = 0
-    cumulative_backoff = 0.0
-    while True:
-        runner = await ctx.spawn_subagent(sub_inv)
-        result = await drive_invocation(
-            sub_inv, runner, coordinator=ctx.coordinator,
-            log=ctx.event_log, emit_events=False, prior_backoff_attempts=backoff)
-        if result.delay is None:
-            break
-        # §10/§12 headless ceiling (checked BEFORE sleeping, matching executor).
-        if (ctx.non_interactive
-                and cumulative_backoff + result.delay > _HEADLESS_RETRY_CEILING_SECONDS):
-            raise SubagentSuspended("retry ceiling reached during subagent backoff")
-        backoff += 1
-        await _interruptible_sleep(result.delay, ctx.coordinator)
-        cumulative_backoff += result.delay
-        if ctx.coordinator is not None and ctx.coordinator.should_pause:
-            raise SubagentSuspended("paused during subagent backoff")
 
-    if result.paused:
-        # Unwind to the executor; resume restarts the subagent subtree fresh.
-        raise SubagentSuspended("subagent paused")
-    if result.fatal or result.errored or result.output is None:
-        # The parent adjudicates a flaky subagent (is_error tool_result) — it
-        # must not kill the task-lead. error_policy backoff has already been
-        # applied above, so transient errors retried before reaching here.
-        cat = result.error.category if result.error else "unknown"
-        kind = result.error.kind if result.error else None
-        # Embed the kind (e.g. "stalled" from the B.2 watchdog) so the parent's
-        # is_error tool_result content carries it — Part D derives the subagent's
-        # terminal glyph from this marker. Without it, a stalled subagent reads
-        # as a generic ✗ failed and the operator can't tell it timed out.
-        # CONSUMER CONTRACT: narrative._close_subagent_fold scans this error
-        # content for the literal "[<kind>]" marker (only on is_error closes).
-        # Keep the bracketed format and kind vocabulary in sync with that scan.
-        suffix = f" [{kind}]" if kind else ""
-        raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
-    return json.dumps(result.output)
+    # Width cap (design Decision 5): acquire THIS invocation's CapacityLimiter
+    # around the whole drive loop — the single drift-proof site that bounds all
+    # four providers once the batch helper fans tasks out. Lazily created,
+    # per-invocation, never inherited (nested-pool deadlock guard). Today's
+    # dispatch is sequential, so there is only ever one borrower; the limiter is
+    # a no-op for behavior until the concurrency core lands. The startup clamp
+    # warning fires here, once, on the first dispatch.
+    limiter = ctx.get_parallel_limiter()
+    emit_parallelism_warning_once(ctx.event_log, ctx.agent_id)
+    async with limiter:
+        if abort_dispatch is not None and abort_dispatch():
+            raise TaskDispatchSkipped(
+                f"task dispatch to {subagent_name!r} skipped after limiter "
+                "acquire: membership froze while queued")
+        backoff = 0
+        cumulative_backoff = 0.0
+        while True:
+            runner = await ctx.spawn_subagent(sub_inv)
+            result = await drive_invocation(
+                sub_inv, runner, coordinator=ctx.coordinator,
+                log=ctx.event_log, emit_events=False, prior_backoff_attempts=backoff)
+            if result.delay is None:
+                break
+            # §10/§12 headless ceiling (checked BEFORE sleeping, matching executor).
+            if (ctx.non_interactive
+                    and cumulative_backoff + result.delay > _HEADLESS_RETRY_CEILING_SECONDS):
+                raise SubagentSuspended("retry ceiling reached during subagent backoff")
+            backoff += 1
+            await _interruptible_sleep(result.delay, ctx.coordinator)
+            cumulative_backoff += result.delay
+            if ctx.coordinator is not None and ctx.coordinator.should_pause:
+                raise SubagentSuspended("paused during subagent backoff")
+
+        if result.paused:
+            # Unwind to the executor; resume restarts the subagent subtree fresh.
+            raise SubagentSuspended("subagent paused")
+        if result.fatal or result.errored or result.output is None:
+            # The parent adjudicates a flaky subagent (is_error tool_result) — it
+            # must not kill the task-lead. error_policy backoff has already been
+            # applied above, so transient errors retried before reaching here.
+            cat = result.error.category if result.error else "unknown"
+            kind = result.error.kind if result.error else None
+            # Embed the kind (e.g. "stalled" from the B.2 watchdog) so the parent's
+            # is_error tool_result content carries it — Part D derives the subagent's
+            # terminal glyph from this marker. Without it, a stalled subagent reads
+            # as a generic ✗ failed and the operator can't tell it timed out.
+            # CONSUMER CONTRACT: narrative._close_subagent_fold scans this error
+            # content for the literal "[<kind>]" marker (only on is_error closes).
+            # Keep the bracketed format and kind vocabulary in sync with that scan.
+            suffix = f" [{kind}]" if kind else ""
+            raise RuntimeError(f"subagent {subagent_name!r} failed ({cat}){suffix}")
+        return json.dumps(result.output)

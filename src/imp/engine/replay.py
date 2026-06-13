@@ -112,7 +112,19 @@ def build_messages_from_events(
 
     def flush() -> None:
         if pending_results:
-            msgs.append(Message(role="user", content=tuple(pending_results)))
+            prev = msgs[-1] if msgs else None
+            if prev is not None and prev.role == "assistant":
+                order = {b.id: i for i, b in enumerate(prev.content)
+                         if isinstance(b, ToolUseBlock)}
+                matched = sorted(
+                    (r for r in pending_results if r.tool_use_id in order),
+                    key=lambda r: order[r.tool_use_id])
+                unmatched = [r for r in pending_results
+                             if r.tool_use_id not in order]
+                ordered = matched + unmatched
+            else:
+                ordered = list(pending_results)
+            msgs.append(Message(role="user", content=tuple(ordered)))
             pending_results.clear()
 
     for e in events:

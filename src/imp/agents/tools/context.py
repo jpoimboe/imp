@@ -101,12 +101,30 @@ class ToolContext:
     # subagent backoff loop applies a wall-clock ceiling instead of retrying
     # forever. Copied from invocation.non_interactive by each provider.
     non_interactive: bool = False
+    # Per-invocation task-dispatch width cap (design Decision 5). Lazily created
+    # by get_parallel_limiter on first task dispatch; bounds one level's breadth.
+    # NOT threaded into child invocations: each spawn builds a fresh ToolContext
+    # with its own limiter (the nested-pool deadlock guard).
+    parallel_limiter: Any = None
     # invocation_id counter for disambiguating same-named subagent invocations
     _subagent_counter: int = 0
 
     def next_subagent_invocation_id(self) -> int:
         self._subagent_counter += 1
         return self._subagent_counter
+
+    def get_parallel_limiter(self) -> Any:
+        """Lazily create THIS invocation's CapacityLimiter via a synchronous
+        check-then-set (no await between — concurrent bridge handlers racing the
+        create must not mint two limiters and double the cap). Width is the
+        single resolved knob value; never inherited from a parent."""
+        import anyio
+
+        from imp.agents.parallel import max_parallel_tasks
+
+        if self.parallel_limiter is None:
+            self.parallel_limiter = anyio.CapacityLimiter(max_parallel_tasks())
+        return self.parallel_limiter
 
     def next_bg_id(self) -> str:
         """"bg1", "bg2", ... — per-invocation. bg.py seeds _bg_counter from the
