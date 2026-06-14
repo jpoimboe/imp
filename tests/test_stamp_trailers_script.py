@@ -1,16 +1,8 @@
 """stamp-trailers.sh stamps `Change: <slug>` on every non-merge commit in range.
 
-It runs once at the top of the review phase, right after autosquash. On the FIRST
-pass the change history is linear (integrate-rebase has not run yet), so it stamps
-the whole fork-point..HEAD range.
-
-But `final-review` (which runs AFTER integrate-rebase) can route `rework -> implement`,
-which re-enters the review phase at autosquash -> stamp-trailers. On that second pass
-the range already contains the integration merge commit. A plain `git rebase $FORK`
-would flatten that merge (dropping its baked-in conflict resolution), so stamp-trailers
-must instead stamp only the linear tail ABOVE the most recent integration merge —
-mirroring autosquash's cheap path. The pre-merge commits keep their first-pass stamps;
-the merge commit is integration plumbing and is left byte-identical."""
+It runs at the top of the review phase, right after autosquash. The branch is always
+linear (integrate-rebase produces a linear result), so it stamps the whole
+fork-point..HEAD range on every pass."""
 from __future__ import annotations
 
 import json
@@ -72,10 +64,6 @@ def _fork(pr: Path) -> str:
     return _git(pr, "merge-base", "main", "HEAD").stdout.strip()
 
 
-def _merges(pr: Path) -> list[str]:
-    out = _git(pr, "rev-list", "--merges", f"{_fork(pr)}..HEAD").stdout
-    return [s for s in out.splitlines() if s]
-
 
 # ── first pass: linear history ────────────────────────────────────────────────
 
@@ -98,53 +86,3 @@ def test_stamp_trailers_stamps_linear_range(tmp_path: Path) -> None:
     assert _change(pr, "HEAD~1") == SLUG   # docs: spec
     assert _change(pr, "HEAD") == SLUG     # feat: work
 
-
-# ── re-entry: integration merge in range (the bug) ────────────────────────────
-
-def test_stamp_trailers_reentry_stamps_tail_and_preserves_merge(tmp_path: Path) -> None:
-    """Second pass after integrate-rebase + a post-merge rework. The pre-merge
-    commits are already stamped; stamp-trailers must stamp the post-merge tail
-    WITHOUT flattening the integration merge or losing its conflict resolution."""
-    pr = tmp_path / "wt"
-    _init(pr)
-    _record_change(pr)
-    (pr / "f.txt").write_text("line1\nline2\nline3\n")
-    _git(pr, "add", "f.txt")
-    _git(pr, "commit", "-m", "base v1")
-    _git(pr, "checkout", "-b", "imp/x")
-    (pr / "spec.txt").write_text("spec\n")
-    _git(pr, "add", "spec.txt")
-    pre1 = _commit(pr, "docs: spec", stamped=True)        # stamped on pass 1
-    (pr / "f.txt").write_text("line1\nBRANCH\nline3\n")
-    _git(pr, "add", "f.txt")
-    pre2 = _commit(pr, "feat: work", stamped=True)        # stamped on pass 1
-    # base advances and conflicts on f.txt line 2
-    _git(pr, "checkout", "main")
-    (pr / "f.txt").write_text("line1\nBASE\nline3\n")
-    _git(pr, "add", "f.txt")
-    _git(pr, "commit", "-m", "base v2")
-    _git(pr, "checkout", "imp/x")
-    _git(pr, "merge", "--no-ff", "--no-commit", "main")   # conflict
-    (pr / "f.txt").write_text("line1\nBRANCH\nBASE\nline3\n")
-    _git(pr, "add", "f.txt")
-    _git(pr, "commit", "--no-edit")                       # integration merge M
-    merge_sha = _git(pr, "rev-parse", "HEAD").stdout.strip()
-    (pr / "h.txt").write_text("post\n")                   # post-merge rework, UNstamped
-    _git(pr, "add", "h.txt")
-    rework = _commit(pr, "fix: address rework feedback")
-
-    result = _run(pr)
-    assert result.returncode == 0, result.stderr
-    # The integration merge survives, byte-identical, with its resolution.
-    assert _merges(pr) == [merge_sha]
-    assert _git(pr, "rev-parse", "HEAD~1").stdout.strip() == merge_sha
-    assert (pr / "f.txt").read_text() == "line1\nBRANCH\nBASE\nline3\n"
-    # Every non-merge commit carries the trailer.
-    assert _change(pr, pre1) == SLUG
-    assert _change(pr, pre2) == SLUG
-    assert _change(pr, "HEAD") == SLUG                    # rework now stamped
-    assert _git(pr, "log", "-1", "--format=%s", "HEAD").stdout.strip() \
-        == "fix: address rework feedback"
-    # The merge commit itself is integration plumbing — left unstamped.
-    assert _change(pr, merge_sha) == ""
-    _ = rework  # pre-stamp sha; HEAD is its amended successor
