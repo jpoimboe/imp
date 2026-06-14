@@ -314,7 +314,7 @@ def _v_write_tool_needs_write_permission(
         agent = workflow.agents.get(step.file.stem)
         if agent is None:
             continue  # _v_agent_files_exist_and_named reports the missing-file case
-        if "write_file" not in agent.tools:
+        if "write_file" not in agent.tools or not agent.explicit_tools:
             continue
         if not _has_write_allow(step.fs_permissions):
             errors.append(

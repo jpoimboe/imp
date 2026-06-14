@@ -797,3 +797,84 @@ def test_parse_agent_deny_tools_not_list_of_strings(tmp_path: Path) -> None:
     with pytest.raises(LoadError) as ei:
         parse_agent_file(p)
     assert "deny_tools" in str(ei.value)
+
+
+# ── Tool resolution tests ─────────────────────────────────────────────────────
+
+_RES_LEAD = """\
+---
+name: lead
+subagents: [worker]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+_RES_WORKER = """\
+---
+name: worker
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+_RES_LEAF = """\
+---
+name: leaf
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+_RES_DENIER = """\
+---
+name: denier
+deny_tools: [bash]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+_RES_EXPLICIT = """\
+---
+name: explicit
+tools: [read_file]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+
+def test_resolution_assigns_position_appropriate_tools(tmp_path: Path) -> None:
+    from imp.engine.loader import BASE_CAPS
+
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s_lead
+                file: agents/lead.md
+              - name: s_leaf
+                file: agents/leaf.md
+              - name: s_denier
+                file: agents/denier.md
+              - name: s_explicit
+                file: agents/explicit.md
+        """, agents={
+            "lead": _RES_LEAD, "worker": _RES_WORKER, "leaf": _RES_LEAF,
+            "denier": _RES_DENIER, "explicit": _RES_EXPLICIT,
+        })
+    w = load_workflow(wf)
+
+    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change"}
+    assert w.agents["worker"].tools == BASE_CAPS                     # subagent
+    assert w.agents["leaf"].tools == top_leaf                       # top-level leaf
+    assert w.agents["lead"].tools == top_leaf | {"task"}           # declares subagents
+    assert w.agents["denier"].tools == top_leaf - {"bash"}        # deny subtracts
+    assert w.agents["explicit"].tools == frozenset({"read_file"})  # verbatim
+    for agent in w.agents.values():
+        assert "complete_step" not in agent.tools
+        assert "load_skill" not in agent.tools

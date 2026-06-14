@@ -8,6 +8,7 @@ Build order in this file:
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import sys
 from pathlib import Path
@@ -139,6 +140,35 @@ def parse_agent_file(path: Path) -> AgentDef:
         explicit_tools=explicit_tools,
         deny_tools=deny_tools,
     )
+
+
+BASE_CAPS: frozenset[str] = frozenset({
+    "read_file", "glob", "grep", "query_events", "bash",
+    "edit_file", "write_file", "web_search", "web_fetch",
+})
+TOP_LEVEL_CAPS: frozenset[str] = frozenset({"wait_for_user", "rename_change"})
+
+
+def _effective_tools(agent: AgentDef, is_sub: bool) -> frozenset[str]:
+    if agent.explicit_tools:
+        return frozenset(agent.tools)
+    effective = set(BASE_CAPS)
+    if not is_sub:
+        effective |= TOP_LEVEL_CAPS
+        if agent.subagents:
+            effective.add("task")
+    effective -= agent.deny_tools
+    return frozenset(effective)
+
+
+def _resolve_agent_tools(agents: dict[str, AgentDef]) -> None:
+    dispatchable: set[str] = set()
+    for a in agents.values():
+        dispatchable.update(a.subagents)
+    for name in list(agents):
+        agent = agents[name]
+        agents[name] = dataclasses.replace(
+            agent, tools=_effective_tools(agent, name in dispatchable))
 
 
 # ── Workflow parsing ──────────────────────────────────────────────────────────
@@ -637,6 +667,8 @@ def load_workflow(
                     agent.source,
                 )
             agents[agent.name] = agent
+
+    _resolve_agent_tools(agents)
 
     # vars (top-level, optional)
     vars_obj = _parse_vars(raw.get("vars"), root_source, yaml_path)
