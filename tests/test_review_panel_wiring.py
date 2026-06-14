@@ -2,7 +2,7 @@
 (review-panel.md) run INSIDE the per-plan implement loop, followed by
 deferred-sweep + sweep-verify + stamp-trailers; plan-cycle-check routes to the
 whole-change review pass (review_scope=change) when multi_plan, then to
-integrate-merge. The integration-* steps and fast-path router gates are gone."""
+integrate-rebase. The integration-* steps and fast-path router gates are gone."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,9 +42,9 @@ def test_implement_phase_is_the_per_plan_loop() -> None:
     ]
 
 
-def test_review_phase_starts_at_integrate_merge() -> None:
+def test_review_phase_starts_at_integrate_rebase() -> None:
     review = next(p for p in _wf().phases if p.name == "review")
-    assert next(s.name for s in review.steps) == "integrate-merge"
+    assert next(s.name for s in review.steps) == "integrate-rebase"
     names = {s.name for s in _wf().flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",
                  "integration-sweep-verify", "stamp-sweep-trailers"):
@@ -132,14 +132,14 @@ def test_plan_cycle_check_routes_supercycle_wholechange_and_merge() -> None:
                         output={"status": "Success", "more_plans": False, "rationale": "x"})
     assert isinstance(m2.action, Goto) and m2.action.target == "review"
     assert m2.var_mutations["review_scope"] == "change"
-    # whole-change pass already ran (review_scope==change) -> integrate-merge
+    # whole-change pass already ran (review_scope==change) -> integrate-rebase
     m3 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": True, "review_scope": "change"},
                         output={"status": "Success", "more_plans": False, "rationale": "x"})
-    assert isinstance(m3.action, Goto) and m3.action.target == "integrate-merge"
-    # single-plan change -> straight to integrate-merge
+    assert isinstance(m3.action, Goto) and m3.action.target == "integrate-rebase"
+    # single-plan change -> straight to integrate-rebase
     m4 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": False},
                         output={"status": "Success", "more_plans": False, "rationale": "x"})
-    assert isinstance(m4.action, Goto) and m4.action.target == "integrate-merge"
+    assert isinstance(m4.action, Goto) and m4.action.target == "integrate-rebase"
 
 
 def test_review_panel_reads_review_scope_not_integration_pass() -> None:

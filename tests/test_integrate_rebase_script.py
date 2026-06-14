@@ -1,5 +1,6 @@
-"""integrate-merge.sh: merges base into the change branch without committing,
-classifying via exit code. Runs the real shipped script against a real git repo."""
+"""integrate-rebase.sh: rebases the change branch ONTO the base tip (linear, no
+merge commit), classifying via exit code. Runs the real shipped script against a
+real git repo."""
 from __future__ import annotations
 
 import json
@@ -7,7 +8,7 @@ import os
 import subprocess
 from pathlib import Path
 
-SCRIPT = Path("src/imp/assets/workflows/default/scripts/integrate-merge.sh").resolve()
+SCRIPT = Path("src/imp/assets/workflows/default/scripts/integrate-rebase.sh").resolve()
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -21,6 +22,12 @@ def _run(project_root: Path) -> subprocess.CompletedProcess[str]:
                           env=env, capture_output=True, text=True, check=False)
 
 
+def _rebase_in_progress(pr: Path) -> bool:
+    d = _git(pr, "rev-parse", "--git-path", "rebase-merge").stdout.strip()
+    a = _git(pr, "rev-parse", "--git-path", "rebase-apply").stdout.strip()
+    return (pr / d).is_dir() or (pr / a).is_dir()
+
+
 def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
     """Repo on branch imp/x; base 'main' is `base_ahead`/conflicting as requested.
 
@@ -30,12 +37,9 @@ def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
     _git(project_root, "init", "-b", "main")
     _git(project_root, "config", "user.email", "t@t")
     _git(project_root, "config", "user.name", "t")
-    # MANDATORY (review finding #1): commit a `.gitignore` covering `.imp/` BEFORE
-    # anything writes under .imp/. The change.json this helper writes — plus the
-    # script's own integrated_base_sha / reintegration_count writes (Task 9) — are
-    # untracked; without this they'd surface in `git status` and other tests'
-    # clean-porcelain assumptions break. Mirrors production (worktree.py requires
-    # .imp/ git-ignored via committed .gitignore / info/exclude).
+    # git-ignore .imp/ BEFORE anything writes there (mirrors production; otherwise
+    # the change.json / integrated_base_sha / reintegration_count writes surface as
+    # untracked dirt that other tests' clean-porcelain assumptions break on).
     (project_root / ".gitignore").write_text(".imp/\n")
     _git(project_root, "add", ".gitignore")
     _git(project_root, "commit", "-m", "gitignore .imp/")
@@ -48,8 +52,6 @@ def _seed(project_root: Path, *, base_ahead: bool, conflict: bool) -> None:
     _git(project_root, "commit", "-m", "branch work")
     if base_ahead:
         _git(project_root, "checkout", "main")
-        # On conflict, base and branch both diverge from v1 on the SAME file so the
-        # merge collides; otherwise base edits a line the branch leaves alone.
         line = "base v2 (conflicting edit)\n" if conflict else "base v2\n"
         (project_root / "f.txt").write_text(line)
         _git(project_root, "add", "f.txt")
@@ -71,46 +73,47 @@ def test_nothing_to_integrate_exits_2(tmp_path: Path) -> None:
     assert _run(pr).returncode == 2
 
 
-def test_clean_integration_exits_0_and_stages(tmp_path: Path) -> None:
+def test_clean_rebase_exits_0_and_linearizes(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=False)
-    head_before = _git(pr, "rev-parse", "HEAD").stdout.strip()
     assert _run(pr).returncode == 0
-    # base v2 content present...
+    # base content present, base is now an ancestor (linear), no merge, no rebase left.
     assert (pr / "f.txt").read_text() == "base v2\n"
-    # ...AND the merge is in progress, NOT committed (the uncommitted-handoff
-    # contract the integrator depends on): MERGE_HEAD exists and HEAD is unmoved.
-    assert _git(pr, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0
-    assert _git(pr, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert _git(pr, "merge-base", "--is-ancestor", "main", "HEAD").returncode == 0
+    assert _git(pr, "rev-list", "--merges", "main..HEAD").stdout.strip() == ""
+    assert not _rebase_in_progress(pr)
 
 
-def test_conflict_exits_0_leaves_conflicted_tree(tmp_path: Path) -> None:
+def test_conflict_rebase_exits_6_leaves_rebase_in_progress(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=True)
-    assert _run(pr).returncode == 0
-    # Conflict markers present for the integrator to resolve.
+    assert _run(pr).returncode == 6
     assert "<<<<<<<" in (pr / "f.txt").read_text()
-    assert _git(pr, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0
+    assert _rebase_in_progress(pr)
+
+
+def test_leftover_rebase_at_entry_exits_5(tmp_path: Path) -> None:
+    # The first run leaves a rebase in progress (exit 6); a second entry must see
+    # the leftover rebase and pause, not re-classify.
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=True, conflict=True)
+    assert _run(pr).returncode == 6
+    assert _run(pr).returncode == 5
 
 
 def test_tracked_dirty_entry_tree_exits_5(tmp_path: Path) -> None:
-    # The dirty-entry guard prevents pre-existing TRACKED dirt being folded in.
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=False)
     (pr / "g.txt").write_text("uncommitted tracked edit\n")   # g.txt is tracked
     assert _run(pr).returncode == 5
-    # Refused before starting any merge.
-    assert _git(pr, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode != 0
+    assert not _rebase_in_progress(pr)                        # refused before any rebase
 
 
 def test_untracked_scratch_does_not_trip_entry_guard(tmp_path: Path) -> None:
-    # Finding #9: untracked scratch files must NOT trip the guard — integration
-    # proceeds (they're never folded into the merge commit).
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=False)
     (pr / "scratch.tmp").write_text("agent scratch, untracked\n")
     assert _run(pr).returncode == 0
-    assert _git(pr, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0
 
 
 def test_bad_base_ref_exits_3(tmp_path: Path) -> None:
@@ -129,33 +132,26 @@ def test_empty_base_ref_exits_5(tmp_path: Path) -> None:
     assert _run(pr).returncode == 5
 
 
-def test_stale_merge_head_at_entry_exits_5(tmp_path: Path) -> None:
-    # A leftover in-progress merge (MERGE_HEAD present, clean index) must pause,
-    # not be misread as a freshly staged merge.
+def test_records_integrated_base_sha_on_clean_rebase(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=False)
-    # Start a merge and leave it in progress (do not commit/abort).
-    _git(pr, "merge", "--no-ff", "--no-commit", "main")
-    # Sanity: MERGE_HEAD is present now.
-    assert _git(pr, "rev-parse", "-q", "--verify", "MERGE_HEAD").returncode == 0
-    assert _run(pr).returncode == 5
-
-
-def test_records_integrated_base_sha(tmp_path: Path) -> None:
-    pr = tmp_path / "wt"
-    _seed(pr, base_ahead=True, conflict=False)
-    _run(pr)
+    assert _run(pr).returncode == 0
     recorded = (pr / ".imp" / "change" / "integrated_base_sha").read_text().strip()
-    expected = _git(pr, "rev-parse", "main^{commit}").stdout.strip()
-    assert recorded == expected
+    assert recorded == _git(pr, "rev-parse", "main^{commit}").stdout.strip()
 
 
 def test_records_sha_even_when_nothing_to_integrate(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=False, conflict=False)
     assert _run(pr).returncode == 2
-    # The fast-path check needs a recorded SHA even on the skip path — and it must
-    # be the current base tip.
+    recorded = (pr / ".imp" / "change" / "integrated_base_sha").read_text().strip()
+    assert recorded == _git(pr, "rev-parse", "main^{commit}").stdout.strip()
+
+
+def test_records_integrated_base_sha_on_conflict_rebase(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=True, conflict=True)
+    assert _run(pr).returncode == 6
     recorded = (pr / ".imp" / "change" / "integrated_base_sha").read_text().strip()
     assert recorded == _git(pr, "rev-parse", "main^{commit}").stdout.strip()
 
@@ -170,10 +166,9 @@ def test_nonnumeric_reintegration_limit_exits_4(tmp_path: Path) -> None:
 
 
 def test_reintegration_counter_pauses_after_limit(tmp_path: Path) -> None:
-    # Each round models real re-integration: integrate-merge starts the merge, the
-    # integrator commits it (tree clean), THEN base advances -> next round actually
-    # integrates and bumps the counter. (The counter sits below --is-ancestor now,
-    # and entry must be clean, so we can't just re-run over a mid-merge tree.)
+    # Each round: the clean rebase replays the branch onto the current base tip and
+    # bumps the counter; then base advances with a fresh commit so the next round
+    # actually integrates. At the limit the script pauses WITHOUT bumping.
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=False)
     env = {**os.environ, "IMP_PROJECT_ROOT": str(pr), "IMP_MAX_REINTEGRATIONS": "2"}
@@ -186,26 +181,22 @@ def test_reintegration_counter_pauses_after_limit(tmp_path: Path) -> None:
 
     advance_count = [0]
 
-    def commit_merge_then_advance_base() -> None:
+    def advance_base() -> None:
         advance_count[0] += 1
-        _git(pr, "commit", "--no-edit")  # integrator commits the merge -> clean tree
         _git(pr, "checkout", "main")
-        # Use a unique filename each call so the commit is never empty.
         fname = f"more_{advance_count[0]}.txt"
         (pr / fname).write_text(f"more base {advance_count[0]}\n")
         _git(pr, "add", fname)
         _git(pr, "commit", "-m", "base advances")
         _git(pr, "checkout", "imp/x")
 
-    r1 = run()                        # count -> 1, records base@v2
-    commit_merge_then_advance_base()  # integrator commits merge; base advances to v3
-    r2 = run()                        # count -> 2, records base@v3
-    commit_merge_then_advance_base()  # integrator commits merge; base advances to v4
-    r3 = run()                        # PREV=2 >= 2 -> exit 4 (no bump, no merge; count parks at 2)
+    r1 = run()      # PREV=0 < 2 -> bump to 1, clean rebase onto v2
+    advance_base()  # base advances to v3
+    r2 = run()      # PREV=1 < 2 -> bump to 2, clean rebase onto v3
+    advance_base()  # base advances to v4
+    r3 = run()      # PREV=2 >= 2 -> exit 4 (no bump, no record)
     assert (r1, r2, r3) == (0, 0, 4)
-    # Finding #5: the exit-4 pause must NOT record the un-integrated current base
-    # tip — the recorded SHA still points at the last base we actually integrated
-    # (v3), so a human skip-forward can't fool the freshness check into merging
-    # without the latest integration.
+    # The exit-4 pause must NOT record the un-integrated current base tip — the
+    # recorded SHA still points at the last base actually integrated (v3).
     recorded = (pr / ".imp" / "change" / "integrated_base_sha").read_text().strip()
     assert recorded != _git(pr, "rev-parse", "main^{commit}").stdout.strip()

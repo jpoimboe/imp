@@ -581,10 +581,9 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
-async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> None:
-    """A standard change: base integrated, integrator clean, finalize approves and
-    merges. The merge/review tail is now integrate-merge -> integrator ->
-    integrate-verify -> finalize, in order."""
+async def test_clean_rebase_skips_integrator_then_merges(tmp_path: Path) -> None:
+    """A clean rebase (the stubbed integrate-rebase.sh exits 0): the integrator is
+    SKIPPED; the tail is integrate-rebase -> integrate-verify -> finalize."""
     change = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
     resolve.reset_providers_for_tests()
@@ -599,9 +598,39 @@ async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> No
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
-    for name in ("integrate-merge", "integrator", "integrate-verify", "finalize"):
+    for name in ("integrate-rebase", "integrate-verify", "finalize"):
         assert name in steps, f"{name} did not run"
-    assert (steps.index("integrate-merge")
+    assert "integrator" not in steps, "clean rebase must not call the integrator"
+    assert (steps.index("integrate-rebase")
+            < steps.index("integrate-verify")
+            < steps.index("finalize"))
+
+
+@pytest.mark.anyio
+async def test_conflict_rebase_routes_through_integrator(tmp_path: Path) -> None:
+    """A conflict rebase (integrate-rebase.sh exits 6) routes through the
+    integrator before integrate-verify and finalize."""
+    change = _seed_default_workflow(tmp_path)
+    ir = (change.project_root / "imp" / "workflows" / "default"
+          / "scripts" / "integrate-rebase.sh")
+    ir.write_text("#!/usr/bin/env bash\nexit 6\n")
+    ir.chmod(0o755)
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "anthropic",
+        env_check=lambda: True,
+        factory=lambda model: AnthropicProvider(
+            model_name=model, client_factory=lambda: fake,
+        ),
+    )
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.COMPLETED
+    steps = [e["payload"].get("step") for e in change.event_log().read()
+             if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
+    for name in ("integrate-rebase", "integrator", "integrate-verify", "finalize"):
+        assert name in steps, f"{name} did not run"
+    assert (steps.index("integrate-rebase")
             < steps.index("integrator")
             < steps.index("integrate-verify")
             < steps.index("finalize"))
@@ -673,7 +702,7 @@ async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Pat
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started"]
-    assert "integrator" in steps and "finalize" in steps
+    assert "integrate-rebase" in steps and "finalize" in steps
     assert "change_merged" in [e.get("type") for e in change.event_log().read()]
 
 
@@ -685,7 +714,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     one renders the events the way `imp log` / the live driver do and checks what
     a human actually sees. Catches the class of regression that the unit render
     tests structurally can't — a quiet step REACHING a phase and emitting a
-    routing action the renderer must humanize (e.g. integrate-merge's
+    routing action the renderer must humanize (e.g. integrate-rebase's
     goto(finalize) on its base-already-integrated no-op path)."""
     from imp.cli import narrative as nv
     from imp.cli.render_text import render_tree
@@ -708,10 +737,10 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
 
     # Every quiet step is HIDDEN: it never renders its own block — neither a header
     # line (`  <name>`) nor a completion breadcrumb (`  <name> complete · …`). That
-    # breadcrumb is exactly what the integrate-merge regression produced
-    # (`integrate-merge complete · goto(summarizer)`). We check the block, NOT bare
+    # breadcrumb is exactly what the integrate-rebase regression produced
+    # (`integrate-rebase complete · goto(summarizer)`). We check the block, NOT bare
     # name presence, because a LOUD step legitimately names a quiet step as a goto
-    # TARGET (`review-panel complete · goto(integrate-merge)`) — and a loud agent
+    # TARGET (`review-panel complete · goto(integrate-rebase)`) — and a loud agent
     # step showing its own routing breadcrumb is intended; humanize-routing is a
     # plumbing rule.
     quiet = {s.name for s in load_workflow(change.workflow_dir).flat_steps() if s.quiet}
@@ -736,13 +765,13 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -> None:
-    """The re-integration EDGE (base advanced during review -> goto integrate-merge
+    """The re-integration EDGE (base advanced during review -> goto integrate-rebase
     -> re-integrate -> merge), driven deterministically. We do NOT try to provoke
     the under-lock STALE status in the mocked harness — that is covered by Task 8's
     worktree unit test, and forcing it here risks a max_loops-bounded re-STALE loop
-    because the shimmed integrate-merge.sh never refreshes integrated_base_sha.
+    because the shimmed integrate-rebase.sh never refreshes integrated_base_sha.
     Instead we make base-fresh-check report 'advanced' exactly once, then
-    'unchanged' — exercising `{else: goto integrate-merge}` and convergence."""
+    'unchanged' — exercising `{else: goto integrate-rebase}` and convergence."""
     change = _seed_default_workflow(tmp_path)
     # Overwrite the (shimmed) base-fresh-check with one that exits 10 on its first
     # call and 0 thereafter, via a call-count file under the gitignored .imp/.
@@ -768,7 +797,7 @@ async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -
     started = [e["payload"].get("step") for e in change.event_log().read()
                if e.get("type") == "step_started"]
     types_seen = [e.get("type") for e in change.event_log().read()]
-    # integrate-merge ran twice: the initial integration + the re-integration the
+    # integrate-rebase ran twice: the initial integration + the re-integration the
     # base-advance triggered. The run still converged to a merge.
-    assert started.count("integrate-merge") >= 2
+    assert started.count("integrate-rebase") >= 2
     assert "change_merged" in types_seen
