@@ -1,10 +1,10 @@
 """stamp-trailers.sh stamps `Change: <slug>` on every non-merge commit in range.
 
 It runs once at the top of the review phase, right after autosquash. On the FIRST
-pass the change history is linear (integrate-merge has not run yet), so it stamps
+pass the change history is linear (integrate-rebase has not run yet), so it stamps
 the whole fork-point..HEAD range.
 
-But `final-review` (which runs AFTER integrate-merge) can route `rework -> implement`,
+But `final-review` (which runs AFTER integrate-rebase) can route `rework -> implement`,
 which re-enters the review phase at autosquash -> stamp-trailers. On that second pass
 the range already contains the integration merge commit. A plain `git rebase $FORK`
 would flatten that merge (dropping its baked-in conflict resolution), so stamp-trailers
@@ -102,7 +102,7 @@ def test_stamp_trailers_stamps_linear_range(tmp_path: Path) -> None:
 # ── re-entry: integration merge in range (the bug) ────────────────────────────
 
 def test_stamp_trailers_reentry_stamps_tail_and_preserves_merge(tmp_path: Path) -> None:
-    """Second pass after integrate-merge + a post-merge rework. The pre-merge
+    """Second pass after integrate-rebase + a post-merge rework. The pre-merge
     commits are already stamped; stamp-trailers must stamp the post-merge tail
     WITHOUT flattening the integration merge or losing its conflict resolution."""
     pr = tmp_path / "wt"

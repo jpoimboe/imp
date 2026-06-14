@@ -1,5 +1,5 @@
 """base-fresh-check.sh: cheap pre-lock comparison of current base tip to the SHA
-integrate-merge recorded. exit 0 = unchanged (continue), exit 10 = advanced (re-integrate)."""
+integrate-rebase recorded. exit 0 = unchanged (continue), exit 10 = advanced (re-integrate)."""
 from __future__ import annotations
 
 import json

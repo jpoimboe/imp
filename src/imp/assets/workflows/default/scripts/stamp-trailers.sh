@@ -5,8 +5,8 @@
 # self-verifies the postcondition before exit 0.
 #
 # Re-entry after integration: on the FIRST review pass the range is linear
-# (integrate-merge has not run yet), so we stamp from the fork point. But
-# finalize runs AFTER integrate-merge and can route rework -> implement, which
+# (integrate-rebase has not run yet), so we stamp from the fork point. But
+# finalize runs AFTER integrate-rebase and can route rework -> implement, which
 # re-enters this step with a real merge commit now in range. A plain `git rebase
 # $FORK` would flatten that merge, silently dropping the integrator's baked-in
 # resolution. So when a merge is present we stamp only the linear tail ABOVE the
