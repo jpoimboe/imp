@@ -1080,9 +1080,9 @@ def test_final_review_solicit_returns_verbatim_prompt() -> None:
     out = _Pipe()
     drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
     for e in [
-        ev("fs", "step_started", step="final-review", kind="agent", phase="review",
+        ev("fs", "step_started", step="finalize", kind="agent", phase="review",
            model="m", provider="anthropic"),
-        ev("aw", "awaiting_user_input", agent_id="step:review/final-review",
+        ev("aw", "awaiting_user_input", agent_id="step:review/finalize",
            prompt="Merge or rework?"),
     ]:
         drv.on_event(e)

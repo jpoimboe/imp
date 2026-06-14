@@ -9,15 +9,15 @@ def test_unattended_vars_pins_spec_confirm_false() -> None:
 
 
 def test_unattended_vars_merges_extra_overrides() -> None:
-    v = unattended_vars(final_review=False)
-    assert v == {"spec_confirm": False, "final_review": False}
+    v = unattended_vars(fast_path=True)
+    assert v == {"spec_confirm": False, "fast_path": True}
 
 
 def test_render_vars_yaml_emits_a_vars_block() -> None:
-    block = render_vars_yaml({"spec_confirm": False, "final_review": False})
+    block = render_vars_yaml({"spec_confirm": False, "fast_path": True})
     assert block.startswith("vars:\n")
     assert "  spec_confirm: false\n" in block
-    assert "  final_review: false\n" in block
+    assert "  fast_path: true\n" in block
 
 
 def test_evals_do_not_run_spec_phase() -> None:

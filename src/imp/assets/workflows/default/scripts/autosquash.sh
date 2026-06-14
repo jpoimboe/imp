@@ -1,14 +1,85 @@
 #!/usr/bin/env bash
-# Fold every `fixup!` commit into its target so the merged branch is one clean
-# commit per unit (Resolution 6). Runs once at review-phase entry. No-op when
-# there are no fixups. A plain-path fold conflict is handed to autosquash-resolve (exit 2); other
-# failures abort and exit non-zero → the engine pauses for a human.
-set -euo pipefail
-cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
+# Fold every `fixup!`/`squash!`/`amend!` commit into its target (one clean commit
+# per unit, Resolution 6) AND — when re-entered after autosquash-resolve — VERIFY
+# the fold preserved the pre-autosquash tree, both in this one invocation. The clean
+# / no-op fold is a pure deterministic step (no agent). A plain-path fold conflict is
+# handed to autosquash-resolve (exit 2), which on finishing re-runs THIS script; the
+# `autosquash-before-tree` sentinel then selects verify-mode. Other failures abort
+# non-zero → the engine pauses for a human.
+#   0 → clean fold / verified resolution → continue
+#   2 → resolvable fold conflict / verify failed with attempts left → autosquash-resolve
+#   1 → hard failure / verify bound exhausted (branch restored pristine) → pause
+set -uo pipefail
+cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}" || exit 1
 BASE=$(python3 -c "import json;print(json.load(open('.imp/change/change.json'))['base_branch'])")
 # Rebase onto the FORK POINT, not the base tip — so we only reorder/squash this
 # change's own commits and never pull in base commits that landed during the change.
 FORK=$(git merge-base "$BASE" HEAD)
+STATE=".imp/change/state"
+
+# ── VERIFY MODE ──────────────────────────────────────────────────────────────
+# A before-tree sentinel means a plain-path fold conflict was handed off and
+# autosquash-resolve has now run; this re-entry VERIFIES the agent's resolution
+# instead of starting a new fold. A fixup! fold is tree-preserving, so the
+# resolution has a checkable correct answer: HEAD^{tree} == the recorded tree, no
+# leftover directive, no rebase in progress. This block owns its own 3-attempt
+# bound and the terminal pristine restore (the engine's max_loops cannot run
+# cleanup). Runs under `set -uo` (no -e) so the conditional git probes don't abort.
+if [ -f "$STATE/autosquash-before-tree" ]; then
+  BEFORE_TREE=$(cat "$STATE/autosquash-before-tree" 2>/dev/null || true)
+  BEFORE_HEAD=$(cat "$STATE/autosquash-before-head" 2>/dev/null || true)
+  ATTEMPTS_FILE="$STATE/autosquash-resolve-attempts"
+  MAX_ATTEMPTS=3
+
+  _cleanup() {
+    rm -f "$STATE/autosquash-before-tree" "$STATE/autosquash-before-head" "$ATTEMPTS_FILE"
+  }
+
+  # First objective failure (empty REASON => verified). Order matters: an in-progress
+  # rebase makes the tree check meaningless, so report it first.
+  REASON=""
+  if [ -d "$(git rev-parse --git-path rebase-merge)" ] \
+     || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+    REASON="a rebase is still in progress (the fold was not driven to completion)"
+  elif git log --format='%s' "$FORK"..HEAD | grep -qE '^(fixup|squash|amend)!'; then
+    REASON="a fixup!/squash!/amend! subject still remains in $FORK..HEAD"
+  elif [ "$(git rev-parse 'HEAD^{tree}')" != "$BEFORE_TREE" ]; then
+    REASON="HEAD tree does not match the pre-autosquash tree (the fold changed content)"
+  fi
+
+  if [ -z "$REASON" ]; then
+    _cleanup
+    echo "autosquash: resolution verified (tree preserved, no leftovers, no rebase in progress)"
+    exit 0
+  fi
+
+  PREV=$(cat "$ATTEMPTS_FILE" 2>/dev/null || echo 0)
+  COUNT=$((PREV + 1))
+  echo "$COUNT" > "$ATTEMPTS_FILE"
+
+  if [ "$COUNT" -ge "$MAX_ATTEMPTS" ]; then
+    # Bound exhausted: restore the branch to its exact pre-autosquash commit
+    # OURSELVES, then pause. Abort any in-progress rebase first (covers a
+    # left-mid-flight rebase and a completed-but-drifted one).
+    git rebase --abort 2>/dev/null || true
+    if [ -n "$BEFORE_HEAD" ]; then git reset -q --hard "$BEFORE_HEAD" 2>/dev/null || true; fi
+    _cleanup
+    echo "autosquash-resolve exhausted $MAX_ATTEMPTS attempts: $REASON" >&2
+    echo "Restored the branch to its pre-autosquash state. Squash by hand, then resume:" >&2
+    echo "  git rebase -i --autosquash \"\$(git merge-base $BASE HEAD)\"" >&2
+    echo "resolve each conflict so the fold preserves the tree, then \`imp resume\`." >&2
+    echo "See docs/autosquash-after-integration-recovery.md." >&2
+    exit 1
+  fi
+
+  echo "autosquash: $REASON (attempt $COUNT/$MAX_ATTEMPTS); re-resolving" >&2
+  exit 2
+fi
+
+# ── FOLD MODE ────────────────────────────────────────────────────────────────
+# The deterministic fold runs under `set -e` exactly as before (it relies on -e to
+# abort on an unexpected git failure mid-rebase).
+set -e
 
 # Fast path: nothing to fold. Match every directive the rest of the script folds
 # (fixup!/squash!/amend!) — a branch reworked with only squash!/amend! still needs
@@ -160,8 +231,8 @@ fi
 
 # No integration merge in range: ordinary autosquash from the fork point.
 # Capture the pre-autosquash HEAD + tree BEFORE starting the rebase. A fixup! fold is
-# tree-preserving by definition, so these are the oracle the later autosquash-verify
-# step checks the agent's resolution against — and the HEAD it resets to on a pristine
+# tree-preserving by definition, so these are the oracle the verify-mode block above
+# checks the agent's resolution against — and the HEAD it resets to on a pristine
 # abort. Persist them only when we actually hand off a conflict (exit 2).
 BEFORE=$(git rev-parse HEAD)
 BEFORE_TREE=$(git rev-parse "HEAD^{tree}")

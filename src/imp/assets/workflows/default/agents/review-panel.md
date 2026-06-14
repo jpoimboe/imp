@@ -24,11 +24,11 @@ The diff under review is **this plan's diff** for a per-plan review (the commits
 the newest plan — read `.imp/change/progress.md`, which records each completed
 plan's task commit subjects, plus the newest `imp/plans/{{ change.slug }}-plan-*.md`
 to find the boundary; if you cannot delimit a prior-plan boundary because this is
-plan 1, review the whole `git diff <base>..HEAD`). For the integration pass it is
-the **whole-change diff** `git diff <base>..HEAD`.
+plan 1, review the whole `git diff <base>..HEAD`). For the whole-change pass (`review_scope ==
+'change'`) it is the **whole-change diff** `git diff <base>..HEAD`.
 
-{% if vars.integration_pass %}
-**Integration pass (end-of-change, cross-plan).** Code-correctness and
+{% if vars.review_scope == 'change' %}
+**Whole-change pass (end-of-change, cross-plan).** Code-correctness and
 spec-compliance were already covered per-plan on fresh diffs; the only thing
 per-plan panels structurally cannot see is cross-plan consistency. Dispatch ONLY the
 two cross-cutting slices over the whole-change diff, each at `tier="high"`:
@@ -109,7 +109,7 @@ findings, those observations have no other fix-it path — append each to the
 step can act on it. Create a `## Deferred Followups` section if absent. Append one
 line per observation in this EXACT pinned format (the sweep parses it):
 
-`- [ ] DEFERRED review-panel: <one-line description> [scope: {% if vars.integration_pass %}change{% else %}plan{% endif %}]`
+`- [ ] DEFERRED review-panel: <one-line description> [scope: {% if vars.review_scope == 'change' %}change{% else %}plan{% endif %}]`
 
 Append nothing when the verdict is `task_gap`/`plan_gap` (those findings route back
 for an immediate fix) or when there are no Minor/Nit findings. Appending to

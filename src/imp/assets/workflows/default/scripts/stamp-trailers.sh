@@ -6,14 +6,15 @@
 #
 # Re-entry after integration: on the FIRST review pass the range is linear
 # (integrate-merge has not run yet), so we stamp from the fork point. But
-# final-review runs AFTER integrate-merge and can route rework -> implement, which
+# finalize runs AFTER integrate-merge and can route rework -> implement, which
 # re-enters this step with a real merge commit now in range. A plain `git rebase
 # $FORK` would flatten that merge, silently dropping the integrator's baked-in
 # resolution. So when a merge is present we stamp only the linear tail ABOVE the
 # most recent integration merge (mirroring autosquash's cheap path): the pre-merge
 # commits keep their first-pass stamps, the merge is left byte-identical, and the
-# post-merge rework gets stamped. Stamping is idempotent (trailer.ifexists=doNothing),
-# so re-stamping an already-stamped commit is a no-op.
+# post-merge rework gets stamped.
+# `trailer.ifexists=doNothing` prevents duplicate trailer lines, but each
+# rebase amend rewrites commit SHAs — stamp-trailers is content-idempotent, not SHA-idempotent.
 set -euo pipefail
 cd "${IMP_PROJECT_ROOT:?IMP_PROJECT_ROOT not set by engine}"
 SLUG="${IMP_CHANGE_SLUG:?IMP_CHANGE_SLUG not set by engine}"   # empty SLUG → fail fast

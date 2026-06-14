@@ -1,9 +1,8 @@
-"""Per-plan review wiring: autosquash/stamp-trailers + a single merged `review`
-step (review-panel.md) run INSIDE the per-plan implement loop, followed by
-deferred-sweep + a post-sweep sweep-verify; the review phase begins with a trimmed
-end-of-change integration pass gated on multi_plan. The standalone panel-gate/
-recheck steps are gone; the review step tiers internally on workflow vars
-(panel_done/fast_path/integration_pass), which is prose and dogfood-verified."""
+"""Per-plan review wiring: autosquash + a single merged `review` step
+(review-panel.md) run INSIDE the per-plan implement loop, followed by
+deferred-sweep + sweep-verify + stamp-trailers; plan-cycle-check routes to the
+whole-change review pass (review_scope=change) when multi_plan, then to
+integrate-merge. The integration-* steps and fast-path router gates are gone."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,12 +17,10 @@ AGENTS = Path("src/imp/assets/workflows/default/agents")
 _TIERS = frozenset({"low", "medium", "high"})
 
 _BASE_VARS = {
-    "fast_path": False, "ready_to_merge": False, "final_review": True,
-    "spec_minors_integrated": False, "plan_minors_integrated": False,
-    "panel_done": False, "integration_needs_review": False,
-    "spec_confirm": True, "spec_unseen_changes": False,
-    "spec_gate_pending": False, "spec_gate_passed": False,
-    "multi_plan": False, "integration_pass": False,
+    "fast_path": False, "spec_minors_integrated": False,
+    "plan_minors_integrated": False, "panel_done": False,
+    "multi_plan": False, "spec_confirm": True, "spec_unseen_changes": False,
+    "review_scope": "plan",
 }
 
 
@@ -39,18 +36,19 @@ def test_implement_phase_is_the_per_plan_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
         "task-lead", "commit-check", "verify",
-        "autosquash", "autosquash-resolve", "autosquash-verify", "stamp-trailers",
-        "review", "deferred-sweep", "sweep-verify",
-        "fast-path-cycle-gate", "plan-cycle-check",
+        "autosquash", "autosquash-resolve",
+        "review", "deferred-sweep", "sweep-verify", "stamp-trailers",
+        "plan-cycle-check",
     ]
 
 
-def test_review_phase_runs_integration_pass_then_merge() -> None:
+def test_review_phase_starts_at_integrate_merge() -> None:
     review = next(p for p in _wf().phases if p.name == "review")
-    assert [s.name for s in review.steps][:6] == [
-        "integration-gate", "integration-pass", "integration-sweep",
-        "integration-sweep-verify", "stamp-sweep-trailers", "integrate-merge",
-    ]
+    assert next(s.name for s in review.steps) == "integrate-merge"
+    names = {s.name for s in _wf().flat_steps()}
+    for gone in ("integration-gate", "integration-pass", "integration-sweep",
+                 "integration-sweep-verify", "stamp-sweep-trailers"):
+        assert gone not in names, gone
 
 
 def test_standalone_panel_gate_and_recheck_are_gone() -> None:
@@ -111,7 +109,7 @@ def test_review_panel_pins_deferred_observation_format() -> None:
     assert "deferred-sweep" in text.lower()   # names the consumer step
 
 
-def test_deferred_sweep_step_then_sweep_tests() -> None:
+def test_deferred_sweep_step_then_sweep_verify() -> None:
     steps = _steps(_wf())
     sweep = steps["deferred-sweep"]
     assert sweep.kind == "agent" and sweep.file.name == "deferred-sweep.md"
@@ -122,44 +120,32 @@ def test_deferred_sweep_step_then_sweep_tests() -> None:
     assert st.rules[-1].action.target == "deferred-sweep" and st.rules[-1].action.resume is True
 
 
-def test_plan_cycle_check_resets_panel_done_and_sets_multi_plan() -> None:
+def test_plan_cycle_check_routes_supercycle_wholechange_and_merge() -> None:
     rules = _steps(_wf())["plan-cycle-check"].rules
+    # more_plans -> supercycle back to plan-writer
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"status": "Success", "more_plans": True, "rationale": "x"})
     assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
     assert m.var_mutations["panel_done"] is False and m.var_mutations["multi_plan"] is True
+    # no more plans, multi-plan, per-plan scope just finished -> whole-change pass
+    m2 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": True, "review_scope": "plan"},
+                        output={"status": "Success", "more_plans": False, "rationale": "x"})
+    assert isinstance(m2.action, Goto) and m2.action.target == "review"
+    assert m2.var_mutations["review_scope"] == "change"
+    # whole-change pass already ran (review_scope==change) -> integrate-merge
+    m3 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": True, "review_scope": "change"},
+                        output={"status": "Success", "more_plans": False, "rationale": "x"})
+    assert isinstance(m3.action, Goto) and m3.action.target == "integrate-merge"
+    # single-plan change -> straight to integrate-merge
+    m4 = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": False},
+                        output={"status": "Success", "more_plans": False, "rationale": "x"})
+    assert isinstance(m4.action, Goto) and m4.action.target == "integrate-merge"
 
 
-def test_integration_gate_gates_on_multi_plan() -> None:
-    rules = _steps(_wf())["integration-gate"].rules
-    m_single = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": False}, output=None)
-    assert isinstance(m_single.action, Goto) and m_single.action.target == "stamp-sweep-trailers"
-    m_multi = evaluate_rules(rules, vars={**_BASE_VARS, "multi_plan": True}, output=None)
-    assert isinstance(m_multi.action, Continue)
-    assert m_multi.var_mutations["integration_pass"] is True
-
-
-def test_integration_pass_uses_review_panel_and_routes_task_gap() -> None:
-    ip = _steps(_wf())["integration-pass"]
-    assert ip.kind == "agent" and ip.file.name == "review-panel.md"
-    m_gap = evaluate_rules(ip.rules, vars={**_BASE_VARS, "integration_pass": True},
-                           output={"status": "Success", "verdict": "task_gap", "findings": "x"})
-    assert isinstance(m_gap.action, Goto) and m_gap.action.target == "task-lead"
-    assert m_gap.var_mutations["integration_pass"] is False
-    m_ok = evaluate_rules(ip.rules, vars={**_BASE_VARS, "integration_pass": True},
-                          output={"status": "Success", "verdict": "approve", "findings": "x"})
-    assert isinstance(m_ok.action, Continue)
-    assert m_ok.var_mutations["integration_pass"] is False
-
-
-def test_integration_sweep_reuses_deferred_sweep_and_stamps() -> None:
-    steps = _steps(_wf())
-    assert steps["integration-sweep"].file.name == "deferred-sweep.md"
-    st = steps["integration-sweep-verify"]
-    assert st.command.endswith("run-verify.sh")
-    assert st.rules[-1].action.target == "integration-sweep"
-    stamp = steps["stamp-sweep-trailers"]
-    assert stamp.kind == "script" and stamp.command.endswith("stamp-trailers.sh")
+def test_review_panel_reads_review_scope_not_integration_pass() -> None:
+    text = (AGENTS / "review-panel.md").read_text()
+    assert "integration_pass" not in text
+    assert "review_scope" in text
 
 
 def test_slices_resolve_from_asset_dir() -> None:

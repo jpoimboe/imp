@@ -9,23 +9,19 @@ description: |
 # review phase. The `review` step is a sonnet coordinator that runs INSIDE the
 # per-plan implement loop; it dispatches a four-member opus panel on first pass,
 # or just the generalist reviewer on re-entry (panel_done) or fast-path. The
-# deferred-sweep drains Minor/Nit observations after each plan. The review phase
-# runs a trimmed end-of-change integration pass only when >1 plan was needed.
+# deferred-sweep drains Minor/Nit observations after each plan. When >1 plan ran,
+# `plan-cycle-check` routes to `review` again with `review_scope=change` for a
+# whole-change pass before `integrate-merge`.
 
 vars:
-  ready_to_merge:         {type: bool, default: false}
-  final_review:           {type: bool, default: true}
   fast_path:              {type: bool, default: false}
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   panel_done:             {type: bool, default: false}
-  multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the end-of-change integration pass
-  integration_pass:       {type: bool, default: false}   # true only during the trimmed end-of-change integration pass; review-panel runs the two cross-cutting slices only
-  integration_needs_review: {type: bool, default: false}
+  multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the whole-change review pass
+  review_scope:           {type: string, default: plan}  # plan | change — one review path, scoped per-plan or over the whole change
   spec_confirm:           {type: bool, default: true}    # confirm-gate enable
   spec_unseen_changes:    {type: bool, default: false}   # some turn changed the spec without user direction
-  spec_gate_pending:      {type: bool, default: false}   # a confirm resume is in flight (one-shot grant)
-  spec_gate_passed:       {type: bool, default: false}   # gated confirm accepted; route past review (one-shot)
 
 defaults:
   max_retries: 3
@@ -42,11 +38,8 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["imp/specs/**"], mode: allow}
         rules:
-          - {if: {phase: confirmed, spec_gate_pending: true, unseen_changes: false},
-             set: {spec_gate_pending: false, spec_gate_passed: true}, continue: true}
           - {else: true,
-             set: {spec_gate_pending: false, spec_gate_passed: false,
-                   fast_path: "output.complexity == 'trivial'",
+             set: {fast_path: "output.complexity == 'trivial'",
                    spec_unseen_changes: "spec_unseen_changes or unseen_changes"},
              continue: true}
 
@@ -55,14 +48,7 @@ phases:
         command: ./scripts/spec-commit-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
-          - {else: true, set: {spec_gate_passed: false}, resume: spec-writer}
-
-      - name: spec-exit-gate           # spec-phase exit router: gated-confirm pass-through, trivial skip, else continue to review
-        quiet: true
-        rules:
-          - {if: {spec_gate_passed: true}, set: {spec_gate_passed: false}, goto: plan-writer}
-          - {if: {fast_path: true}, set: {spec_unseen_changes: false}, goto: plan-writer}
-          - {else: true, continue: true}
+          - {else: true, resume: spec-writer}
 
       - name: spec-reviewer
         file: agents/spec-reviewer.md
@@ -75,22 +61,28 @@ phases:
           # Critical/Major -> rework, then re-review. Clear the minors flag: a real fix re-opens the one minors pass.
           - {if: {blocking: true}, set: {spec_minors_integrated: false},
              resume: spec-writer, feedback: "Here's review feedback to address:"}
-          # Clean verification review after a minors pass, armed -> confirm gate (if enabled).
-          - {if: {spec_minors_integrated: true, spec_confirm: true, spec_unseen_changes: true},
-             set: {spec_minors_integrated: false, spec_unseen_changes: false, spec_gate_pending: true},
-             resume: spec-writer, feedback: &confirm_fb "The review cycle is complete and the spec is accepted. Surface any significant decisions made during review to the user and confirm before finalizing:"}
-          # Clean verification review, gate disabled or unarmed -> proceed.
-          - {if: {spec_minors_integrated: true},
-             set: {spec_minors_integrated: false, spec_unseen_changes: false}, goto: plan-writer}
-          # Clean with actionable minors -> minors pass; arming happens via the writer's unseen_changes.
-          - {if: {has_minor_findings: true}, set: {spec_minors_integrated: true},
+          # Clean with actionable minors, not yet integrated -> one minors pass; owe a verification review.
+          - {if: {spec_minors_integrated: false, has_minor_findings: true}, set: {spec_minors_integrated: true},
              resume: spec-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
-          # Clean, no minors, but the cycle changed the spec -> confirm gate (if enabled).
+          # Clean and settled (verification pass, or nothing actionable) AND the spec changed this
+          # cycle with confirm enabled -> forward confirm gate; the verification review's minors are dropped.
           - {if: {spec_confirm: true, spec_unseen_changes: true},
-             set: {spec_unseen_changes: false, spec_gate_pending: true},
-             resume: spec-writer, feedback: *confirm_fb}
-          # Clean first pass, nothing changed since the brainstorm -> proceed.
-          - {else: true, set: {spec_unseen_changes: false}, goto: plan-writer}
+             set: {spec_minors_integrated: false, spec_unseen_changes: false}, goto: spec-confirm}
+          # Clean and settled, no confirm needed -> proceed to planning.
+          - {else: true, set: {spec_minors_integrated: false, spec_unseen_changes: false}, goto: plan-writer}
+
+      - name: spec-confirm
+        file: agents/spec-confirm.md
+        tier: medium
+        fs_permissions:
+          - {operations: [read], paths: ["**"], mode: allow}
+        rules:
+          # User requested changes -> resume the writer; re-arm the confirm gate so the
+          # re-review re-presents (the writer's user-directed edits emit unseen_changes:false).
+          - {if: {confirm: changes}, set: {spec_unseen_changes: true},
+             resume: spec-writer, feedback: "The user reviewed the spec and requested changes. Address them:"}
+          # Approved -> forward to planning.
+          - {else: true, goto: plan-writer}
 
   - name: plan
     steps:
@@ -105,14 +97,9 @@ phases:
         quiet: true
         command: ./scripts/plan-commit-verify.sh
         rules:
+          - {if: {exit: 0, fast_path: true}, goto: task-lead}   # trivial change: skip plan review entirely
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: plan-writer}
-
-      - name: fast-path-plan-gate      # trivial change -> skip plan review entirely
-        quiet: true
-        rules:
-          - {if: {fast_path: true}, goto: task-lead}   # skip plan-review on fast-path
-          - {else: true, continue: true}
 
       - name: plan-review
         file: agents/plan-reviewer.md
@@ -155,39 +142,27 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: task-lead}
 
-      # ── autosquash + stamp-trailers move INTO the per-plan loop so each panel
-      #    reviews folded, one-commit-per-task diffs. They stay paired (stamp
-      #    immediately after autosquash) so they never drift apart.
+      # ── autosquash runs INSIDE the per-plan loop so each panel reviews folded,
+      #    one-commit-per-task diffs. autosquash.sh folds AND (on re-entry after
+      #    autosquash-resolve) verifies the fold preserved the tree, in one script.
+      #    The clean fold is a pure deterministic step (no agent).
       - name: autosquash
         quiet: true
         command: ./scripts/autosquash.sh
         rules:
-          - {if: {exit: 2}, continue: true}        # agent-resolvable fold conflict -> autosquash-resolve (next step)
-          - {if: {exit: 0}, goto: stamp-trailers}  # clean fold / nothing to fold: skip the resolve+verify steps
-          - {else: true, pause: true}              # hard failure (exit 1) / merge-path refusal (unchanged)
+          - {if: {exit: 0}, goto: review}          # clean fold / verified resolution: skip the resolver, go to the panel
+          - {if: {exit: 2}, continue: true}        # resolvable fold conflict / verify failed -> autosquash-resolve
+          - {else: true, pause: true}              # hard failure (exit 1) / verify bound exhausted -> human
 
       - name: autosquash-resolve
         file: agents/autosquash-resolve.md
         tier: high
+        max_loops: 6                               # defensive backstop; the script's 3-attempt bound aborts first
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
-
-      - name: autosquash-verify
-        quiet: true
-        command: ./scripts/autosquash-verify.sh
-        max_loops: 5                               # defensive backstop only; the script's own bound aborts first
         rules:
-          - {if: {exit: 0}, continue: true}                         # verified -> stamp-trailers
-          - {if: {exit: 2}, resume: autosquash-resolve, feedback: "The autosquash fold resolution did not verify. Address the failure below and re-resolve so the fold preserves the pre-autosquash tree:"}
-          - {else: true, pause: true}                               # exit 1: script already restored pristine
-
-      - name: stamp-trailers
-        quiet: true
-        command: ./scripts/stamp-trailers.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
-          - {else: true, pause: true}
+          - {else: true, goto: autosquash}         # re-run autosquash.sh -> verify-mode (before-tree sentinel present)
 
       # ── merged review-panel + recheck. The agent tiers INTERNALLY on vars:
       #    first pass (panel_done false, not fast_path) = full opus 4-member panel;
@@ -218,68 +193,35 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: deferred-sweep}
 
-      - name: fast-path-cycle-gate
-        quiet: true
-        rules:
-          - {if: {fast_path: true}, goto: integration-gate}   # trivial: single-plan; integration-gate skips the pass and stamps sweep commits
-          - {else: true, continue: true}
-
-      - name: plan-cycle-check
-        file: agents/plan-cycle-check.md
-        tier: medium        # Sonnet coverage judgment
-        max_loops: 10                # plans-per-spec bound
-        rules:
-          - {if: {more_plans: true}, set: {panel_done: false, multi_plan: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}     # supercycle
-          - {else: true, continue: true}
-
-  - name: review
-    steps:
-      # ── trimmed end-of-change integration pass: ONLY when >1 plan ran ──
-      - name: integration-gate
-        quiet: true
-        rules:
-          - {if: {multi_plan: false}, goto: stamp-sweep-trailers}   # single plan: the per-plan pass WAS the whole-change pass; still stamp sweep commits
-          - {else: true, set: {integration_pass: true}, continue: true}
-
-      - name: integration-pass        # review-panel.md in integration_pass mode: completeness + boundaries slices over the whole-change diff
-        file: agents/review-panel.md
-        tier: medium
-        max_loops: 6
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: [".imp/change/**"], mode: allow}
-        rules:
-          - {if: {verdict: task_gap}, set: {integration_pass: false}, goto: task-lead, feedback: "The integration pass found cross-plan gaps. Findings:"}
-          - {if: {verdict: plan_gap}, set: {integration_pass: false}, goto: plan-writer, feedback: "The integration pass found the plan needs revision. Findings:"}
-          - {else: true, set: {integration_pass: false}, continue: true}
-
-      - name: integration-sweep       # cross-plan deferred sweep over the whole change
-        file: agents/deferred-sweep.md
-        tier: medium
-        fs_permissions:
-          - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["**"], mode: allow}
-
-      - name: integration-sweep-verify
-        command: ./scripts/run-verify.sh
-        rules:
-          - {if: {exit: 0}, continue: true}
-          - {else: true, resume: integration-sweep}
-
-      - name: stamp-sweep-trailers     # idempotently stamp Change: on sweep commits the per-plan stamp-trailers could not reach
+      # One idempotent stamp of all run commits — task commits AND the sweep commits
+      # the panel/deferred-sweep just produced — before plan-cycle-check. Re-running it
+      # under the whole-change pass (review_scope=change) is a no-op on already-stamped
+      # commits (trailer.ifexists=doNothing).
+      - name: stamp-trailers
         quiet: true
         command: ./scripts/stamp-trailers.sh
         rules:
           - {if: {exit: 0}, continue: true}
           - {else: true, pause: true}
 
+      - name: plan-cycle-check
+        file: agents/plan-cycle-check.md
+        tier: medium        # Sonnet coverage judgment
+        max_loops: 10                # plans-per-spec bound
+        rules:
+          - {if: {more_plans: true}, set: {panel_done: false, multi_plan: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}   # supercycle
+          - {if: {multi_plan: true, review_scope: plan}, set: {review_scope: "'change'", panel_done: false}, goto: review}   # one whole-change review pass over the full diff
+          - {else: true, goto: integrate-merge}   # single-plan, or the whole-change pass already ran (review_scope=change is the one-shot guard)
+
+  - name: review
+    steps:
       # ── integrate base into the branch, before review folds into one decision ──
       - name: integrate-merge
         quiet: true
         command: ./scripts/integrate-merge.sh
         rules:
-          - {if: {exit: 2}, goto: summarizer}
-          - {if: {exit: 0}, continue: true}
+          - {if: {exit: 2}, goto: finalize}   # base already ancestor: no merge to resolve -> finalize
+          - {if: {exit: 0}, continue: true}   # real base merge -> integrator
           - {else: true, pause: true}
 
       - name: integrator
@@ -288,9 +230,7 @@ phases:
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["**"], mode: allow}
-        rules:
-          - {if: {integration: review}, set: {integration_needs_review: true}, continue: true}
-          - {else: true, set: {integration_needs_review: false}, continue: true}
+        # no rules: continue-on-success. finalize always reviews the resolution.
 
       - name: integrate-verify
         command: ./scripts/run-verify.sh
@@ -299,32 +239,12 @@ phases:
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: integrator}
 
-      - name: integration-review
-        file: agents/integration-reviewer.md
+      - name: finalize
+        file: agents/finalize.md
         tier: high
-        max_loops: 5
-        rules:
-          - {if: {verdict: task_gap}, resume: integrator, feedback: "Integration review found gaps in the merge resolution. Findings:"}
-          - {if: {verdict: plan_gap}, resume: integrator, feedback: "Integration review flagged a deeper issue with the merge. Findings:"}
-          - {else: true, continue: true}
-
-      - name: summarizer
-        file: agents/summarizer.md
-        tier: high
-
-      - name: final-review-gate
-        quiet: true
-        rules:
-          - {if: {final_review: false}, set: {ready_to_merge: true}, goto: merge}
-          - {if: {ready_to_merge: true, integration_needs_review: false}, goto: merge}
-          - {else: true, continue: true}
-
-      - name: final-review
-        file: agents/final-review.md
-        tier: medium
         max_loops: 20
         rules:
-          - {if: {decision: merge},  set: {ready_to_merge: true}, continue: true}
+          - {if: {decision: merge},  goto: merge}
           - {if: {decision: rework}, goto: implement, feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 

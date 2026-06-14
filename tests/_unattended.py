@@ -12,8 +12,7 @@ from __future__ import annotations
 def unattended_vars(**extra: bool) -> dict[str, bool]:
     """The workflow var overrides every unattended harness should apply.
 
-    Pins `spec_confirm: false`; callers add harness-specific extras
-    (e.g. final_review=False for auto-merge)."""
+    Pins `spec_confirm: false`; callers add harness-specific extras."""
     return {"spec_confirm": False, **extra}
 
 

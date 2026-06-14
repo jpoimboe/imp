@@ -54,11 +54,11 @@ things a single deferring task could not (e.g. a `_can_pty` dedup that is
    Dispatch the implementer **and then the quality-reviewer**
    (`task(subagent_name="quality-reviewer", tier="medium", …)`); address any
    blocking finding before committing. **One clean commit**, then record it for
-   `final-review` as fixed-but-flagged (below).
+   `finalize` as fixed-but-flagged (below).
 
 3. **Surface for decision — do NOT fix.** The item needs design, a spec call, or is
    genuinely out of scope for the whole change (e.g. a spec contradiction). Leave it
-   deferred; it surfaces to the human via the summarizer exactly as today. You
+   deferred; it surfaces to the human via finalize exactly as today. You
    **never** auto-route these to plan-writer and you **never** grow the change.
 
 The boundary between (1) and (2) is: *would a careful reviewer want to know this
@@ -86,7 +86,7 @@ checkbox and recording the disposition after an em-dash ` — `:
 - surface-for-decision → `- [ ] DEFERRED <source>: <desc> [scope: …] — still-deferred: <reason>`
 
 Resolve `<commit-sha>` with `git rev-parse --short HEAD` after the implementer's
-commit. The summarizer reads these dispositions and surfaces only `fyi-fixed` and
+commit. finalize reads these dispositions and surfaces only `fyi-fixed` and
 `still-deferred`; `silent-fixed` items appear nowhere.
 
 ## Degraded marker

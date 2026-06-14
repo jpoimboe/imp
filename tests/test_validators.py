@@ -86,8 +86,9 @@ def test_step_name_collides_with_phase_name_no_goto_is_allowed(tmp_path: Path) -
     load_workflow(wf)  # must NOT raise
 
 
-def test_step_name_collides_with_phase_name_with_ambiguous_goto_is_error(tmp_path: Path) -> None:
-    # A goto targeting the colliding name is ambiguous (step vs. phase?), so it IS an error.
+def test_step_name_collides_with_phase_name_with_goto_is_allowed(tmp_path: Path) -> None:
+    # resolve_goto deterministically prefers steps over phases, so a goto to a name
+    # that is both a step and phase is unambiguous — it targets the step. No error.
     wf = _wf(tmp_path, """\
         name: t
         description: t
@@ -103,8 +104,7 @@ def test_step_name_collides_with_phase_name_with_ambiguous_goto_is_error(tmp_pat
                 rules:
                   - {else: true, goto: review}
         """)
-    with pytest.raises((LoadError, LoadErrors)):
-        load_workflow(wf)
+    load_workflow(wf)  # must NOT raise
 
 
 def test_duplicate_step_name_across_phases_is_error(tmp_path: Path) -> None:

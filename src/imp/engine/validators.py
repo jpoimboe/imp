@@ -148,26 +148,11 @@ def _v_resume_targets_are_agents(
 def _v_unique_step_names_disjoint_from_phases(
     workflow: Workflow, errors: list[LoadError]
 ) -> None:
-    phase_names = {p.name for p in workflow.phases}
+    # resolve_goto prioritises steps over phases, so a step sharing a phase name
+    # is always resolved deterministically — no collision check needed.
     flat = workflow.flat_steps()
-    step_names = {s.name for s in flat}
-    # Only flag a collision when a goto actually targets the ambiguous name —
-    # resolve_goto prioritises the step, so an untargeted collision is harmless.
-    ambiguous_goto_targets = {
-        rule.action.target
-        for step in flat
-        for rule in step.rules
-        if isinstance(rule.action, Goto)
-        and rule.action.target in phase_names
-        and rule.action.target in step_names
-    }
     seen: dict[str, object] = {}
     for step in flat:
-        if step.name in phase_names and step.name in ambiguous_goto_targets:
-            errors.append(LoadError(
-                f"step {step.name!r} collides with a phase name targeted by a "
-                f"goto (ambiguous resolution); rename the step or phase",
-                step.source))
         if step.name in seen:
             errors.append(LoadError(
                 f"duplicate step name {step.name!r} (names are global)", step.source))

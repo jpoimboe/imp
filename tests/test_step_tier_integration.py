@@ -57,7 +57,6 @@ def test_default_workflow_loads_and_resolves_review_steps() -> None:
     # No differ_from -> not diverged -> absent from resolved_steps (it holds only
     # steps that diverge from their tier via differ_from).
     assert "review" not in resolved_steps
-    assert "integration-pass" not in resolved_steps
 
 
 def test_review_steps_resolve_same_vendor_single_provider() -> None:
@@ -69,4 +68,3 @@ def test_review_steps_resolve_same_vendor_single_provider() -> None:
     assert resolved_tiers["medium"].provider == "claude_code"
     assert resolved_tiers["medium"].model == "sonnet"
     assert "review" not in resolved_steps
-    assert "integration-pass" not in resolved_steps

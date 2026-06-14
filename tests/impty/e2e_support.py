@@ -108,9 +108,13 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
     return {
         "steps": {
             "spec-writer": [{"text": "spec", "tools": [
+                {"name": "rename_change", "input": {"name": "demo change"}},
                 bash(spec_cmd),
                 done(phase="written", spec_path="imp/specs/SCRIPTED-STUB.md",
                      complexity="trivial", unseen_changes=False),
+            ]}],
+            "spec-reviewer": [{"text": "review", "tools": [
+                done(findings="No findings.", blocking=False, has_minor_findings=False),
             ]}],
             "plan-writer": [{"text": "plan", "tools": [
                 bash(plan_cmd),
@@ -126,12 +130,12 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
             "deferred-sweep": [{"text": "sweep", "tools": [
                 done(summary="no deferred items"),
             ]}],
-            "summarizer": [{"text": "summary", "tools": [
-                done(built="sentinel", verify_status="n/a",
-                     open_items="none", next_steps="none"),
+            "plan-cycle-check": [{"text": "check", "tools": [
+                done(more_plans=False, rationale="single plan covers the spec"),
             ]}],
-            "final-review": [{"text": "final", "tools": [
-                done(decision="merge", comments=""),
+            "finalize": [{"text": "finalize", "tools": [
+                done(decision="merge", comments="", built="sentinel",
+                     verify_status="n/a", open_items="none", next_steps="none"),
             ]}],
         },
         "default": [{"text": "ok", "tools": [done()]}],

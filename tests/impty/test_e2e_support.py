@@ -53,7 +53,7 @@ def test_default_workflow_script_covers_the_fast_path_agents() -> None:
     steps = script["steps"]
     # Every agent the trivial fast path invokes on the way to completion + merge.
     for agent in ("spec-writer", "plan-writer", "task-lead",
-                  "review-panel", "deferred-sweep", "summarizer", "final-review"):
+                  "review-panel", "deferred-sweep", "plan-cycle-check", "finalize"):
         assert agent in steps, f"{agent} missing from the default-workflow script"
 
     # spec-writer marks the change trivial → fast path; task-lead writes the sentinel.
@@ -63,7 +63,7 @@ def test_default_workflow_script_covers_the_fast_path_agents() -> None:
     assert "IMP_DOGFOOD_t2t2t2" in lead_bash and "src/sentinel.py" in lead_bash
     lead_done = steps["task-lead"][0]["tools"][-1]["input"]
     assert lead_done["done"] is True
-    assert steps["final-review"][0]["tools"][-1]["input"]["decision"] == "merge"
+    assert steps["finalize"][0]["tools"][-1]["input"]["decision"] == "merge"
 
 
 def test_seed_default_repo_installs_the_real_default_workflow(tmp_path: Path) -> None:
