@@ -69,6 +69,20 @@ fidelity caveats live here once:
 - **`exec` in shell-wrapped spawns.** If you spawn through `bash -lc`, `exec` is mandatory —
   without it bash (not imp) leads the foreground group and Ctrl-C/ESC never reach imp.
 
+## Shared fake-Telegram harness reference
+
+For the **chat** surface, `tests/playbooks/fake_telegram.py` plays the role impty plays for the
+pty: a stdlib `http.server` fake Bot API that is the test's window into the chat. It implements
+exactly the two methods the adapter calls — `POST /bot<token>/getUpdates` (FIFO drain honouring the
+adapter's offset, monotonic `update_id`s) and `POST /bot<token>/sendMessage` (records outbound,
+monotonic `message_id` so reply-to threading is faithful) — plus a test side-channel: `POST
+/_inject` (push inbound text, optional `reply_to_message_id`; malformed body → 400) and `GET
+/_outbox` (the messages the bot sent). Unlike impty it needs no MCP server: JSON-over-HTTP is
+already agent-drivable from bash with `curl`. The deterministic pytest drives it through its Python
+API (`start`/`url`/`inject`/`inject_reply`/`outbox`/`stop`); the playbook launches it with `python3
+-m tests.playbooks.fake_telegram` and drives it with `curl`. Point a real daemon at it via
+`IMP_TELEGRAM_API_BASE`.
+
 ## Throwaway-clone reference
 
 Run in a **standalone `git clone`** (not a `git worktree add`) and abandon all churn at the end.
@@ -95,3 +109,8 @@ symbols or branch paths into a playbook.
 - `dogfood-playbook.md` — run-to-completion outcome/e2e acceptance test: drive a full `imp new` run
   to completion + merge, judge the produced work with fresh eyes, run `check_dogfood_invariants.py`,
   and write a critical PASS/FAIL results report → `docs/bugs/`.
+- `remote-control-playbook.md` — drive a full Change from the chat (fake Telegram harness + real
+  `imp remote-control start` via `IMP_TELEGRAM_API_BASE`) to completion + merge, exercise `/help` /
+  `/list` / `/new` / `/abandon` / the unknown-command notice / the unroutable-message hint, judge
+  the multi-Change chat UX, and write a PASS/FAIL + UX verdict → `docs/bugs/`. Validates
+  `imp/specs/2026-06-14-remote-control-chat-commands.md`.
