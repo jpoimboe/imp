@@ -148,6 +148,16 @@ def test_review_panel_reads_review_scope_not_integration_pass() -> None:
     assert "review_scope" in text
 
 
+def test_integrator_is_a_rebase_conflict_resolver() -> None:
+    text = (AGENTS / "integrator.md").read_text()
+    assert "MERGE_HEAD" not in text
+    assert "--amend" not in text
+    assert "git rebase --continue" in text
+    assert "integration-notes.md" in text
+    assert "integration: {type: enum" in text
+    assert "wait_for_user" in text
+
+
 def test_slices_resolve_from_asset_dir() -> None:
     from imp.evals.driver import baseline_agent_path
     for name in ("completeness-slice", "spec-compliance-slice", "boundaries-slice"):
