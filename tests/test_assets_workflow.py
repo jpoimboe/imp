@@ -29,8 +29,12 @@ def test_shipped_default_workflow_loads(tmp_path: Path) -> None:
     assert wf.name
     assert wf.phases
     for agent in wf.agents.values():
-        assert "complete_step" not in agent.tools, f"{agent.name}: complete_step is provider-injected"
-        assert "load_skill" not in agent.tools, f"{agent.name}: load_skill is provider-injected"
+        assert "complete_step" not in agent.tools, (
+            f"{agent.name}: complete_step is provider-injected"
+        )
+        assert "load_skill" not in agent.tools, (
+            f"{agent.name}: load_skill is provider-injected"
+        )
 
 
 def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) -> None:

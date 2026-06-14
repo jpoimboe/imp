@@ -33,7 +33,9 @@ def test_declared_web_tools_filters_and_orders() -> None:
 
 
 def test_capability_ok_for_anthropic_both() -> None:
-    wn.check_web_capability("anthropic", _agent(frozenset({"web_search", "web_fetch"}), explicit_tools=True))
+    wn.check_web_capability(
+        "anthropic", _agent(frozenset({"web_search", "web_fetch"}), explicit_tools=True)
+    )
 
 
 def test_capability_openai_web_fetch_degrades(caplog) -> None:

@@ -21,6 +21,8 @@ class _AgentDef:
     def __init__(self, tools: tuple[str, ...]) -> None:
         self.tools = frozenset(tools)
         self.output_schema = _SCHEMA
+        self.explicit_tools = bool(tools)
+        self.deny_tools: frozenset[str] = frozenset()
 
 
 class _Inv:
