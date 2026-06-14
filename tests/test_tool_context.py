@@ -271,3 +271,65 @@ def test_get_parallel_limiter_is_lazy_and_per_invocation(tmp_path: Path) -> None
                         events_path=tmp_path / "events.jsonl")
     assert other.get_parallel_limiter() is not lim  # fresh limiter per invocation
     reset_parallelism_cache()
+
+
+def test_terminate_reaps_regrouped_descendant(tmp_path):
+    """A descendant that calls setsid() LEAVES the tool's process group, so killpg
+    alone misses it — but it keeps the parent as ppid, so the /proc walk finds it.
+    After terminate_running_processes the descendant must be gone (not reparented
+    to init and surviving)."""
+    import os
+    import sys
+    from pathlib import Path
+
+    import anyio
+    import pytest
+
+    from imp.agents.tools.context import ToolContext, terminate_running_processes
+
+    if not Path("/proc").is_dir():
+        pytest.skip("descendant reaping needs /proc (Linux)")
+
+    ctx = ToolContext(project_root=tmp_path, fs_permissions=(),
+                      events_path=tmp_path / "e.jsonl")
+    pidfile = tmp_path / "descendant.pid"
+    # Parent (registered, its own session via start_new_session) forks a child that
+    # setsid()s — leaving the parent's process group — writes its pid, then sleeps.
+    script = (
+        "import os, sys, time\n"
+        "pid = os.fork()\n"
+        "if pid == 0:\n"
+        "    os.setsid()\n"
+        "    open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+        "    time.sleep(300)\n"
+        "else:\n"
+        "    time.sleep(300)\n"
+    )
+
+    async def go():
+        proc = await anyio.open_process(
+            [sys.executable, "-c", script, str(pidfile)],
+            start_new_session=True,
+        )
+        ctx.running_processes.append(proc)
+        for _ in range(250):
+            if pidfile.exists() and pidfile.read_text().strip():
+                break
+            await anyio.sleep(0.02)
+        descendant = int(pidfile.read_text().strip())
+        os.kill(descendant, 0)  # alive (raises ProcessLookupError if not)
+
+        await terminate_running_processes(ctx)
+        assert ctx.running_processes == []
+
+        gone = False
+        for _ in range(250):
+            try:
+                os.kill(descendant, 0)
+            except ProcessLookupError:
+                gone = True
+                break
+            await anyio.sleep(0.02)
+        assert gone, "re-grouped descendant survived the reaping path"
+
+    anyio.run(go)

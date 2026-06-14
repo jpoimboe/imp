@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal as _signal
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -206,13 +207,76 @@ async def kill_process_group(proc: Any, sig: int) -> None:
         fn()
 
 
+def _parse_ppid(status_text: str) -> int | None:
+    for line in status_text.splitlines():
+        if line.startswith("PPid:"):
+            with contextlib.suppress(ValueError):
+                return int(line.split(":", 1)[1].strip())
+            return None
+    return None
+
+
+def descendant_pids(root_pid: int) -> list[int]:
+    """Transitive descendants of `root_pid`, enumerated from /proc PPid links
+    (excludes root_pid itself). Returns [] where /proc is absent (non-Linux) — the
+    caller then degrades to killpg-only. Gather this WHILE the parent tree is alive:
+    once the parent dies its children reparent to init and the PPid links are gone.
+    """
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        return []
+    children: dict[int, list[int]] = {}
+    for entry in proc_root.iterdir():
+        name = entry.name
+        if not name.isdigit():
+            continue
+        try:
+            status = (entry / "status").read_text()
+        except OSError:
+            continue                       # process vanished mid-scan
+        ppid = _parse_ppid(status)
+        if ppid is not None:
+            children.setdefault(ppid, []).append(int(name))
+    out: list[int] = []
+    seen: set[int] = set()
+    queue = list(children.get(root_pid, []))
+    while queue:
+        pid = queue.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+        queue.extend(children.get(pid, []))
+    return out
+
+
+def _signal_pids(pids: Iterable[int], sig: int) -> None:
+    for pid in pids:
+        with contextlib.suppress(OSError):
+            os.kill(pid, sig)
+
+
+async def kill_process_tree(proc: Any, sig: int) -> None:
+    """killpg the process's group AND signal its transitive (possibly re-grouped)
+    descendants by pid. Enumerate descendants BEFORE the killpg, so a SIGKILL that
+    severs the ppid links can't hide a re-grouped escapee. Single-shot — used by
+    the in-tool cap/timeout kills; the SIGTERM->grace->SIGKILL reaping path uses the
+    two-stage capture in terminate_running_processes."""
+    pid = getattr(proc, "pid", None)
+    descendants = descendant_pids(pid) if pid is not None else []
+    await kill_process_group(proc, sig)
+    _signal_pids(descendants, sig)
+
+
 async def terminate_running_processes(
     ctx: ToolContext, *, timeout: float = PROCESS_KILL_GRACE_S,
 ) -> list[Any]:
-    """SIGTERM the process GROUP of every registered process, wait `timeout`
-    (named grace, default 4 s), then SIGKILL the group of any survivor. Drain the
-    registry. Returns the processes that were signalled (caller emits tool_killed
-    from it). Escalation is TIME-gated, not count-gated."""
+    """SIGTERM the process GROUP of every registered process AND its transitive
+    descendants, wait `timeout` (named grace, default 4 s), then SIGKILL the group
+    + descendants of any survivor. Drain the registry. Returns the processes that
+    were signalled (caller emits tool_killed from it). Escalation is TIME-gated,
+    not count-gated. Descendants that left the group (setpgid/setsid) are reached
+    by pid via a /proc walk, captured while the parent tree is still alive."""
     import anyio
 
     if not ctx.running_processes:
@@ -220,8 +284,13 @@ async def terminate_running_processes(
     procs = list(ctx.running_processes)
     ctx.running_processes.clear()
 
+    captured: dict[int, set[int]] = {}
     for p in procs:
+        pid = getattr(p, "pid", None)
+        ds = set(descendant_pids(pid)) if pid is not None else set()
+        captured[id(p)] = ds
         await kill_process_group(p, _signal.SIGTERM)
+        _signal_pids(ds, _signal.SIGTERM)
 
     async def _wait_one(p: Any) -> None:
         with contextlib.suppress(Exception):
@@ -233,8 +302,15 @@ async def terminate_running_processes(
                 tg.start_soon(_wait_one, p)
 
     for p in procs:
+        pid = getattr(p, "pid", None)
+        # Re-enumerate BEFORE the group SIGKILL severs the ppid links, then union
+        # with the SIGTERM-stage capture so an escapee whose in-group parent already
+        # died during grace (now reparented to init) is still reached by pid.
+        fresh = set(descendant_pids(pid)) if pid is not None else set()
+        survivors = captured[id(p)] | fresh
         if getattr(p, "returncode", None) is None:
             await kill_process_group(p, _signal.SIGKILL)
             with contextlib.suppress(Exception):
                 await p.wait()
+        _signal_pids(survivors, _signal.SIGKILL)
     return procs
