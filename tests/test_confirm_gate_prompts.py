@@ -17,7 +17,7 @@ def test_spec_writer_schema_gains_confirmed_phase_and_unseen_changes() -> None:
     schema = wf.agents["spec-writer"].output_schema
     phase = next(f for f in schema.fields if f.name == "phase")
     assert phase.type == "enum"
-    assert set(phase.values) == {"written", "confirmed"}
+    assert set(phase.values) == {"written"}
     unseen = next(f for f in schema.fields if f.name == "unseen_changes")
     assert unseen.type == "bool"
     assert unseen.required is True

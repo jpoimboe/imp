@@ -6,7 +6,7 @@ output:
   status: {type: enum, values: [Success, Error]}
   decision: {type: enum, values: [merge, rework, pause]}
   built: {type: string}
-  test_status: {type: string}
+  verify_status: {type: string}
   open_items: {type: string}
   next_steps: {type: string}
   comments: {type: string}
@@ -52,7 +52,7 @@ only if cheap; do NOT make code changes). Populate:
 - `built`: what was built, by plan/task, in prose. If base was integrated, say so
   (e.g. "Merged base (N commits); resolved X conflicts — Y flagged uncertain"); if
   `integration-notes.md` is absent, "no base changes to integrate".
-- `test_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
+- `verify_status`: the verification state in plain user terms — never surface internal gate jargon or raw exit codes.
 - `open_items`: read the **Deferred Followups** dispositions the `deferred-sweep`
   step recorded in `.imp/change/progress.md`, as TWO labelled subsections —
   **Fixed (FYI/veto):** every `fyi-fixed <commit>` item with its commit, and
@@ -75,15 +75,15 @@ call (a bare turn-end is treated as a bug and will nudge you). In a headless run
 
 When the user has decided (their reply is the `wait_for_user` tool result), and the
 merge-resolution review (if any) is sound:
-- Merge -> `complete_step(decision="merge", comments="<notes>", built=…, test_status=…, open_items=…, next_steps=…)`.
+- Merge -> `complete_step(decision="merge", comments="<notes>", built=…, verify_status=…, open_items=…, next_steps=…)`.
 - Rework -> `complete_step(decision="rework", comments="<the user's feedback OR the
-  resolution problem, verbatim and actionable>", built=…, test_status=…, open_items=…, next_steps=…)`.
+  resolution problem, verbatim and actionable>", built=…, verify_status=…, open_items=…, next_steps=…)`.
   Your `comments` are carried to the implementer as authoritative feedback — be
   specific (name the task/behavior/file to change).
 - Cannot proceed without a human and none is available, or an unrecoverable problem
-  -> `complete_step(decision="pause", comments="<why>", built=…, test_status=…, open_items=…, next_steps=…)`.
+  -> `complete_step(decision="pause", comments="<why>", built=…, verify_status=…, open_items=…, next_steps=…)`.
 
-Always emit the summary fields (`built` / `test_status` / `open_items` /
+Always emit the summary fields (`built` / `verify_status` / `open_items` /
 `next_steps`) on every `complete_step`, whichever decision you make — they land in
 the event log and are queryable via `imp log {{ change.slug }}`. Do not write files;
 do not commit.

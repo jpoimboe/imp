@@ -96,7 +96,7 @@ def test_finalize_is_high_tier_and_routes_merge_rework_pause() -> None:
     assert set(decision.values) == {"merge", "rework", "pause"}
     base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
     out = {"status": "Success", "decision": "merge", "comments": "",
-           "built": "", "test_status": "", "open_items": "", "next_steps": ""}
+           "built": "", "verify_status": "", "open_items": "", "next_steps": ""}
     m = evaluate_rules(step.rules, vars=base, output=out)
     assert isinstance(m.action, Goto) and m.action.target == "merge"
     m2 = evaluate_rules(step.rules, vars=base, output={**out, "decision": "rework"})
