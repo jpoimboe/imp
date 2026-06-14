@@ -14,7 +14,7 @@ class ControlPlane:
         hub: SouthHub,
         resume: Callable[[str, str], None],
         create: Callable[[str], None],
-        abandon: Callable[[str], None],
+        abandon: Callable[[str], int],
         list_changes: Callable[[], list[ChangeInfo]],
     ) -> None:
         self._hub: SouthHub = hub
@@ -33,8 +33,8 @@ class ControlPlane:
     def create(self, prompt: str) -> None:
         self._create(prompt)
 
-    def abandon(self, change_id: str) -> None:
-        self._abandon(change_id)
+    def abandon(self, change_id: str) -> int:
+        return self._abandon(change_id)
 
     def list_changes(self) -> list[ChangeInfo]:
         return self._list_fn()

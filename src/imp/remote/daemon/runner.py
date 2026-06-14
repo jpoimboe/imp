@@ -125,8 +125,13 @@ async def _handle_command(
         control.create(command.prompt)
         responses.put(Notice("Spawning a new Change… watch for its first question"))
     elif isinstance(command, Abandon):
-        control.abandon(command.change_id)
-        responses.put(Notice(f"Abandoning @{handle_for(command.change_id)}…"))
+        handle = handle_for(command.change_id)
+        rc = await anyio.to_thread.run_sync(control.abandon, command.change_id)
+        if rc == 0:
+            responses.put(Notice(f"Abandoned @{handle}."))
+        else:
+            responses.put(Notice(
+                f"@{handle} is still running — stop it first, then /abandon again."))
     elif isinstance(command, ListChanges):
         try:
             changes = await anyio.to_thread.run_sync(control.list_changes)
@@ -178,7 +183,7 @@ async def run_daemon(
         [Mapping[str, str], Callable[[Command], None]], Any] = _make_telegram_adapter,
     resume: Callable[[str, str], None] | None = None,
     create: Callable[[str], None] | None = None,
-    abandon: Callable[[str], None] | None = None,
+    abandon: Callable[[str], int] | None = None,
     list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,

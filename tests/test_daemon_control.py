@@ -19,12 +19,12 @@ class FakeHub:
 
 
 def _plane(hub: FakeHub, *, resumed: list, created: list, abandoned: list,
-           infos: list[ChangeInfo]) -> ControlPlane:
+           infos: list[ChangeInfo], abandon_rc: int = 0) -> ControlPlane:
     return ControlPlane(
         hub=hub,
         resume=lambda cid, text: resumed.append((cid, text)),
         create=lambda prompt: created.append(prompt),
-        abandon=lambda cid: abandoned.append(cid),
+        abandon=lambda cid: (abandoned.append(cid), abandon_rc)[1],
         list_changes=lambda: infos)
 
 
@@ -60,10 +60,11 @@ def test_create_spawns_a_change_from_the_prompt() -> None:
     assert created == ["add dark mode"]
 
 
-def test_abandon_targets_the_change() -> None:
+def test_abandon_targets_the_change_and_returns_exit_code() -> None:
     abandoned: list = []
-    plane = _plane(FakeHub(live=False), resumed=[], created=[], abandoned=abandoned, infos=[])
-    plane.abandon("2026-06-13-abc")
+    plane = _plane(FakeHub(live=False), resumed=[], created=[],
+                   abandoned=abandoned, infos=[], abandon_rc=2)
+    assert plane.abandon("2026-06-13-abc") == 2
     assert abandoned == ["2026-06-13-abc"]
 
 
