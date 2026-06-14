@@ -633,6 +633,9 @@ async def _collect_resume_input(
     at completion only /continue (or Ctrl-D) finishes. Ctrl-D raises EOFError out
     of reply_input_fn; the caller wraps this call in `except EOFError` to
     pause-and-exit (rc 130) — EOFError is propagated, never swallowed here."""
+    if not at_completion and sys.stdout.isatty():
+        print("paused — type a message to redirect, "
+              "or ctrl-d to leave it paused")
     reminder_shown = False
     while True:
         line = await reply_input_fn()  # Ctrl-D → EOFError (propagated to caller)
