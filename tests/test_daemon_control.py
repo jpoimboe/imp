@@ -20,11 +20,15 @@ class FakeHub:
 
 def _plane(hub: FakeHub, *, resumed: list, created: list, abandoned: list,
            infos: list[ChangeInfo], abandon_rc: int = 0) -> ControlPlane:
+    def _abandon(cid: str) -> int:
+        abandoned.append(cid)
+        return abandon_rc
+
     return ControlPlane(
         hub=hub,
         resume=lambda cid, text: resumed.append((cid, text)),
         create=lambda prompt: created.append(prompt),
-        abandon=lambda cid: (abandoned.append(cid), abandon_rc)[1],
+        abandon=_abandon,
         list_changes=lambda: infos)
 
 
