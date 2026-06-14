@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from imp.cli.main import _should_prompt_opening, _normalize_opening_reply, OPENING_QUESTION
+from imp.cli.main import OPENING_QUESTION, _normalize_opening_reply, _should_prompt_opening
 
 
 def test_prompts_when_interactive_and_unseeded() -> None:

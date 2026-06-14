@@ -424,20 +424,21 @@ def test_cmd_log_auto_picks_latest_by_mtime(
     assert "second" not in out
 
 
-def test_cmd_log_no_changes_yet_returns_rc_2(
+def test_cmd_log_no_changes_yet_returns_rc_0(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
 ) -> None:
-    """`imp log` in a project with no .imp/worktrees/ returns rc=2 with a
-    friendly stderr message."""
+    """`imp log` in a project with no .imp/worktrees/ returns rc=0 with a
+    friendly stdout message."""
     import imp.cli.main as m
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
     (tmp_path / ".imp").mkdir()
     rc = main(["log"])
-    assert rc == 2
-    err = capsys.readouterr().err
-    assert "in-flight" in err.lower() or "no" in err.lower()
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "No Changes" in captured.out
+    assert captured.err == ""
 
 
 def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
