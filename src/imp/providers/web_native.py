@@ -15,10 +15,10 @@ derives only from any citations appended to the response text.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from imp.engine.types import AgentDef
-from imp.providers import errors as perr
 
 # The two reserved native-capability names. Skipped by every `_build_tools`.
 WEB_TOOL_NAMES = frozenset({"web_search", "web_fetch"})
@@ -26,7 +26,7 @@ WEB_TOOL_NAMES = frozenset({"web_search", "web_fetch"})
 # Which normalized web tools each provider can fulfill natively. OpenAI's
 # Responses API has built-in web_search but no native web_fetch (a future
 # `http_get` escape hatch is out of scope), so declaring web_fetch on OpenAI is
-# a fail-loud misconfiguration.
+# dropped with a one-time warning (see check_web_capability).
 _PROVIDER_WEB_SUPPORT: dict[str, frozenset[str]] = {
     "anthropic": frozenset({"web_search", "web_fetch"}),
     "claude_code": frozenset({"web_search", "web_fetch"}),
@@ -50,6 +50,11 @@ _ANTHROPIC_WEB_FETCH_TYPE = "web_fetch_20250910"
 _CC_BUILTIN_FOR = {"web_search": "WebSearch", "web_fetch": "WebFetch"}
 CC_WEB_BUILTIN_TO_NORM = {v: k for k, v in _CC_BUILTIN_FOR.items()}
 
+_logger = logging.getLogger(__name__)
+
+# (provider, tool) pairs already warned about, so degradation logs once.
+_warned_unsupported: set[tuple[str, str]] = set()
+
 
 def declared_web_tools(agent_def: AgentDef) -> list[str]:
     """The reserved web names this agent declared (subset of WEB_TOOL_NAMES).
@@ -59,18 +64,24 @@ def declared_web_tools(agent_def: AgentDef) -> list[str]:
 
 
 def check_web_capability(provider_name: str, agent_def: AgentDef) -> None:
-    """Raise a clear ConfigError (§8) if the agent declares a web tool the
-    resolved provider cannot fulfill. No-op when everything is supported."""
+    """Drop (and warn once about) any declared native web tool the resolved
+    provider cannot fulfill, instead of failing the run. The per-provider spec
+    builders already emit only supported capabilities, so the unsupported tool
+    is effectively absent; this records why. No-op when everything is
+    supported."""
     declared = set(declared_web_tools(agent_def))
     if not declared:
         return
     supported = _PROVIDER_WEB_SUPPORT.get(provider_name, frozenset())
-    unsupported = sorted(declared - supported)
-    if unsupported:
-        raise perr.ConfigError(
-            f"provider {provider_name!r} does not support native web tool(s): "
-            f"{unsupported}. Remove them from the agent's `tools:` or pin a "
-            f"provider/model that supports them.")
+    for tool in sorted(declared - supported):
+        key = (provider_name, tool)
+        if key in _warned_unsupported:
+            continue
+        _warned_unsupported.add(key)
+        _logger.warning(
+            "provider %r does not support native web tool %r; dropping it. "
+            "The agent runs with its remaining web capabilities.",
+            provider_name, tool)
 
 
 def anthropic_web_tool_specs(agent_def: AgentDef) -> list[dict[str, Any]]:
