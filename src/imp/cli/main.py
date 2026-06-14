@@ -1654,9 +1654,10 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         _interactive() if interactive is None else interactive)
     if do_prompt:
         st = State.load(change.state_dir)
+        effective = _effective_status(st.status, change.change_dir)
         n = worktree.commit_count(control, change_id, change.base_branch)
         print(f"Abandon {token}: {change.title!r} "
-              f"(status {st.status}, {n} commit{'s' if n != 1 else ''})?")
+              f"(status {effective}, {n} commit{'s' if n != 1 else ''})?")
         try:
             ans = input_fn(
                 "Type 'y' to confirm, anything else to cancel: ").strip().lower()
