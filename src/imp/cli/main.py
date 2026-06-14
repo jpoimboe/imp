@@ -585,12 +585,14 @@ async def _run_change_session(
                 # Ctrl-D at the resume prompt → pause-and-exit (rc 130), the same
                 # finalize as a Ctrl-D during the run (plan §2: the interrupted
                 # prompt's Ctrl-D pauses, it does not crash).
-                return _finalize_paused_exit(change, driver, coord, "ctrl-d")
+                return _finalize_paused_exit(
+                    change, driver, coord,
+                    _exit_pause_reason(coord.pause_reason, "ctrl-d"))
             except KeyboardInterrupt:
                 # Second Ctrl-C or SIGTERM at the resume prompt: pause-and-exit,
                 # mirroring the run loop's exit arm.
                 return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "ctrl-c")
+                    change, driver, coord, _exit_pause_reason(coord.pause_reason, "ctrl-c"))
             if slash != "continue" and line.strip():
                 coord.enqueue_interject(line)
             change.event_log().append(
@@ -606,6 +608,10 @@ async def _run_change_session(
                 await channel.stop()
         status.reset()
         tg.cancel_scope.cancel()
+
+
+def _exit_pause_reason(engine_reason: str | None, gesture: str) -> str:
+    return engine_reason or gesture
 
 
 def _finalize_paused_exit(
