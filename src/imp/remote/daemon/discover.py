@@ -38,6 +38,31 @@ def list_changes(control_root: Path) -> list[ChangeInfo]:
     return out
 
 
+def snapshot(control_root: Path, change_id: str) -> tuple[str, str, str] | None:
+    from imp.cli.main import _row_for_id
+    row = _row_for_id(control_root, change_id)
+    if row is None:
+        return None
+    _id, status, step, _last, title, _created = row
+    return (status, step, title)
+
+
+def recent_narrative(control_root: Path, change_id: str, n: int) -> list[str]:
+    from imp.cli.main import _load_events_for_id
+    from imp.remote.drivers.telegram import event_body
+    events = _load_events_for_id(control_root, change_id)
+    if events is None:
+        return []
+    bodies: list[str] = []
+    for event in events:
+        if event.get("type") != "llm_response":
+            continue
+        body = event_body("llm_response", event.get("payload") or {})
+        if body.strip():
+            bodies.append(body)
+    return bodies[-n:] if n > 0 else []
+
+
 def socket_is_live(path: Path | str) -> bool:
     """True iff a daemon is accepting on path; an absent path or unlistened socket is not live."""
     probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
