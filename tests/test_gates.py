@@ -170,3 +170,61 @@ def test_run_script_timeout_kills_group(tmp_path) -> None:
     step = _script_step("sleep 30", timeout_seconds=1)
     with pytest.raises(subprocess.TimeoutExpired):
         run_script(step, cwd=tmp_path)
+
+
+def test_route_script_does_not_block_event_loop(tmp_path) -> None:
+    """A script gate's blocking subprocess must run OFF the event loop so
+    concurrent tasks keep running while it executes.
+
+    Regression for the frozen live status line ("running · 0s") during a
+    multi-minute verify gate: `_route_script` ran the subprocess via a
+    synchronous `proc.communicate()` on the event-loop thread, starving every
+    concurrent anyio task (the status `tick()` animator, the signal receiver,
+    the remote-channel poller, live-view event processing) for the command's
+    entire duration. This drives a `sleep` gate while a ticker counts loop
+    iterations and asserts the loop kept turning.
+    """
+    import inspect
+    import types
+
+    import anyio
+
+    from imp.engine.executor import _route_script
+    from imp.engine.state import InMemoryEventLog
+
+    change = types.SimpleNamespace(
+        workflow_dir=tmp_path, project_root=tmp_path,
+        id="2026-01-01-test", slug="test", title="Test",
+    )
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={})
+        log = InMemoryEventLog()
+        step = _script_step("sleep 0.5")
+
+        ticks = 0
+
+        async def ticker() -> None:
+            nonlocal ticks
+            while True:
+                await anyio.sleep(0.02)
+                ticks += 1
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(ticker)
+            await anyio.sleep(0.06)          # let the ticker spin up
+            before = ticks
+            res = _route_script(step, change, state, log)
+            if inspect.isawaitable(res):
+                res = await res
+            during = ticks - before
+            tg.cancel_scope.cancel()
+
+        # ~0.5s / 0.02s ≈ 25 ticks if the loop kept turning; ≈0 if it was
+        # starved by a blocking subprocess on the loop thread.
+        assert during >= 8, (
+            f"event loop starved during script gate: only {during} ticks "
+            "advanced while a 0.5s subprocess ran (expected ~25)"
+        )
+
+    anyio.run(main)
