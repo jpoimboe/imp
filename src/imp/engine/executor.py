@@ -188,8 +188,16 @@ async def run_change(
                 # boundary. Finalize directly — no dispatch, no transcript wipe.
                 state.completion_pending = False
                 return _complete(change, state, log)
-            if state.step is None or index_of.get(state.step) is None:
-                return _complete(change, state, log)            # terminal
+            if state.step is None:
+                return _complete(change, state, log)            # genuine completion
+            if index_of.get(state.step) is None:
+                # The cursor names a step absent from the loaded workflow
+                # (corruption, or a future --refresh-workflow re-snapshot). Never
+                # silent-merge: pause with an error instead of calling _complete.
+                state.status = "paused"
+                state.save(change.state_dir)
+                _emit_paused_event(log, "unknown_step", step=state.step)
+                return RunResult.PAUSED
             idx = index_of[state.step]
             step = flat[idx]
             is_resume = (state.resume_pending == state.step)

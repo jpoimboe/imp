@@ -1399,3 +1399,44 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
     assert evs and evs[-1]["payload"]["step"] == "check"
     # exit 7 proves the snapshot's probe.sh actually executed on resume.
     assert evs[-1]["payload"]["exit"] == 7
+
+
+# ── Cursor vs absent step guard ──────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_none_step_resolves_to_complete(tmp_path: Path) -> None:
+    """state.step is None is genuine completion: the run finalizes COMPLETED."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    state = State.load(change.state_dir)
+    state.step = None
+    state.save(change.state_dir)
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.COMPLETED
+    assert State.load(change.state_dir).status == "completed"
+
+
+@pytest.mark.anyio
+async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
+    """A cursor naming a step absent from the loaded workflow pauses with an
+    unknown_step error rather than calling _complete (which could silent-merge)."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    state = State.load(change.state_dir)
+    state.step = "ghost-step"
+    state.save(change.state_dir)
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.PAUSED
+    reloaded = State.load(change.state_dir)
+    assert reloaded.status == "paused"
+    assert reloaded.step == "ghost-step"          # cursor untouched, not nulled
+    events = list(change.event_log().read())  # read() is a single-use generator
+    paused = [e for e in events if e.get("type") == "workflow_paused"]
+    assert paused and paused[-1]["payload"]["reason"] == "unknown_step"
+    assert paused[-1]["payload"]["step"] == "ghost-step"
+    assert not any(e.get("type") == "change_merged" for e in events)
