@@ -65,7 +65,8 @@ def pause_and_exit(
     if engine_emitted:
         return  # the engine's workflow_paused already carries this; no dup append
     change.event_log().append(
-        agent_id=None, type="workflow_paused", payload={"reason": reason})
+        agent_id=None, type="workflow_paused",
+        payload={"reason": reason, "interrupt_reason": reason})
 
 
 def install_process_group() -> None:

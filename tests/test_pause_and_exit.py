@@ -58,3 +58,15 @@ def test_append_when_engine_emitted_omitted(tmp_path: Path) -> None:
     events = [e for e in change.event_log().read() if e["type"] == "workflow_paused"]
     assert len(events) == 1
     assert events[0]["payload"]["reason"] == "ctrl-d"
+
+
+def test_signal_path_event_carries_interrupt_reason(tmp_path: Path) -> None:
+    # The renderer keys on interrupt_reason (falling back to reason); the
+    # signal-path event must carry interrupt_reason so it renders consistently
+    # with the executor-path event.
+    change = _change(tmp_path, status="running")
+    pause_and_exit(change, reason="sigterm", engine_emitted=False)
+    events = [e for e in change.event_log().read() if e["type"] == "workflow_paused"]
+    assert len(events) == 1
+    assert events[0]["payload"]["interrupt_reason"] == "sigterm"
+    assert events[0]["payload"]["reason"] == "sigterm"
