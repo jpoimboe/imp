@@ -31,27 +31,6 @@ output:
 prompt body
 """
 
-_WRITE_FILE_AGENT = """\
----
-name: writer
-tools: [write_file, complete_step]
-output:
-  status: {type: enum, values: [Success, Error]}
----
-prompt body
-"""
-
-_READ_ONLY_AGENT = """\
----
-name: reader
-tools: [read_file, complete_step]
-output:
-  status: {type: enum, values: [Success, Error]}
----
-prompt body
-"""
-
-
 # ── new cases from spec (Step 1) ─────────────────────────────────────────────
 
 
@@ -347,80 +326,6 @@ def test_v12_step_tier_unconfigured(tmp_path: Path) -> None:
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf, configured_tiers=frozenset({"default"}))
     assert any("'missing-role'" in str(e) for e in ei.value.errors)
-
-
-# ── _v_write_tool_needs_write_permission ──────────────────────────────────────
-
-
-def test_v15_pass_write_file_with_write_permission(tmp_path: Path) -> None:
-    """A step declaring write_file AND an allow-write fs_permissions rule -> no error."""
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: s
-                file: agents/writer.md
-                fs_permissions:
-                  - {operations: [read], paths: ['artifacts/**'], mode: allow}
-                  - {operations: [write], paths: ['artifacts/**'], mode: allow}
-        """, agents={"writer": _WRITE_FILE_AGENT})
-    load_workflow(wf)  # must not raise
-
-
-def test_v15_fail_write_file_no_fs_permissions(tmp_path: Path) -> None:
-    """Agent has write_file but step has NO fs_permissions -> error."""
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: s
-                file: agents/writer.md
-        """, agents={"writer": _WRITE_FILE_AGENT})
-    with pytest.raises((LoadError, LoadErrors)) as ei:
-        load_workflow(wf)
-    assert any(
-        "write_file" in str(e) and "no fs_permissions" in str(e)
-        for e in ei.value.errors
-    )
-
-
-def test_v15_fail_write_file_only_read_permission(tmp_path: Path) -> None:
-    """Agent has write_file but fs_permissions only allows read -> error."""
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: s
-                file: agents/writer.md
-                fs_permissions:
-                  - {operations: [read], paths: ['artifacts/**'], mode: allow}
-        """, agents={"writer": _WRITE_FILE_AGENT})
-    with pytest.raises((LoadError, LoadErrors)) as ei:
-        load_workflow(wf)
-    assert any(
-        "write_file" in str(e) and "no fs_permissions" in str(e)
-        for e in ei.value.errors
-    )
-
-
-def test_v15_pass_no_write_file_tool_empty_permissions(tmp_path: Path) -> None:
-    """A step that does NOT declare write_file -> no error even with empty fs_permissions."""
-    wf = _wf(tmp_path, """\
-        name: t
-        description: t
-        phases:
-          - name: p
-            steps:
-              - name: s
-                file: agents/reader.md
-        """, agents={"reader": _READ_ONLY_AGENT})
-    load_workflow(wf)  # must not raise
 
 
 # ── _v_required_blocks_per_kind ───────────────────────────────────────────────

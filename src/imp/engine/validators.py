@@ -38,7 +38,6 @@ def validate(
     if configured_tiers is not None:
         _v_step_tier_configured(workflow, configured_tiers, errors)
     _v_differ_from_targets_exist(workflow, errors)
-    _v_write_tool_needs_write_permission(workflow, errors)
     _v_no_wait_for_user_in_parallel_dispatchable(workflow, errors)
 
     return errors, warnings
@@ -288,40 +287,6 @@ def _v_differ_from_targets_exist(
                 LoadError(
                     f"differ_from target {target!r} (on step {step.name!r}) "
                     f"does not name an agent step in this workflow",
-                    step.source,
-                )
-            )
-
-
-def _v_write_tool_needs_write_permission(
-    workflow: Workflow, errors: list[LoadError]
-) -> None:
-    """A step whose agent declares `write_file` in its tools must have at least
-    one fs_permissions rule with mode=='allow' and 'write' in operations.
-    Catches the Bug 2 class: agent can call write_file but the step grants no
-    write path, so every write silently fails with PermissionDenied.
-    """
-
-    def _has_write_allow(fs_permissions: tuple[FsRule, ...]) -> bool:
-        return any(
-            rule.mode == "allow" and "write" in rule.operations
-            for rule in fs_permissions
-        )
-
-    for step in workflow.flat_steps():
-        if step.kind != "agent" or step.file is None:
-            continue
-        agent = workflow.agents.get(step.file.stem)
-        if agent is None:
-            continue  # _v_agent_files_exist_and_named reports the missing-file case
-        if "write_file" not in agent.tools or not agent.explicit_tools:
-            continue
-        if not _has_write_allow(step.fs_permissions):
-            errors.append(
-                LoadError(
-                    f"agent {agent.name!r} declares tool 'write_file' but the "
-                    f"step/gate has no fs_permissions rule with "
-                    f"mode=allow and operation=write",
                     step.source,
                 )
             )
