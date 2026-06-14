@@ -721,25 +721,26 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     assert reused.start_ts == "2026-05-30T10:05:00+00:00"
 
 
-def test_agent_output_stashes_args_and_emits_prose_for_long_fields() -> None:
+def test_agent_output_stashes_args_without_emitting_prose_node() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
-    # agent_output fires before step_completed; long summary -> prose node,
-    # short scalar + path -> NOT prose (folded later into the breadcrumb).
+    # agent_output fires before step_completed; its long free-text field is
+    # stashed for the breadcrumb/--full view, NEVER promoted to a prose block.
     b.add(_ev("2", "agent_output", agent_id="step:build/coder",
               summary="A long summary. " * 10, status="Success",
               plan_path="docs/plan.md"))
     step = b._step_stack[-1]
     assert step.agent_output["status"] == "Success"
+    assert step.agent_output["summary"].startswith("A long summary.")
     lits = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
-    assert len(lits) == 1
-    assert lits[0].text.startswith("A long summary.")
+    assert lits == []          # output fields are not prose blocks (E1)
 
 
 def test_agent_output_skips_whitespace_only_prose_field() -> None:
     # A whitespace-only multi-line field passes _is_prose_field (it contains a
-    # newline) but must NOT emit a blank LiteralTextNode — the `v.strip()` guard.
+    # newline) but must NOT promote to _render_output_args output — the v.strip()
+    # guard in _render_output_args skips empty/whitespace values.
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
@@ -1614,7 +1615,10 @@ def _reviewer_conclusion(narration: str, findings: str) -> nv.NarrativeTree:
     ])
 
 
-def test_near_duplicate_trailing_narration_is_dropped() -> None:
+def test_trailing_narration_kept_and_findings_not_promoted() -> None:
+    # E1: the agent's prose narration is the single rendered copy. The complete_step
+    # `findings` arg is plumbing, never promoted to a LiteralTextNode, and the
+    # (now-deleted) near-duplicate guard no longer drops the narration behind it.
     tree = _reviewer_conclusion(
         narration="No findings. Spec is complete and ready for planning.",
         findings=("No findings. Spec is complete and ready for planning. "
@@ -1624,21 +1628,8 @@ def test_near_duplicate_trailing_narration_is_dropped() -> None:
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
     bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
     assert len(bursts) == 1           # the trailing complete_step burst is present
-    assert agent_texts == []          # the duplicate narration (behind it) is gone
-    assert len(literals) == 1         # exactly one conclusion remains
-    assert literals[0].text.startswith("No findings.")
-
-
-def test_distinct_trailing_narration_is_kept() -> None:
-    tree = _reviewer_conclusion(
-        narration="Let me know if you would like any changes before we proceed.",
-        findings=("No findings. Spec is complete and verified clean against the "
-                  "codebase, every claim checked."))
-    step = tree.root.children[0].children[0]
-    agent_texts = [c for c in step.children if isinstance(c, nv.AgentTextNode)]
-    literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
-    assert len(agent_texts) == 1      # a genuinely different narration survives
-    assert len(literals) == 1
+    assert len(agent_texts) == 1      # the narration renders once (not dropped)
+    assert literals == []             # findings is not a prose block (E1)
 
 
 def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
@@ -1654,7 +1645,7 @@ def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
     ]
 
 
-def test_clean_panel_renders_findings_prose_generically() -> None:
+def test_clean_panel_findings_not_promoted_to_prose() -> None:
     events = [
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
@@ -1675,11 +1666,11 @@ def test_clean_panel_renders_findings_prose_generically() -> None:
     folds = [c for c in step.children if isinstance(c, nv.SubagentFold)]
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
     assert len(folds) == 4
-    assert any("two nits were noted" in lit.text for lit in literals)
+    assert literals == []                  # findings arg is not a prose block (E1)
     assert not hasattr(nv, "PanelSummaryNode")
 
 
-def test_blocking_panel_keeps_findings_prose() -> None:
+def test_blocking_panel_findings_not_promoted_to_prose() -> None:
     events = [
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
@@ -1697,5 +1688,4 @@ def test_blocking_panel_keeps_findings_prose() -> None:
     tree = nv.build_tree(events)
     step = tree.root.children[0].children[0]
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
-    assert len(literals) == 1                              # findings prose expands inline
-    assert "missing handler" in literals[0].text
+    assert literals == []                  # findings arg is not a prose block (E1)

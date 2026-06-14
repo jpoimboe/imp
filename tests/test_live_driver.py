@@ -1102,10 +1102,10 @@ def test_non_final_review_solicit_returns_plain_question() -> None:
     assert drv.take_pending_question() == "Prefer A or B?"
 
 
-def test_near_duplicate_narration_held_and_deduped_live() -> None:
-    # The live driver must hold the trailing AgentTextNode until agent_output
-    # resolves, dedup it when agent_output near-duplicates it, and emit the
-    # complete_step burst without skipping it.
+def test_narration_un_held_after_agent_output_findings_hidden_live() -> None:
+    # The live driver holds the trailing AgentTextNode until agent_output fires,
+    # then un-holds it. findings is plumbing (E1) — hidden by default, not
+    # promoted to prose. The narration is the single rendered copy.
     narration = "No findings. Spec is complete and ready for planning."
     findings = ("No findings. Spec is complete and ready for planning. "
                 "All load-bearing claims were verified against the codebase.")
@@ -1132,11 +1132,9 @@ def test_near_duplicate_narration_held_and_deduped_live() -> None:
     drv.finish()
     body = _body(out)
     full = out.getvalue()
-    # The near-duplicate narration must be deduped — findings appear exactly once.
-    # "load-bearing" is unique to the findings text, not in the narration.
-    assert full.count("load-bearing") == 1
-    # The narration was a near-duplicate and must not appear separately — the
-    # findings supersede it, so we see "No findings." only once (inside findings).
+    # findings are hidden by default (E1) — "load-bearing" is in findings only.
+    assert full.count("load-bearing") == 0
+    # The narration is un-held and appears exactly once.
     assert full.count("No findings.") == 1
     # Live and log must be byte-identical (parity invariant).
     assert body == _render_body(events)

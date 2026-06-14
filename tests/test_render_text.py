@@ -1293,7 +1293,23 @@ def test_merged_node_renders_friendly_footer() -> None:
     assert pal._ANSI["green"] in colored
 
 
-def test_clean_review_panel_renders_findings_no_panel_chrome() -> None:
+def test_complete_step_findings_hidden_lean_visible_full() -> None:
+    events = [
+        _ev("1", "step_started", step="rev", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+        _ev("2", "agent_output", agent_id="step:review/rev",
+            verdict="rework",
+            findings="Line 1 is wrong.\nLine 2 needs a guard.\nLine 3 leaks."),
+        _ev("3", "step_completed", step="rev", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ]
+    lean = "\n".join(_lines(events, full=False))
+    full = "\n".join(_lines(events, full=True))
+    assert "Line 2 needs a guard." not in lean    # hidden by default
+    assert "Line 2 needs a guard." in full         # surfaced under --full
+
+
+def test_clean_review_panel_findings_hidden_by_default() -> None:
     events = [
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
@@ -1309,10 +1325,12 @@ def test_clean_review_panel_renders_findings_no_panel_chrome() -> None:
         _ev("sc", "step_completed", step="review", kind="agent",
             action={"verb": "goto", "target": "integrate-rebase"}, var_mutations={}),
     ]
-    out = "\n".join(_lines(events))
-    assert "panel:" not in out
-    assert "code-reviewer" in out
-    assert "one nit" in out
+    lean = "\n".join(_lines(events))
+    full = "\n".join(_lines(events, full=True))
+    assert "panel:" not in lean
+    assert "code-reviewer" in lean          # the subagent fold still renders
+    assert "one nit" not in lean            # findings hidden by default (E1)
+    assert "one nit" in full                # surfaced under --full
 
 
 def test_display_tool_name_strips_mcp_namespace() -> None:

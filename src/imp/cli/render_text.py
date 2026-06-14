@@ -432,6 +432,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         yield from _render_children(node.children, depth=depth, full=full,
                                     color=color, width=width, gutters=gutters,
                                     prime=True, live_viewer=live_viewer)
+        if full and node.agent_output:
+            yield from _render_output_args(node.agent_output, depth=depth,
+                                           color=color, width=width, gutters=gutters)
         return
 
     if isinstance(node, nv.AgentTextNode):
@@ -669,6 +672,19 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     # No leading marker — a tool burst is sub-detail of the agent's turn and is
     # indented (by _render_burst) under the turn's words. Internal `·` stay.
     return f"{count} · {shown}{more}{secs}"
+
+
+def _render_output_args(args: dict[str, Any], *, depth: int, color: bool,
+                        width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
+    prose = [(k, v) for k, v in args.items()
+             if nv._is_prose_field(k, v) and v.strip()]
+    if not prose:
+        return
+    yield _line(f"{pal.fold_glyph(expanded=True)} complete_step", depth, color,
+                *pal.NODE_COLORS["tools"], gutters=gutters)
+    for k, v in prose:
+        yield from _hang_wrap(f"{k}: {v}", "", width, depth + 1, color,
+                              *pal.NODE_COLORS["tools"], gutters=gutters)
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,

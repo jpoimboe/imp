@@ -895,24 +895,10 @@ def _sole_success_tool_result(payload: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _is_prose_field(key: str, value: Any) -> bool:
-    """True for a free-text output field that should render as a bold prose block
-    rather than fold into the breadcrumb (issues 5/6)."""
+    """True for a free-text output field: excluded from the breadcrumb and surfaced under --full."""
     return (isinstance(value, str) and not key.endswith("_path")
             and ("\n" in value or len(value) > _PROSE_THRESHOLD))
 
-
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
-
-
-def _normalized_tokens(text: str) -> set[str]:
-    return set(_TOKEN_RE.findall(text.lower()))
-
-
-def _near_duplicate(a: str, b: str, *, threshold: float = 0.8) -> bool:
-    ta, tb = _normalized_tokens(a), _normalized_tokens(b)
-    if not ta or not tb:
-        return False
-    return len(ta & tb) / min(len(ta), len(tb)) >= threshold
 
 
 def _last_narration_index(children: list[Any]) -> int | None:
@@ -1049,26 +1035,18 @@ def _h_step_context(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
 
 def _h_agent_output(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     # agent_output (= complete_step args) fires BEFORE step_completed. Stash the
-    # args on the open StepNode so _h_step_completed can fold short scalars into
-    # the breadcrumb, and surface each long/multi-line free-text field as a bold
-    # prose block now (issues 5/6). Enum/scalar/*_path fields are not prose.
+    # args on the open StepNode: scalars fold into the breadcrumb, the full args
+    # surface only under `--full`. A tool call's arguments are plumbing, never a
+    # prose block — the agent's narration is the single rendered copy (E1).
     if not self._step_stack:
         return
     self._flush_burst()
     step = self._step_stack[-1]
     step.agent_output = p
+    # Un-hold the agent's final narration so the live driver emits it now: the
+    # agent has yielded, so its trailing prose is settled, not a held tail.
     children = self._container().children
     narration_idx = _last_narration_index(children)
-    for k, v in p.items():
-        # `_is_prose_field` already screens most empties; the `.strip()` is
-        # belt-and-suspenders for a whitespace-only multi-line field.
-        if _is_prose_field(k, v) and v.strip():
-            if (narration_idx is not None
-                    and _near_duplicate(children[narration_idx].text, v)):
-                children.pop(narration_idx)
-                narration_idx = None
-            self._append(LiteralTextNode(text=v))
-    # Un-hold the narration if it wasn't popped: it's now final for the live driver.
     if narration_idx is not None:
         children[narration_idx].held = False
 
