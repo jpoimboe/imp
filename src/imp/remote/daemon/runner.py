@@ -66,6 +66,8 @@ def _install_file_logging(
 
 
 def _remove_file_logging(handlers: list[logging.Handler]) -> None:
+    if not handlers:
+        return
     for name in _LOG_NAMES:
         logger = logging.getLogger(name)
         for handler in handlers:
