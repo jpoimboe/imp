@@ -39,6 +39,12 @@ _EVENT_LABELS = {
 }
 
 _API_BASE = "https://api.telegram.org"
+
+
+def _api_base() -> str:
+    return os.environ.get("IMP_TELEGRAM_API_BASE", _API_BASE)
+
+
 _LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
 _HTTP_TIMEOUT = 35        # seconds; urlopen ceiling, must exceed the long-poll
 _POLL_GAP = 1.0   # seconds to back off after a failed poll cycle
@@ -202,7 +208,7 @@ def get_updates_params(offset: int, timeout: int) -> dict[str, Any]:
 def api_call(token: str, method: str, params: Mapping[str, Any]) -> dict[str, Any]:
     """POST one Telegram Bot API call and return the parsed JSON. This is the
     single HTTP seam — tests monkeypatch it (the 'mocked HTTP' of AC 12d)."""
-    url = f"{_API_BASE}/bot{token}/{method}"
+    url = f"{_api_base()}/bot{token}/{method}"
     data = json.dumps(dict(params)).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"})

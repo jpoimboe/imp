@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from imp.remote.daemon.commands import Command, ListResult, Response, parse
 from imp.remote.drivers.telegram import (
     api_call,
     curate,
@@ -88,6 +89,16 @@ def format_outbound(event: dict[str, Any], handle: str) -> str:
     return f"{format_event_message(event)}\n↩ @{handle}"
 
 
+def render_response(response: Response) -> str:
+    if isinstance(response, ListResult):
+        if not response.changes:
+            return "No changes."
+        return "\n".join(
+            f"@{handle_for(c.id)}  {c.title} — {c.status} · {c.step}"
+            for c in response.changes)
+    return response.text
+
+
 def send_message(token: str, chat_id: int, text: str, *, silent: bool) -> int | None:
     """POST one sendMessage and return the created message's id, or None if absent."""
     response = api_call(token, "sendMessage", send_message_params(
@@ -104,7 +115,7 @@ class TelegramNorthAdapter:
         self,
         *,
         chat_id: int,
-        submit: Callable[[str, str], None],
+        submit: Callable[[Command], None],
         send: Callable[[str, bool], int | None],
         get_updates: Callable[[int], dict[str, Any]],
     ) -> None:
@@ -120,7 +131,7 @@ class TelegramNorthAdapter:
     def from_env(
         cls,
         env: dict[str, str],
-        submit: Callable[[str, str], None],
+        submit: Callable[[Command], None],
         *,
         file_text: str | None = None,
     ) -> TelegramNorthAdapter:
@@ -152,15 +163,21 @@ class TelegramNorthAdapter:
             self._msg_to_change[message_id] = change_id
         self._handle_to_change[handle] = change_id
 
+    def on_response(self, response: Response) -> None:
+        text = render_response(response)
+        if text:
+            self._send(text, True)
+
     def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
         """Resolve one inbound reply to (change_id, text) against the recorded maps."""
         return resolve_change_id(
             inbound, self._msg_to_change, self._handle_to_change)
 
+    def _resolve_text(self, text: str, reply_to: int | None) -> tuple[str | None, str]:
+        return self.resolve(Inbound(text=text, reply_to_message_id=reply_to))
+
     def poll_once(self) -> None:
         response = self._get_updates(self._offset)
         items, self._offset = extract_inbound(response, self._chat_id, self._offset)
         for item in items:
-            change_id, text = self.resolve(item)
-            if change_id is not None:
-                self._submit(change_id, text)
+            self._submit(parse(item.text, item.reply_to_message_id, self._resolve_text))
