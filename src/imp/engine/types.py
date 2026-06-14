@@ -149,6 +149,8 @@ class AgentDef:
     # None so dispatch_task can tell "inherit parent" (None) from "use the
     # 'medium' tier". Top-level steps override at the step level via Step.tier.
     tier: str | None = None
+    explicit_tools: bool = False
+    deny_tools: frozenset[str] = frozenset()
 
 
 # ── Steps & phases ────────────────────────────────────────────────────────────

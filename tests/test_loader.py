@@ -744,3 +744,56 @@ def test_merge_kind_requires_rules(tmp_path: Path) -> None:
         """)
     with pytest.raises((LoadError, LoadErrors), match="requires a rules"):
         load_workflow(wf)
+
+
+def test_parse_agent_deny_tools(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ndeny_tools: [bash, web_fetch]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    agent = parse_agent_file(p)
+    assert agent.deny_tools == frozenset({"bash", "web_fetch"})
+    assert agent.explicit_tools is False
+    assert agent.tools == frozenset()
+
+
+def test_parse_agent_explicit_tools_flag_set_when_tools_given(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ntools: [read_file]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    agent = parse_agent_file(p)
+    assert agent.explicit_tools is True
+    assert agent.deny_tools == frozenset()
+
+
+def test_parse_agent_tools_and_deny_tools_conflict(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ntools: [read_file]\ndeny_tools: [bash]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    with pytest.raises(LoadError) as ei:
+        parse_agent_file(p)
+    assert "deny_tools" in str(ei.value) and "not both" in str(ei.value)
+
+
+def test_parse_agent_deny_tools_not_list_of_strings(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ndeny_tools: {bash: true}\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    with pytest.raises(LoadError) as ei:
+        parse_agent_file(p)
+    assert "deny_tools" in str(ei.value)
