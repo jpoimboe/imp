@@ -74,10 +74,6 @@ spec
   
   spec-verify-commit complete · 0s
   
-  spec-final-review-gate
-  
-  spec-final-review-gate complete · 0s
-  
   fast-path-spec-gate
   
   fast-path-spec-gate complete · 0s
@@ -187,10 +183,6 @@ spec
   spec-verify-commit
   
   spec-verify-commit complete · 0s
-  
-  spec-final-review-gate
-  
-  spec-final-review-gate complete · → plan · 0s
 
 spec complete · 3m 9s
 
@@ -227,10 +219,6 @@ plan
   plan-verify-commit
   
   plan-verify-commit complete · 0s
-  
-  plan-final-review-gate
-  
-  plan-final-review-gate complete · 0s
   
   fast-path-plan-gate
   
@@ -360,10 +348,6 @@ plan
   plan-verify-commit
   
   plan-verify-commit complete · 0s
-  
-  plan-final-review-gate
-  
-  plan-final-review-gate complete · → implement · 0s
 
 plan complete · 4m 7s
 
@@ -637,10 +621,6 @@ review
        lazily, but this is purely cosmetic and not warranted now.
   
   summarizer complete · 1m 15s
-  
-  final-review-gate
-  
-  final-review-gate complete · 0s
   
   final-review · sonnet
   

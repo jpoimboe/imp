@@ -48,6 +48,7 @@ def _canned_anthropic(**overrides):
         "open_items": "", "next_steps": "",
         "result": "DONE", "report": "ok",
         "integration": "clean",
+        "confirm": "approve",
     }
     fields.update(overrides)
     return response(tool_use("c0", "complete_step", fields), stop_reason="tool_use")
@@ -104,7 +105,7 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     """Copy the shipped default workflow into the change root, then replace
     the script-gate shells with `exit 0` stubs.
 
-    Also initializes a bare-minimum git repo so the merge gate (ready_to_merge)
+    Also initializes a bare-minimum git repo so the merge gate
     can run `git status --porcelain` without failing.
     """
     src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default"
@@ -131,7 +132,7 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
 
     # Initialize a minimal git repo so `git status --porcelain` and
-    # merge_to_base work when the merge-gate sets ready_to_merge=true.
+    # merge_to_base work.
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
@@ -179,7 +180,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
     #
     # Fields that drive workflow routing (must produce a single-pass run):
     #   verdict:approve    review-panel / recheck → continue (not task_gap/plan_gap)
-    #   decision:merge     final-review  → sets ready_to_merge=true, continue
+    #   decision:merge     finalize  → goto merge
     #   phase:written      spec-writer   → not drafting, advances
     #   done:true          task-lead     → plan fully implemented
     #   deviation:false    task-lead     → no supercycle back to plan-writer
@@ -191,7 +192,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             # review-panel / recheck routing
             "verdict": "approve",
             "findings": "none",
-            # final-review routing (superpowers workflow)
+            # finalize routing
             "decision": "merge",
             "comments": "",
             # spec-writer phase
@@ -212,7 +213,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             # reviewers
             "blocking": False,
             "has_minor_findings": False,
-            # summarizer
+            # finalize
             "built": "stub",
             "verify_status": "ok",
             "open_items": "",
@@ -222,6 +223,8 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             "report": "ok",
             # integrator
             "integration": "clean",
+            # spec-confirm
+            "confirm": "approve",
         }),
         stop_reason="tool_use",
     )
@@ -236,7 +239,7 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
         ),
     )
 
-    # The final-review agent uses wait_for_user to solicit the human, but the fake
+    # The finalize agent uses wait_for_user to solicit the human, but the fake
     # provider returns complete_step immediately (no wait_for_user call in the
     # scripted response), so the reply channel is never exercised.
     result = await run_change(
@@ -434,9 +437,11 @@ async def test_fast_path_skips_reviewers_and_runs_review(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
-    # complexity:trivial -> spec-writer sets fast_path=true; spec and plan reviewers
-    # are skipped; the merged `review` step still runs (cheap re-verify mode, which
-    # internally skips the opus panel — that tiering is prose, dogfood-verified).
+    # complexity:trivial -> spec-writer sets fast_path=true; spec-reviewer runs but
+    # routes straight to plan-writer (no unseen changes); plan-review is skipped via
+    # fast-path rule on plan-verify-commit; the merged `review` step still runs
+    # (cheap re-verify mode, which internally skips the opus panel — that tiering
+    # is prose, dogfood-verified).
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
 
     resolve.reset_providers_for_tests()
@@ -455,7 +460,6 @@ async def test_fast_path_skips_reviewers_and_runs_review(
 
     result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
-    assert "spec-reviewer" not in started, started
     assert "plan-review" not in started, started
     assert "recheck" not in started, started          # removed step
     assert "review" in started, started               # merged review step runs
@@ -531,41 +535,24 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_final_review_wait_for_user_solicit_then_merge(tmp_path: Path) -> None:
-    """Exercises the wait_for_user flow in final-review: the agent calls
-    wait_for_user to solicit the human, receives the reply as the tool result,
-    then completes the step with decision=merge.
-
-    The change is pre-positioned at final-review (skipping the earlier phases)
-    so only the final-review → merge path runs. The fake provider is scripted
-    with TWO responses: first a wait_for_user tool_use, then a complete_step
-    tool_use. user_chat_input_fn returns "looks good, merge it" which is
-    injected as the tool_result for the wait_for_user call.
-    """
+async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None:
+    """finalize solicits the human via wait_for_user, receives the reply as the
+    tool result, then completes with decision=merge. Positioned directly at
+    finalize so only the finalize -> merge path runs."""
     change = _seed_default_workflow(tmp_path)
-
-    # Position the Change directly at final-review, bypassing earlier phases.
     st = State.load(change.state_dir)
-    st.step = "final-review"
+    st.step = "finalize"
     st.status = "running"
-    # final-review checks final_review var (default true → runs) and
-    # ready_to_merge must be false to avoid skipping.
-    st.vars["final_review"] = True
-    st.vars["ready_to_merge"] = False
     st.save(change.state_dir)
 
-    # Script two responses for the final-review agent:
-    #   1. wait_for_user — agent solicits the human
-    #   2. complete_step(decision=merge) — agent finishes after receiving reply
     wfu_response = response(
         tool_use("wfu1", "wait_for_user", {"prompt": "Summary: stub change. Merge or rework?"}),
         stop_reason="tool_use",
     )
     merge_response = response(
         tool_use("c1", "complete_step", {
-            "status": "Success",
-            "decision": "merge",
-            "comments": "user approved",
+            "status": "Success", "decision": "merge", "comments": "user approved",
+            "built": "stub", "verify_status": "ok", "open_items": "", "next_steps": "",
         }),
         stop_reason="tool_use",
     )
@@ -576,8 +563,6 @@ async def test_final_review_wait_for_user_solicit_then_merge(tmp_path: Path) -> 
         factory=lambda model: AnthropicProvider(
             model_name=model, client_factory=lambda: fake),
     )
-
-    # Attended: user_chat_input_fn supplies the reply for wait_for_user.
     human_replies: list[str] = []
 
     def _user_chat_input(prompt: str) -> str:
@@ -586,34 +571,21 @@ async def test_final_review_wait_for_user_solicit_then_merge(tmp_path: Path) -> 
 
     events_seen: list[dict] = []
     result = await run_change(
-        change, on_event=events_seen.append,
-        # wait_for_user is routed through user_chat_input_fn.
-        user_chat_input_fn=_user_chat_input,
+        change, on_event=events_seen.append, user_chat_input_fn=_user_chat_input,
     )
-
-    # The run completes: final-review → merge → COMPLETED.
     assert result is RunResult.COMPLETED, (
         f"expected COMPLETED, got {result!r}; events: {[e['type'] for e in events_seen]}"
     )
-
-    # The human was solicited exactly once via wait_for_user.
-    assert len(human_replies) == 1, (
-        f"expected 1 wait_for_user solicit, got {human_replies!r}"
-    )
-
-    # awaiting_user_input event was emitted (the runner records the solicit).
-    event_types = [e["type"] for e in events_seen]
-    assert "awaiting_user_input" in event_types, (
-        f"awaiting_user_input event not found in {event_types}"
-    )
+    assert len(human_replies) == 1, human_replies
+    assert "awaiting_user_input" in [e["type"] for e in events_seen]
 
 
 @pytest.mark.anyio
 async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> None:
-    """A standard (non-fast-path) change: base integrated, integrator clean,
-    integration-review approves, summarizer + final-review -> merge. Asserts the
-    new steps appear in the event log in order, before summarizer."""
-    change = _seed_default_workflow(tmp_path)  # existing fixture; shims script gates to exit 0
+    """A standard change: base integrated, integrator clean, finalize approves and
+    merges. The merge/review tail is now integrate-merge -> integrator ->
+    integrate-verify -> finalize, in order."""
+    change = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -627,14 +599,12 @@ async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> No
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
-    # The four new steps appear, in order, before summarizer.
-    for name in ("integrate-merge", "integrator", "integrate-verify", "integration-review"):
+    for name in ("integrate-merge", "integrator", "integrate-verify", "finalize"):
         assert name in steps, f"{name} did not run"
     assert (steps.index("integrate-merge")
             < steps.index("integrator")
             < steps.index("integrate-verify")
-            < steps.index("integration-review")
-            < steps.index("summarizer"))
+            < steps.index("finalize"))
 
 
 @pytest.mark.anyio
@@ -687,15 +657,9 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
 
 
 @pytest.mark.anyio
-async def test_autonomous_mode_integrates_reviews_and_merges_without_human(tmp_path: Path) -> None:
+async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Path) -> None:
+    # No workflow var override needed — finalize merges without a human gate.
     change = _seed_default_workflow(tmp_path)
-    # Set final_review=false by DIRECT State mutation — the sibling idiom (see
-    # test_final_review_wait_for_user_solicit_then_merge). There is NO
-    # var-override config mechanism; `_rewrite_config` only does provider
-    # string-replacement in .imp/config.yaml.
-    st = State.load(change.state_dir)
-    st.vars["final_review"] = False
-    st.save(change.state_dir)
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
     resolve.reset_providers_for_tests()
     resolve.register_provider(
@@ -709,11 +673,8 @@ async def test_autonomous_mode_integrates_reviews_and_merges_without_human(tmp_p
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started"]
-    # Integration + its review ran; final-review (human) did NOT.
-    assert "integrator" in steps and "integration-review" in steps
-    assert "final-review" not in steps
-    types_seen = [e.get("type") for e in change.event_log().read()]
-    assert "change_merged" in types_seen
+    assert "integrator" in steps and "finalize" in steps
+    assert "change_merged" in [e.get("type") for e in change.event_log().read()]
 
 
 @pytest.mark.anyio
@@ -725,7 +686,7 @@ async def test_full_run_transcript_hides_quiet_plumbing(tmp_path: Path) -> None:
     a human actually sees. Catches the class of regression that the unit render
     tests structurally can't — a quiet step REACHING a phase and emitting a
     routing action the renderer must humanize (e.g. integrate-merge's
-    goto(summarizer) on its base-already-integrated no-op path)."""
+    goto(finalize) on its base-already-integrated no-op path)."""
     from imp.cli import narrative as nv
     from imp.cli.render_text import render_tree
     from imp.engine.loader import load_workflow

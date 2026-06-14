@@ -186,12 +186,12 @@ def test_autosquash_is_noop_without_fixups(tmp_path: Path) -> None:
     assert before == after                                # no rebase happened
 
 
-def test_autosquash_aborts_cleanly_on_conflict(tmp_path: Path) -> None:
-    # A fixup of task 1 and a later task 2 both edit the same line → autosquash
-    # produces a real merge conflict (unmerged paths). autosquash.sh detects the
-    # rebase-in-progress + unmerged-paths combination and exits 2 (fold conflict),
-    # leaving the rebase in progress for the autosquash-resolve agent; it does NOT
-    # abort. The before-head/tree state files are written for the resolver/verifier.
+def test_autosquash_hands_off_conflict_to_resolve(tmp_path: Path) -> None:
+    # A fixup of task 1 and a later task 2 both edit the same line → the autosquash
+    # fold conflicts. The collapsed script no longer aborts on a plain-path fold
+    # conflict; it leaves the rebase in progress and exits 2 to hand off to
+    # autosquash-resolve (the workflow routes exit 2 → autosquash-resolve), writing
+    # the before-tree/before-head sentinels the verify re-entry checks against.
     root = _impl_repo(tmp_path, n_tasks=1)
     (root / "f.py").write_text("orig\n")
     _git(root, "add", "-A")
@@ -204,10 +204,10 @@ def test_autosquash_aborts_cleanly_on_conflict(tmp_path: Path) -> None:
     (root / "f.py").write_text("fixed\n")                 # fixup of task 1, same line
     _git(root, "add", "-A")
     _git(root, "commit", f"--fixup={a}")
-    assert _run("autosquash.sh", root, "2026-06-01-x") == 2  # fold conflict → autosquash-resolve
+    assert _run("autosquash.sh", root, "2026-06-01-x") == 2   # hand-off, not abort
     assert (root / ".git" / "rebase-merge").exists()          # rebase left in progress
     state = root / ".imp" / "change" / "state"
-    assert (state / "autosquash-before-tree").exists()        # oracle for autosquash-verify
+    assert (state / "autosquash-before-tree").exists()        # sentinels for verify-mode
     assert (state / "autosquash-before-head").exists()
     # Clean up so tmp_path teardown doesn't fail on a rebase-in-progress worktree.
     subprocess.run(["git", "rebase", "--abort"], cwd=root, capture_output=True)

@@ -37,7 +37,7 @@ def test_supercycle_back_edges_present() -> None:
     steps = {s.name: s for p in _wf().phases for s in p.steps}
     # plan-cycle-check loops to plan-writer; the merged review + deferred-sweep run per plan.
     assert "plan-cycle-check" in steps and "review" in steps and "deferred-sweep" in steps
-    assert "task-lead" in steps and "final-review" in steps
+    assert "task-lead" in steps and "finalize" in steps
 
 
 def test_skills_shipped() -> None:
@@ -82,27 +82,49 @@ def test_no_orphan_agent_files() -> None:
     )
 
 
-def test_integration_review_uses_dedicated_reviewer() -> None:
-    """The integration-review step must use a purpose-written prompt (not the
-    final whole-change code-reviewer), and that prompt must emit the verdict enum
-    the step's rules route on: task_gap / plan_gap -> resume integrator; else ->
-    continue. If the enum drifts, the routing rules silently fall through to the
-    approve branch — so pin both the wiring and the contract here."""
+def test_finalize_is_high_tier_and_routes_merge_rework_pause() -> None:
+    from imp.engine.gates import evaluate_rules
+    from imp.engine.types import Goto, Pause
     wf = _wf()
-    steps = {s.name: s for p in wf.phases for s in p.steps}
-    step = steps["integration-review"]
-    assert step.file is not None and step.file.stem == "integration-reviewer"
-    agent = wf.agents["integration-reviewer"]
-    verdict = next(f for f in agent.output_schema.fields if f.name == "verdict")
-    assert verdict.type == "enum"
-    assert set(verdict.values) == {"approve", "task_gap", "plan_gap"}
+    steps = {s.name: s for s in wf.flat_steps()}
+    step = steps["finalize"]
+    assert step.kind == "agent" and step.tier == "high"
+    assert step.file is not None and step.file.stem == "finalize"
+    agent = wf.agents["finalize"]
+    decision = next(f for f in agent.output_schema.fields if f.name == "decision")
+    assert decision.type == "enum"
+    assert set(decision.values) == {"merge", "rework", "pause"}
+    base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
+    out = {"status": "Success", "decision": "merge", "comments": "",
+           "built": "", "verify_status": "", "open_items": "", "next_steps": ""}
+    m = evaluate_rules(step.rules, vars=base, output=out)
+    assert isinstance(m.action, Goto) and m.action.target == "merge"
+    m2 = evaluate_rules(step.rules, vars=base, output={**out, "decision": "rework"})
+    assert isinstance(m2.action, Goto) and m2.action.target == "implement"
+    m3 = evaluate_rules(step.rules, vars=base, output={**out, "decision": "pause"})
+    assert isinstance(m3.action, Pause)
 
 
-def test_default_workflow_has_merge_var_and_no_artifacts_paths() -> None:
+def test_deleted_merge_vars_absent_and_no_artifacts_paths() -> None:
     wf = load_workflow(default_workflow_dir())
-    assert any(v.name == "ready_to_merge" for v in wf.vars.decls)
+    names = {v.name for v in wf.vars.decls}
+    for gone in ("ready_to_merge", "final_review", "integration_needs_review"):
+        assert gone not in names, gone
     text = (default_workflow_dir() / "workflow.yaml").read_text()
     assert "/artifacts/" not in text
+
+
+def test_no_deleted_var_names_anywhere_in_workflow_assets() -> None:
+    wf_dir = default_workflow_dir()
+    banned = ["ready_to_merge", "final_review", "integration_pass",
+              "integration_needs_review", "spec_gate_pending", "spec_gate_passed"]
+    targets = [wf_dir / "workflow.yaml"]
+    targets += sorted((wf_dir / "agents").glob("*.md"))
+    targets += sorted((wf_dir / "scripts").glob("*.sh"))
+    for path in targets:
+        body = path.read_text()
+        for name in banned:
+            assert name not in body, f"{name} still appears in {path.name}"
 
 
 def test_no_agent_prompt_uses_artifacts_namespace() -> None:
