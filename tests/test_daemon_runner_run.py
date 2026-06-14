@@ -119,6 +119,7 @@ async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) ->
     spath = socket_path(tmp_path)
 
     start = time.monotonic()
+    cancel_time: float = 0.0
     with anyio.fail_after(10):
         async with anyio.create_task_group() as tg:
             tg.start_soon(functools.partial(
@@ -131,9 +132,11 @@ async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) ->
                     await anyio.sleep(0.02)
             assert pid_path(tmp_path).exists()
 
+            cancel_time = time.monotonic()
             tg.cancel_scope.cancel()               # external cancel — the Defect-1 path
     elapsed = time.monotonic() - start
 
     assert elapsed < 3
+    assert time.monotonic() - cancel_time < 1.5
     assert not socket_is_live(spath)
     assert not pid_path(tmp_path).exists()
