@@ -43,3 +43,26 @@ def test_plan_writer_declares_research_subagents() -> None:
     a = _wf().agents["plan-writer"]
     assert "task" in a.tools
     assert set(a.subagents) == {"explorer", "researcher"}
+
+
+def test_spec_writer_declares_research_subagents() -> None:
+    a = _wf().agents["spec-writer"]
+    assert "task" in a.tools
+    assert set(a.subagents) == {"explorer", "researcher"}
+
+
+def test_spec_writer_prose_relaxes_throttle_and_adds_research() -> None:
+    body = _wf().agents["spec-writer"].prompt_template_source
+    assert "no more than 3 question rounds" not in body
+    assert "Do not over-research a clear request" not in body
+    assert "Research before you converge" in body
+    assert 'task(subagent_name="explorer"' in body
+    assert "researcher" in body
+    assert "no cost gating" in body
+
+
+def test_spec_writer_design_quality_and_coverage_guidance() -> None:
+    body = _wf().agents["spec-writer"].prompt_template_source
+    assert "present it in sections" in body
+    assert "do not propose unrelated refactoring" in body
+    assert "architecture, components, data flow, error handling, and testing" in body
