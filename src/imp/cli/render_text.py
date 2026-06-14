@@ -677,8 +677,8 @@ def _render_output_args(args: dict[str, Any], *, depth: int, color: bool,
     yield _line(f"{pal.fold_glyph(expanded=True)} complete_step", depth, color,
                 *pal.NODE_COLORS["tools"], gutters=gutters)
     for k, v in prose:
-        yield from _hang_wrap(f"{k}: {v}", "", width, depth + 1, color,
-                              *pal.NODE_COLORS["tools"], gutters=gutters)
+        yield from _wrap(f"{k}: {v}", width, depth + 1, color,
+                         *pal.NODE_COLORS["tools"], gutters=gutters)
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,
