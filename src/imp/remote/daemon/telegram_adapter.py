@@ -9,6 +9,7 @@ from typing import Any
 from imp.remote.daemon.commands import Command, ListResult, Response, parse
 from imp.remote.drivers.telegram import (
     api_call,
+    clamp_text,
     curate,
     event_body,
     format_event_message,
@@ -102,7 +103,7 @@ def render_response(response: Response) -> str:
 def send_message(token: str, chat_id: int, text: str, *, silent: bool) -> int | None:
     """POST one sendMessage and return the created message's id, or None if absent."""
     response = api_call(token, "sendMessage", send_message_params(
-        chat_id, text, silent=silent))
+        chat_id, clamp_text(text), silent=silent))
     result = response.get("result") or {}
     message_id = result.get("message_id")
     return message_id if isinstance(message_id, int) else None

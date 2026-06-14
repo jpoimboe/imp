@@ -42,3 +42,29 @@ def test_send_message_returns_none_when_response_has_no_message_id(
     monkeypatch.setattr(
         telegram_adapter, "api_call", lambda *a, **k: {"ok": False})
     assert send_message("tok", 4242, "hello", silent=True) is None
+
+
+def test_send_message_clamps_overlong_text(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_api_call(token: str, method: str, params: dict) -> dict:
+        captured["params"] = params
+        return {"ok": True, "result": {"message_id": 1}}
+
+    monkeypatch.setattr(telegram_adapter, "api_call", fake_api_call)
+    send_message("tok", 4242, "a" * 5000, silent=False)
+    sent = captured["params"]["text"]
+    assert len(sent) == 4096
+    assert sent.endswith("\n[truncated]")
+
+
+def test_send_message_leaves_short_text_unchanged(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_api_call(token: str, method: str, params: dict) -> dict:
+        captured["params"] = params
+        return {"ok": True, "result": {"message_id": 1}}
+
+    monkeypatch.setattr(telegram_adapter, "api_call", fake_api_call)
+    send_message("tok", 4242, "short", silent=False)
+    assert captured["params"]["text"] == "short"
