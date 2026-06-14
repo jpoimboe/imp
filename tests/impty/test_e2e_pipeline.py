@@ -35,7 +35,7 @@ def test_scripted_default_workflow_run_passes_the_dogfood_invariants(
 
     # Drive the real binary through impty to completion + merge.
     with TerminalSession(
-        [sys.executable, "-m", "imp", "new", "demo change", "--non-interactive"],
+        [sys.executable, "-m", "imp", "new", "--title", "demo change", "--non-interactive"],
         cwd=str(clone), env=env, cols=100, rows=40,
     ) as s:
         rc = s.run_to_completion(hard=180.0)
