@@ -1334,6 +1334,9 @@ def _resolve_default_id(control: Path) -> str | None:
     return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
 
 
+_NO_CHANGES_MESSAGE = "No Changes."
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
@@ -1348,9 +1351,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
     else:
         change_id = _resolve_default_id(control)
     if change_id is None:
-        print("imp: no Changes found (no in-flight or completed Changes)",
-              file=sys.stderr)
-        return 2
+        print(_NO_CHANGES_MESSAGE)
+        return 0
     events = _load_events_for_id(control, change_id)
     if events is None:
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
@@ -1729,12 +1731,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
     except worktree.PreconditionError:
-        print("No Changes.")
+        print(_NO_CHANGES_MESSAGE)
         return 0
     inflight = _sort_rows_newest_first(_status_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
     if not inflight and not past:
-        print("No Changes.")
+        print(_NO_CHANGES_MESSAGE)
         return 0
     color = should_use_color(sys.stdout)
     now = datetime.now(UTC)
