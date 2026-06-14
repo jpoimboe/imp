@@ -126,10 +126,6 @@ class UserMessageNode:
                                         # the engine blocked for via awaiting_user_input).
                                         # Synthetic prompts — the "begin" kickoff, a
                                         # resume nudge — are False and never rendered.
-    pending_question: str = ""          # the prompt carried by the awaiting_user_input
-                                        # event that solicited this reply (M3). Rendered
-                                        # as the question line above the `>` reply caret.
-                                        # Empty when the solicit carried no prompt.
     collapsible = False
 
 
@@ -387,12 +383,8 @@ class NarrativeBuilder:
         # answers it, so the next user_message is tagged as a genuine human turn
         # (rendered as `❯ …`) rather than a synthetic engine prompt (dropped).
         self._awaiting_reply = False
-        # The prompt carried by the awaiting_user_input event that armed
-        # _awaiting_reply, handed to the answering user_message as its rendered
-        # question line (M3). Reset to "" when consumed.
-        self._pending_question = ""
         # Unresolved wait_for_user calls: id → that call's input.prompt. Drives
-        # the §1 orphan-result net and call-keyed question attribution (I4).
+        # the §1 orphan-result net.
         self._pending_wfu: dict[str, str] = {}
 
     # -- public API -----------------------------------------------------------
@@ -405,10 +397,6 @@ class NarrativeBuilder:
         """The open (still-accumulating) tool burst, or None. Public read-only
         accessor for the live driver's finalization check and LiveStatus."""
         return self._current_burst
-
-    def pending_question(self) -> str:
-        """Prompt text of the pending wait_for_user solicit; '' when none."""
-        return self._pending_question
 
     def current_activity(self) -> Activity | None:
         """Current activity for the live status line; None when idle."""
@@ -823,7 +811,6 @@ def _h_awaiting_user_input(
     if self._step_stack:
         self._step_stack[-1].interactive = True
     self._awaiting_reply = True
-    self._pending_question = str(p.get("prompt") or "")
     # Un-hold any held narration in the current container: the prose carried by
     # the llm_response that called wait_for_user is the context the human must
     # read to answer, and the agent is now blocked for that reply — so it is
@@ -846,8 +833,7 @@ def _h_user_interjected(
     # is a deliberate prior decision — keep it). The user_message just appended a
     # UserMessageNode with interactive=False, which render_text would drop as a
     # synthetic engine prompt. Retroactively mark that node interactive=True so it
-    # renders as a genuine `> …` human turn. It carries no question (unsolicited),
-    # so pending_question stays "". The node is the most-recently-appended child of
+    # renders as a genuine `> …` human turn. The node is the most-recently-appended child of
     # the current container (post-append mutation is an established pattern — see
     # the resume re-entry path mutating existing.interactive).
     children = self._container().children
@@ -948,27 +934,9 @@ def _elapsed_seconds(start_ts: str | None, end_ts: Any) -> float | None:
         return None
 
 
-def _last_prose_text(self: NarrativeBuilder) -> str:
-    """Text of the most recent agent-prose child in the open container, or "".
-    Used to suppress a pending_question that merely duplicates the agent's
-    end-of-turn message (the usual attended case: the solicited prompt IS the
-    assistant text that just rendered)."""
-    children = self._container().children
-    for child in reversed(children):
-        if isinstance(child, AgentTextNode):
-            return child.text.strip()
-        if isinstance(child, LiteralTextNode):
-            return child.text.strip()
-        if isinstance(child, (ThinkingFold, ToolBurstFold, SkillLoadNode)):
-            continue  # interstitial chrome; keep scanning for the prose turn
-        break  # any other node type means no prose is adjacent — show the question (never wrong)
-    return ""
-
-
 def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
     self._flush_burst()
     interactive, self._awaiting_reply = self._awaiting_reply, False
-    question, self._pending_question = self._pending_question, ""
     text = _user_message_text(p)
     if interactive and not text.strip():
         block = _sole_success_tool_result(p)
@@ -979,18 +947,7 @@ def _h_user_message(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, 
             text = _summarize_result(block.get("content"))
             rid = str(block.get("tool_use_id") or block.get("id") or "")
             self._pending_wfu.pop(rid, None)
-    # M3: the event's prompt is the only GUARANTEED source of the question (the
-    # attended tool path solicits with ""). But in the usual case the agent's
-    # end-of-turn assistant text — already rendered as prose just above — IS the
-    # prompt, so echoing it as a pending-question line would duplicate the whole
-    # turn. Carry the question ONLY when it isn't already that preceding prose.
-    # A synthetic prompt (no preceding awaiting_user_input) carries no question.
-    if interactive and question and question.strip() != _last_prose_text(self):
-        rendered_question = question
-    else:
-        rendered_question = ""
-    self._append(UserMessageNode(
-        text=text, interactive=interactive, pending_question=rendered_question))
+    self._append(UserMessageNode(text=text, interactive=interactive))
 
 
 def _h_llm_response(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
@@ -1198,12 +1155,8 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
                         call.citations_footer = footer
                         call.is_error = True
                         self._awaiting_reply = False
-                        self._pending_question = ""
                         return
-                    _synthesize_wfu_turn(
-                        self, text=summary,
-                        question=str((call.input or {}).get("prompt", "")),
-                        answered_call=call)
+                    _synthesize_wfu_turn(self, text=summary, answered_call=call)
                     return
                 # Non-wfu pairing: this turn actually ran → advance the clock.
                 burst.end_ts = ts
@@ -1224,10 +1177,8 @@ def _h_tool_result(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, A
                 call_id=rid, name="tool", input={}, result=summary,
                 citations_footer=footer, is_error=True, call_ts=ts))
             self._awaiting_reply = False
-            self._pending_question = ""
             return
-        _synthesize_wfu_turn(self, text=summary, question=pending_prompt,
-                             answered_call=None)
+        _synthesize_wfu_turn(self, text=summary, answered_call=None)
         return
 
     # (The former §11 unmatched-result heuristic — popitem() the most-recent open
@@ -1309,7 +1260,7 @@ def _summarize_result(content: Any) -> str:
     return str(content)      # safety net for any other shape (unchanged)
 
 
-def _synthesize_wfu_turn(self: NarrativeBuilder, *, text: str, question: str,
+def _synthesize_wfu_turn(self: NarrativeBuilder, *, text: str,
                          answered_call: ToolCall | None) -> None:
     """Split the open burst and append the synthesized user turn (I1/I3). Child
     order: [closed burst, user turn, fresh open burst]. Carries unresulted
@@ -1324,12 +1275,8 @@ def _synthesize_wfu_turn(self: NarrativeBuilder, *, text: str, question: str,
             burst.calls.remove(answered_call)
         carried = [c for c in burst.calls if c.result is None]
         burst.calls = [c for c in burst.calls if c.result is not None]
-    # Consume the awaiting flags (mirrors _h_user_message) and dedup the question
-    # against the immediately-preceding prose turn.
     self._awaiting_reply = False
-    self._pending_question = ""
-    q = question if (question and question.strip() != _last_prose_text(self)) else ""
-    self._append(UserMessageNode(text=text, interactive=True, pending_question=q))
+    self._append(UserMessageNode(text=text, interactive=True))
     if carried:
         fresh = ToolBurstFold()
         cts = [c.call_ts for c in carried if c.call_ts]
@@ -1476,8 +1423,7 @@ def structural_repr(node: Any) -> Any:
     if isinstance(node, AgentTextNode):
         return {"t": t, "text": node.text}
     if isinstance(node, UserMessageNode):
-        return {"t": t, "text": node.text, "interactive": node.interactive,
-                "pending_question": node.pending_question}
+        return {"t": t, "text": node.text, "interactive": node.interactive}
     if isinstance(node, ThinkingFold):
         return {"t": t, "content": node.content}
     if isinstance(node, ToolBurstFold):

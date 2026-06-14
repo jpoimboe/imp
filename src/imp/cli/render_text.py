@@ -461,12 +461,6 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # content (not the indent): the caret returns to default fg (39), NOT a
         # full reset, so the bg keeps painting under the text; one reset closes it.
         indent = _gutter_indent(depth, gutters, color)
-        # M3: the pending-input question (from the awaiting_user_input event)
-        # renders as a quiet line ABOVE the reply caret, so the recorded
-        # transcript shows what the human was asked before what they typed.
-        if node.pending_question:
-            yield from render_question_block(
-                node.pending_question, width, depth, color, gutters)
         bg = pal.user_bg_open(enabled=color)
         if color:
             caret = pal.sgr(*pal.NODE_COLORS["user"], enabled=True) + pal.CARET + "\x1b[39m"

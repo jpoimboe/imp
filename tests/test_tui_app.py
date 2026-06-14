@@ -298,7 +298,7 @@ def test_prompt_window_shows_caret_and_question() -> None:
 
 
 @pytest.mark.anyio
-async def test_solicit_captures_question_and_shows_your_turn(tmp_path: Path) -> None:
+async def test_solicit_shows_your_turn_status(tmp_path: Path) -> None:
     from prompt_toolkit.application import create_app_session
     from prompt_toolkit.input.defaults import create_pipe_input
     from prompt_toolkit.output import DummyOutput
@@ -319,7 +319,6 @@ async def test_solicit_captures_question_and_shows_your_turn(tmp_path: Path) -> 
 
         async def _drive() -> None:
             await asyncio.sleep(0.05)
-            captured["question"] = app._solicit_question
             captured["status"] = app.status_line()
             pin.send_text("yes\r")
 
@@ -327,6 +326,5 @@ async def test_solicit_captures_question_and_shows_your_turn(tmp_path: Path) -> 
         asyncio.ensure_future(_drive())  # noqa: RUF006
         await app.run_async()
 
-    assert captured["question"] == "Ship it?"
     assert "your turn" in captured["status"]
     assert app._solicit_question == ""      # reset after solicit returns

@@ -38,16 +38,6 @@ def test_tokentotals_add_usage_tolerates_missing_keys() -> None:
     assert (tt.input, tt.output, tt.cache_read, tt.cache_creation) == (15, 3, 2, 1)
 
 
-def test_pending_question_exposes_awaiting_prompt() -> None:
-    from imp.cli.narrative import NarrativeBuilder
-    from tests._event_fixtures import ev
-
-    b = NarrativeBuilder()
-    assert b.pending_question() == ""                 # idle
-    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    b.add(ev("2", "awaiting_user_input", agent_id="step:p/s", prompt="Ship it?"))
-    assert b.pending_question() == "Ship it?"
-
 
 def test_build_tree_empty_yields_root_only() -> None:
     tree = nv.build_tree([])
@@ -1139,7 +1129,6 @@ def test_wfu_pairing_synthesizes_user_turn_and_splits_burst():       # [I1][I2][
     user = next(k for k in kids if isinstance(k, nv.UserMessageNode))
     assert user.interactive is True
     assert user.text == "yes please"
-    assert user.pending_question == "continue?"
     assert b.current_burst is None        # no siblings → no fresh burst, cursor cleared
 
 
@@ -1201,9 +1190,9 @@ def test_wfu_orphan_net_synthesizes_when_pairing_missed():          # [I1][I3]
     assert "w1" not in b._pending_wfu        # id discarded after net synthesis
 
 
-def test_double_wfu_each_synthesis_gets_own_question():             # [I1][I4] double-wfu
-    """Two sequential wait_for_user calls in the same burst; each reply attributed
-    to its own call's prompt. I1 (no reply lost), I4 (per-call question attribution)."""
+def test_double_wfu_each_synthesis_gets_own_reply():                # [I1] double-wfu
+    """Two sequential wait_for_user calls in the same burst; each reply captured
+    separately. I1: no reply is lost."""
     b = nv.NarrativeBuilder()
     _wfu_step(b)
     b.add(ev("t0", "tool_call", agent_id="a", id="b1", name="bash",
@@ -1215,12 +1204,12 @@ def test_double_wfu_each_synthesis_gets_own_question():             # [I1][I4] d
     b.add(ev("t2", "tool_call", agent_id="a", id="w2", name="wait_for_user",
              input={"prompt": "Q2?"}, timestamp="2026-06-10T00:00:03"))
     b.add(ev("r2", "tool_result", agent_id="a", id="w2", content="A2"))
-    # Two UserMessageNodes must exist; each attributed to its own prompt
+    # Two UserMessageNodes must exist
     step = _step_node(b)
     users = [k for k in step.children if isinstance(k, nv.UserMessageNode)]
     assert len(users) == 2                          # [I1] neither reply lost
-    assert users[0].text == "A1" and users[0].pending_question == "Q1?"   # [I4]
-    assert users[1].text == "A2" and users[1].pending_question == "Q2?"   # [I4]
+    assert users[0].text == "A1"
+    assert users[1].text == "A2"
     # bash is still unresulted; it should be in the final fresh burst
     assert b.current_burst is not None
     assert b.current_burst.calls[0].call_id == "b1"
@@ -1237,7 +1226,6 @@ def test_resume_tool_result_shaped_user_message_renders_reply():    # [I1]
     user = next(k for k in step.children if isinstance(k, nv.UserMessageNode))
     assert user.interactive is True
     assert user.text == "the human reply"
-    assert user.pending_question == "continue?"
 
 
 def test_resume_unarmed_balance_injection_renders_nothing():         # [I1] negative
