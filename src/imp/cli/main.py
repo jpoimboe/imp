@@ -568,9 +568,13 @@ async def _run_change_session(
                         seed_opening=seed_opening_pending)
                     seed_opening_pending = None
             except EOFError:
-                return _finalize_paused_exit(change, driver, coord, "ctrl-d")
+                return _finalize_paused_exit(
+                    change, driver, coord,
+                    _exit_pause_reason(coord.pause_reason, "ctrl-d"))
             except KeyboardInterrupt:
-                return _finalize_paused_exit(change, driver, coord, "ctrl-c")
+                return _finalize_paused_exit(
+                    change, driver, coord,
+                    _exit_pause_reason(coord.pause_reason, "ctrl-c"))
 
             if coord.escalated:
                 return _finalize_paused_exit(change, driver, coord, "force-quit")
