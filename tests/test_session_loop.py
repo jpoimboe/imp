@@ -288,9 +288,11 @@ async def test_ctrl_d_at_resume_prompt_pauses_and_exits(tmp_path: Path) -> None:
     assert State.load(change.state_dir).status == "paused"
     paused = [e for e in change.event_log().read()
               if e.get("type") == "workflow_paused"]
-    # One from the engine's interrupt pause, one from the ctrl-d finalize
-    # (different reasons → not suppressed).
-    assert any((e.get("payload") or {}).get("reason") == "ctrl-d" for e in paused)
+    # The executor emitted workflow_paused(esc) in round 1; the ctrl-d
+    # finalize is suppressed by the journal-tail guard (open pause already
+    # exists) → exactly one workflow_paused in the log.
+    assert len(paused) == 1
+    assert paused[0]["payload"]["interrupt_reason"] == "esc"
 
 
 @pytest.mark.anyio
@@ -456,12 +458,9 @@ async def test_exit_during_park_writes_single_workflow_paused(
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("pause_reason", "expected"),
-    [(None, "ctrl-c"), ("sigterm", "sigterm")],
-)
+@pytest.mark.parametrize("pause_reason", [None, "sigterm"])
 async def test_keyboardinterrupt_at_resume_prompt_pauses_cleanly(
-    tmp_path: Path, pause_reason: str | None, expected: str,
+    tmp_path: Path, pause_reason: str | None,
 ) -> None:
     """Round 1 interrupts to the loopable resume prompt; a second Ctrl-C (or a
     SIGTERM) makes the reply raise KeyboardInterrupt. The session must pause-exit
@@ -524,7 +523,11 @@ async def test_keyboardinterrupt_at_resume_prompt_pauses_cleanly(
     assert State.load(change.state_dir).status == "paused"
     paused = [e for e in change.event_log().read()
               if e.get("type") == "workflow_paused"]
-    assert any((e.get("payload") or {}).get("reason") == expected for e in paused)
+    # The executor emitted workflow_paused(esc) in round 1; the KI finalize
+    # is suppressed by the journal-tail guard (open pause already exists) →
+    # exactly one workflow_paused in the log.
+    assert len(paused) == 1
+    assert paused[0]["payload"]["interrupt_reason"] == "esc"
 
 
 @pytest.mark.anyio
@@ -534,11 +537,10 @@ async def test_executor_emitted_then_exit_event_writes_single_workflow_paused(
     """SIGTERM mid-ACTIVE-run: _dispatch_signal sets should_pause SYNCHRONOUSLY, so
     the executor can reach a should_pause boundary, emit workflow_paused, and return
     RunResult.PAUSED BEFORE the actuator's async scope-cancel lands. exit_event is
-    also set, so the loop takes the exit_event arm (532) with result=PAUSED — and
-    the finalize must NOT duplicate the executor's event. This is the regression a
-    hardcoded engine_emitted=False at 533 would introduce; the conditional
-    `(result is RunResult.PAUSED and coord.should_pause)` suppresses it → exactly
-    one workflow_paused."""
+    also set, so the loop takes the exit_event arm with result=PAUSED — and the
+    finalize must NOT duplicate the executor's event. pause_and_exit's journal-tail
+    guard reverse-scans the journal, finds the executor's workflow_paused before
+    any workflow_resumed, and skips the append → exactly one workflow_paused."""
     import imp.cli.main as cli_main
     from imp.engine.executor import RunResult
 
