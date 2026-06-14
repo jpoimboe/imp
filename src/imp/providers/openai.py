@@ -519,11 +519,10 @@ class OpenAIAgentRunner:
                     messages, transcript, elog, aid,
                     wrapper_text=invocation.retry_feedback)
             else:
-                repair = repair_dangling_tool_use_on_resume(messages, transcript)
-                if repair is not None:
-                    for b in repair.content:
-                        if isinstance(b, ToolResultBlock):
-                            elog.append_tool_result(agent_id=aid, block=b)
+                synth = repair_dangling_tool_use_on_resume(messages, transcript)
+                if synth is not None:
+                    for rb in synth:
+                        elog.append_tool_result(agent_id=aid, block=rb)
             state = classify_resume(messages)
             if state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {

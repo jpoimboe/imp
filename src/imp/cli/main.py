@@ -536,8 +536,7 @@ async def _run_change_session(
                 return _finalize_paused_exit(change, driver, coord, "force-quit")
             if exit_event.is_set():
                 return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "sigterm",
-                    engine_emitted=(result is RunResult.PAUSED and coord.should_pause))
+                    change, driver, coord, coord.pause_reason or "sigterm")
             assert result is not None
 
             interrupt_paused = (
@@ -567,8 +566,7 @@ async def _run_change_session(
                 # (--non-interactive, or no controlling tty): exit paused,
                 # mirroring the legacy `coord.should_pause` arm (rc 130).
                 return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "ctrl-c",
-                    engine_emitted=True)
+                    change, driver, coord, coord.pause_reason or "ctrl-c")
 
             coord.reset()
             if not non_interactive and _should_respawn_reader(
@@ -612,14 +610,13 @@ async def _run_change_session(
 
 def _finalize_paused_exit(
     change: Change, driver: Any, coord: Any, reason: str,
-    *, engine_emitted: bool = False,
 ) -> int:
-    """Finish the driver, persist the paused state (suppressing a duplicate
-    workflow_paused only when the engine already emitted one this run), journal
-    the pause, and return rc 130. The single exit sequence shared by every
-    interrupt/EOF/SIGTERM/escalation path out of the session loop."""
+    """Finish the driver, persist the paused state, journal the pause (guarded
+    by the journal-tail idempotency check in pause_and_exit), and return rc 130.
+    The single exit sequence shared by every interrupt/EOF/SIGTERM/escalation
+    path out of the session loop."""
     driver.finish()
-    pause_and_exit(change, reason=reason, engine_emitted=engine_emitted)
+    pause_and_exit(change, reason=reason)
     _emit_paused(change, reason)
     return 130
 
@@ -881,8 +878,7 @@ async def _run_tui_session(
     result = holder.get("result")
     if result is None or (result is RunResult.PAUSED and coord.should_pause):
         return _finalize_paused_exit(
-            change, app, coord, coord.pause_reason or "ctrl-c",
-            engine_emitted=(result is RunResult.PAUSED and coord.should_pause))
+            change, app, coord, coord.pause_reason or "ctrl-c")
     return _handle_terminal_outcome(change, result, coord)
 
 

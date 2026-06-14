@@ -168,10 +168,9 @@ def test_repair_backfills_every_dangling_tool_use_not_just_the_last(tmp_path) ->
         Message(role="user", content=(TextBlock(text="go"),)),
         assistant]
     transcript = Transcript(tmp_path / "transcript.jsonl")
-    repair = repair_dangling_tool_use_on_resume(messages, transcript)
-    assert repair is not None
-    repaired_ids = sorted(b.tool_use_id for b in repair.content
-                          if isinstance(b, ToolResultBlock))
+    synth = repair_dangling_tool_use_on_resume(messages, transcript)
+    assert synth is not None
+    repaired_ids = sorted(b.tool_use_id for b in synth)
     assert repaired_ids == ["t1", "t2", "t3"]
 
 
