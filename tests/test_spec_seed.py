@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import anyio
 import pytest
 
+import imp.cli.prompt as prompt_mod
 from imp.cli import main as cli_main
 from imp.engine.executor import RunResult
 from tests.conftest import _seed_control
@@ -415,9 +417,6 @@ def test_spec_writer_prompt_has_seed_branch() -> None:
 
 def test_opening_prompt_reply_wires_to_seed_opening(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
-    import imp.cli.prompt as prompt_mod
-
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 
@@ -453,9 +452,6 @@ def test_opening_prompt_reply_wires_to_seed_opening(
 
 def test_opening_prompt_empty_reply_gives_none_seed_opening(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
-    import imp.cli.prompt as prompt_mod
-
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 
