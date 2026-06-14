@@ -176,15 +176,21 @@ def effective_reply_fn(
 ) -> Callable[[], Awaitable[str]]:
     """Choose the reply source for a solicit window (spec §A):
       - no channel        → the local reply fn unchanged (imp behaves as today);
-      - headless + channel → phone-only: the driver line alone, honoring
-        reply_timeout (a finite value falls back to a pause via AwaitingUserInput);
+      - headless + channel → the local one-shot seed first (the --message seed),
+        then phone-only: the driver line honoring reply_timeout (a finite value
+        falls back to a pause via AwaitingUserInput);
       - attended + channel → race the local prompt against the driver line."""
     if channel is None:
         return reply_input_fn
     if non_interactive:
-        async def _phone() -> str:
-            return cast(str, await channel.next_reply(timeout=channel.reply_timeout))
-        return _phone
+        async def _seed_then_phone() -> str:
+            from imp.agents.tools.wait_for_user import AwaitingUserInput
+            try:
+                return await reply_input_fn()
+            except AwaitingUserInput:
+                return cast(
+                    str, await channel.next_reply(timeout=channel.reply_timeout))
+        return _seed_then_phone
 
     async def _raced() -> str:
         result = await race_reply(

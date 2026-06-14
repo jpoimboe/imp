@@ -41,12 +41,39 @@ class _FakeChannel:
 
 
 @pytest.mark.anyio
-async def test_phone_only_uses_channel_next_reply_with_reply_timeout() -> None:
+async def test_phone_only_falls_through_to_phone_when_no_local_seed() -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    async def local_pause() -> str:
+        raise AwaitingUserInput()
+
     ch = _FakeChannel("from-phone")
     ch.reply_timeout = 30.0  # type: ignore[assignment]
-    fn = effective_reply_fn(_local_never, ch, non_interactive=True)
+    fn = effective_reply_fn(local_pause, ch, non_interactive=True)
     assert await fn() == "from-phone"
     assert ch.timeout_seen == 30.0   # phone-only honors reply_timeout
+
+
+@pytest.mark.anyio
+async def test_phone_only_returns_local_seed_before_phone() -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    delivered = {"done": False}
+
+    async def local_seed() -> str:
+        if delivered["done"]:
+            raise AwaitingUserInput()
+        delivered["done"] = True
+        return "seed-intent"
+
+    ch = _FakeChannel("from-phone")
+    ch.reply_timeout = 30.0  # type: ignore[assignment]
+    fn = effective_reply_fn(local_seed, ch, non_interactive=True)
+
+    assert await fn() == "seed-intent"   # first solicit: the local seed wins
+    assert ch.timeout_seen == "unset"    # phone was NOT consulted yet
+    assert await fn() == "from-phone"    # seed exhausted → fall through to phone
+    assert ch.timeout_seen == 30.0       # phone-only still honors reply_timeout
 
 
 @pytest.mark.anyio
