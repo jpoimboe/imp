@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from imp.cli import palette as pal
 from imp.cli.narrative import build_tree
 from imp.cli.render_text import render_tree
 from imp.cli.tui_app import HINT, TuiApp
@@ -255,7 +256,7 @@ def test_your_turn_status_line_shows_blue_accent_marker() -> None:
     app._prompt_visible = True
     line = app.status_line()
     assert "▌ your turn" in line       # left accent marker, not a full stripe
-    assert "\x1b[94m" in line          # bright_blue accent (imp's user identity)
+    assert pal.sgr("bright_blue", enabled=True) in line  # bright_blue accent (imp's user identity)
     assert "\x1b[7m" not in line       # no inverse fill in the your-turn text
 
 
