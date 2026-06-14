@@ -46,10 +46,13 @@ class Change:
         return self.slug
 
     @property
-    def workflow_dir(self) -> Path:
-        # The Change's own worktree carries the tracked workflow; the branch IS
-        # the per-Change workflow source. No gitignored snapshot copy.
+    def live_workflow_dir(self) -> Path:
         return self.project_root / "imp" / "workflows" / "default"
+
+    @property
+    def workflow_dir(self) -> Path:
+        snapshot = self.change_dir / "workflow"
+        return snapshot if snapshot.is_dir() else self.live_workflow_dir
 
     @property
     def state_dir(self) -> Path:

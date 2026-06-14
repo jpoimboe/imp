@@ -157,6 +157,13 @@ async def run_change(
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
     try:
+        snapshot = change.change_dir / "workflow"
+        if not snapshot.is_dir():
+            tmp = change.change_dir / "workflow.tmp"
+            if tmp.exists():
+                shutil.rmtree(tmp)
+            shutil.copytree(change.live_workflow_dir, tmp)
+            os.rename(tmp, snapshot)
         workflow = load_workflow(change.workflow_dir)
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,
@@ -188,8 +195,16 @@ async def run_change(
                 # boundary. Finalize directly — no dispatch, no transcript wipe.
                 state.completion_pending = False
                 return _complete(change, state, log)
-            if state.step is None or index_of.get(state.step) is None:
-                return _complete(change, state, log)            # terminal
+            if state.step is None:
+                return _complete(change, state, log)            # genuine completion
+            if index_of.get(state.step) is None:
+                # The cursor names a step absent from the loaded workflow
+                # (corruption, or a future --refresh-workflow re-snapshot). Never
+                # silent-merge: pause with an error instead of calling _complete.
+                state.status = "paused"
+                state.save(change.state_dir)
+                _emit_paused_event(log, "unknown_step", step=state.step)
+                return RunResult.PAUSED
             idx = index_of[state.step]
             step = flat[idx]
             is_resume = (state.resume_pending == state.step)

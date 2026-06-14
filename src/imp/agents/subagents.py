@@ -132,8 +132,7 @@ async def dispatch_task(
 
     cc = ctx.change_context or ChangeContext(
         id="", slug="", title="", project_root=ctx.project_root,
-        # The branch's own tracked workflow dir — mirrors Change.workflow_dir
-        # (no create-time snapshot copy exists anymore).
+        # No change context → no change_dir, no snapshot; live dir is the only option.
         workflow_dir=ctx.project_root / "imp" / "workflows" / "default",
     )
 
