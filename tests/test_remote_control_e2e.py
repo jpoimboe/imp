@@ -57,7 +57,7 @@ async def test_e2e_chat_commands_round_trip(
                 run_daemon, tmp_path,
                 env={"IMP_TELEGRAM_TOKEN": "TOK", "IMP_TELEGRAM_CHAT_ID": "4242"},
                 create=created.append,
-                abandon=abandoned.append,
+                abandon=lambda cid: (abandoned.append(cid), 0)[1],
                 list_changes=lambda: listed,
                 resume=lambda cid, text: None,
                 install_signals=False, shutdown=shutdown))
@@ -95,7 +95,7 @@ async def test_e2e_chat_commands_round_trip(
             # /abandon, addressed by replying to the Change's message.
             fake.inject_reply("/abandon", reply_to_message_id=m1)
             await _wait(lambda: abandoned == [CHANGE])
-            await _wait(lambda: _text_in_outbox(fake, "Abandoning @zzzzzz"))
+            await _wait(lambda: _text_in_outbox(fake, "Abandoned @zzzzzz."))
 
             # An unroutable bare message gets a hint, never a silent drop.
             fake.inject("who is this even")

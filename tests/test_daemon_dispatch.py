@@ -25,11 +25,14 @@ def anyio_backend() -> str:
 
 
 class FakeControl:
-    def __init__(self, changes: list[ChangeInfo] | None = None) -> None:
+    def __init__(
+        self, changes: list[ChangeInfo] | None = None, *, abandon_rc: int = 0,
+    ) -> None:
         self.replies: list[tuple[str, str]] = []
         self.created: list[str] = []
         self.abandoned: list[str] = []
         self._changes = changes or []
+        self._abandon_rc = abandon_rc
 
     async def reply(self, change_id: str, text: str) -> str:
         self.replies.append((change_id, text))
@@ -38,8 +41,9 @@ class FakeControl:
     def create(self, prompt: str) -> None:
         self.created.append(prompt)
 
-    def abandon(self, change_id: str) -> None:
+    def abandon(self, change_id: str) -> int:
         self.abandoned.append(change_id)
+        return self._abandon_rc
 
     def list_changes(self) -> list[ChangeInfo]:
         return self._changes
@@ -64,13 +68,26 @@ async def test_create_calls_create_and_enqueues_a_notice() -> None:
 
 
 @pytest.mark.anyio
-async def test_abandon_calls_abandon_and_enqueues_a_notice() -> None:
-    control = FakeControl()
+async def test_abandon_success_enqueues_abandoned_notice() -> None:
+    control = FakeControl(abandon_rc=0)
     responses: queue.Queue = queue.Queue()
     await _handle_command(Abandon("2026-06-13-k3f9qa"), control, responses)
     assert control.abandoned == ["2026-06-13-k3f9qa"]
     notice = responses.get_nowait()
-    assert isinstance(notice, Notice) and "k3f9qa" in notice.text
+    assert isinstance(notice, Notice) and notice.text == "Abandoned @k3f9qa."
+    assert responses.empty()   # no optimistic pre-result ack
+
+
+@pytest.mark.anyio
+async def test_abandon_running_change_enqueues_still_running_notice() -> None:
+    control = FakeControl(abandon_rc=2)
+    responses: queue.Queue = queue.Queue()
+    await _handle_command(Abandon("2026-06-13-k3f9qa"), control, responses)
+    assert control.abandoned == ["2026-06-13-k3f9qa"]
+    notice = responses.get_nowait()
+    assert isinstance(notice, Notice)
+    assert "k3f9qa" in notice.text and "still running" in notice.text
+    assert responses.empty()
 
 
 @pytest.mark.anyio

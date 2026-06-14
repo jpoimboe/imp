@@ -84,8 +84,8 @@ async def test_phone_only_driver_reply_continues_the_run(tmp_path: Path) -> None
         id=change.id, title=change.title)
 
     async def _never_local() -> str:
-        await anyio.sleep_forever()
-        raise AssertionError("unreachable")
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        raise AwaitingUserInput()
 
     rc_holder: dict[str, int] = {}
 
@@ -135,8 +135,8 @@ async def test_channel_receives_events_during_run(tmp_path: Path) -> None:
         id=change.id, title=change.title)
 
     async def _never_local() -> str:
-        await anyio.sleep_forever()
-        raise AssertionError("unreachable")
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        raise AwaitingUserInput()
 
     async def _runner() -> None:
         async with anyio.create_task_group() as tg:
@@ -191,8 +191,8 @@ async def test_seed_opening_with_channel_does_not_park(tmp_path: Path) -> None:
         id=change.id, title=change.title)
 
     async def _never_local() -> str:
-        await anyio.sleep_forever()
-        raise AssertionError("unreachable")
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+        raise AwaitingUserInput()
 
     rc_holder: dict[str, int] = {}
 

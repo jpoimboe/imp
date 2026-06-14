@@ -25,6 +25,14 @@ def _spawn_detached(argv: list[str], env: Mapping[str, str], cwd: Path) -> None:
         stderr=subprocess.DEVNULL, start_new_session=True)
 
 
+def _run_foreground(argv: list[str], env: Mapping[str, str], cwd: Path) -> int:
+    """Run imp synchronously (the daemon owns it), discarding I/O; returns its exit code."""
+    return subprocess.run(
+        argv, env=dict(env), cwd=str(cwd),
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL).returncode
+
+
 def _imp(*args: str) -> list[str]:
     return [sys.executable, "-m", "imp", *args]
 
@@ -41,6 +49,7 @@ def create_change(control_root: Path, prompt: str) -> None:
         _imp("new", "--non-interactive", "--message", prompt), _base_env(), control_root)
 
 
-def abandon_change(control_root: Path, change_id: str) -> None:
-    """Abandon a Change via `imp abandon --yes`."""
-    _spawn_detached(_imp("abandon", change_id, "--yes"), _base_env(), control_root)
+def abandon_change(control_root: Path, change_id: str) -> int:
+    """Abandon a Change via `imp abandon --yes`, synchronously; returns its exit code."""
+    return _run_foreground(
+        _imp("abandon", change_id, "--yes"), _base_env(), control_root)

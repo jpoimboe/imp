@@ -125,8 +125,13 @@ async def _handle_command(
         control.create(command.prompt)
         responses.put(Notice("Spawning a new Change… watch for its first question"))
     elif isinstance(command, Abandon):
-        control.abandon(command.change_id)
-        responses.put(Notice(f"Abandoning @{handle_for(command.change_id)}…"))
+        handle = handle_for(command.change_id)
+        rc = await anyio.to_thread.run_sync(control.abandon, command.change_id)
+        if rc == 0:
+            responses.put(Notice(f"Abandoned @{handle}."))
+        else:
+            responses.put(Notice(
+                f"@{handle} is still running — stop it first, then /abandon again."))
     elif isinstance(command, ListChanges):
         try:
             changes = await anyio.to_thread.run_sync(control.list_changes)
@@ -178,7 +183,7 @@ async def run_daemon(
         [Mapping[str, str], Callable[[Command], None]], Any] = _make_telegram_adapter,
     resume: Callable[[str, str], None] | None = None,
     create: Callable[[str], None] | None = None,
-    abandon: Callable[[str], None] | None = None,
+    abandon: Callable[[str], int] | None = None,
     list_changes: Callable[[], list[discover.ChangeInfo]] | None = None,
     install_signals: bool = True,
     shutdown: anyio.Event | None = None,
@@ -228,13 +233,28 @@ async def run_daemon(
 
 
 def start_daemon(control_root: Path) -> int:
-    """`imp remote-control start`: reject a second live daemon, then run in foreground."""
+    """`imp remote-control start`: reject a second live daemon, refuse when no
+    remote.driver is configured, then run in foreground."""
+    from imp.cli.remote_channel import driver_config_from
+    from imp.providers.effective import load_effective_config
     from imp.remote.drivers.telegram import ConfigError
     try:
         check_not_running(control_root)
     except DaemonAlreadyRunning:
         print("imp: a remote-control daemon is already running for this repo",
               file=sys.stderr)
+        return 2
+    config = load_effective_config(
+        project_root=control_root, control_root=control_root).config
+    _driver_raw = (getattr(config, "remote", None) or {}).get("driver")
+    if not _driver_raw:
+        print("imp: remote-control requires a configured remote.driver; add a "
+              "remote.driver block to your config and restart", file=sys.stderr)
+        return 2
+    if driver_config_from(config) is None:
+        _name = _driver_raw.get("name", "<unknown>")
+        print(f"imp: remote-control: driver {_name!r} is not recognised; "
+              "check remote.driver.name in your config", file=sys.stderr)
         return 2
     try:
         anyio.run(run_daemon, control_root)
