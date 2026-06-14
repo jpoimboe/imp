@@ -1,7 +1,6 @@
 ---
 name: finalize
 description: Final gate — review the base-merge resolution (when one occurred), summarize the whole change for `imp log`, and decide merge / rework / pause.
-tools: [complete_step, wait_for_user, read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   decision: {type: enum, values: [merge, rework, pause]}

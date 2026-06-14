@@ -1,7 +1,6 @@
 ---
 name: code-reviewer
 description: Final whole-change review vs the spec — correctness AND completeness; routes approve / task_gap / plan_gap.
-tools: [complete_step, read_file, glob, grep, bash, query_events, web_search]
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, task_gap, plan_gap]}

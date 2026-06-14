@@ -29,7 +29,38 @@ def test_shipped_default_workflow_loads(tmp_path: Path) -> None:
     assert wf.name
     assert wf.phases
     for agent in wf.agents.values():
-        assert "complete_step" in agent.tools, f"{agent.name} missing complete_step"
+        assert "complete_step" not in agent.tools, f"{agent.name}: complete_step is provider-injected"
+        assert "load_skill" not in agent.tools, f"{agent.name}: load_skill is provider-injected"
+
+
+def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) -> None:
+    from imp.engine.loader import BASE_CAPS
+    asset = Path("src/imp/assets/workflows/default").resolve()
+    shutil.copytree(asset, tmp_path / "wf")
+    wf = load_workflow(tmp_path / "wf")
+
+    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change"}
+    top_dispatcher = top_leaf | {"task"}
+    subagents = {
+        "implementer", "quality-reviewer", "code-reviewer",
+        "completeness-slice", "spec-compliance-slice", "boundaries-slice",
+    }
+    dispatchers = {"task-lead", "review-panel", "deferred-sweep",
+                   "plan-writer", "spec-writer"}
+
+    for name, agent in wf.agents.items():
+        assert "complete_step" not in agent.tools, name
+        assert "load_skill" not in agent.tools, name
+        if agent.explicit_tools:
+            # Hand-scoped read-only subagents (explorer, researcher) declare
+            # their own tools and are not subject to the all-by-default buckets.
+            continue
+        if name in subagents:
+            assert agent.tools == BASE_CAPS, name
+        elif name in dispatchers:
+            assert agent.tools == top_dispatcher, name
+        else:
+            assert agent.tools == top_leaf, name
 
 
 def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:
@@ -38,7 +69,7 @@ def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:
     wf = load_workflow(tmp_path / "wf")
     spec_writer = wf.agents["spec-writer"]
     assert "ask_user" not in spec_writer.tools
-    assert "complete_step" in spec_writer.tools
+    assert "complete_step" not in spec_writer.tools
 
 
 def test_bundled_workflow_loads_and_producers_resume() -> None:

@@ -1,7 +1,6 @@
 ---
 name: review-panel
 description: Whole-diff review coordinator — dispatch four opus reviewers, mechanically collapse their verdicts (precedence) and findings (verbatim union), route approve / task_gap / plan_gap.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task]
 subagents: [code-reviewer, completeness-slice, spec-compliance-slice, boundaries-slice]
 output:
   status: {type: enum, values: [Success, Error]}

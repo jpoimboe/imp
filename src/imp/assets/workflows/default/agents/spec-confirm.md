@@ -1,7 +1,6 @@
 ---
 name: spec-confirm
 description: Surface the significant decisions settled while writing and reviewing the spec, confirm with the user before planning, and route approve -> plan / changes -> spec-writer.
-tools: [complete_step, wait_for_user, read_file, glob, grep, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   confirm: {type: enum, values: [approve, changes]}

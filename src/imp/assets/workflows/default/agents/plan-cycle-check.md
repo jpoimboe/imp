@@ -1,7 +1,6 @@
 ---
 name: plan-cycle-check
 description: Decide whether the spec needs another plan (supercycle) or is fully covered by the plans implemented so far.
-tools: [complete_step, read_file, glob, grep, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   more_plans: {type: bool}

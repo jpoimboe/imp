@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Web research — search and fetch external sources (and read the codebase for grounding), then report findings with citations.
-tools: [complete_step, read_file, glob, grep, bash, query_events, web_search, web_fetch]
+tools: [read_file, glob, grep, bash, query_events, web_search, web_fetch]
 output:
   status: {type: enum, values: [Success, Error]}
   report: {type: string}

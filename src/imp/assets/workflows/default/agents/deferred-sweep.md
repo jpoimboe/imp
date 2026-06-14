@@ -1,7 +1,6 @@
 ---
 name: deferred-sweep
 description: Drain the Deferred Followups list — re-evaluate each item at the sweep's broader scope and apply the three-way disposition (silent fix / fix + FYI-veto / surface-for-decision).
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task]
 subagents: [implementer, quality-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}
