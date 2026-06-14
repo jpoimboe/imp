@@ -43,11 +43,29 @@ class Notice:
 
 
 @dataclass(frozen=True)
+class Subscribe:
+    change_id: str
+
+
+@dataclass(frozen=True)
+class Unsubscribe:
+    pass
+
+
+@dataclass(frozen=True)
+class Replay:
+    change_id: str | None
+    n: int
+
+
+@dataclass(frozen=True)
 class ListResult:
     changes: list[ChangeInfo]
 
 
-Command = Reply | Create | Abandon | ListChanges | Help | Notice
+Command = (
+    Reply | Create | Abandon | ListChanges | Help | Notice
+    | Subscribe | Unsubscribe | Replay)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
@@ -59,21 +77,31 @@ ROUTE_HINT = (
     "Couldn't route that — reply to a Change's message, prefix @handle, or send /list.")
 HELP_TEXT = (
     "Commands:\n"
-    "/list — show changes\n"
+    "/list — show changes (● = subscribed)\n"
     "/new <prompt> — start a Change\n"
+    "/subscribe (reply or @handle) — follow a Change's narrative\n"
+    "/unsubscribe — mute narrative (lifecycle alerts stay on)\n"
+    "/replay [n] (reply, @handle, or subscribed) — re-send last n messages\n"
     "/abandon (reply or @handle) — stop a Change\n"
     "/help — this message\n"
     "Reply to a Change's message (or @handle) to answer it.")
 
 
-def _resolve_abandon_target(
-    rest: str, reply_to: int | None, resolve_lookup: ResolveLookup,
+def _resolve_target(
+    rest: str, reply_to: int | None, resolve_lookup: ResolveLookup, filler: str,
 ) -> str | None:
-    """Resolve /abandon's target. An @handle needs a trailing token for parse_handle
-    to strip it; the command word stands in as that token and is discarded."""
-    probe = f"{rest} abandon" if rest else ""
+    # An @handle needs a trailing token for parse_handle to strip it; filler stands in
+    # as that token and is discarded.
+    probe = f"{rest} {filler}" if rest else ""
     change_id, _ = resolve_lookup(probe, reply_to)
     return change_id
+
+
+def _parse_replay_n(rest: str) -> int:
+    for token in rest.split():
+        if token.isdigit():
+            return max(1, min(20, int(token)))
+    return 5
 
 
 def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Command:
@@ -91,8 +119,17 @@ def parse(text: str, reply_to: int | None, resolve_lookup: ResolveLookup) -> Com
         if verb == "new":
             return Create(rest) if rest else Notice(NEW_USAGE)
         if verb == "abandon":
-            change_id = _resolve_abandon_target(rest, reply_to, resolve_lookup)
+            change_id = _resolve_target(rest, reply_to, resolve_lookup, "abandon")
             return Abandon(change_id) if change_id is not None else Notice(ABANDON_USAGE)
+        if verb in ("subscribe", "sub"):
+            change_id = _resolve_target(rest, reply_to, resolve_lookup, "subscribe")
+            return Subscribe(change_id) if change_id is not None else Notice(ROUTE_HINT)
+        if verb in ("unsubscribe", "unsub", "mute"):
+            return Unsubscribe()
+        if verb == "replay":
+            n = _parse_replay_n(rest)
+            change_id = _resolve_target(rest, reply_to, resolve_lookup, "replay")
+            return Replay(change_id, n)
         return Notice(UNKNOWN_COMMAND)
     change_id, body = resolve_lookup(text, reply_to)
     return Reply(change_id, body) if change_id is not None else Notice(ROUTE_HINT)
