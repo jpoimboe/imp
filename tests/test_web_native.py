@@ -40,13 +40,15 @@ def test_capability_ok_for_anthropic_both() -> None:
 
 def test_capability_openai_web_fetch_degrades(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="imp.providers.web_native"):
-        wn.check_web_capability("openai", _agent(frozenset({"web_fetch"}), explicit_tools=True))  # no raise
+        # no raise
+        wn.check_web_capability("openai", _agent(frozenset({"web_fetch"}), explicit_tools=True))
     assert any("web_fetch" in r.getMessage() and "openai" in r.getMessage() for r in caplog.records)
 
 
 def test_capability_codex_web_fetch_degrades(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="imp.providers.web_native"):
-        wn.check_web_capability("codex", _agent(frozenset({"web_fetch"}), explicit_tools=True))  # no raise
+        # no raise
+        wn.check_web_capability("codex", _agent(frozenset({"web_fetch"}), explicit_tools=True))
     assert any("codex" in r.getMessage() and "web_fetch" in r.getMessage() for r in caplog.records)
 
 
