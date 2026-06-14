@@ -281,10 +281,14 @@ def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
     return phase
 
 
-def _pause_lines(name: str, phase: str | None, token: str, *, color: bool) -> list[str]:
+def _pause_lines(
+    name: str, phase: str | None, token: str,
+    *, reason: str | None = None, color: bool,
+) -> list[str]:
     at = f"  at {phase}" if phase else ""
+    why = f"  ({reason})" if reason else ""
     return [
-        ansi(f"Paused  {name}{at}", "dim", enabled=color),
+        ansi(f"Paused  {name}{at}{why}", "dim", enabled=color),
         ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
     ]
 
@@ -297,11 +301,12 @@ def _pause_facts(change: Change) -> tuple[str, str | None, str]:
     return name, phase, resume_token(change.id)
 
 
-def _emit_paused(change: Change) -> None:
-    """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim."""
+def _emit_paused(change: Change, reason: str | None = None) -> None:
+    """Interactive exit — print the dimmed pause headline (with trigger reason if given)."""
     color = should_use_color(sys.stdout)
     name, phase, token = _pause_facts(change)
-    print("\n" + "\n".join(_pause_lines(name, phase, token, color=color)))
+    print("\n" + "\n".join(
+        _pause_lines(name, phase, token, reason=reason, color=color)))
 
 
 def _emit_paused_summary(change: Change) -> None:
@@ -610,7 +615,7 @@ def _finalize_paused_exit(
     interrupt/EOF/SIGTERM/escalation path out of the session loop."""
     driver.finish()
     pause_and_exit(change, reason=reason, engine_emitted=engine_emitted)
-    _emit_paused(change)
+    _emit_paused(change, reason)
     return 130
 
 
