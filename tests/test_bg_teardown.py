@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import anyio
@@ -311,7 +312,6 @@ def test_teardown_reaps_regrouped_bg_descendant(tmp_path: Path) -> None:
     misses it but the /proc walk finds it — after terminate_background_processes it
     must be gone (not reparented to init and surviving)."""
     async def main() -> None:
-        import sys
         from imp.agents.tools.bg import BgProc, _bg_dir, terminate_background_processes
 
         ctx = _ctx(tmp_path)
