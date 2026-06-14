@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import signal
 import socket
+import unittest.mock
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,30 @@ def test_start_daemon_refuses_without_remote_driver(
     monkeypatch.setattr(runner.anyio, "run", _must_not_run)
     assert runner.start_daemon(tmp_path) == 2
     assert "remote.driver" in capsys.readouterr().err
+
+
+def test_start_daemon_refuses_with_unrecognised_driver_name(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    # A config with a remote.driver block but an unregistered name must refuse
+    # with rc 2 and a message mentioning "not recognised".
+    from imp.remote.daemon import runner
+
+    class _FakeConfig:
+        remote = {"driver": {"name": "no-such-driver"}}
+
+    def _fake_load(**_: object) -> object:
+        class R:
+            config = _FakeConfig()
+        return R()
+
+    with unittest.mock.patch(
+        "imp.providers.effective.load_effective_config", side_effect=_fake_load
+    ), unittest.mock.patch(
+        "imp.remote.daemon.runner.check_not_running"
+    ):
+        assert runner.start_daemon(tmp_path) == 2
+    assert "not recognised" in capsys.readouterr().err
 
 
 def test_start_daemon_returns_rc2_for_config_error(
