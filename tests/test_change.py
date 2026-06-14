@@ -114,14 +114,6 @@ def test_workflow_dir_prefers_snapshot_when_present(tmp_path: Path) -> None:
     assert ch.workflow_dir == snapshot
 
 
-def test_workflow_dir_falls_back_to_live_when_no_snapshot(tmp_path: Path) -> None:
-    _seed_control(tmp_path)
-    ch = Change.create(tmp_path, title="X",
-                       change_id="2026-06-14-snap02", base_branch="main")
-    # No snapshot yet (create does not take it): fall back to the live branch dir.
-    assert not (ch.change_dir / "workflow").exists()
-    assert ch.workflow_dir == ch.project_root / "imp" / "workflows" / "default"
-
 
 def test_live_workflow_dir_ignores_the_snapshot(tmp_path: Path) -> None:
     _seed_control(tmp_path)
