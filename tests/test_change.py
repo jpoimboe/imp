@@ -33,7 +33,7 @@ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
     wtpath = tmp_path / ".imp" / "worktrees" / "2026-06-04-abc123"
     assert ch.project_root == wtpath
     assert (wtpath / ".imp" / "change" / "change.json").exists()
-    # No snapshot copy: the gitignored .imp/change/workflow/ is gone.
+    # create() does not take a snapshot; no .imp/change/workflow/ dir yet.
     assert not (wtpath / ".imp" / "change" / "workflow").exists()
     # workflow_dir IS the branch's own tracked workflow dir.
     assert ch.workflow_dir == wtpath / "imp" / "workflows" / "default"
@@ -57,7 +57,7 @@ def test_change_json_has_no_slug_or_auto_titled(tmp_path: Path) -> None:
     assert set(meta) == {"id", "title", "base_branch", "created_at"}
 
 
-def test_workflow_dir_is_the_branch_dir_not_a_copy(tmp_path: Path) -> None:
+def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", change_id="2026-06-04-isolat", base_branch="main")
     # The executed workflow lives in the worktree's tracked tree...
@@ -101,6 +101,38 @@ def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
     # The branch+worktree created before validation must be torn down.
     assert not (tmp_path / ".imp" / "worktrees" / "badwf").exists()
     assert "imp/badwf" not in _git(tmp_path, "branch", "--list", "imp/badwf").stdout
+
+
+def test_workflow_dir_prefers_snapshot_when_present(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X",
+                       change_id="2026-06-14-snap01", base_branch="main")
+    snapshot = ch.change_dir / "workflow"
+    snapshot.mkdir()
+    (snapshot / "workflow.yaml").write_text("name: frozen\n")
+    # Once the snapshot exists, workflow_dir resolves to it, NOT the live dir.
+    assert ch.workflow_dir == snapshot
+
+
+def test_workflow_dir_falls_back_to_live_when_no_snapshot(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X",
+                       change_id="2026-06-14-snap02", base_branch="main")
+    # No snapshot yet (create does not take it): fall back to the live branch dir.
+    assert not (ch.change_dir / "workflow").exists()
+    assert ch.workflow_dir == ch.project_root / "imp" / "workflows" / "default"
+
+
+def test_live_workflow_dir_ignores_the_snapshot(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="X",
+                       change_id="2026-06-14-snap03", base_branch="main")
+    snapshot = ch.change_dir / "workflow"
+    snapshot.mkdir()
+    (snapshot / "workflow.yaml").write_text("name: frozen\n")
+    # live_workflow_dir always points at the branch dir, even with a snapshot present.
+    assert ch.live_workflow_dir == ch.project_root / "imp" / "workflows" / "default"
+    assert ch.workflow_dir == snapshot
 
 
 def test_leaf_edit_pinned_in_graph_live_on_reload(tmp_path: Path) -> None:
