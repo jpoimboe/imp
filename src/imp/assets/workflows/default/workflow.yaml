@@ -158,6 +158,7 @@ phases:
         quiet: true
         command: ./scripts/autosquash.sh
         rules:
+          - {if: {exit: 0, fast_path: true}, goto: stamp-trailers}   # trivial change: skip review/deferred-sweep/sweep-verify
           - {if: {exit: 0}, goto: review}          # clean fold / verified resolution: skip the resolver, go to the panel
           - {if: {exit: 2}, continue: true}        # resolvable fold conflict / verify failed -> autosquash-resolve
           - {else: true, pause: true}              # hard failure (exit 1) / verify bound exhausted -> human

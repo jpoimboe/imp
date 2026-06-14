@@ -499,3 +499,32 @@ def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
         output={"exit": 0, "stdout": "", "stderr": ""},
     )
     assert isinstance(m.action, Continue)
+
+
+def test_autosquash_fast_path_skips_review_to_stamp_trailers() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["autosquash"].rules
+    # Clean fold on the fast path -> stamp-trailers, skipping
+    # review/deferred-sweep/sweep-verify.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "fast_path": True},
+        output={"exit": 0, "stdout": "", "stderr": ""},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "stamp-trailers" and m.action.resume is False
+
+
+def test_autosquash_non_fast_path_goes_to_review() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["autosquash"].rules
+    # Clean fold on the standard path -> the review panel, unchanged.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "fast_path": False},
+        output={"exit": 0, "stdout": "", "stderr": ""},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "review" and m.action.resume is False
