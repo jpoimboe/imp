@@ -107,6 +107,19 @@ def _resume_system_prompt(
     return None       # empty transcript (pre-emit crash, or no-transcript provider)
 
 
+def _resume_replays_transcript(transcript_dir: Any) -> bool:
+    """True when a resumed agent step's kept transcript can be replayed.
+    False when the transcript ended without complete_step (MISSING_COMPLETE_STEP)
+    — replaying it only re-fails with agent_output_missing, so the step
+    re-runs fresh. Empty/absent transcripts are safe to replay (no-op)."""
+    from imp.agents.classify import ResumeState, classify_resume
+    from imp.agents.transcript import Transcript
+    t = Transcript(transcript_dir / "transcript.jsonl")
+    if not t.exists_and_nonempty():
+        return True
+    return classify_resume(t.load()) is not ResumeState.MISSING_COMPLETE_STEP
+
+
 def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, ...]:
     """Fresh-entry seed. `<imp:begin/>` (or the wrapper text on a fresh goto),
     plus a name line when the Change is named — so a named Change conveys its
@@ -557,9 +570,11 @@ async def _route_agent(
     agent_def = workflow.agents[step.file.stem]
     transcript_dir = change.change_dir / "steps" / step.phase / step.name
 
-    # Navigation-driven: keep the transcript only when this entry was reached
-    # via a `resume:` edge (the resume_pending marker == this step).
-    keep = is_resume
+    # Keep (replay) the transcript only when this entry was reached via a
+    # `resume:` edge AND the kept transcript is actually replayable. A resumed
+    # autonomous step whose transcript ended before complete_step is re-run
+    # fresh instead — replaying it only re-fails with agent_output_missing.
+    keep = is_resume and _resume_replays_transcript(transcript_dir)
     if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)
         transcript_dir.mkdir(parents=True, exist_ok=True)
