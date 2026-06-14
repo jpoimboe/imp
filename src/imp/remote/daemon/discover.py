@@ -19,14 +19,21 @@ class ChangeInfo:
 
 
 def list_changes(control_root: Path) -> list[ChangeInfo]:
-    """Every known Change (live worktrees + journal) with the fields the `list` verb reports."""
-    from imp.cli.main import _iter_change_ids, _row_for_id
+    """The in-flight Changes the `list` verb reports — those a user can still act on.
+
+    `_iter_change_ids` enumerates every known Change including the journal
+    (completed / merged / abandoned), but those are terminal: surfacing them in a
+    remote `/list` is just noise. Keep only the in-flight statuses
+    (running / paused / errored / merge_blocked)."""
+    from imp.cli.main import _INFLIGHT, _iter_change_ids, _row_for_id
     out: list[ChangeInfo] = []
     for change_id in _iter_change_ids(control_root):
         row = _row_for_id(control_root, change_id)
         if row is None:
             continue
         change_id_, status_, step_, _last, title_, _created = row
+        if status_ not in _INFLIGHT:
+            continue
         out.append(ChangeInfo(id=change_id_, title=title_, status=status_, step=step_))
     return out
 

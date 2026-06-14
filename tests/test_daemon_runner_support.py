@@ -116,19 +116,45 @@ class _RaiseThenStopAdapter:
         self._stop.set()
 
 
-def test_adapter_worker_survives_a_raising_poll_and_continues(
+def test_poll_worker_survives_a_raising_poll_and_continues(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setattr(runner, "_WORKER_GAP", 0.01)   # keep the backoff fast
     stop = threading.Event()
     adapter = _RaiseThenStopAdapter(stop)
     with caplog.at_level(logging.WARNING, logger="imp.daemon"):
-        runner._adapter_worker(adapter, queue.Queue(), queue.Queue(), stop)
+        runner._poll_worker(adapter, stop)
     assert adapter.polls == 2                       # loop continued past the raise
     assert "adapter worker cycle failed" in caplog.text
 
 
-def test_adapter_worker_shutdown_survives_a_failing_final_drain(
+def test_sender_worker_delivers_a_response_without_polling() -> None:
+    # The sender is decoupled from the inbound long-poll: it flushes a queued
+    # response immediately and never calls poll_once (that is the poll worker's
+    # job). This is the fix for replies being gated behind the 25s long-poll.
+    from imp.remote.daemon.commands import Notice
+
+    stop = threading.Event()
+    responses: queue.Queue = queue.Queue()
+    responses.put(Notice("hi"))
+    sent: list[str] = []
+
+    class _RecordingAdapter:
+        def on_event(self, event: dict) -> None:
+            pass
+
+        def on_response(self, response: object) -> None:
+            sent.append(response.text)   # type: ignore[attr-defined]
+            stop.set()                   # one delivery, then end the loop
+
+        def poll_once(self) -> None:
+            raise AssertionError("sender worker must not poll")
+
+    runner._sender_worker(_RecordingAdapter(), queue.Queue(), responses, stop)
+    assert sent == ["hi"]
+
+
+def test_sender_worker_shutdown_survives_a_failing_final_drain(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from imp.remote.daemon.commands import Notice
@@ -149,12 +175,12 @@ def test_adapter_worker_shutdown_survives_a_failing_final_drain(
             pass
 
     with caplog.at_level(logging.WARNING, logger="imp.daemon"):
-        runner._adapter_worker(
+        runner._sender_worker(
             _FailingDrainAdapter(), queue.Queue(), responses, stop)
     assert "final response drain failed" in caplog.text
 
 
-def test_adapter_worker_shutdown_survives_a_failing_outbound_drain(
+def test_sender_worker_shutdown_survives_a_failing_outbound_drain(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     stop = threading.Event()
@@ -173,6 +199,6 @@ def test_adapter_worker_shutdown_survives_a_failing_outbound_drain(
             pass
 
     with caplog.at_level(logging.WARNING, logger="imp.daemon"):
-        runner._adapter_worker(
+        runner._sender_worker(
             _FailingOutboundAdapter(), outbound, queue.Queue(), stop)
     assert "final outbound drain failed" in caplog.text

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -127,6 +128,9 @@ class TelegramNorthAdapter:
         self._offset = 0
         self._msg_to_change: dict[int, str] = {}
         self._handle_to_change: dict[str, str] = {}
+        # The reply maps below are WRITTEN by on_event (sender thread) and READ by
+        # resolve (poll thread); _offset stays poll-thread-only. Guard only the maps.
+        self._lock = threading.Lock()
 
     @classmethod
     def from_env(
@@ -160,9 +164,10 @@ class TelegramNorthAdapter:
             return
         handle = handle_for(change_id)
         message_id = self._send(format_outbound(event, handle), kind == "silent")
-        if message_id is not None:
-            self._msg_to_change[message_id] = change_id
-        self._handle_to_change[handle] = change_id
+        with self._lock:
+            if message_id is not None:
+                self._msg_to_change[message_id] = change_id
+            self._handle_to_change[handle] = change_id
 
     def on_response(self, response: Response) -> None:
         text = render_response(response)
@@ -171,8 +176,9 @@ class TelegramNorthAdapter:
 
     def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
         """Resolve one inbound reply to (change_id, text) against the recorded maps."""
-        return resolve_change_id(
-            inbound, self._msg_to_change, self._handle_to_change)
+        with self._lock:
+            return resolve_change_id(
+                inbound, self._msg_to_change, self._handle_to_change)
 
     def _resolve_text(self, text: str, reply_to: int | None) -> tuple[str | None, str]:
         return self.resolve(Inbound(text=text, reply_to_message_id=reply_to))

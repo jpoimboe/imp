@@ -91,24 +91,32 @@ def parse_event(line: str) -> dict[str, Any] | None:
     return obj if isinstance(obj, dict) else None
 
 
-def drain_outbound(adapter: Any, outbound: queue.Queue[str]) -> None:
-    """Flush every queued south line into the adapter; garbage lines are dropped."""
+def drain_outbound(adapter: Any, outbound: queue.Queue[str]) -> bool:
+    """Flush every queued south line into the adapter; garbage lines are dropped.
+    Returns True iff at least one line was dequeued (so the sender loop can wait
+    only when both queues were empty)."""
+    drained = False
     while True:
         try:
             line = outbound.get_nowait()
         except queue.Empty:
-            return
+            return drained
+        drained = True
         event = parse_event(line)
         if event is not None:
             adapter.on_event(event)
 
 
-def drain_responses(adapter: Any, responses: queue.Queue[Response]) -> None:
+def drain_responses(adapter: Any, responses: queue.Queue[Response]) -> bool:
+    """Flush every queued command response into the adapter. Returns True iff at
+    least one response was dequeued."""
+    drained = False
     while True:
         try:
             response = responses.get_nowait()
         except queue.Empty:
-            return
+            return drained
+        drained = True
         adapter.on_response(response)
 
 
@@ -147,6 +155,7 @@ def _make_telegram_adapter(
 
 
 _WORKER_GAP = 1.0
+_SENDER_GAP = 0.05   # idle wait between outbound/response drains (latency ceiling)
 
 
 class _WorkerGate:
@@ -164,17 +173,36 @@ class _WorkerGate:
         _log.warning("adapter worker cycle failed: %r", exc, exc_info=True)
 
 
-def _adapter_worker(
-    adapter: Any, outbound: queue.Queue[str],
-    responses: queue.Queue[Response], stop: threading.Event,
-) -> None:
+def _poll_worker(adapter: Any, stop: threading.Event) -> None:
+    """Inbound only: long-poll for chat messages and submit them. Runs in its own
+    thread so its blocking getUpdates long-poll never delays outbound delivery —
+    that is the _sender_worker's job (a single combined loop would gate each reply
+    behind the next long-poll's full timeout)."""
     gate = _WorkerGate()
     while not stop.is_set():
         try:
-            drain_outbound(adapter, outbound)
-            drain_responses(adapter, responses)
             adapter.poll_once()
             gate.ok()
+        except Exception as exc:
+            gate.fail(exc)
+            stop.wait(_WORKER_GAP)
+
+
+def _sender_worker(
+    adapter: Any, outbound: queue.Queue[str],
+    responses: queue.Queue[Response], stop: threading.Event,
+) -> None:
+    """Outbound only: flush south events and command responses to chat as soon as
+    they appear, independent of the inbound long-poll. When both queues are empty
+    it waits a short _SENDER_GAP, bounding delivery latency without busy-spinning."""
+    gate = _WorkerGate()
+    while not stop.is_set():
+        try:
+            sent = drain_outbound(adapter, outbound)
+            sent = drain_responses(adapter, responses) or sent
+            gate.ok()
+            if not sent:
+                stop.wait(_SENDER_GAP)
         except Exception as exc:
             gate.fail(exc)
             stop.wait(_WORKER_GAP)
@@ -292,8 +320,9 @@ async def run_daemon(
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
             tg.start_soon(_dispatch_inbound, inbound, control, responses, stop)
+            tg.start_soon(anyio.to_thread.run_sync, _poll_worker, adapter, stop)
             tg.start_soon(anyio.to_thread.run_sync,
-                          _adapter_worker, adapter, outbound, responses, stop)
+                          _sender_worker, adapter, outbound, responses, stop)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
             await shutdown.wait()
