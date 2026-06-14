@@ -155,7 +155,7 @@ async def run_change(
     # without revisiting (all git calls already pass explicit control_root).
     try:
         snapshot = change.change_dir / "workflow"
-        if not snapshot.exists():
+        if not snapshot.is_dir():
             shutil.copytree(change.live_workflow_dir, snapshot)
         workflow = load_workflow(change.workflow_dir)
         config = load_effective_config(
