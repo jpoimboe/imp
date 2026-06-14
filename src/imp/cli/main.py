@@ -109,6 +109,22 @@ class ReplyInterjectRouter:
 
 SPEC_SEED_MARKER = "Implement this spec"
 
+OPENING_QUESTION = (
+    "What change would you like to make? Describe what you have in mind, "
+    "and I'll help shape it into a spec.")
+
+
+def _should_prompt_opening(
+    *, seed_text: str | None, interactive: bool,
+) -> bool:
+    if not interactive:
+        return False
+    return seed_text is None
+
+
+def _normalize_opening_reply(reply: str) -> str | None:
+    return reply.strip() or None
+
 
 class SeedError(Exception):
     """A bad spec-seed source: a missing/unreadable --spec-file, or two seed
@@ -945,6 +961,23 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         input_fn=input, output_fn=print,
         err_fn=lambda m: print(m, file=sys.stderr))
 
+    interactive = (not bool(getattr(args, "non_interactive", False))
+                   and sys.stdin.isatty() and sys.stdout.isatty())
+    opening_text = seed.seed_text
+    if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
+        prompt = Prompt(
+            editing_mode=_editing_mode(control),
+            color=should_use_color(sys.stdout))
+        try:
+            reply = (await prompt.ask_async(question=OPENING_QUESTION,
+                                            width=_term_width())).strip()
+        except (EOFError, KeyboardInterrupt):
+            print("imp: cancelled", file=sys.stderr)
+            return 130
+        # An empty reply falls back to the unseeded path (the spec-writer opens
+        # by asking); a real answer becomes the opening intent.
+        opening_text = _normalize_opening_reply(reply)
+
     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
     # names it via rename_change once intent is clear, or the user passes --title.
@@ -970,7 +1003,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
                 return await _run_tui_session(
-                    change, args=args, seed_opening=seed.seed_text)
+                    change, args=args, seed_opening=opening_text)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -1006,7 +1039,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                             change, coord=coord, driver=driver, status=status,
                             esc_reader=esc_reader, reply_input_fn=reply_input_fn,
                             non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_opening=seed.seed_text)
+                            seed_opening=opening_text)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
