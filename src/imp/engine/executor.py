@@ -11,11 +11,14 @@ complete_step. The whole steps/ tree is removed at change completion.
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any
+
+import anyio
 
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import (
@@ -366,10 +369,11 @@ async def _dispatch_step(
     if step.kind == "branch":
         return _route_branch(step, state, log)
     if step.kind == "merge":
-        return _route_merge(step, change, state, log)
+        return await _route_merge(step, change, state, log)
     if step.kind == "script":
-        return _route_script(step, change, state, log, verify_command=verify_command,
-                             sandbox_policy=sandbox_policy)
+        return await _route_script(step, change, state, log,
+                                   verify_command=verify_command,
+                                   sandbox_policy=sandbox_policy)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -409,19 +413,28 @@ def _route_branch(
     return _finish(log, step, match)            # branch goto carries NO feedback
 
 
-def _route_script(
+async def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
     *, verify_command: str | None = None,
     sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step)
-    out = run_script(step, cwd=change.workflow_dir,
-                     env_extra=engine_env(project_root=change.project_root,
-                                          change_id=change.id,
-                                          change_slug=change.slug,
-                                          change_title=change.title,
-                                          verify_command=verify_command),
-                     policy=sandbox_policy)
+    # The script gate's subprocess runs to completion under a blocking
+    # proc.communicate() (gates.run_script). Offload it to a worker thread so the
+    # event loop keeps turning — otherwise a multi-minute verify gate starves
+    # every concurrent task on the loop (the live-status tick() animator, the
+    # signal receiver, the remote-channel poller), freezing the UI at
+    # "running · 0s" until the command returns. Only the blocking wait moves off
+    # the loop; the event emits stay on the loop thread (single terminal writer).
+    out = await anyio.to_thread.run_sync(
+        functools.partial(
+            run_script, step, cwd=change.workflow_dir,
+            env_extra=engine_env(project_root=change.project_root,
+                                 change_id=change.id,
+                                 change_slug=change.slug,
+                                 change_title=change.title,
+                                 verify_command=verify_command),
+            policy=sandbox_policy))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, match)
@@ -443,7 +456,7 @@ def _route_script(
     return action, feedback, muts
 
 
-def _route_merge(
+async def _route_merge(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Engine-native authoritative merge (B3/F1). Holds RepoGitLock (inside
@@ -475,9 +488,16 @@ def _route_merge(
     sha_file = change.change_dir / "integrated_base_sha"
     expected_sha = sha_file.read_text().strip() if sha_file.exists() else None
 
-    result = worktree.merge_to_base(
-        change.control_root, change.id, change.base_branch, title=change.title,
-        project_root=change.project_root, expected_base_sha=expected_sha)
+    # merge_to_base holds RepoGitLock and shells out to git (merge/commit); a
+    # large or conflict-heavy merge can take seconds-to-minutes. Offload it to a
+    # worker thread so the event loop keeps turning — same rationale as the
+    # script gate (see _route_script). The surrounding emits and state.save stay
+    # on the loop thread (single terminal writer / no cross-thread state race).
+    result = await anyio.to_thread.run_sync(
+        functools.partial(
+            worktree.merge_to_base,
+            change.control_root, change.id, change.base_branch, title=change.title,
+            project_root=change.project_root, expected_base_sha=expected_sha))
     if result.status == "MERGED":
         state.merge_commit = result.merge_commit
         state.save(change.state_dir)

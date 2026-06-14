@@ -878,29 +878,30 @@ def test_subagent_suspended_resume_drains_via_parent_replay() -> None:
 
 
 def test_script_step_route_does_not_drain_interjects() -> None:
-    """_route_branch and _route_script are sync functions with no coordinator
-    parameter — they cannot drain the interject queue. Interjects stay queued
-    and are consumed by the NEXT _route_agent call's resume-entry drain.
+    """_route_branch and _route_script take no coordinator parameter — they
+    cannot drain the interject queue. Interjects stay queued and are consumed by
+    the NEXT _route_agent call's resume-entry drain.
 
     The test proves the invariant structurally (signature inspection) rather
     than running a full executor loop (which would require a real git repo +
     script files). The behavioral guarantee is: if _route_branch/_route_script
     accepted `coordinator` and called drain_all_interjects_at_resume, queued
     interjects would be silently lost before the next agent step sees them.
+
+    Note: _route_script IS a coroutine (it awaits the script subprocess off the
+    event loop so a long gate doesn't starve concurrent tasks — see
+    test_route_script_does_not_block_event_loop). Coroutine-ness is orthogonal to
+    the no-drain guarantee; the load-bearing assertion is the absent coordinator
+    parameter, not sync-ness.
     """
     import inspect as _inspect
 
     from imp.engine import executor as _executor
 
-    # _route_branch and _route_script are sync — cannot call any coordinator API.
-    assert not _inspect.iscoroutinefunction(_executor._route_branch), (
-        "_route_branch must be sync (it is)"
-    )
-    assert not _inspect.iscoroutinefunction(_executor._route_script), (
-        "_route_script must be sync (it is)"
-    )
-
-    # Neither accepts `coordinator` as a parameter.
+    # The guarantee is the ABSENCE of a coordinator parameter — no coordinator
+    # API can be reached, drain included. (_route_branch stays sync; _route_script
+    # is async only to offload its blocking subprocess, not to gain coordinator
+    # access.)
     branch_params = set(_inspect.signature(_executor._route_branch).parameters)
     script_params = set(_inspect.signature(_executor._route_script).parameters)
     assert "coordinator" not in branch_params, (
