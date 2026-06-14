@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import threading
 
 import pytest
 
@@ -15,7 +16,7 @@ from imp.remote.daemon.commands import (
     Reply,
 )
 from imp.remote.daemon.discover import ChangeInfo
-from imp.remote.daemon.runner import _handle_command
+from imp.remote.daemon.runner import _dispatch_inbound, _handle_command
 
 
 @pytest.fixture
@@ -94,3 +95,41 @@ async def test_notice_passes_through() -> None:
     responses: queue.Queue = queue.Queue()
     await _handle_command(Notice("hint"), FakeControl(), responses)
     assert responses.get_nowait() == Notice("hint")
+
+
+class FailThenStopControl:
+    """`reply` raises for the `"boom"` change, records others, and stops the loop
+    once the second (good) command lands."""
+
+    def __init__(self, stop: threading.Event) -> None:
+        self.stop = stop
+        self.calls: list[str] = []
+
+    async def reply(self, change_id: str, text: str) -> str:
+        self.calls.append(change_id)
+        if change_id == "boom":
+            raise RuntimeError("kaboom")
+        self.stop.set()
+        return "live"
+
+
+@pytest.mark.anyio
+async def test_dispatch_inbound_survives_a_failing_command(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A command that makes `_handle_command` raise must not crash the dispatch
+    # loop or stall the queue: the loop logs and continues to the next command.
+    stop = threading.Event()
+    inbound: queue.Queue = queue.Queue()
+    inbound.put(Reply("boom", "x"))
+    inbound.put(Reply("2026-06-13-good", "y"))
+    control = FailThenStopControl(stop)
+    responses: queue.Queue = queue.Queue()
+
+    with caplog.at_level("WARNING"):
+        await _dispatch_inbound(inbound, control, responses, stop)
+
+    # The loop processed the good command *after* the failing one — proof it
+    # neither crashed nor dropped the rest of the queue.
+    assert control.calls == ["boom", "2026-06-13-good"]
+    assert "command failed" in caplog.text
