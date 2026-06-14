@@ -27,6 +27,9 @@ class FakeAdapter:
     def on_event(self, event: dict) -> None:
         self.events.append(event)
 
+    def on_response(self, response: object) -> None:
+        pass
+
     def poll_once(self) -> None:
         time.sleep(0.01)   # pace the worker loop; no inbound to submit
 

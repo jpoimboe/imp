@@ -16,10 +16,22 @@ from typing import Any
 import anyio
 
 from imp.remote.daemon import discover, spawn
+from imp.remote.daemon.commands import (
+    HELP_TEXT,
+    Abandon,
+    Command,
+    Create,
+    Help,
+    ListChanges,
+    ListResult,
+    Notice,
+    Reply,
+    Response,
+)
 from imp.remote.daemon.control import ControlPlane
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.server import SouthHub
-from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter
+from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
 
 _log = logging.getLogger("imp.daemon")
 
@@ -47,6 +59,15 @@ def drain_outbound(adapter: Any, outbound: queue.Queue[str]) -> None:
         event = parse_event(line)
         if event is not None:
             adapter.on_event(event)
+
+
+def drain_responses(adapter: Any, responses: queue.Queue[Response]) -> None:
+    while True:
+        try:
+            response = responses.get_nowait()
+        except queue.Empty:
+            return
+        adapter.on_response(response)
 
 
 def pid_path(control_root: Path) -> Path:
@@ -77,44 +98,68 @@ def check_not_running(control_root: Path) -> None:
 
 
 def _make_telegram_adapter(
-    env: Mapping[str, str], submit: Callable[[str, str], None],
+    env: Mapping[str, str], submit: Callable[[Command], None],
 ) -> TelegramNorthAdapter:
     """Default north adapter — Telegram, refusing without an allowlist."""
     return TelegramNorthAdapter.from_env(dict(env), submit)
 
 
 def _adapter_worker(
-    adapter: Any, outbound: queue.Queue[str], stop: threading.Event,
+    adapter: Any, outbound: queue.Queue[str],
+    responses: queue.Queue[Response], stop: threading.Event,
 ) -> None:
-    """Flush queued south events then run one poll cycle, until stop is set."""
     while not stop.is_set():
         drain_outbound(adapter, outbound)
+        drain_responses(adapter, responses)
         adapter.poll_once()
-    drain_outbound(adapter, outbound)  # flush events queued before stop
+    drain_outbound(adapter, outbound)
+    drain_responses(adapter, responses)
 
 
-async def _relay_replies(
-    replies: queue.Queue[tuple[str, str]], control: ControlPlane,
-    stop: threading.Event,
+async def _handle_command(
+    command: Command, control: ControlPlane, responses: queue.Queue[Response],
 ) -> None:
-    """Route each inbound reply submitted by the adapter to its Change."""
-    def _get() -> tuple[str, str] | None:
+    if isinstance(command, Reply):
+        await control.reply(command.change_id, command.text)
+    elif isinstance(command, Create):
+        control.create(command.prompt)
+        responses.put(Notice("Spawning a new Change… watch for its first question"))
+    elif isinstance(command, Abandon):
+        control.abandon(command.change_id)
+        responses.put(Notice(f"Abandoning @{handle_for(command.change_id)}…"))
+    elif isinstance(command, ListChanges):
+        try:
+            changes = await anyio.to_thread.run_sync(control.list_changes)
+            responses.put(ListResult(changes))
+        except Exception:
+            _log.warning("list_changes failed", exc_info=True)
+            responses.put(Notice("Error: could not list changes."))
+    elif isinstance(command, Help):
+        responses.put(Notice(HELP_TEXT))
+    elif isinstance(command, Notice):
+        responses.put(command)
+
+
+async def _dispatch_inbound(
+    inbound: queue.Queue[Command], control: ControlPlane,
+    responses: queue.Queue[Response], stop: threading.Event,
+) -> None:
+    def _get() -> Command | None:
         while not stop.is_set():
             try:
-                return replies.get(timeout=0.05)
+                return inbound.get(timeout=0.05)
             except queue.Empty:
                 continue
         return None
 
     while True:
-        result = await anyio.to_thread.run_sync(_get)
-        if result is None:
+        command = await anyio.to_thread.run_sync(_get)
+        if command is None:
             return
-        change_id, text = result
         try:
-            await control.reply(change_id, text)
+            await _handle_command(command, control, responses)
         except Exception:
-            _log.warning("reply failed for change %s", change_id, exc_info=True)
+            _log.warning("command failed: %r", command, exc_info=True)
 
 
 async def _await_shutdown_signals(shutdown: anyio.Event) -> None:
@@ -130,7 +175,7 @@ async def run_daemon(
     *,
     env: Mapping[str, str] | None = None,
     make_adapter: Callable[
-        [Mapping[str, str], Callable[[str, str], None]], Any] = _make_telegram_adapter,
+        [Mapping[str, str], Callable[[Command], None]], Any] = _make_telegram_adapter,
     resume: Callable[[str, str], None] | None = None,
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], None] | None = None,
@@ -148,14 +193,15 @@ async def run_daemon(
 
     spath = socket_path(control_root)
     outbound: queue.Queue[str] = queue.Queue()
-    replies: queue.Queue[tuple[str, str]] = queue.Queue()
+    inbound: queue.Queue[Command] = queue.Queue()
+    responses: queue.Queue[Response] = queue.Queue()
     stop = threading.Event()
 
     hub = SouthHub(str(spath), on_event=lambda cid, line: outbound.put(line))
     control = ControlPlane(
         hub=hub, resume=resume, create=create,
         abandon=abandon, list_changes=list_changes)
-    adapter = make_adapter(env, lambda cid, text: replies.put((cid, text)))
+    adapter = make_adapter(env, inbound.put)
 
     with contextlib.suppress(FileNotFoundError):
         spath.unlink()   # clear a stale socket file (guard already proved not live)
@@ -164,9 +210,9 @@ async def run_daemon(
         await hub.open()
         async with anyio.create_task_group() as tg:
             tg.start_soon(hub.serve)
-            tg.start_soon(_relay_replies, replies, control, stop)
+            tg.start_soon(_dispatch_inbound, inbound, control, responses, stop)
             tg.start_soon(anyio.to_thread.run_sync,
-                          _adapter_worker, adapter, outbound, stop)
+                          _adapter_worker, adapter, outbound, responses, stop)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
             await shutdown.wait()
