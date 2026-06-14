@@ -131,3 +131,26 @@ def test_clamp_text_passes_exactly_max_length_unchanged() -> None:
     from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
     text = "x" * TELEGRAM_MAX_TEXT
     assert clamp_text(text) == text
+
+
+def test_make_send_clamps_overlong_text() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, make_send
+    captured: list[dict] = []
+
+    def fake_api_call(token: str, method: str, params: dict) -> dict:  # type: ignore[type-arg]
+        captured.append(params)
+        return {"ok": True}
+
+    import imp.remote.drivers.telegram as _t
+    original = _t.api_call
+    _t.api_call = fake_api_call  # type: ignore[assignment]
+    try:
+        send = make_send("tok")
+        send(42, "a" * 5000, silent=False)
+    finally:
+        _t.api_call = original
+
+    assert len(captured) == 1
+    text = captured[0]["text"]
+    assert len(text) == TELEGRAM_MAX_TEXT
+    assert text.endswith("[truncated]")

@@ -231,7 +231,8 @@ def api_call(token: str, method: str, params: Mapping[str, Any]) -> dict[str, An
 def make_send(token: str) -> Callable[..., None]:
     """Bind a sendMessage caller to the bot token."""
     def send(chat_id: int, text: str, *, silent: bool) -> None:
-        api_call(token, "sendMessage", send_message_params(chat_id, text, silent=silent))
+        params = send_message_params(chat_id, clamp_text(text), silent=silent)
+        api_call(token, "sendMessage", params)
     return send
 
 
