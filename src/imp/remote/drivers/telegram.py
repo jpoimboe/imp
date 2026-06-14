@@ -43,6 +43,8 @@ _API_BASE = "https://api.telegram.org"
 
 def _api_base() -> str:
     return os.environ.get("IMP_TELEGRAM_API_BASE", _API_BASE)
+
+
 _LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
 _HTTP_TIMEOUT = 35        # seconds; urlopen ceiling, must exceed the long-poll
 _POLL_GAP = 1.0   # seconds to back off after a failed poll cycle
