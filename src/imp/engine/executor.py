@@ -154,6 +154,9 @@ async def run_change(
     # process (the foreground CLI model). Do not parallelize runs in-process
     # without revisiting (all git calls already pass explicit control_root).
     try:
+        snapshot = change.change_dir / "workflow"
+        if not snapshot.exists():
+            shutil.copytree(change.live_workflow_dir, snapshot)
         workflow = load_workflow(change.workflow_dir)
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,

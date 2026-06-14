@@ -1331,3 +1331,71 @@ def test_last_script_blocked_returns_last_match() -> None:
         {"type": "step_completed", "payload": {"step": "check"}},
     ]
     assert _last_script_blocked(mixed, "check") == mixed[1]
+
+
+# ── Workflow snapshot ────────────────────────────────────────────────────────
+
+
+@pytest.mark.anyio
+async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
+    """The first run copies the live workflow dir into the gitignored per-Change
+    snapshot at .imp/change/workflow/ (taken once, at run-start)."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    snapshot = change.change_dir / "workflow"
+    assert not snapshot.exists()
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.COMPLETED
+    assert (snapshot / "workflow.yaml").exists()
+    assert (snapshot / "agents" / "writer.md").exists()
+
+
+@pytest.mark.anyio
+async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
+    tmp_path: Path,
+) -> None:
+    """A resume reuses the existing snapshot and never re-copies: even after the
+    entire live workflow dir (script + step) is deleted mid-run, the resume still
+    runs the frozen snapshot version."""
+    import shutil
+    import subprocess
+
+    wf = tmp_path / "imp" / "workflows" / "default"
+    (wf / "scripts").mkdir(parents=True)
+    (wf / "scripts" / "probe.sh").write_text("echo frozen >&2\nexit 7\n")
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: check\n"
+        "        command: sh scripts/probe.sh\n"
+        "        rules:\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    # The sandbox policy binds control_root/.git; git init ensures bwrap finds it.
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})  # resolve_run needs a registered provider
+
+    r1 = await run_change(change, on_event=lambda _e: None)
+    assert r1 is RunResult.PAUSED
+    snapshot = change.change_dir / "workflow"
+    assert (snapshot / "scripts" / "probe.sh").exists()
+
+    # Mutate the live workflow out from under the run: delete script AND step.
+    shutil.rmtree(wf)
+
+    # Resume reuses the frozen snapshot — no re-copy from the now-missing live
+    # dir (which would raise), and the deleted script still runs.
+    r2 = await run_change(change, on_event=lambda _e: None)
+    assert r2 is RunResult.PAUSED
+    evs = [e for e in change.event_log().read()
+           if e.get("type") == "script_blocked"]
+    assert evs and evs[-1]["payload"]["step"] == "check"
+    # exit 7 proves the snapshot's probe.sh actually executed on resume.
+    assert evs[-1]["payload"]["exit"] == 7
