@@ -467,7 +467,7 @@ def test_v_step_tier_configured_flags_subagent_role() -> None:
     assert any("ghost" in e.message for e in errors)
 
 
-# ── _v_no_wait_for_user_in_parallel_dispatchable ──────────────────────────────
+# ── _v_subagent_forbidden_tools ───────────────────────────────────────────────
 
 _WAITER_SUBAGENT = """\
 ---
@@ -564,3 +564,109 @@ def test_resume_in_defaults_on_max_retries_to_non_agent_is_rejected(tmp_path: Pa
     with pytest.raises((LoadError, LoadErrors)) as ei:
         load_workflow(wf)
     assert any("resume" in str(e) and "agent" in str(e) for e in ei.value.errors)
+
+
+_TASKER_SUBAGENT = """\
+---
+name: tasker
+tools: [task, complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
+_RENAMER_SUBAGENT = """\
+---
+name: renamer
+tools: [rename_change, complete_step]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
+_LEAD_WITH_TASKER_SUB = """\
+---
+name: lead
+tools: [task, complete_step]
+subagents: [tasker]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
+_LEAD_WITH_RENAMER_SUB = """\
+---
+name: lead
+tools: [task, complete_step]
+subagents: [renamer]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
+_PLAIN_SUBAGENT = """\
+---
+name: plain
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
+_LEAD_WITH_PLAIN_SUB = """\
+---
+name: lead
+subagents: [plain]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+prompt body
+"""
+
+
+def test_dispatchable_subagent_with_task_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/lead.md
+        """, agents={"lead": _LEAD_WITH_TASKER_SUB, "tasker": _TASKER_SUBAGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert any("tasker" in str(e) and "task" in str(e) for e in ei.value.errors)
+
+
+def test_dispatchable_subagent_with_rename_change_is_error(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/lead.md
+        """, agents={"lead": _LEAD_WITH_RENAMER_SUB, "renamer": _RENAMER_SUBAGENT})
+    with pytest.raises((LoadError, LoadErrors)) as ei:
+        load_workflow(wf)
+    assert any(
+        "renamer" in str(e) and "rename_change" in str(e) for e in ei.value.errors)
+
+
+def test_default_resolved_subagent_has_no_forbidden_tools(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/lead.md
+        """, agents={"lead": _LEAD_WITH_PLAIN_SUB, "plain": _PLAIN_SUBAGENT})
+    load_workflow(wf)  # must not raise — `plain` resolves to BASE_CAPS only

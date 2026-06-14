@@ -38,7 +38,7 @@ def validate(
     if configured_tiers is not None:
         _v_step_tier_configured(workflow, configured_tiers, errors)
     _v_differ_from_targets_exist(workflow, errors)
-    _v_no_wait_for_user_in_parallel_dispatchable(workflow, errors)
+    _v_subagent_forbidden_tools(workflow, errors)
 
     return errors, warnings
 
@@ -292,7 +292,10 @@ def _v_differ_from_targets_exist(
             )
 
 
-def _v_no_wait_for_user_in_parallel_dispatchable(
+_SUBAGENT_FORBIDDEN_TOOLS = ("wait_for_user", "task", "rename_change")
+
+
+def _v_subagent_forbidden_tools(
     workflow: Workflow, errors: list[LoadError]
 ) -> None:
     dispatchable: set[str] = set()
@@ -302,13 +305,14 @@ def _v_no_wait_for_user_in_parallel_dispatchable(
         adef = workflow.agents.get(name)
         if adef is None:
             continue  # unknown-subagent reference reported elsewhere
-        if "wait_for_user" in adef.tools:
-            errors.append(
-                LoadError(
-                    f"subagent {name!r} is parallel-dispatchable (named in a "
-                    f"`subagents:` list) and declares 'wait_for_user'; a batched "
-                    f"subagent cannot pause the run",
-                    adef.source,
-                    hint="remove 'wait_for_user' from tools, or make the subagent sequential",
+        for tool in _SUBAGENT_FORBIDDEN_TOOLS:
+            if tool in adef.tools:
+                errors.append(
+                    LoadError(
+                        f"subagent {name!r} is parallel-dispatchable (named in a "
+                        f"`subagents:` list) and declares {tool!r}; a dispatched "
+                        f"subagent cannot pause, dispatch, or rename the change",
+                        adef.source,
+                        hint=f"remove {tool!r} from the subagent's tools",
+                    )
                 )
-            )
