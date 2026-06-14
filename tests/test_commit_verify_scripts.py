@@ -188,8 +188,8 @@ def test_autosquash_is_noop_without_fixups(tmp_path: Path) -> None:
 
 def test_autosquash_aborts_cleanly_on_conflict(tmp_path: Path) -> None:
     # A fixup of task 1 and a later task 2 both edit the same line → autosquash
-    # replay conflicts. The script must `git rebase --abort` and exit non-zero,
-    # leaving the branch intact (Resolution 6 → engine pauses for a human).
+    # replay conflicts. The script exits 2 (resolvable fold conflict) and leaves
+    # the rebase in progress for autosquash-resolve; it does NOT abort.
     root = _impl_repo(tmp_path, n_tasks=1)
     (root / "f.py").write_text("orig\n")
     _git(root, "add", "-A")
@@ -202,13 +202,10 @@ def test_autosquash_aborts_cleanly_on_conflict(tmp_path: Path) -> None:
     (root / "f.py").write_text("fixed\n")                 # fixup of task 1, same line
     _git(root, "add", "-A")
     _git(root, "commit", f"--fixup={a}")
-    before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
-                            capture_output=True, text=True, check=True).stdout.strip()
-    assert _run("autosquash.sh", root, "2026-06-01-x") != 0
-    after = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
-                           capture_output=True, text=True, check=True).stdout.strip()
-    assert before == after                                # aborted, branch intact
-    assert not (root / ".git" / "rebase-merge").exists()  # no rebase left in progress
+    assert _run("autosquash.sh", root, "2026-06-01-x") == 2  # fold conflict → autosquash-resolve
+    assert (root / ".git" / "rebase-merge").exists()          # rebase left in progress
+    state = root / ".imp" / "change" / "state"
+    assert (state / "autosquash-before-tree").exists()        # oracle for autosquash-verify
 
 
 def _change_subject(root: Path, ref: str) -> str:

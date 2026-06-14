@@ -136,7 +136,8 @@ def test_verify_rejects_leftover_fixup_subject(tmp_path: Path) -> None:
 
     result = _run(VERIFY, pr)
     assert result.returncode == 2, result.stderr
-    assert "fixup" in result.stderr.lower() or "squash" in result.stderr.lower() or "amend" in result.stderr.lower()
+    lower = result.stderr.lower()
+    assert "fixup" in lower or "squash" in lower or "amend" in lower
     assert (_state(pr) / "autosquash-resolve-attempts").read_text().strip() == "1"
     assert (_state(pr) / "autosquash-before-tree").exists()
 
