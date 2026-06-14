@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import anyio
 import pytest
 
+import imp.cli.prompt as prompt_mod
 from imp.cli import main as cli_main
 from imp.engine.executor import RunResult
 from tests.conftest import _seed_control
@@ -411,3 +413,73 @@ def test_spec_writer_prompt_has_seed_branch() -> None:
     if next_heading != -1:
         section = section[:next_heading]
     assert cli_main.SPEC_SEED_MARKER in section
+
+
+def test_opening_prompt_reply_wires_to_seed_opening(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run(change: object, *, on_event: object,
+                        user_chat_input_fn: object, coordinator: object,
+                        non_interactive: object, seed_opening: object) -> RunResult:
+        captured["seed_opening"] = seed_opening
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+
+    async def _fake_ask(self: object, *, question: object = None,
+                        width: object = None, prompt_text: object = None) -> str:
+        return "add a feature"
+
+    monkeypatch.setattr(prompt_mod.Prompt, "ask_async", _fake_ask)
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        args = _new_args(opening=None, non_interactive=False)
+        rc = anyio.run(cli_main._async_cmd_new, args)
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert captured["seed_opening"] == "add a feature"
+
+
+def test_opening_prompt_empty_reply_gives_none_seed_opening(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_control(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, object] = {}
+
+    async def _fake_run(change: object, *, on_event: object,
+                        user_chat_input_fn: object, coordinator: object,
+                        non_interactive: object, seed_opening: object) -> RunResult:
+        captured["seed_opening"] = seed_opening
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(cli_main, "run_change", _fake_run)
+
+    async def _fake_ask(self: object, *, question: object = None,
+                        width: object = None, prompt_text: object = None) -> str:
+        return "   "
+
+    monkeypatch.setattr(prompt_mod.Prompt, "ask_async", _fake_ask)
+
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        args = _new_args(opening=None, non_interactive=False)
+        rc = anyio.run(cli_main._async_cmd_new, args)
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc == 0
+    assert captured["seed_opening"] is None
