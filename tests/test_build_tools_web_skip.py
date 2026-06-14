@@ -6,7 +6,6 @@ import pytest
 
 from imp.agents.runner import AgentInvocation, ChangeContext, Message, TextBlock
 from imp.engine.types import AgentDef, OutputSchema, SourceLoc
-from imp.providers import errors as perr
 from imp.providers.anthropic import _build_tools as anthropic_build
 from imp.providers.claude_code import _build_tools as cc_build
 from imp.providers.openai import _build_tools as openai_build
@@ -43,9 +42,24 @@ def test_web_search_is_skipped_not_registry_looked_up(build, provider) -> None:
     assert "complete_step" in tools
 
 
-def test_openai_web_fetch_declaration_fails_loud() -> None:
-    with pytest.raises(perr.ConfigError):
-        openai_build(_inv("openai", frozenset({"complete_step", "web_fetch"})))
+def test_openai_web_fetch_declaration_degrades_gracefully() -> None:
+    # web_fetch on openai is dropped, not raised; the reserved name also never
+    # enters the registry tool dict.
+    tools = openai_build(_inv("openai", frozenset({"complete_step", "web_fetch"})))
+    assert "web_fetch" not in tools
+    assert "complete_step" in tools
+
+
+def test_openai_researcher_toolset_loads() -> None:
+    # The researcher declares both web tools; under openai it must load with
+    # web_fetch silently dropped (and both reserved names absent from the dict).
+    tools = openai_build(_inv(
+        "openai",
+        frozenset({"complete_step", "read_file", "glob", "grep", "bash",
+                   "query_events", "web_search", "web_fetch"})))
+    assert "web_fetch" not in tools and "web_search" not in tools
+    assert {"complete_step", "read_file", "glob", "grep", "bash",
+            "query_events"} <= set(tools)
 
 
 def test_anthropic_web_fetch_declaration_is_allowed() -> None:
