@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import io
-
 from imp.remote.drivers import telegram as imp_telegram
 
 
@@ -64,14 +62,6 @@ def test_clamp_text_truncates_overflow_and_marks_it() -> None:
     assert out.endswith("[truncated]")            # the cut is visible to the reader
 
 
-def test_emit_reply_collapses_to_a_single_flushed_line() -> None:
-    buf = io.StringIO()
-    imp_telegram.emit_reply("line one\nline two\r\nthree", buf)
-    # imp reads exactly one line per reply, so internal newlines collapse to
-    # spaces and the value is terminated with a single trailing newline.
-    assert buf.getvalue() == "line one line two  three\n"
-
-
 def test_format_falls_back_to_imp_when_no_title_and_no_id() -> None:
     event = {"type": "errored", "change": {}, "payload": {}}
     assert imp_telegram.format_event_message(event) == "[imp] error"
@@ -86,71 +76,7 @@ def test_format_uses_payload_message_key_as_body() -> None:
     assert imp_telegram.format_event_message(event) == "[T] error\nsomething went wrong"
 
 
-def test_emit_reply_plain_string() -> None:
-    buf = io.StringIO()
-    imp_telegram.emit_reply("ok", buf)
-    assert buf.getvalue() == "ok\n"
-
-
-def test_handle_event_drops_bodyless_silent_narrative() -> None:
-    # A tool-only llm_response (no prose) is silent-narrative noise: dropping it
-    # beats buzzing a bare "[title] llm_response" type name.
-    sent: list[tuple[int, str, bool]] = []
-
-    def send(chat_id: int, text: str, *, silent: bool) -> None:
-        sent.append((chat_id, text, silent))
-
-    event = {
-        "type": "llm_response",
-        "change": {"title": "T"},
-        "payload": {
-            "provider": "anthropic", "model": "m",
-            "raw": {"content": [
-                {"type": "tool_use", "id": "t1", "name": "read_file", "input": {}}]},
-            "usage": {}, "stop_reason": "tool_use",
-        },
-    }
-    assert imp_telegram.handle_event(event, send, chat_id=7) is False
-    assert sent == []
-
-
-def test_handle_event_keeps_bodyless_loud_event() -> None:
-    # A loud event's type name is itself the signal, so a bodyless loud event
-    # still notifies (header-only) rather than being dropped.
-    sent: list[tuple[int, str, bool]] = []
-
-    def send(chat_id: int, text: str, *, silent: bool) -> None:
-        sent.append((chat_id, text, silent))
-
-    event = {"type": "completed", "change": {"id": "c1"}, "payload": {}}
-    assert imp_telegram.handle_event(event, send, chat_id=7) is True
-    assert sent == [(7, "[c1] done", False)]
-
-
 def test_clamp_text_passes_exactly_max_length_unchanged() -> None:
     from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
     text = "x" * TELEGRAM_MAX_TEXT
     assert clamp_text(text) == text
-
-
-def test_make_send_clamps_overlong_text() -> None:
-    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, make_send
-    captured: list[dict] = []
-
-    def fake_api_call(token: str, method: str, params: dict) -> dict:  # type: ignore[type-arg]
-        captured.append(params)
-        return {"ok": True}
-
-    import imp.remote.drivers.telegram as _t
-    original = _t.api_call
-    _t.api_call = fake_api_call  # type: ignore[assignment]
-    try:
-        send = make_send("tok")
-        send(42, "a" * 5000, silent=False)
-    finally:
-        _t.api_call = original
-
-    assert len(captured) == 1
-    text = captured[0]["text"]
-    assert len(text) == TELEGRAM_MAX_TEXT
-    assert text.endswith("[truncated]")

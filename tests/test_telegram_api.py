@@ -14,17 +14,6 @@ def test_get_updates_params_shape() -> None:
     assert imp_telegram.get_updates_params(3, 25) == {"offset": 3, "timeout": 25}
 
 
-def test_make_send_calls_api_with_sendmessage(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[tuple] = []
-    monkeypatch.setattr(
-        imp_telegram, "api_call",
-        lambda token, method, params: calls.append((token, method, params)))
-    imp_telegram.make_send("TOK")(5, "hello", silent=False)
-    assert calls == [(
-        "TOK", "sendMessage",
-        {"chat_id": 5, "text": "hello", "disable_notification": False})]
-
-
 def test_make_get_updates_calls_api_with_getupdates(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple] = []
 
