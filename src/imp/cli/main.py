@@ -109,6 +109,22 @@ class ReplyInterjectRouter:
 
 SPEC_SEED_MARKER = "Implement this spec"
 
+OPENING_QUESTION = (
+    "What change would you like to make? Describe what you have in mind, "
+    "and I'll help shape it into a spec.")
+
+
+def _should_prompt_opening(
+    *, seed_text: str | None, interactive: bool,
+) -> bool:
+    if not interactive:
+        return False
+    return seed_text is None
+
+
+def _normalize_opening_reply(reply: str) -> str | None:
+    return reply.strip() or None
+
 
 class SeedError(Exception):
     """A bad spec-seed source: a missing/unreadable --spec-file, or two seed
@@ -283,14 +299,36 @@ def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
 
 def _pause_lines(
     name: str, phase: str | None, token: str,
-    *, reason: str | None = None, color: bool,
+    *, reason: str | None = None, color: bool, recover_phase: str | None = None,
 ) -> list[str]:
     at = f"  at {phase}" if phase else ""
     why = f"  ({reason})" if reason else ""
-    return [
+    lines = [
         ansi(f"Paused  {name}{at}{why}", "dim", enabled=color),
         ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
     ]
+    if recover_phase is not None:
+        lines.append(ansi(
+            f"   recover: imp resume {token} --from {recover_phase}",
+            "dim", enabled=color))
+    return lines
+
+
+def _recover_phase(change: Change) -> str | None:
+    from imp.engine.executor import _resume_replays_transcript
+    try:
+        state = State.load(change.state_dir)
+    except FileNotFoundError:
+        return None
+    if state.step is None or state.resume_pending != state.step:
+        return None
+    phase = _phase_from_events(list(change.event_log().read()))
+    if phase is None:
+        return None
+    transcript_dir = change.change_dir / "steps" / phase / state.step
+    if _resume_replays_transcript(transcript_dir):
+        return None
+    return phase
 
 
 def _pause_facts(change: Change) -> tuple[str, str | None, str]:
@@ -306,14 +344,16 @@ def _emit_paused(change: Change, reason: str | None = None) -> None:
     color = should_use_color(sys.stdout)
     name, phase, token = _pause_facts(change)
     print("\n" + "\n".join(
-        _pause_lines(name, phase, token, reason=reason, color=color)))
+        _pause_lines(name, phase, token, reason=reason, color=color,
+                     recover_phase=_recover_phase(change))))
 
 
 def _emit_paused_summary(change: Change) -> None:
     """The trailing run-status line on a non-interactive pause / merge-block."""
     color = should_use_color(sys.stdout)
     name, phase, token = _pause_facts(change)
-    for ln in _pause_lines(name, phase, token, color=color):
+    for ln in _pause_lines(name, phase, token, color=color,
+                            recover_phase=_recover_phase(change)):
         print(ln)
 
 
@@ -528,9 +568,13 @@ async def _run_change_session(
                         seed_opening=seed_opening_pending)
                     seed_opening_pending = None
             except EOFError:
-                return _finalize_paused_exit(change, driver, coord, "ctrl-d")
+                return _finalize_paused_exit(
+                    change, driver, coord,
+                    _exit_pause_reason(coord.pause_reason, "ctrl-d"))
             except KeyboardInterrupt:
-                return _finalize_paused_exit(change, driver, coord, "ctrl-c")
+                return _finalize_paused_exit(
+                    change, driver, coord,
+                    _exit_pause_reason(coord.pause_reason, "ctrl-c"))
 
             if coord.escalated:
                 return _finalize_paused_exit(change, driver, coord, "force-quit")
@@ -585,12 +629,14 @@ async def _run_change_session(
                 # Ctrl-D at the resume prompt → pause-and-exit (rc 130), the same
                 # finalize as a Ctrl-D during the run (plan §2: the interrupted
                 # prompt's Ctrl-D pauses, it does not crash).
-                return _finalize_paused_exit(change, driver, coord, "ctrl-d")
+                return _finalize_paused_exit(
+                    change, driver, coord,
+                    _exit_pause_reason(coord.pause_reason, "ctrl-d"))
             except KeyboardInterrupt:
                 # Second Ctrl-C or SIGTERM at the resume prompt: pause-and-exit,
                 # mirroring the run loop's exit arm.
                 return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "ctrl-c")
+                    change, driver, coord, _exit_pause_reason(coord.pause_reason, "ctrl-c"))
             if slash != "continue" and line.strip():
                 coord.enqueue_interject(line)
             change.event_log().append(
@@ -606,6 +652,10 @@ async def _run_change_session(
                 await channel.stop()
         status.reset()
         tg.cancel_scope.cancel()
+
+
+def _exit_pause_reason(engine_reason: str | None, gesture: str) -> str:
+    return engine_reason or gesture
 
 
 def _finalize_paused_exit(
@@ -633,6 +683,9 @@ async def _collect_resume_input(
     at completion only /continue (or Ctrl-D) finishes. Ctrl-D raises EOFError out
     of reply_input_fn; the caller wraps this call in `except EOFError` to
     pause-and-exit (rc 130) — EOFError is propagated, never swallowed here."""
+    if not at_completion and sys.stdout.isatty():
+        print("paused — type a message to redirect, "
+              "or ctrl-d to leave it paused")
     reminder_shown = False
     while True:
         line = await reply_input_fn()  # Ctrl-D → EOFError (propagated to caller)
@@ -912,6 +965,23 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         input_fn=input, output_fn=print,
         err_fn=lambda m: print(m, file=sys.stderr))
 
+    interactive = (not bool(getattr(args, "non_interactive", False))
+                   and sys.stdin.isatty() and sys.stdout.isatty())
+    opening_text = seed.seed_text
+    if _should_prompt_opening(seed_text=seed.seed_text, interactive=interactive):
+        prompt = Prompt(
+            editing_mode=_editing_mode(control),
+            color=should_use_color(sys.stdout))
+        try:
+            reply = (await prompt.ask_async(question=OPENING_QUESTION,
+                                            width=_term_width())).strip()
+        except (EOFError, KeyboardInterrupt):
+            print("imp: cancelled", file=sys.stderr)
+            return 130
+        # An empty reply falls back to the unseeded path (the spec-writer opens
+        # by asking); a real answer becomes the opening intent.
+        opening_text = _normalize_opening_reply(reply)
+
     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
     # No auto-name: an unnamed Change has an empty title (slug == ""). The agent
     # names it via rename_change once intent is clear, or the user passes --title.
@@ -937,7 +1007,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
             _warn_if_tui_unavailable(args, sys.stdout)
             if _tui_requested(args) and not non_interactive:
                 return await _run_tui_session(
-                    change, args=args, seed_opening=seed.seed_text)
+                    change, args=args, seed_opening=opening_text)
             status = LiveStatus(sys.stdout)
             driver = LiveDriver(stream=sys.stdout,
                                 color=should_use_color(sys.stdout),
@@ -973,7 +1043,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
                             change, coord=coord, driver=driver, status=status,
                             esc_reader=esc_reader, reply_input_fn=reply_input_fn,
                             non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_opening=seed.seed_text)
+                            seed_opening=opening_text)
             except* (LoadError, LoadErrors) as eg:
                 # A bad workflow/config raised on the FIRST run_change (it never
                 # reaches the loop). _run_change_session has already cleaned up
@@ -1334,6 +1404,9 @@ def _resolve_default_id(control: Path) -> str | None:
     return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
 
 
+_NO_CHANGES_MESSAGE = "No Changes."
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
@@ -1348,9 +1421,8 @@ def _cmd_log(args: argparse.Namespace) -> int:
     else:
         change_id = _resolve_default_id(control)
     if change_id is None:
-        print("imp: no Changes found (no in-flight or completed Changes)",
-              file=sys.stderr)
-        return 2
+        print(_NO_CHANGES_MESSAGE)
+        return 0
     events = _load_events_for_id(control, change_id)
     if events is None:
         print(f"imp: no such Change {change_id!r}", file=sys.stderr)
@@ -1654,9 +1726,10 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
         _interactive() if interactive is None else interactive)
     if do_prompt:
         st = State.load(change.state_dir)
+        effective = _effective_status(st.status, change.change_dir)
         n = worktree.commit_count(control, change_id, change.base_branch)
         print(f"Abandon {token}: {change.title!r} "
-              f"(status {st.status}, {n} commit{'s' if n != 1 else ''})?")
+              f"(status {effective}, {n} commit{'s' if n != 1 else ''})?")
         try:
             ans = input_fn(
                 "Type 'y' to confirm, anything else to cancel: ").strip().lower()
@@ -1728,12 +1801,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
     except worktree.PreconditionError:
-        print("No Changes.")
+        print(_NO_CHANGES_MESSAGE)
         return 0
     inflight = _sort_rows_newest_first(_status_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
     if not inflight and not past:
-        print("No Changes.")
+        print(_NO_CHANGES_MESSAGE)
         return 0
     color = should_use_color(sys.stdout)
     now = datetime.now(UTC)
@@ -1887,7 +1960,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_status = sub.add_parser(
         "status",
-        help="List in-flight Changes (use -a for completed and abandoned).")
+        help="List in-flight Changes (use -a for completed and abandoned).",
+        description=(
+            "List in-flight Changes as a table (id, status, step, last "
+            "activity, title). Use -a/--all to also show completed and "
+            "abandoned Changes."
+        ),
+    )
     p_status.add_argument(
         "-a", "--all", action="store_true",
         help="Also list completed and abandoned Changes (default: in-flight only).",
@@ -1895,7 +1974,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=_cmd_status)
 
     p_config = sub.add_parser(
-        "config", help="Show the effective config and per-setting provenance.")
+        "config",
+        help="Show the effective config and per-setting provenance.",
+        description=(
+            "Show the effective configuration and where each setting came "
+            "from (its provenance layer). --explain TIER traces one tier's "
+            "model bindings through the layers; --all shows every "
+            "provider x tier row."
+        ),
+    )
     p_config.add_argument("--explain", metavar="TIER", default=None,
                           help="trace one tier's bindings through the layers")
     p_config.add_argument("--all", action="store_true",
@@ -1907,7 +1994,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "abandon",
         help="Tear down a Change's worktree, branch, and state (logged).",
     )
-    p_abandon.add_argument("token")
+    p_abandon.add_argument(
+        "token",
+        help="Change id or short token identifying which Change to abandon.")
     p_abandon.add_argument(
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")

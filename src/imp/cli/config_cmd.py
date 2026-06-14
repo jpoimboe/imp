@@ -31,14 +31,6 @@ def _layer(src_file: Path) -> str:
     return "user"
 
 
-_LAYER_COLOR = {
-    "default": "dim",
-    "user": "cyan",
-    "local": "yellow",
-    "project": "green",
-}
-
-
 def _arrow(out: TextIO, key: str, value: str, src_file: Path) -> None:
     out.write(f"  {key:<28} {value:<24} ← {_label(src_file)}\n")
 
@@ -106,8 +98,10 @@ def render_explain(eff: EffectiveConfig, tier: str, out: TextIO, *, color: bool 
         for vendor in sorted(cfg.tiers[tier])
     ]
     for vendor, value, src_file in rows:
+        value_cell = f"{value:<24}"
+        if color:
+            value_cell = pal.ansi(value_cell, "bold")
         annotation = f"← {_label(src_file)}"
         if color:
-            annotation = pal.ansi(
-                annotation, _LAYER_COLOR[_layer(src_file)])
-        out.write(f"  {vendor:<28} {value:<24} {annotation}\n")
+            annotation = pal.ansi(annotation, "dim")
+        out.write(f"  {vendor:<28} {value_cell} {annotation}\n")

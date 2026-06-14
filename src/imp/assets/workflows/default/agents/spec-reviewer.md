@@ -66,6 +66,11 @@ meta-commentary defects — do not flag them.
 
 Report `findings` as classified prose, grouped by severity. If there are no issues, state that explicitly (e.g., "No findings. Spec is complete and ready for planning.").
 
+State your verified conclusion once. Do not repeat the same "all claims
+verified" conclusion across a narration bullet, the findings body, and one or
+more one-line summaries — a single statement inside `findings` is enough. The
+streaming CLI shows every line, so repetition is pure noise.
+
 Set `blocking = true` if any Critical or Major findings exist; `blocking = false` otherwise.
 
 Set `has_minor_findings = true` when there are **Minor** findings worth
