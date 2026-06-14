@@ -68,7 +68,7 @@ def test_main_sends_hello_forwards_stdin_and_relays_reply(tmp_path: Path) -> Non
         assert not t.is_alive(), "server thread did not finish in time"
         assert rc == 0
         assert out.getvalue() == "do the thing\n"
-        assert parse_hello(received[0]) == ("2026-06-13-abc", "Add dark mode")
+        assert parse_hello(received[0]) == ("2026-06-13-abc", "Add dark mode", False)
         assert received[1] == '{"type": "agent_output", "payload": {"k": "v"}}'
     finally:
         srv.close()
@@ -140,4 +140,4 @@ def test_main_attaches_when_the_daemon_appears_and_reattaches_after_a_bounce(
     assert not ct.is_alive(), "connector did not exit after stdin EOF"
     assert rc_box == [0]
     assert len(hellos) == 2, "connector did not re-attach after the daemon bounced"
-    assert all(parse_hello(h) == ("2026-06-13-abc", "Add dark mode") for h in hellos)
+    assert all(parse_hello(h) == ("2026-06-13-abc", "Add dark mode", False) for h in hellos)
