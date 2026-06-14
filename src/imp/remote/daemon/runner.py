@@ -228,13 +228,22 @@ async def run_daemon(
 
 
 def start_daemon(control_root: Path) -> int:
-    """`imp remote-control start`: reject a second live daemon, then run in foreground."""
+    """`imp remote-control start`: reject a second live daemon, refuse when no
+    remote.driver is configured, then run in foreground."""
+    from imp.cli.remote_channel import driver_config_from
+    from imp.providers.effective import load_effective_config
     from imp.remote.drivers.telegram import ConfigError
     try:
         check_not_running(control_root)
     except DaemonAlreadyRunning:
         print("imp: a remote-control daemon is already running for this repo",
               file=sys.stderr)
+        return 2
+    config = load_effective_config(
+        project_root=control_root, control_root=control_root).config
+    if driver_config_from(config) is None:
+        print("imp: remote-control requires a configured remote.driver; add a "
+              "remote.driver block to your config and restart", file=sys.stderr)
         return 2
     try:
         anyio.run(run_daemon, control_root)
