@@ -6,12 +6,20 @@
 # (journal + remove worktree + mark completed), mirroring the run_change flow.
 from pathlib import Path
 
+import anyio
+
 from imp.engine.change import Change
 from imp.engine.executor import _complete, _route_merge
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog, State
 from imp.engine.types import Pause
 from tests.conftest import _git, _seed_control
+
+
+def _run_merge(step, ch, state, log):
+    """_route_merge is a coroutine (it offloads the blocking git merge off the
+    event loop); drive it to completion from these sync tests."""
+    return anyio.run(_route_merge, step, ch, state, log)
 
 
 def _merge_step():
@@ -37,7 +45,7 @@ def test_merge_step_merges_then_complete_journals_and_removes(tmp_path: Path) ->
     _git(ch.project_root, "commit", "-qm", "feat")
     state, log = _ctx(ch)
 
-    action, _fb, _muts = _route_merge(_merge_step(), ch, state, log)
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     # MERGED -> continue; commit stashed for _complete to finalize.
     assert not isinstance(action, Pause)
     assert state.merge_commit is not None
@@ -67,7 +75,7 @@ def test_merge_step_merge_blocked_on_conflict(tmp_path: Path) -> None:
     _git(tmp_path, "commit", "-qam", "base")
     state, log = _ctx(ch)
 
-    action, _fb, _muts = _route_merge(_merge_step(), ch, state, log)
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     # _route_merge intercepts CONFLICT into a reasoned merge_blocked Pause.
     assert isinstance(action, Pause)
     assert action.reason == "merge_blocked"
@@ -86,7 +94,7 @@ def test_merge_step_refuses_dirty_worktree(tmp_path: Path) -> None:
     (ch.project_root / "uncommitted.txt").write_text("not committed")  # left dirty
     state, log = _ctx(ch)
 
-    action, _fb, _muts = _route_merge(_merge_step(), ch, state, log)
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert isinstance(action, Pause)
     assert action.reason == "merge_blocked"
     assert action.kind == "worktree_dirty"
@@ -102,14 +110,14 @@ def test_merge_blocked_resumes_and_completes(tmp_path: Path) -> None:
     ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
     (ch.project_root / "f.txt").write_text("v")  # dirty -> first attempt blocks
     state, log = _ctx(ch)
-    action, _fb, _muts = _route_merge(_merge_step(), ch, state, log)
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert isinstance(action, Pause)
     assert state.merge_commit is None
 
     _git(ch.project_root, "add", "-A")
     _git(ch.project_root, "commit", "-qm", "f")
     state = State.load(ch.state_dir)
-    action, _fb, _muts = _route_merge(_merge_step(), ch, state, JsonlEventLog(ch.events_path))
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, JsonlEventLog(ch.events_path))
     assert not isinstance(action, Pause)
     assert state.merge_commit is not None
     result = _complete(ch, state, JsonlEventLog(ch.events_path))
@@ -131,8 +139,67 @@ def test_merge_step_idempotent_when_commit_already_recorded(tmp_path: Path) -> N
     state.merge_commit = "deadbeef"  # pretend a prior run already merged
     base_before = _git(tmp_path, "rev-parse", "main").stdout.strip()
 
-    action, _fb, _muts = _route_merge(_merge_step(), ch, state, log)
+    action, _fb, _muts = _run_merge(_merge_step(), ch, state, log)
     assert not isinstance(action, Pause)
     # No second merge commit on base.
     assert _git(tmp_path, "rev-parse", "main").stdout.strip() == base_before
     assert state.merge_commit == "deadbeef"
+
+
+def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> None:
+    """The merge step's git work (merge_to_base, under RepoGitLock) must run OFF
+    the event loop, like a script gate. A conflict-heavy or large merge would
+    otherwise starve concurrent tasks (status tick(), signal receiver,
+    remote-channel poller) for its full duration. This stubs merge_to_base with a
+    blocking sleep and asserts a concurrent ticker kept advancing.
+    """
+    import inspect
+    import time
+    import types
+
+    import anyio
+
+    from imp.engine import worktree
+    from imp.engine.state import InMemoryEventLog
+
+    def _blocking_merge(*a, **k):
+        time.sleep(0.5)                     # stand-in for a slow git merge
+        return worktree.MergeResult("MERGED", "deadbeef")
+
+    monkeypatch.setattr(worktree, "merge_to_base", _blocking_merge)
+
+    change = types.SimpleNamespace(
+        change_dir=tmp_path, control_root=tmp_path, id="feat",
+        base_branch="main", title="x", project_root=tmp_path, state_dir=tmp_path,
+    )
+    step = _merge_step()
+
+    async def main() -> None:
+        state = types.SimpleNamespace(vars={}, merge_commit=None,
+                                      save=lambda *a, **k: None)
+        log = InMemoryEventLog()
+
+        ticks = 0
+
+        async def ticker() -> None:
+            nonlocal ticks
+            while True:
+                await anyio.sleep(0.02)
+                ticks += 1
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(ticker)
+            await anyio.sleep(0.06)          # let the ticker spin up
+            before = ticks
+            res = _route_merge(step, change, state, log)
+            if inspect.isawaitable(res):
+                res = await res
+            during = ticks - before
+            tg.cancel_scope.cancel()
+
+        assert during >= 8, (
+            f"event loop starved during merge step: only {during} ticks advanced "
+            "while a 0.5s merge ran (expected ~25)"
+        )
+
+    anyio.run(main)

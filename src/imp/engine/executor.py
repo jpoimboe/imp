@@ -369,7 +369,7 @@ async def _dispatch_step(
     if step.kind == "branch":
         return _route_branch(step, state, log)
     if step.kind == "merge":
-        return _route_merge(step, change, state, log)
+        return await _route_merge(step, change, state, log)
     if step.kind == "script":
         return await _route_script(step, change, state, log,
                                    verify_command=verify_command,
@@ -456,7 +456,7 @@ async def _route_script(
     return action, feedback, muts
 
 
-def _route_merge(
+async def _route_merge(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Engine-native authoritative merge (B3/F1). Holds RepoGitLock (inside
@@ -488,9 +488,16 @@ def _route_merge(
     sha_file = change.change_dir / "integrated_base_sha"
     expected_sha = sha_file.read_text().strip() if sha_file.exists() else None
 
-    result = worktree.merge_to_base(
-        change.control_root, change.id, change.base_branch, title=change.title,
-        project_root=change.project_root, expected_base_sha=expected_sha)
+    # merge_to_base holds RepoGitLock and shells out to git (merge/commit); a
+    # large or conflict-heavy merge can take seconds-to-minutes. Offload it to a
+    # worker thread so the event loop keeps turning — same rationale as the
+    # script gate (see _route_script). The surrounding emits and state.save stay
+    # on the loop thread (single terminal writer / no cross-thread state race).
+    result = await anyio.to_thread.run_sync(
+        functools.partial(
+            worktree.merge_to_base,
+            change.control_root, change.id, change.base_branch, title=change.title,
+            project_root=change.project_root, expected_base_sha=expected_sha))
     if result.status == "MERGED":
         state.merge_commit = result.merge_commit
         state.save(change.state_dir)
