@@ -64,11 +64,16 @@ def declared_web_tools(agent_def: AgentDef) -> list[str]:
 
 
 def check_web_capability(provider_name: str, agent_def: AgentDef) -> None:
-    """Drop (and warn once about) any declared native web tool the resolved
-    provider cannot fulfill, instead of failing the run. The per-provider spec
-    builders already emit only supported capabilities, so the unsupported tool
-    is effectively absent; this records why. No-op when everything is
+    """Drop (and warn once about) any EXPLICITLY-declared native web tool the
+    resolved provider cannot fulfill, instead of failing the run. The
+    per-provider spec builders already emit only supported capabilities, so the
+    unsupported tool is effectively absent; this records why. Soft
+    (default-granted) web tools — present only because the agent resolved to the
+    all-default base set (explicit_tools is False) — are dropped silently by the
+    native spec builders and are never gated here. No-op when everything is
     supported."""
+    if not agent_def.explicit_tools:
+        return
     declared = set(declared_web_tools(agent_def))
     if not declared:
         return

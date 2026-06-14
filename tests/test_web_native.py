@@ -14,12 +14,13 @@ def _clear_warned_unsupported():
     wn._warned_unsupported.clear()
 
 
-def _agent(tools: frozenset[str]) -> AgentDef:
+def _agent(tools: frozenset[str], explicit_tools: bool = False) -> AgentDef:
     loc = SourceLoc(file=Path("a.md"), line=1)
     return AgentDef(
         name="t", description="", tools=tools, subagents=(),
         output_schema=OutputSchema(fields=(), source=loc),
-        prompt_template_source="", source_path=Path("a.md"), source=loc)
+        prompt_template_source="", source_path=Path("a.md"), source=loc,
+        explicit_tools=explicit_tools)
 
 
 def test_reserved_names() -> None:
@@ -32,24 +33,23 @@ def test_declared_web_tools_filters_and_orders() -> None:
 
 
 def test_capability_ok_for_anthropic_both() -> None:
-    # Should not raise.
-    wn.check_web_capability("anthropic", _agent(frozenset({"web_search", "web_fetch"})))
+    wn.check_web_capability("anthropic", _agent(frozenset({"web_search", "web_fetch"}), explicit_tools=True))
 
 
 def test_capability_openai_web_fetch_degrades(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="imp.providers.web_native"):
-        wn.check_web_capability("openai", _agent(frozenset({"web_fetch"})))  # no raise
+        wn.check_web_capability("openai", _agent(frozenset({"web_fetch"}), explicit_tools=True))  # no raise
     assert any("web_fetch" in r.getMessage() and "openai" in r.getMessage() for r in caplog.records)
 
 
 def test_capability_codex_web_fetch_degrades(caplog) -> None:
     with caplog.at_level(logging.WARNING, logger="imp.providers.web_native"):
-        wn.check_web_capability("codex", _agent(frozenset({"web_fetch"})))  # no raise
+        wn.check_web_capability("codex", _agent(frozenset({"web_fetch"}), explicit_tools=True))  # no raise
     assert any("codex" in r.getMessage() and "web_fetch" in r.getMessage() for r in caplog.records)
 
 
 def test_capability_degrades_warns_once(caplog) -> None:
-    agent = _agent(frozenset({"web_search", "web_fetch"}))
+    agent = _agent(frozenset({"web_search", "web_fetch"}), explicit_tools=True)
     with caplog.at_level(logging.WARNING, logger="imp.providers.web_native"):
         wn.check_web_capability("openai", agent)
         wn.check_web_capability("openai", agent)
@@ -65,12 +65,11 @@ def test_openai_specs_drops_web_fetch_keeps_web_search() -> None:
 
 
 def test_capability_openai_web_search_ok() -> None:
-    wn.check_web_capability("openai", _agent(frozenset({"web_search"})))
+    wn.check_web_capability("openai", _agent(frozenset({"web_search"}), explicit_tools=True))
 
 
 def test_capability_codex_web_search_ok() -> None:
-    # codex supports model-hosted web_search (option B) — must not raise.
-    wn.check_web_capability("codex", _agent(frozenset({"web_search"})))
+    wn.check_web_capability("codex", _agent(frozenset({"web_search"}), explicit_tools=True))
 
 
 def test_anthropic_specs() -> None:
@@ -92,3 +91,13 @@ def test_cc_enabled_builtins() -> None:
     assert got == ["WebSearch"]
     got2 = wn.cc_enabled_web_builtins(_agent(frozenset({"web_search", "web_fetch"})))
     assert sorted(got2) == ["WebFetch", "WebSearch"]
+
+
+def test_capability_soft_web_fetch_skipped_on_openai() -> None:
+    wn.check_web_capability(
+        "openai", _agent(frozenset({"web_search", "web_fetch"}), explicit_tools=False))
+
+
+def test_capability_soft_web_fetch_skipped_on_codex() -> None:
+    wn.check_web_capability(
+        "codex", _agent(frozenset({"web_search", "web_fetch"}), explicit_tools=False))
