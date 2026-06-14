@@ -246,9 +246,15 @@ def start_daemon(control_root: Path) -> int:
         return 2
     config = load_effective_config(
         project_root=control_root, control_root=control_root).config
-    if driver_config_from(config) is None:
+    _driver_raw = (getattr(config, "remote", None) or {}).get("driver")
+    if not _driver_raw:
         print("imp: remote-control requires a configured remote.driver; add a "
               "remote.driver block to your config and restart", file=sys.stderr)
+        return 2
+    if driver_config_from(config) is None:
+        _name = _driver_raw.get("name", "<unknown>")
+        print(f"imp: remote-control: driver {_name!r} is not recognised; "
+              "check remote.driver.name in your config", file=sys.stderr)
         return 2
     try:
         anyio.run(run_daemon, control_root)
