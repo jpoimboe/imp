@@ -4,7 +4,7 @@ description: Interactively brainstorm with the user, name the change once intent
 tools: [complete_step, wait_for_user, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search, rename_change]
 output:
   status: {type: enum, values: [Success, Error]}
-  phase: {type: enum, values: [written, confirmed]}
+  phase: {type: enum, values: [written]}
   spec_path: {type: string}
   complexity: {type: enum, values: [trivial, standard]}
   unseen_changes: {type: bool}
@@ -340,9 +340,6 @@ Per turn it is the OR over that turn's changes:
 
 - `phase: written` — spec is written, committed, and ready for review (or sent
   back through review after a rework, minors, or gate-discussion edit)
-- `phase: confirmed` — no longer produced by the spec-writer. The forward
-  `spec-confirm` step now owns the user confirmation; this value remains in the
-  output enum only for schema stability and is never emitted here.
 
 ---
 
