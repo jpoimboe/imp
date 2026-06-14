@@ -11,11 +11,14 @@ complete_step. The whole steps/ tree is removed at change completion.
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import Any
+
+import anyio
 
 from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import (
@@ -368,8 +371,9 @@ async def _dispatch_step(
     if step.kind == "merge":
         return _route_merge(step, change, state, log)
     if step.kind == "script":
-        return _route_script(step, change, state, log, verify_command=verify_command,
-                             sandbox_policy=sandbox_policy)
+        return await _route_script(step, change, state, log,
+                                   verify_command=verify_command,
+                                   sandbox_policy=sandbox_policy)
     return await _route_agent(
         step, workflow, change, state, log,
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
@@ -409,19 +413,28 @@ def _route_branch(
     return _finish(log, step, match)            # branch goto carries NO feedback
 
 
-def _route_script(
+async def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
     *, verify_command: str | None = None,
     sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step)
-    out = run_script(step, cwd=change.workflow_dir,
-                     env_extra=engine_env(project_root=change.project_root,
-                                          change_id=change.id,
-                                          change_slug=change.slug,
-                                          change_title=change.title,
-                                          verify_command=verify_command),
-                     policy=sandbox_policy)
+    # The script gate's subprocess runs to completion under a blocking
+    # proc.communicate() (gates.run_script). Offload it to a worker thread so the
+    # event loop keeps turning — otherwise a multi-minute verify gate starves
+    # every concurrent task on the loop (the live-status tick() animator, the
+    # signal receiver, the remote-channel poller), freezing the UI at
+    # "running · 0s" until the command returns. Only the blocking wait moves off
+    # the loop; the event emits stay on the loop thread (single terminal writer).
+    out = await anyio.to_thread.run_sync(
+        functools.partial(
+            run_script, step, cwd=change.workflow_dir,
+            env_extra=engine_env(project_root=change.project_root,
+                                 change_id=change.id,
+                                 change_slug=change.slug,
+                                 change_title=change.title,
+                                 verify_command=verify_command),
+            policy=sandbox_policy))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
     action, _, muts = _finish(log, step, match)
