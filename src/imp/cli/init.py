@@ -292,10 +292,11 @@ def run_init(
 
     output_fn("")
     if already_initialized:
+        output_fn("Project already initialized (imp/project.yaml is committed).")
         if wrote_user_config:
-            output_fn("Project already initialized — bootstrapped your machine's config.")
+            output_fn("Bootstrapped your machine config (providers, theme).")
         else:
-            output_fn("Project already initialized — your machine's config is already set up.")
+            output_fn("Your machine config is already set up — nothing to do.")
     else:
         output_fn("Created:")
         output_fn("  imp/project.yaml     (track in git — workflow + project settings)")
