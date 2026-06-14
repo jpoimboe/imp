@@ -35,6 +35,46 @@ from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
 
 _log = logging.getLogger("imp.daemon")
 
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_LOG_NAMES = ("imp.daemon", "imp.remote")
+
+
+def _install_file_logging(
+    control_root: Path, env: Mapping[str, str],
+) -> list[logging.Handler]:
+    log_path = control_root / ".imp" / "remote-control.log"
+    level = logging.DEBUG if env.get("IMP_DEBUG") == "1" else logging.INFO
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler: logging.Handler = logging.FileHandler(log_path)
+    except OSError as exc:
+        logging.getLogger("imp.daemon").warning(
+            "remote-control file logging disabled (%s): %s", log_path, exc)
+        return []
+    file_handler.setLevel(level)
+    file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    stderr_handler: logging.Handler = logging.StreamHandler()
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    handlers = [file_handler, stderr_handler]
+    for name in _LOG_NAMES:
+        logger = logging.getLogger(name)
+        for handler in handlers:
+            logger.addHandler(handler)
+        logger.setLevel(level)
+    return handlers
+
+
+def _remove_file_logging(handlers: list[logging.Handler]) -> None:
+    for name in _LOG_NAMES:
+        logger = logging.getLogger(name)
+        for handler in handlers:
+            logger.removeHandler(handler)
+        logger.setLevel(logging.NOTSET)
+    for handler in handlers:
+        with contextlib.suppress(Exception):
+            handler.close()
+
 
 class DaemonAlreadyRunning(Exception):
     """A daemon is already accepting on this repo's socket (single daemon per repo)."""
