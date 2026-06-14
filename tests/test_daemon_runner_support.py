@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import socket
+import threading
 from pathlib import Path
 
 import pytest
@@ -77,3 +79,100 @@ def test_check_not_running_raises_when_socket_is_live(tmp_path: Path) -> None:
 def test_check_not_running_passes_when_no_daemon(tmp_path: Path) -> None:
     (tmp_path / ".imp").mkdir()
     runner.check_not_running(tmp_path)   # no raise
+
+
+def test_worker_gate_logs_once_then_suppresses_until_a_success(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    gate = runner._WorkerGate()
+    with caplog.at_level(logging.DEBUG, logger="imp.daemon"):
+        gate.fail(RuntimeError("x"))   # first failure → WARNING
+        gate.fail(RuntimeError("y"))   # still failing → DEBUG
+        gate.ok()                      # a success re-arms the warning
+        gate.fail(RuntimeError("z"))   # next failure → WARNING again
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    debugs = [r for r in caplog.records if r.levelno == logging.DEBUG]
+    assert len(warnings) == 2
+    assert len(debugs) == 1
+
+
+class _RaiseThenStopAdapter:
+    """poll_once raises on the first call, then sets `stop` on the second."""
+
+    def __init__(self, stop: threading.Event) -> None:
+        self._stop = stop
+        self.polls = 0
+
+    def on_event(self, event: dict) -> None:
+        pass
+
+    def on_response(self, response: object) -> None:
+        pass
+
+    def poll_once(self) -> None:
+        self.polls += 1
+        if self.polls == 1:
+            raise RuntimeError("boom")
+        self._stop.set()
+
+
+def test_adapter_worker_survives_a_raising_poll_and_continues(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(runner, "_WORKER_GAP", 0.01)   # keep the backoff fast
+    stop = threading.Event()
+    adapter = _RaiseThenStopAdapter(stop)
+    with caplog.at_level(logging.WARNING, logger="imp.daemon"):
+        runner._adapter_worker(adapter, queue.Queue(), queue.Queue(), stop)
+    assert adapter.polls == 2                       # loop continued past the raise
+    assert "adapter worker cycle failed" in caplog.text
+
+
+def test_adapter_worker_shutdown_survives_a_failing_final_drain(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from imp.remote.daemon.commands import Notice
+
+    stop = threading.Event()
+    stop.set()                                       # skip the loop, go to final drain
+    responses: queue.Queue = queue.Queue()
+    responses.put(Notice("bye"))
+
+    class _FailingDrainAdapter:
+        def on_event(self, event: dict) -> None:
+            pass
+
+        def on_response(self, response: object) -> None:
+            raise RuntimeError("send 400")
+
+        def poll_once(self) -> None:
+            pass
+
+    with caplog.at_level(logging.WARNING, logger="imp.daemon"):
+        runner._adapter_worker(
+            _FailingDrainAdapter(), queue.Queue(), responses, stop)
+    assert "final response drain failed" in caplog.text
+
+
+def test_adapter_worker_shutdown_survives_a_failing_outbound_drain(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    stop = threading.Event()
+    stop.set()                                       # skip the loop, go to final drain
+    outbound: queue.Queue = queue.Queue()
+    outbound.put('{"type": "x"}')
+
+    class _FailingOutboundAdapter:
+        def on_event(self, event: dict) -> None:
+            raise RuntimeError("outbound 400")
+
+        def on_response(self, response: object) -> None:
+            pass
+
+        def poll_once(self) -> None:
+            pass
+
+    with caplog.at_level(logging.WARNING, logger="imp.daemon"):
+        runner._adapter_worker(
+            _FailingOutboundAdapter(), outbound, queue.Queue(), stop)
+    assert "final outbound drain failed" in caplog.text

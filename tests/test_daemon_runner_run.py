@@ -7,6 +7,7 @@ from pathlib import Path
 import anyio
 import pytest
 
+from imp.remote.daemon.commands import Help
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.protocol import make_hello
 from imp.remote.daemon.runner import pid_path, run_daemon
@@ -68,3 +69,43 @@ async def test_run_daemon_binds_relays_a_south_event_and_cleans_up(tmp_path: Pat
     # After run_daemon returns the socket is unbound and the pidfile removed.
     assert not socket_is_live(spath)
     assert not pid_path(tmp_path).exists()
+
+
+class SubmitOnceAdapter:
+    def __init__(self, submit) -> None:
+        self._submit = submit
+        self._done = False
+
+    def on_event(self, event: dict) -> None:
+        pass
+
+    def on_response(self, response: object) -> None:
+        pass
+
+    def poll_once(self) -> None:
+        if not self._done:
+            self._done = True
+            self._submit(Help())
+        time.sleep(0.01)
+
+
+@pytest.mark.anyio
+async def test_run_daemon_logs_start_and_routed_command_to_file(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    shutdown = anyio.Event()
+    log_path = tmp_path / ".imp" / "remote-control.log"
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(functools.partial(
+            run_daemon, tmp_path, env={},
+            make_adapter=lambda env, submit: SubmitOnceAdapter(submit),
+            install_signals=False, shutdown=shutdown))
+
+        with anyio.fail_after(5):
+            while not (log_path.exists() and "routing command" in log_path.read_text()):
+                await anyio.sleep(0.02)
+        shutdown.set()
+
+    text = log_path.read_text()
+    assert "remote-control daemon starting" in text
+    assert "routing command" in text

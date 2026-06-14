@@ -49,6 +49,16 @@ _LONG_POLL_TIMEOUT = 25   # seconds; getUpdates long-poll window
 _HTTP_TIMEOUT = 35        # seconds; urlopen ceiling, must exceed the long-poll
 _POLL_GAP = 1.0   # seconds to back off after a failed poll cycle
 
+TELEGRAM_MAX_TEXT = 4096
+_TRUNCATION_MARKER = "\n[truncated]"
+
+
+def clamp_text(text: str) -> str:
+    if len(text) <= TELEGRAM_MAX_TEXT:
+        return text
+    keep = TELEGRAM_MAX_TEXT - len(_TRUNCATION_MARKER)
+    return text[:keep] + _TRUNCATION_MARKER
+
 
 def curate(event_type: Any) -> str | None:
     """Classify an imp event type: 'loud' (notify), 'silent' (quiet narrative),
@@ -221,7 +231,8 @@ def api_call(token: str, method: str, params: Mapping[str, Any]) -> dict[str, An
 def make_send(token: str) -> Callable[..., None]:
     """Bind a sendMessage caller to the bot token."""
     def send(chat_id: int, text: str, *, silent: bool) -> None:
-        api_call(token, "sendMessage", send_message_params(chat_id, text, silent=silent))
+        params = send_message_params(chat_id, clamp_text(text), silent=silent)
+        api_call(token, "sendMessage", params)
     return send
 
 

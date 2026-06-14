@@ -35,6 +35,48 @@ from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
 
 _log = logging.getLogger("imp.daemon")
 
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_LOG_NAMES = ("imp.daemon", "imp.remote")
+
+
+def _install_file_logging(
+    control_root: Path, env: Mapping[str, str],
+) -> list[logging.Handler]:
+    log_path = control_root / ".imp" / "remote-control.log"
+    level = logging.DEBUG if env.get("IMP_DEBUG") == "1" else logging.INFO
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler: logging.Handler = logging.FileHandler(log_path)
+    except OSError as exc:
+        logging.getLogger("imp.daemon").warning(
+            "remote-control file logging disabled (%s): %s", log_path, exc)
+        return []
+    file_handler.setLevel(level)
+    file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    stderr_handler: logging.Handler = logging.StreamHandler()
+    stderr_handler.setLevel(logging.WARNING)
+    stderr_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    handlers = [file_handler, stderr_handler]
+    for name in _LOG_NAMES:
+        logger = logging.getLogger(name)
+        for handler in handlers:
+            logger.addHandler(handler)
+        logger.setLevel(level)
+    return handlers
+
+
+def _remove_file_logging(handlers: list[logging.Handler]) -> None:
+    if not handlers:
+        return
+    for name in _LOG_NAMES:
+        logger = logging.getLogger(name)
+        for handler in handlers:
+            logger.removeHandler(handler)
+        logger.setLevel(logging.NOTSET)
+    for handler in handlers:
+        with contextlib.suppress(Exception):
+            handler.close()
+
 
 class DaemonAlreadyRunning(Exception):
     """A daemon is already accepting on this repo's socket (single daemon per repo)."""
@@ -104,16 +146,46 @@ def _make_telegram_adapter(
     return TelegramNorthAdapter.from_env(dict(env), submit)
 
 
+_WORKER_GAP = 1.0
+
+
+class _WorkerGate:
+    def __init__(self) -> None:
+        self._failing = False
+
+    def ok(self) -> None:
+        self._failing = False
+
+    def fail(self, exc: BaseException) -> None:
+        if self._failing:
+            _log.debug("adapter worker cycle failed: %r", exc)
+            return
+        self._failing = True
+        _log.warning("adapter worker cycle failed: %r", exc, exc_info=True)
+
+
 def _adapter_worker(
     adapter: Any, outbound: queue.Queue[str],
     responses: queue.Queue[Response], stop: threading.Event,
 ) -> None:
+    gate = _WorkerGate()
     while not stop.is_set():
+        try:
+            drain_outbound(adapter, outbound)
+            drain_responses(adapter, responses)
+            adapter.poll_once()
+            gate.ok()
+        except Exception as exc:
+            gate.fail(exc)
+            stop.wait(_WORKER_GAP)
+    try:
         drain_outbound(adapter, outbound)
+    except Exception:
+        _log.warning("final outbound drain failed during shutdown", exc_info=True)
+    try:
         drain_responses(adapter, responses)
-        adapter.poll_once()
-    drain_outbound(adapter, outbound)
-    drain_responses(adapter, responses)
+    except Exception:
+        _log.warning("final response drain failed during shutdown", exc_info=True)
 
 
 async def _handle_command(
@@ -161,6 +233,7 @@ async def _dispatch_inbound(
         command = await anyio.to_thread.run_sync(_get)
         if command is None:
             return
+        _log.info("routing command: %r", command)
         try:
             await _handle_command(command, control, responses)
         except Exception:
@@ -208,6 +281,9 @@ async def run_daemon(
         abandon=abandon, list_changes=list_changes)
     adapter = make_adapter(env, inbound.put)
 
+    log_handlers = _install_file_logging(control_root, env)
+    _log.info("remote-control daemon starting (control_root=%s)", control_root)
+
     with contextlib.suppress(FileNotFoundError):
         spath.unlink()   # clear a stale socket file (guard already proved not live)
     try:
@@ -225,11 +301,15 @@ async def run_daemon(
             await hub.close()       # triggers ClosedResourceError in hub.serve
             await anyio.sleep(0)    # let the hub.serve task see it before we cancel
             tg.cancel_scope.cancel()
+    except Exception:
+        _log.exception("remote-control daemon crashed")
+        raise
     finally:
         await hub.close()
         with contextlib.suppress(FileNotFoundError):
             spath.unlink()
         remove_pid(control_root)
+        _remove_file_logging(log_handlers)
 
 
 def start_daemon(control_root: Path) -> int:
