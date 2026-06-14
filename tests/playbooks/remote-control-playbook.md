@@ -39,6 +39,9 @@ mkdir -p "$WT/.imp"
 cat > "$WT/.imp/config.yaml" <<'YAML'
 providers: [claude_code]   # exactly one of: claude_code | anthropic | openai | codex
 theme: ansi
+remote:
+  driver:
+    name: telegram
 YAML
 ```
 
