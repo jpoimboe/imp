@@ -1,7 +1,6 @@
 ---
 name: implementer
 description: Implement one task; apply the task-lead's directed fixes; commit the task with git.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   result: {type: enum, values: [DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT]}

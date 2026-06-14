@@ -1,7 +1,6 @@
 ---
 name: task-lead
 description: Implement-phase controller — pick the next task, dispatch implementer + one reviewer, adjudicate, commit one clean unit, record progress.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events, task]
 subagents: [implementer, quality-reviewer]
 output:
   status: {type: enum, values: [Success, Error]}

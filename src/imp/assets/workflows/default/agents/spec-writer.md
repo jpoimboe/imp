@@ -1,7 +1,6 @@
 ---
 name: spec-writer
 description: Interactively brainstorm with the user, name the change once intent is clear, then write and commit the spec.
-tools: [complete_step, wait_for_user, read_file, write_file, edit_file, glob, grep, bash, query_events, web_search, rename_change, task]
 subagents: [explorer, researcher]
 output:
   status: {type: enum, values: [Success, Error]}

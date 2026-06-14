@@ -1,7 +1,6 @@
 ---
 name: autosquash-resolve
 description: Resolve a mid-flight fixup!-fold rebase conflict so the fold preserves the pre-autosquash tree, then drive the rebase to completion.
-tools: [complete_step, read_file, write_file, edit_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   summary: {type: string}

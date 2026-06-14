@@ -8,6 +8,7 @@ Build order in this file:
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import sys
 from pathlib import Path
@@ -100,7 +101,17 @@ def parse_agent_file(path: Path) -> AgentDef:
             "'output' must be a mapping", source
         )
     schema = parse_output_schema(output_raw, loc(path, output_raw))
+    if "tools" in fm and "deny_tools" in fm:
+        raise LoadError(
+            "agent may declare 'tools:' or 'deny_tools:', not both", source)
+    explicit_tools = "tools" in fm
     tools = frozenset(fm.get("tools") or [])
+    deny_raw = fm.get("deny_tools")
+    if deny_raw is not None and not (
+        isinstance(deny_raw, list) and all(isinstance(x, str) for x in deny_raw)
+    ):
+        raise LoadError("'deny_tools' must be a list of strings", source)
+    deny_tools = frozenset(deny_raw or [])
     subagents = tuple(fm.get("subagents") or [])
 
     mtc_raw = fm.get("max_tool_calls")
@@ -126,7 +137,38 @@ def parse_agent_file(path: Path) -> AgentDef:
         source=source,
         max_tool_calls=mtc_raw,
         tier=tier,
+        explicit_tools=explicit_tools,
+        deny_tools=deny_tools,
     )
+
+
+BASE_CAPS: frozenset[str] = frozenset({
+    "read_file", "glob", "grep", "query_events", "bash",
+    "edit_file", "write_file", "web_search", "web_fetch",
+})
+TOP_LEVEL_CAPS: frozenset[str] = frozenset({"wait_for_user", "rename_change"})
+
+
+def _effective_tools(agent: AgentDef, is_sub: bool) -> frozenset[str]:
+    if agent.explicit_tools:
+        return frozenset(agent.tools)
+    effective = set(BASE_CAPS)
+    if not is_sub:
+        effective |= TOP_LEVEL_CAPS
+        if agent.subagents:
+            effective.add("task")
+    effective -= agent.deny_tools
+    return frozenset(effective)
+
+
+def _resolve_agent_tools(agents: dict[str, AgentDef]) -> None:
+    dispatchable: set[str] = set()
+    for a in agents.values():
+        dispatchable.update(a.subagents)
+    for name in list(agents):
+        agent = agents[name]
+        agents[name] = dataclasses.replace(
+            agent, tools=_effective_tools(agent, name in dispatchable))
 
 
 # ── Workflow parsing ──────────────────────────────────────────────────────────
@@ -625,6 +667,8 @@ def load_workflow(
                     agent.source,
                 )
             agents[agent.name] = agent
+
+    _resolve_agent_tools(agents)
 
     # vars (top-level, optional)
     vars_obj = _parse_vars(raw.get("vars"), root_source, yaml_path)

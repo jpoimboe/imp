@@ -744,3 +744,245 @@ def test_merge_kind_requires_rules(tmp_path: Path) -> None:
         """)
     with pytest.raises((LoadError, LoadErrors), match="requires a rules"):
         load_workflow(wf)
+
+
+def test_parse_agent_deny_tools(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ndeny_tools: [bash, web_fetch]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    agent = parse_agent_file(p)
+    assert agent.deny_tools == frozenset({"bash", "web_fetch"})
+    assert agent.explicit_tools is False
+    assert agent.tools == frozenset()
+
+
+def test_parse_agent_deny_tools_empty_list(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ndeny_tools: []\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    agent = parse_agent_file(p)
+    assert agent.deny_tools == frozenset()
+    assert agent.explicit_tools is False
+
+
+def test_parse_agent_explicit_tools_flag_set_when_tools_given(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ntools: [read_file]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    agent = parse_agent_file(p)
+    assert agent.explicit_tools is True
+    assert agent.deny_tools == frozenset()
+    assert agent.tools == frozenset({"read_file"})
+
+
+def test_parse_agent_tools_and_deny_tools_conflict(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ntools: [read_file]\ndeny_tools: [bash]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    with pytest.raises(LoadError) as ei:
+        parse_agent_file(p)
+    assert "deny_tools" in str(ei.value) and "not both" in str(ei.value)
+
+
+def test_parse_agent_deny_tools_not_list_of_strings(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ndeny_tools: {bash: true}\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    with pytest.raises(LoadError) as ei:
+        parse_agent_file(p)
+    assert "deny_tools" in str(ei.value)
+
+
+# ── Tool resolution tests ─────────────────────────────────────────────────────
+
+_RES_LEAD = """\
+---
+name: lead
+subagents: [worker]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+_RES_WORKER = """\
+---
+name: worker
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+_RES_LEAF = """\
+---
+name: leaf
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+_RES_DENIER = """\
+---
+name: denier
+deny_tools: [bash]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+_RES_EXPLICIT = """\
+---
+name: explicit
+tools: [read_file]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+
+def test_resolution_assigns_position_appropriate_tools(tmp_path: Path) -> None:
+    from imp.engine.loader import BASE_CAPS
+
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s_lead
+                file: agents/lead.md
+              - name: s_leaf
+                file: agents/leaf.md
+              - name: s_denier
+                file: agents/denier.md
+              - name: s_explicit
+                file: agents/explicit.md
+        """, agents={
+            "lead": _RES_LEAD, "worker": _RES_WORKER, "leaf": _RES_LEAF,
+            "denier": _RES_DENIER, "explicit": _RES_EXPLICIT,
+        })
+    w = load_workflow(wf)
+
+    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change"}
+    assert w.agents["worker"].tools == BASE_CAPS                     # subagent
+    assert w.agents["leaf"].tools == top_leaf                       # top-level leaf
+    assert w.agents["lead"].tools == top_leaf | {"task"}           # declares subagents
+    assert w.agents["denier"].tools == top_leaf - {"bash"}        # deny subtracts
+    assert w.agents["explicit"].tools == frozenset({"read_file"})  # verbatim
+    for agent in w.agents.values():
+        assert "complete_step" not in agent.tools
+        assert "load_skill" not in agent.tools
+
+
+_RES_DENIER_SUB = """\
+---
+name: denier-sub
+deny_tools: [bash]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+_RES_LEAD_WITH_DENIER_SUB = """\
+---
+name: lead-ds
+subagents: [denier-sub]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+
+def test_resolution_deny_tools_on_subagent(tmp_path: Path) -> None:
+    from imp.engine.loader import BASE_CAPS
+
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/lead-ds.md
+        """, agents={
+            "lead-ds": _RES_LEAD_WITH_DENIER_SUB,
+            "denier-sub": _RES_DENIER_SUB,
+        })
+    w = load_workflow(wf)
+    assert w.agents["denier-sub"].tools == BASE_CAPS - {"bash"}
+
+
+_RES_NESTED_MID = """\
+---
+name: nested-mid
+subagents: [nested-leaf]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+_RES_NESTED_LEAF = """\
+---
+name: nested-leaf
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+_RES_OUTER_LEAD = """\
+---
+name: outer-lead
+subagents: [nested-mid]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+
+def test_resolution_nested_dispatcher_is_subagent(tmp_path: Path) -> None:
+    from imp.engine.loader import BASE_CAPS
+
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/outer-lead.md
+        """, agents={
+            "outer-lead": _RES_OUTER_LEAD,
+            "nested-mid": _RES_NESTED_MID,
+            "nested-leaf": _RES_NESTED_LEAF,
+        })
+    w = load_workflow(wf)
+    # nested-mid is dispatchable (in outer-lead's subagents) → gets only BASE_CAPS,
+    # NOT task, even though it declares its own subagents
+    assert w.agents["nested-mid"].tools == BASE_CAPS
+    # nested-leaf is doubly-subagent; also BASE_CAPS
+    assert w.agents["nested-leaf"].tools == BASE_CAPS

@@ -1,7 +1,6 @@
 ---
 name: spec-compliance-slice
 description: Spec-compliance-only review — does the code do EXACTLY what the task/spec/docstring says?
-tools: [complete_step, read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, task_gap, plan_gap]}

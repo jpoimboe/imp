@@ -38,8 +38,7 @@ def validate(
     if configured_tiers is not None:
         _v_step_tier_configured(workflow, configured_tiers, errors)
     _v_differ_from_targets_exist(workflow, errors)
-    _v_write_tool_needs_write_permission(workflow, errors)
-    _v_no_wait_for_user_in_parallel_dispatchable(workflow, errors)
+    _v_subagent_forbidden_tools(workflow, errors)
 
     return errors, warnings
 
@@ -293,41 +292,10 @@ def _v_differ_from_targets_exist(
             )
 
 
-def _v_write_tool_needs_write_permission(
-    workflow: Workflow, errors: list[LoadError]
-) -> None:
-    """A step whose agent declares `write_file` in its tools must have at least
-    one fs_permissions rule with mode=='allow' and 'write' in operations.
-    Catches the Bug 2 class: agent can call write_file but the step grants no
-    write path, so every write silently fails with PermissionDenied.
-    """
-
-    def _has_write_allow(fs_permissions: tuple[FsRule, ...]) -> bool:
-        return any(
-            rule.mode == "allow" and "write" in rule.operations
-            for rule in fs_permissions
-        )
-
-    for step in workflow.flat_steps():
-        if step.kind != "agent" or step.file is None:
-            continue
-        agent = workflow.agents.get(step.file.stem)
-        if agent is None:
-            continue  # _v_agent_files_exist_and_named reports the missing-file case
-        if "write_file" not in agent.tools:
-            continue
-        if not _has_write_allow(step.fs_permissions):
-            errors.append(
-                LoadError(
-                    f"agent {agent.name!r} declares tool 'write_file' but the "
-                    f"step/gate has no fs_permissions rule with "
-                    f"mode=allow and operation=write",
-                    step.source,
-                )
-            )
+_SUBAGENT_FORBIDDEN_TOOLS = ("wait_for_user", "task", "rename_change")
 
 
-def _v_no_wait_for_user_in_parallel_dispatchable(
+def _v_subagent_forbidden_tools(
     workflow: Workflow, errors: list[LoadError]
 ) -> None:
     dispatchable: set[str] = set()
@@ -337,13 +305,14 @@ def _v_no_wait_for_user_in_parallel_dispatchable(
         adef = workflow.agents.get(name)
         if adef is None:
             continue  # unknown-subagent reference reported elsewhere
-        if "wait_for_user" in adef.tools:
-            errors.append(
-                LoadError(
-                    f"subagent {name!r} is parallel-dispatchable (named in a "
-                    f"`subagents:` list) and declares 'wait_for_user'; a batched "
-                    f"subagent cannot pause the run",
-                    adef.source,
-                    hint="remove 'wait_for_user' from tools, or make the subagent sequential",
+        for tool in _SUBAGENT_FORBIDDEN_TOOLS:
+            if tool in adef.tools:
+                errors.append(
+                    LoadError(
+                        f"subagent {name!r} is parallel-dispatchable (named in a "
+                        f"`subagents:` list) and declares {tool!r}; a dispatched "
+                        f"subagent cannot pause, dispatch, or rename the change",
+                        adef.source,
+                        hint=f"remove {tool!r} from the subagent's tools",
+                    )
                 )
-            )

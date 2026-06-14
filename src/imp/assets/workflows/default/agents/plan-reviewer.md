@@ -1,7 +1,6 @@
 ---
 name: plan-reviewer
 description: Review the newest plan for spec coverage, placeholders, and type consistency; severity-classified; blocking iff Critical/Major.
-tools: [complete_step, read_file, glob, grep, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   findings: {type: string}

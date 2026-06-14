@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: Fast read-only codebase exploration — find files, search code, answer questions about the codebase, and report findings with file:line citations.
-tools: [complete_step, read_file, glob, grep, bash, query_events]
+tools: [read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   report: {type: string}

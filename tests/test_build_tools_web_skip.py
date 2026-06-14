@@ -11,18 +11,19 @@ from imp.providers.claude_code import _build_tools as cc_build
 from imp.providers.openai import _build_tools as openai_build
 
 
-def _agent(tools: frozenset[str]) -> AgentDef:
+def _agent(tools: frozenset[str], explicit_tools: bool = False) -> AgentDef:
     loc = SourceLoc(file=Path("a.md"), line=1)
     return AgentDef(
         name="t", description="", tools=tools, subagents=(),
         output_schema=OutputSchema(fields=(), source=loc),
-        prompt_template_source="", source_path=Path("a.md"), source=loc)
+        prompt_template_source="", source_path=Path("a.md"), source=loc,
+        explicit_tools=explicit_tools)
 
 
-def _inv(provider: str, tools: frozenset[str]) -> AgentInvocation:
+def _inv(provider: str, tools: frozenset[str], explicit_tools: bool = False) -> AgentInvocation:
     return AgentInvocation(
-        agent_def=_agent(tools), provider_name=provider, model_name="m",
-        system_prompt="s",
+        agent_def=_agent(tools, explicit_tools=explicit_tools), provider_name=provider,
+        model_name="m", system_prompt="s",
         initial_messages=(Message(role="user", content=(TextBlock(text="go"),)),),
         change_context=ChangeContext(slug="s", title="t", project_root=Path("/"),
                                      workflow_dir=Path("/")),

@@ -1,7 +1,6 @@
 ---
 name: completeness-slice
 description: Completeness-only review — every changed symbol's callers and parallel paths.
-tools: [complete_step, read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, task_gap, plan_gap]}

@@ -1,7 +1,6 @@
 ---
 name: boundaries-slice
 description: Boundaries-only review — edge cases, overflow/empty/None, and error handling at the extremes.
-tools: [complete_step, read_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   verdict: {type: enum, values: [approve, task_gap, plan_gap]}

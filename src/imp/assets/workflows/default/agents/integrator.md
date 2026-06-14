@@ -1,7 +1,6 @@
 ---
 name: integrator
 description: Resolve a rebase that stopped on a conflict while replaying the change branch onto base — fix textual + semantic conflicts, record findings, drive the rebase to completion; escalate only what can't be safely reconciled.
-tools: [complete_step, wait_for_user, read_file, write_file, edit_file, glob, grep, bash, query_events]
 output:
   status: {type: enum, values: [Success, Error]}
   integration: {type: enum, values: [clean, review]}

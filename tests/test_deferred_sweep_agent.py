@@ -13,11 +13,16 @@ def test_deferred_sweep_parses_with_expected_contract() -> None:
     agent = parse_agent_file(SWEEP)
     assert agent.name == "deferred-sweep"
     assert set(agent.subagents) == {"implementer", "quality-reviewer"}
-    for tool in ("complete_step", "read_file", "write_file", "edit_file",
-                 "bash", "task"):
-        assert tool in agent.tools, f"missing tool {tool}"
     fields = agent.output_schema.field_names()
     assert "status" in fields and "summary" in fields
+
+
+def test_deferred_sweep_resolves_to_dispatcher_tools() -> None:
+    wf = load_workflow(default_workflow_dir())
+    agent = wf.agents["deferred-sweep"]
+    for tool in ("read_file", "write_file", "edit_file", "bash", "task"):
+        assert tool in agent.tools, f"missing tool {tool}"
+    assert "complete_step" not in agent.tools
 
 
 def test_deferred_sweep_loads_as_part_of_the_workflow() -> None:
