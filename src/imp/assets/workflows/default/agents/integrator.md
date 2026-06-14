@@ -73,7 +73,9 @@ Drive to a clean state, then verify it:
   `git status` is clean (no unmerged paths, nothing uncommitted).
 - The branch must be linear on base: `git merge-base --is-ancestor "$BASE" HEAD`
   succeeds and `git rev-list --merges "$(git merge-base "$BASE" HEAD)"..HEAD` is
-  empty. **Never leave uncommitted changes** and never leave a rebase half-done.
+  empty (this verifies the branch is genuinely linear — it is unrelated to the
+  deleted autosquash merge-detection). **Never leave uncommitted changes** and
+  never leave a rebase half-done.
 
 ## Output
 
