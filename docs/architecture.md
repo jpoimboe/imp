@@ -224,7 +224,7 @@ flowchart TD
   IP -->|plan_gap| back2([→ plan-writer])
   IP -->|clean| ISW["integration-sweep + tests"]
   ISW --> SST
-  SST --> IM{{"integrate-merge"}}
+  SST --> IM{{"integrate-rebase"}}
   IM --> INT["integrator"]
   INT --> IR["integration-review"]
   IR -->|gaps| INT
@@ -244,7 +244,7 @@ A cheap freshness check, then the lock-protected engine-native merge. If base mo
 flowchart TD
   in([from review]) --> BFC{"base-fresh-check"}
   BFC -->|"base unchanged"| M2B{"merge-to-base<br/>(lock-protected)"}
-  BFC -->|"base advanced"| reint([→ integrate-merge])
+  BFC -->|"base advanced"| reint([→ integrate-rebase])
   M2B -->|MERGED| done([change complete<br/>worktree removed · journal kept])
   M2B -->|STALE| reint
 ```
