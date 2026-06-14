@@ -121,6 +121,39 @@ async def test_approved_clean_reintegration_merges_without_second_finalize(
 
 
 @pytest.mark.anyio
+async def test_approved_nothing_to_integrate_merges_without_second_finalize(
+    tmp_path,
+) -> None:
+    """Edge case: after finalize approves and base advanced but integrate-rebase
+    finds nothing to integrate (exit 2, base became an ancestor), the change
+    routes to base-fresh-check and merges — no second human prompt."""
+    change = _seed_default_workflow(tmp_path)
+    scripts = (change.project_root / "imp" / "workflows" / "default" / "scripts")
+
+    bfc = scripts / "base-fresh-check.sh"
+    bfc.write_text(
+        "#!/usr/bin/env bash\n"
+        'f="${IMP_PROJECT_ROOT}/.imp/change/_bfc_calls"\n'
+        'n=$(( $(cat "$f" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$f"\n'
+        '[ "$n" -eq 1 ] && exit 10 || exit 0\n')
+    bfc.chmod(0o755)
+    ir = scripts / "integrate-rebase.sh"
+    ir.write_text("#!/usr/bin/env bash\nexit 2\n")
+    ir.chmod(0o755)
+
+    fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
+    _register_fake_anthropic(fake)
+
+    result = await run_change(change, non_interactive=True)
+    assert result is RunResult.COMPLETED
+
+    started = _started_steps(change)
+    assert started.count("finalize") == 1, started
+    assert "merge-to-base" in started, started
+    assert "change_merged" in _event_types(change)
+
+
+@pytest.mark.anyio
 async def test_approved_conflict_reintegration_routes_back_to_finalize(
     tmp_path,
 ) -> None:
