@@ -22,6 +22,8 @@ vars:
   review_scope:           {type: string, default: plan}  # plan | change — one review path, scoped per-plan or over the whole change
   spec_confirm:           {type: bool, default: true}    # confirm-gate enable
   spec_unseen_changes:    {type: bool, default: false}   # some turn changed the spec without user direction
+  merge_approved:         {type: bool, default: false}
+  reintegrate_clean:      {type: bool, default: false}
 
 defaults:
   max_retries: 3
@@ -220,9 +222,10 @@ phases:
         quiet: true
         command: ./scripts/integrate-rebase.sh
         rules:
+          - {if: {exit: 2, merge_approved: true}, goto: base-fresh-check}
           - {if: {exit: 2}, goto: finalize}          # base already ancestor: nothing to integrate
-          - {if: {exit: 0}, goto: integrate-verify}  # clean rebase: skip the integrator
-          - {if: {exit: 6}, continue: true}          # conflict rebase -> integrator
+          - {if: {exit: 0}, set: {reintegrate_clean: true},  goto: integrate-verify}
+          - {if: {exit: 6}, set: {reintegrate_clean: false}, continue: true}
           - {else: true, pause: true}                # bad ref / dirty / leftover rebase / limit
 
       - name: integrator
@@ -237,6 +240,7 @@ phases:
         command: ./scripts/run-verify.sh
         max_loops: 5
         rules:
+          - {if: {exit: 0, merge_approved: true, reintegrate_clean: true}, goto: base-fresh-check}
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: integrator}
 
@@ -245,8 +249,8 @@ phases:
         tier: high
         max_loops: 20
         rules:
-          - {if: {decision: merge},  goto: merge}
-          - {if: {decision: rework}, goto: implement, feedback: "Here's the feedback to address:"}
+          - {if: {decision: merge},  set: {merge_approved: true},  goto: merge}
+          - {if: {decision: rework}, set: {merge_approved: false}, goto: implement, feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
   # ── merge ───────────────────────────────────────────────────────────
@@ -255,6 +259,7 @@ phases:
       - name: base-fresh-check       # B3: cheap pre-lock freshness fast-path
         quiet: true
         command: ./scripts/base-fresh-check.sh
+        max_loops: 10
         rules:
           - {if: {exit: 0}, continue: true}          # base unchanged / not-integrated -> take the lock
           - {if: {exit: 10}, goto: integrate-rebase}  # base advanced -> re-integrate
