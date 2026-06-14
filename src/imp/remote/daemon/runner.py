@@ -104,16 +104,46 @@ def _make_telegram_adapter(
     return TelegramNorthAdapter.from_env(dict(env), submit)
 
 
+_WORKER_GAP = 1.0
+
+
+class _WorkerGate:
+    def __init__(self) -> None:
+        self._failing = False
+
+    def ok(self) -> None:
+        self._failing = False
+
+    def fail(self, exc: BaseException) -> None:
+        if self._failing:
+            _log.debug("adapter worker cycle failed: %r", exc)
+            return
+        self._failing = True
+        _log.warning("adapter worker cycle failed: %r", exc, exc_info=True)
+
+
 def _adapter_worker(
     adapter: Any, outbound: queue.Queue[str],
     responses: queue.Queue[Response], stop: threading.Event,
 ) -> None:
+    gate = _WorkerGate()
     while not stop.is_set():
+        try:
+            drain_outbound(adapter, outbound)
+            drain_responses(adapter, responses)
+            adapter.poll_once()
+            gate.ok()
+        except Exception as exc:
+            gate.fail(exc)
+            stop.wait(_WORKER_GAP)
+    try:
         drain_outbound(adapter, outbound)
+    except Exception:
+        _log.warning("final outbound drain failed during shutdown", exc_info=True)
+    try:
         drain_responses(adapter, responses)
-        adapter.poll_once()
-    drain_outbound(adapter, outbound)
-    drain_responses(adapter, responses)
+    except Exception:
+        _log.warning("final response drain failed during shutdown", exc_info=True)
 
 
 async def _handle_command(
