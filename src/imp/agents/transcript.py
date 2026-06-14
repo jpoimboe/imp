@@ -109,25 +109,29 @@ def _synthetic_tool_result_content(tool_name: str) -> str:
 
 def repair_dangling_tool_use_on_resume(
     messages: list[Message], transcript: Transcript,
-) -> Message | None:
+) -> tuple[ToolResultBlock, ...] | None:
     """Restore the tool_use ↔ tool_result invariant before resuming.
 
     Two shapes are repaired:
       1. The last message is an ASSISTANT turn with one or more unmatched tool_use
          blocks (the mid-tool interrupt left no following user turn): synthesize a
-         NEW trailing user message with a placeholder tool_result for each, append
-         it to `messages` (in place) and `transcript`, and return it.
+         NEW trailing user message with a placeholder tool_result for each plus the
+         durability note, append it to `messages` (in place) and `transcript`.
       2. The last message is a USER turn that immediately follows an assistant turn
          carrying unmatched tool_use blocks — e.g. a claude_code
          '[Request interrupted by user]' message persisted after the tool_use.
          Anthropic requires the tool_result to live in the user turn directly after
-         the tool_use, so inject the placeholder result(s) INTO that trailing user
-         turn (in place), rewrite the transcript, and return the rewritten message.
+         the tool_use, so inject the placeholder result(s) for the UNMATCHED
+         tool_uses INTO that trailing user turn (in place) and rewrite the
+         transcript.
 
-    Returns None when no repair is needed (already balanced) — the caller uses that
-    as the 'transcript was already balanced' signal. Caller is responsible for any
-    user-facing event (e.g. a tool_result event for `imp log`); this helper only
-    touches the in-memory and on-disk transcript.
+    Returns the tuple of ToolResultBlocks this call SYNTHESIZED — shape-1: every
+    result block it created; shape-2: only the `unmatched`-derived blocks, never a
+    pre-existing matched tool_result already in the trailing user turn. Returns
+    None when no repair is needed (already balanced); the returned tuple is never
+    empty, so `is not None` is still the 'transcript was already balanced' signal.
+    The Message is mutated in place in `messages` and `transcript`; callers iterate
+    the returned tuple to emit one tool_result event per synthesized block.
     """
     if not messages:
         return None
@@ -139,21 +143,21 @@ def repair_dangling_tool_use_on_resume(
         ]
         if not tool_uses:
             return None
-        blocks: tuple[TextBlock | ToolResultBlock, ...] = (
-            *(
-                ToolResultBlock(
-                    tool_use_id=tu.id,
-                    content=_synthetic_tool_result_content(tu.name),
-                    is_error=True,
-                )
-                for tu in tool_uses
-            ),
-            TextBlock(text=RESUME_DURABILITY_NOTE),
+        result_blocks = tuple(
+            ToolResultBlock(
+                tool_use_id=tu.id,
+                content=_synthetic_tool_result_content(tu.name),
+                is_error=True,
+            )
+            for tu in tool_uses
         )
-        repair = Message(role="user", content=blocks)
+        repair = Message(
+            role="user",
+            content=(*result_blocks, TextBlock(text=RESUME_DURABILITY_NOTE)),
+        )
         messages.append(repair)
         transcript.append(repair)
-        return repair
+        return result_blocks
     if last.role == "user" and len(messages) >= 2 and messages[-2].role == "assistant":
         tool_uses = [
             b for b in messages[-2].content
@@ -188,7 +192,7 @@ def repair_dangling_tool_use_on_resume(
         )
         messages[-1] = repaired
         transcript.rewrite(messages)
-        return repaired
+        return result_blocks
     return None
 
 
