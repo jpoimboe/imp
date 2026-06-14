@@ -42,11 +42,11 @@ class _FakeCoordinator:
 async def test_attended_returns_reply_and_emits_event(tmp_path):
     ctx = _ctx(tmp_path, user_input_fn=lambda _q: "ship it", non_interactive=False)
     tool = make_wait_for_user_tool()
-    result = await tool.async_invoke(ctx, {"prompt": "Merge or rework?"})
+    result = await tool.async_invoke(ctx, {})
     assert result == "ship it"
     evs = [e for e in ctx.event_log.events if e["type"] == "awaiting_user_input"]
     assert evs and evs[0]["agent_id"] == "step:review/final-review"
-    assert evs[0]["payload"]["prompt"] == "Merge or rework?"
+    assert evs[0]["payload"]["prompt"] == ""
 
 
 @pytest.mark.anyio
@@ -54,7 +54,7 @@ async def test_headless_raises_awaiting_user_input(tmp_path):
     ctx = _ctx(tmp_path, user_input_fn=None, non_interactive=False)
     tool = make_wait_for_user_tool()
     with pytest.raises(AwaitingUserInput):
-        await tool.async_invoke(ctx, {"prompt": "need help"})
+        await tool.async_invoke(ctx, {})
 
 
 @pytest.mark.anyio
@@ -69,7 +69,7 @@ async def test_pending_interject_satisfies_wait_for_user(tmp_path):
     ctx = _ctx(tmp_path, user_input_fn=_must_not_solicit, non_interactive=False,
                coordinator=coord)
     tool = make_wait_for_user_tool()
-    result = await tool.async_invoke(ctx, {"prompt": "anything pending?"})
+    result = await tool.async_invoke(ctx, {})
     assert result == "use the queued line"
 
 
@@ -80,7 +80,7 @@ async def test_empty_interject_queue_falls_through_to_solicit(tmp_path):
     ctx = _ctx(tmp_path, user_input_fn=lambda _q: "solicited", non_interactive=False,
                coordinator=coord)
     tool = make_wait_for_user_tool()
-    result = await tool.async_invoke(ctx, {"prompt": "x"})
+    result = await tool.async_invoke(ctx, {})
     assert result == "solicited"
 
 
@@ -92,7 +92,7 @@ async def test_non_interactive_returns_scripted_reply(tmp_path):
     # pause now comes from the reply fn raising, not from the tool.
     ctx = _ctx(tmp_path, user_input_fn=lambda _q: "scripted", non_interactive=True)
     tool = make_wait_for_user_tool()
-    result = await tool.async_invoke(ctx, {"prompt": "x"})
+    result = await tool.async_invoke(ctx, {})
     assert result == "scripted"
 
 
@@ -106,7 +106,7 @@ async def test_non_interactive_propagates_reply_fn_pause(tmp_path):
     ctx = _ctx(tmp_path, user_input_fn=_raise, non_interactive=True)
     tool = make_wait_for_user_tool()
     with pytest.raises(AwaitingUserInput):
-        await tool.async_invoke(ctx, {"prompt": "x"})
+        await tool.async_invoke(ctx, {})
 
 
 class _RecordingCoord:
@@ -140,7 +140,7 @@ async def test_wait_for_user_brackets_await_with_begin_end(tmp_path):
     ctx = _ctx(tmp_path, user_input_fn=_ainput, non_interactive=False,
                coordinator=coord)
     tool = make_wait_for_user_tool()
-    result = await tool.async_invoke(ctx, {"prompt": "x"})
+    result = await tool.async_invoke(ctx, {})
     assert result == "ship it"
     assert coord.events == ["begin", "end"]
     assert coord.active is False      # restored on normal return
@@ -157,6 +157,6 @@ async def test_wait_for_user_restores_watchdog_on_cancel(tmp_path):
                coordinator=coord)
     tool = make_wait_for_user_tool()
     with pytest.raises(AwaitingUserInput):
-        await tool.async_invoke(ctx, {"prompt": "x"})
+        await tool.async_invoke(ctx, {})
     assert coord.events == ["begin", "end"]   # finally restored it on the exception
     assert coord.active is False

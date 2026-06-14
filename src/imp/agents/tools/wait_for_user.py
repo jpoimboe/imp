@@ -39,28 +39,23 @@ def _cancelled_exc() -> type[BaseException]:
 
 _SCHEMA = {
     "type": "object",
-    "properties": {
-        "prompt": {
-            "type": "string",
-            "description": "The question or context to show the human.",
-        }
-    },
+    "properties": {},
     "required": [],
     "additionalProperties": False,
 }
 
 
 def make_wait_for_user_tool() -> Tool:
-    async def _invoke(ctx: Any, prompt: str = "", **_ignore: Any) -> str:
+    async def _invoke(ctx: Any, **_ignore: Any) -> str:
         if ctx.event_log is not None:
             ctx.event_log.append(
                 agent_id=getattr(ctx, "agent_id", None),
                 type="awaiting_user_input",
-                payload={"prompt": prompt},
+                payload={"prompt": ""},
             )
         attended = ctx.user_input_fn is not None
         if not attended:
-            raise AwaitingUserInput(prompt)
+            raise AwaitingUserInput()
         # R6: a line the human typed WHILE the agent was running was routed to the
         # interject queue at submit time. If one is pending now, it SATISFIES this
         # wait — consume it instead of soliciting fresh input, so the human's
@@ -86,7 +81,7 @@ def make_wait_for_user_tool() -> Tool:
                 # SIGTERM/escalation tore the prompt down mid-solicit. Convert to
                 # the dangling-wait pause so no exception crosses the MCP boundary;
                 # the headless AwaitingUserInput path takes over from here.
-                raise AwaitingUserInput(prompt) from None
+                raise AwaitingUserInput() from None
             finally:
                 if coord is not None:
                     coord.end_solicit_watchdog()

@@ -228,10 +228,10 @@ async def test_solicit_cancel_converts_to_awaiting_user_input_cleanly() -> None:
         with warnings.catch_warnings():
             warnings.simplefilter("error")
             with redirect_stderr(buf), pytest.raises(AwaitingUserInput) as ei:
-                await tool.fn(ctx, prompt="approve?")
+                await tool.fn(ctx)
 
-    # The conversion preserves the prompt text for the dangling-wait pause.
-    assert ei.value.prompt == "approve?"
+    # The cancellation converts cleanly; prompt arg is dropped, prompt is always "".
+    assert ei.value.prompt == ""
     _no_cancel_scope_warning(buf.getvalue())
 
 
@@ -251,5 +251,5 @@ async def test_solicit_normal_reply_unchanged() -> None:
 
         ctx = _Ctx(user_input_fn)
         pipe.send_text("do the thing\r")
-        reply = await tool.fn(ctx, prompt="approve?")
+        reply = await tool.fn(ctx)
     assert reply == "do the thing"
