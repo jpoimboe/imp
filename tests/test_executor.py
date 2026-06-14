@@ -1353,6 +1353,27 @@ async def test_first_run_snapshots_the_workflow(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_snapshot_copy_cleans_stale_tmp_dir(tmp_path: Path) -> None:
+    """A leftover workflow.tmp from a previous crashed copy is removed before the
+    new copy proceeds, so the final workflow/ snapshot is always complete."""
+    change, _, _ = _seed_minimal_workflow(tmp_path)
+    _register_fake({"status": "Success"})
+    # Simulate a partial copy left over from a prior crash.
+    tmp = change.change_dir / "workflow.tmp"
+    tmp.mkdir()
+    (tmp / "stale.yaml").write_text("garbage")
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.COMPLETED
+    # The stale tmp dir should be gone.
+    assert not tmp.exists()
+    # And the real snapshot should be present and correct.
+    snapshot = change.change_dir / "workflow"
+    assert (snapshot / "workflow.yaml").exists()
+
+
+@pytest.mark.anyio
 async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
     tmp_path: Path,
 ) -> None:

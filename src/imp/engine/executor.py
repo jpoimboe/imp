@@ -156,7 +156,11 @@ async def run_change(
     try:
         snapshot = change.change_dir / "workflow"
         if not snapshot.is_dir():
-            shutil.copytree(change.live_workflow_dir, snapshot)
+            tmp = change.change_dir / "workflow.tmp"
+            if tmp.exists():
+                shutil.rmtree(tmp)
+            shutil.copytree(change.live_workflow_dir, tmp)
+            os.rename(tmp, snapshot)
         workflow = load_workflow(change.workflow_dir)
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,
