@@ -231,6 +231,7 @@ async def _dispatch_inbound(
         command = await anyio.to_thread.run_sync(_get)
         if command is None:
             return
+        _log.info("routing command: %r", command)
         try:
             await _handle_command(command, control, responses)
         except Exception:
@@ -278,6 +279,9 @@ async def run_daemon(
         abandon=abandon, list_changes=list_changes)
     adapter = make_adapter(env, inbound.put)
 
+    log_handlers = _install_file_logging(control_root, env)
+    _log.info("remote-control daemon starting (control_root=%s)", control_root)
+
     with contextlib.suppress(FileNotFoundError):
         spath.unlink()   # clear a stale socket file (guard already proved not live)
     try:
@@ -295,11 +299,15 @@ async def run_daemon(
             await hub.close()       # triggers ClosedResourceError in hub.serve
             await anyio.sleep(0)    # let the hub.serve task see it before we cancel
             tg.cancel_scope.cancel()
+    except Exception:
+        _log.exception("remote-control daemon crashed")
+        raise
     finally:
         await hub.close()
         with contextlib.suppress(FileNotFoundError):
             spath.unlink()
         remove_pid(control_root)
+        _remove_file_logging(log_handlers)
 
 
 def start_daemon(control_root: Path) -> int:
