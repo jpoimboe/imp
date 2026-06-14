@@ -250,6 +250,17 @@ def test_status_line_reads_your_turn_during_solicit_not_spinner() -> None:
     assert line.endswith(HINT)
 
 
+def test_question_window_wraps_and_docks_to_content_height() -> None:
+    from prompt_toolkit.layout.containers import Window
+
+    app = _app()
+    app._build_app()
+    qwin = next(w for w in app._app.layout.walk()
+                if isinstance(w, Window) and w.content is app._question_control)
+    assert qwin.wrap_lines() is True
+    assert qwin.dont_extend_height() is True
+
+
 def test_prompt_window_shows_caret_and_question() -> None:
     from prompt_toolkit.formatted_text import ANSI
     from prompt_toolkit.layout.processors import BeforeInput

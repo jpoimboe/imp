@@ -238,7 +238,8 @@ class TuiApp:
         self._question_control = FormattedTextControl(
             text=lambda: ANSI(self._solicit_question))
         question_win = ConditionalContainer(
-            Window(self._question_control),
+            Window(self._question_control,
+                   wrap_lines=True, dont_extend_height=True),
             filter=Condition(
                 lambda: self._prompt_visible and bool(self._solicit_question)))
         slash_win = ConditionalContainer(
