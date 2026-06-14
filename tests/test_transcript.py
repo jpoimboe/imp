@@ -190,3 +190,57 @@ def test_repair_dangling_tool_use_appends_durability_note(tmp_path: Path) -> Non
     # The note must survive the round-trip to disk (replayed verbatim on resume).
     assert any(RESUME_DURABILITY_NOTE in b.text
                for b in t.load()[-1].content if isinstance(b, TextBlock))
+
+
+def test_repair_balances_trailing_interrupt_user_turn(tmp_path: Path) -> None:
+    """'…, assistant(tool_use X), user("[Request interrupted by user]")' — the
+    repair injects the synthetic tool_result INTO that trailing user turn (not a
+    new appended message), so every tool_use is matched in the immediately
+    following user turn and the replayed history is well-formed."""
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant",
+                content=(ToolUseBlock(id="x1", name="bash", input={"command": "x"}),)),
+        Message(role="user",
+                content=(TextBlock(text="[Request interrupted by user]"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    repaired = repair_dangling_tool_use_on_resume(msgs, t)
+
+    assert repaired is not None
+    assert msgs[-1] is repaired           # edited in place, no new trailing turn
+    assert len(msgs) == 3
+    results = [b for b in repaired.content if isinstance(b, ToolResultBlock)]
+    assert len(results) == 1
+    assert results[0].tool_use_id == "x1"
+    assert results[0].is_error is True
+    # The original interrupt text is preserved on the same turn.
+    assert any(isinstance(b, TextBlock) and "[Request interrupted by user]" in b.text
+               for b in repaired.content)
+    # No unmatched tool_use remains; resume routes to SEND_TO_LLM (forward progress).
+    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
+    # The balance survives the round-trip to disk.
+    reloaded = Transcript(tmp_path / "transcript.jsonl").load()
+    assert classify_resume(reloaded) is ResumeState.SEND_TO_LLM
+    reloaded_results = [
+        b for m in reloaded for b in m.content if isinstance(b, ToolResultBlock)]
+    assert [r.tool_use_id for r in reloaded_results] == ["x1"]
+
+
+def test_repair_noop_when_trailing_user_already_balanced(tmp_path: Path) -> None:
+    """A trailing user turn that already carries the matching tool_result needs no
+    repair (the wait_for_user / complete_step balance paths must be unaffected)."""
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="assistant",
+                content=(ToolUseBlock(id="x1", name="bash", input={"command": "x"}),)),
+        Message(role="user",
+                content=(ToolResultBlock(tool_use_id="x1", content="ok"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+    assert repair_dangling_tool_use_on_resume(msgs, t) is None
+    assert len(msgs) == 2
