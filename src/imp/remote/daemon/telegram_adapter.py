@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from imp.remote.daemon.commands import ListResult, Response
 from imp.remote.drivers.telegram import (
     api_call,
     curate,
@@ -88,6 +89,16 @@ def format_outbound(event: dict[str, Any], handle: str) -> str:
     return f"{format_event_message(event)}\n↩ @{handle}"
 
 
+def render_response(response: Response) -> str:
+    if isinstance(response, ListResult):
+        if not response.changes:
+            return "No changes."
+        return "\n".join(
+            f"@{handle_for(c.id)}  {c.title} — {c.status} · {c.step}"
+            for c in response.changes)
+    return response.text
+
+
 def send_message(token: str, chat_id: int, text: str, *, silent: bool) -> int | None:
     """POST one sendMessage and return the created message's id, or None if absent."""
     response = api_call(token, "sendMessage", send_message_params(
@@ -151,6 +162,11 @@ class TelegramNorthAdapter:
         if message_id is not None:
             self._msg_to_change[message_id] = change_id
         self._handle_to_change[handle] = change_id
+
+    def on_response(self, response: Response) -> None:
+        text = render_response(response)
+        if text:
+            self._send(text, True)
 
     def resolve(self, inbound: Inbound) -> tuple[str | None, str]:
         """Resolve one inbound reply to (change_id, text) against the recorded maps."""
