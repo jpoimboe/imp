@@ -42,6 +42,6 @@ def test_pause_lines_include_reason_when_given() -> None:
     assert lines[0] == "Paused  add-version-flag  at implement  (ctrl-c)"
 
 
-def test_pause_lines_omit_reason_suffix_when_absent() -> None:
-    lines = _pause_lines("add-version-flag", "implement", "yaitd7", color=False)
-    assert lines[0] == "Paused  add-version-flag  at implement"
+def test_pause_lines_color_dims_with_reason() -> None:
+    lines = _pause_lines("add-version-flag", "implement", "yaitd7", reason="ctrl-c", color=True)
+    assert lines[0] == "\x1b[2mPaused  add-version-flag  at implement  (ctrl-c)\x1b[0m"

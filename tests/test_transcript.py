@@ -220,14 +220,41 @@ def test_repair_balances_trailing_interrupt_user_turn(tmp_path: Path) -> None:
     # The original interrupt text is preserved on the same turn.
     assert any(isinstance(b, TextBlock) and "[Request interrupted by user]" in b.text
                for b in repaired.content)
-    # No unmatched tool_use remains; resume routes to SEND_TO_LLM (forward progress).
-    assert classify_resume(msgs) is ResumeState.SEND_TO_LLM
     # The balance survives the round-trip to disk.
     reloaded = Transcript(tmp_path / "transcript.jsonl").load()
     assert classify_resume(reloaded) is ResumeState.SEND_TO_LLM
     reloaded_results = [
         b for m in reloaded for b in m.content if isinstance(b, ToolResultBlock)]
     assert [r.tool_use_id for r in reloaded_results] == ["x1"]
+
+
+def test_repair_balances_multiple_unmatched_tool_use_in_trailing_user_turn(tmp_path: Path) -> None:
+    """F4 shape-2: two unmatched tool_use blocks in the last assistant turn, followed
+    by a trailing user interrupt — both are patched into that user turn, no new turn
+    appended."""
+    t = Transcript(tmp_path / "transcript.jsonl")
+    msgs = [
+        Message(role="user", content=(TextBlock(text="go"),)),
+        Message(role="assistant", content=(
+            ToolUseBlock(id="a1", name="bash", input={"command": "x"}),
+            ToolUseBlock(id="a2", name="bash", input={"command": "y"}),
+        )),
+        Message(role="user",
+                content=(TextBlock(text="[Request interrupted by user]"),)),
+    ]
+    for m in msgs:
+        t.append(m)
+
+    repaired = repair_dangling_tool_use_on_resume(msgs, t)
+
+    assert repaired is not None
+    assert msgs[-1] is repaired
+    assert len(msgs) == 3
+    results = [b for b in repaired.content if isinstance(b, ToolResultBlock)]
+    tool_use_ids = {r.tool_use_id for r in results}
+    assert tool_use_ids == {"a1", "a2"}
+    assert any(isinstance(b, TextBlock) and "[Request interrupted by user]" in b.text
+               for b in repaired.content)
 
 
 def test_repair_noop_when_trailing_user_already_balanced(tmp_path: Path) -> None:

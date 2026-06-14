@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -177,7 +178,6 @@ async def _drive_session(
 
     if on_tty:
         # Force the interactive-loop predicate true without a real /dev/tty.
-        import sys
         orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
         sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
         sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
