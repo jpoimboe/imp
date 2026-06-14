@@ -6,7 +6,7 @@ from pathlib import Path
 
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
-from imp.engine.types import Goto
+from imp.engine.types import Continue, Goto
 
 
 def _steps(wf):
@@ -438,3 +438,93 @@ def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     assert link.resolve() == target.resolve(), (
         f"{link} resolves to {link.resolve()}, expected {target.resolve()}"
     )
+
+
+def test_spec_verify_commit_fast_path_no_unseen_skips_to_plan_writer() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-verify-commit"].rules
+    # Clean commit, fast path, no unseen spec change -> straight to planning,
+    # skipping spec-reviewer entirely.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "fast_path": True, "spec_unseen_changes": False},
+        output={"exit": 0, "stdout": "", "stderr": ""},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer" and m.action.resume is False
+
+
+def test_spec_verify_commit_fast_path_unseen_change_forwards_confirm_gate() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-verify-commit"].rules
+    # Fast path, confirm enabled, an undirected spec change pending -> still routes
+    # through spec-confirm (preserving spec-reviewer's gate), clearing the flag.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "fast_path": True, "spec_confirm": True,
+              "spec_unseen_changes": True},
+        output={"exit": 0, "stdout": "", "stderr": ""},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "spec-confirm" and m.action.resume is False
+    assert m.var_mutations["spec_unseen_changes"] is False
+
+
+def test_spec_verify_commit_fast_path_confirm_disabled_skips_to_plan_writer() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-verify-commit"].rules
+    # Fast path with confirm DISABLED: even an unseen change goes straight to
+    # planning -- the user opted out of the confirm gate.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "fast_path": True, "spec_confirm": False,
+              "spec_unseen_changes": True},
+        output={"exit": 0, "stdout": "", "stderr": ""},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "plan-writer" and m.action.resume is False
+
+
+def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["spec-verify-commit"].rules
+    # Non-fast path, clean commit -> continue (falls through to spec-reviewer).
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "fast_path": False},
+        output={"exit": 0, "stdout": "", "stderr": ""},
+    )
+    assert isinstance(m.action, Continue)
+
+
+def test_autosquash_fast_path_skips_review_to_stamp_trailers() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["autosquash"].rules
+    # Clean fold on the fast path -> stamp-trailers, skipping
+    # review/deferred-sweep/sweep-verify.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "fast_path": True},
+        output={"exit": 0, "stdout": "", "stderr": ""},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "stamp-trailers" and m.action.resume is False
+
+
+def test_autosquash_non_fast_path_goes_to_review() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    rules = _steps(wf)["autosquash"].rules
+    # Clean fold on the standard path -> the review panel, unchanged.
+    m = evaluate_rules(
+        rules,
+        vars={**_BASE_VARS, "fast_path": False},
+        output={"exit": 0, "stdout": "", "stderr": ""},
+    )
+    assert isinstance(m.action, Goto)
+    assert m.action.target == "review" and m.action.resume is False

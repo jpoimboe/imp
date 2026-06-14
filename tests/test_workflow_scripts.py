@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 
 from imp.assets import default_workflow_dir
+from imp.engine.loader import load_workflow
 
 
 def _scripts_dir() -> Path:
@@ -119,3 +120,32 @@ def test_run_verify_skips_on_unchanged_tree(tmp_path: Path) -> None:
         "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd})
     assert third.returncode == 0
     assert counter.read_text().count("x") == 2   # tree changed => re-ran
+
+
+def test_verify_and_sweep_verify_share_tree_skip_cache(tmp_path: Path) -> None:
+    # Both verify and sweep-verify call the same script, so they share the tree-skip cache.
+    wf = load_workflow(default_workflow_dir())
+    by = {s.name: s for s in wf.flat_steps()}
+    assert by["verify"].command == "./scripts/run-verify.sh"
+    assert by["sweep-verify"].command == "./scripts/run-verify.sh"
+
+    project = tmp_path / "proj"
+    project.mkdir()
+    _git_init(project)
+    (project / "a.txt").write_text("1")
+    _git_commit_all(project, "c1")
+    counter = project / "count"
+    cmd = f'sh -c "echo x >> {counter}"'
+
+    # First invocation (the `verify` step): runs the command, records the green tree.
+    verify = _run("run-verify.sh", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd})
+    assert verify.returncode == 0, verify.stderr
+    assert counter.read_text().count("x") == 1
+
+    # Second invocation (the `sweep-verify` step) at the SAME tree -> cache hit.
+    sweep_verify = _run("run-verify.sh", env_extra={
+        "IMP_PROJECT_ROOT": str(project), "IMP_VERIFY_COMMAND": cmd})
+    assert sweep_verify.returncode == 0, sweep_verify.stderr
+    assert "verify skipped — tree unchanged since last green run" in sweep_verify.stdout
+    assert counter.read_text().count("x") == 1   # sweep-verify did NOT re-run

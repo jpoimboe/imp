@@ -433,14 +433,15 @@ async def test_clean_review_with_minors_integrates_then_verifies(
 
 
 @pytest.mark.anyio
-async def test_fast_path_skips_reviewers_and_runs_review(
+async def test_fast_path_skips_reviewers_and_review(
     tmp_path: Path,
 ) -> None:
     change = _seed_default_workflow(tmp_path)
-    # complexity:trivial -> spec-writer sets fast_path=true; spec-reviewer runs but
-    # routes straight to plan-writer (no unseen changes); plan-review is skipped via
-    # fast-path rule on plan-verify-commit; the merged `review` step still runs
-    # (cheap re-verify mode, internally skips the opus panel — prose, dogfood-verified).
+    # complexity:trivial -> spec-writer sets fast_path=true. The fast path skips
+    # spec-reviewer (A.1: spec-verify-commit routes straight to plan-writer with no
+    # unseen change), plan-review (plan-verify-commit fast-path rule), and the whole
+    # review -> deferred-sweep -> sweep-verify block (A.2: autosquash routes to
+    # stamp-trailers). The run still reaches planning, implementation, and merge.
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic(complexity="trivial"))
 
     resolve.reset_providers_for_tests()
@@ -459,9 +460,13 @@ async def test_fast_path_skips_reviewers_and_runs_review(
 
     result = await run_change(change, on_event=on_event)
     assert result is RunResult.COMPLETED
-    assert "plan-review" not in started, started
-    assert "recheck" not in started, started          # removed step
-    assert "review" in started, started               # merged review step runs
+    assert "spec-reviewer" not in started, started    # A.1: skipped on fast path
+    assert "plan-review" not in started, started       # plan-verify-commit fast-path rule
+    assert "review" not in started, started            # A.2: skipped on fast path
+    assert "deferred-sweep" not in started, started    # A.2
+    assert "sweep-verify" not in started, started      # A.2
+    assert "plan-writer" in started, started           # planning still runs
+    assert "task-lead" in started, started             # implementation still runs
 
 
 @pytest.mark.anyio

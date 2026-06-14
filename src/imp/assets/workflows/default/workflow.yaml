@@ -49,6 +49,12 @@ phases:
         quiet: true
         command: ./scripts/spec-commit-verify.sh
         rules:
+          # Trivial fast path: skip spec-reviewer. Preserve the confirm gate exactly
+          # as spec-reviewer does today -- an undirected spec change with confirm
+          # enabled still routes through spec-confirm before planning.
+          - {if: {exit: 0, fast_path: true, spec_confirm: true, spec_unseen_changes: true},
+             set: {spec_unseen_changes: false}, goto: spec-confirm}
+          - {if: {exit: 0, fast_path: true}, goto: plan-writer}
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 
@@ -152,6 +158,7 @@ phases:
         quiet: true
         command: ./scripts/autosquash.sh
         rules:
+          - {if: {exit: 0, fast_path: true}, goto: stamp-trailers}   # trivial change: skip review/deferred-sweep/sweep-verify
           - {if: {exit: 0}, goto: review}          # clean fold / verified resolution: skip the resolver, go to the panel
           - {if: {exit: 2}, continue: true}        # resolvable fold conflict / verify failed -> autosquash-resolve
           - {else: true, pause: true}              # hard failure (exit 1) / verify bound exhausted -> human
