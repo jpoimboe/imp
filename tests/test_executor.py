@@ -1440,3 +1440,37 @@ async def test_unknown_step_pauses_without_silent_merge(tmp_path: Path) -> None:
     assert paused and paused[-1]["payload"]["reason"] == "unknown_step"
     assert paused[-1]["payload"]["step"] == "ghost-step"
     assert not any(e.get("type") == "change_merged" for e in events)
+
+
+@pytest.mark.anyio
+async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
+    tmp_path: Path,
+) -> None:
+    """A script gate runs with cwd under .imp/change/workflow/ (the snapshot,
+    sandbox binding intact) while IMP_PROJECT_ROOT still points at the worktree, so
+    git ops act on the change's real tree. Exit 0 -> continue -> COMPLETED."""
+    import subprocess
+
+    wf = tmp_path / "imp" / "workflows" / "default"
+    wf.mkdir(parents=True)
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n"
+        "  - name: only\n"
+        "    steps:\n"
+        "      - name: probe\n"
+        "        command: 'case \"$(pwd)\" in */.imp/change/workflow) ;; *) exit 9;; esac;"
+        " cd \"$IMP_PROJECT_ROOT\"; git rev-parse --is-inside-work-tree'\n"
+        "        rules:\n"
+        "          - {if: {exit: 0}, continue: true}\n"
+        "          - {else: true, pause: true}\n"
+    )
+    _write_fake_config(tmp_path)
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    change = _make_change(tmp_path)
+    _register_fake({"status": "Success"})
+
+    result = await run_change(change, on_event=lambda _e: None)
+
+    assert result is RunResult.COMPLETED
