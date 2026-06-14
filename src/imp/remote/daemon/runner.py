@@ -128,8 +128,12 @@ async def _handle_command(
         control.abandon(command.change_id)
         responses.put(Notice(f"Abandoning @{handle_for(command.change_id)}…"))
     elif isinstance(command, ListChanges):
-        changes = await anyio.to_thread.run_sync(control.list_changes)
-        responses.put(ListResult(changes))
+        try:
+            changes = await anyio.to_thread.run_sync(control.list_changes)
+            responses.put(ListResult(changes))
+        except Exception:
+            _log.warning("list_changes failed", exc_info=True)
+            responses.put(Notice("Error: could not list changes."))
     elif isinstance(command, Help):
         responses.put(Notice(HELP_TEXT))
     elif isinstance(command, Notice):
