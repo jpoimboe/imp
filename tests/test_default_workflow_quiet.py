@@ -9,7 +9,7 @@ _QUIET = {
     "spec-verify-commit", "plan-verify-commit", "commit-check",
     # review/merge plumbing: mechanical git scripts + pure routing gates
     "autosquash", "stamp-trailers",
-    "base-fresh-check", "integrate-merge",
+    "base-fresh-check", "integrate-rebase",
 }
 
 

@@ -11,7 +11,7 @@ description: |
 # or just the generalist reviewer on re-entry (panel_done) or fast-path. The
 # deferred-sweep drains Minor/Nit observations after each plan. When >1 plan ran,
 # `plan-cycle-check` routes to `review` again with `review_scope=change` for a
-# whole-change pass before `integrate-merge`.
+# whole-change pass before `integrate-rebase`.
 
 vars:
   fast_path:              {type: bool, default: false}
@@ -211,18 +211,19 @@ phases:
         rules:
           - {if: {more_plans: true}, set: {panel_done: false, multi_plan: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}   # supercycle
           - {if: {multi_plan: true, review_scope: plan}, set: {review_scope: "'change'", panel_done: false}, goto: review}   # one whole-change review pass over the full diff
-          - {else: true, goto: integrate-merge}   # single-plan, or the whole-change pass already ran (review_scope=change is the one-shot guard)
+          - {else: true, goto: integrate-rebase}   # single-plan, or the whole-change pass already ran (review_scope=change is the one-shot guard)
 
   - name: review
     steps:
-      # ── integrate base into the branch, before review folds into one decision ──
-      - name: integrate-merge
+      # ── rebase the branch ONTO base, before review folds into one decision ──
+      - name: integrate-rebase
         quiet: true
-        command: ./scripts/integrate-merge.sh
+        command: ./scripts/integrate-rebase.sh
         rules:
-          - {if: {exit: 2}, goto: finalize}   # base already ancestor: no merge to resolve -> finalize
-          - {if: {exit: 0}, continue: true}   # real base merge -> integrator
-          - {else: true, pause: true}
+          - {if: {exit: 2}, goto: finalize}          # base already ancestor: nothing to integrate
+          - {if: {exit: 0}, goto: integrate-verify}  # clean rebase: skip the integrator
+          - {if: {exit: 6}, continue: true}          # conflict rebase -> integrator
+          - {else: true, pause: true}                # bad ref / dirty / leftover rebase / limit
 
       - name: integrator
         file: agents/integrator.md
@@ -256,12 +257,12 @@ phases:
         command: ./scripts/base-fresh-check.sh
         rules:
           - {if: {exit: 0}, continue: true}          # base unchanged / not-integrated -> take the lock
-          - {if: {exit: 10}, goto: integrate-merge}  # base advanced -> re-integrate
+          - {if: {exit: 10}, goto: integrate-rebase}  # base advanced -> re-integrate
           - {else: true, pause: true}                # exit 1 preamble failure -> human
 
       - name: merge-to-base          # B3: engine-native, lock-protected, routable
         kind: merge
         rules:
-          - {if: {merge: STALE}, goto: integrate-merge}   # base moved between check and lock -> re-integrate
+          - {if: {merge: STALE}, goto: integrate-rebase}   # base moved between check and lock -> re-integrate
           - {if: {merge: MERGED}, continue: true}          # falls through to _complete finalize
           - {else: true, pause: true}                      # defensive fallback; _route_merge intercepts CONFLICT/REFUSED/DIRTY first to emit merge_blocked + a reasoned pause

@@ -1,18 +1,14 @@
-"""autosquash.sh folds fixup! commits into their targets.
+"""autosquash.sh folds fixup!/squash!/amend! commits into their targets.
 
-Layered behavior, all exercised here against the real shipped script + real git:
+The branch is always LINEAR here (base integration rebases, never merges), so this
+is the plain fork-point autosquash with no merge-recreation machinery. Exercised
+against the real shipped script + real git:
 
-- No integration merge in range: ordinary autosquash from the fork point.
-- A fixup targeting a POST-merge commit: cheap path rebases only above the most
-  recent integration merge, leaving the merge (and its baked-in resolutions)
-  byte-identical.
-- A fixup targeting a PRE-merge commit (B3/#4): the merge must be recreated to fold
-  it. autosquash does this under `git rerere` (seeded from each integration merge's
-  recorded resolution) guarded by a TREE-EQUALITY invariant — folding fixups must
-  never change the final tree. So an unrelated pre-merge fixup auto-folds with the
-  resolution preserved, while a fixup that would drop or alter a resolution (it
-  overlaps a resolved conflict, or a clean-merge semantic edit can't be replayed)
-  is refused with the branch left exactly pristine."""
+- No fixups in range: fast-path no-op (exit 0).
+- Ordinary fork-point autosquash folds fixup! / squash! directives.
+- A fold that conflicts on reorder is handed to autosquash-resolve (exit 2): the
+  rebase is left in progress and the pre-autosquash HEAD + tree are persisted.
+- A non-conflict rebase failure is a hard failure (exit 1), no oracle written."""
 from __future__ import annotations
 
 import json
@@ -64,213 +60,10 @@ def _record_change(project_root: Path) -> None:
         {"id": "x", "title": "t", "base_branch": "main"}))
 
 
-def _build_clean_merge(project_root: Path) -> tuple[str, str]:
-    """main: A → B(f v1) → C(f v2); imp/x: A → B → D(g.txt) → M(merge C).
-    Branch and base touch DIFFERENT files, so M is a clean auto-merge (no manual
-    resolution). Returns (branch_work_sha D, merge_sha M)."""
-    _init(project_root)
-    (project_root / "f.txt").write_text("base v1\n")
-    _git(project_root, "add", "f.txt")
-    _git(project_root, "commit", "-m", "base v1")
-    _git(project_root, "checkout", "-b", "imp/x")
-    (project_root / "g.txt").write_text("branch work\n")
-    _git(project_root, "add", "g.txt")
-    _git(project_root, "commit", "-m", "branch work")
-    branch_sha = _git(project_root, "rev-parse", "HEAD").stdout.strip()
-    _git(project_root, "checkout", "main")
-    (project_root / "f.txt").write_text("base v2\n")
-    _git(project_root, "add", "f.txt")
-    _git(project_root, "commit", "-m", "base v2")
-    _git(project_root, "checkout", "imp/x")
-    _git(project_root, "merge", "--no-ff", "-m", "integrate main into imp/x", "main")
-    merge_sha = _git(project_root, "rev-parse", "HEAD").stdout.strip()
-    _record_change(project_root)
-    return branch_sha, merge_sha
-
-
-def _build_conflicted_merge(project_root: Path) -> tuple[str, str]:
-    """Both sides edit f.txt line 2, resolved MANUALLY in the merge (keep both).
-    main: A → B(l1/l2/l3) → C(l2=BASE); imp/x: A → B → D(l2=BRANCH) → M(resolved).
-    Returns (branch_work_sha D, merge_sha M)."""
-    _init(project_root)
-    (project_root / "f.txt").write_text("line1\nline2\nline3\n")
-    _git(project_root, "add", "f.txt")
-    _git(project_root, "commit", "-m", "base v1")
-    _git(project_root, "checkout", "-b", "imp/x")
-    (project_root / "f.txt").write_text("line1\nBRANCH-line2\nline3\n")
-    _git(project_root, "add", "f.txt")
-    _git(project_root, "commit", "-m", "branch work")
-    branch_sha = _git(project_root, "rev-parse", "HEAD").stdout.strip()
-    _git(project_root, "checkout", "main")
-    (project_root / "f.txt").write_text("line1\nBASE-line2\nline3\n")
-    _git(project_root, "add", "f.txt")
-    _git(project_root, "commit", "-m", "base v2")
-    _git(project_root, "checkout", "imp/x")
-    _git(project_root, "merge", "--no-ff", "--no-commit", "main")  # conflicts
-    (project_root / "f.txt").write_text("line1\nBRANCH-line2\nBASE-line2\nline3\n")
-    _git(project_root, "add", "f.txt")
-    _git(project_root, "commit", "--no-edit")
-    merge_sha = _git(project_root, "rev-parse", "HEAD").stdout.strip()
-    _record_change(project_root)
-    return branch_sha, merge_sha
-
-
-def _build_semantic_merge(project_root: Path) -> tuple[str, str]:
-    """Clean auto-merge, but the integrator bakes a SEMANTIC edit into the merge
-    commit (sem.txt) that git's auto-merge would not produce. main touches f.txt,
-    branch touches g.txt. Returns (branch_work_sha D, merge_sha M)."""
-    _init(project_root)
-    (project_root / "f.txt").write_text("a\n")
-    (project_root / "sem.txt").write_text("x\n")
-    _git(project_root, "add", "f.txt", "sem.txt")
-    _git(project_root, "commit", "-m", "base v1")
-    _git(project_root, "checkout", "-b", "imp/x")
-    (project_root / "g.txt").write_text("branch work\n")
-    _git(project_root, "add", "g.txt")
-    _git(project_root, "commit", "-m", "branch work")
-    branch_sha = _git(project_root, "rev-parse", "HEAD").stdout.strip()
-    _git(project_root, "checkout", "main")
-    (project_root / "f.txt").write_text("b\n")
-    _git(project_root, "add", "f.txt")
-    _git(project_root, "commit", "-m", "base v2")
-    _git(project_root, "checkout", "imp/x")
-    _git(project_root, "merge", "--no-ff", "--no-commit", "main")  # clean
-    (project_root / "sem.txt").write_text("SEMANTIC-FIX\n")  # not from auto-merge
-    _git(project_root, "add", "sem.txt")
-    _git(project_root, "commit", "--no-edit")
-    merge_sha = _git(project_root, "rev-parse", "HEAD").stdout.strip()
-    _record_change(project_root)
-    return branch_sha, merge_sha
-
-
 def _subjects(pr: Path) -> list[str]:
     fork = _git(pr, "merge-base", "main", "HEAD").stdout.strip()
     out = _git(pr, "log", "--format=%s", f"{fork}..HEAD").stdout
     return [s for s in out.splitlines() if s]
-
-
-def _merges(pr: Path) -> int:
-    fork = _git(pr, "merge-base", "main", "HEAD").stdout.strip()
-    out = _git(pr, "rev-list", "--merges", f"{fork}..HEAD").stdout
-    return len([s for s in out.splitlines() if s])
-
-
-def _tree(pr: Path) -> str:
-    return _git(pr, "rev-parse", "HEAD^{tree}").stdout.strip()
-
-
-def _rr_cache_count(pr: Path) -> int:
-    rr = pr / ".git" / "rr-cache"
-    return len(list(rr.iterdir())) if rr.is_dir() else 0
-
-
-# ── cheap path: post-merge fixup ──────────────────────────────────────────────
-
-def test_autosquash_folds_post_merge_fixup_and_preserves_merge(tmp_path: Path) -> None:
-    """A fixup! targeting a POST-merge commit is folded by rebasing only the
-    segment above the integration merge. The merge commit is left untouched."""
-    pr = tmp_path / "wt"
-    _, merge_sha = _build_clean_merge(pr)
-    (pr / "h.txt").write_text("post v1\n")
-    _git(pr, "add", "h.txt")
-    _git(pr, "commit", "-m", "post-merge work")
-    post_sha = _git(pr, "rev-parse", "HEAD").stdout.strip()
-    (pr / "h.txt").write_text("post v1 (fixed)\n")
-    _git(pr, "add", "h.txt")
-    _git(pr, "commit", f"--fixup={post_sha}")
-
-    result = _run(pr)
-    assert result.returncode == 0, result.stderr
-    assert _git(pr, "merge-base", "--is-ancestor", merge_sha, "HEAD").returncode == 0
-    assert _git(pr, "rev-list", "--merges", "--max-count=1",
-                f"{merge_sha}^..HEAD").stdout.strip() == merge_sha
-    assert not any(s.startswith("fixup!") for s in _subjects(pr))
-    assert (pr / "h.txt").read_text() == "post v1 (fixed)\n"
-
-
-# ── #4: pre-merge fixup, merge-preserving auto-fold ───────────────────────────
-
-def test_autosquash_folds_pre_merge_fixup_unrelated_to_resolution(tmp_path: Path) -> None:
-    """A fixup! targeting a PRE-merge commit, touching a file unrelated to the
-    integration, is auto-folded: the merge is recreated under rerere and the final
-    tree is preserved. The fixup's content lands and the merge survives."""
-    pr = tmp_path / "wt"
-    branch_sha, _ = _build_conflicted_merge(pr)
-    (pr / "h.txt").write_text("post\n")
-    _git(pr, "add", "h.txt")
-    _git(pr, "commit", "-m", "post-merge work")
-    # fixup! -> D (pre-merge), editing g.txt, which the f.txt merge never touched.
-    (pr / "g.txt").write_text("branch extra\n")
-    _git(pr, "add", "g.txt")
-    _git(pr, "commit", f"--fixup={branch_sha}")
-    before_tree = _tree(pr)
-
-    result = _run(pr)
-    assert result.returncode == 0, result.stderr
-    assert _tree(pr) == before_tree                 # fold preserved the final tree
-    assert _merges(pr) >= 1                          # merge recreated, not linearized
-    assert not any(s.startswith("fixup!") for s in _subjects(pr))
-    # The integrator's manual f.txt resolution survived.
-    assert (pr / "f.txt").read_text() == "line1\nBRANCH-line2\nBASE-line2\nline3\n"
-    assert (pr / "g.txt").read_text() == "branch extra\n"
-    assert _rr_cache_count(pr) == 0                  # rerere cache cleaned up
-
-
-def test_autosquash_pauses_when_fixup_overlaps_resolved_region(tmp_path: Path) -> None:
-    """The dangerous case: a pre-merge fixup edits the SAME region the integrator
-    resolved by hand. rerere can't replay onto the changed preimage, so the
-    recreate conflicts — autosquash refuses and leaves the branch exactly
-    pristine. No silent corruption."""
-    pr = tmp_path / "wt"
-    branch_sha, _ = _build_conflicted_merge(pr)
-    (pr / "h.txt").write_text("post\n")
-    _git(pr, "add", "h.txt")
-    _git(pr, "commit", "-m", "post-merge work")
-    # fixup! -> D editing f.txt line 2 — the resolved conflict region.
-    (pr / "f.txt").write_text("line1\nBRANCH-line2-EDITED\nline3\n")
-    _git(pr, "add", "f.txt")
-    _git(pr, "commit", f"--fixup={branch_sha}")
-    head_before = _git(pr, "rev-parse", "HEAD").stdout.strip()
-
-    result = _run(pr)
-    assert result.returncode == 1
-    assert _git(pr, "rev-parse", "HEAD").stdout.strip() == head_before  # pristine
-    assert any(s.startswith("fixup!") for s in _subjects(pr))           # nothing folded
-    assert _rr_cache_count(pr) == 0                                     # cache cleaned up
-
-
-def test_autosquash_pauses_when_fold_would_drop_a_semantic_resolution(tmp_path: Path) -> None:
-    """A clean auto-merge with a SEMANTIC edit baked in: recreating the merge
-    re-runs the clean auto-merge, which lacks the integrator's edit. rerere learns
-    nothing (no conflict), so the tree-equality guard is what catches it — the
-    final tree would differ, so autosquash refuses pristine."""
-    pr = tmp_path / "wt"
-    branch_sha, _ = _build_semantic_merge(pr)
-    (pr / "h.txt").write_text("post\n")
-    _git(pr, "add", "h.txt")
-    _git(pr, "commit", "-m", "post-merge work")
-    (pr / "g.txt").write_text("branch extra\n")  # unrelated pre-merge fixup
-    _git(pr, "add", "g.txt")
-    _git(pr, "commit", f"--fixup={branch_sha}")
-    head_before = _git(pr, "rev-parse", "HEAD").stdout.strip()
-
-    result = _run(pr)
-    assert result.returncode == 1
-    assert _git(pr, "rev-parse", "HEAD").stdout.strip() == head_before  # pristine
-    assert (pr / "sem.txt").read_text() == "SEMANTIC-FIX\n"             # edit intact
-    assert _rr_cache_count(pr) == 0
-
-
-# ── degenerate paths ──────────────────────────────────────────────────────────
-
-def test_autosquash_noop_without_fixups_keeps_merge(tmp_path: Path) -> None:
-    """Rework-after-integration WITHOUT fixup! commits: exit 0, HEAD untouched."""
-    pr = tmp_path / "wt"
-    _build_clean_merge(pr)
-    head_before = _git(pr, "rev-parse", "HEAD").stdout.strip()
-    result = _run(pr)
-    assert result.returncode == 0, result.stderr
-    assert _git(pr, "rev-parse", "HEAD").stdout.strip() == head_before
 
 
 def test_autosquash_folds_with_no_integration_merge(tmp_path: Path) -> None:
@@ -318,6 +111,20 @@ def test_autosquash_folds_squash_only_no_fixup(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert not any(
         s.startswith(("fixup!", "squash!", "amend!")) for s in _subjects(pr))
+
+
+def test_autosquash_noop_when_no_fixup_commits(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _init(pr)
+    _record_change(pr)
+    # Plain commit with no fixup!/squash!/amend! subject -> fast path, nothing to fold.
+    (pr / "plain.txt").write_text("plain\n")
+    _git(pr, "add", "plain.txt")
+    _git(pr, "commit", "-m", "plain commit, no directive")
+    head_before = _git(pr, "rev-parse", "HEAD").stdout.strip()
+    result = _run(pr)
+    assert result.returncode == 0
+    assert _git(pr, "rev-parse", "HEAD").stdout.strip() == head_before
 
 
 def _build_plain_conflict(pr: Path) -> str:

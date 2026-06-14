@@ -1307,7 +1307,7 @@ def test_clean_review_panel_renders_findings_no_panel_chrome() -> None:
             status="Success", verdict="approve",
             findings="review complete: one nit\nno blocking issues"),
         _ev("sc", "step_completed", step="review", kind="agent",
-            action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
+            action={"verb": "goto", "target": "integrate-rebase"}, var_mutations={}),
     ]
     out = "\n".join(_lines(events))
     assert "panel:" not in out
