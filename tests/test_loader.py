@@ -892,3 +892,97 @@ def test_resolution_assigns_position_appropriate_tools(tmp_path: Path) -> None:
     for agent in w.agents.values():
         assert "complete_step" not in agent.tools
         assert "load_skill" not in agent.tools
+
+
+_RES_DENIER_SUB = """\
+---
+name: denier-sub
+deny_tools: [bash]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+_RES_LEAD_WITH_DENIER_SUB = """\
+---
+name: lead-ds
+subagents: [denier-sub]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+
+def test_resolution_deny_tools_on_subagent(tmp_path: Path) -> None:
+    from imp.engine.loader import BASE_CAPS
+
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/lead-ds.md
+        """, agents={
+            "lead-ds": _RES_LEAD_WITH_DENIER_SUB,
+            "denier-sub": _RES_DENIER_SUB,
+        })
+    w = load_workflow(wf)
+    assert w.agents["denier-sub"].tools == BASE_CAPS - {"bash"}
+
+
+_RES_NESTED_MID = """\
+---
+name: nested-mid
+subagents: [nested-leaf]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+_RES_NESTED_LEAF = """\
+---
+name: nested-leaf
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+_RES_OUTER_LEAD = """\
+---
+name: outer-lead
+subagents: [nested-mid]
+output:
+  status: {type: enum, values: [Success, Error]}
+---
+body
+"""
+
+
+def test_resolution_nested_dispatcher_is_subagent(tmp_path: Path) -> None:
+    from imp.engine.loader import BASE_CAPS
+
+    wf = _write(tmp_path, """\
+        name: t
+        description: t
+        phases:
+          - name: p
+            steps:
+              - name: s
+                file: agents/outer-lead.md
+        """, agents={
+            "outer-lead": _RES_OUTER_LEAD,
+            "nested-mid": _RES_NESTED_MID,
+            "nested-leaf": _RES_NESTED_LEAF,
+        })
+    w = load_workflow(wf)
+    # nested-mid is dispatchable (in outer-lead's subagents) → gets only BASE_CAPS,
+    # NOT task, even though it declares its own subagents
+    assert w.agents["nested-mid"].tools == BASE_CAPS
+    # nested-leaf is doubly-subagent; also BASE_CAPS
+    assert w.agents["nested-leaf"].tools == BASE_CAPS
