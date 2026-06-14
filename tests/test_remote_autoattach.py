@@ -20,14 +20,19 @@ def test_no_remote_config_returns_none(tmp_path: Path) -> None:
     assert env == {}
 
 
-def test_daemon_absent_keeps_the_configured_driver(tmp_path: Path) -> None:
+def test_daemon_absent_still_selects_the_connector(tmp_path: Path) -> None:
+    # The daemon is the sole gate: a configured driver is ALWAYS run through the
+    # connector, which polls for the socket and attaches if/when the daemon comes
+    # up. imp never spawns the telegram driver directly, so a missing daemon is a
+    # behavioral no-op (the connector polls quietly), not a daemon-less delivery.
     env: dict[str, str] = {}
     dc = select_driver_config(
         _telegram_config(), control_root=tmp_path,
         change_id="2026-06-13-abc", title="T", env=env)
     assert dc is not None
-    assert dc.command[-1] == "imp.remote.drivers.telegram"
-    assert "IMP_REMOTE_CONTROL_SOCK" not in env   # no attach env injected
+    assert dc.command[-1] == "imp.remote.drivers.daemon_connector"
+    assert env["IMP_REMOTE_CONTROL_SOCK"].endswith("remote-control.sock")
+    assert env["IMP_REMOTE_CONTROL_CHANGE_ID"] == "2026-06-13-abc"
 
 
 def test_live_socket_selects_the_connector_and_sets_env(tmp_path: Path) -> None:

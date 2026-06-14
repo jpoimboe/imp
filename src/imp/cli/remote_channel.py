@@ -78,17 +78,23 @@ def select_driver_config(
     title: str,
     env: MutableMapping[str, str],
 ) -> DriverConfig | None:
-    """Choose the driver for one terminal Change (spec auto-attach)."""
-    from imp.remote.daemon.discover import socket_is_live, socket_path
+    """Choose the driver for one terminal Change.
+
+    A configured driver is ALWAYS run through the daemon-connector: the connector
+    polls for the per-repo daemon socket and attaches whenever the daemon is up
+    (including a daemon that starts after the run begins, or bounces mid-run).
+    While no daemon is running the connector sits in a quiet poll loop and
+    delivers nothing — so the daemon is the sole gate for remote activity: no
+    daemon, no remote. The configured driver (e.g. telegram) supplies the event
+    allowlist + timeouts and tells the daemon which transport to use; imp never
+    spawns it directly."""
+    from imp.remote.daemon.discover import socket_path
     from imp.remote.drivers import REGISTRY
 
     dc = driver_config_from(config)
     if dc is None:
         return None
-    spath = socket_path(control_root)
-    if not socket_is_live(spath):
-        return dc
-    env["IMP_REMOTE_CONTROL_SOCK"] = str(spath)
+    env["IMP_REMOTE_CONTROL_SOCK"] = str(socket_path(control_root))
     env["IMP_REMOTE_CONTROL_CHANGE_ID"] = change_id
     env["IMP_REMOTE_CONTROL_TITLE"] = title
     entry = REGISTRY["daemon-connector"]

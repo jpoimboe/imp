@@ -18,7 +18,14 @@ def anyio_backend() -> str:
 
 
 @pytest.mark.anyio
-async def test_connector_exits_clean_when_the_daemon_dies(tmp_path: Path) -> None:
+async def test_connector_keeps_polling_when_daemon_dies_and_exits_on_stdin_eof(
+    tmp_path: Path,
+) -> None:
+    # The daemon is the gate, but its death is NOT the connector's death: when the
+    # daemon dies the connector keeps polling (so it re-attaches if the daemon
+    # returns). It exits only when imp tears it down — here, stdin EOF.
+    import imp.remote.drivers.daemon_connector as connector
+
     sock = str(tmp_path / "rc.sock")
     hub = SouthHub(sock, on_event=lambda cid, line: None)
     r_fd, w_fd = os.pipe()
@@ -44,17 +51,22 @@ async def test_connector_exits_clean_when_the_daemon_dies(tmp_path: Path) -> Non
             while "2026-06-13-abc" not in hub.live_ids():
                 await anyio.sleep(0.02)
 
-        # Simulate daemon crash: force-close all live connections from the hub side.
-        # This is the real crash path — the OS closes the daemon's socket FDs,
-        # which sends EOF to each connected connector's socket reader.
+        # Simulate a daemon that dies for good: drop its socket name so the
+        # connector's re-dials fail, then force-close the live connections (the OS
+        # closing the daemon's FDs sends EOF to each connector's socket reader).
+        os.unlink(sock)
         for stream in list(hub._conns.values()):
             await stream.aclose()
 
-        with anyio.fail_after(5):                 # connector must exit on socket EOF
+        # The connector must NOT exit just because the daemon died — give it long
+        # enough to have re-dialed and chosen to keep polling.
+        await anyio.sleep(connector._POLL_GAP + 0.2)
+        assert worker.is_alive(), "connector exited on daemon death instead of polling"
+
+        # Now imp tears it down: stdin EOF → the connector exits cleanly.
+        os.close(w_fd)
+        with anyio.fail_after(5):
             await anyio.to_thread.run_sync(lambda: worker.join(5))
-        try:
-            assert not worker.is_alive(), "connector thread did not exit after socket EOF"
-            assert result["rc"] == 0                  # clean exit → RemoteChannel falls back
-        finally:
-            os.close(w_fd)
+        assert not worker.is_alive(), "connector did not exit on stdin EOF"
+        assert result["rc"] == 0
         tg.cancel_scope.cancel()
