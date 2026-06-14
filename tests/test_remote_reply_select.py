@@ -58,12 +58,13 @@ async def test_phone_only_falls_through_to_phone_when_no_local_seed() -> None:
 async def test_phone_only_returns_local_seed_before_phone() -> None:
     from imp.agents.tools.wait_for_user import AwaitingUserInput
 
-    delivered = {"done": False}
+    delivered = False
 
     async def local_seed() -> str:
-        if delivered["done"]:
+        nonlocal delivered
+        if delivered:
             raise AwaitingUserInput()
-        delivered["done"] = True
+        delivered = True
         return "seed-intent"
 
     ch = _FakeChannel("from-phone")
