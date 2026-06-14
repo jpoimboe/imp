@@ -880,7 +880,7 @@ def _sole_success_tool_result(payload: dict[str, Any]) -> dict[str, Any] | None:
     return b
 
 
-def _is_prose_field(key: str, value: Any) -> bool:
+def is_prose_field(key: str, value: Any) -> bool:
     """True for a free-text output field: excluded from the breadcrumb and surfaced under --full."""
     return (isinstance(value, str) and not key.endswith("_path")
             and ("\n" in value or len(value) > _PROSE_THRESHOLD))
@@ -905,7 +905,7 @@ def _breadcrumb_extras(args: Any) -> list[str]:
         return []
     out: list[str] = []
     for k, v in args.items():
-        if _is_prose_field(k, v):
+        if is_prose_field(k, v):
             continue
         if isinstance(v, (str, int, float, bool)):
             out.append(f"{k}={v}")

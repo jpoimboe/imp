@@ -671,7 +671,7 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
 def _render_output_args(args: dict[str, Any], *, depth: int, color: bool,
                         width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
     prose = [(k, v) for k, v in args.items()
-             if nv._is_prose_field(k, v) and v.strip()]
+             if nv.is_prose_field(k, v) and v.strip()]
     if not prose:
         return
     yield _line(f"{pal.fold_glyph(expanded=True)} complete_step", depth, color,
