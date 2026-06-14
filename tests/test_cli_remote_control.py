@@ -5,6 +5,7 @@ import signal
 import socket
 import unittest.mock
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -77,7 +78,7 @@ def test_start_daemon_refuses_with_unrecognised_driver_name(
     from imp.remote.daemon import runner
 
     class _FakeConfig:
-        remote = {"driver": {"name": "no-such-driver"}}
+        remote: ClassVar[dict] = {"driver": {"name": "no-such-driver"}}
 
     def _fake_load(**_: object) -> object:
         class R:
