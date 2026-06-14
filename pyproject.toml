@@ -29,6 +29,7 @@ dependencies = [
 dev = [
   "pytest>=8.0",
   "pytest-mock>=3.12",
+  "pytest-timeout>=2.3",
   "ruff>=0.4",
   "mypy>=1.10",
   "types-PyYAML",
@@ -44,6 +45,8 @@ packages = ["src/imp", "src/impty"]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 pythonpath = ["src"]
+timeout = 60
+timeout_method = "signal"
 markers = [
     "real_sandbox_policy: opt out of the no-bwrap sandbox fallback fixture (tests asserting the raw sandbox posture)",
 ]
