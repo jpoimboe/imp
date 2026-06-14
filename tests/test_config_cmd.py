@@ -149,8 +149,8 @@ def test_explain_colors_sources_when_layers_differ(
     output = out.getvalue()
     anthropic_line = next(ln for ln in output.splitlines() if "anthropic" in ln)
     openai_line = next(ln for ln in output.splitlines() if "openai" in ln)
-    assert "\x1b[2m" in anthropic_line   # default layer → dim
-    assert "\x1b[36m" in openai_line     # user layer → cyan
+    assert "\x1b[2m" in anthropic_line   # provenance always dim
+    assert "\x1b[2m" in openai_line     # provenance always dim
 
 
 def test_explain_colors_even_when_layers_match(
@@ -179,3 +179,27 @@ def test_explain_never_colors_under_no_color(
     out = io.StringIO()
     render_explain(eff, "high", out, color=False)
     assert "\x1b[" not in out.getvalue()
+
+
+def test_explain_bolds_value_and_dims_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+    render_explain(eff, "high", out, color=True)
+    text = out.getvalue()
+    # The resolved value is emphasized (bold SGR \x1b[1m) and the provenance
+    assert "\x1b[1m" in text   # bold value
+    assert "\x1b[2m" in text   # dim provenance
+    assert "←" in text
+
+
+def test_explain_plain_unchanged_under_no_color(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    eff = _eff(tmp_path, monkeypatch)
+    out = io.StringIO()
+    render_explain(eff, "high", out, color=False)
+    text = out.getvalue()
+    assert "\x1b[" not in text          # no SGR escapes at all
+    assert "anthropic" in text and "←" in text
