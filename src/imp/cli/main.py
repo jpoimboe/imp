@@ -1984,7 +1984,8 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p_config.add_argument("--explain", metavar="TIER", default=None,
-                          help="trace one tier's bindings through the layers")
+                          help="Trace how one tier's model bindings resolve "
+                               "through the configuration layers.")
     p_config.add_argument("--all", action="store_true",
                           help="Show every provider x tier row "
                                "(default: only configured providers).")
