@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys as _sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import anyio
 import pytest
 
 import imp.cli.main as m
+from imp.engine.change import Change
 from imp.engine.executor import RunResult
+from imp.engine.state import State
 
 
 def test_build_parser_new_accepts_tui_flag() -> None:
@@ -231,7 +235,8 @@ async def test_run_tui_session_result_none_calls_finalize_paused(
     monkeypatch.setattr(m, "run_change", _slow_run_change)
     monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
     monkeypatch.setattr(m, "_finalize_paused_exit",
-                        lambda change, driver, coord, reason: finalized.append(reason) or 130)
+                        lambda change, driver, coord, reason, *, engine_emitted=False:
+                            finalized.append(reason) or 130)
 
     rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
 
@@ -348,3 +353,44 @@ def test_async_cmd_new_installs_benign_loop_handler(tmp_path, monkeypatch) -> No
         title="demo", tui=False, non_interactive=True, message="go"))
     assert rc == 0
     assert entered["n"] == 1
+
+
+def _seed_change(tmp_path: Path) -> Change:
+    cd = tmp_path / ".imp" / "change"
+    (cd / "state").mkdir(parents=True, exist_ok=True)
+    (cd / "change.json").write_text(json.dumps(
+        {"id": "c", "title": "t", "base_branch": "main"}))
+    State(id="c", step="s", step_attempt=0, status="running").save(cd / "state")
+    return Change(id="c", title="t", base_branch="main",
+                  control_root=tmp_path, project_root=tmp_path, change_dir=cd)
+
+
+@pytest.mark.anyio
+async def test_run_tui_session_paused_writes_single_workflow_paused(
+    monkeypatch, tmp_path, capsys,
+) -> None:
+    """TUI interrupt-pause: the executor emitted workflow_paused before returning
+    RunResult.PAUSED, so the REAL _finalize_paused_exit (engine_emitted=True from
+    the call site) must NOT append a duplicate. Closes the gate gap left by the
+    monkeypatched-finalize test — exactly one workflow_paused must remain."""
+    change = _seed_change(tmp_path)
+
+    async def _paused_run_change(change, *, on_event, user_chat_input_fn,
+                                 coordinator, non_interactive, seed_opening=None):
+        coordinator.request_exit("ctrl-c")  # sets should_pause + pause_reason
+        change.event_log().append(  # the executor's own emission
+            agent_id=None, type="workflow_paused",
+            payload={"reason": "ctrl-c", "interrupt_reason": "ctrl-c"})
+        return RunResult.PAUSED
+
+    monkeypatch.setattr(m, "TuiApp", _FakeTuiApp)
+    monkeypatch.setattr(m, "run_change", _paused_run_change)
+    monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
+
+    rc = await m._run_tui_session(change, args=argparse.Namespace(tui=True))
+
+    assert rc == 130
+    assert State.load(change.state_dir).status == "paused"
+    paused = [e for e in change.event_log().read()
+              if e.get("type") == "workflow_paused"]
+    assert len(paused) == 1  # the executor's event, NOT duplicated by finalize

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import anyio
@@ -301,4 +302,67 @@ def test_pause_during_wait_full_surface(tmp_path: Path) -> None:
         await terminate_background_processes(ctx)
         r = await _read(ctx, out["id"])
         assert r["status"] == "killed" and r["kill_reason"] == "interrupted"
+    anyio.run(main)
+
+
+@pytest.mark.skipif(not Path("/proc").is_dir(),
+                    reason="descendant reaping needs /proc (Linux)")
+def test_teardown_reaps_regrouped_bg_descendant(tmp_path: Path) -> None:
+    """A bg descendant that calls setsid() leaves the bg process group; killpg alone
+    misses it but the /proc walk finds it — after terminate_background_processes it
+    must be gone (not reparented to init and surviving)."""
+    async def main() -> None:
+        from imp.agents.tools.bg import BgProc, _bg_dir, terminate_background_processes
+
+        ctx = _ctx(tmp_path)
+        pidfile = tmp_path / "descendant.pid"
+        script = (
+            "import os, sys, time\n"
+            "pid = os.fork()\n"
+            "if pid == 0:\n"
+            "    os.setsid()\n"
+            "    open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+            "    time.sleep(300)\n"
+            "else:\n"
+            "    time.sleep(300)\n"
+        )
+        d = _bg_dir(ctx)
+        d.mkdir(parents=True, exist_ok=True)
+        out_path = d / "bg1.out"
+        err_path = d / "bg1.err"
+        out_f = open(out_path, "wb")   # noqa: SIM115
+        err_f = open(err_path, "wb")   # noqa: SIM115
+        try:
+            proc = await anyio.open_process(
+                [sys.executable, "-c", script, str(pidfile)],
+                start_new_session=True,
+                stdout=out_f,
+                stderr=err_f,
+            )
+        finally:
+            out_f.close()
+            err_f.close()
+        bp = BgProc(id="bg1", proc=proc, out_path=out_path, err_path=err_path,
+                    command="test-spawn")
+        ctx.background_processes["bg1"] = bp
+        ctx._bg_counter = 1
+
+        with anyio.fail_after(10):
+            while not (pidfile.exists() and pidfile.read_text().strip()):
+                await anyio.sleep(0.02)
+        descendant = int(pidfile.read_text().strip())
+        os.kill(descendant, 0)  # verify it is alive before teardown
+
+        await terminate_background_processes(ctx)
+
+        gone = False
+        for _ in range(250):
+            try:
+                os.kill(descendant, 0)
+            except ProcessLookupError:
+                gone = True
+                break
+            await anyio.sleep(0.02)
+        assert gone, "re-grouped bg descendant survived terminate_background_processes"
+
     anyio.run(main)

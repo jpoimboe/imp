@@ -42,7 +42,7 @@ def test_new_paused_journals_correct_pause_reason(
     monkeypatch.setattr(cli_main, "run_change", _fake_run_change)
     monkeypatch.setattr(
         cli_main, "pause_and_exit",
-        lambda _change, *, reason, engine_pause_reason=None: reasons.append(reason),
+        lambda _change, *, reason, engine_emitted=False: reasons.append(reason),
     )
 
     args = argparse.Namespace(title="headline test")

@@ -21,7 +21,7 @@ from subprocess import PIPE
 import anyio
 
 from imp.agents.tools import imp_tool
-from imp.agents.tools.context import ToolContext, kill_process_group
+from imp.agents.tools.context import ToolContext, kill_process_tree
 from imp.agents.tools.limits import (
     OUTPUT_TRUNCATION_MARKER,
     TOOL_OUTPUT_CAP_BYTES,
@@ -149,7 +149,7 @@ async def bash(
             if counter.total >= cap:
                 counter.capped = True
                 counter.which = name           # S2: which stream crossed the cap
-                await kill_process_group(proc, signal.SIGKILL)
+                await kill_process_tree(proc, signal.SIGKILL)
                 return
 
     # Decision 10 ticker (pinned lifecycle): sweeps the background registry
@@ -185,7 +185,7 @@ async def bash(
         except TimeoutError:
             # B.1: the call outran the wall clock. Kill the group, reap, and
             # surface a timeout the agent can react to (NOT a normal result).
-            await kill_process_group(proc, signal.SIGKILL)
+            await kill_process_tree(proc, signal.SIGKILL)
             with contextlib.suppress(Exception):
                 await proc.wait()
             raise ToolAborted("timed-out") from None
