@@ -588,6 +588,11 @@ async def _run_change_session(
                 # finalize as a Ctrl-D during the run (plan §2: the interrupted
                 # prompt's Ctrl-D pauses, it does not crash).
                 return _finalize_paused_exit(change, driver, coord, "ctrl-d")
+            except KeyboardInterrupt:
+                # Second Ctrl-C or SIGTERM at the resume prompt: pause-and-exit,
+                # mirroring the run loop's exit arm.
+                return _finalize_paused_exit(
+                    change, driver, coord, coord.pause_reason or "ctrl-c")
             if slash != "continue" and line.strip():
                 coord.enqueue_interject(line)
             change.event_log().append(
