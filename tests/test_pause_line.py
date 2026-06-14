@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from imp.cli.main import _pause_lines, _phase_from_events
 from tests._event_fixtures import ev
 
@@ -45,3 +47,27 @@ def test_pause_lines_include_reason_when_given() -> None:
 def test_pause_lines_color_dims_with_reason() -> None:
     lines = _pause_lines("add-version-flag", "implement", "yaitd7", reason="ctrl-c", color=True)
     assert lines[0] == "\x1b[2mPaused  add-version-flag  at implement  (ctrl-c)\x1b[0m"
+
+
+def test_pause_facts_unnamed_change_labels_with_resume_token(tmp_path: Path) -> None:
+    from imp.cli.main import _pause_facts
+    from imp.engine.change import Change
+
+    change = Change(id="2026-06-14-qzbscf", title="", base_branch="main",
+                    control_root=tmp_path, project_root=tmp_path,
+                    change_dir=tmp_path / ".imp" / "change")
+    name, _phase, token = _pause_facts(change)
+    assert name == "qzbscf"
+    assert token == "qzbscf"
+
+
+def test_pause_facts_named_change_labels_with_slug_descriptor(tmp_path: Path) -> None:
+    from imp.cli.main import _pause_facts
+    from imp.engine.change import Change
+
+    change = Change(id="2026-06-14-qzbscf", title="Add version flag",
+                    base_branch="main", control_root=tmp_path,
+                    project_root=tmp_path,
+                    change_dir=tmp_path / ".imp" / "change")
+    name, _phase, _token = _pause_facts(change)
+    assert name == "add-version-flag"

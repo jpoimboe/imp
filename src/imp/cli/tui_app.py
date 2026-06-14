@@ -68,8 +68,11 @@ class TuiApp:
         return time.monotonic() - self._start
 
     def status_line(self) -> str:
-        left = ("your turn" if self._prompt_visible
-                else self._driver.status_text(self._frame, self._elapsed()))
+        if self._prompt_visible:
+            marker = pal.ansi("▌ your turn", "bright_blue", enabled=self._color)
+            hint = pal.ansi(HINT, "gray", "dim", enabled=self._color)
+            return f"{marker}{_STATUS_SEP}{hint}"
+        left = self._driver.status_text(self._frame, self._elapsed())
         if not left:
             return HINT
         budget = self._width - len(HINT) - len(_STATUS_SEP)
@@ -224,9 +227,9 @@ class TuiApp:
             ),
             get_vertical_scroll=self._vertical_scroll,
             wrap_lines=False, always_hide_cursor=True)
-        status = Window(
+        self._status_win = Window(
             content=FormattedTextControl(text=lambda: ANSI(self.status_line())),
-            height=1, style="reverse")
+            height=1, style=lambda: "" if self._prompt_visible else "reverse")
         self._buffer = Buffer(
             accept_handler=lambda buf: self._accept(buf),
             multiline=False)
@@ -238,7 +241,8 @@ class TuiApp:
         self._question_control = FormattedTextControl(
             text=lambda: ANSI(self._solicit_question))
         question_win = ConditionalContainer(
-            Window(self._question_control),
+            Window(self._question_control,
+                   wrap_lines=True, dont_extend_height=True),
             filter=Condition(
                 lambda: self._prompt_visible and bool(self._solicit_question)))
         slash_win = ConditionalContainer(
@@ -246,7 +250,7 @@ class TuiApp:
                 text=lambda: ANSI("\n".join(self._slash_lines)))),
             filter=Condition(lambda: self._prompt_visible and bool(self._slash_lines)))
         layout = Layout(
-            HSplit([self._body, slash_win, status, question_win, prompt_win]),
+            HSplit([self._body, slash_win, self._status_win, question_win, prompt_win]),
             focused_element=self._body)
         self._app = Application(
             layout=layout, key_bindings=self._key_bindings(),

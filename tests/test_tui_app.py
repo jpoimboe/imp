@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from imp.cli import palette as pal
 from imp.cli.narrative import build_tree
 from imp.cli.render_text import render_tree
 from imp.cli.tui_app import HINT, TuiApp
@@ -248,6 +249,36 @@ def test_status_line_reads_your_turn_during_solicit_not_spinner() -> None:
     assert "your turn" in line
     assert "bash ls" not in line            # the spinner activity is replaced
     assert line.endswith(HINT)
+
+
+def test_your_turn_status_line_shows_blue_accent_marker() -> None:
+    app = TuiApp(coord=_FakeCoord(), color=True, width=80)
+    app._prompt_visible = True
+    line = app.status_line()
+    assert "▌ your turn" in line       # left accent marker, not a full stripe
+    assert pal.sgr("bright_blue", enabled=True) in line  # bright_blue accent (imp's user identity)
+    assert "\x1b[7m" not in line       # no inverse fill in the your-turn text
+
+
+def test_status_window_reverse_fill_is_state_dependent() -> None:
+    app = _app()
+    app._build_app()
+    status_win = app._status_win
+    app._prompt_visible = False
+    assert status_win.style() == "reverse"   # running/idle keeps the inverse fill
+    app._prompt_visible = True
+    assert status_win.style() == ""           # your turn drops the fill
+
+
+def test_question_window_wraps_and_docks_to_content_height() -> None:
+    from prompt_toolkit.layout.containers import Window
+
+    app = _app()
+    app._build_app()
+    qwin = next(w for w in app._app.layout.walk()
+                if isinstance(w, Window) and w.content is app._question_control)
+    assert qwin.wrap_lines() is True
+    assert qwin.dont_extend_height() is True
 
 
 def test_prompt_window_shows_caret_and_question() -> None:
