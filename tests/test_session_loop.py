@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -177,7 +178,6 @@ async def _drive_session(
 
     if on_tty:
         # Force the interactive-loop predicate true without a real /dev/tty.
-        import sys
         orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
         sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
         sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
@@ -410,3 +410,165 @@ async def test_sigterm_mid_run_exits_paused_no_unbound_result(tmp_path: Path) ->
     assert rc == 130
     assert State.load(change.state_dir).status == "paused"
     assert driver.finished >= 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("reason", ["sigterm", "ctrl-c"])
+async def test_exit_during_park_writes_single_workflow_paused(
+    tmp_path: Path, reason: str,
+) -> None:
+    """Point A (clean-solicit SIGINT) and SIGTERM-mid-run: the run is PARKED (no
+    event yielded), so the executor emits no workflow_paused itself. The session
+    loop's exit-event finalize must write EXACTLY one workflow_paused (none
+    dropped) and leave state paused."""
+    change = _seed_single_agent(tmp_path)
+    coord = InterruptCoordinator()
+    blocked = anyio.Event()  # never set
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            # Request the out-of-band exit, then block until cancelled — no event
+            # crosses the executor's per-event should_pause boundary, so the only
+            # workflow_paused is the one the finalize appends.
+            coord.request_exit(reason)
+            await blocked.wait()
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    _register_fake(lambda _m: _P())
+
+    rc, _driver, _status = await _drive_session(change, coord, replies=[])
+
+    assert rc == 130
+    assert State.load(change.state_dir).status == "paused"
+    paused = [e for e in change.event_log().read()
+              if e.get("type") == "workflow_paused"]
+    assert len(paused) == 1
+    assert paused[0]["payload"]["reason"] == reason
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("pause_reason", "expected"),
+    [(None, "ctrl-c"), ("sigterm", "sigterm")],
+)
+async def test_keyboardinterrupt_at_resume_prompt_pauses_cleanly(
+    tmp_path: Path, pause_reason: str | None, expected: str,
+) -> None:
+    """Round 1 interrupts to the loopable resume prompt; a second Ctrl-C (or a
+    SIGTERM) makes the reply raise KeyboardInterrupt. The session must pause-exit
+    cleanly (rc 130, no KeyboardInterrupt / BaseExceptionGroup escaping), stay
+    paused, and surface the right reason."""
+    change = _seed_single_agent(tmp_path)
+    coord = InterruptCoordinator()
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            await coord.signal_pause(reason="esc")
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    _register_fake(lambda _m: _P())
+
+    driver = _StubDriver()
+    status = _StubStatus()
+    coord._esc_reader = object()
+
+    async def _reply() -> str:
+        # The session loop calls coord.reset() before the resume prompt, so
+        # coord.pause_reason is None here. A SIGTERM at the prompt sets pause_reason
+        # ("sigterm") before the KeyboardInterrupt unwinds out of _ask_or_exit (D1
+        # decision); a bare second Ctrl-C leaves it None → the arm falls back to
+        # "ctrl-c". Both must finalize cleanly.
+        if pause_reason is not None:
+            coord.pause_reason = pause_reason
+        raise KeyboardInterrupt
+
+    rc_holder: dict[str, int] = {}
+
+    async def _runner() -> None:
+        async with anyio.create_task_group() as tg:
+            rc_holder["rc"] = await _run_change_session(
+                change, coord=coord, driver=driver, status=status,
+                esc_reader=_StubReader(),  # type: ignore[arg-type]
+                reply_input_fn=_reply,
+                non_interactive=False, tg=tg)
+
+    import sys
+    orig_in, orig_out = sys.stdin.isatty, sys.stdout.isatty
+    sys.stdin.isatty = lambda: True   # type: ignore[method-assign]
+    sys.stdout.isatty = lambda: True  # type: ignore[method-assign]
+    try:
+        await _runner()
+    finally:
+        sys.stdin.isatty = orig_in    # type: ignore[method-assign]
+        sys.stdout.isatty = orig_out  # type: ignore[method-assign]
+
+    assert rc_holder["rc"] == 130
+    assert State.load(change.state_dir).status == "paused"
+    paused = [e for e in change.event_log().read()
+              if e.get("type") == "workflow_paused"]
+    assert any((e.get("payload") or {}).get("reason") == expected for e in paused)
+
+
+@pytest.mark.anyio
+async def test_executor_emitted_then_exit_event_writes_single_workflow_paused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SIGTERM mid-ACTIVE-run: _dispatch_signal sets should_pause SYNCHRONOUSLY, so
+    the executor can reach a should_pause boundary, emit workflow_paused, and return
+    RunResult.PAUSED BEFORE the actuator's async scope-cancel lands. exit_event is
+    also set, so the loop takes the exit_event arm (532) with result=PAUSED — and
+    the finalize must NOT duplicate the executor's event. This is the regression a
+    hardcoded engine_emitted=False at 533 would introduce; the conditional
+    `(result is RunResult.PAUSED and coord.should_pause)` suppresses it → exactly
+    one workflow_paused."""
+    import imp.cli.main as cli_main
+    from imp.engine.executor import RunResult
+
+    change = _seed_single_agent(tmp_path)
+    coord = InterruptCoordinator()
+
+    async def _emit_then_pause(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, non_interactive: bool, seed_opening: Any = None,
+    ) -> RunResult:
+        # Reproduce the race deterministically: set pause state + fire the exit hook
+        # the actuator watches, append the executor's own workflow_paused, then
+        # RETURN PAUSED with NO await — so no checkpoint lets the actuator cancel
+        # the run scope before run_change returns its value.
+        coordinator.pause_reason = "sigterm"
+        coordinator._should_pause = True
+        assert coordinator._trigger_exit is not None  # session loop wired the hook
+        coordinator._trigger_exit("sigterm")
+        change.event_log().append(
+            agent_id=None, type="workflow_paused",
+            payload={"reason": "sigterm", "interrupt_reason": "sigterm"})
+        return RunResult.PAUSED
+
+    monkeypatch.setattr(cli_main, "run_change", _emit_then_pause)
+
+    rc, _driver, _status = await _drive_session(change, coord, replies=[])
+
+    assert rc == 130
+    assert State.load(change.state_dir).status == "paused"
+    paused = [e for e in change.event_log().read()
+              if e.get("type") == "workflow_paused"]
+    assert len(paused) == 1  # the executor's event, NOT duplicated by the finalize
+    assert paused[0]["payload"]["reason"] == "sigterm"

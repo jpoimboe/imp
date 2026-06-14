@@ -80,6 +80,12 @@ class Transcript:
         with self._path.open("a") as f:
             f.write(message_to_json(msg) + "\n")
 
+    def rewrite(self, messages: list[Message]) -> None:
+        """Overwrite the transcript with `messages` — repairs an existing turn in place."""
+        with self._path.open("w") as f:
+            for m in messages:
+                f.write(message_to_json(m) + "\n")
+
 
 _INTERRUPTED_BASH_BODY = (
     '{"stdout": "", '
@@ -106,40 +112,84 @@ def repair_dangling_tool_use_on_resume(
 ) -> Message | None:
     """Restore the tool_use ↔ tool_result invariant before resuming.
 
-    Inspects the final message: if it's an assistant message containing
-    one or more tool_use blocks, synthesize a user message with a
-    placeholder tool_result for each one, append it to both `messages`
-    (in-place) and `transcript`, and return it. Returns None when no
-    repair was needed — the caller can use that as the "transcript was
-    already balanced" signal without re-walking the list.
+    Two shapes are repaired:
+      1. The last message is an ASSISTANT turn with one or more unmatched tool_use
+         blocks (the mid-tool interrupt left no following user turn): synthesize a
+         NEW trailing user message with a placeholder tool_result for each, append
+         it to `messages` (in place) and `transcript`, and return it.
+      2. The last message is a USER turn that immediately follows an assistant turn
+         carrying unmatched tool_use blocks — e.g. a claude_code
+         '[Request interrupted by user]' message persisted after the tool_use.
+         Anthropic requires the tool_result to live in the user turn directly after
+         the tool_use, so inject the placeholder result(s) INTO that trailing user
+         turn (in place), rewrite the transcript, and return the rewritten message.
 
-    Caller is responsible for emitting any user-facing event (e.g. a
-    `tool_result` event so `imp log` shows the synthetic result) — this
-    helper only touches the in-memory and on-disk transcript.
+    Returns None when no repair is needed (already balanced) — the caller uses that
+    as the 'transcript was already balanced' signal. Caller is responsible for any
+    user-facing event (e.g. a tool_result event for `imp log`); this helper only
+    touches the in-memory and on-disk transcript.
     """
-    if not messages or messages[-1].role != "assistant":
+    if not messages:
         return None
-    tool_uses = [
-        b for b in messages[-1].content
-        if isinstance(b, ToolUseBlock) and b.name != "wait_for_user"
-    ]
-    if not tool_uses:
-        return None
-    blocks: tuple[TextBlock | ToolResultBlock, ...] = (
-        *(
+    last = messages[-1]
+    if last.role == "assistant":
+        tool_uses = [
+            b for b in last.content
+            if isinstance(b, ToolUseBlock) and b.name != "wait_for_user"
+        ]
+        if not tool_uses:
+            return None
+        blocks: tuple[TextBlock | ToolResultBlock, ...] = (
+            *(
+                ToolResultBlock(
+                    tool_use_id=tu.id,
+                    content=_synthetic_tool_result_content(tu.name),
+                    is_error=True,
+                )
+                for tu in tool_uses
+            ),
+            TextBlock(text=RESUME_DURABILITY_NOTE),
+        )
+        repair = Message(role="user", content=blocks)
+        messages.append(repair)
+        transcript.append(repair)
+        return repair
+    if last.role == "user" and len(messages) >= 2 and messages[-2].role == "assistant":
+        tool_uses = [
+            b for b in messages[-2].content
+            if isinstance(b, ToolUseBlock) and b.name != "wait_for_user"
+        ]
+        if not tool_uses:
+            return None
+        matched = {
+            b.tool_use_id for b in last.content if isinstance(b, ToolResultBlock)
+        }
+        unmatched = [tu for tu in tool_uses if tu.id not in matched]
+        if not unmatched:
+            return None
+        result_blocks = tuple(
             ToolResultBlock(
                 tool_use_id=tu.id,
                 content=_synthetic_tool_result_content(tu.name),
                 is_error=True,
             )
-            for tu in tool_uses
-        ),
-        TextBlock(text=RESUME_DURABILITY_NOTE),
-    )
-    repair = Message(role="user", content=blocks)
-    messages.append(repair)
-    transcript.append(repair)
-    return repair
+            for tu in unmatched
+        )
+        # Anthropic requires tool_result blocks at the head of the user turn; the
+        # original interrupt text follows, and the durability note frames the
+        # (error-shaped) reconstructed results last.
+        repaired = Message(
+            role="user",
+            content=(
+                *result_blocks,
+                *last.content,
+                TextBlock(text=RESUME_DURABILITY_NOTE),
+            ),
+        )
+        messages[-1] = repaired
+        transcript.rewrite(messages)
+        return repaired
+    return None
 
 
 def balance_success_on_resume(

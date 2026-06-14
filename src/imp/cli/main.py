@@ -281,10 +281,14 @@ def _phase_from_events(events: list[dict[str, Any]]) -> str | None:
     return phase
 
 
-def _pause_lines(name: str, phase: str | None, token: str, *, color: bool) -> list[str]:
+def _pause_lines(
+    name: str, phase: str | None, token: str,
+    *, reason: str | None = None, color: bool,
+) -> list[str]:
     at = f"  at {phase}" if phase else ""
+    why = f"  ({reason})" if reason else ""
     return [
-        ansi(f"Paused  {name}{at}", "dim", enabled=color),
+        ansi(f"Paused  {name}{at}{why}", "dim", enabled=color),
         ansi(f"   resume:  imp resume {token}", "dim", enabled=color),
     ]
 
@@ -297,11 +301,12 @@ def _pause_facts(change: Change) -> tuple[str, str | None, str]:
     return name, phase, resume_token(change.id)
 
 
-def _emit_paused(change: Change) -> None:
-    """Interactive exit (ctrl-c / ctrl-d) — a soft, expected stop: dim."""
+def _emit_paused(change: Change, reason: str | None = None) -> None:
+    """Interactive exit — print the dimmed pause headline (with trigger reason if given)."""
     color = should_use_color(sys.stdout)
     name, phase, token = _pause_facts(change)
-    print("\n" + "\n".join(_pause_lines(name, phase, token, color=color)))
+    print("\n" + "\n".join(
+        _pause_lines(name, phase, token, reason=reason, color=color)))
 
 
 def _emit_paused_summary(change: Change) -> None:
@@ -531,7 +536,8 @@ async def _run_change_session(
                 return _finalize_paused_exit(change, driver, coord, "force-quit")
             if exit_event.is_set():
                 return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "sigterm")
+                    change, driver, coord, coord.pause_reason or "sigterm",
+                    engine_emitted=(result is RunResult.PAUSED and coord.should_pause))
             assert result is not None
 
             interrupt_paused = (
@@ -561,7 +567,8 @@ async def _run_change_session(
                 # (--non-interactive, or no controlling tty): exit paused,
                 # mirroring the legacy `coord.should_pause` arm (rc 130).
                 return _finalize_paused_exit(
-                    change, driver, coord, coord.pause_reason or "ctrl-c")
+                    change, driver, coord, coord.pause_reason or "ctrl-c",
+                    engine_emitted=True)
 
             coord.reset()
             if not non_interactive and _should_respawn_reader(
@@ -581,6 +588,11 @@ async def _run_change_session(
                 # finalize as a Ctrl-D during the run (plan §2: the interrupted
                 # prompt's Ctrl-D pauses, it does not crash).
                 return _finalize_paused_exit(change, driver, coord, "ctrl-d")
+            except KeyboardInterrupt:
+                # Second Ctrl-C or SIGTERM at the resume prompt: pause-and-exit,
+                # mirroring the run loop's exit arm.
+                return _finalize_paused_exit(
+                    change, driver, coord, coord.pause_reason or "ctrl-c")
             if slash != "continue" and line.strip():
                 coord.enqueue_interject(line)
             change.event_log().append(
@@ -600,14 +612,15 @@ async def _run_change_session(
 
 def _finalize_paused_exit(
     change: Change, driver: Any, coord: Any, reason: str,
+    *, engine_emitted: bool = False,
 ) -> int:
     """Finish the driver, persist the paused state (suppressing a duplicate
-    workflow_paused when the engine already emitted one), journal the pause, and
-    return rc 130. The single exit sequence shared by every interrupt/EOF/
-    SIGTERM/escalation path out of the session loop."""
+    workflow_paused only when the engine already emitted one this run), journal
+    the pause, and return rc 130. The single exit sequence shared by every
+    interrupt/EOF/SIGTERM/escalation path out of the session loop."""
     driver.finish()
-    pause_and_exit(change, reason=reason, engine_pause_reason=coord.pause_reason)
-    _emit_paused(change)
+    pause_and_exit(change, reason=reason, engine_emitted=engine_emitted)
+    _emit_paused(change, reason)
     return 130
 
 
@@ -868,7 +881,8 @@ async def _run_tui_session(
     result = holder.get("result")
     if result is None or (result is RunResult.PAUSED and coord.should_pause):
         return _finalize_paused_exit(
-            change, app, coord, coord.pause_reason or "ctrl-c")
+            change, app, coord, coord.pause_reason or "ctrl-c",
+            engine_emitted=(result is RunResult.PAUSED and coord.should_pause))
     return _handle_terminal_outcome(change, result, coord)
 
 

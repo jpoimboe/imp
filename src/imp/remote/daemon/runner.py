@@ -15,13 +15,13 @@ from typing import Any
 
 import anyio
 
-_log = logging.getLogger("imp.daemon")
-
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.control import ControlPlane
 from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.server import SouthHub
 from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter
+
+_log = logging.getLogger("imp.daemon")
 
 
 class DaemonAlreadyRunning(Exception):
