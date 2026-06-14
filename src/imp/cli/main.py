@@ -334,7 +334,7 @@ def _recover_phase(change: Change) -> str | None:
 def _pause_facts(change: Change) -> tuple[str, str | None, str]:
     from imp.cli.change_row import resume_token
     from imp.cli.narrative import _slug_descriptor
-    name = _slug_descriptor(change.slug) or change.id
+    name = _slug_descriptor(change.slug) or resume_token(change.id)
     phase = _phase_from_events(list(change.event_log().read()))
     return name, phase, resume_token(change.id)
 
