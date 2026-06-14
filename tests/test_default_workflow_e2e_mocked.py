@@ -105,7 +105,7 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     """Copy the shipped default workflow into the change root, then replace
     the script-gate shells with `exit 0` stubs.
 
-    Also initializes a bare-minimum git repo so the merge gate (ready_to_merge)
+    Also initializes a bare-minimum git repo so the merge gate
     can run `git status --porcelain` without failing.
     """
     src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default"
@@ -132,7 +132,7 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     (tmp_path / ".imp" / "config.yaml").write_text(cfg_content)
 
     # Initialize a minimal git repo so `git status --porcelain` and
-    # merge_to_base work when the merge-gate sets ready_to_merge=true.
+    # merge_to_base work.
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
@@ -657,6 +657,7 @@ async def test_merge_conflict_surfaces_merge_blocked(tmp_path: Path, monkeypatch
 
 @pytest.mark.anyio
 async def test_autonomous_mode_integrates_and_merges_without_human(tmp_path: Path) -> None:
+    # No workflow var override needed — finalize merges without a human gate.
     change = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
     resolve.reset_providers_for_tests()

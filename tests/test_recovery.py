@@ -41,7 +41,7 @@ def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:
 def _state(step, *, loop_counts=None, vars=None):
     return State(
         id="s", step=step, step_attempt=3, status="paused",
-        vars=vars if vars is not None else {"ready_to_merge": False},
+        vars=vars if vars is not None else {},
         loop_counts=loop_counts or {},
         resume_pending="something", current_step=None,
     )
@@ -84,8 +84,8 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
 def test_plan_rewind_merge_blocked_reentry_no_gates() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # merge_blocked: cursor None (terminal), ready_to_merge already true.
-    st = _state(None, vars={"ready_to_merge": True})
+    # cursor None (terminal): the merge-blocked state; vars are opaque to recovery.
+    st = _state(None)
     plan = plan_rewind(_wf(), st, "merge")
     assert plan.to_step == "base-fresh-check"        # B3: re-enters the merge phase
     assert plan.from_step is None                    # nullable from a None cursor
@@ -107,7 +107,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     assert st.resume_pending is None
     assert st.current_step is None
     assert st.loop_counts == {"task-lead": 2}        # downstream reset, upstream kept
-    assert st.vars == {"ready_to_merge": False}      # untouched by any arming
+    assert st.vars == {}                             # untouched by any arming
     types = [e["type"] for e in log.read()]
     assert "step_rewound" in types
     assert "gates_bypassed" not in types
