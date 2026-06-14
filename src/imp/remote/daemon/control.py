@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.focus import Focus
 from imp.remote.daemon.server import SouthHub
 
 
@@ -16,12 +17,24 @@ class ControlPlane:
         create: Callable[[str], None],
         abandon: Callable[[str], int],
         list_changes: Callable[[], list[ChangeInfo]],
+        focus: Focus,
+        snapshot: Callable[[str], tuple[str, str, str] | None],
+        recent_narrative: Callable[[str, int], list[str]],
     ) -> None:
         self._hub: SouthHub = hub
         self._resume = resume
         self._create = create
         self._abandon = abandon
         self._list_fn = list_changes
+        self.focus = focus
+        self._snapshot = snapshot
+        self._recent_narrative = recent_narrative
+
+    def snapshot(self, change_id: str) -> tuple[str, str, str] | None:
+        return self._snapshot(change_id)
+
+    def recent_narrative(self, change_id: str, n: int) -> list[str]:
+        return self._recent_narrative(change_id, n)
 
     async def reply(self, change_id: str, text: str) -> str:
         """Route a reply: live south connection returns "live"; paused Change returns "resumed"."""
