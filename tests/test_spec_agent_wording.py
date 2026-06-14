@@ -19,3 +19,21 @@ def test_spec_writer_forbids_tool_loading_narration() -> None:
     context = body[max(0, idx - 300) : idx + 300]
     # Confirms the prohibition is in the unseeded-open section (near wait_for_user).
     assert "wait_for_user" in context or "Open by asking" in context
+
+
+def test_spec_reviewer_states_conclusion_once() -> None:
+    body = _prompt("spec-reviewer")
+    assert "State your verified conclusion once" in body
+    # Verify it's in the ## Output section (near "findings").
+    idx = body.index("State your verified conclusion once")
+    context = body[max(0, idx - 300) : idx + 300]
+    assert "findings" in context or "## Output" in context
+
+
+def test_spec_writer_single_closing_summary() -> None:
+    body = _prompt("spec-writer")
+    assert "Emit a single closing summary" in body
+    # Verify it's in the general guidance area (not in an unrelated section).
+    idx = body.index("Emit a single closing summary")
+    context = body[max(0, idx - 300) : idx + 300]
+    assert "complete_step" in context or "web_search" in context or "summary" in context.lower()

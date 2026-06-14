@@ -78,6 +78,10 @@ you want?".
 
 **Research with web_search sparingly.** You MAY use `web_search` to check whether a library exists, verify current best practice, or look up an API — but prefer reading the actual codebase first. Do not over-research a clear request.
 
+**One closing summary.** Emit a single closing summary after the spec is
+committed — do not restate the same conclusion in two near-identical messages.
+The CLI streams every line, so a repeated summary just adds noise.
+
 ## Seeded with a draft spec
 
 This is a first-class opening path, not an exception. When the user wrote a draft
