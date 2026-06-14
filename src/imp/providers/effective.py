@@ -81,7 +81,7 @@ def merge_layers(
                 for k, v in val.items():
                     dst2[k] = v
                     prov[(key, k)] = src
-            else:  # leaf: providers (whole list), theme, editing_mode, lint/test
+            else:  # leaf: providers (whole list), theme, editing_mode, verify_command
                 out[key] = val
                 prov[(key,)] = src
     return out, prov
@@ -94,8 +94,7 @@ def _to_config(merged: dict[str, Any]) -> Config:
         provider_envs=merged.get("provider_envs", {}),
         source=FLOOR_SRC,
         var_overrides=merged.get("vars", {}),
-        lint_command=merged.get("lint_command"),
-        test_command=merged.get("test_command"),
+        verify_command=merged.get("verify_command"),
         editing_mode=merged.get("editing_mode", "emacs"),
         theme=merged.get("theme", "ansi"),
         sandbox=merged.get("sandbox", {}),

@@ -583,7 +583,7 @@ async def test_finalize_wait_for_user_solicit_then_merge(tmp_path: Path) -> None
 async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> None:
     """A standard change: base integrated, integrator clean, finalize approves and
     merges. The merge/review tail is now integrate-merge -> integrator ->
-    integrate-tests -> finalize, in order."""
+    integrate-verify -> finalize, in order."""
     change = _seed_default_workflow(tmp_path)
     fake = FakeAsyncAnthropic([], default_response=_canned_anthropic())
     resolve.reset_providers_for_tests()
@@ -598,11 +598,11 @@ async def test_integration_sequence_runs_clean_then_merges(tmp_path: Path) -> No
     assert result is RunResult.COMPLETED
     steps = [e["payload"].get("step") for e in change.event_log().read()
              if e.get("type") == "step_started" and e.get("payload", {}).get("step")]
-    for name in ("integrate-merge", "integrator", "integrate-tests", "finalize"):
+    for name in ("integrate-merge", "integrator", "integrate-verify", "finalize"):
         assert name in steps, f"{name} did not run"
     assert (steps.index("integrate-merge")
             < steps.index("integrator")
-            < steps.index("integrate-tests")
+            < steps.index("integrate-verify")
             < steps.index("finalize"))
 
 

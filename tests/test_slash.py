@@ -8,6 +8,7 @@ import anyio
 import pytest
 
 from imp.cli.slash import REPROMPT, handle_slash_line, is_slash_command
+from imp.cli.tui_app import HINT
 
 
 class _FakeChange:
@@ -287,3 +288,17 @@ async def test_first_prompt_gets_the_question_then_reprompt_does_not() -> None:
     assert line == "the answer"
     # First solicit carried the question; the post-slash reprompt carried none.
     assert prompt.questions == ["Pick A or B?", ""]
+
+
+def test_hint_and_help_agree_on_esc_ctrlc_vocabulary(tmp_path: Path) -> None:
+    change = _FakeChange(tmp_path)
+    out: list[str] = []
+    handle_slash_line("/help", change=change, output_fn=out.append)
+    ctrl_c_line = next(line for line in out if "Ctrl+C" in line)
+
+    # Both surfaces describe ESC/Ctrl-C with "pause", neither with "interrupt".
+    assert "pause" in ctrl_c_line.lower()
+    assert "Esc" in ctrl_c_line          # Esc is explicitly listed in /help
+    assert "interrupt" not in ctrl_c_line.lower()
+    assert "pause" in HINT.lower()
+    assert "interrupt" not in HINT.lower()

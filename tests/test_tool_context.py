@@ -165,7 +165,7 @@ def test_tool_context_tiers_defaults_empty(tmp_path) -> None:
     assert ctx.tiers == ("low", "high")
 
 
-# --- resolve_path / resolve_path_strict / authorize_fs tests ---
+# --- resolve_path / authorize_fs tests ---
 
 def test_resolve_path_relative_maps_under_root(tmp_path):
     ctx = _ctx(tmp_path)
@@ -183,29 +183,6 @@ def test_resolve_path_returns_out_of_worktree_without_raise(tmp_path: Path) -> N
 def test_resolve_path_relative_still_maps_under_root(tmp_path: Path) -> None:
     ctx = _ctx(tmp_path)
     assert ctx.resolve_path("src/x.py") == (tmp_path / "src" / "x.py").resolve()
-
-
-def test_resolve_path_strict_rejects_absolute_outside_root(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        ctx.resolve_path_strict("/etc/passwd")
-
-
-def test_resolve_path_strict_rejects_parent_escape(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        ctx.resolve_path_strict("../../etc/passwd")
-
-
-def test_resolve_path_strict_normalizes_embedded_traversal(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    with pytest.raises(PermissionDenied):
-        ctx.resolve_path_strict("imp/specs/../../../etc/passwd")
-
-
-def test_resolve_path_strict_maps_relative_under_root(tmp_path: Path) -> None:
-    ctx = _ctx(tmp_path)
-    assert ctx.resolve_path_strict("src/foo.py") == (tmp_path / "src" / "foo.py").resolve()
 
 
 def _active_policy(tmp_path: Path) -> SandboxPolicy:

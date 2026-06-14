@@ -15,12 +15,12 @@ def test_gate_steps_in_span_review_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [17..20] = integrate-merge, integrator, integrate-tests, finalize.
-    # Gates: integrate-merge (pause), integrate-tests (resume: integrator, backward),
+    # Span [17..20] = integrate-merge, integrator, integrate-verify, finalize.
+    # Gates: integrate-merge (pause), integrate-verify (resume: integrator, backward),
     # finalize (pause + goto implement backward).
     # integrator (no rules / continue-only) is NOT a gate.
     assert gate_steps_in_span(wf, 17, 20) == (
-        "integrate-merge", "integrate-tests", "finalize",
+        "integrate-merge", "integrate-verify", "finalize",
     )
 
 
@@ -73,7 +73,7 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     with pytest.raises(GateBypassRequired) as exc:
         plan_rewind(_wf(), _state("integrate-merge"), "merge")
     assert exc.value.gate_steps == (
-        "integrate-merge", "integrate-tests", "finalize",
+        "integrate-merge", "integrate-verify", "finalize",
     )
     msg = str(exc.value)
     assert "integrate-merge" in msg
@@ -119,7 +119,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
 def test_plan_rewind_forward_no_gate_allowed() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # integrator (18) -> integrate-tests (19): span [18,18] = integrator,
+    # integrator (18) -> integrate-verify (19): span [18,18] = integrator,
     # a non-gate (no rules / continue-only) -> a forward jump bypassing no gate.
-    plan = plan_rewind(_wf(), _state("integrator"), "integrate-tests")
-    assert plan.to_step == "integrate-tests"
+    plan = plan_rewind(_wf(), _state("integrator"), "integrate-verify")
+    assert plan.to_step == "integrate-verify"

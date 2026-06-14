@@ -32,6 +32,9 @@ def test_tui_lifecycle_renders_real_engine_tool_calls() -> None:
             time.sleep(0.02)
         assert s.is_alt_screen() is True, "alt-screen never entered"
 
+        s.send("\x0f")  # Ctrl-O -> full mode (lean is default) to see individual tool calls
+        time.sleep(0.1)
+
         # The engine emits all tool_call events in one batch (scripted provider),
         # then executes the 40 bash subprocesses sequentially (~20s total).
         # Wait for the last call to appear in the viewport, then wait for the

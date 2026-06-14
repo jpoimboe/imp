@@ -26,7 +26,7 @@ Read first, every entry:
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 message containing feedback — reviewer findings (end-gate `task_gap` from the
 review panel or the recheck reviewer, human finalize decision) **or** a gate failure
-(the `commit-check`/`run-tests` scripts
+(the `commit-check`/`verify` scripts
 `resume` you with their stderr — e.g. failing tests or an uncommitted file) —
 treat it as **authoritative over progress.md**: re-open and fix the named task
 even if progress.md marks it done, then reconcile progress.md. (Otherwise
@@ -66,19 +66,17 @@ progress.md is your guide.)
    it. Never hand a reviewer contradictory framing.
 
    **State what was already verified.** In the reviewer's dispatch message, state
-   what the implementer verified for this change — the focused tests it ran and,
-   **only when `$IMP_LINT_COMMAND` is configured**, "lint clean." Do **not** run
-   the project's full test suite yourself to produce this: the `run-tests` gate is
-   the authoritative full-suite check and runs once after the implement phase, so a
-   full run here only duplicates it. State only what was actually run — do not claim
-   lint-clean when no lint command is configured.
+   what the implementer verified for this change — the focused tests it ran. Do
+   **not** run the project's full suite, lint, or typecheck yourself: the phase-level
+   `verify` gate is the authoritative combined check and runs once after the
+   implement phase, so a run here only duplicates it. State only what was actually run.
 
    {% if vars.fast_path %}
    **Fast-path: the spec waived tests.** When you dispatch the implementer for a
    fast-path task, state plainly in the dispatch message: "the spec waived **new**
-   tests — do **not** add or modify tests; make exactly the task's edits, run the
-   lint gate if `$IMP_LINT_COMMAND` is set, then commit. Do **not** run the
-   project's full test suite — the `run-tests` gate runs it after this phase."
+   tests — do **not** add or modify tests; make exactly the task's edits, then
+   commit. Do **not** run the project's full suite or lint/typecheck — the
+   phase-level `verify` gate runs the project's combined checks after this phase."
    **One reviewer.** Dispatch ONLY `quality-reviewer` at the **`medium` tier**:
    `task(subagent_name="quality-reviewer", tier="medium", …)`. (Trivial diffs
    waived new tests, so spec-conformance is least likely to be the failure mode;
@@ -124,7 +122,7 @@ progress.md is your guide.)
    behavior."
 
    A **nit-only** fixup (no blocking findings in the round)
-   does not re-trigger the quality-reviewer — the phase-level `run-tests` gate
+   does not re-trigger the quality-reviewer — the phase-level `verify` gate
    is the safety net — and does not mark the run degraded (nit polish is not
    correctness; see step 5). When a round carries blocking findings, re-review
    until none remain. All fixes go through the implementer — you never commit,
@@ -144,7 +142,7 @@ progress.md is your guide.)
 
    **Record an `open_items` note
    whenever a round was NOT clean on first pass** — any of: a reviewer raised a
-   blocking (Critical/Major) finding; a gate (`commit-check` / `run-tests`) failed
+   blocking (Critical/Major) finding; a gate (`commit-check` / `verify`) failed
    and resumed you; or a fixup had to be made for **correctness** (not polish). A
    degraded run must be self-reporting. The line between polish and correctness:
    renaming a variable for clarity, or a nit that cleared the fixability bar, =

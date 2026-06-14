@@ -15,7 +15,8 @@ The task-lead's dispatch message contains the task text and spec. In `bash`, run
 ## Your Job
 
 **Trust the stated verification.** The task-lead's dispatch states what it
-already verified (test state, and lint-clean when a lint command is configured).
+already verified (the focused tests it ran); the phase-level `verify` gate is the
+authoritative combined check.
 Do not re-run the full test suite unless you have a specific reason to doubt the
 stated state. If the dispatch contains **no** verification statement at all, do
 not assume green — verify independently before trusting an absent claim. Review

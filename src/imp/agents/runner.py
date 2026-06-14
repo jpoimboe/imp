@@ -147,12 +147,9 @@ class AgentInvocation:
     # can drive a subagent with pause detection + interrupt attachment. Any to
     # avoid importing cli.signals here. None for legacy/test construction.
     coordinator: Any = None
-    # config.lint_command, threaded onto the child ToolContext by each provider
-    # so the agent bash tool can inject IMP_LINT_COMMAND. None => no lint gate.
-    lint_command: str | None = None
-    # config.test_command, threaded onto the child ToolContext by each provider
-    # so the agent bash tool can inject IMP_TEST_COMMAND. None => no test gate.
-    test_command: str | None = None
+    # config.verify_command, threaded onto the child ToolContext by each provider
+    # so the agent bash tool can inject IMP_VERIFY_COMMAND. None => no verify gate.
+    verify_command: str | None = None
     # §10/§12: when True, the run is headless (no human at the keyboard) and the
     # subagent backoff loop applies a wall-clock ceiling instead of waiting forever.
     # Threaded from run_change → _route_agent → _run_agent_invocation →

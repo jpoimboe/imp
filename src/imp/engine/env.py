@@ -17,18 +17,16 @@ from pathlib import Path
 
 # Every env var this module manages. `engine_env` is the AUTHORITY for these: a
 # subprocess must see exactly what `engine_env` produces, never an inherited copy.
-# `IMP_LINT_COMMAND` and `IMP_TEST_COMMAND` are conditionally present
-# (absent => no lint/test gate), so without explicit stripping a stale ambient
-# value (e.g. from a parent imp process during imp-on-imp dogfooding) would leak
-# through a `{**os.environ, ...}` merge and falsely enable the gate. Use
-# `overlay_engine_env` to merge, not a raw dict spread.
+# `IMP_VERIFY_COMMAND` is conditionally present (absent => no verify gate), so
+# without explicit stripping a stale ambient value (e.g. from a parent imp process
+# during imp-on-imp dogfooding) would leak through a `{**os.environ, ...}` merge
+# and falsely enable the gate. Use `overlay_engine_env` to merge, not a raw dict spread.
 ENGINE_ENV_VARS = frozenset({
     "IMP_PROJECT_ROOT",
     "IMP_CHANGE_ID",
     "IMP_CHANGE_SLUG",
     "IMP_CHANGE_TITLE",
-    "IMP_LINT_COMMAND",
-    "IMP_TEST_COMMAND",
+    "IMP_VERIFY_COMMAND",
 })
 
 
@@ -39,9 +37,8 @@ def overlay_engine_env(
 
     Any engine-managed var inherited from `parent` is dropped first, so only the
     vars `overlay` actually provides reach the subprocess. This prevents a stale
-    ambient engine var — notably `IMP_LINT_COMMAND` or `IMP_TEST_COMMAND` from an
-    outer imp process — from leaking past `engine_env`'s "absent => no lint/test
-    gate" contract.
+    ambient engine var — notably `IMP_VERIFY_COMMAND` from an outer imp process —
+    from leaking past `engine_env`'s "absent => no verify gate" contract.
 
     `PYTHONPATH` is special-cased: it is a *prefix*, not an authoritative value.
     The worktree's `src/` (set by `engine_env` for an imp checkout) is prepended
@@ -66,8 +63,7 @@ def overlay_engine_env(
 
 def engine_env(
     *, project_root: Path, change_id: str, change_slug: str, change_title: str,
-    lint_command: str | None = None,
-    test_command: str | None = None,
+    verify_command: str | None = None,
 ) -> dict[str, str]:
     """Return the environment variables the engine injects into every subprocess.
 
@@ -79,12 +75,10 @@ def engine_env(
                             title rename. Do not key automation on it; use
                             IMP_CHANGE_ID.
         IMP_CHANGE_TITLE  — human-readable title for the change.
-        IMP_LINT_COMMAND  — optional lint-clean gate command, injected only when
-                            configured. A falsy command (None or empty string) is
-                            treated as absent => no lint gate, so the var is omitted.
-        IMP_TEST_COMMAND  — optional test-run gate command, injected only when
-                            configured. A falsy command (None or empty string) is
-                            treated as absent => no test gate, so the var is omitted.
+        IMP_VERIFY_COMMAND — optional combined verify gate command (tests+lint+typecheck),
+                            injected only when configured. A falsy command (None or
+                            empty string) is treated as absent => no verify gate, so
+                            the var is omitted.
         PYTHONPATH        — prefix pointing at `<project_root>/src`, injected only
                             for an imp source checkout (imp-on-imp dogfooding), so
                             unrelated projects' subprocesses are never perturbed.
@@ -101,10 +95,8 @@ def engine_env(
         "IMP_CHANGE_SLUG": change_slug,
         "IMP_CHANGE_TITLE": change_title,
     }
-    if lint_command:
-        env["IMP_LINT_COMMAND"] = lint_command
-    if test_command:
-        env["IMP_TEST_COMMAND"] = test_command
+    if verify_command:
+        env["IMP_VERIFY_COMMAND"] = verify_command
     # imp-on-imp only: when the project being changed is itself an imp source
     # checkout, an editable install (pip install -e) pins `import imp` to the
     # parent repo, so a worktree's agent would import the parent's code, not the

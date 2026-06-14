@@ -45,7 +45,7 @@ things a single deferring task could not (e.g. a `_can_pty` dedup that is
    (`task(subagent_name="implementer", tier="medium", …)`) with the over-reach
    guardrail: "apply ONLY this named item; it is bounded and mechanical; do not
    refactor beyond it, touch unrelated code, or alter behavior." Run **no quality-reviewer** (this matches the existing nit-only-fixup rule). The
-   `run-tests` gate after the sweep is the backstop; you also self-verify the diff
+   `verify` gate after the sweep is the backstop; you also self-verify the diff
    stays within the named item. **One clean commit** for the item. **Not surfaced.**
    This is the common case.
 

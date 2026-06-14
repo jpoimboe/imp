@@ -55,7 +55,7 @@ Read all of these before forming a verdict.
   instances are **Important** open items under `approve`.
 - Edge cases covered?
 - Integration tests where they matter?
-- The `run-tests` gate has already confirmed the suite passes — you may re-run
+- The `verify` gate has already confirmed the project's checks pass — you may re-run
   tests or a linter via `bash` to spot-check, but do not rely on that gate as a
   substitute for reading the tests themselves.
 

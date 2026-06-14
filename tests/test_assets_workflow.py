@@ -51,7 +51,7 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert isinstance(by["spec-verify-commit"].rules[-1].action, Goto)
     assert by["spec-verify-commit"].rules[-1].action.resume is True   # -> spec-writer
     assert by["plan-verify-commit"].rules[-1].action.resume is True   # -> plan-writer
-    assert by["run-tests"].rules[-1].action.resume is True            # -> task-lead
+    assert by["verify"].rules[-1].action.resume is True            # -> task-lead
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
     # phase jumps clear (plain goto)
     assert by["review"].rules[1].action.resume is False   # plan_gap -> plan-writer (plain goto)
@@ -202,12 +202,12 @@ def test_commit_tool_is_removed_from_registry() -> None:
     assert "commit" not in get_registry()
 
 
-def test_implement_phase_stamps_trailers_after_sweep_tests() -> None:
+def test_implement_phase_stamps_trailers_after_sweep_verify() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     impl = next(p for p in wf.phases if p.name == "implement")
     names = [s.name for s in impl.steps]
-    assert names.index("sweep-tests") < names.index("stamp-trailers"), names
+    assert names.index("sweep-verify") < names.index("stamp-trailers"), names
     assert names.index("stamp-trailers") < names.index("plan-cycle-check"), names
 
 

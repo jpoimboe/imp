@@ -1,6 +1,6 @@
 """Per-plan review wiring: autosquash + a single merged `review` step
 (review-panel.md) run INSIDE the per-plan implement loop, followed by
-deferred-sweep + sweep-tests + stamp-trailers; plan-cycle-check routes to the
+deferred-sweep + sweep-verify + stamp-trailers; plan-cycle-check routes to the
 whole-change review pass (review_scope=change) when multi_plan, then to
 integrate-merge. The integration-* steps and fast-path router gates are gone."""
 from __future__ import annotations
@@ -35,9 +35,9 @@ def _steps(wf):
 def test_implement_phase_is_the_per_plan_loop() -> None:
     impl = next(p for p in _wf().phases if p.name == "implement")
     assert [s.name for s in impl.steps] == [
-        "task-lead", "commit-check", "run-tests",
+        "task-lead", "commit-check", "verify",
         "autosquash", "autosquash-resolve",
-        "review", "deferred-sweep", "sweep-tests", "stamp-trailers",
+        "review", "deferred-sweep", "sweep-verify", "stamp-trailers",
         "plan-cycle-check",
     ]
 
@@ -47,7 +47,7 @@ def test_review_phase_starts_at_integrate_merge() -> None:
     assert next(s.name for s in review.steps) == "integrate-merge"
     names = {s.name for s in _wf().flat_steps()}
     for gone in ("integration-gate", "integration-pass", "integration-sweep",
-                 "integration-sweep-tests", "stamp-sweep-trailers"):
+                 "integration-sweep-verify", "stamp-sweep-trailers"):
         assert gone not in names, gone
 
 
@@ -109,13 +109,13 @@ def test_review_panel_pins_deferred_observation_format() -> None:
     assert "deferred-sweep" in text.lower()   # names the consumer step
 
 
-def test_deferred_sweep_step_then_sweep_tests() -> None:
+def test_deferred_sweep_step_then_sweep_verify() -> None:
     steps = _steps(_wf())
     sweep = steps["deferred-sweep"]
     assert sweep.kind == "agent" and sweep.file.name == "deferred-sweep.md"
     assert any(r.mode == "allow" and "write" in r.operations for r in sweep.fs_permissions)
-    st = steps["sweep-tests"]
-    assert st.kind == "script" and st.command.endswith("run-tests.sh")
+    st = steps["sweep-verify"]
+    assert st.kind == "script" and st.command.endswith("run-verify.sh")
     assert isinstance(st.rules[-1].action, Goto)
     assert st.rules[-1].action.target == "deferred-sweep" and st.rules[-1].action.resume is True
 

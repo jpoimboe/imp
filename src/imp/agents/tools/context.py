@@ -4,7 +4,7 @@ Path model: in-worktree files are addressed by paths RELATIVE to the worktree
 root. `resolve_path` resolves both relative-under-root and absolute paths with NO
 containment raise; `authorize_fs` then bounds the result (fs_permissions
 in-worktree, the sandbox mirror outside) so the fs tools reach the same paths as
-`bash`. `resolve_path_strict` keeps worktree containment for glob/grep. There is
+`bash`. There is
 no virtual `/project`/`/scratch` namespace and no in-memory scratch store; system
 paths are `bash`'s job, backstopped by the OS sandbox.
 """
@@ -87,12 +87,9 @@ class ToolContext:
     # provider. dispatch_task passes it to drive_invocation so a subagent gets
     # pause detection + interrupt attachment. None for legacy/test contexts.
     coordinator: Any = None
-    # Optional lint-clean gate command (config.lint_command). Threaded onto the
-    # subprocess env (IMP_LINT_COMMAND) by the bash tool. None => no lint gate.
-    lint_command: str | None = None
-    # Optional test-run gate command (config.test_command). Threaded onto the
-    # subprocess env (IMP_TEST_COMMAND) by the bash tool. None => no test gate.
-    test_command: str | None = None
+    # Optional combined verify gate command (config.verify_command). Threaded onto
+    # the subprocess env (IMP_VERIFY_COMMAND) by the bash tool. None => no verify gate.
+    verify_command: str | None = None
     # Resolved SandboxPolicy for shell wrapping (spec Part B). None => bare sh -c
     # (no sandbox), preserving pre-sandbox behavior. Set by the runner from
     # invocation.sandbox_policy.
@@ -140,19 +137,9 @@ class ToolContext:
         project_root; an absolute path replaces the root (pathlib join semantics)
         and resolves to its literal host location. Out-of-worktree access is then
         bounded by authorize_fs (fs_permissions in-worktree, the sandbox mirror
-        outside), matching `bash`. glob/grep use resolve_path_strict instead.
+        outside), matching `bash`.
         """
         return (self.project_root / path).resolve()
-
-    def resolve_path_strict(self, path: str) -> Path:
-        """Resolve `path` contained to the worktree root; raise PermissionDenied if it escapes."""
-        root = self.project_root.resolve()
-        resolved = (self.project_root / path).resolve()
-        if resolved != root and not resolved.is_relative_to(root):
-            raise PermissionDenied(
-                f"path {path!r} escapes the worktree root {root}"
-            )
-        return resolved
 
     def authorize_fs(
         self, ops: tuple[Literal["read", "write"], ...], path: str,

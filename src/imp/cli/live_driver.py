@@ -32,7 +32,7 @@ from imp.cli import palette as pal
 from imp.cli import render_text as rt
 from imp.cli.live_status import LiveStatus
 
-_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+_SPINNER = "|/-\\"
 
 
 def compose_activity_status(

@@ -407,8 +407,7 @@ def build_agent_invocation(
     retry_feedback: str | None = None,
     balance_on_resume: bool = False,
     log: Any = None,
-    lint_command: str | None = None,
-    test_command: str | None = None,
+    verify_command: str | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
 ) -> AgentInvocation:
@@ -459,8 +458,7 @@ def build_agent_invocation(
         tiers=tiers,
         subagent_depth=subagent_depth,
         coordinator=coordinator,
-        lint_command=lint_command,
-        test_command=test_command,
+        verify_command=verify_command,
         non_interactive=non_interactive,
         sandbox_policy=sandbox_policy,
     )

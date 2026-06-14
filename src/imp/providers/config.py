@@ -8,8 +8,7 @@ Schema (post 2026-06-04-roles-to-tiers):
       high:   {claude_code: opus,   openai: gpt-5.5}
     provider_envs:                        # optional; default <PROVIDER>_API_KEY
       openai: {env: OPENAI_API_KEY}
-    lint_command: "..."                   # optional
-    test_command: "..."                   # optional
+    verify_command: "..."                 # optional combined verify gate (tests+lint+typecheck)
     editing_mode: emacs                   # vi | emacs (default emacs)
     vars: {...}                           # optional scalar overrides
 """
@@ -46,8 +45,7 @@ class Config:
         default_factory=lambda: SourceLoc(file=Path("config.yaml"), line=1),
     )
     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
-    lint_command: str | None = field(hash=False, default=None)
-    test_command: str | None = field(hash=False, default=None)
+    verify_command: str | None = field(hash=False, default=None)
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
@@ -90,16 +88,11 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         out["provider_envs"] = _parse_provider_envs(raw["provider_envs"], src)
     if raw.get("vars") is not None:
         out["vars"] = _parse_var_overrides(raw["vars"], src)
-    if "lint_command" in raw:
-        v = raw["lint_command"]
+    if "verify_command" in raw:
+        v = raw["verify_command"]
         if not isinstance(v, str):
-            raise LoadError("'lint_command' must be a string (e.g. \"make lint\")", src)
-        out["lint_command"] = v
-    if "test_command" in raw:
-        v = raw["test_command"]
-        if not isinstance(v, str):
-            raise LoadError("'test_command' must be a string (e.g. \"make test\")", src)
-        out["test_command"] = v
+            raise LoadError("'verify_command' must be a string (e.g. \"make check\")", src)
+        out["verify_command"] = v
     if "editing_mode" in raw:
         v = raw["editing_mode"]
         if v not in ("vi", "emacs"):
