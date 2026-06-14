@@ -1890,7 +1890,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_status = sub.add_parser(
         "status",
-        help="List in-flight Changes (use -a for completed and abandoned).")
+        help="List in-flight Changes (use -a for completed and abandoned).",
+        description=(
+            "List in-flight Changes as a table (id, status, step, last "
+            "activity, title). Use -a/--all to also show completed and "
+            "abandoned Changes."
+        ),
+    )
     p_status.add_argument(
         "-a", "--all", action="store_true",
         help="Also list completed and abandoned Changes (default: in-flight only).",
@@ -1898,7 +1904,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=_cmd_status)
 
     p_config = sub.add_parser(
-        "config", help="Show the effective config and per-setting provenance.")
+        "config",
+        help="Show the effective config and per-setting provenance.",
+        description=(
+            "Show the effective configuration and where each setting came "
+            "from (its provenance layer). --explain TIER traces one tier's "
+            "model bindings through the layers; --all shows every "
+            "provider x tier row."
+        ),
+    )
     p_config.add_argument("--explain", metavar="TIER", default=None,
                           help="trace one tier's bindings through the layers")
     p_config.add_argument("--all", action="store_true",
@@ -1910,7 +1924,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "abandon",
         help="Tear down a Change's worktree, branch, and state (logged).",
     )
-    p_abandon.add_argument("token")
+    p_abandon.add_argument(
+        "token",
+        help="Change id or short token identifying which Change to abandon.")
     p_abandon.add_argument(
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
