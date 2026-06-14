@@ -760,6 +760,19 @@ def test_parse_agent_deny_tools(tmp_path: Path) -> None:
     assert agent.tools == frozenset()
 
 
+def test_parse_agent_deny_tools_empty_list(tmp_path: Path) -> None:
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ndeny_tools: []\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    agent = parse_agent_file(p)
+    assert agent.deny_tools == frozenset()
+    assert agent.explicit_tools is False
+
+
 def test_parse_agent_explicit_tools_flag_set_when_tools_given(tmp_path: Path) -> None:
     p = write_agent_md(
         tmp_path / "x.md",
@@ -771,6 +784,7 @@ def test_parse_agent_explicit_tools_flag_set_when_tools_given(tmp_path: Path) ->
     agent = parse_agent_file(p)
     assert agent.explicit_tools is True
     assert agent.deny_tools == frozenset()
+    assert agent.tools == frozenset({"read_file"})
 
 
 def test_parse_agent_tools_and_deny_tools_conflict(tmp_path: Path) -> None:
