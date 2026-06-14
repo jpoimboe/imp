@@ -43,6 +43,7 @@ CHANGE_DIR=".imp/change"
 if git merge-base --is-ancestor "$BASE" HEAD; then
   SHA=$(git rev-parse "${BASE}^{commit}") || exit 5
   echo "$SHA" > "$CHANGE_DIR/integrated_base_sha"
+  rm -f "$CHANGE_DIR/integration-notes.md"
   echo "base ($BASE) already integrated; nothing to do"
   exit 2
 fi
@@ -71,6 +72,7 @@ echo "$SHA" > "$CHANGE_DIR/integrated_base_sha"
 # Rebase the branch onto base. rerere on every invocation (a conflict recurring
 # across re-integration rounds replays its recorded resolution); --empty=drop (a
 # change commit base already contains is dropped, not a stop on an empty pick).
+rm -f "$CHANGE_DIR/integration-notes.md"
 if git -c rerere.enabled=true -c rerere.autoupdate=true rebase --empty=drop "$BASE"; then
   echo "clean rebase onto $BASE (no conflicts); handing to integrate-verify"
   exit 0

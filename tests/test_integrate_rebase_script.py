@@ -156,6 +156,24 @@ def test_records_integrated_base_sha_on_conflict_rebase(tmp_path: Path) -> None:
     assert recorded == _git(pr, "rev-parse", "main^{commit}").stdout.strip()
 
 
+def test_noop_path_deletes_stale_integration_notes(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=False, conflict=False)
+    stale = pr / ".imp" / "change" / "integration-notes.md"
+    stale.write_text("stale notes from prior conflict round\n")
+    assert _run(pr).returncode == 2
+    assert not stale.exists()
+
+
+def test_clean_rebase_path_deletes_stale_integration_notes(tmp_path: Path) -> None:
+    pr = tmp_path / "wt"
+    _seed(pr, base_ahead=True, conflict=False)
+    stale = pr / ".imp" / "change" / "integration-notes.md"
+    stale.write_text("stale notes from prior conflict round\n")
+    assert _run(pr).returncode == 0
+    assert not stale.exists()
+
+
 def test_nonnumeric_reintegration_limit_exits_4(tmp_path: Path) -> None:
     pr = tmp_path / "wt"
     _seed(pr, base_ahead=True, conflict=False)
