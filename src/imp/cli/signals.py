@@ -44,16 +44,23 @@ _suppress = contextlib.suppress
 _SUPPRESS_WINDOW_S = 1.0  # anti-double-tap: a 2nd gesture within this window is dropped
 
 
-def pause_and_exit(
-    change: Change, *, reason: str, engine_emitted: bool = False,
-) -> None:
+def _open_pause_exists(change: Change) -> bool:
+    for event in reversed(list(change.event_log().read())):
+        etype = event.get("type")
+        if etype == "workflow_paused":
+            return True
+        if etype == "workflow_resumed":
+            return False
+    return False
+
+
+def pause_and_exit(change: Change, *, reason: str) -> None:
     """Save state as paused (ONLY transitioning from running — a missing or
     merge_blocked status is preserved) and append workflow_paused UNLESS the
-    engine (executor) already emitted one for this pause this run
-    (engine_emitted=True). Emission-driven, NOT reason-equality: the
-    clean-solicit-SIGINT (point A) and SIGTERM paths emit no engine pause, so
-    their workflow_paused must not be suppressed even when `reason` coincides
-    with the gesture."""
+    journal already holds an open pause (a workflow_paused with no intervening
+    workflow_resumed). Emission-driven, NOT reason-equality: the
+    clean-solicit-SIGINT (point A) and SIGTERM paths emit no engine pause, so the
+    tail is not `paused` and they still append correctly."""
     try:
         state = State.load(change.state_dir)
         if state.status == "running":
@@ -62,8 +69,8 @@ def pause_and_exit(
     except FileNotFoundError:
         # State never reached the durable phase — nothing to update
         pass
-    if engine_emitted:
-        return  # the engine's workflow_paused already carries this; no dup append
+    if _open_pause_exists(change):
+        return  # an open pause already exists in the journal; no dup append
     change.event_log().append(
         agent_id=None, type="workflow_paused",
         payload={"reason": reason, "interrupt_reason": reason})

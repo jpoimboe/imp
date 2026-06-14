@@ -185,6 +185,18 @@ def test_resolve_path_relative_still_maps_under_root(tmp_path: Path) -> None:
     assert ctx.resolve_path("src/x.py") == (tmp_path / "src" / "x.py").resolve()
 
 
+def test_resolve_path_expands_home(tmp_path: Path, monkeypatch) -> None:
+    # A `~`-home path resolves to the literal host location, NOT under the
+    # worktree root — so an agent in a Change worktree can reach a file the user
+    # named by ~/path in their main checkout.
+    home = tmp_path / "home" / "u"
+    monkeypatch.setenv("HOME", str(home))
+    ctx = _ctx(tmp_path)
+    assert ctx.resolve_path("~/imp/docs/bug.md") == (home / "imp" / "docs" / "bug.md").resolve()
+    # A bare ~ component is expanded, not treated as a literal dir under the root.
+    assert ctx.resolve_path("~") == home.resolve()
+
+
 def _active_policy(tmp_path: Path) -> SandboxPolicy:
     return SandboxPolicy(
         active=True,

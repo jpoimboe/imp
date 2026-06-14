@@ -134,13 +134,14 @@ class ToolContext:
     def resolve_path(self, path: str) -> Path:
         """Resolve an fs-tool path WITHOUT a worktree-containment raise.
 
-        `(project_root / path).resolve()`: a relative path maps under
-        project_root; an absolute path replaces the root (pathlib join semantics)
-        and resolves to its literal host location. Out-of-worktree access is then
-        bounded by authorize_fs (fs_permissions in-worktree, the sandbox mirror
-        outside), matching `bash`.
+        `(project_root / path.expanduser()).resolve()`: a relative path maps under
+        project_root; a `~`-home path expands to an absolute host path, and any
+        absolute path replaces the root (pathlib join semantics) and resolves to
+        its literal host location. Out-of-worktree access is then bounded by
+        authorize_fs (fs_permissions in-worktree, the sandbox mirror outside),
+        matching `bash`.
         """
-        return (self.project_root / path).resolve()
+        return (self.project_root / Path(path).expanduser()).resolve()
 
     def authorize_fs(
         self, ops: tuple[Literal["read", "write"], ...], path: str,

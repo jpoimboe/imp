@@ -461,7 +461,7 @@ async def _route_script(
         feedback = format_script_feedback(
             step.command, out["exit"], out["stdout"], out["stderr"])
     elif isinstance(action, Pause):
-        # Script pauses (e.g. integrate-merge exit 3/4/5, base-fresh-check exit 1,
+        # Script pauses (e.g. integrate-rebase exit 3/4/5, base-fresh-check exit 1,
         # autosquash/stamp-trailers) otherwise lose their stderr — the pause verb
         # carries no reason and the CLI keys remediation only on merge_blocked.
         # Journal it so `imp log` shows it and the CLI can surface it (findings #5/#6).
@@ -497,8 +497,8 @@ async def _route_merge(
     # Tolerate a missing SHA file -> None: merge_to_base then skips the freshness
     # check. A genuinely missing file means integration never ran this run (a
     # workflow without integration, or the mocked e2e harness that shims
-    # integrate-merge.sh to `exit 0` and never writes the file), or
-    # base-fresh-check already exited 10 -> goto integrate-merge (which records
+    # integrate-rebase.sh to `exit 0` and never writes the file), or
+    # base-fresh-check already exited 10 -> goto integrate-rebase (which records
     # the SHA before merge-to-base re-runs). Either way, None is correct here.
     sha_file = change.change_dir / "integrated_base_sha"
     expected_sha = sha_file.read_text().strip() if sha_file.exists() else None
@@ -535,7 +535,7 @@ async def _route_merge(
                "action": _action_payload(pause), "var_mutations": {}})
         return pause, None, {}
 
-    # STALE -> goto integrate-merge; MERGED -> continue (falls through to finalize).
+    # STALE -> goto integrate-rebase; MERGED -> continue (falls through to finalize).
     match = evaluate_rules(step.rules, vars=state.vars, output={"merge": result.status})
     state.vars.update(match.var_mutations)
     return _finish(log, step, match)

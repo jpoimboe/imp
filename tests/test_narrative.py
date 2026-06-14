@@ -1668,7 +1668,7 @@ def test_clean_panel_renders_findings_prose_generically() -> None:
             status="Success", verdict="approve",
             findings="all four approve; two nits were noted\n(foo rename, comment style)"),
         _ev("sc", "step_completed", step="review", kind="agent",
-            action={"verb": "goto", "target": "integrate-merge"}, var_mutations={}),
+            action={"verb": "goto", "target": "integrate-rebase"}, var_mutations={}),
     ]
     tree = nv.build_tree(events)
     step = tree.root.children[0].children[0]

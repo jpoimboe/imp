@@ -235,7 +235,7 @@ async def test_run_tui_session_result_none_calls_finalize_paused(
     monkeypatch.setattr(m, "run_change", _slow_run_change)
     monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
     monkeypatch.setattr(m, "_finalize_paused_exit",
-                        lambda change, driver, coord, reason, *, engine_emitted=False:
+                        lambda change, driver, coord, reason:
                             finalized.append(reason) or 130)
 
     rc = await m._run_tui_session(SimpleNamespace(), args=argparse.Namespace(tui=True))
@@ -370,9 +370,10 @@ async def test_run_tui_session_paused_writes_single_workflow_paused(
     monkeypatch, tmp_path, capsys,
 ) -> None:
     """TUI interrupt-pause: the executor emitted workflow_paused before returning
-    RunResult.PAUSED, so the REAL _finalize_paused_exit (engine_emitted=True from
-    the call site) must NOT append a duplicate. Closes the gate gap left by the
-    monkeypatched-finalize test — exactly one workflow_paused must remain."""
+    RunResult.PAUSED, so the REAL _finalize_paused_exit (whose pause_and_exit
+    journal-tail guard sees the open pause) must NOT append a duplicate. Closes
+    the gate gap left by the monkeypatched-finalize test — exactly one
+    workflow_paused must remain."""
     change = _seed_change(tmp_path)
 
     async def _paused_run_change(change, *, on_event, user_chat_input_fn,

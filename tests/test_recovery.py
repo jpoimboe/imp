@@ -15,12 +15,12 @@ def test_gate_steps_in_span_review_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [17..20] = integrate-merge, integrator, integrate-verify, finalize.
-    # Gates: integrate-merge (pause), integrate-verify (resume: integrator, backward),
+    # Span [17..20] = integrate-rebase, integrator, integrate-verify, finalize.
+    # Gates: integrate-rebase (pause), integrate-verify (resume: integrator, backward),
     # finalize (pause + goto implement backward).
     # integrator (no rules / continue-only) is NOT a gate.
     assert gate_steps_in_span(wf, 17, 20) == (
-        "integrate-merge", "integrate-verify", "finalize",
+        "integrate-rebase", "integrate-verify", "finalize",
     )
 
 
@@ -71,12 +71,12 @@ def test_plan_rewind_forward_to_merge_is_rejected() -> None:
     from imp.engine.recovery import GateBypassRequired, plan_rewind
 
     with pytest.raises(GateBypassRequired) as exc:
-        plan_rewind(_wf(), _state("integrate-merge"), "merge")
+        plan_rewind(_wf(), _state("integrate-rebase"), "merge")
     assert exc.value.gate_steps == (
-        "integrate-merge", "integrate-verify", "finalize",
+        "integrate-rebase", "integrate-verify", "finalize",
     )
     msg = str(exc.value)
-    assert "integrate-merge" in msg
+    assert "integrate-rebase" in msg
     assert "--force" not in msg
     assert "not allowed" in msg
 
