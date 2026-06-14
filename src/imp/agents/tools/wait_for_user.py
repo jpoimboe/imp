@@ -96,12 +96,13 @@ def make_wait_for_user_tool() -> Tool:
     return Tool(
         name="wait_for_user",
         description=(
-            "Yield to the human and wait for their reply. Call this as your ONLY "
-            "tool call in the turn. Pass `prompt` with your question. When a human "
-            "is attended you receive their reply as the tool result and continue. "
-            "A subagent or a run with no input channel pauses the run for a human; "
-            "a headless top-level run consumes its --message reply then pauses when "
-            "none remains."
+            "Yield to the human and wait for their reply. Ask your question in "
+            "your turn text; this tool takes no arguments. Call this as your "
+            "ONLY tool call in the turn. When a human is attended you receive "
+            "their reply as the tool result and continue. A subagent or a run "
+            "with no input channel pauses the run for a human; a headless "
+            "top-level run consumes its --message reply then pauses when none "
+            "remains."
         ),
         input_schema=_SCHEMA,
         fn=_invoke,

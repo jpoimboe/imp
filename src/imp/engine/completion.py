@@ -28,7 +28,8 @@ def completion_instruction(schema: OutputSchema) -> str:
     fields_text = ", ".join(parts)
     return (
         "To finish this step you MUST call the `complete_step` tool with: "
-        f"{fields_text}. Do not answer in prose — call the tool."
+        f"{fields_text}. Structured arguments are not shown to the user, so "
+        "state your conclusion in your turn text as prose; then call the tool."
     )
 
 

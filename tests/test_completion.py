@@ -35,7 +35,7 @@ def test_marks_optional_fields_optional() -> None:
     assert "optional" in text.lower()
 
 
-def test_instructs_tool_call_not_prose() -> None:
+def test_instructs_prose_before_tool_call() -> None:
     text = completion_instruction(_schema())
     assert "prose" in text.lower()
 
@@ -82,3 +82,4 @@ def test_continuation_always_nudges_and_names_both_terminators() -> None:
     for _ in range(NUDGE_LIMIT - 1):
         assert fn("x") is not None
     assert fn("x") is None
+
