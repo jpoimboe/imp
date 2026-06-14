@@ -50,6 +50,20 @@ def test_format_falls_back_to_change_id_then_header_only() -> None:
     assert imp_telegram.format_event_message(event) == "[2026-06-11-abc] error"
 
 
+def test_clamp_text_leaves_short_text_unchanged() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
+    assert TELEGRAM_MAX_TEXT == 4096
+    assert clamp_text("hello") == "hello"
+
+
+def test_clamp_text_truncates_overflow_and_marks_it() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
+    out = clamp_text("a" * 5000)
+    assert len(out) == TELEGRAM_MAX_TEXT          # never exceeds the protocol limit
+    assert out.startswith("aaa")                  # the head of the original survives
+    assert out.endswith("[truncated]")            # the cut is visible to the reader
+
+
 def test_emit_reply_collapses_to_a_single_flushed_line() -> None:
     buf = io.StringIO()
     imp_telegram.emit_reply("line one\nline two\r\nthree", buf)
@@ -111,3 +125,9 @@ def test_handle_event_keeps_bodyless_loud_event() -> None:
     event = {"type": "completed", "change": {"id": "c1"}, "payload": {}}
     assert imp_telegram.handle_event(event, send, chat_id=7) is True
     assert sent == [(7, "[c1] done", False)]
+
+
+def test_clamp_text_passes_exactly_max_length_unchanged() -> None:
+    from imp.remote.drivers.telegram import TELEGRAM_MAX_TEXT, clamp_text
+    text = "x" * TELEGRAM_MAX_TEXT
+    assert clamp_text(text) == text
