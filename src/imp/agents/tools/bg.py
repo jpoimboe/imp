@@ -35,7 +35,12 @@ import anyio
 
 from imp.agents.tools import imp_tool
 from imp.agents.tools import limits as _limits
-from imp.agents.tools.context import ToolContext, kill_process_group
+from imp.agents.tools.context import (
+    ToolContext,
+    _signal_pids,
+    descendant_pids,
+    kill_process_group,
+)
 from imp.agents.tools.limits import (
     PROCESS_KILL_GRACE_S,
     TOOL_OUTPUT_CAP_BYTES,
@@ -317,11 +322,17 @@ async def _kill_group_escalate(bp: BgProc) -> None:
     cancellation landing mid-grace must not skip the SIGKILL escalation — the
     caller already flipped kill_reason, so no later sweep would retry."""
     with anyio.CancelScope(shield=True):
+        pid = getattr(bp.proc, "pid", None)
+        captured = set(descendant_pids(pid)) if pid is not None else set()
         await kill_process_group(bp.proc, signal.SIGTERM)
+        _signal_pids(captured, signal.SIGTERM)
         with anyio.move_on_after(PROCESS_KILL_GRACE_S):
             with contextlib.suppress(Exception):
                 await bp.proc.wait()
+        fresh = set(descendant_pids(pid)) if pid is not None else set()
+        survivors = captured | fresh
         await kill_process_group(bp.proc, signal.SIGKILL)
+        _signal_pids(survivors, signal.SIGKILL)
         with anyio.move_on_after(PROCESS_KILL_GRACE_S):
             with contextlib.suppress(Exception):
                 await bp.proc.wait()
@@ -469,8 +480,13 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
     with anyio.CancelScope(shield=True):
         # (2) — signaling a fully-dead group is a silent no-op (ESRCH
         # suppressed in kill_process_group), never an abort mid-registry.
+        captured_bg: dict[int, set[int]] = {}
         for bp in procs:
+            pid = getattr(bp.proc, "pid", None)
+            ds = set(descendant_pids(pid)) if pid is not None else set()
+            captured_bg[id(bp)] = ds
             await kill_process_group(bp.proc, signal.SIGTERM)
+            _signal_pids(ds, signal.SIGTERM)
 
         async def _wait_one(p: Any) -> None:
             with contextlib.suppress(Exception):
@@ -490,7 +506,11 @@ async def terminate_background_processes(ctx: ToolContext) -> None:
             # `bp.proc.returncode is None` would let a TERM-immune child of
             # an exited leader outlive teardown — the leak Decision 7 exists
             # to prevent.
+            pid = getattr(bp.proc, "pid", None)
+            fresh = set(descendant_pids(pid)) if pid is not None else set()
+            survivors = captured_bg[id(bp)] | fresh
             await kill_process_group(bp.proc, signal.SIGKILL)
+            _signal_pids(survivors, signal.SIGKILL)
             if bp.proc.returncode is None:
                 # Bounded like _kill_group_escalate's post-SIGKILL wait: a
                 # D-state straggler must not hang the (shielded, uncancellable)
