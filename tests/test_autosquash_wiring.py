@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.engine.loader import load_workflow
 from imp.engine.expr import Binary, IntLit, Name
+from imp.engine.loader import load_workflow
 from imp.engine.types import Continue, Goto, Pause
 
 WF_DIR = Path("src/imp/assets/workflows/default")

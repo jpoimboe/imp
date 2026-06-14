@@ -3,8 +3,9 @@ complete_step, point at the tree oracle, instruct to drive the rebase to complet
 and forbid aborting/skipping (which would fail the verify gate)."""
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 PROMPT = Path("src/imp/assets/workflows/default/agents/autosquash-resolve.md")
 

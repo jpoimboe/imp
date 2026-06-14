@@ -172,8 +172,10 @@ def _policy(
 
 
 def test_grep_external_accepted_when_policy_inactive(tmp_path: Path) -> None:
-    wt = tmp_path / "wt"; wt.mkdir()
-    ext = tmp_path / "ext"; ext.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
     (ext / "n.txt").write_text("needle here\n")
     ctx = _ctx(wt)                             # no sandbox_policy → external accepted
     out = _grep(ctx, pattern="needle", path=str(ext), output_mode="content")
@@ -181,8 +183,10 @@ def test_grep_external_accepted_when_policy_inactive(tmp_path: Path) -> None:
 
 
 def test_grep_external_masked_target_denied_when_policy_active(tmp_path: Path) -> None:
-    wt = tmp_path / "wt"; wt.mkdir()
-    secret = tmp_path / "secret"; secret.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    secret = tmp_path / "secret"
+    secret.mkdir()
     (secret / "id_rsa").write_text("KEY\n")
     ctx = _ctx(wt)
     ctx.sandbox_policy = _policy(wt, secret_dirs=(str(secret),))
@@ -220,9 +224,12 @@ def test_glob_external_masked_base_denied_when_policy_active(tmp_path: Path) -> 
 
 
 def test_glob_external_per_result_symlink_into_masked_dir_dropped(tmp_path: Path) -> None:
-    wt = tmp_path / "wt"; wt.mkdir()
-    ext = tmp_path / "ext"; ext.mkdir()
-    secret = tmp_path / "secret"; secret.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    secret = tmp_path / "secret"
+    secret.mkdir()
     (secret / "id_rsa").write_text("")
     # symlink inside the allowed ext/ base pointing into the masked secret/ dir
     (ext / "link").symlink_to(secret / "id_rsa")
@@ -235,7 +242,8 @@ def test_glob_external_per_result_symlink_into_masked_dir_dropped(tmp_path: Path
 
 
 def test_glob_inworktree_masked_file_dropped(tmp_path: Path) -> None:
-    wt = tmp_path / "wt"; wt.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
     (wt / "ok.txt").write_text("")
     (wt / "secret.txt").write_text("")
     ctx = _ctx(wt)
@@ -281,9 +289,12 @@ def test_grep_external_walk_prunes_masked_dir(tmp_path: Path) -> None:
 
 
 def test_grep_external_walk_symlink_into_masked_dir_dropped(tmp_path: Path) -> None:
-    wt = tmp_path / "wt"; wt.mkdir()
-    ext = tmp_path / "ext"; ext.mkdir()
-    secret = tmp_path / "secret"; secret.mkdir()
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    secret = tmp_path / "secret"
+    secret.mkdir()
     (secret / "id_rsa").write_text("KEY\n")
     # symlink inside the allowed ext/ walk pointing into the masked secret/ dir
     (ext / "link").symlink_to(secret / "id_rsa")
