@@ -30,24 +30,29 @@ def test_status_paused_when_running(tmp_path: Path) -> None:
     assert State.load(change.state_dir).status == "paused"
 
 
-def test_append_suppressed_when_reason_matches_engine(tmp_path: Path) -> None:
+def test_append_suppressed_when_engine_emitted(tmp_path: Path) -> None:
+    # The executor already emitted a workflow_paused for this pause this run →
+    # pause_and_exit must NOT duplicate it.
     change = _change(tmp_path, status="running")
-    pause_and_exit(change, reason="esc", engine_pause_reason="esc")
+    pause_and_exit(change, reason="esc", engine_emitted=True)
     events = [e for e in change.event_log().read() if e["type"] == "workflow_paused"]
     assert events == []
 
 
-def test_append_when_reason_differs(tmp_path: Path) -> None:
+def test_append_when_engine_did_not_emit(tmp_path: Path) -> None:
+    # The clean-solicit-SIGINT / SIGTERM paths: the engine emitted nothing, so the
+    # append is the ONLY workflow_paused and must fire even when reason coincides
+    # with the gesture (the bug: it used to be suppressed by reason-equality).
     change = _change(tmp_path, status="running")
-    pause_and_exit(change, reason="ctrl-d", engine_pause_reason="esc")
+    pause_and_exit(change, reason="sigterm", engine_emitted=False)
     events = [e for e in change.event_log().read() if e["type"] == "workflow_paused"]
     assert len(events) == 1
-    assert events[0]["payload"]["reason"] == "ctrl-d"
+    assert events[0]["payload"]["reason"] == "sigterm"
 
 
-def test_append_when_engine_pause_reason_omitted(tmp_path: Path) -> None:
-    # Default-None contract (the common path for existing callers): with no
-    # engine_pause_reason, the workflow_paused append always fires exactly once.
+def test_append_when_engine_emitted_omitted(tmp_path: Path) -> None:
+    # Default-False contract (the common path): with no engine_emitted, the append
+    # always fires exactly once.
     change = _change(tmp_path, status="running")
     pause_and_exit(change, reason="ctrl-d")
     events = [e for e in change.event_log().read() if e["type"] == "workflow_paused"]
