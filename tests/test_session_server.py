@@ -310,3 +310,61 @@ async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None
                 await anyio.sleep(0.02)
         assert result["r"] == "hibernated"
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_lock_is_released_when_run_fn_raises(tmp_path: Path) -> None:
+    from imp.engine.state import ProjectLock
+
+    sock = str(tmp_path / "s.sock")
+    lock_path = tmp_path / "lock"
+    server = SessionServer(sock, lock=ProjectLock(lock_path))
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        raise RuntimeError("boom")
+
+    await server.open()
+    with pytest.raises(Exception):
+        await server.serve(run_fn)
+    assert not lock_path.exists()
+
+
+@pytest.mark.anyio
+async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 2:
+                await anyio.sleep(0.02)
+        try:
+            await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+        return "resident"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client1 = await _attach(sock, "c1")
+        client2 = await _attach(sock, "c2")
+        with anyio.fail_after(5):
+            while server.attached_count != 2:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)  # let the gate open while both are attached
+        await client1.aclose()
+        await anyio.sleep(0.05)  # first detach alone must not trigger hibernation
+        await client2.aclose()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "hibernated"
+        tg.cancel_scope.cancel()
