@@ -256,6 +256,21 @@ git commit -m "feat: add specific feature"
 ```
 ````
 
+## No Redundant Whole-Project Gate Task
+
+A plan MUST NOT contain a task or step whose **only** purpose is running the
+whole-project test suite, lint, or typecheck with no source change and no
+commit. The workflow's mechanical `verify` gate runs the project's
+`verify_command` after the implement phase and routes any failure back to
+`task-lead`, so re-running the full gate by hand is wasted tokens and a wasted
+suite run. The plan ends at the last real task's `Commit` step.
+
+This prohibition targets **only** the whole-project gate. It does NOT touch the
+per-task *focused* TDD steps — the "Run test to verify it fails / passes"
+red/green steps against the one file under test — which are kept and must never
+be stripped. It also does NOT touch a genuine final task that writes or wires
+code and then commits: that is a real task, not a gate.
+
 ## Falsifiability of Tests
 
 Each task's test must assert an **externally observable consequence** — a return value
@@ -300,6 +315,12 @@ After writing the complete plan, check it against the spec and prior plans with 
 **6. Falsifiability:** For each test, would it fail if the implementation were wrong or
 absent? A test whose expected value is just the literal the implementation returns is a
 tautology (plan-echo) — pin an observable consequence instead.
+
+**7. Redundant whole-project gate:** Did you emit a standalone task or step whose
+only purpose is running the whole-project test suite, lint, or typecheck with no
+source change and no commit? If so, remove it — the mechanical `verify` gate
+covers it after the implement phase. Keep per-task focused TDD steps and any
+genuine committing final task.
 
 If you find issues, fix them inline. If you find a spec requirement with no task anywhere, add the task.
 
