@@ -13,8 +13,15 @@ from typing import Any
 import anyio
 from anyio.abc import SocketListener, SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
+from anyio.streams.memory import MemoryObjectSendStream
 
-from imp.remote.session.protocol import Attach, encode_event, parse_client_message
+from imp.remote.session.protocol import (
+    Attach,
+    Control,
+    Input,
+    encode_event,
+    parse_client_message,
+)
 
 _MAX_FRAME = 1 << 20
 
@@ -26,12 +33,15 @@ class SessionSocket:
         *,
         on_attach: Callable[[Attach], None] | None = None,
         on_detach: Callable[[], None] | None = None,
+        on_control: Callable[[str], None] | None = None,
     ) -> None:
         self._path = path
         self._on_attach = on_attach
         self._on_detach = on_detach
+        self._on_control = on_control
         self._clients: set[SocketStream] = set()
         self._listener: SocketListener | None = None
+        self._input_send: MemoryObjectSendStream[str] | None = None
 
     async def open(self) -> None:
         self._listener = await anyio.create_unix_listener(self._path)
@@ -48,24 +58,41 @@ class SessionSocket:
     async def broadcast(self, event: dict[str, Any]) -> None:
         line = (encode_event(event) + "\n").encode("utf-8")
         for stream in list(self._clients):
-            try:
+            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
                 await stream.send(line)
-            except (anyio.BrokenResourceError, anyio.ClosedResourceError):
-                pass
+
+    async def next_input(self) -> str:
+        # capacity-1 stream + WouldBlock drop: first write wins, loser not queued for next gate
+        send, recv = anyio.create_memory_object_stream[str](max_buffer_size=1)
+        self._input_send = send
+        try:
+            return await recv.receive()
+        finally:
+            self._input_send = None
+
+    def _dispatch(self, message: object) -> None:
+        if isinstance(message, Input) and self._input_send is not None:
+            with contextlib.suppress(anyio.WouldBlock):
+                self._input_send.send_nowait(message.text)
+        elif isinstance(message, Control) and self._on_control is not None:
+            self._on_control(message.action)
 
     async def _handle(self, stream: SocketStream) -> None:
         attached = False
         buf = BufferedByteReceiveStream(stream)
         try:
             first = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
-            if not isinstance(parse_client_message(first), Attach):
+            hello = parse_client_message(first)
+            if not isinstance(hello, Attach):
                 return
             self._clients.add(stream)
             attached = True
             if self._on_attach is not None:
-                self._on_attach(parse_client_message(first))  # type: ignore[arg-type]
+                self._on_attach(hello)
             while True:
-                await buf.receive_until(b"\n", _MAX_FRAME)
+                line = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
+                with contextlib.suppress(ValueError, KeyError):
+                    self._dispatch(parse_client_message(line))
         except (anyio.IncompleteRead, anyio.EndOfStream,
                 anyio.ClosedResourceError, anyio.DelimiterNotFound,
                 anyio.BrokenResourceError, ValueError, KeyError):
