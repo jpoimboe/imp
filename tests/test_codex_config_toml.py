@@ -31,3 +31,22 @@ def test_config_toml_enables_web_search_when_declared() -> None:
                              bearer_env_var="X", web_search_enabled=True)
     assert 'web_search = "live"' in txt
     assert 'web_search = "disabled"' not in txt
+
+
+def test_config_toml_mirrors_driver_as_stdio_block() -> None:
+    txt = render_config_toml(host="127.0.0.1", port=49152,
+                             bearer_env_var="IMP_MCP_TOKEN",
+                             web_search_enabled=False, drivers=["impty"])
+    assert "[mcp_servers.impty]" in txt
+    assert "[mcp_servers.imp]" in txt
+    block = txt[txt.index("[mcp_servers.impty]"):]
+    assert 'command = "python"' in block
+    assert 'args = ["-m", "impty.mcp"]' in block
+    assert "url =" not in block
+    assert "bearer_token_env_var =" not in block
+
+
+def test_config_toml_no_driver_block_when_none() -> None:
+    txt = render_config_toml(host="127.0.0.1", port=1,
+                             bearer_env_var="X", web_search_enabled=False)
+    assert "[mcp_servers.impty]" not in txt
