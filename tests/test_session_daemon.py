@@ -312,6 +312,39 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
     assert calls["n"] == 1
 
 
+def test_main_forwards_seed_opening_via_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:   # partial form takes a single positional
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--seed-opening", "ship the thing",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.func is daemon.serve_change_session
+    assert fn.args == (loaded,)
+    assert fn.keywords == {"seed_opening": "ship the thing"}
+
+
 @pytest.mark.anyio
 async def test_seed_opening_is_forwarded_to_the_first_run_only(
     tmp_path: Path,

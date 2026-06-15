@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -90,9 +91,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="imp-session-daemon")
     parser.add_argument("--control-root", required=True)
     parser.add_argument("--change-id", required=True)
+    parser.add_argument("--seed-opening", default=None)
     ns = parser.parse_args(argv)
     change = Change.load(Path(ns.control_root), ns.change_id)
-    anyio.run(serve_change_session, change)
+    if ns.seed_opening is None:
+        anyio.run(serve_change_session, change)
+    else:
+        anyio.run(functools.partial(
+            serve_change_session, change, seed_opening=ns.seed_opening))
     return 0
 
 
