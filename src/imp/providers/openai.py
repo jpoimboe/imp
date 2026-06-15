@@ -556,12 +556,11 @@ class OpenAIAgentRunner:
                         ),
                     }}
                     return
-                wfu = next((b for b in messages[-1].content
-                            if isinstance(b, ToolUseBlock)
-                            and b.name == "wait_for_user"), None)
-                prompt = (wfu.input.get("prompt") if wfu else "") or ""
+                # wait_for_user carries no prompt arg (the schema dropped it),
+                # so the gate has no question payload: the agent's prose IS the
+                # question, already journaled and rendered. Emit an empty prompt.
                 elog.append(agent_id=aid, type="awaiting_user_input",
-                            payload={"prompt": prompt})
+                            payload={"prompt": ""})
                 # §2 dangling-wait join (F5): queued interjects satisfy the wait
                 # directly (mirrors wait_for_user.py R6). Fall back to
                 # user_input_fn only when the queue is empty.

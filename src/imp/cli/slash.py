@@ -193,8 +193,6 @@ async def ask_line_with_slash(
             # them before the loop re-prompts.
             with status.suspend():
                 try:
-                    question = (driver.take_pending_question()
-                                if driver is not None else "")
                     while True:
                         if driver is not None:
                             driver.prepare_for_prompt()
@@ -203,12 +201,10 @@ async def ask_line_with_slash(
                         exit_evt = getattr(coord, "_exit_event", None) if coord else None
                         try:
                             if exit_evt is None:
-                                line: str = await prompt.ask_async(
-                                    question=question, width=width)
+                                line: str = await prompt.ask_async(width=width)
                             else:
                                 line = await _ask_or_exit(
-                                    prompt, exit_evt, question=question, width=width)
-                            question = ""  # only the first prompt shows the label
+                                    prompt, exit_evt, width=width)
                         except KeyboardInterrupt:
                             # A KeyboardInterrupt reaching here is normally the
                             # exit-event-won synthesis from _ask_or_exit: an out-of-band

@@ -473,8 +473,12 @@ class CodexAgentRunner:
                         "category": "config", "kind": "no_user_input_fn",
                         "message": "AWAITING_USER resume requires user_input_fn"}}
                     return
+                # Parity with the other providers: the awaiting_user_input gate
+                # carries no question payload. The agent's prose IS the question;
+                # codex's last_text is already journaled as its llm_response and
+                # rendered in the narrative, so an empty prompt loses nothing.
                 elog.append(agent_id=aid, type="awaiting_user_input",
-                            payload={"prompt": last_text})
+                            payload={"prompt": ""})
                 # §2 dangling-wait join (F5): queued interjects satisfy the wait
                 # directly (mirrors wait_for_user.py R6). Fall back to
                 # user_input_fn only when the queue is empty.

@@ -836,33 +836,9 @@ def test_prose_before_wait_for_user_emitted_before_the_prompt() -> None:
         f"not held until after the user answers; body={_body(out)}")
 
 
-def test_driver_takes_pending_wait_for_user_question() -> None:
-    drv, _ = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
-    drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
-                    prompt="Pick A or B?"))
-    assert drv.take_pending_question() == "Pick A or B?"
-    assert drv.take_pending_question() == ""        # consumed; not re-shown
-
-
-def test_driver_has_no_question_without_a_solicit() -> None:
-    drv, _ = _driver()
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
-    assert drv.take_pending_question() == ""
-
-
 def test_live_driver_has_no_opening_question_suppression() -> None:
     params = inspect.signature(LiveDriver.__init__).parameters
     assert "suppress_opening_question" not in params
-
-
-def test_opening_question_is_surfaced_not_swallowed() -> None:
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
-    drv.on_event(ev("1", "change_created", change_id=1, title="x"))
-    drv.on_event(ev("2", "awaiting_user_input", agent_id="a",
-                    prompt="What change would you like to make?"))
-    assert drv.take_pending_question() == "What change would you like to make?"
 
 
 def test_quiet_continue_is_silent_live_and_matches_log() -> None:
@@ -1074,32 +1050,6 @@ def _panel_member_ev(eid: str, verdict: str, findings: str = "") -> list:
            content=json.dumps({"status": "Success", "verdict": verdict,
                                "findings": findings}), error=False),
     ]
-
-
-def test_final_review_solicit_returns_verbatim_prompt() -> None:
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
-    for e in [
-        ev("fs", "step_started", step="finalize", kind="agent", phase="review",
-           model="m", provider="anthropic"),
-        ev("aw", "awaiting_user_input", agent_id="step:review/finalize",
-           prompt="Merge or rework?"),
-    ]:
-        drv.on_event(e)
-    assert drv.take_pending_question() == "Merge or rework?"
-
-
-def test_non_final_review_solicit_returns_plain_question() -> None:
-    out = _Pipe()
-    drv = LiveDriver(stream=out, color=False, width=80, status=LiveStatus(out))
-    for e in [
-        ev("1", "step_started", step="spec-writer", kind="agent", phase="spec",
-           model="m", provider="anthropic"),
-        ev("aw", "awaiting_user_input", agent_id="step:spec/spec-writer",
-           prompt="Prefer A or B?"),
-    ]:
-        drv.on_event(e)
-    assert drv.take_pending_question() == "Prefer A or B?"
 
 
 def test_narration_un_held_after_agent_output_findings_hidden_live() -> None:

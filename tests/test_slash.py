@@ -202,25 +202,6 @@ class _RecDriver:
     def flush_deferred(self) -> None:
         self.events.append("flush")
 
-    def take_pending_question(self) -> str:
-        return ""
-
-
-class _FakeDriver:
-    def __init__(self, question: str) -> None:
-        self._q = question
-        self.flushed = False
-
-    def prepare_for_prompt(self) -> None:
-        pass
-
-    def flush_deferred(self) -> None:
-        self.flushed = True
-
-    def take_pending_question(self) -> str:
-        q, self._q = self._q, ""
-        return q
-
 
 class _CountStatus:
     """Status stub that counts how many times suspend() is entered."""
@@ -270,24 +251,6 @@ def test_solicit_flushes_on_slash_reprompt(tmp_path: Path) -> None:
     # prepare fires twice (once per loop iteration), flush fires once (in finally)
     assert drv.events == ["prepare", "prepare", "flush"]
     assert status.suspend_calls == 1   # hoisted: still just one suspend
-
-
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.mark.anyio
-async def test_first_prompt_gets_the_question_then_reprompt_does_not() -> None:
-    from imp.cli.slash import ask_line_with_slash
-    prompt = _FakePrompt(["/help", "the answer"])
-    driver = _FakeDriver("Pick A or B?")
-    line = await ask_line_with_slash(
-        prompt, _NullStatus(), change=None, color=False, width=80,
-        coord=None, driver=driver)
-    assert line == "the answer"
-    # First solicit carried the question; the post-slash reprompt carried none.
-    assert prompt.questions == ["Pick A or B?", ""]
 
 
 def test_hint_and_help_agree_on_esc_ctrlc_vocabulary(tmp_path: Path) -> None:
