@@ -206,3 +206,107 @@ async def test_lock_is_held_during_serve_and_released_after(tmp_path: Path) -> N
         assert result["r"] == "done"
         assert not lock_path.exists()  # released on serve() return
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_gate_with_zero_clients_hibernates(tmp_path: Path) -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        try:
+            await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+        return "resident"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "hibernated"
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_gate_with_attached_client_returns_first_input(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+    received: list[str] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        reply = await user_chat_input_fn("")
+        received.append(reply)
+        return reply
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)  # let run_fn reach the gate (open next_input)
+        await client.send((encode_input("ship it") + "\n").encode())
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "ship it"
+        assert received == ["ship it"]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_gate_hibernates_when_last_client_detaches(tmp_path: Path) -> None:
+    from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=True)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        try:
+            await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+        return "resident"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)  # let the gate open while resident
+        await client.aclose()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "hibernated"
+        tg.cancel_scope.cancel()

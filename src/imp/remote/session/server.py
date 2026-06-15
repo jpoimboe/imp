@@ -27,11 +27,20 @@ class SessionServer:
         coordinator: Any = None,
         on_abandon: Callable[[], None] | None = None,
         lock: Any = None,
+        hibernate: bool = False,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
         self._lock = lock
-        self._socket = SessionSocket(socket_path, on_control=self._enqueue_control)
+        self._hibernate = hibernate
+        # Initialized in open() because anyio.Event needs a running event loop.
+        self._attach_changed: anyio.Event | None = None
+        self._socket = SessionSocket(
+            socket_path,
+            on_attach=self._on_attach_pulse,
+            on_detach=self._on_detach_pulse,
+            on_control=self._enqueue_control,
+        )
         ev_send, ev_recv = anyio.create_memory_object_stream[dict[str, Any]](
             max_buffer_size=math.inf)
         self._event_send: MemoryObjectSendStream[dict[str, Any]] = ev_send
@@ -46,6 +55,7 @@ class SessionServer:
         return self._socket.attached_count
 
     async def open(self) -> None:
+        self._attach_changed = anyio.Event()
         await self._socket.open()
 
     async def serve(self, run_fn: RunFn) -> Any:
@@ -81,7 +91,50 @@ class SessionServer:
             await self._socket.broadcast(event)
 
     def _chat(self, _query: str) -> Awaitable[str]:
+        if self._hibernate:
+            return self._hibernation_gate()
         return self._socket.next_input()
+
+    async def _hibernation_gate(self) -> str:
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+        if self._socket.attached_count == 0:
+            raise AwaitingUserInput()
+        holder: dict[str, str] = {}
+        async with anyio.create_task_group() as tg:
+            async def _await_input() -> None:
+                holder["text"] = await self._socket.next_input()
+                tg.cancel_scope.cancel()
+
+            async def _await_all_detached() -> None:
+                # Condition loop: capture event, test condition, await — so a detach
+                # that fires between test and await still wakes us (no lost wakeup),
+                # and a re-attach that replaces the event is re-read on next iteration.
+                while True:
+                    evt = self._attach_changed
+                    if self._socket.attached_count == 0:
+                        break
+                    assert evt is not None
+                    await evt.wait()
+                tg.cancel_scope.cancel()
+
+            tg.start_soon(_await_input)
+            tg.start_soon(_await_all_detached)
+        if "text" not in holder:
+            raise AwaitingUserInput()
+        return holder["text"]
+
+    def _pulse_attach_change(self) -> None:
+        evt = self._attach_changed
+        if evt is not None:
+            evt.set()
+            self._attach_changed = anyio.Event()
+
+    def _on_attach_pulse(self, _attach: Any) -> None:
+        self._pulse_attach_change()
+
+    def _on_detach_pulse(self) -> None:
+        self._pulse_attach_change()
 
     def _enqueue_control(self, action: str) -> None:
         with contextlib.suppress(anyio.WouldBlock):
