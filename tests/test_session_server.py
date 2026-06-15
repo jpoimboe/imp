@@ -141,14 +141,17 @@ async def test_interrupt_control_pauses_the_coordinator(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
-async def test_abandon_control_invokes_the_callback(tmp_path: Path) -> None:
+async def test_abandon_control_cancels_run_and_records_abandonment(
+    tmp_path: Path,
+) -> None:
     sock = str(tmp_path / "s.sock")
-    release = anyio.Event()
-    abandoned: list[bool] = []
-    server = SessionServer(sock, on_abandon=lambda: abandoned.append(True))
+    started = anyio.Event()
+    abandoned_cb: list[bool] = []
+    server = SessionServer(sock, on_abandon=lambda: abandoned_cb.append(True))
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        await release.wait()
+        started.set()
+        await anyio.sleep_forever()   # only an abandon-cancel can end this run
         return "done"
 
     async with anyio.create_task_group() as tg:
@@ -163,15 +166,14 @@ async def test_abandon_control_invokes_the_callback(tmp_path: Path) -> None:
         with anyio.fail_after(5):
             while server.attached_count != 1:
                 await anyio.sleep(0.02)
+        await started.wait()
         await client.send((encode_control("abandon") + "\n").encode())
-        with anyio.fail_after(5):
-            while not abandoned:
-                await anyio.sleep(0.02)
-        assert abandoned == [True]
-        release.set()
         with anyio.fail_after(5):
             while "r" not in result:
                 await anyio.sleep(0.02)
+        assert server.abandoned is True
+        assert abandoned_cb == [True]
+        assert result["r"] is None   # run cancelled mid-flight; no return value
         await client.aclose()
         tg.cancel_scope.cancel()
 

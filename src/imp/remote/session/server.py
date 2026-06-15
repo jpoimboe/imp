@@ -33,6 +33,8 @@ class SessionServer:
         self._on_abandon = on_abandon
         self._lock = lock
         self._hibernate = hibernate
+        self.abandoned = False
+        self._serve_scope: anyio.CancelScope | None = None
         # Initialized in open() because anyio.Event needs a running event loop.
         self._attach_changed: anyio.Event | None = None
         self._socket = SessionSocket(
@@ -66,8 +68,10 @@ class SessionServer:
             return await self._serve(run_fn)
 
     async def _serve(self, run_fn: RunFn) -> Any:
+        result: Any = None
         try:
             async with anyio.create_task_group() as tg:
+                self._serve_scope = tg.cancel_scope
                 tg.start_soon(self._socket.serve)
                 async with anyio.create_task_group() as pump_tg:
                     pump_tg.start_soon(self._pump)
@@ -147,5 +151,9 @@ class SessionServer:
     async def _dispatch_control(self, action: str) -> None:
         if action == CONTROL_INTERRUPT and self._coordinator is not None:
             await self._coordinator.signal_pause(reason="ctrl-c")
-        elif action == CONTROL_ABANDON and self._on_abandon is not None:
-            self._on_abandon()
+        elif action == CONTROL_ABANDON:
+            self.abandoned = True
+            if self._on_abandon is not None:
+                self._on_abandon()
+            assert self._serve_scope is not None
+            self._serve_scope.cancel()
