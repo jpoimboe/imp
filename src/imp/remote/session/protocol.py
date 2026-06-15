@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 _MAX_FRAME = 1 << 20  # exceeding this raises DelimiterNotFound and silently detaches the client
 
@@ -58,6 +58,8 @@ def encode_event(event: dict[str, Any]) -> str:
 
 def parse_client_message(line: str) -> ClientMessage:
     obj = json.loads(line)
+    if not isinstance(obj, dict):
+        raise ValueError(f"expected JSON object, got {type(obj).__name__}")
     kind = obj.get("kind")
     try:
         if kind == "attach":
@@ -76,9 +78,14 @@ def parse_client_message(line: str) -> ClientMessage:
 
 def parse_event(line: str) -> dict[str, Any]:
     obj = json.loads(line)
+    if not isinstance(obj, dict):
+        raise ValueError(f"expected JSON object, got {type(obj).__name__}")
     if obj.get("kind") != "event":
         raise ValueError(f"expected event frame, got {obj.get('kind')!r}")
     try:
-        return cast(dict[str, Any], obj["event"])
+        event = obj["event"]
     except KeyError:
         raise ValueError("missing required field 'event'") from None
+    if not isinstance(event, dict):
+        raise ValueError(f"expected 'event' to be a JSON object, got {type(event).__name__}")
+    return event

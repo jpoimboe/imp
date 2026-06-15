@@ -84,3 +84,20 @@ def test_parse_event_recovers_inner_event() -> None:
 def test_parse_event_rejects_non_event_frame() -> None:
     with pytest.raises(ValueError, match="expected event frame"):
         parse_event(encode_attach("c1", "T"))
+
+
+def test_parse_client_message_rejects_non_object_json() -> None:
+    for frame in ("42", '"hello"', "[1,2,3]", "null"):
+        with pytest.raises(ValueError, match="expected JSON object"):
+            parse_client_message(frame)
+
+
+def test_parse_event_rejects_non_object_json() -> None:
+    for frame in ("42", '"hello"', "[1,2,3]", "null"):
+        with pytest.raises(ValueError, match="expected JSON object"):
+            parse_event(frame)
+
+
+def test_parse_event_rejects_non_object_event_field() -> None:
+    with pytest.raises(ValueError, match="expected 'event' to be a JSON object"):
+        parse_event('{"kind": "event", "event": 42}')
