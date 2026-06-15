@@ -10,6 +10,7 @@ from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import (
     encode_attach,
+    encode_control,
     encode_input,
     parse_event,
 )
@@ -95,5 +96,81 @@ async def test_first_client_input_satisfies_the_gate_and_returns(
                 await anyio.sleep(0.02)
         assert result["r"] == "ship it"
         assert received == ["ship it"]
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_interrupt_control_pauses_the_coordinator(tmp_path: Path) -> None:
+    from imp.cli.signals import InterruptCoordinator
+
+    sock = str(tmp_path / "s.sock")
+    coord = InterruptCoordinator()
+    release = anyio.Event()
+    server = SessionServer(sock, coordinator=coord)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await release.wait()
+        return "done"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        assert not coord.should_pause
+        await client.send((encode_control("interrupt") + "\n").encode())
+        with anyio.fail_after(5):
+            while not coord.should_pause:
+                await anyio.sleep(0.02)
+        assert coord.should_pause
+        release.set()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "done"
+        await client.aclose()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_abandon_control_invokes_the_callback(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    release = anyio.Event()
+    abandoned: list[bool] = []
+    server = SessionServer(sock, on_abandon=lambda: abandoned.append(True))
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await release.wait()
+        return "done"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client = await _attach(sock, "c1")
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await client.send((encode_control("abandon") + "\n").encode())
+        with anyio.fail_after(5):
+            while not abandoned:
+                await anyio.sleep(0.02)
+        assert abandoned == [True]
+        release.set()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
         await client.aclose()
         tg.cancel_scope.cancel()
