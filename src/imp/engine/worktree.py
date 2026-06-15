@@ -324,8 +324,7 @@ def _commit_files_to_ref(
     each `files` entry is hashed and added at `prefix+name`. The commit is
     parented on `ref` when it already exists (else a root commit). CAS on the
     final update-ref is cheap insurance (moot under the lock)."""
-    with RepoGitLock(control_root).acquire():
-        with _temp_index(control_root) as env:
+    with RepoGitLock(control_root).acquire(), _temp_index(control_root) as env:
             parent = _git(control_root, "rev-parse", "--verify", "--quiet", ref)
             have_parent = parent.returncode == 0
             if have_parent:
@@ -375,6 +374,37 @@ def artifact_commit(
     _commit_files_to_ref(
         control_root, ref=f"refs/imp/journal-wip/{change_id}", prefix="",
         files=files, message=message)
+
+
+def _journal_has_id(control_root: Path, change_id: str) -> bool:
+    return _git(control_root, "cat-file", "-e",
+                f"refs/imp/journal:{change_id}").returncode == 0
+
+
+def fold_wip_into_journal(
+    control_root: Path, change_id: str, runtime_files: Mapping[str, Path],
+) -> None:
+    """Fold refs/imp/journal-wip/<id> into refs/imp/journal in ONE commit, then
+    delete the wip ref. The wip tip's whole tree is read in under <id>/ and the
+    runtime blobs are added under <id>/. When the wip ref is absent (abandoned
+    before any artifact) only the runtime files are journaled.
+
+    Crash-idempotent: if <id>/ already exists in the journal the fold already
+    ran, so the prefix read-tree (which would fail on an existing prefix) is
+    skipped — re-running only re-journals the runtime blobs and re-asserts the
+    wip ref is gone."""
+    wip_ref = f"refs/imp/journal-wip/{change_id}"
+    have_wip = _git(control_root, "rev-parse", "--verify", "--quiet",
+                    wip_ref).returncode == 0
+    extra_tree: tuple[str, str] | None = None
+    if have_wip and not _journal_has_id(control_root, change_id):
+        extra_tree = (f"{change_id}/", f"{wip_ref}^{{tree}}")
+    _commit_files_to_ref(
+        control_root, ref="refs/imp/journal", prefix=f"{change_id}/",
+        files=runtime_files, message=f"journal: {change_id}", extra_tree=extra_tree)
+    if have_wip:
+        with RepoGitLock(control_root).acquire():
+            _git_ok(control_root, "update-ref", "-d", wip_ref)
 
 
 def _common_dir(control_root: Path) -> Path:
