@@ -94,7 +94,8 @@ async def test_zero_client_gate_hibernates_by_default(tmp_path: Path) -> None:
             return "hibernated"
         return "resident"
 
-    result = await serve_change_session(change, run_fn=fake_run)
+    with anyio.fail_after(5):
+        result = await serve_change_session(change, run_fn=fake_run)
     assert result == "hibernated"
 
 
