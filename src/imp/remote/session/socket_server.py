@@ -109,6 +109,9 @@ class SessionSocket:
             await stream.aclose()
 
     async def close(self) -> None:
+        for stream in list(self._clients):
+            with contextlib.suppress(anyio.BrokenResourceError, anyio.ClosedResourceError):
+                await stream.aclose()
         if self._listener is not None:
             await self._listener.aclose()
             self._listener = None
