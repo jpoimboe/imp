@@ -1,3 +1,5 @@
+"""Session keystroke mapper: forwards interrupt, abandon, and detach gestures as control frames."""
+
 from __future__ import annotations
 
 from imp.cli.signals import InterruptCoordinator
