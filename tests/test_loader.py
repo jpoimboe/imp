@@ -800,6 +800,33 @@ def test_parse_agent_tools_and_deny_tools_conflict(tmp_path: Path) -> None:
     assert "deny_tools" in str(ei.value) and "not both" in str(ei.value)
 
 
+def test_parse_agent_deny_tools_unknown_name_rejected(tmp_path: Path) -> None:
+    """A typo'd deny entry would silently no-op; reject it at parse time."""
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ndeny_tools: [bash, bsah]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    with pytest.raises(LoadError) as ei:
+        parse_agent_file(p)
+    assert "bsah" in str(ei.value) and "deny_tools" in str(ei.value)
+
+
+def test_parse_agent_deny_tools_real_name_other_context_ok(tmp_path: Path) -> None:
+    """A real tool name that's only granted in some contexts is accepted."""
+    p = write_agent_md(
+        tmp_path / "x.md",
+        frontmatter=(
+            "name: x\ndeny_tools: [wait_for_user, task]\n"
+            "output:\n  status: {type: enum, values: [Success, Error]}"
+        ),
+    )
+    agent = parse_agent_file(p)
+    assert agent.deny_tools == frozenset({"wait_for_user", "task"})
+
+
 def test_parse_agent_deny_tools_not_list_of_strings(tmp_path: Path) -> None:
     p = write_agent_md(
         tmp_path / "x.md",

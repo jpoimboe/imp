@@ -112,6 +112,14 @@ def parse_agent_file(path: Path) -> AgentDef:
     ):
         raise LoadError("'deny_tools' must be a list of strings", source)
     deny_tools = frozenset(deny_raw or [])
+    unknown_deny = deny_tools - DENYABLE_TOOLS
+    if unknown_deny:
+        raise LoadError(
+            "'deny_tools' names tools that are never default-granted "
+            f"(no-op): {sorted(unknown_deny)}; denyable tools are "
+            f"{sorted(DENYABLE_TOOLS)}",
+            source,
+        )
     subagents = tuple(fm.get("subagents") or [])
 
     mtc_raw = fm.get("max_tool_calls")
@@ -147,6 +155,13 @@ BASE_CAPS: frozenset[str] = frozenset({
     "edit_file", "write_file", "web_search", "web_fetch",
 })
 TOP_LEVEL_CAPS: frozenset[str] = frozenset({"wait_for_user", "rename_change"})
+
+# The maximal default grant any agent can receive. deny_tools only ever
+# subtracts from this set, so a deny entry outside it is a silent no-op
+# (almost always a typo). Validated at parse time. Subagents receive a
+# subset of this, so denying e.g. wait_for_user on a subagent is a harmless
+# no-op rather than an error — the name is real, just not in that context.
+DENYABLE_TOOLS: frozenset[str] = BASE_CAPS | TOP_LEVEL_CAPS | frozenset({"task"})
 
 
 def _effective_tools(agent: AgentDef, is_sub: bool) -> frozenset[str]:
