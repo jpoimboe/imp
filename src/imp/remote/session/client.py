@@ -8,13 +8,12 @@ from anyio.abc import SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
 from imp.remote.session.protocol import (
+    _MAX_FRAME,
     encode_attach,
     encode_control,
     encode_input,
     parse_event,
 )
-
-_MAX_FRAME = 1 << 20
 
 
 class SessionClient:

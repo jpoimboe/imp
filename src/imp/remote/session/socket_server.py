@@ -19,11 +19,10 @@ from imp.remote.session.protocol import (
     Attach,
     Control,
     Input,
+    _MAX_FRAME,
     encode_event,
     parse_client_message,
 )
-
-_MAX_FRAME = 1 << 20  # exceeding this raises DelimiterNotFound and silently detaches the client
 
 
 class SessionSocket:

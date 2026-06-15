@@ -11,6 +11,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, cast
 
+_MAX_FRAME = 1 << 20  # exceeding this raises DelimiterNotFound and silently detaches the client
+
 CONTROL_INTERRUPT = "interrupt"
 CONTROL_DETACH = "detach"
 CONTROL_ABANDON = "abandon"
