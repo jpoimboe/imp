@@ -41,9 +41,12 @@ def test_awaiting_user_is_replayed(tmp_path: Path) -> None:
     assert _resume_replays_transcript(tmp_path) is True
 
 
-def test_empty_transcript_is_replayed(tmp_path: Path) -> None:
-    # Nothing on disk: keep=True is harmless (the provider sees a fresh entry).
-    assert _resume_replays_transcript(tmp_path) is True
+def test_empty_transcript_is_not_replayed(tmp_path: Path) -> None:
+    # Nothing on disk: there is nothing to replay. keep=True would route the
+    # step through the resume branch (initial_messages=()), and the provider's
+    # empty-transcript fallback would then build an EMPTY query that hangs
+    # receive_response() forever. An empty transcript must run fresh.
+    assert _resume_replays_transcript(tmp_path) is False
 
 
 def test_dangling_tool_use_is_replayed(tmp_path: Path) -> None:
@@ -133,4 +136,47 @@ async def test_resume_truncated_autonomous_reruns_and_advances(
     result = await run_change(change)
     assert result is RunResult.COMPLETED          # advanced, not wedged
     assert seen_nonempty == [False]               # transcript re-run fresh
+    assert State.load(change.state_dir).status == "completed"
+
+
+@pytest.mark.anyio
+async def test_resume_empty_transcript_seeds_fresh_and_advances(
+        tmp_path: Path, provider_registry) -> None:
+    # A `resume:` edge into a step that never ran (empty transcript). This is the
+    # reintegration path: a clean rebase skips the integrator, integrate-verify
+    # then fails, and its `resume: integrator` rule resumes a step with no
+    # transcript. The buggy path kept the (empty) transcript and passed
+    # initial_messages=(), so the provider built an empty query and hung. The fix
+    # runs the step fresh: a non-empty seed reaches the runner and it advances.
+    change = _seed_single_agent(tmp_path)
+    state = State.load(change.state_dir)
+    state.resume_pending = state.step
+    state.save(change.state_dir)
+    # Step's transcript dir exists but is empty — the never-ran case.
+    tdir = change.change_dir / "steps" / "only" / "w"
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    seen_initial_nonempty: list[bool] = []
+
+    class _Runner:
+        async def run(self, inv: AgentInvocation) -> AsyncIterator[Event]:
+            # The crux: a fresh re-run must hand the runner a non-empty seed so
+            # the provider sends a real first query (no infinite receive_response).
+            seen_initial_nonempty.append(len(inv.initial_messages) > 0)
+            yield {"type": "agent_output", "payload": {"status": "Success"}}
+
+        async def interrupt(self) -> None:
+            pass
+
+    class _P:
+        name = "fake"
+        model = "m"
+        def create_runner(self, _i: AgentInvocation) -> AgentRunner:
+            return _Runner()
+
+    provider_registry("fake", env_check=lambda: True, factory=lambda _m: _P())
+
+    result = await run_change(change)
+    assert result is RunResult.COMPLETED          # advanced, not wedged
+    assert seen_initial_nonempty == [True]        # fresh seed, not an empty replay
     assert State.load(change.state_dir).status == "completed"

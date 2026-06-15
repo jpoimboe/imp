@@ -326,6 +326,12 @@ def _recover_phase(change: Change) -> str | None:
     if phase is None:
         return None
     transcript_dir = change.change_dir / "steps" / phase / state.step
+    from imp.agents.transcript import Transcript
+    # Never-ran step (empty/absent transcript): a plain `imp resume` re-runs it
+    # fresh, so no `--from <phase>` recovery hint is needed. Only a non-empty but
+    # unreplayable transcript (truncated/MISSING_COMPLETE_STEP) warrants --from.
+    if not Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
+        return None
     if _resume_replays_transcript(transcript_dir):
         return None
     return phase

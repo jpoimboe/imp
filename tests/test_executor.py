@@ -9,9 +9,32 @@ from pathlib import Path
 import pytest
 
 from imp.agents.runner import AgentInvocation, AgentRunner, Event
+from imp.agents.transcript import Transcript
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
 from imp.engine.state import State
+
+
+def _persist_initial(invocation: AgentInvocation) -> None:
+    """Mimic the real providers' fresh-entry persistence (claude_code.py: the
+    empty-transcript branch appends initial_messages to transcript.jsonl AND
+    emits step_context). Fake runners must do the same so a later `resume:` entry
+    sees a non-empty, replayable transcript with its stored system prompt —
+    without it the resume either looks like a never-ran step (and re-runs fresh)
+    or trips the resume invariant (non-empty transcript, no stored step_context).
+    Only fresh entries carry initial_messages, so this no-ops on resume."""
+    if not invocation.initial_messages:
+        return
+    t = Transcript(invocation.transcript_dir / "transcript.jsonl")
+    for m in invocation.initial_messages:
+        t.append(m)
+    if invocation.event_log is not None:
+        invocation.event_log.append_step_context(
+            agent_id=invocation.agent_id,
+            parent_id_override=invocation.first_event_parent_id,
+            provider=invocation.provider_name, model="m",
+            system_prompt=invocation.system_prompt,
+            tools_schema=[], params={}, max_tool_calls=None)
 
 
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
@@ -810,6 +833,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
 
     class _Runner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            _persist_initial(invocation)
             aid = invocation.agent_id
             runs.append((aid, invocation.retry_feedback))
             if invocation.agent_def.name == "reviewer":
@@ -996,6 +1020,7 @@ def _register_capturing(coder_behavior, reviewer_verdicts: list[str], runs: list
 
     class _Runner:
         async def run(self, invocation: AgentInvocation):
+            _persist_initial(invocation)
             runs.append((invocation.agent_id, invocation.balance_on_resume,
                          invocation.retry_feedback))
             name = invocation.agent_def.name
@@ -1099,6 +1124,7 @@ async def test_resume_is_constant_across_error_retry(tmp_path: Path) -> None:
 
     class _Runner:
         async def run(self, invocation: AgentInvocation):
+            _persist_initial(invocation)
             runs.append((invocation.agent_id, invocation.balance_on_resume))
             if invocation.agent_def.name == "coder":
                 counts["coder"] += 1
@@ -1148,6 +1174,7 @@ async def test_resume_survives_pause_and_reload(tmp_path: Path) -> None:
 
     class _Runner:
         async def run(self, invocation: AgentInvocation):
+            _persist_initial(invocation)
             runs.append((invocation.agent_id, invocation.balance_on_resume))
             if invocation.agent_def.name == "coder":
                 counts["coder"] += 1
@@ -1209,7 +1236,10 @@ async def test_resume_keep_branch_passes_empty_initial_messages(
 
     class _Runner:
         async def run(self, invocation: AgentInvocation) -> AsyncIterator[Event]:
+            # Snapshot initial_messages BEFORE persisting (the assertions inspect
+            # the per-entry seed; persistence only affects the on-disk transcript).
             invs.append(invocation)
+            _persist_initial(invocation)
             if invocation.agent_def.name == "reviewer":
                 reviewer_calls["n"] += 1
                 verdict = "rework" if reviewer_calls["n"] == 1 else "approve"

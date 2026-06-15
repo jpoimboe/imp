@@ -111,12 +111,17 @@ def _resume_replays_transcript(transcript_dir: Any) -> bool:
     """True when a resumed agent step's kept transcript can be replayed.
     False when the transcript ended without complete_step (MISSING_COMPLETE_STEP)
     — replaying it only re-fails with agent_output_missing, so the step
-    re-runs fresh. Empty/absent transcripts are safe to replay (no-op)."""
+    re-runs fresh. Also False when the transcript is empty/absent: a `resume:`
+    edge can target a step that never ran (e.g. a clean reintegration rebase
+    skips the integrator, then integrate-verify fails and resumes it). Keeping
+    an empty transcript routes the step through the resume branch with
+    initial_messages=(), and the provider's empty-transcript fallback then
+    builds an empty query that hangs receive_response() forever. Run it fresh."""
     from imp.agents.classify import ResumeState, classify_resume
     from imp.agents.transcript import Transcript
     t = Transcript(transcript_dir / "transcript.jsonl")
     if not t.exists_and_nonempty():
-        return True
+        return False
     return classify_resume(t.load()) is not ResumeState.MISSING_COMPLETE_STEP
 
 

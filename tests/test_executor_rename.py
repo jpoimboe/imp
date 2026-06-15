@@ -10,7 +10,8 @@ from typing import Any
 import anyio
 import pytest
 
-from imp.agents.runner import AgentInvocation, AgentRunner, Event
+from imp.agents.runner import AgentInvocation, AgentRunner, Event, Message, TextBlock
+from imp.agents.transcript import Transcript
 from imp.engine.change import Change
 from imp.engine.errors import LoadError
 from imp.engine.executor import RunResult, run_change
@@ -244,6 +245,17 @@ async def test_seed_opening_forwarded_to_next_fresh_step_on_resume(
     state = State.load(ch.state_dir)
     state.resume_pending = state.step  # simulate a paused-then-resumed first step
     state.save(ch.state_dir)
+    # A genuinely paused-then-resumed step actually ran: it has a non-empty,
+    # replayable transcript and a stored step_context. (An empty transcript is a
+    # never-ran step, which now correctly re-runs fresh instead of replaying an
+    # empty query — see _resume_replays_transcript.)
+    s1_dir = ch.change_dir / "steps" / "p" / "s1"
+    s1_dir.mkdir(parents=True, exist_ok=True)
+    Transcript(s1_dir / "transcript.jsonl").append(
+        Message(role="user", content=(TextBlock(text="<imp:begin/>"),)))
+    ch.event_log().append_step_context(
+        agent_id="step:p/s1", provider="anthropic", model="m",
+        system_prompt="sys", tools_schema=[], params={}, max_tool_calls=None)
 
     result = await run_change(
         ch, on_event=lambda _e: None,
