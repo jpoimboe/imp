@@ -75,7 +75,7 @@ async def test_explicit_non_interactive_flag_skips_picker_even_on_a_tty(
     monkeypatch.setattr(m, "_resumable_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: True)   # tty present, but flag wins
 
-    async def boom_picker(candidates, *, now, color):      # must never be drawn
+    async def boom_picker(candidates, *, now, color, header, selected_index=0):      # must never be drawn
         raise AssertionError("picker drawn despite --non-interactive")
 
     monkeypatch.setattr(m.resume_select, "run_picker", boom_picker)
@@ -94,7 +94,7 @@ async def test_multiple_interactive_uses_picker_selection(
     monkeypatch.setattr(m, "_resumable_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
-    async def fake_picker(candidates, *, now, color):
+    async def fake_picker(candidates, *, now, color, header, selected_index=0):
         return candidates[1].change_id
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)
@@ -111,7 +111,7 @@ async def test_multiple_interactive_cancel_returns_2(
     monkeypatch.setattr(m, "_resumable_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: True)
 
-    async def fake_picker(candidates, *, now, color):
+    async def fake_picker(candidates, *, now, color, header, selected_index=0):
         return None
 
     monkeypatch.setattr(m.resume_select, "run_picker", fake_picker)

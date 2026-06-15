@@ -17,15 +17,17 @@ class Candidate:
 
 
 class ResumePicker:
-    """Pure selection state. `candidates` arrive newest-first, so index 0 (the
-    default) pre-selects the newest Change."""
+    """Pure selection state. `candidates` arrive newest-first; `selected_index`
+    chooses which row is pre-highlighted (0 = newest). `header` is the full
+    caller-supplied prompt line drawn above the rows."""
 
     def __init__(self, candidates: list[Candidate], *, now: datetime,
-                 color: bool) -> None:
+                 color: bool, header: str, selected_index: int = 0) -> None:
         self.candidates = candidates
         self.now = now
         self.color = color
-        self.index = 0
+        self.header = header
+        self.index = selected_index
 
     def move_up(self) -> None:
         self.index = max(0, self.index - 1)
@@ -47,7 +49,7 @@ class ResumePicker:
 
 
 async def run_picker(candidates: list[Candidate], *, now: datetime,
-                     color: bool) -> str | None:
+                     color: bool, header: str, selected_index: int = 0) -> str | None:
     """Draw the inline arrow-key picker; return the chosen change id, or None when
     the user cancels (q / esc / ctrl-c). Uses Application.run_async so it nests on
     the event loop imp's anyio.run already owns."""
@@ -60,7 +62,8 @@ async def run_picker(candidates: list[Candidate], *, now: datetime,
 
     from imp.cli import palette as pal
 
-    model = ResumePicker(candidates, now=now, color=color)
+    model = ResumePicker(candidates, now=now, color=color, header=header,
+                         selected_index=selected_index)
     kb = KeyBindings()
 
     @kb.add("up")
@@ -85,8 +88,7 @@ async def run_picker(candidates: list[Candidate], *, now: datetime,
 
     head = Window(
         content=FormattedTextControl(lambda: ANSI(pal.ansi(
-            "Resume which change?  (↑/↓ to move · enter to resume · q to cancel)",
-            "dim", enabled=color))),
+            model.header, "dim", enabled=color))),
         height=1)
     body = Window(content=FormattedTextControl(lambda: ANSI(model.render())))
     app: Any = Application(

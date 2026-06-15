@@ -1705,7 +1705,8 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
         change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3])
         for r in rows]
     chosen = await resume_select.run_picker(
-        candidates, now=datetime.now(UTC), color=should_use_color(sys.stdout))
+        candidates, now=datetime.now(UTC), color=should_use_color(sys.stdout),
+        header="Resume which change?  (↑/↓ to move · enter to resume · q to cancel)")
     return chosen if chosen is not None else 2
 
 
