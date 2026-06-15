@@ -33,10 +33,16 @@ per-plan panels structurally cannot see is cross-plan consistency. Dispatch ONLY
 two cross-cutting slices over the whole-change diff, each at `tier="high"`:
 - `task(subagent_name="completeness-slice", tier="high", task_description=…)`
 - `task(subagent_name="boundaries-slice", tier="high", task_description=…)`
-{% elif vars.fast_path or vars.panel_done %}
-**Cheap re-verify.** The full opus panel already ran for this plan (`panel_done`),
-or this is a trivial fast-path change that skips the opus panel. Dispatch ONLY the
-generalist reviewer over this plan's diff at `tier="medium"`:
+{% elif vars.panel_done %}
+**Strong re-verify (same-plan rework).** The full opus panel already ran for this
+plan; a rework bounce is the SAME plan, so re-verify on the strong tier — a late
+rejection deserves an opus re-check, not a medium one. Dispatch ONLY the generalist
+reviewer over this plan's diff at `tier="high"`:
+- `task(subagent_name="code-reviewer", tier="high", task_description=…)`
+{% elif vars.fast_path %}
+**Cheap re-verify (trivial fast-path).** This is a trivial fast-path change that
+skips the opus panel. Dispatch ONLY the generalist reviewer over this plan's diff
+at `tier="medium"`:
 - `task(subagent_name="code-reviewer", tier="medium", task_description=…)`
 {% else %}
 **Full opus panel (first pass for this plan).** Dispatch ALL FOUR concurrently over

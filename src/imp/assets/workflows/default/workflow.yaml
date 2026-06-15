@@ -146,9 +146,10 @@ phases:
         rules:
           - {else: true, goto: autosquash}         # re-run autosquash.sh -> verify-mode (before-tree sentinel present)
 
-      # ── merged review-panel + recheck. The agent tiers INTERNALLY on vars:
+      # ── merged review-panel. The agent tiers INTERNALLY on vars:
       #    first pass (panel_done false, not fast_path) = full opus 4-member panel;
-      #    fix-round re-entry (panel_done true) or fast_path = cheap sonnet re-verify.
+      #    same-plan rework re-entry (panel_done true) = single opus re-verify (high);
+      #    trivial fast_path = single medium re-verify.
       - name: review
         file: agents/review-panel.md
         tier: medium

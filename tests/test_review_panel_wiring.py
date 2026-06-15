@@ -9,11 +9,13 @@ from pathlib import Path
 
 import pytest
 
+from imp.agents.prompts import build_context, render_prompt
 from imp.assets import default_workflow_dir
 from imp.engine.errors import LoadError
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.schema import validate_agent_output
+from imp.engine.state import JsonlEventLog
 from imp.engine.types import Continue, Goto
 
 AGENTS = Path("src/imp/assets/workflows/default/agents")
@@ -187,3 +189,33 @@ def test_slices_resolve_from_asset_dir() -> None:
     evals_agents = Path("src/imp/evals/data/agents")
     for name in ("completeness-slice", "spec-compliance-slice", "boundaries-slice"):
         assert not (evals_agents / f"{name}.md").exists()
+
+
+def _render_panel(tmp_path, *, panel_done: bool, fast_path: bool,
+                  review_scope: str = "plan") -> str:
+    wf = _wf()
+    body = wf.agents["review-panel"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    ctx = build_context(change_slug="t", change_title="t", event_log=log,
+                        vars={"panel_done": panel_done, "fast_path": fast_path,
+                              "review_scope": review_scope})
+    return render_prompt(body, ctx)
+
+
+def test_panel_done_reverify_dispatches_high_tier(tmp_path) -> None:
+    out = _render_panel(tmp_path, panel_done=True, fast_path=False)
+    assert 'task(subagent_name="code-reviewer", tier="high"' in out
+    assert "spec-compliance-slice" not in out      # single reviewer, not the 4-member panel
+
+
+def test_fast_path_reverify_stays_medium_tier(tmp_path) -> None:
+    out = _render_panel(tmp_path, panel_done=False, fast_path=True)
+    assert 'task(subagent_name="code-reviewer", tier="medium"' in out
+    assert 'tier="high"' not in out
+
+
+def test_first_pass_dispatches_full_four_member_panel_at_high(tmp_path) -> None:
+    out = _render_panel(tmp_path, panel_done=False, fast_path=False)
+    for member in ("code-reviewer", "completeness-slice",
+                   "spec-compliance-slice", "boundaries-slice"):
+        assert f'task(subagent_name="{member}", tier="high"' in out
