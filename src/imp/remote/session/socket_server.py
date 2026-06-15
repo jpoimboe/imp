@@ -23,7 +23,7 @@ from imp.remote.session.protocol import (
     parse_client_message,
 )
 
-_MAX_FRAME = 1 << 20
+_MAX_FRAME = 1 << 20  # exceeding this raises DelimiterNotFound and silently detaches the client
 
 
 class SessionSocket:
@@ -62,6 +62,8 @@ class SessionSocket:
                 await stream.send(line)
 
     async def next_input(self) -> str:
+        if self._input_send is not None:
+            raise RuntimeError("next_input called while gate is already open")
         # capacity-1 stream + WouldBlock drop: first write wins, loser not queued for next gate
         send, recv = anyio.create_memory_object_stream[str](max_buffer_size=1)
         self._input_send = send
@@ -69,6 +71,8 @@ class SessionSocket:
             return await recv.receive()
         finally:
             self._input_send = None
+            send.close()
+            recv.close()
 
     def _dispatch(self, message: object) -> None:
         if isinstance(message, Input) and self._input_send is not None:
