@@ -47,19 +47,21 @@ class SessionServer:
         await self._socket.open()
 
     async def serve(self, run_fn: RunFn) -> Any:
-        async with anyio.create_task_group() as tg:
-            tg.start_soon(self._socket.serve)
-            async with anyio.create_task_group() as pump_tg:
-                pump_tg.start_soon(self._pump)
-                pump_tg.start_soon(self._control_loop)
-                try:
-                    result = await run_fn(
-                        on_event=self._emit, user_chat_input_fn=self._chat)
-                finally:
-                    await self._event_send.aclose()
-                    await self._control_send.aclose()
-            tg.cancel_scope.cancel()
-        await self._socket.close()
+        try:
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(self._socket.serve)
+                async with anyio.create_task_group() as pump_tg:
+                    pump_tg.start_soon(self._pump)
+                    pump_tg.start_soon(self._control_loop)
+                    try:
+                        result = await run_fn(
+                            on_event=self._emit, user_chat_input_fn=self._chat)
+                    finally:
+                        await self._event_send.aclose()
+                        await self._control_send.aclose()
+                tg.cancel_scope.cancel()
+        finally:
+            await self._socket.close()
         return result
 
     def _emit(self, event: dict[str, Any]) -> None:
