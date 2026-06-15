@@ -51,6 +51,8 @@ class Config:
     theme: str = field(hash=False, default="ansi")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
     remote: dict[str, Any] = field(hash=False, default_factory=dict)
+    project_facts: dict[str, str] = field(hash=False, default_factory=dict)
+    guidance: str = field(hash=False, default="")
 
     def tier_names(self) -> frozenset[str]:
         return frozenset(self.tiers)
