@@ -42,6 +42,9 @@ async def run_terminal_client(
             prompt = (event.get("payload") or {}).get("prompt") or ""
             gate_send.send_nowait(prompt)
 
+    coord.escalation_event = anyio.Event()
+    coord.set_escalation_hook(coord.escalation_event.set)
+
     client = await attach(_on_event)
     try:
         # Constructed for its side effect: binds the interrupt-forward runner onto coord.
@@ -51,7 +54,13 @@ async def run_terminal_client(
                 async for prompt in gate_recv:
                     await client.send_input(await solicit(prompt))
 
+            async def _watch_force_quit() -> None:
+                # cancel scope → finally → client.aclose; daemon detaches and runs on
+                await coord.escalation_event.wait()
+                tg.cancel_scope.cancel()
+
             tg.start_soon(_answer_gates)
+            tg.start_soon(_watch_force_quit)
             await client.receive_events()
             tg.cancel_scope.cancel()
     finally:

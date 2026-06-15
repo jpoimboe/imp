@@ -175,3 +175,58 @@ async def test_terminal_client_detaches_interrupt_forwarder_on_return(
             # call send_control on the now-closed client and raise RuntimeError.
             await coord.signal_pause()
             tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_force_quit_tears_down_client_and_run_survives(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    survived: list[bool] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "step_started", "payload": {}})
+        # Force-quit tears down the CLIENT here; the run must keep going.
+        with anyio.fail_after(5):
+            while server.attached_count != 0:
+                await anyio.sleep(0.02)
+        survived.append(True)
+        return "done"
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+
+            tg.start_soon(_client)
+            with anyio.fail_after(5):
+                while coord.escalation_event is None or server.attached_count != 1:
+                    await anyio.sleep(0.02)
+            coord.escalation_event.set()       # force-quit gesture
+
+    assert survived == [True]
