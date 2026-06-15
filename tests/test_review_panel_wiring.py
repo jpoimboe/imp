@@ -292,4 +292,4 @@ def test_panel_members_are_pure_advisors(name: str) -> None:
     assert "verdict" not in text
     assert "task_gap" not in text
     assert "plan_gap" not in text
-    assert "`approve`" not in text
+    assert "approve" not in text
