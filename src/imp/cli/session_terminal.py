@@ -13,7 +13,9 @@ and the solicit callback, and replaces the in-process run_change call in
 """
 from __future__ import annotations
 
+import contextlib
 import math
+import signal
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -45,28 +47,50 @@ async def run_terminal_client(
     coord.escalation_event = anyio.Event()
     coord.set_escalation_hook(coord.escalation_event.set)
 
-    client = await attach(_on_event)
-    try:
-        # Constructed for its side effect: binds the interrupt-forward runner onto coord.
-        SessionControls(client, coord)
-        async with anyio.create_task_group() as tg:
-            async def _answer_gates() -> None:
-                async for prompt in gate_recv:
-                    await client.send_input(await solicit(prompt))
+    # Arm the Ctrl-\ (SIGQUIT) trap BEFORE attaching so a deliberate detach works
+    # any time, including mid-grind with no prompt up. open_signal_receiver is a
+    # sync context manager that installs the loop handler on enter (replacing
+    # SIGQUIT's core-dump default) and restores it on exit.
+    sigquit = getattr(signal, "SIGQUIT", None)
+    with contextlib.ExitStack() as stack:
+        sigquit_signals = (
+            stack.enter_context(anyio.open_signal_receiver(sigquit))
+            if sigquit is not None else None)
+        client = await attach(_on_event)
+        try:
+            # Constructed for its side effect: binds the interrupt-forward runner onto coord.
+            SessionControls(client, coord)
+            async with anyio.create_task_group() as tg:
+                async def _answer_gates() -> None:
+                    async for prompt in gate_recv:
+                        await client.send_input(await solicit(prompt))
 
-            async def _watch_force_quit() -> None:
-                # cancel scope → finally → client.aclose; daemon detaches and runs on
-                await coord.escalation_event.wait()
+                async def _watch_force_quit() -> None:
+                    # cancel scope → finally → client.aclose; daemon detaches and runs on
+                    await coord.escalation_event.wait()
+                    tg.cancel_scope.cancel()
+
+                async def _watch_sigquit() -> None:
+                    # Ctrl-\ deliberate detach: same teardown as force-quit — trigger
+                    # the escalation event so _watch_force_quit handles the cancel.
+                    # This avoids a race in anyio's asyncio backend where the sigquit
+                    # wakeup Handle lands in _ready before the socket-reader Handle,
+                    # causing InvalidStateError when cancel fires before set_result.
+                    if sigquit_signals is None:
+                        return
+                    async for _sig in sigquit_signals:
+                        coord.escalation_event.set()
+                        break
+
+                tg.start_soon(_answer_gates)
+                tg.start_soon(_watch_force_quit)
+                tg.start_soon(_watch_sigquit)
+                await client.receive_events()
                 tg.cancel_scope.cancel()
-
-            tg.start_soon(_answer_gates)
-            tg.start_soon(_watch_force_quit)
-            await client.receive_events()
-            tg.cancel_scope.cancel()
-    finally:
-        coord.detach_runner()
-        coord.set_escalation_hook(None)
-        await gate_send.aclose()
-        gate_recv.close()
-        driver.finish()
-        await client.aclose()
+        finally:
+            coord.detach_runner()
+            coord.set_escalation_hook(None)
+            await gate_send.aclose()
+            gate_recv.close()
+            driver.finish()
+            await client.aclose()

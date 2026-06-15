@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import signal
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -228,5 +230,68 @@ async def test_force_quit_tears_down_client_and_run_survives(
                 while coord.escalation_event is None or server.attached_count != 1:
                     await anyio.sleep(0.02)
             coord.escalation_event.set()       # force-quit gesture
+
+    assert survived == [True]
+
+
+@pytest.mark.anyio
+async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionServer(sock, hibernate=False)
+    survived: list[bool] = []
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        with anyio.fail_after(5):
+            while server.attached_count == 0:
+                await anyio.sleep(0.02)
+        on_event({"type": "step_started", "payload": {}})
+        # Ctrl-\ tears down the CLIENT here; the run must keep going.
+        with anyio.fail_after(5):
+            while server.attached_count != 0:
+                await anyio.sleep(0.02)
+        survived.append(True)
+        return "done"
+
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve, run_fn)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+
+            tg.start_soon(_client)
+            with anyio.fail_after(5):
+                while server.attached_count != 1:
+                    await anyio.sleep(0.02)
+            # Safety + readiness gate: the client arms its SIGQUIT trap BEFORE it
+            # attaches, so attached_count == 1 implies the trap is installed and
+            # SIGQUIT's default core-dump disposition has been replaced. Asserting
+            # this before os.kill guarantees the signal is never delivered to a
+            # SIG_DFL disposition (which would abort the whole test process); it
+            # also fails the test cleanly when the trap is absent (the
+            # not-yet-implemented state), so the kill is never reached in red.
+            assert signal.getsignal(signal.SIGQUIT) != signal.SIG_DFL
+            os.kill(os.getpid(), signal.SIGQUIT)   # Ctrl-\ deliberate-detach gesture
 
     assert survived == [True]
