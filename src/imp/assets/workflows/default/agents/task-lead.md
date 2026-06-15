@@ -24,8 +24,7 @@ Read first, every entry:
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
 message containing feedback — reviewer findings (end-gate `task_gap` from the
-review panel or the recheck reviewer, human finalize decision) **or** a gate failure
-(the `commit-check`/`verify` scripts
+recheck reviewer) **or** a gate failure (the `commit-check`/`verify` scripts
 `resume` you with their stderr — e.g. failing tests or an uncommitted file) —
 treat it as **authoritative over progress.md**: re-open and fix the named task
 even if progress.md marks it done, then reconcile progress.md. (Otherwise

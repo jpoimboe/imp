@@ -250,3 +250,13 @@ def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:
     assert "send the change back to implement" not in text
     assert "carried to the implementer" not in text
     assert "clarify the desired outcome and scope before returning a rework decision" in text
+
+
+def test_task_lead_step0_drops_rerouted_feedback_sources() -> None:
+    text = (AGENTS / "task-lead.md").read_text()
+    # "review panel" alone also appears out-of-scope at line 82, so guard on the
+    # Step-0-unique enumeration phrase that the edit removes:
+    assert "review panel or the recheck reviewer" not in text   # review rework now -> plan-writer
+    assert "human finalize decision" not in text                # human rework now -> plan-writer
+    # the gate-failure resume source is still authoritative in Step 0
+    assert 'gate failure (the `commit-check`' in text
