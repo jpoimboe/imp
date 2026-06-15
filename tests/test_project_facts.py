@@ -122,3 +122,15 @@ def test_non_scalar_guidance_rejected(tmp_path: Path) -> None:
     p = _write(tmp_path, "guidance:\n  key: val\n")
     with pytest.raises(LoadError):
         parse_project_facts(p)
+
+
+def test_leading_underscore_key_rejected(tmp_path: Path) -> None:
+    p = _write(tmp_path, "facts:\n  _foo: bar\n")
+    with pytest.raises(LoadError) as ei:
+        parse_project_facts(p)
+    assert "_foo" in str(ei.value)
+    assert "not a valid identifier" in str(ei.value)
+    assert "[A-Za-z][A-Za-z0-9_]*" in str(ei.value)
+    assert "[A-Za-z_][A-Za-z0-9_]*" not in str(ei.value)
+    assert ei.value.source is not None
+    assert ei.value.source.file == p

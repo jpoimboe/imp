@@ -63,7 +63,7 @@ class Config:
         return self.provider_envs.get(provider, f"{provider.upper()}_API_KEY")
 
 
-_FACT_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_FACT_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*\Z")
 _FACT_SCALARS = (str, int, float, bool)
 
 
@@ -104,7 +104,7 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
         if not isinstance(key, str) or not _FACT_KEY_RE.match(key):
             raise LoadError(
                 f"facts key {key!r} is not a valid identifier "
-                "([A-Za-z_][A-Za-z0-9_]*)",
+                "([A-Za-z][A-Za-z0-9_]*)",
                 facts_src,
             )
         if key == "guidance":
