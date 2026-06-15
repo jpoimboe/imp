@@ -27,7 +27,7 @@ class LoadError(Exception):
         return "\n".join(parts)
 
     @property
-    def errors(self) -> "list[LoadError]":
+    def errors(self) -> list[LoadError]:
         return [self]
 
 
