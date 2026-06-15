@@ -746,3 +746,8 @@ def test_jinja_syntax_error_is_loaderror(tmp_path: Path) -> None:
              agents={"stub": _agent_with_body("{{ project.foo ")})
     with pytest.raises((LoadError, LoadErrors)):
         load_workflow(wf, project_keys=frozenset({"foo"}))
+
+
+def test_no_facts_block_and_no_project_refs_loads_ok(tmp_path: Path) -> None:
+    wf = _wf(tmp_path, _PROJECT_WF, agents={"stub": _OK_AGENT})
+    load_workflow(wf)  # no facts block, no project.* refs -> must not raise
