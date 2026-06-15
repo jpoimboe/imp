@@ -1,3 +1,7 @@
+---
+description: Fire Ctrl-C / ESC / Ctrl-D at imp across agent states and surfaces, judging clean-pause behavior (live, via the impty driver).
+---
+
 # imp interrupt playbook — Ctrl-C / ESC / Ctrl-D acceptance test (impty MCP)
 
 > **You are the test driver.** This file is your full instruction set. You drive `imp`

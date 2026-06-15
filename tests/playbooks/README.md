@@ -97,12 +97,6 @@ symbols or branch paths into a playbook.
 
 *(Append every new playbook here — this list is hand-maintained.)*
 
-- `imp-ux-playbook.md` — surface-selectable usability & polish pass (CLI or TUI):
-  agent-authored PASS/FAIL verdict + open-ended suggestions → `docs/issues/`.
-- `interrupt-playbook.md` — Ctrl-C / ESC / Ctrl-D clean-pause correctness matrix across all four
-  providers, several agent states, and surface (CLI or TUI). Validates
-  `imp/specs/2026-06-04-esc-and-clean-interrupt.md` (TUI mode also covers the `--tui` interrupt
-  bindings from `imp/specs/2026-06-11-tui-run-viewer.md`).
 - `before-after-playbook.md` — before/after visual showcase for an imp change: render the
   user-visible CLI/TUI surfaces it touched, before vs after, into one self-contained HTML page.
   A communication artifact, not a pass/fail test.
