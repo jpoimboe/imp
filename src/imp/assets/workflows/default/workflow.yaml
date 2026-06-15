@@ -20,8 +20,6 @@ vars:
   panel_done:             {type: bool, default: false}
   multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the whole-change review pass
   review_scope:           {type: string, default: plan}  # plan | change — one review path, scoped per-plan or over the whole change
-  spec_confirm:           {type: bool, default: true}    # confirm-gate enable
-  spec_unseen_changes:    {type: bool, default: false}   # some turn changed the spec without user direction
   merge_approved:         {type: bool, default: false}
   reintegrate_clean:      {type: bool, default: false}
 
@@ -40,21 +38,13 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: ["imp/specs/**"], mode: allow}
         rules:
-          - {else: true,
-             set: {fast_path: "output.complexity == 'trivial'",
-                   spec_unseen_changes: "spec_unseen_changes or unseen_changes"},
-             continue: true}
+          - {else: true, set: {fast_path: "output.complexity == 'trivial'"}, continue: true}
 
       - name: spec-verify-commit
         quiet: true
         command: ./scripts/spec-commit-verify.sh
         rules:
-          # Trivial fast path: skip spec-reviewer. Preserve the confirm gate exactly
-          # as spec-reviewer does today -- an undirected spec change with confirm
-          # enabled still routes through spec-confirm before planning.
-          - {if: {exit: 0, fast_path: true, spec_confirm: true, spec_unseen_changes: true},
-             set: {spec_unseen_changes: false}, goto: spec-confirm}
-          - {if: {exit: 0, fast_path: true}, goto: plan-writer}
+          - {if: {exit: 0, fast_path: true}, goto: plan-writer}   # trivial fast path: skip spec-reviewer
           - {if: {exit: 0}, continue: true}
           - {else: true, resume: spec-writer}
 
@@ -72,25 +62,8 @@ phases:
           # Clean with actionable minors, not yet integrated -> one minors pass; owe a verification review.
           - {if: {spec_minors_integrated: false, has_minor_findings: true}, set: {spec_minors_integrated: true},
              resume: spec-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
-          # Clean and settled (verification pass, or nothing actionable) AND the spec changed this
-          # cycle with confirm enabled -> forward confirm gate; the verification review's minors are dropped.
-          - {if: {spec_confirm: true, spec_unseen_changes: true},
-             set: {spec_minors_integrated: false, spec_unseen_changes: false}, goto: spec-confirm}
-          # Clean and settled, no confirm needed -> proceed to planning.
-          - {else: true, set: {spec_minors_integrated: false, spec_unseen_changes: false}, goto: plan-writer}
-
-      - name: spec-confirm
-        file: agents/spec-confirm.md
-        tier: medium
-        fs_permissions:
-          - {operations: [read], paths: ["**"], mode: allow}
-        rules:
-          # User requested changes -> resume the writer; re-arm the confirm gate so the
-          # re-review re-presents (the writer's user-directed edits emit unseen_changes:false).
-          - {if: {confirm: changes}, set: {spec_unseen_changes: true},
-             resume: spec-writer, feedback: "The user reviewed the spec and requested changes. Address them:"}
-          # Approved -> forward to planning.
-          - {else: true, goto: plan-writer}
+          # Clean and settled (verification pass, or nothing actionable) -> proceed to planning.
+          - {else: true, set: {spec_minors_integrated: false}, goto: plan-writer}
 
   - name: plan
     steps:

@@ -12,15 +12,13 @@ from imp.engine.types import Goto
 AGENTS = Path("src/imp/assets/workflows/default/agents")
 
 
-def test_spec_writer_schema_gains_confirmed_phase_and_unseen_changes() -> None:
+def test_spec_writer_schema_drops_unseen_changes() -> None:
     wf = load_workflow(default_workflow_dir())
     schema = wf.agents["spec-writer"].output_schema
     phase = next(f for f in schema.fields if f.name == "phase")
     assert phase.type == "enum"
     assert set(phase.values) == {"written"}
-    unseen = next(f for f in schema.fields if f.name == "unseen_changes")
-    assert unseen.type == "bool"
-    assert unseen.required is True
+    assert all(f.name != "unseen_changes" for f in schema.fields)
 
 
 def _spec_writer() -> str:
@@ -49,21 +47,6 @@ def test_spec_writer_carries_ask_vs_decide_policy_and_markers() -> None:
     assert "decide and record" in text.lower()
 
 
-def test_spec_confirm_agent_surfaces_decisions_and_routes() -> None:
-    text = (AGENTS / "spec-confirm.md").read_text()
-    assert "wait_for_user" in text
-    assert 'confirm="approve"' in text and 'confirm="changes"' in text
-    # the confirm-changes resume feedback string the workflow rule sends
-    assert "requested changes" in text
-
-
-def test_spec_writer_has_unseen_changes_emit_section() -> None:
-    text = _spec_writer()
-    assert "emit `unseen_changes` on every" in text
-    # the per-shape definition (the field's meaning) is documented
-    assert "without the user" in text and "direction" in text
-
-
 def test_spec_writer_has_amend_precondition_with_fixup_fallback() -> None:
     text = _spec_writer()
     assert "docs: add spec for <slug>" in text   # HEAD-is-spec-commit subject
@@ -84,7 +67,6 @@ def test_spec_writer_recognition_is_preamble_primary() -> None:
     assert "Here's review feedback to address:" in text
     assert ("No blocking issues — integrate these minor improvements; a final "
             "review follows:") in text
-    assert "The user reviewed the spec and requested changes. Address them:" in text
     # The synthesized tool_result note (resume-vs-goto discriminator) is present.
     assert "previous step output recorded; superseded by the feedback below" in text
 
@@ -180,62 +162,22 @@ def test_engine_sourced_taxonomy_strings_present_in_both_prompts() -> None:
             f"{path.name}: missing synthesized tool_result note")
 
 
-def test_spec_gate_vars_are_gone_and_confirm_vars_remain() -> None:
+def test_spec_gate_and_confirm_vars_are_gone() -> None:
     wf = load_workflow(default_workflow_dir())
     names = {v.name for v in wf.vars.decls}
     assert "spec_gate_pending" not in names
     assert "spec_gate_passed" not in names
-    assert {"spec_confirm", "spec_unseen_changes"} <= names
+    assert "spec_confirm" not in names
+    assert "spec_unseen_changes" not in names
 
 
-def test_spec_exit_gate_removed_and_spec_confirm_follows_reviewer() -> None:
+def test_spec_phase_steps_have_no_confirm_or_exit_gate() -> None:
     wf = load_workflow(default_workflow_dir())
     spec = next(p for p in wf.phases if p.name == "spec")
     names = [s.name for s in spec.steps]
     assert "spec-exit-gate" not in names
-    assert names == ["spec-writer", "spec-verify-commit", "spec-reviewer", "spec-confirm"]
+    assert "spec-confirm" not in names
+    assert names == ["spec-writer", "spec-verify-commit", "spec-reviewer"]
 
 
-def test_spec_confirm_is_medium_agent_with_wait_for_user() -> None:
-    wf = load_workflow(default_workflow_dir())
-    step = {s.name: s for s in wf.flat_steps()}["spec-confirm"]
-    assert step.kind == "agent" and step.tier == "medium"
-    assert step.file is not None and step.file.name == "spec-confirm.md"
-    assert step.quiet is False
-    agent = wf.agents["spec-confirm"]
-    assert "wait_for_user" in agent.tools
-    confirm = next(f for f in agent.output_schema.fields if f.name == "confirm")
-    assert confirm.type == "enum" and set(confirm.values) == {"approve", "changes"}
 
-
-def test_spec_confirm_routes_approve_forward_and_changes_back() -> None:
-    from imp.engine.gates import evaluate_rules
-    wf = load_workflow(default_workflow_dir())
-    rules = {s.name: s for s in wf.flat_steps()}["spec-confirm"].rules
-    base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
-    approve = evaluate_rules(rules, vars=base,
-                             output={"status": "Success", "confirm": "approve", "comments": ""})
-    assert isinstance(approve.action, Goto) and approve.action.target == "plan-writer"
-    assert approve.action.resume is False
-    changes = evaluate_rules(rules, vars=base,
-                             output={"status": "Success", "confirm": "changes", "comments": "x"})
-    assert isinstance(changes.action, Goto) and changes.action.target == "spec-writer"
-    assert changes.action.resume is True
-    # The changes edge re-arms the confirm gate so the re-review re-presents to the user.
-    assert changes.var_mutations["spec_unseen_changes"] is True
-
-
-def test_spec_reviewer_clean_unseen_routes_to_confirm() -> None:
-    from imp.engine.gates import evaluate_rules
-    wf = load_workflow(default_workflow_dir())
-    rules = {s.name: s for s in wf.flat_steps()}["spec-reviewer"].rules
-    base = {v.name: wf.vars.defaults()[v.name] for v in wf.vars.decls}
-    # Clean, nothing to integrate, spec changed this cycle, confirm enabled -> spec-confirm.
-    m = evaluate_rules(rules, vars={**base, "spec_confirm": True, "spec_unseen_changes": True},
-                       output={"status": "Success", "blocking": False, "has_minor_findings": False})
-    assert isinstance(m.action, Goto) and m.action.target == "spec-confirm"
-    # Same but unseen=False -> straight to plan-writer (no confirm).
-    m2 = evaluate_rules(
-        rules, vars={**base, "spec_confirm": True, "spec_unseen_changes": False},
-        output={"status": "Success", "blocking": False, "has_minor_findings": False})
-    assert isinstance(m2.action, Goto) and m2.action.target == "plan-writer"
