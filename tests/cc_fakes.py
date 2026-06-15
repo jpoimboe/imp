@@ -129,6 +129,9 @@ class FakeClaudeSDKClient:
     async def interrupt(self) -> None:
         pass
 
+    async def disconnect(self) -> None:
+        self.closed = True
+
 
 def assistant(*blocks: Any) -> FakeAssistantMessage:
     return FakeAssistantMessage(content=list(blocks))

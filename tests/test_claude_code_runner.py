@@ -1129,4 +1129,105 @@ async def _run_events(tmp_path: Path, scripted: list, *, max_tool_calls: int,
     return [ev async for ev in runner.run(inv)]
 
 
+class _CLIConnectionError(Exception):
+    """Local stand-in for the SDK's CLIConnectionError. Matched by class name
+    (`_is_terminated_process_teardown`) — but that helper requires the exact
+    name "CLIConnectionError", so expose it under that __name__."""
+
+
+_CLIConnectionError.__name__ = "CLIConnectionError"
+
+
+class _StallingClient:
+    """A claude CLI child that wedged mid-turn: receive_response() parks forever
+    awaiting a model-API stream that never arrives. disconnect() kills the
+    transport subprocess, which unblocks the parked read with a
+    terminated-process error — exactly the SDK's behavior when its child dies."""
+
+    def __init__(self, opts: Any) -> None:
+        self.opts = opts
+        self.disconnected = False
+        import asyncio
+        self._killed = asyncio.Event()
+
+    async def __aenter__(self) -> _StallingClient:
+        return self
+
+    async def __aexit__(self, *_exc: Any) -> bool:
+        self.disconnected = True
+        self._killed.set()
+        return False
+
+    async def query(self, _prompt: Any) -> None:
+        pass
+
+    async def receive_response(self) -> Any:
+        await self._killed.wait()
+        raise _CLIConnectionError("Cannot write to terminated process")
+        yield  # unreachable, but makes this an async generator
+
+    async def disconnect(self) -> None:
+        self.disconnected = True
+        self._killed.set()
+
+    async def interrupt(self) -> None:
+        pass
+
+
+@pytest.mark.anyio
+async def test_interrupt_tears_down_stalled_sdk_client(tmp_path: Path) -> None:
+    """Regression: the inactivity watchdog tears a stalled agent down via
+    runner.interrupt(). For claude_code that MUST kill the live CLI subprocess —
+    flipping _cancel alone never unblocks a receive_response() parked on a
+    message that isn't coming, so the child would otherwise leak and race the
+    watchdog's restart of the same step."""
+    import asyncio
+
+    (tmp_path / "art").mkdir()
+    holder: dict[str, _StallingClient] = {}
+
+    def factory(opts: Any) -> _StallingClient:
+        c = _StallingClient(opts)
+        holder["c"] = c
+        return c
+
+    inv = _inv(tmp_path)
+    runner = ClaudeCodeAgentRunner(
+        model_name="claude-sonnet-4-5", client_factory=factory)
+
+    events: list[dict[str, Any]] = []
+
+    async def drive() -> None:
+        async for ev in runner.run(inv):
+            events.append(ev)
+
+    task = asyncio.create_task(drive())
+    # Let run() build the client and park in receive_response().
+    for _ in range(1000):
+        if "c" in holder:
+            break
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.02)
+    assert not task.done(), "agent should be stalled, not finished"
+
+    await runner.interrupt()
+
+    # interrupt() must break the parked stream; without the live-client
+    # teardown the task hangs here forever (the leaked-subprocess bug).
+    await asyncio.wait_for(task, timeout=2)
+
+    assert holder["c"].disconnected is True
+    assert events and events[-1]["type"] == "error"
+    assert events[-1]["payload"]["kind"] == "interrupted"
+
+
+@pytest.mark.anyio
+async def test_interrupt_without_live_client_is_safe(tmp_path: Path) -> None:
+    """interrupt() before run() (no client connected) must not raise."""
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-5")
+    await runner.interrupt()
+    await runner.interrupt()  # idempotent
+    assert runner._cancel is True
+
+
 

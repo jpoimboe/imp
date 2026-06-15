@@ -835,6 +835,10 @@ class ClaudeCodeAgentRunner:
         self._last_no_result_diag: dict[str, Any] = {}
         self._cancel = False
         self._ctx: ToolContext | None = None
+        # The live SDK client while a turn streams; interrupt() disconnects it to
+        # kill the CLI subprocess (the only effect that breaks a stalled
+        # receive_response()). None outside an active `async with client_ctx`.
+        self._client: Any = None
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str]) -> Any:
@@ -930,6 +934,10 @@ class ClaudeCodeAgentRunner:
                 from imp.agents.tools.bg import terminate_background_processes
                 with contextlib.suppress(Exception):
                     await terminate_background_processes(self._ctx)
+            # The client's own `async with` __aexit__ has run (or its generator
+            # was abandoned); drop the stale handle so a late interrupt() is a
+            # no-op rather than disconnecting a dead client.
+            self._client = None
 
     async def _run_loop(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
         from imp.engine.state import JsonlEventLog
@@ -1115,6 +1123,9 @@ class ClaudeCodeAgentRunner:
 
         client_ctx = self._build_client(opts)
         async with client_ctx as client:
+            # Publish the live client so interrupt() (called from the watchdog/
+            # pause task) can disconnect it and break a parked receive_response().
+            self._client = client
             # FIRST query streams the prepared history; re-queries send a plain
             # next_text string (asymmetry preserved from the pre-restructure
             # code). Each outer iteration runs its OWN receive_response() so a
@@ -1507,12 +1518,26 @@ class ClaudeCodeAgentRunner:
         from imp.agents.tools.bg import terminate_background_processes
         from imp.agents.tools.context import terminate_running_processes
         self._cancel = True
-        if self._ctx is not None:
-            await terminate_running_processes(self._ctx)
-            # Decision 7: pause kills background processes too (leak
-            # resistance); the persisted tombstones give the resumed agent an
-            # explanation. Idempotent vs the run() finally (both fire on pause).
-            await terminate_background_processes(self._ctx)
+        try:
+            if self._ctx is not None:
+                await terminate_running_processes(self._ctx)
+                # Decision 7: pause kills background processes too (leak
+                # resistance); the persisted tombstones give the resumed agent an
+                # explanation. Idempotent vs the run() finally (both fire on pause).
+                await terminate_background_processes(self._ctx)
+        finally:
+            # disconnect() must fire even if a teardown raises: _cancel is only
+            # observed BETWEEN SDK messages, so a stalled agent parked in
+            # receive_response() awaiting a message that never comes (the
+            # watchdog's exact case) never sees it. Killing the transport
+            # subprocess is the only effect that breaks that parked read — the
+            # claude_code analog of codex's AbortController.abort(). Without it
+            # the CLI child leaks past teardown and races the step's restart.
+            # Idempotent vs the `async with` __aexit__ that also disconnects.
+            client = self._client
+            if client is not None:
+                with contextlib.suppress(Exception):
+                    await client.disconnect()
 
 
 class ClaudeCodeProvider:
