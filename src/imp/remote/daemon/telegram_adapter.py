@@ -169,14 +169,15 @@ class TelegramNorthAdapter:
         change_id = change.get("id")
         if not change_id:
             return
+        handle = handle_for(change_id)
+        with self._lock:
+            self._handle_to_change[handle] = change_id
         if kind == "silent" and self._focus.current() != change_id:
             return
-        handle = handle_for(change_id)
         message_id = self._send(format_outbound(event, handle), kind == "silent")
         with self._lock:
             if message_id is not None:
                 self._msg_to_change[message_id] = change_id
-            self._handle_to_change[handle] = change_id
 
     def on_response(self, response: Response) -> None:
         text = render_response(response, self._focus.current())
