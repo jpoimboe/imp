@@ -16,10 +16,10 @@ from anyio.streams.buffered import BufferedByteReceiveStream
 from anyio.streams.memory import MemoryObjectSendStream
 
 from imp.remote.session.protocol import (
+    _MAX_FRAME,
     Attach,
     Control,
     Input,
-    _MAX_FRAME,
     encode_event,
     parse_client_message,
 )
