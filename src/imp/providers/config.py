@@ -22,7 +22,7 @@ from typing import Any
 
 import yaml
 
-from imp.engine._yaml import LineLoader, items, loc
+from imp.engine._yaml import LineLoader, items, key_loc, loc
 from imp.engine.errors import LoadError
 from imp.engine.expr import ExprType
 from imp.engine.types import SourceLoc, Vars
@@ -86,7 +86,7 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
     elif not isinstance(guidance_raw, _FACT_SCALARS):
         raise LoadError(
             "'guidance:' must be a string scalar",
-            loc(path, raw),
+            key_loc(path, raw, "guidance"),
         )
     else:
         guidance = str(guidance_raw)
@@ -97,7 +97,8 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
         return facts, guidance
     if not isinstance(facts_raw, dict):
         raise LoadError(
-            "'facts:' must be a mapping of name to scalar value", loc(path, raw)
+            "'facts:' must be a mapping of name to scalar value",
+            key_loc(path, raw, "facts"),
         )
     facts_src = loc(path, facts_raw)
     for key, value in items(facts_raw):

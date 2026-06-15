@@ -134,3 +134,19 @@ def test_leading_underscore_key_rejected(tmp_path: Path) -> None:
     assert "[A-Za-z_][A-Za-z0-9_]*" not in str(ei.value)
     assert ei.value.source is not None
     assert ei.value.source.file == p
+
+
+def test_non_mapping_facts_error_points_at_facts_line(tmp_path: Path) -> None:
+    p = _write(tmp_path, "guidance: hi\nfacts: notamap\n")
+    with pytest.raises(LoadError) as ei:
+        parse_project_facts(p)
+    assert ei.value.source is not None
+    assert ei.value.source.line == 2
+
+
+def test_non_scalar_guidance_error_points_at_guidance_line(tmp_path: Path) -> None:
+    p = _write(tmp_path, "facts:\n  a: b\nguidance:\n  nested: x\n")
+    with pytest.raises(LoadError) as ei:
+        parse_project_facts(p)
+    assert ei.value.source is not None
+    assert ei.value.source.line == 3
