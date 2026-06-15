@@ -1667,11 +1667,11 @@ def test_blocking_panel_findings_not_promoted_to_prose() -> None:
     events += _panel_member("2", "approve", "")
     events += [
         _ev("ao", "agent_output", agent_id="step:review/review",
-            status="Success", verdict="task_gap",
+            status="Success", verdict="rework",
             findings="### member-1 (task-level)\nblocking: missing handler that is "
                      "reachable in normal usage and clearly blocks the merge gate"),
         _ev("sc", "step_completed", step="review", kind="agent",
-            action={"verb": "goto", "target": "implement"}, var_mutations={}),
+            action={"verb": "goto", "target": "plan-writer"}, var_mutations={}),
     ]
     tree = nv.build_tree(events)
     step = tree.root.children[0].children[0]

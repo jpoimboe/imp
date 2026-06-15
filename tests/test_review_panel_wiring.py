@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from imp.assets import default_workflow_dir
+from imp.engine.errors import LoadError
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.schema import validate_agent_output
@@ -63,16 +66,17 @@ def test_review_step_uses_review_panel_at_medium_tier() -> None:
     assert review.differ_from is None
 
 
-def test_review_step_routes_and_sets_panel_done() -> None:
+def test_review_step_routes_rework_to_plan_writer_and_sets_panel_done() -> None:
     rules = _steps(_wf())["review"].rules
-    for verdict, target in [("task_gap", "task-lead"), ("plan_gap", "plan-writer")]:
-        m = evaluate_rules(rules, vars=_BASE_VARS,
-                           output={"status": "Success", "verdict": verdict, "findings": "x"})
-        assert isinstance(m.action, Goto) and m.action.target == target, verdict
-        assert m.var_mutations["panel_done"] is True, verdict
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={"status": "Success", "verdict": "rework", "findings": "x"})
+    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
+    assert m.action.resume is False                      # cross-phase plain goto
+    assert m.action.feedback                             # findings forwarded as a preamble
+    assert m.var_mutations["panel_done"] is True
     m_ok = evaluate_rules(rules, vars=_BASE_VARS,
                           output={"status": "Success", "verdict": "approve", "findings": "x"})
-    assert isinstance(m_ok.action, Continue)            # approve -> deferred-sweep
+    assert isinstance(m_ok.action, Continue)             # approve -> deferred-sweep
     assert m_ok.var_mutations["panel_done"] is True
 
 
@@ -80,10 +84,26 @@ def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
     schema = wf.agents["review-panel"].output_schema
     rules = _steps(wf)["review"].rules
-    for verdict in ("task_gap", "plan_gap", "approve"):
+    for verdict in ("approve", "rework"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
-        validate_agent_output(payload, schema)          # must not raise
+        validate_agent_output(payload, schema)           # must not raise
         assert evaluate_rules(rules, vars=_BASE_VARS, output=payload).action is not None
+
+
+def test_review_panel_verdict_enum_is_collapsed() -> None:
+    schema = _wf().agents["review-panel"].output_schema
+    verdict_field = next(f for f in schema.fields if f.name == "verdict")
+    assert set(verdict_field.values) == {"approve", "rework"}
+    for gap in ("task_gap", "plan_gap"):
+        with pytest.raises(LoadError):
+            validate_agent_output(
+                {"status": "Success", "verdict": gap, "findings": "x"}, schema)
+
+
+def test_no_gap_verdict_in_workflow_yaml() -> None:
+    text = (AGENTS.parent / "workflow.yaml").read_text()
+    assert "task_gap" not in text
+    assert "plan_gap" not in text
 
 
 def test_review_panel_declares_four_members() -> None:
