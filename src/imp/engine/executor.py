@@ -379,7 +379,7 @@ def _complete(change: Change, state: State, log: EventLog) -> RunResult:
     state.save(change.state_dir)
     _emit(log, "change_merged",
           {"base": change.base_branch, "commit": state.merge_commit})
-    worktree.journal_commit(change.control_root, change.id, {
+    worktree.fold_wip_into_journal(change.control_root, change.id, {
         "events.jsonl": change.events_path,
         "change.json": change.change_dir / "change.json",
         "state.json": change.state_dir / "state.json",
