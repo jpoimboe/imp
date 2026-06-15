@@ -84,19 +84,22 @@ phases:
           - {else: true, resume: plan-writer}
 
       - name: plan-review
-        file: agents/plan-reviewer.md
-        tier: high
-        # Mirrors spec-reviewer: the reviewer gets the last word. plan_minors_integrated
-        # tracks whether the writer has already spent its one minors-integration pass.
+        file: agents/plan-review-panel.md
+        tier: medium
+        # The coordinator dispatches plan-reviewer subagents at their own high tier and
+        # only collapses, so the step runs at medium. plan_minors_integrated tracks the
+        # writer's one minors pass; plan_panel_done is the re-verify dial — true on the
+        # two bounce-back branches (2->1 reviewers), false on the terminal branches so
+        # the next plan starts fresh with a 2-reviewer first pass.
         rules:
-          # Critical/Major -> rework, then re-review. Clear the flag: a real fix re-opens the one minors pass.
-          - {if: {blocking: true}, set: {plan_minors_integrated: false}, resume: plan-writer, feedback: "Here's review feedback to address:"}
-          # Clean, and the writer already did its minors-integration pass -> stop; drop this review's minors.
-          - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false}, goto: task-lead}
+          # Critical/Major -> rework, then re-verify. Clear the minors flag; set the dial.
+          - {if: {blocking: true}, set: {plan_minors_integrated: false, plan_panel_done: true}, resume: plan-writer, feedback: "Here's review feedback to address:"}
+          # Clean, and the writer already did its minors-integration pass -> stop; reset the dial.
+          - {if: {plan_minors_integrated: true}, set: {plan_minors_integrated: false, plan_panel_done: false}, goto: task-lead}
           # Clean with actionable minors -> integrate them, then owe one more (verification) review.
-          - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true}, resume: plan-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
-          # Clean, nothing to integrate -> stop.
-          - {else: true, goto: task-lead}
+          - {if: {has_minor_findings: true}, set: {plan_minors_integrated: true, plan_panel_done: true}, resume: plan-writer, feedback: "No blocking issues — integrate these minor improvements; a final review follows:"}
+          # Clean, nothing to integrate -> stop; reset the dial.
+          - {else: true, set: {plan_panel_done: false}, goto: task-lead}
 
   - name: implement
     steps:

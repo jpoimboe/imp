@@ -48,9 +48,10 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     subagents = {
         "implementer", "quality-reviewer", "code-reviewer",
         "completeness-slice", "spec-compliance-slice", "boundaries-slice",
+        "plan-reviewer",
     }
     dispatchers = {"task-lead", "review-panel", "deferred-sweep",
-                   "plan-writer", "spec-writer"}
+                   "plan-writer", "spec-writer", "plan-review-panel"}
 
     for name, agent in wf.agents.items():
         assert "complete_step" not in agent.tools, name
@@ -287,6 +288,7 @@ def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is True
     assert m.var_mutations["plan_minors_integrated"] is False
+    assert m.var_mutations["plan_panel_done"] is True
 
 
 def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
@@ -299,6 +301,7 @@ def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
         output={"blocking": False, "has_minor_findings": True},
     )
     assert m.var_mutations["plan_minors_integrated"] is True
+    assert m.var_mutations["plan_panel_done"] is True
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is True
 
@@ -313,6 +316,7 @@ def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
         output={"blocking": False, "has_minor_findings": True},
     )
     assert m.var_mutations["plan_minors_integrated"] is False
+    assert m.var_mutations["plan_panel_done"] is False
     assert isinstance(m.action, Goto)
     assert m.action.target == "task-lead" and m.action.resume is False
 
@@ -328,7 +332,7 @@ def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "task-lead" and m.action.resume is False
-    assert m.var_mutations == {}
+    assert m.var_mutations == {"plan_panel_done": False}
 
 
 def test_spec_writer_prompt_has_minors_integration_branch() -> None:
