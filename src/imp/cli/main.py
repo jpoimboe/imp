@@ -1678,36 +1678,62 @@ def _interactive() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
-    rows = _resumable_rows(control)
-    if not rows:
-        print("Nothing to resume.")
-        past = _past_change_count(control)
-        if past:
-            plural = "s" if past != 1 else ""
-            print(pal.ansi(
-                f"({past} past change{plural} — see `imp status --all`)",
-                "dim", enabled=should_use_color(sys.stdout)))
-        return 0
+def _resume_picker_empty(control: Path) -> int:
+    print("Nothing to resume.")
+    past = _past_change_count(control)
+    if past:
+        plural = "s" if past != 1 else ""
+        print(pal.ansi(
+            f"({past} past change{plural} — see `imp status --all`)",
+            "dim", enabled=should_use_color(sys.stdout)))
+    return 0
+
+
+def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
     if len(rows) == 1:
         return rows[0][0]
+    print("Multiple resumable Changes — pass a token:", file=sys.stderr)
+    color = should_use_color(sys.stderr)
+    now = datetime.now(UTC)
+    print(change_row.header_line(color=color), file=sys.stderr)
+    for r in rows:
+        print(change_row.format_change_line(
+            change_id=r[0], title=r[4], status=r[1], step=r[2],
+            last_iso=r[3], now=now, color=color), file=sys.stderr)
+    return 2
+
+
+async def _pick_change_target(
+    *, rows: list[_Row], header: str,
+    on_empty: Callable[[], int],
+    on_non_tty: Callable[[list[_Row]], str | int],
+    selected_index: int = 0,
+    non_interactive: bool = False,
+) -> str | int:
+    if not rows:
+        return on_empty()
     if non_interactive or not _interactive():
-        print("Multiple resumable Changes — pass a token:", file=sys.stderr)
-        color = should_use_color(sys.stderr)
-        now = datetime.now(UTC)
-        print(change_row.header_line(color=color), file=sys.stderr)
-        for r in rows:
-            print(change_row.format_change_line(
-                change_id=r[0], title=r[4], status=r[1], step=r[2],
-                last_iso=r[3], now=now, color=color), file=sys.stderr)
-        return 2
+        return on_non_tty(rows)
+    if len(rows) == 1:
+        return rows[0][0]
     candidates = [resume_select.Candidate(
         change_id=r[0], title=r[4], status=r[1], step=r[2], last_iso=r[3])
         for r in rows]
     chosen = await resume_select.run_picker(
-        candidates, now=datetime.now(UTC), color=should_use_color(sys.stdout),
-        header="Resume which change?  (↑/↓ to move · enter to resume · q to cancel)")
+        candidates, now=datetime.now(UTC),
+        color=should_use_color(sys.stdout),
+        header=header, selected_index=selected_index)
     return chosen if chosen is not None else 2
+
+
+async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | int:
+    return await _pick_change_target(
+        rows=_resumable_rows(control),
+        header="Resume which change?  (↑/↓ to move · enter to resume · q to cancel)",
+        on_empty=lambda: _resume_picker_empty(control),
+        on_non_tty=_resume_picker_non_tty,
+        non_interactive=non_interactive,
+    )
 
 
 def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
