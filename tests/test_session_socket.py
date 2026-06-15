@@ -230,3 +230,12 @@ async def test_control_frame_invokes_on_control(tmp_path: Path) -> None:
         await client.aclose()
         await session.close()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_open_creates_missing_parent_directory(tmp_path: Path) -> None:
+    sock = str(tmp_path / "sessions" / "c1.sock")
+    session = SessionSocket(sock)
+    await session.open()
+    assert (tmp_path / "sessions").is_dir()
+    await session.close()

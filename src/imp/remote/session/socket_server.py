@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -43,6 +44,7 @@ class SessionSocket:
         self._input_send: MemoryObjectSendStream[str] | None = None
 
     async def open(self) -> None:
+        Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         self._listener = await anyio.create_unix_listener(self._path)
 
     async def serve(self) -> None:
