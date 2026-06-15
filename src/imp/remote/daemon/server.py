@@ -17,9 +17,18 @@ _MAX_FRAME = 1 << 20
 class SouthHub:
     """Owns the south-side socket and the live change_id -> stream registry."""
 
-    def __init__(self, path: str, on_event: Callable[[str, str], None]) -> None:
+    def __init__(
+        self,
+        path: str,
+        on_event: Callable[[str, str], None],
+        *,
+        on_attach: Callable[[str, bool], None] | None = None,
+        on_detach: Callable[[str], None] | None = None,
+    ) -> None:
         self._path = path
         self._on_event = on_event
+        self._on_attach = on_attach
+        self._on_detach = on_detach
         self._conns: dict[str, SocketStream] = {}
         self._listener: SocketListener | None = None
 
@@ -39,8 +48,10 @@ class SouthHub:
         buf = BufferedByteReceiveStream(stream)
         try:
             hello = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
-            change_id, _title = parse_hello(hello)
+            change_id, _title, autosubscribe = parse_hello(hello)
             self._conns[change_id] = stream
+            if self._on_attach is not None:
+                self._on_attach(change_id, autosubscribe)
             while True:
                 line = (await buf.receive_until(b"\n", _MAX_FRAME)).decode("utf-8")
                 with contextlib.suppress(Exception):
@@ -53,6 +64,8 @@ class SouthHub:
         finally:
             if change_id is not None and self._conns.get(change_id) is stream:
                 self._conns.pop(change_id)
+                if self._on_detach is not None:
+                    self._on_detach(change_id)
             await stream.aclose()
 
     async def send_reply(self, change_id: str, text: str) -> bool:

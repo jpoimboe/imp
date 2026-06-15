@@ -4,6 +4,7 @@ import pytest
 
 from imp.remote.daemon.control import ControlPlane
 from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.focus import Focus
 
 
 class FakeHub:
@@ -29,7 +30,10 @@ def _plane(hub: FakeHub, *, resumed: list, created: list, abandoned: list,
         resume=lambda cid, text: resumed.append((cid, text)),
         create=lambda prompt: created.append(prompt),
         abandon=_abandon,
-        list_changes=lambda: infos)
+        list_changes=lambda: infos,
+        focus=Focus(),
+        snapshot=lambda cid: None,
+        recent_narrative=lambda cid, n: [])
 
 
 @pytest.fixture

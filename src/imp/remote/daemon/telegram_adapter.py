@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from imp.remote.daemon.commands import Command, ListResult, Response, parse
+from imp.remote.daemon.focus import Focus
 from imp.remote.drivers.telegram import (
     api_call,
     clamp_text,
@@ -91,13 +92,16 @@ def format_outbound(event: dict[str, Any], handle: str) -> str:
     return f"{format_event_message(event)}\n↩ @{handle}"
 
 
-def render_response(response: Response) -> str:
+def render_response(response: Response, focused_id: str | None = None) -> str:
     if isinstance(response, ListResult):
         if not response.changes:
             return "No changes."
-        return "\n".join(
-            f"@{handle_for(c.id)}  {c.title} — {c.status} · {c.step}"
-            for c in response.changes)
+        lines = []
+        for c in response.changes:
+            mark = "● " if c.id == focused_id else ""
+            lines.append(
+                f"{mark}@{handle_for(c.id)}  {c.title} — {c.status} · {c.step}")
+        return "\n".join(lines)
     return response.text
 
 
@@ -120,11 +124,13 @@ class TelegramNorthAdapter:
         submit: Callable[[Command], None],
         send: Callable[[str, bool], int | None],
         get_updates: Callable[[int], dict[str, Any]],
+        focus: Focus,
     ) -> None:
         self._chat_id = chat_id
         self._submit = submit
         self._send = send
         self._get_updates = get_updates
+        self._focus = focus
         self._offset = 0
         self._msg_to_change: dict[int, str] = {}
         self._handle_to_change: dict[str, str] = {}
@@ -138,6 +144,7 @@ class TelegramNorthAdapter:
         env: dict[str, str],
         submit: Callable[[Command], None],
         *,
+        focus: Focus,
         file_text: str | None = None,
     ) -> TelegramNorthAdapter:
         config = load_config(env, file_text)
@@ -148,7 +155,7 @@ class TelegramNorthAdapter:
         get_updates = make_get_updates(config.token)
 
         return cls(chat_id=config.chat_id, submit=submit,
-                   send=send, get_updates=get_updates)
+                   send=send, get_updates=get_updates, focus=focus)
 
     def on_event(self, event: dict[str, Any]) -> None:
         """Curate one event, send it with its handle, and record the reply maps."""
@@ -163,14 +170,17 @@ class TelegramNorthAdapter:
         if not change_id:
             return
         handle = handle_for(change_id)
+        with self._lock:
+            self._handle_to_change[handle] = change_id
+        if kind == "silent" and self._focus.current() != change_id:
+            return
         message_id = self._send(format_outbound(event, handle), kind == "silent")
         with self._lock:
             if message_id is not None:
                 self._msg_to_change[message_id] = change_id
-            self._handle_to_change[handle] = change_id
 
     def on_response(self, response: Response) -> None:
-        text = render_response(response)
+        text = render_response(response, self._focus.current())
         if text:
             self._send(text, True)
 
