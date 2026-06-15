@@ -15,7 +15,10 @@ from imp.engine.types import (
 
 
 def validate(
-    workflow: Workflow, *, configured_tiers: frozenset[str] | None = None,
+    workflow: Workflow,
+    *,
+    configured_tiers: frozenset[str] | None = None,
+    project_keys: frozenset[str] = frozenset(),
 ) -> tuple[list[LoadError], list[LoadError]]:
     """Run every validator. Returns (errors, warnings).
 
@@ -39,6 +42,7 @@ def validate(
         _v_step_tier_configured(workflow, configured_tiers, errors)
     _v_differ_from_targets_exist(workflow, errors)
     _v_subagent_forbidden_tools(workflow, errors)
+    _v_project_refs(workflow, project_keys, errors)
 
     return errors, warnings
 
@@ -316,3 +320,41 @@ def _v_subagent_forbidden_tools(
                         hint=f"remove {tool!r} from the subagent's tools",
                     )
                 )
+
+
+def _v_project_refs(
+    workflow: Workflow, project_keys: frozenset[str], errors: list[LoadError],
+) -> None:
+    import jinja2
+    from jinja2 import nodes
+
+    env = jinja2.Environment()
+    known = set(project_keys) | {"guidance"}
+    for agent in workflow.agents.values():
+        try:
+            ast = env.parse(agent.prompt_template_source)
+        except jinja2.exceptions.TemplateSyntaxError as e:
+            errors.append(LoadError(
+                f"agent {agent.name!r}: template syntax error: {e.message}",
+                agent.source,
+            ))
+            continue
+        for node in ast.find_all((nodes.Getattr, nodes.Getitem)):
+            target = node.node
+            if not (isinstance(target, nodes.Name) and target.name == "project"):
+                continue
+            if isinstance(node, nodes.Getattr):
+                key = node.attr
+                template_form = f"{{{{ project.{key} }}}}"
+            elif isinstance(node.arg, nodes.Const) and isinstance(node.arg.value, str):
+                key = node.arg.value
+                template_form = f'{{{{ project["{key}"] }}}}'
+            else:
+                continue  # dynamic subscript: checked at render, not statically
+            if key not in known:
+                errors.append(LoadError(
+                    f"agent {agent.name!r}: unknown project fact {key!r} "
+                    f"in '{template_form}'",
+                    agent.source,
+                    hint=f"configured project keys: {sorted(known)}",
+                ))

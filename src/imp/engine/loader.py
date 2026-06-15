@@ -643,6 +643,7 @@ def _parse_step(
 def load_workflow(
     workflow_dir: Path,
     configured_tiers: frozenset[str] | None = None,
+    project_keys: frozenset[str] = frozenset(),
 ) -> Workflow:
     """Parse <workflow_dir>/workflow.yaml + agents/*.md into a Workflow."""
     yaml_path = workflow_dir / "workflow.yaml"
@@ -736,7 +737,8 @@ def load_workflow(
 
     # Run validators and print warnings; raise on errors.
     from imp.engine.validators import validate
-    errors, warnings = validate(workflow, configured_tiers=configured_tiers)
+    errors, warnings = validate(
+        workflow, configured_tiers=configured_tiers, project_keys=project_keys)
     if errors:
         raise LoadErrors(errors=errors, warnings=warnings)
     for w in warnings:
