@@ -310,3 +310,51 @@ async def test_interrupt_pause_hibernates_with_zero_clients(
             change, run_fn=fake_run, hibernate=True)
     assert result is RunResult.PAUSED
     assert calls["n"] == 1
+
+
+@pytest.mark.anyio
+async def test_seed_opening_is_forwarded_to_the_first_run_only(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-sed")
+    sock = str(session_socket_path(change.control_root, change.id))
+    seeds: list[str | None] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any, seed_opening: str | None = None,
+    ) -> RunResult:
+        seeds.append(seed_opening)
+        if len(seeds) == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False,
+                seed_opening="open the door")
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(5):
+            while not any(
+                    e.get("type") == "awaiting_user_input" for e in received):
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
+        await client.send_input("go")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert seeds == ["open the door", None]
+        await client.aclose()
+        tg.cancel_scope.cancel()

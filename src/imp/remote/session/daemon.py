@@ -30,6 +30,7 @@ async def serve_change_session(
     run_fn: RunFn = run_change,
     hibernate: bool = True,
     tear_down: Callable[[Change], None] = tear_down_change,
+    seed_opening: str | None = None,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -47,11 +48,14 @@ async def serve_change_session(
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         from imp.agents.tools.wait_for_user import AwaitingUserInput
 
+        first_kwargs = (
+            {"seed_opening": seed_opening} if seed_opening is not None else {})
         result = await run_fn(
             change,
             on_event=on_event,
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator,
+            **first_kwargs,
         )
         while _is_interrupt_pause(result, coordinator):
             prompt_event = {"type": "awaiting_user_input",
