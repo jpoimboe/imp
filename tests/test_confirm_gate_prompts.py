@@ -47,10 +47,11 @@ def test_spec_writer_carries_ask_vs_decide_policy_and_markers() -> None:
     assert "decide and record" in text.lower()
 
 
-def test_spec_writer_has_amend_precondition_with_fixup_fallback() -> None:
+def test_spec_writer_uses_artifact_commit_not_amend() -> None:
     text = _spec_writer()
-    assert "docs: add spec for <slug>" in text   # HEAD-is-spec-commit subject
-    assert "--fixup=\":/docs: add spec for <slug>\"" in text
+    assert "imp artifact-commit spec" in text
+    assert "--fixup" not in text
+    assert "git commit --amend" not in text
 
 
 def test_spec_writer_recognition_is_preamble_primary() -> None:

@@ -18,3 +18,12 @@ def test_finalize_prompt_has_plain_language_guidance() -> None:
 def test_finalize_prompt_avoids_full_width_rules() -> None:
     body = _agent_prompt("finalize")
     assert "do **not** draw full-width horizontal rules" in body
+
+
+def test_spec_writer_writes_to_artifacts_and_uses_commit_script() -> None:
+    body = _agent_prompt("spec-writer")
+    assert ".imp/change/artifacts/spec/" in body
+    assert "imp artifact-commit spec" in body
+    # The old code-branch path and git-commit machinery are gone.
+    assert "imp/specs/" not in body
+    assert "git commit --amend" not in body
