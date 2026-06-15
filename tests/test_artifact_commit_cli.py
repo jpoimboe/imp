@@ -57,3 +57,24 @@ def test_artifact_commit_fails_when_no_artifacts(
 
     rc = main(["artifact-commit", "spec"])
     assert rc == 1
+
+
+def test_artifact_commit_rejects_review_kind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import imp.cli.main as m
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Rev", change_id="rev", base_branch="main")
+    art = ch.change_dir / "artifacts" / "review"
+    art.mkdir(parents=True)
+    (art / "rev.md").write_text("# a review note\n")
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setenv("IMP_CHANGE_ID", "rev")
+    monkeypatch.chdir(ch.project_root)
+
+    with pytest.raises(SystemExit) as exc:
+        main(["artifact-commit", "review"])
+    assert exc.value.code == 2
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/journal-wip/rev").returncode != 0

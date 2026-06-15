@@ -2147,7 +2147,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "artifact-commit",
         help="Commit the change's live artifacts to its journal-wip ref "
              "(invoked by artifact-commit.sh; not for direct use).")
-    p_artifact.add_argument("kind", choices=["spec", "plan", "review"],
+    p_artifact.add_argument("kind", choices=["spec", "plan"],
                             help="Artifact kind being committed (labels the commit).")
     p_artifact.set_defaults(func=_cmd_artifact_commit)
 
