@@ -128,3 +128,50 @@ async def test_terminal_client_forwards_interrupt_gesture_as_a_control_frame(
             with anyio.fail_after(5):
                 await client_returned.wait()
             tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_terminal_client_detaches_interrupt_forwarder_on_return(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionSocket(sock)
+    coord = InterruptCoordinator()
+
+    async def _attach(
+        on_event: Callable[[dict[str, Any]], None],
+    ) -> SessionClient:
+        client = SessionClient(sock, "c1", "T", on_event=on_event)
+        await client.connect()
+        return client
+
+    async def _solicit(_prompt: str) -> str:
+        raise AssertionError("no gate fired; solicit must not be called")
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    returned = anyio.Event()
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            await server.open()
+            tg.start_soon(server.serve)
+
+            async def _client() -> None:
+                await run_terminal_client(
+                    attach=_attach, driver=_Driver(),
+                    coord=coord, solicit=_solicit)
+                returned.set()
+
+            tg.start_soon(_client)
+            with anyio.fail_after(5):
+                while server.attached_count != 1:
+                    await anyio.sleep(0.02)
+            await server.close()              # daemon ends → client returns
+            with anyio.fail_after(5):
+                await returned.wait()
+            # The forwarder must be detached: with it still attached this would
+            # call send_control on the now-closed client and raise RuntimeError.
+            await coord.signal_pause()
+            tg.cancel_scope.cancel()

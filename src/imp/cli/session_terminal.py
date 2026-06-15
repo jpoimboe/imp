@@ -55,6 +55,7 @@ async def run_terminal_client(
             await client.receive_events()
             tg.cancel_scope.cancel()
     finally:
+        coord.detach_runner()
         await gate_send.aclose()
         gate_recv.close()
         driver.finish()
