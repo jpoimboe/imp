@@ -24,7 +24,7 @@ import anyio
 
 from imp import __version__
 from imp.agents.tools.wait_for_user import AwaitingUserInput
-from imp.cli import change_row, resume_select
+from imp.cli import change_row, playbooks, resume_select
 from imp.cli import palette as pal
 from imp.cli.init import run_init
 from imp.cli.live_driver import LiveDriver
@@ -179,6 +179,19 @@ def resolve_spec_seed(args: argparse.Namespace) -> SeedResolution:
         return SeedResolution(title, opening)
 
     return SeedResolution(title, None)
+
+
+def resolve_playbook_seed(
+    control: Path, name: str, args_text: str | None, *, findings_only: bool,
+) -> str:
+    pb = playbooks.find_playbook(control, name)
+    if pb is None:
+        available = ", ".join(p.name for p in playbooks.list_playbooks(control))
+        raise SeedError(f"unknown playbook {name!r}; available: {available}")
+    seed = playbooks.render_playbook(pb, args_text or "")
+    if findings_only:
+        seed += playbooks.FINDINGS_ONLY_DIRECTIVE
+    return seed
 
 
 def make_message_reply_fn(message: str | None) -> Callable[[], Awaitable[str]]:
@@ -957,7 +970,18 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
         return 2
 
     try:
+        playbook_name = getattr(args, "playbook", None)
+        if playbook_name and getattr(args, "spec_file", None):
+            raise SeedError("--playbook and --spec-file are mutually exclusive")
+        if getattr(args, "findings_only", False) and not playbook_name:
+            raise SeedError("--findings-only requires --playbook")
         seed = resolve_spec_seed(args)
+        if playbook_name:
+            seed = SeedResolution(
+                seed.title,
+                resolve_playbook_seed(
+                    control, playbook_name, getattr(args, "opening", None),
+                    findings_only=getattr(args, "findings_only", False)))
     except SeedError as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -2117,6 +2141,12 @@ def _build_parser() -> argparse.ArgumentParser:
                             "becomes the spec-writer's opening intent. A missing or "
                             "unreadable PATH is a hard error (rc 2). Mutually "
                             "exclusive with a positional MESSAGE and with --message.")
+    p_new.add_argument("--playbook", metavar="NAME", default=None,
+                       help="Seed the change from imp/playbooks/<NAME>.md, "
+                            "rendering {{ args }} from the positional MESSAGE.")
+    p_new.add_argument("--findings-only", action="store_true",
+                       help="With --playbook, stop at a committed findings doc "
+                            "instead of implementing.")
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
