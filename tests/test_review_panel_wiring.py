@@ -219,3 +219,13 @@ def test_first_pass_dispatches_full_four_member_panel_at_high(tmp_path) -> None:
     for member in ("code-reviewer", "completeness-slice",
                    "spec-compliance-slice", "boundaries-slice"):
         assert f'task(subagent_name="{member}", tier="high"' in out
+
+
+def test_plan_writer_recognizes_rework_preambles() -> None:
+    by = _steps(_wf())
+    review_fb = by["review"].rules[0].action.feedback        # rework -> plan-writer
+    finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
+    assert review_fb and finalize_fb
+    text = (AGENTS / "plan-writer.md").read_text()
+    assert review_fb in text
+    assert finalize_fb in text
