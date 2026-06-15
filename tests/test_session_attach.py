@@ -120,6 +120,28 @@ async def test_spawns_then_attaches_when_no_daemon_resident(tmp_path: Path) -> N
         tg.cancel_scope.cancel()
 
 
+def test_spawn_session_daemon_includes_seed_opening_when_provided(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+
+    def fake_popen(argv: list[str], **kwargs: Any) -> object:
+        captured["argv"] = argv
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    spawn_session_daemon(change, seed_opening="ship the\nthing")
+
+    assert captured["argv"] == [
+        sys.executable, "-m", "imp.remote.session.daemon",
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--seed-opening", "ship the\nthing",
+    ]
+
+
 @pytest.mark.anyio
 async def test_raises_when_spawn_never_creates_the_socket(tmp_path: Path) -> None:
     change = _make_change(tmp_path, "2026-06-15-dead")

@@ -17,12 +17,14 @@ from imp.remote.session.discover import session_socket_path
 SpawnFn = Callable[[Change], None]
 
 
-def spawn_session_daemon(change: Change) -> None:
+def spawn_session_daemon(change: Change, *, seed_opening: str | None = None) -> None:
     argv = [
         sys.executable, "-m", "imp.remote.session.daemon",
         "--control-root", str(change.control_root),
         "--change-id", change.id,
     ]
+    if seed_opening is not None:
+        argv += ["--seed-opening", seed_opening]
     env = overlay_engine_env(os.environ, {})
     env.pop("IMP_REMOTE_CONTROL_SOCK", None)
     subprocess.Popen(
