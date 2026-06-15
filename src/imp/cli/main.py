@@ -1094,6 +1094,31 @@ def _cmd_new(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_new, args)
 
 
+async def _async_cmd_run(args: argparse.Namespace) -> int:
+    control = _control_root()
+    name = args.name
+    if name is None:
+        picked = await _pick_playbook(
+            control,
+            non_interactive=args.non_interactive)
+        if isinstance(picked, int):
+            return picked
+        name = picked
+    if playbooks.find_playbook(control, name) is None:
+        available = ", ".join(p.name for p in playbooks.list_playbooks(control))
+        print(f"imp: unknown playbook {name!r}; available: {available}",
+              file=sys.stderr)
+        return 2
+    args.playbook = name
+    args.opening = args.playbook_args
+    args.spec_file = None
+    return await _async_cmd_new(args)
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    return anyio.run(_async_cmd_run, args)
+
+
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -1884,6 +1909,26 @@ async def _pick_resume_target(control: Path, *, non_interactive: bool) -> str | 
     )
 
 
+async def _pick_playbook(control: Path, *, non_interactive: bool) -> str | int:
+    pbs = playbooks.list_playbooks(control)
+    if not pbs:
+        print("No playbooks found.", file=sys.stderr)
+        return 2
+    if len(pbs) == 1:
+        return pbs[0].name
+    if non_interactive or not _interactive():
+        print("Multiple playbooks — pass a name:", file=sys.stderr)
+        for pb in pbs:
+            print(f"  {pb.name} — {pb.description}", file=sys.stderr)
+        return 2
+    chosen = await resume_select.run_item_picker(
+        pbs,
+        render_item=lambda pb: f"{pb.name} — {pb.description}",
+        header="Run which playbook?  (↑/↓ to move · enter to run · q to cancel)",
+        color=should_use_color(sys.stdout))
+    return chosen.name if chosen is not None else 2
+
+
 def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
              interactive: bool | None = None,
              input_fn: Callable[[str], str] = input) -> int:
@@ -2151,6 +2196,30 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
     p_new.set_defaults(func=_cmd_new)
+
+    p_run = sub.add_parser(
+        "run", help="Run a playbook by name (or pick one interactively).")
+    p_run.add_argument(
+        "name", nargs="?",
+        help="Playbook name (resolves imp/playbooks/<name>.md); omit to pick "
+             "from a list.")
+    p_run.add_argument(
+        "playbook_args", nargs="?", metavar="ARGS",
+        help="Trailing argument exposed to the playbook body as {{ args }}.")
+    p_run.add_argument("--findings-only", action="store_true",
+                       help="Stop at a committed findings doc instead of "
+                            "implementing.")
+    p_run.add_argument("--title", metavar="TEXT", default=None,
+                       help="Set the Change title explicitly.")
+    p_run.add_argument("--non-interactive", action="store_true",
+                       help="Headless: no live prompt; supply the reply via --message.")
+    p_run.add_argument("--message", metavar="TEXT", default=None,
+                       help="Headless reply consumed by the first wait_for_user; "
+                            "requires --non-interactive.")
+    p_run.add_argument("--tui", action="store_true",
+                       help="Render the run in a full-screen, scrollable viewer; "
+                            "falls back to streaming on a non-tty.")
+    p_run.set_defaults(func=_cmd_run)
 
     p_resume = sub.add_parser(
         "resume", help="Resume a paused or interrupted Change by id or token.")
