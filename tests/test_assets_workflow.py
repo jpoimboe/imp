@@ -150,6 +150,11 @@ def test_minors_integrated_vars_declared_default_false() -> None:
     assert defaults["plan_minors_integrated"] is False
 
 
+def test_plan_panel_done_var_declared_default_false() -> None:
+    from imp.assets import default_workflow_dir
+    wf = load_workflow(default_workflow_dir())
+    assert wf.vars.defaults()["plan_panel_done"] is False
+
 
 def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import default_workflow_dir

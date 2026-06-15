@@ -18,6 +18,7 @@ vars:
   spec_minors_integrated: {type: bool, default: false}
   plan_minors_integrated: {type: bool, default: false}
   panel_done:             {type: bool, default: false}
+  plan_panel_done:        {type: bool, default: false}   # re-verify dial for the plan-review panel (2 reviewers first pass, 1 on bounce-back); mirrors panel_done
   multi_plan:             {type: bool, default: false}   # >1 plan was needed (set on plan-cycle-check supercycle); gates the whole-change review pass
   review_scope:           {type: string, default: plan}  # plan | change — one review path, scoped per-plan or over the whole change
   merge_approved:         {type: bool, default: false}
