@@ -54,9 +54,9 @@ non-soliciting exception):
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
 | Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the implementer found:" + deviation fields | Revise per `progress.md`. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
-| Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" + `verdict:` fields | Rework mode (see below): findings are requirements; decide depth, then revise/extend per `progress.md`. |
+| Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" | Rework mode (see below): findings are requirements; decide depth, then revise/extend per `progress.md`. |
 | Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (see below): treat `comments` as the brief; decide depth, then revise/extend per `progress.md`. |
-| Integration-pass plan gap | goto (fresh session) | "The integration pass found the plan needs revision. Findings:" + `verdict:` fields | Revise/extend per `progress.md`; findings are requirements. |
+| Integration-pass plan gap | goto (fresh session) | "The integration pass found the plan needs revision. Findings:" | Revise/extend per `progress.md`; findings are requirements. |
 
 Do NOT key any goto on the *absence* of a `blocking:` line — that is a schema
 coincidence pinned by no test; the preamble plus the missing synthesized

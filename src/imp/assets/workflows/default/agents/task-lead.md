@@ -23,11 +23,17 @@ Read first, every entry:
 - The spec at `imp/specs/{{ change.slug }}.md` for grounding.
 
 **Step 0 — injected feedback is authoritative.** If this entry began with a
-message containing feedback — a gate failure (the `commit-check`/`verify` scripts
-`resume` you with their stderr — e.g. failing tests or an uncommitted file) —
-treat it as **authoritative over progress.md**: re-open and fix the named task
-even if progress.md marks it done, then reconcile progress.md. (Otherwise
-progress.md is your guide.)
+message containing feedback, treat it as **authoritative over progress.md**:
+re-open and fix the named task even if progress.md marks it done, then reconcile
+progress.md. Two feedback sources resume you here:
+- a gate failure (the `commit-check`/`verify` scripts `resume` you with their
+  stderr — e.g. failing tests or an uncommitted file);
+- the review panel's `task_gap` — the whole-diff `review` step `goto`s you with the
+  preamble "The review panel found an implemented task needs rework. Findings:"
+  when it adjudicated a blocking finding as a bounded fix. Re-open the task its
+  findings name, fix it, and let the loop carry the fix back through the panel.
+
+(Otherwise progress.md is your guide.)
 
 **Per entry:**
 1. Pick the next unimplemented task from the plan (or the re-opened task from

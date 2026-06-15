@@ -162,7 +162,8 @@ phases:
           - {operations: [read],  paths: ["**"], mode: allow}
           - {operations: [write], paths: [".imp/change/**"], mode: allow}   # append deferred observations to progress.md
         rules:
-          - {if: {verdict: rework}, set: {panel_done: true}, goto: plan-writer, feedback: "The review found the plan needs revision. Findings:"}
+          - {if: {verdict: task_gap}, set: {panel_done: true}, goto: task-lead, feedback: "The review panel found an implemented task needs rework. Findings:"}
+          - {if: {verdict: plan_gap}, set: {panel_done: true}, goto: plan-writer, feedback: "The review found the plan needs revision. Findings:"}
           - {else: true, set: {panel_done: true}, continue: true}
 
       - name: deferred-sweep

@@ -68,17 +68,23 @@ def test_review_step_uses_review_panel_at_medium_tier() -> None:
     assert review.differ_from is None
 
 
-def test_review_step_routes_rework_to_plan_writer_and_sets_panel_done() -> None:
+def test_review_step_routes_three_way_and_sets_panel_done() -> None:
     rules = _steps(_wf())["review"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"status": "Success", "verdict": "rework", "findings": "x"})
-    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    assert m.action.resume is False                      # cross-phase plain goto
-    assert m.action.feedback                             # findings forwarded as a preamble
-    assert m.var_mutations["panel_done"] is True
+    m_task = evaluate_rules(rules, vars=_BASE_VARS,
+                            output={"status": "Success", "verdict": "task_gap", "findings": "x"})
+    assert isinstance(m_task.action, Goto) and m_task.action.target == "task-lead"
+    assert m_task.action.resume is False                  # cross-phase plain goto
+    assert m_task.action.feedback                          # findings forwarded as a preamble
+    assert m_task.var_mutations["panel_done"] is True
+    m_plan = evaluate_rules(rules, vars=_BASE_VARS,
+                            output={"status": "Success", "verdict": "plan_gap", "findings": "x"})
+    assert isinstance(m_plan.action, Goto) and m_plan.action.target == "plan-writer"
+    assert m_plan.action.resume is False
+    assert m_plan.action.feedback
+    assert m_plan.var_mutations["panel_done"] is True
     m_ok = evaluate_rules(rules, vars=_BASE_VARS,
                           output={"status": "Success", "verdict": "approve", "findings": "x"})
-    assert isinstance(m_ok.action, Continue)             # approve -> deferred-sweep
+    assert isinstance(m_ok.action, Continue)              # approve -> deferred-sweep
     assert m_ok.var_mutations["panel_done"] is True
 
 
@@ -86,26 +92,40 @@ def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
     schema = wf.agents["review-panel"].output_schema
     rules = _steps(wf)["review"].rules
-    for verdict in ("approve", "rework"):
+    for verdict in ("approve", "task_gap", "plan_gap"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
         validate_agent_output(payload, schema)           # must not raise
         assert evaluate_rules(rules, vars=_BASE_VARS, output=payload).action is not None
 
 
-def test_review_panel_verdict_enum_is_collapsed() -> None:
+def test_review_panel_verdict_enum_is_three_way() -> None:
     schema = _wf().agents["review-panel"].output_schema
     verdict_field = next(f for f in schema.fields if f.name == "verdict")
-    assert set(verdict_field.values) == {"approve", "rework"}
-    for gap in ("task_gap", "plan_gap"):
-        with pytest.raises(LoadError):
-            validate_agent_output(
-                {"status": "Success", "verdict": gap, "findings": "x"}, schema)
+    assert set(verdict_field.values) == {"approve", "task_gap", "plan_gap"}
+    with pytest.raises(LoadError):
+        validate_agent_output(
+            {"status": "Success", "verdict": "rework", "findings": "x"}, schema)
 
 
-def test_no_gap_verdict_in_workflow_yaml() -> None:
+def test_review_panel_adjudicates_not_tallies() -> None:
+    text = (AGENTS / "review-panel.md").read_text()
+    assert "COMPUTE, do not judge" not in text
+    assert "receiving-code-review" in text
+    low = text.lower()
+    # §2 guardrail
+    assert "non-dismissable" in low
+    assert "misclassification" in low
+    assert "downward" in low
+    # §3 routing taxonomy + tie-breaker
+    assert "default to defer" in low
+    assert "task_gap" in text and "plan_gap" in text
+
+
+def test_gap_verdicts_route_in_workflow_yaml() -> None:
     text = (AGENTS.parent / "workflow.yaml").read_text()
-    assert "task_gap" not in text
-    assert "plan_gap" not in text
+    assert "task_gap" in text
+    assert "plan_gap" in text
+    assert "verdict: rework" not in text
 
 
 def test_review_panel_declares_four_members() -> None:
@@ -212,7 +232,7 @@ def test_first_pass_dispatches_full_four_member_panel_at_high(tmp_path) -> None:
 
 def test_plan_writer_recognizes_rework_preambles() -> None:
     by = _steps(_wf())
-    review_fb = by["review"].rules[0].action.feedback        # rework -> plan-writer
+    review_fb = by["review"].rules[1].action.feedback        # plan_gap -> plan-writer
     finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
     assert review_fb and finalize_fb
     text = (AGENTS / "plan-writer.md").read_text()
@@ -241,17 +261,35 @@ def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:
     assert "clarify the desired outcome and scope before returning a rework decision" in text
 
 
-def test_task_lead_step0_drops_rerouted_feedback_sources() -> None:
+def test_task_lead_step0_admits_panel_task_gap() -> None:
     text = (AGENTS / "task-lead.md").read_text()
-    # "review panel" alone also appears out-of-scope at line 82, so guard on the
-    # Step-0-unique enumeration phrase that the edit removes:
-    assert "review panel or the recheck reviewer" not in text   # review rework now -> plan-writer
-    assert "human finalize decision" not in text                # human rework now -> plan-writer
+    # the panel's task_gap rework is a recognized Step-0 feedback source again,
+    # matching the exact preamble workflow.yaml emits for verdict: task_gap
+    assert "The review panel found an implemented task needs rework." in text
     # the gate-failure resume source is still authoritative in Step 0
     assert 'gate failure (the `commit-check`' in text
+    # human finalize rework still routes to plan-writer, not here
+    assert "human finalize decision" not in text
 
 
 def test_rework_path_loop_budgets_unchanged() -> None:
     steps = _steps(_wf())
     assert steps["review"].max_loops == 6
     assert steps["finalize"].max_loops == 20
+
+
+PANEL_MEMBERS = ("code-reviewer", "completeness-slice",
+                 "spec-compliance-slice", "boundaries-slice")
+
+
+@pytest.mark.parametrize("name", PANEL_MEMBERS)
+def test_panel_members_are_pure_advisors(name: str) -> None:
+    schema = _wf().agents[name].output_schema
+    fields = {f.name for f in schema.fields}
+    assert "blocking" in fields and "verdict" not in fields
+    assert "findings" in fields
+    text = (AGENTS / f"{name}.md").read_text()
+    assert "verdict" not in text
+    assert "task_gap" not in text
+    assert "plan_gap" not in text
+    assert "approve" not in text
