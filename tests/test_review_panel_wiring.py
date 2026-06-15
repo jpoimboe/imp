@@ -260,3 +260,9 @@ def test_task_lead_step0_drops_rerouted_feedback_sources() -> None:
     assert "human finalize decision" not in text                # human rework now -> plan-writer
     # the gate-failure resume source is still authoritative in Step 0
     assert 'gate failure (the `commit-check`' in text
+
+
+def test_rework_path_loop_budgets_unchanged() -> None:
+    steps = _steps(_wf())
+    assert steps["review"].max_loops == 6
+    assert steps["finalize"].max_loops == 20
