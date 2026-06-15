@@ -71,6 +71,19 @@ def _build_user_config(
     }
 
 
+def _facts_hint() -> str:
+    return (
+        "\n# Project facts: human-authored values any agent prompt can read via\n"
+        "# {{ project.<key> }} (and the freeform {{ project.guidance }}). All\n"
+        "# commented out -- uncomment and edit to expose facts to your agents.\n"
+        "# facts:\n"
+        "#   test_command: make test\n"
+        "#   stack: python 3.12, pytest\n"
+        "# guidance: |\n"
+        "#   Freeform notes for agents (conventions, gotchas).\n"
+    )
+
+
 def _remote_hint() -> str:
     lines = [
         "",
@@ -262,7 +275,7 @@ def run_init(
                 "# to catch regressions (tests + lint + typecheck). Empty string opts out.\n"
                 + format_verify_command_yaml(chosen)
             )
-        project_file.write_text(body + verify_block)
+        project_file.write_text(body + verify_block + _facts_hint())
     elif not (imp_dir / "workflows" / "default").is_dir():
         # Belt-and-suspenders (finding L2): a real teammate clone has project.yaml
         # AND workflows committed together, so the gate above is correct. But a

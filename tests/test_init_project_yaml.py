@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from imp.cli.init import run_init
+from imp.providers.config import parse_project_facts
 
 
 def _run(root: Path, xdg: Path, providers: list[str]) -> None:
@@ -77,3 +78,21 @@ def test_init_leaves_existing_user_config(
     # Pre-existing user config preserved (machine bootstrapped once).
     user = yaml.safe_load((xdg / "imp" / "config.yaml").read_text())
     assert user["providers"] == ["anthropic"]
+
+
+def test_init_appends_commented_facts_example(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
+    root = tmp_path / "repo"
+    root.mkdir()
+    _run(root, xdg, ["claude_code"])
+
+    text = (root / "imp" / "project.yaml").read_text()
+    assert "# facts:" in text
+    assert "{{ project." in text
+
+    facts, guidance = parse_project_facts(root / "imp" / "project.yaml")
+    assert facts == {}
+    assert guidance == ""
