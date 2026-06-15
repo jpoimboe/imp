@@ -210,8 +210,16 @@ def is_dirty(worktree: Path) -> bool:
     return bool(_git_ok(worktree, "status", "--porcelain").strip())
 
 
+def _merge_subject(title: str, change_id: str, body: str | None) -> str:
+    trailer = f"(imp/{change_id})"
+    if body:
+        return f"Merge {title}\n\n{body.strip()}\n\n{trailer}"
+    return f"Merge {title}\n\n{trailer}"
+
+
 def merge_to_base(
     control_root: Path, change_id: str, base: str, *, title: str,
+    body: str | None = None,
     project_root: Path | None = None, expected_base_sha: str | None = None,
 ) -> MergeResult:
     """Integrate imp/<id> into <base> (spec §4). B1: git decides on base dirt.
@@ -245,11 +253,12 @@ def merge_to_base(
                 return MergeResult("STALE")
         live = _worktree_on_branch(control_root, base)
         if live is not None:
-            return _merge_in_place(live, branch, title, change_id)
-        return _merge_detached(control_root, change_id, branch, base, title)
+            return _merge_in_place(live, branch, title, change_id, body)
+        return _merge_detached(control_root, change_id, branch, base, title, body)
 
 
-def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> MergeResult:
+def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str,
+                    body: str | None = None) -> MergeResult:
     """Branch 1: advance ref + index + working tree atomically in the live
     checkout. (See the dirty-safety note in merge_to_base.)
 
@@ -259,7 +268,7 @@ def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> 
     histories, …) starts nothing — calling `git merge --abort` there errors ("no
     merge to abort"). MERGE_HEAD answers this locale-independently. git's stderr
     is carried in `detail` so the surfaced reason is truthful for any refusal."""
-    subject = f"Merge {title}\n\n(imp/{change_id})"
+    subject = _merge_subject(title, change_id, body)
     proc = _git(worktree, "merge", "--no-ff", "-m", subject, branch)
     if proc.returncode == 0:
         commit = _git_ok(worktree, "rev-parse", "HEAD").strip()
@@ -275,7 +284,7 @@ def _merge_in_place(worktree: Path, branch: str, title: str, change_id: str) -> 
 
 
 def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
-                    title: str) -> MergeResult:
+                    title: str, body: str | None = None) -> MergeResult:
     """Branch 3: <base> checked out nowhere. Merge in a detached scratch worktree,
     update-ref, remove the scratch."""
     scratch_rel = Path(".imp") / "worktrees" / f".merge-{change_id}"
@@ -283,7 +292,7 @@ def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
     _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
     shutil.rmtree(scratch, ignore_errors=True)
     _git_ok(control_root, "worktree", "add", "--detach", str(scratch_rel), base)
-    subject = f"Merge {title}\n\n(imp/{change_id})"
+    subject = _merge_subject(title, change_id, body)
     try:
         proc = _git(scratch, "merge", "--no-ff", "-m", subject, branch)
         if proc.returncode != 0:

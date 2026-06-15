@@ -169,7 +169,7 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(worktree, "merge_to_base", _blocking_merge)
 
     change = types.SimpleNamespace(
-        change_dir=tmp_path, control_root=tmp_path, id="feat",
+        change_dir=tmp_path, control_root=tmp_path, id="feat", slug="feat",
         base_branch="main", title="x", project_root=tmp_path, state_dir=tmp_path,
     )
     step = _merge_step()
@@ -203,3 +203,29 @@ def test_route_merge_does_not_block_event_loop(tmp_path: Path, monkeypatch) -> N
         )
 
     anyio.run(main)
+
+
+def test_decisions_body_extracts_summary_section(tmp_path: Path) -> None:
+    from imp.engine import executor
+    spec = tmp_path / "spec.md"
+    spec.write_text(
+        "# Title\n\n## Goal\n\nDo the thing.\n\n"
+        "## Decisions summary\n\n- D1 — picked A over B.\n- D2 — kept C.\n\n"
+        "## Acceptance criteria\n\n- works\n")
+    out = executor._decisions_body(spec)
+    assert "D1 — picked A over B." in out
+    assert "D2 — kept C." in out
+    assert "Acceptance criteria" not in out   # stops at the next ## header
+    assert "Do the thing." not in out         # only the Decisions section
+
+
+def test_decisions_body_missing_section_returns_none(tmp_path: Path) -> None:
+    from imp.engine import executor
+    spec = tmp_path / "spec.md"
+    spec.write_text("# Title\n\n## Goal\n\nDo the thing.\n")
+    assert executor._decisions_body(spec) is None
+
+
+def test_decisions_body_file_not_found_returns_none(tmp_path: Path) -> None:
+    from imp.engine import executor
+    assert executor._decisions_body(tmp_path / "nonexistent.md") is None

@@ -16,6 +16,7 @@ import os
 import shutil
 from collections.abc import Awaitable, Callable
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -497,6 +498,24 @@ async def _route_script(
     return action, feedback, muts
 
 
+def _decisions_body(spec_path: Path) -> str | None:
+    if not spec_path.is_file():
+        return None
+    lines = spec_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    out: list[str] = []
+    capturing = False
+    for line in lines:
+        if line.startswith("## "):
+            if capturing:
+                break
+            capturing = "decision" in line.lower()
+            continue
+        if capturing:
+            out.append(line)
+    text = "\n".join(out).strip()
+    return text or None
+
+
 async def _route_merge(
     step: Step, change: Change, state: State, log: EventLog,
 ) -> tuple[Action, str | None, dict[str, object]]:
@@ -534,11 +553,13 @@ async def _route_merge(
     # worker thread so the event loop keeps turning — same rationale as the
     # script gate (see _route_script). The surrounding emits and state.save stay
     # on the loop thread (single terminal writer / no cross-thread state race).
+    spec_path = change.change_dir / "artifacts" / "spec" / f"{change.slug}.md"
+    body = _decisions_body(spec_path)
     result = await anyio.to_thread.run_sync(
         functools.partial(
             worktree.merge_to_base,
             change.control_root, change.id, change.base_branch, title=change.title,
-            project_root=change.project_root, expected_base_sha=expected_sha))
+            body=body, project_root=change.project_root, expected_base_sha=expected_sha))
     if result.status == "MERGED":
         state.merge_commit = result.merge_commit
         state.save(change.state_dir)

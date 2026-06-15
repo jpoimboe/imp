@@ -498,3 +498,27 @@ def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path)
     assert _make_worktree_and_check(tmp_path)
 
 
+def test_merge_body_carries_decisions(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    body = "We chose X over Y because Z."
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=body)
+    assert result.status == "MERGED"
+    msg = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout
+    assert "Merge My Feature" in msg
+    assert "We chose X over Y because Z." in msg
+    assert "(imp/feat)" in msg
+
+
+def test_merge_body_none_keeps_minimal(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=None)
+    assert result.status == "MERGED"
+    msg = _git(tmp_path, "log", "-1", "--format=%B", result.merge_commit).stdout.strip()
+    # Minimal body: subject + the id trailer only.
+    assert msg == "Merge My Feature\n\n(imp/feat)"
+
+
