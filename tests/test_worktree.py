@@ -372,6 +372,41 @@ def test_merge_already_in_base_is_idempotent_merged(tmp_path: Path) -> None:
     assert again.status == "MERGED"   # idempotent, NOT STALE
 
 
+def test_artifact_commit_writes_flat_and_accumulates(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    stage = tmp_path / ".imp"
+    stage.mkdir(exist_ok=True)
+    spec = stage / "spec.md"
+    spec.write_text("# the spec\n")
+    # First artifact commit: wip ref does not exist yet -> root commit, no parent.
+    wt.artifact_commit(tmp_path, "feat", {"spec/feat.md": spec}, message="artifact: spec")
+    assert _git(tmp_path, "show",
+                "refs/imp/journal-wip/feat:spec/feat.md").stdout == "# the spec\n"
+    first = _git(tmp_path, "rev-parse", "refs/imp/journal-wip/feat").stdout.strip()
+
+    # Second commit accumulates: the prior file survives, a new one is added,
+    # and the new commit is parented on the first (history grows, not replaced).
+    plan = stage / "plan.md"
+    plan.write_text("# plan 1\n")
+    wt.artifact_commit(tmp_path, "feat", {"plans/feat-plan-1.md": plan},
+                       message="artifact: plan")
+    assert _git(tmp_path, "show",
+                "refs/imp/journal-wip/feat:plans/feat-plan-1.md").stdout == "# plan 1\n"
+    assert _git(tmp_path, "show",
+                "refs/imp/journal-wip/feat:spec/feat.md").returncode == 0
+    second = _git(tmp_path, "rev-parse", "refs/imp/journal-wip/feat").stdout.strip()
+    assert second != first
+    assert _git(tmp_path, "rev-parse",
+                "refs/imp/journal-wip/feat~1").stdout.strip() == first
+    # Files live FLAT at the tree root (no <id>/ prefix) and the code tree is untouched.
+    assert "feat/" not in _git(tmp_path, "ls-tree", "--name-only",
+                               "refs/imp/journal-wip/feat").stdout
+    assert _git(tmp_path, "status", "--porcelain").stdout.strip() == ""
+    # The shared journal ref is NOT touched by an artifact commit.
+    assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
+                "refs/imp/journal").returncode != 0
+
+
 def test_ensure_imp_ignored_exclude_fallback_when_commit_blocked(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
     _git(tmp_path, "config", "user.email", "t@t")

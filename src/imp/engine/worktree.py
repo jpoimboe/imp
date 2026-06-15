@@ -296,31 +296,44 @@ def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
         _git(control_root, "worktree", "remove", "--force", str(scratch_rel))
 
 
-def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]) -> None:
-    """Append one commit to refs/imp/journal (spec §4, §6) via plumbing — never
-    checks out the ref. Files land under <id>/ in the journal tree. On the
-    very first journaled Change the ref doesn't exist, so commit-tree runs with
-    no -p (a root commit, starting the orphan history)."""
+@contextmanager
+def _temp_index(control_root: Path):  # type: ignore[no-untyped-def]
+    """Yield a throwaway GIT_INDEX_FILE env dict (file lives under .imp/).
+    Do NOT simplify the unlink dance: a 0-byte index makes `git update-index`
+    fail; a *missing* GIT_INDEX_FILE is treated as an empty index — exactly
+    what the no-parent bootstrap needs."""
+    env = dict(os.environ)
+    with tempfile.NamedTemporaryFile(dir=control_root / ".imp", delete=False) as tf:
+        index_file = tf.name
+    os.unlink(index_file)
+    env["GIT_INDEX_FILE"] = index_file
+    try:
+        yield env
+    finally:
+        Path(index_file).unlink(missing_ok=True)
+
+
+def _commit_files_to_ref(
+    control_root: Path, *, ref: str, prefix: str, files: Mapping[str, Path],
+    message: str, extra_tree: tuple[str, str] | None = None,
+) -> None:
+    """Append one commit to `ref` via plumbing — never checks out the ref.
+
+    The index is seeded from `ref` (so existing content accumulates), then
+    `extra_tree=(p, treeish)` — when given — is read in under prefix `p`, then
+    each `files` entry is hashed and added at `prefix+name`. The commit is
+    parented on `ref` when it already exists (else a root commit). CAS on the
+    final update-ref is cheap insurance (moot under the lock)."""
     with RepoGitLock(control_root).acquire():
-        env = dict(os.environ)
-        # Keep the transient index inside .imp/ (gitignored) so it never shows as
-        # untracked even momentarily. Do NOT "simplify" the unlink dance below.
-        with tempfile.NamedTemporaryFile(dir=control_root / ".imp", delete=False) as tf:
-            index_file = tf.name
-        # CRITICAL: a 0-byte index makes `git update-index` fail with "index file
-        # smaller than expected". git treats a *missing* GIT_INDEX_FILE as an empty
-        # index, which is what the bootstrap (no-parent) path needs. So unlink the
-        # placeholder before any git command touches it.
-        os.unlink(index_file)
-        env["GIT_INDEX_FILE"] = index_file
-        try:
-            parent = _git(control_root, "rev-parse", "--verify", "--quiet",
-                          "refs/imp/journal")
+        with _temp_index(control_root) as env:
+            parent = _git(control_root, "rev-parse", "--verify", "--quiet", ref)
             have_parent = parent.returncode == 0
-            # Seed the temp index with the existing journal tree so prior ids
-            # survive (read-tree is a no-op miss when the ref is absent).
             if have_parent:
-                subprocess.run(["git", "read-tree", "refs/imp/journal"],
+                subprocess.run(["git", "read-tree", ref], cwd=control_root, env=env,
+                               check=True, capture_output=True, text=True)
+            if extra_tree is not None:
+                p, treeish = extra_tree
+                subprocess.run(["git", "read-tree", f"--prefix={p}", treeish],
                                cwd=control_root, env=env, check=True,
                                capture_output=True, text=True)
             for name, src in files.items():
@@ -330,24 +343,38 @@ def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]
                 ).stdout.decode().strip()
                 subprocess.run(
                     ["git", "update-index", "--add", "--cacheinfo",
-                     f"100644,{blob},{change_id}/{name}"],
-                    cwd=control_root, env=env, check=True, capture_output=True, text=True,
-                )
+                     f"100644,{blob},{prefix}{name}"],
+                    cwd=control_root, env=env, check=True, capture_output=True, text=True)
             tree = subprocess.run(["git", "write-tree"], cwd=control_root, env=env,
                                   check=True, capture_output=True, text=True).stdout.strip()
-            args = ["git", "commit-tree", tree, "-m", f"journal: {change_id}"]
+            args = ["git", "commit-tree", tree, "-m", message]
             if have_parent:
-                args += ["-p", "refs/imp/journal"]
+                args += ["-p", ref]
             commit = subprocess.run(args, cwd=control_root, env=env, check=True,
                                     capture_output=True, text=True).stdout.strip()
-            old = parent.stdout.strip() if have_parent else ""
-            # CAS for cheap insurance (moot under the lock).
-            cas = ["git", "update-ref", "refs/imp/journal", commit]
-            cas += [old] if have_parent else []
+            cas = ["git", "update-ref", ref, commit]
+            cas += [parent.stdout.strip()] if have_parent else []
             subprocess.run(cas, cwd=control_root, check=True,
                            capture_output=True, text=True)
-        finally:
-            Path(index_file).unlink(missing_ok=True)
+
+
+def journal_commit(control_root: Path, change_id: str, files: Mapping[str, Path]) -> None:
+    """Append one commit to refs/imp/journal (spec §4, §6); files land under
+    <id>/ in the journal tree. Thin wrapper over the generalized writer."""
+    _commit_files_to_ref(
+        control_root, ref="refs/imp/journal", prefix=f"{change_id}/",
+        files=files, message=f"journal: {change_id}")
+
+
+def artifact_commit(
+    control_root: Path, change_id: str, files: Mapping[str, Path], *, message: str,
+) -> None:
+    """Append one commit to the per-change artifact lineage
+    refs/imp/journal-wip/<id>, accumulating on the prior wip tip. Files sit FLAT
+    at the wip tree root (e.g. spec/<slug>.md, plans/<slug>-plan-N.md)."""
+    _commit_files_to_ref(
+        control_root, ref=f"refs/imp/journal-wip/{change_id}", prefix="",
+        files=files, message=message)
 
 
 def _common_dir(control_root: Path) -> Path:
