@@ -1,10 +1,10 @@
 ---
 name: completeness-slice
-description: Completeness-only review — every changed symbol's callers and parallel paths.
+description: Completeness-only review — every changed symbol's callers and parallel paths; pure advisor reporting findings + a blocking bool.
 output:
   status: {type: enum, values: [Success, Error]}
-  verdict: {type: enum, values: [approve, task_gap, plan_gap]}
   findings: {type: string}
+  blocking: {type: bool}
 ---
 
 You perform a **completeness-only** review of a single committed change. You are
@@ -30,9 +30,11 @@ should have touched but did not.
 
 Use the same severity sections as a standard review. In `findings`, for each gap
 name the changed symbol, the parallel path that was missed, and `file:line`. Set
-`verdict` to `task_gap` ONLY for a **material** consistency gap — a parallel path that
-is genuinely reachable and would misbehave because the change was not applied there. A
-theoretical or unreachable inconsistency is a **Minor/Nit**: still name it in
-`findings`, but return `approve` — it is surfaced to the author, not gated on. Never
-bounce a change back to rework over a gap that cannot actually misbehave. Report ONLY
-completeness gaps; do not pad with style notes.
+`blocking: true` ONLY for a **material** consistency gap — a parallel path that is
+genuinely reachable and would misbehave because the change was not applied there (a
+Critical or Major finding). A theoretical or unreachable inconsistency is a
+**Minor/Nit**: still name it in `findings`, but set `blocking: false` — it is surfaced
+to the author, not gated on. Never mark `blocking` over a gap that cannot actually
+misbehave. You are a pure advisor: report findings + the `blocking` bool; the review
+panel adjudicates and routes. Report ONLY completeness gaps; do not pad with style
+notes.

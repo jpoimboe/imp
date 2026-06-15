@@ -255,3 +255,20 @@ def test_rework_path_loop_budgets_unchanged() -> None:
     steps = _steps(_wf())
     assert steps["review"].max_loops == 6
     assert steps["finalize"].max_loops == 20
+
+
+PANEL_MEMBERS = ("code-reviewer", "completeness-slice",
+                 "spec-compliance-slice", "boundaries-slice")
+
+
+@pytest.mark.parametrize("name", PANEL_MEMBERS)
+def test_panel_members_are_pure_advisors(name: str) -> None:
+    schema = _wf().agents[name].output_schema
+    fields = {f.name for f in schema.fields}
+    assert "blocking" in fields and "verdict" not in fields
+    assert "findings" in fields
+    text = (AGENTS / f"{name}.md").read_text()
+    assert "verdict" not in text
+    assert "task_gap" not in text
+    assert "plan_gap" not in text
+    assert "`approve`" not in text
