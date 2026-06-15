@@ -100,7 +100,7 @@ def test_finalize_is_high_tier_and_routes_merge_rework_pause() -> None:
     m = evaluate_rules(step.rules, vars=base, output=out)
     assert isinstance(m.action, Goto) and m.action.target == "merge"
     m2 = evaluate_rules(step.rules, vars=base, output={**out, "decision": "rework"})
-    assert isinstance(m2.action, Goto) and m2.action.target == "implement"
+    assert isinstance(m2.action, Goto) and m2.action.target == "plan-writer"
     m3 = evaluate_rules(step.rules, vars=base, output={**out, "decision": "pause"})
     assert isinstance(m3.action, Pause)
 

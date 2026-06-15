@@ -229,3 +229,24 @@ def test_plan_writer_recognizes_rework_preambles() -> None:
     text = (AGENTS / "plan-writer.md").read_text()
     assert review_fb in text
     assert finalize_fb in text
+
+
+def test_finalize_rework_routes_to_plan_writer() -> None:
+    rules = _steps(_wf())["finalize"].rules
+    base = {"status": "Success", "built": "", "verify_status": "",
+            "open_items": "", "next_steps": "", "comments": ""}
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={**base, "decision": "rework", "comments": "fix X"})
+    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
+    assert m.var_mutations["merge_approved"] is False
+    m_merge = evaluate_rules(rules, vars=_BASE_VARS,
+                             output={**base, "decision": "merge"})
+    assert isinstance(m_merge.action, Goto) and m_merge.action.target == "merge"
+    assert m_merge.var_mutations["merge_approved"] is True
+
+
+def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:
+    text = (AGENTS / "finalize.md").read_text()
+    assert "send the change back to implement" not in text
+    assert "carried to the implementer" not in text
+    assert "clarify the desired outcome and scope before returning a rework decision" in text

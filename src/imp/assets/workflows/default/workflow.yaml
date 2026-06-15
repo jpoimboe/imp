@@ -230,7 +230,7 @@ phases:
         max_loops: 20
         rules:
           - {if: {decision: merge},  set: {merge_approved: true},  goto: merge}
-          - {if: {decision: rework}, set: {merge_approved: false}, goto: implement, feedback: "Here's the feedback to address:"}
+          - {if: {decision: rework}, set: {merge_approved: false}, goto: plan-writer, feedback: "Here's the feedback to address:"}
           - {else: true, pause: true}
 
   # ── merge ───────────────────────────────────────────────────────────
