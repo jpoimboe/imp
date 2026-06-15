@@ -190,4 +190,4 @@ def test_dunder_raises_attributeerror() -> None:
     from imp.agents.prompts import _ProjectNamespace
     ns = _ProjectNamespace({"a": "1", "guidance": ""})
     with pytest.raises(AttributeError):
-        getattr(ns, "__html__")
+        _ = ns.__html__

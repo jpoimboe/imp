@@ -339,22 +339,27 @@ def _v_project_refs(
                 agent.source,
             ))
             continue
-        for node in ast.find_all((nodes.Getattr, nodes.Getitem)):
-            target = node.node
-            if not (isinstance(target, nodes.Name) and target.name == "project"):
+        for ga in ast.find_all(nodes.Getattr):
+            if not (isinstance(ga.node, nodes.Name) and ga.node.name == "project"):
                 continue
-            if isinstance(node, nodes.Getattr):
-                key = node.attr
-                template_form = f"{{{{ project.{key} }}}}"
-            elif isinstance(node.arg, nodes.Const) and isinstance(node.arg.value, str):
-                key = node.arg.value
-                template_form = f'{{{{ project["{key}"] }}}}'
-            else:
-                continue  # dynamic subscript: checked at render, not statically
+            key = ga.attr
             if key not in known:
                 errors.append(LoadError(
                     f"agent {agent.name!r}: unknown project fact {key!r} "
-                    f"in '{template_form}'",
+                    f"in '{{{{ project.{key} }}}}'",
+                    agent.source,
+                    hint=f"configured project keys: {sorted(known)}",
+                ))
+        for gi in ast.find_all(nodes.Getitem):
+            if not (isinstance(gi.node, nodes.Name) and gi.node.name == "project"):
+                continue
+            if not (isinstance(gi.arg, nodes.Const) and isinstance(gi.arg.value, str)):
+                continue  # dynamic subscript: checked at render, not statically
+            key = gi.arg.value
+            if key not in known:
+                errors.append(LoadError(
+                    f"agent {agent.name!r}: unknown project fact {key!r} "
+                    f"in '{{{{ project[\"{key}\"] }}}}'",
                     agent.source,
                     hint=f"configured project keys: {sorted(known)}",
                 ))
