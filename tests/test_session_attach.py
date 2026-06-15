@@ -138,7 +138,7 @@ def test_spawn_session_daemon_includes_seed_opening_when_provided(
         sys.executable, "-m", "imp.remote.session.daemon",
         "--control-root", str(tmp_path),
         "--change-id", "2026-06-15-abc",
-        "--seed-opening", "ship the\nthing",
+        "--seed-opening=ship the\nthing",
     ]
 
 
