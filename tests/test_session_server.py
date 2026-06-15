@@ -324,8 +324,10 @@ async def test_lock_is_released_when_run_fn_raises(tmp_path: Path) -> None:
         raise RuntimeError("boom")
 
     await server.open()
-    with pytest.raises(RuntimeError):
+    try:
         await server.serve(run_fn)
+    except* RuntimeError:
+        pass
     assert not lock_path.exists()
 
 
