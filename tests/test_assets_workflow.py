@@ -90,8 +90,10 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
     assert by["verify"].rules[-1].action.resume is True            # -> task-lead
     assert by["spec-reviewer"].rules[0].action.resume is True         # rework -> spec-writer
     # phase jumps clear (plain goto)
-    assert by["review"].rules[0].action.target == "plan-writer"   # rework -> plan-writer
+    assert by["review"].rules[0].action.target == "task-lead"     # task_gap -> implementer
     assert by["review"].rules[0].action.resume is False           # cross-phase plain goto
+    assert by["review"].rules[1].action.target == "plan-writer"   # plan_gap -> plan-writer
+    assert by["review"].rules[1].action.resume is False
     assert by["spec-verify-commit"].kind == "script"
     # B3: the merge phase is the engine-native authoritative merge.
     assert wf.phases[-1].name == "merge"

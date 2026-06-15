@@ -68,17 +68,23 @@ def test_review_step_uses_review_panel_at_medium_tier() -> None:
     assert review.differ_from is None
 
 
-def test_review_step_routes_rework_to_plan_writer_and_sets_panel_done() -> None:
+def test_review_step_routes_three_way_and_sets_panel_done() -> None:
     rules = _steps(_wf())["review"].rules
-    m = evaluate_rules(rules, vars=_BASE_VARS,
-                       output={"status": "Success", "verdict": "rework", "findings": "x"})
-    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
-    assert m.action.resume is False                      # cross-phase plain goto
-    assert m.action.feedback                             # findings forwarded as a preamble
-    assert m.var_mutations["panel_done"] is True
+    m_task = evaluate_rules(rules, vars=_BASE_VARS,
+                            output={"status": "Success", "verdict": "task_gap", "findings": "x"})
+    assert isinstance(m_task.action, Goto) and m_task.action.target == "task-lead"
+    assert m_task.action.resume is False                  # cross-phase plain goto
+    assert m_task.action.feedback                          # findings forwarded as a preamble
+    assert m_task.var_mutations["panel_done"] is True
+    m_plan = evaluate_rules(rules, vars=_BASE_VARS,
+                            output={"status": "Success", "verdict": "plan_gap", "findings": "x"})
+    assert isinstance(m_plan.action, Goto) and m_plan.action.target == "plan-writer"
+    assert m_plan.action.resume is False
+    assert m_plan.action.feedback
+    assert m_plan.var_mutations["panel_done"] is True
     m_ok = evaluate_rules(rules, vars=_BASE_VARS,
                           output={"status": "Success", "verdict": "approve", "findings": "x"})
-    assert isinstance(m_ok.action, Continue)             # approve -> deferred-sweep
+    assert isinstance(m_ok.action, Continue)              # approve -> deferred-sweep
     assert m_ok.var_mutations["panel_done"] is True
 
 
@@ -115,10 +121,11 @@ def test_review_panel_adjudicates_not_tallies() -> None:
     assert "task_gap" in text and "plan_gap" in text
 
 
-def test_no_gap_verdict_in_workflow_yaml() -> None:
+def test_gap_verdicts_route_in_workflow_yaml() -> None:
     text = (AGENTS.parent / "workflow.yaml").read_text()
-    assert "task_gap" not in text
-    assert "plan_gap" not in text
+    assert "task_gap" in text
+    assert "plan_gap" in text
+    assert "verdict: rework" not in text
 
 
 def test_review_panel_declares_four_members() -> None:
@@ -225,7 +232,7 @@ def test_first_pass_dispatches_full_four_member_panel_at_high(tmp_path) -> None:
 
 def test_plan_writer_recognizes_rework_preambles() -> None:
     by = _steps(_wf())
-    review_fb = by["review"].rules[0].action.feedback        # rework -> plan-writer
+    review_fb = by["review"].rules[1].action.feedback        # plan_gap -> plan-writer
     finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
     assert review_fb and finalize_fb
     text = (AGENTS / "plan-writer.md").read_text()
