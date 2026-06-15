@@ -261,14 +261,15 @@ def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:
     assert "clarify the desired outcome and scope before returning a rework decision" in text
 
 
-def test_task_lead_step0_drops_rerouted_feedback_sources() -> None:
+def test_task_lead_step0_admits_panel_task_gap() -> None:
     text = (AGENTS / "task-lead.md").read_text()
-    # "review panel" alone also appears out-of-scope at line 82, so guard on the
-    # Step-0-unique enumeration phrase that the edit removes:
-    assert "review panel or the recheck reviewer" not in text   # review rework now -> plan-writer
-    assert "human finalize decision" not in text                # human rework now -> plan-writer
+    # the panel's task_gap rework is a recognized Step-0 feedback source again,
+    # matching the exact preamble workflow.yaml emits for verdict: task_gap
+    assert "The review panel found an implemented task needs rework." in text
     # the gate-failure resume source is still authoritative in Step 0
     assert 'gate failure (the `commit-check`' in text
+    # human finalize rework still routes to plan-writer, not here
+    assert "human finalize decision" not in text
 
 
 def test_rework_path_loop_budgets_unchanged() -> None:
