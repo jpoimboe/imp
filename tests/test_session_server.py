@@ -174,3 +174,35 @@ async def test_abandon_control_invokes_the_callback(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_lock_is_held_during_serve_and_released_after(tmp_path: Path) -> None:
+    from imp.engine.state import ProjectLock
+
+    sock = str(tmp_path / "s.sock")
+    lock_path = tmp_path / "lock"
+    release = anyio.Event()
+    server = SessionServer(sock, lock=ProjectLock(lock_path))
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        await release.wait()
+        return "done"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        await anyio.sleep(0.05)  # let serve acquire the lock and enter run_fn
+        assert lock_path.exists()  # ProjectLock writes the holder-pid file while held
+        release.set()
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] == "done"
+        assert not lock_path.exists()  # released on serve() return
+        tg.cancel_scope.cancel()

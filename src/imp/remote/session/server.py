@@ -26,9 +26,11 @@ class SessionServer:
         *,
         coordinator: Any = None,
         on_abandon: Callable[[], None] | None = None,
+        lock: Any = None,
     ) -> None:
         self._coordinator = coordinator
         self._on_abandon = on_abandon
+        self._lock = lock
         self._socket = SessionSocket(socket_path, on_control=self._enqueue_control)
         ev_send, ev_recv = anyio.create_memory_object_stream[dict[str, Any]](
             max_buffer_size=math.inf)
@@ -47,6 +49,13 @@ class SessionServer:
         await self._socket.open()
 
     async def serve(self, run_fn: RunFn) -> Any:
+        # Releasing on return is the "release lock" half of hibernation.
+        if self._lock is None:
+            return await self._serve(run_fn)
+        with self._lock.acquire():
+            return await self._serve(run_fn)
+
+    async def _serve(self, run_fn: RunFn) -> Any:
         try:
             async with anyio.create_task_group() as tg:
                 tg.start_soon(self._socket.serve)
