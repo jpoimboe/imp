@@ -1753,7 +1753,7 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
             state.save(change.state_dir)                          # (a)
             change.event_log().append(                            # (b)
                 agent_id=None, type="change_abandoned", payload={})
-            worktree.journal_commit(control, change_id, {         # (c)
+            worktree.fold_wip_into_journal(control, change_id, {   # (c)
                 "events.jsonl": change.events_path,
                 "change.json": change.change_dir / "change.json",
                 "state.json": change.state_dir / "state.json",

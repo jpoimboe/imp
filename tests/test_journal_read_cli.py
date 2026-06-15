@@ -422,6 +422,46 @@ def test_status_default_inflight_columns_and_color(
     assert lines[1].rstrip().endswith("yaitd7")
 
 
+def test_abandon_folds_artifacts_from_wip(tmp_path: Path) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="Doomed", change_id="doomed",
+                       base_branch="main")
+    art = ch.change_dir / "artifacts" / "plans"
+    art.mkdir(parents=True)
+    (art / "doomed-plan-1.md").write_text("# plan\n")
+    worktree.artifact_commit(
+        tmp_path, "doomed",
+        {"plans/doomed-plan-1.md": art / "doomed-plan-1.md"},
+        message="artifact: plan")
+
+    rc = m._abandon(tmp_path, "doomed", assume_yes=True)
+    assert rc == 0
+    assert journal.journal_show(tmp_path, "doomed", "plans/doomed-plan-1.md") \
+        == b"# plan\n"
+    assert journal.journal_show(tmp_path, "doomed", "state.json") is not None
+    assert subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/doomed"],
+        cwd=tmp_path, capture_output=True).returncode != 0
+
+
+def test_abandon_without_wip_still_journals_runtime(tmp_path: Path) -> None:
+    import imp.cli.main as m
+
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="Bare", change_id="bare",
+                  base_branch="main")
+    # No artifact committed → no wip ref exists.
+    rc = m._abandon(tmp_path, "bare", assume_yes=True)
+    assert rc == 0
+    # Runtime state is journaled even without any artifact.
+    assert journal.journal_show(tmp_path, "bare", "state.json") is not None
+    assert subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/imp/journal-wip/bare"],
+        cwd=tmp_path, capture_output=True).returncode != 0
+
+
 def test_finalize_journals_artifacts_from_wip(tmp_path: Path) -> None:
     from imp.engine import executor
     from imp.engine.state import JsonlEventLog
