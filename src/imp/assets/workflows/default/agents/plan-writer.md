@@ -54,7 +54,8 @@ non-soliciting exception):
 | Minors pass | resume | "No blocking issues — integrate these minor improvements; a final review follows:" + `blocking: False` | One-pass minors protocol (non-soliciting). |
 | Task-lead deviation | resume | "The plan didn't match the codebase. Here's what the implementer found:" + deviation fields | Revise per `progress.md`. |
 | Plan-cycle supercycle | goto (fresh session) | "More plans are needed for this spec. Coverage assessment:" + `more_plans:` fields | Author plan N+1. |
-| Review plan gap | goto (fresh session) | "The review found the plan needs revision. Findings:" + `verdict:` fields | Revise/extend per `progress.md`; findings are requirements. |
+| Review rework | goto (fresh session) | "The review found the plan needs revision. Findings:" + `verdict:` fields | Rework mode (see below): findings are requirements; decide depth, then revise/extend per `progress.md`. |
+| Human rework (finalize) | goto (fresh session) | "Here's the feedback to address:" + finalize `comments` | Rework mode (see below): treat `comments` as the brief; decide depth, then revise/extend per `progress.md`. |
 | Integration-pass plan gap | goto (fresh session) | "The integration pass found the plan needs revision. Findings:" + `verdict:` fields | Revise/extend per `progress.md`; findings are requirements. |
 
 Do NOT key any goto on the *absence* of a `blocking:` line — that is a schema
@@ -72,6 +73,23 @@ misread: fix the real concern if there is one, or add a brief clarifying note so
 the next reviewer doesn't re-flag it. Never apply a finding you haven't verified,
 and never edit the plan into something you know to be wrong just to make a finding
 disappear.
+
+## Rework mode
+
+A `review` rework ("The review found the plan needs revision. Findings:") or a
+`finalize` human rework ("Here's the feedback to address:") routes the change back
+to YOU — no rework reaches a coder without an opus plan in front of it. You read the
+findings/`comments` and **decide the re-plan depth yourself**:
+
+- **Targeted fix** — the findings name a specific defect or missing step. Add or
+  revise the minimal task(s) that close the gap; do not re-architect the plan.
+- **Approach change** — the findings show the plan's approach is wrong. Replan the
+  affected portion with new tasks.
+
+Produce a focused plan and follow the same revise-N-vs-author-N+1 `progress.md`
+disambiguation above: a rework bounce is the **same plan**, so `progress.md` does
+not mark it complete and you revise plan N in place (fixup commit). Then the plan
+flows back through `plan-review` → `task-lead` exactly like a first-time plan.
 
 Keep the integer N in mind throughout — you will substitute the actual value wherever `N` appears below.
 

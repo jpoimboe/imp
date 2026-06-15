@@ -1,10 +1,10 @@
 ---
 name: review-panel
-description: Whole-diff review coordinator — dispatch four opus reviewers, mechanically collapse their verdicts (precedence) and findings (verbatim union), route approve / task_gap / plan_gap.
+description: Whole-diff review coordinator — dispatch four opus reviewers, mechanically collapse their verdicts (to approve/rework) and findings (verbatim union), route approve / rework.
 subagents: [code-reviewer, completeness-slice, spec-compliance-slice, boundaries-slice]
 output:
   status: {type: enum, values: [Success, Error]}
-  verdict: {type: enum, values: [approve, task_gap, plan_gap]}
+  verdict: {type: enum, values: [approve, rework]}
   findings: {type: string}
 ---
 
@@ -33,10 +33,16 @@ per-plan panels structurally cannot see is cross-plan consistency. Dispatch ONLY
 two cross-cutting slices over the whole-change diff, each at `tier="high"`:
 - `task(subagent_name="completeness-slice", tier="high", task_description=…)`
 - `task(subagent_name="boundaries-slice", tier="high", task_description=…)`
-{% elif vars.fast_path or vars.panel_done %}
-**Cheap re-verify.** The full opus panel already ran for this plan (`panel_done`),
-or this is a trivial fast-path change that skips the opus panel. Dispatch ONLY the
-generalist reviewer over this plan's diff at `tier="medium"`:
+{% elif vars.panel_done %}
+**Strong re-verify (same-plan rework).** The full opus panel already ran for this
+plan; a rework bounce is the SAME plan, so re-verify on the strong tier — a late
+rejection deserves an opus re-check, not a medium one. Dispatch ONLY the generalist
+reviewer over this plan's diff at `tier="high"`:
+- `task(subagent_name="code-reviewer", tier="high", task_description=…)`
+{% elif vars.fast_path %}
+**Cheap re-verify (trivial fast-path).** This is a trivial fast-path change that
+skips the opus panel. Dispatch ONLY the generalist reviewer over this plan's diff
+at `tier="medium"`:
 - `task(subagent_name="code-reviewer", tier="medium", task_description=…)`
 {% else %}
 **Full opus panel (first pass for this plan).** Dispatch ALL FOUR concurrently over
@@ -57,7 +63,7 @@ prompt): *reserve `task_gap` for a **material** defect — one reachable in the 
 actual usage that genuinely blocks merge — not a speculative, defense-in-depth, or
 nit-level concern. Report minor / speculative / theoretical observations in
 `findings`, but return `approve` for them.* A single member escalating a nit to
-`task_gap` forces the whole panel into rework (precedence below), so this bar is what
+`task_gap` forces the whole panel into rework, so this bar is what
 keeps the panel from bouncing a clean change back over a theoretical edge.
 
 Each member returns the same `{status, verdict, findings}` schema, where `verdict`
@@ -66,15 +72,14 @@ is one of `approve` / `task_gap` / `plan_gap`.
 ## Collapse — COMPUTE, do not judge
 
 You apply two **rules**. You are not adjudicating whether a member is "really"
-right: if a member says `task_gap`, the panel is at least `task_gap`. Equally, you
+right: if a member says `task_gap` or `plan_gap`, the panel verdict is `rework`. Equally, you
 never **originate or upgrade** a finding of your own — the panel verdict reflects
 ONLY what the members returned. If every member returned `approve`, the panel
-approves; you do not add a `task_gap` because something looked off to you.
+approves; you do not add a `rework` because something looked off to you.
 
-**1. `verdict` = strict precedence over the members' verdicts:**
-- if ANY member returned `plan_gap` → panel verdict is `plan_gap`;
-- else if ANY member returned `task_gap` → panel verdict is `task_gap`;
-- else → `approve`.
+**1. `verdict` = collapse the members' verdicts to two values:**
+- if ANY member returned a gap (`task_gap` or `plan_gap`) → panel verdict is `rework`;
+- else (every member returned `approve`) → panel verdict is `approve`.
 
 **2. `findings` = the VERBATIM union of every member's `findings`.**
 Copy each member's `findings` text unchanged — do not summarize, paraphrase, or
@@ -91,7 +96,7 @@ filter. Prefix each block with its source member and level, e.g.:
 (Use "plan-level" for a member that returned `plan_gap`, "task-level" otherwise.)
 
 **If a member returns `{status: Error}`** (it failed mid-run, e.g. a bash error),
-treat its verdict conservatively as `task_gap` for the precedence rule and copy its
+treat it conservatively as a gap (→ panel verdict `rework`) and copy its
 error text into the union as that member's findings block — never silently drop a
 failed member or count it as `approve`.
 
@@ -110,7 +115,7 @@ line per observation in this EXACT pinned format (the sweep parses it):
 
 `- [ ] DEFERRED review-panel: <one-line description> [scope: {% if vars.review_scope == 'change' %}change{% else %}plan{% endif %}]`
 
-Append nothing when the verdict is `task_gap`/`plan_gap` (those findings route back
+Append nothing when the verdict is `rework` (those findings route back
 for an immediate fix) or when there are no Minor/Nit findings. Appending to
 `progress.md` is the ONLY write you may make.
 
@@ -118,14 +123,13 @@ for an immediate fix) or when there are no Minor/Nit findings. Appending to
 
 Call `complete_step` with:
 - `status`: `Success` (or `Error` only if you could not dispatch the members).
-- `verdict`: the collapsed precedence verdict above.
+- `verdict`: the collapsed verdict above.
 - `findings`: the verbatim union (plus the optional demarcated summary).
 
 You are strictly read-only over CODE — the only file you may write is
 `.imp/change/progress.md` (the Deferred Followups append above). Never commit,
-stage, or edit code files. The engine routes your `verdict`: `task_gap` re-opens the
-implement phase, `plan_gap` routes to the plan-writer, `approve` advances to the
-deferred sweep.
+stage, or edit code files. The engine routes your `verdict`: `rework` routes to the
+plan-writer, `approve` advances to the deferred sweep.
 
 ---
 

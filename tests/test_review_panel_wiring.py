@@ -7,10 +7,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from imp.agents.prompts import build_context, render_prompt
 from imp.assets import default_workflow_dir
+from imp.engine.errors import LoadError
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.schema import validate_agent_output
+from imp.engine.state import JsonlEventLog
 from imp.engine.types import Continue, Goto
 
 AGENTS = Path("src/imp/assets/workflows/default/agents")
@@ -63,16 +68,17 @@ def test_review_step_uses_review_panel_at_medium_tier() -> None:
     assert review.differ_from is None
 
 
-def test_review_step_routes_and_sets_panel_done() -> None:
+def test_review_step_routes_rework_to_plan_writer_and_sets_panel_done() -> None:
     rules = _steps(_wf())["review"].rules
-    for verdict, target in [("task_gap", "task-lead"), ("plan_gap", "plan-writer")]:
-        m = evaluate_rules(rules, vars=_BASE_VARS,
-                           output={"status": "Success", "verdict": verdict, "findings": "x"})
-        assert isinstance(m.action, Goto) and m.action.target == target, verdict
-        assert m.var_mutations["panel_done"] is True, verdict
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={"status": "Success", "verdict": "rework", "findings": "x"})
+    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
+    assert m.action.resume is False                      # cross-phase plain goto
+    assert m.action.feedback                             # findings forwarded as a preamble
+    assert m.var_mutations["panel_done"] is True
     m_ok = evaluate_rules(rules, vars=_BASE_VARS,
                           output={"status": "Success", "verdict": "approve", "findings": "x"})
-    assert isinstance(m_ok.action, Continue)            # approve -> deferred-sweep
+    assert isinstance(m_ok.action, Continue)             # approve -> deferred-sweep
     assert m_ok.var_mutations["panel_done"] is True
 
 
@@ -80,10 +86,26 @@ def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
     schema = wf.agents["review-panel"].output_schema
     rules = _steps(wf)["review"].rules
-    for verdict in ("task_gap", "plan_gap", "approve"):
+    for verdict in ("approve", "rework"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
-        validate_agent_output(payload, schema)          # must not raise
+        validate_agent_output(payload, schema)           # must not raise
         assert evaluate_rules(rules, vars=_BASE_VARS, output=payload).action is not None
+
+
+def test_review_panel_verdict_enum_is_collapsed() -> None:
+    schema = _wf().agents["review-panel"].output_schema
+    verdict_field = next(f for f in schema.fields if f.name == "verdict")
+    assert set(verdict_field.values) == {"approve", "rework"}
+    for gap in ("task_gap", "plan_gap"):
+        with pytest.raises(LoadError):
+            validate_agent_output(
+                {"status": "Success", "verdict": gap, "findings": "x"}, schema)
+
+
+def test_no_gap_verdict_in_workflow_yaml() -> None:
+    text = (AGENTS.parent / "workflow.yaml").read_text()
+    assert "task_gap" not in text
+    assert "plan_gap" not in text
 
 
 def test_review_panel_declares_four_members() -> None:
@@ -167,3 +189,80 @@ def test_slices_resolve_from_asset_dir() -> None:
     evals_agents = Path("src/imp/evals/data/agents")
     for name in ("completeness-slice", "spec-compliance-slice", "boundaries-slice"):
         assert not (evals_agents / f"{name}.md").exists()
+
+
+def _render_panel(tmp_path, *, panel_done: bool, fast_path: bool,
+                  review_scope: str = "plan") -> str:
+    wf = _wf()
+    body = wf.agents["review-panel"].prompt_template_source
+    log = JsonlEventLog(tmp_path / "events.jsonl")
+    ctx = build_context(change_slug="t", change_title="t", event_log=log,
+                        vars={"panel_done": panel_done, "fast_path": fast_path,
+                              "review_scope": review_scope})
+    return render_prompt(body, ctx)
+
+
+def test_panel_done_reverify_dispatches_high_tier(tmp_path) -> None:
+    out = _render_panel(tmp_path, panel_done=True, fast_path=False)
+    assert 'task(subagent_name="code-reviewer", tier="high"' in out
+    assert "spec-compliance-slice" not in out      # single reviewer, not the 4-member panel
+
+
+def test_fast_path_reverify_stays_medium_tier(tmp_path) -> None:
+    out = _render_panel(tmp_path, panel_done=False, fast_path=True)
+    assert 'task(subagent_name="code-reviewer", tier="medium"' in out
+    assert 'tier="high"' not in out
+
+
+def test_first_pass_dispatches_full_four_member_panel_at_high(tmp_path) -> None:
+    out = _render_panel(tmp_path, panel_done=False, fast_path=False)
+    for member in ("code-reviewer", "completeness-slice",
+                   "spec-compliance-slice", "boundaries-slice"):
+        assert f'task(subagent_name="{member}", tier="high"' in out
+
+
+def test_plan_writer_recognizes_rework_preambles() -> None:
+    by = _steps(_wf())
+    review_fb = by["review"].rules[0].action.feedback        # rework -> plan-writer
+    finalize_fb = by["finalize"].rules[1].action.feedback    # decision: rework rule
+    assert review_fb and finalize_fb
+    text = (AGENTS / "plan-writer.md").read_text()
+    assert review_fb in text
+    assert finalize_fb in text
+
+
+def test_finalize_rework_routes_to_plan_writer() -> None:
+    rules = _steps(_wf())["finalize"].rules
+    base = {"status": "Success", "built": "", "verify_status": "",
+            "open_items": "", "next_steps": "", "comments": ""}
+    m = evaluate_rules(rules, vars=_BASE_VARS,
+                       output={**base, "decision": "rework", "comments": "fix X"})
+    assert isinstance(m.action, Goto) and m.action.target == "plan-writer"
+    assert m.var_mutations["merge_approved"] is False
+    m_merge = evaluate_rules(rules, vars=_BASE_VARS,
+                             output={**base, "decision": "merge"})
+    assert isinstance(m_merge.action, Goto) and m_merge.action.target == "merge"
+    assert m_merge.var_mutations["merge_approved"] is True
+
+
+def test_finalize_clarifies_before_rework_and_drops_implement_wording() -> None:
+    text = (AGENTS / "finalize.md").read_text()
+    assert "send the change back to implement" not in text
+    assert "carried to the implementer" not in text
+    assert "clarify the desired outcome and scope before returning a rework decision" in text
+
+
+def test_task_lead_step0_drops_rerouted_feedback_sources() -> None:
+    text = (AGENTS / "task-lead.md").read_text()
+    # "review panel" alone also appears out-of-scope at line 82, so guard on the
+    # Step-0-unique enumeration phrase that the edit removes:
+    assert "review panel or the recheck reviewer" not in text   # review rework now -> plan-writer
+    assert "human finalize decision" not in text                # human rework now -> plan-writer
+    # the gate-failure resume source is still authoritative in Step 0
+    assert 'gate failure (the `commit-check`' in text
+
+
+def test_rework_path_loop_budgets_unchanged() -> None:
+    steps = _steps(_wf())
+    assert steps["review"].max_loops == 6
+    assert steps["finalize"].max_loops == 20

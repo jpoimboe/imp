@@ -67,7 +67,13 @@ merge-vs-rework affordance explicit: state this is the final **merge gate**; lis
 the **Fixed (FYI/veto)** items (the human may veto any — a veto routes `rework`
 naming the commit(s) to undo; how the undo happens is left to the implementer) and
 the **Still deferred** items; tell the user to reply **merge** to merge into the
-base branch, or describe the **rework** to send the change back to implement.
+base branch, or describe the **rework** to send the change back for re-planning.
+
+When a human asks for rework and the request is underspecified, use `wait_for_user`
+to clarify the desired outcome and scope before returning a rework decision — settle
+the details first (a brainstorming-like posture), then hand a crisp, actionable
+brief to the plan-writer. An agent-detected `review` rework does NOT solicit here;
+this clarify step applies only to human-originated reworks.
 Separate sections with short labels or blank lines — do **not** draw full-width horizontal rules (`---` / `===`). Do not end your turn with plain text and no tool
 call (a bare turn-end is treated as a bug and will nudge you). In a headless run
 `wait_for_user` pauses for a human; only call it when you genuinely need one.
@@ -77,7 +83,7 @@ merge-resolution review (if any) is sound:
 - Merge -> `complete_step(decision="merge", comments="<notes>", built=…, verify_status=…, open_items=…, next_steps=…)`.
 - Rework -> `complete_step(decision="rework", comments="<the user's feedback OR the
   resolution problem, verbatim and actionable>", built=…, verify_status=…, open_items=…, next_steps=…)`.
-  Your `comments` are carried to the implementer as authoritative feedback — be
+  Your `comments` are carried to the plan-writer as authoritative feedback — be
   specific (name the task/behavior/file to change).
 - Cannot proceed without a human and none is available, or an unrecoverable problem
   -> `complete_step(decision="pause", comments="<why>", built=…, verify_status=…, open_items=…, next_steps=…)`.
