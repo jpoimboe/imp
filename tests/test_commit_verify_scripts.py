@@ -32,44 +32,70 @@ def _run(script: str, root: Path, slug: str) -> int:
     ).returncode
 
 
-def test_spec_verify_passes_on_commit_touching_spec(tmp_path: Path) -> None:
+def _run_id(script: str, root: Path, slug: str, change_id: str) -> int:
+    return subprocess.run(
+        ["bash", str(SCRIPTS / script)], cwd=SCRIPTS,
+        env={"IMP_PROJECT_ROOT": str(root), "IMP_CHANGE_SLUG": slug,
+             "IMP_CHANGE_ID": change_id,
+             "PATH": __import__("os").environ["PATH"]},
+        capture_output=True, text=True,
+    ).returncode
+
+
+def _wip_commit(root: Path, change_id: str, rel: str, body: str) -> None:
+    """Write .imp/change/artifacts/<rel> and snapshot to refs/imp/journal-wip/<id>."""
+    from imp.engine import worktree
+    art = root / ".imp" / "change" / "artifacts"
+    dest = art / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(body)
+    files = {str(p.relative_to(art)): p for p in sorted(art.rglob("*")) if p.is_file()}
+    worktree.artifact_commit(root, change_id, files, message="artifact: test")
+
+
+def test_spec_verify_passes_when_wip_matches_live(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "imp" / "specs").mkdir(parents=True)
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
+    (root / ".imp").mkdir()                       # gitignored stage for the temp index
+    (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: spec")        # no Change: trailer
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") == 0
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "spec/2026-06-01-x.md", "# spec\n")
+    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") == 0
 
 
-def test_spec_verify_fails_when_file_untouched(tmp_path: Path) -> None:
+def test_spec_verify_fails_when_wip_ref_absent(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "other.txt").write_text("x\n")
-    _git(root, "add", "-A")
-    _git(root, "commit", "-m", "chore: other\n\nChange: 2026-06-01-x")
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
+    (root / ".imp" / "change" / "artifacts" / "spec").mkdir(parents=True)
+    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# spec\n")
+    # No artifact_commit -> no wip ref.
+    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
 
 
-def test_spec_verify_fails_on_uncommitted_spec_edit(tmp_path: Path) -> None:
+def test_spec_verify_fails_when_blob_absent_from_wip(tmp_path: Path) -> None:
+    # Wip ref exists (from a different artifact kind) but carries no spec blob.
     root = _repo(tmp_path)
-    (root / "imp" / "specs").mkdir(parents=True)
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: spec")
-    # HEAD touches the spec (old check passes) but the working tree has an
-    # uncommitted edit to it -> new clean-spec-path check must fail.
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec edited\n")
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
+    _git(root, "commit", "-m", "seed")
+    # Commit only a plan artifact — spec/<slug>.md is absent from the wip tree.
+    _wip_commit(root, "id1", "plans/2026-06-01-x-plan-1.md", "# plan\n")
+    # Live spec file exists but was never committed to the wip tree.
+    (root / ".imp" / "change" / "artifacts" / "spec").mkdir(parents=True)
+    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# spec\n")
+    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
 
 
-def test_spec_verify_fails_on_untracked_stray_in_specs(tmp_path: Path) -> None:
+def test_spec_verify_fails_when_live_differs_from_committed(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / "imp" / "specs").mkdir(parents=True)
-    (root / "imp" / "specs" / "2026-06-01-x.md").write_text("# spec\n")
+    (root / ".imp").mkdir()
+    (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
-    _git(root, "commit", "-m", "docs: spec")
-    # An untracked scratch file under imp/specs/ -> porcelain is non-empty -> fail.
-    (root / "imp" / "specs" / "scratch.md").write_text("draft\n")
-    assert _run("spec-commit-verify.sh", root, "2026-06-01-x") != 0
+    _git(root, "commit", "-m", "seed")
+    _wip_commit(root, "id1", "spec/2026-06-01-x.md", "# spec\n")
+    # The agent edited the live file after committing it -> blob mismatch.
+    (root / ".imp" / "change" / "artifacts" / "spec" / "2026-06-01-x.md").write_text("# edited\n")
+    assert _run_id("spec-commit-verify.sh", root, "2026-06-01-x", "id1") != 0
 
 
 def test_plan_verify_passes_on_newest_plan(tmp_path: Path) -> None:
