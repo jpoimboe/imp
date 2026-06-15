@@ -10,8 +10,10 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import shutil
 import signal
+import subprocess
 import sys
 from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
@@ -1379,6 +1381,102 @@ def _parse_jsonl(raw: bytes) -> list[dict[str, Any]]:
     return out
 
 
+def _show_slug(control: Path, change_id: str) -> str:
+    """Current slug for a change, worktree-first then journal."""
+    title = _title_for_id(control, change_id) or change_id
+    return dated_slug(title, date=change_id[:10])
+
+
+def _show_artifact(control: Path, change_id: str, rel: str) -> bytes | None:
+    live = (control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+            / "artifacts" / rel)
+    if live.is_file():
+        return live.read_bytes()
+    return journal.journal_show(control, change_id, rel)
+
+
+def _show_newest_plan_rel(control: Path, change_id: str, slug: str) -> str | None:
+    """plans/<slug>-plan-N.md for the highest N, live worktree first then
+    journal. Returns None when no plan exists in either place."""
+    def _newest(names: list[str]) -> str | None:
+        best, pick = -1, None
+        for name in names:
+            mobj = re.fullmatch(rf"{re.escape(slug)}-plan-(\d+)\.md", name)
+            if mobj and int(mobj.group(1)) > best:
+                best, pick = int(mobj.group(1)), name
+        return pick
+
+    live_dir = (control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+                / "artifacts" / "plans")
+    if live_dir.is_dir():
+        pick = _newest([p.name for p in live_dir.iterdir() if p.is_file()])
+        if pick:
+            return f"plans/{pick}"
+    proc = subprocess.run(
+        ["git", "ls-tree", "--name-only", f"refs/imp/journal:{change_id}/plans"],
+        cwd=control, capture_output=True, text=True)
+    if proc.returncode == 0:
+        pick = _newest([ln.strip() for ln in proc.stdout.splitlines() if ln.strip()])
+        if pick:
+            return f"plans/{pick}"
+    return None
+
+
+def _show_runtime(control: Path, change_id: str, name: str) -> bytes | None:
+    change = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
+    live = change / "state" / "state.json" if name == "state.json" else change / name
+    if live.is_file():
+        return live.read_bytes()
+    return journal.journal_show(control, change_id, name)
+
+
+_REVIEW_STEPS = frozenset({
+    "spec-reviewer", "plan-review", "review", "deferred-sweep",
+    "plan-cycle-check", "finalize",
+})
+
+
+def _cmd_show(args: argparse.Namespace) -> int:
+    control = _control_root()
+    try:
+        change_id = _resolve_id(control, args.token)
+    except SystemExit:
+        return 2
+    resource = args.resource
+    if resource in ("spec", "plan"):
+        slug = _show_slug(control, change_id)
+    if resource == "spec":
+        data = _show_artifact(control, change_id, f"spec/{slug}.md")
+    elif resource == "plan":
+        rel = _show_newest_plan_rel(control, change_id, slug)
+        data = _show_artifact(control, change_id, rel) if rel else None
+    elif resource == "events":
+        data = _show_runtime(control, change_id, "events.jsonl")
+    elif resource == "status":
+        raw = _show_runtime(control, change_id, "state.json")
+        if raw is None:
+            print(f"imp: no state for {change_id!r}", file=sys.stderr)
+            return 2
+        print(json.loads(raw).get("status", "unknown"))
+        return 0
+    elif resource == "review":
+        raw = _show_runtime(control, change_id, "events.jsonl")
+        if raw is None:
+            print(f"imp: no events for {change_id!r}", file=sys.stderr)
+            return 2
+        for ev in _parse_jsonl(raw):
+            payload = ev.get("payload") or {}
+            if ev.get("type") == "step_started" and \
+                    payload.get("step") in _REVIEW_STEPS:
+                print(f"{payload.get('phase', '?')}/{payload.get('step')}")
+        return 0
+    if data is None:
+        print(f"imp: no {resource} for {change_id!r}", file=sys.stderr)
+        return 2
+    sys.stdout.write(data.decode("utf-8", errors="replace"))
+    return 0
+
+
 def _load_events_for_id(control: Path, change_id: str) -> list[dict[str, Any]] | None:
     """Worktree first, journal second. Returns None if the id is in neither.
 
@@ -1984,6 +2082,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Render every event (no tool-burst collapse).",
     )
     p_log.set_defaults(func=_cmd_log)
+
+    p_show = sub.add_parser(
+        "show",
+        help="Show a Change's spec, plan, review, events, or status.",
+        description=(
+            "Print one artifact of a Change. Reads the live worktree files while "
+            "the Change is in flight, and falls back to the journal once it is "
+            "merged and the worktree is gone."),
+    )
+    p_show.add_argument("token", help="Change id or its short token.")
+    p_show.add_argument(
+        "resource", nargs="?", default="status",
+        choices=["spec", "plan", "review", "events", "status"],
+        help="Which artifact to print (default: status).")
+    p_show.set_defaults(func=_cmd_show)
 
     p_status = sub.add_parser(
         "status",
