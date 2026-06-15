@@ -111,7 +111,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
                 {"name": "rename_change", "input": {"name": "demo change"}},
                 bash(spec_cmd),
                 done(phase="written", spec_path="imp/specs/SCRIPTED-STUB.md",
-                     complexity="trivial", unseen_changes=False),
+                     complexity="trivial"),
             ]}],
             "spec-reviewer": [{"text": "review", "tools": [
                 done(findings="No findings.", blocking=False, has_minor_findings=False),

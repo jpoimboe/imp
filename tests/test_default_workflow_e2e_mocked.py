@@ -39,7 +39,6 @@ def _canned_anthropic(**overrides):
         "decision": "merge", "comments": "",
         "phase": "written", "spec_path": "stub-spec.md",
         "complexity": "standard",
-        "unseen_changes": False,
         "plan_path": "stub-plan.md", "plan_number": 1,
         "done": True, "deviation": False, "summary": "ok",
         "more_plans": False, "rationale": "ok",
@@ -48,7 +47,6 @@ def _canned_anthropic(**overrides):
         "open_items": "", "next_steps": "",
         "result": "DONE", "report": "ok",
         "integration": "clean",
-        "confirm": "approve",
     }
     fields.update(overrides)
     return response(tool_use("c0", "complete_step", fields), stop_reason="tool_use")
@@ -199,7 +197,6 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             "phase": "written",
             "spec_path": "stub-spec.md",
             "complexity": "standard",
-            "unseen_changes": False,
             # plan-writer
             "plan_path": "stub-plan.md",
             "plan_number": 1,
@@ -223,8 +220,6 @@ async def test_full_default_workflow_completes_with_canned_anthropic(
             "report": "ok",
             # integrator
             "integration": "clean",
-            # spec-confirm
-            "confirm": "approve",
         }),
         stop_reason="tool_use",
     )
@@ -278,7 +273,6 @@ async def test_full_default_workflow_completes_with_canned_openai(
             "decision": "merge", "comments": "",
             "phase": "written", "spec_path": "stub-spec.md",
             "complexity": "standard",
-            "unseen_changes": False,
             "plan_path": "stub-plan.md", "plan_number": 1,
             "done": True, "deviation": False, "summary": "ok",
             "more_plans": False, "rationale": "ok",
@@ -341,7 +335,6 @@ async def test_full_default_workflow_completes_with_canned_claude_code(
                     "decision": "merge", "comments": "",
                     "phase": "written", "spec_path": "stub-spec.md",
                     "complexity": "standard",
-                    "unseen_changes": False,
                     "plan_path": "stub-plan.md", "plan_number": 1,
                     "done": True, "deviation": False, "summary": "ok",
                     "more_plans": False, "rationale": "ok",
@@ -507,7 +500,6 @@ async def test_resume_from_maxed_gate_reruns_and_merges(tmp_path: Path) -> None:
             "decision": "merge", "comments": "",
             "phase": "written", "spec_path": "stub-spec.md",
             "complexity": "standard",
-            "unseen_changes": False,
             "plan_path": "stub-plan.md", "plan_number": 1,
             "done": True, "deviation": False, "summary": "ok",
             "more_plans": False, "rationale": "ok",

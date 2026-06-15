@@ -100,13 +100,14 @@ outbox() { curl -s "$FAKE_URL/_outbox" | python3 -m json.tool; }
 
 1. **`/new`** the seeded intent: `inject "/new <the §1 intent text with the sentinel>"`. Watch
    `outbox` for the optimistic "Spawning a new Change…" ack, then for the spawned Change's first
-   narration — its **spec-confirm** question arriving as a message with an `↩ @<handle>` footer.
-2. **Answer the spec-confirm gate** by replying to that question's message: read its `message_id`
-   from `outbox`, then `inject_reply "yes, proceed" <message_id>`. (A reply-to threads to the
-   Change; `@<handle> yes` also works.) Run `outbox` again and confirm a new message arrived from
-   the Change (narration or the next gate), verifying the reply was routed correctly.
-3. **Narration streams** to the chat as the run proceeds (spec → plan → implement → review). Answer
-   any further gates the same way (reply to the message, or `@handle`).
+   narration arriving as a message with an `↩ @<handle>` footer.
+2. **Narration streams** to the chat as the run proceeds (spec → plan → implement → review). The
+   spec phase has no confirmation gate, so the run flows from spec into planning automatically; the
+   first human gate you answer remotely is the **merge-approval** gate at `finalize`.
+3. **Answer the merge-approval gate** by replying to that question's message: read its `message_id`
+   from `outbox`, then `inject_reply "approve" <message_id>`. (A reply-to threads to the Change;
+   `@<handle> approve` also works.) Run `outbox` again and confirm the Change proceeds toward merge,
+   verifying the reply was routed correctly.
 4. Drive to **completion + merge**. Confirm: `cd "$WT" && imp status --all` shows the change
    **completed** and the working tree is clean.
 
