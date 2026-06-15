@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from pathlib import Path
 
 import pytest
@@ -59,11 +59,15 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     }, indent=2, sort_keys=True))
 
     configured_tiers: list[str] = []
+    project_keys: frozenset[str] = frozenset()
     with contextlib.suppress(Exception):
-        configured_tiers = load_effective_config(
-            project_root=root, control_root=root).config.tier_names()
+        _cfg = load_effective_config(
+            project_root=root, control_root=root).config
+        configured_tiers = _cfg.tier_names()
+        project_keys = frozenset(_cfg.project_facts)
 
-    workflow = load_workflow(src_wf, configured_tiers=configured_tiers)
+    workflow = load_workflow(
+        src_wf, configured_tiers=configured_tiers, project_keys=project_keys)
     flat = workflow.flat_steps()
     from imp.engine.state import State as _State
     _State(
@@ -114,6 +118,40 @@ def _register_fake(output: dict) -> None:
     resolve.register_provider(
         "fake", env_check=lambda: True,
         factory=lambda model: _FakeProvider(output, model=model),
+    )
+
+
+class _CapturingRunner:
+    def __init__(self, output: dict, sink: list[str]) -> None:
+        self._output = output
+        self._sink = sink
+
+    async def run(self, invocation: AgentInvocation) -> AsyncGenerator[Event, None]:
+        self._sink.append(invocation.system_prompt)
+        yield {"type": "agent_output", "payload": self._output}
+
+    async def interrupt(self) -> None:
+        pass
+
+
+class _CapturingProvider:
+    name = "fake"
+
+    def __init__(self, output: dict, sink: list[str], model: str = "m") -> None:
+        self._output = output
+        self._sink = sink
+        self.model = model
+
+    def create_runner(self, invocation: AgentInvocation) -> AgentRunner:
+        return _CapturingRunner(self._output, self._sink)
+
+
+def _register_prompt_capturing(output: dict, sink: list[str]) -> None:
+    from imp.providers import resolve
+    resolve.reset_providers_for_tests()
+    resolve.register_provider(
+        "fake", env_check=lambda: True,
+        factory=lambda model: _CapturingProvider(output, sink, model=model),
     )
 
 
@@ -1525,3 +1563,40 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     result = await run_change(change, on_event=lambda _e: None)
 
     assert result is RunResult.COMPLETED
+
+
+@pytest.mark.anyio
+async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
+    wf = tmp_path / "imp" / "workflows" / "default"
+    (wf / "agents").mkdir(parents=True)
+    (wf / "agents" / "writer.md").write_text(
+        "---\nname: writer\ntools: [complete_step]\n"
+        "output:\n  status: {type: enum, values: [Success, Error]}\n---\n"
+        "run {{ project.test_command }}\n"
+    )
+    (wf / "workflow.yaml").write_text(
+        "name: t\ndescription: t\n"
+        "defaults: {max_retries: 1, max_loops: 6}\n"
+        "phases:\n  - name: only\n    steps:\n"
+        "      - {name: w, file: agents/writer.md, tier: medium}\n"
+    )
+    (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
+    (tmp_path / "imp" / "project.yaml").write_text(
+        "workflow: default\nfacts:\n  test_command: make check\n"
+    )
+    change = _make_change(tmp_path)
+    sink: list[str] = []
+    _register_prompt_capturing({"status": "Success"}, sink)
+
+    result = await run_change(change, on_event=lambda _e: None)
+    assert result is RunResult.COMPLETED
+    assert any("run make check" in p for p in sink)
+
+
+def test_change_context_defaults_empty_facts() -> None:
+    from imp.agents.runner import ChangeContext
+    cc = ChangeContext(
+        slug="s", title="t", project_root=Path("/x"), workflow_dir=Path("/x"))
+    assert cc.project_facts == {}
+    assert cc.guidance == ""

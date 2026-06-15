@@ -182,10 +182,13 @@ async def run_change(
                 shutil.rmtree(tmp)
             shutil.copytree(change.live_workflow_dir, tmp)
             os.rename(tmp, snapshot)
-        workflow = load_workflow(change.workflow_dir)
         config = load_effective_config(
             project_root=change.project_root, control_root=change.control_root,
         ).config
+        workflow = load_workflow(
+            change.workflow_dir,
+            project_keys=frozenset(config.project_facts),
+        )
         log: EventLog = JsonlEventLog(
             change.events_path, on_event=_liveness_on_event(coordinator, on_event))
         sandbox_policy = _build_sandbox_policy(change, config, log)
@@ -241,7 +244,9 @@ async def run_change(
                 verify_command=config.verify_command,
                 non_interactive=non_interactive,
                 sandbox_policy=sandbox_policy,
-                seed_opening=seed_for_step)
+                seed_opening=seed_for_step,
+                project_facts=config.project_facts,
+                guidance=config.guidance)
             if seed_for_step is not None:
                 pending_seed = None
 
@@ -390,6 +395,8 @@ async def _dispatch_step(
     non_interactive: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
+    project_facts: dict[str, str] | None = None,
+    guidance: str = "",
 ) -> tuple[Action, str | None, dict[str, object]]:
     """Returns (action, feedback_text, var_mutations)."""
     wrapper_text: str | None = None
@@ -412,7 +419,8 @@ async def _dispatch_step(
         user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
         wrapper_text=wrapper_text, is_resume=is_resume, verify_command=verify_command,
         non_interactive=non_interactive,
-        sandbox_policy=sandbox_policy, seed_opening=seed_opening)
+        sandbox_policy=sandbox_policy, seed_opening=seed_opening,
+        project_facts=project_facts, guidance=guidance)
 
 
 def _step_started_payload(step: Step) -> dict[str, Any]:
@@ -568,6 +576,8 @@ async def _route_agent(
     non_interactive: bool = False,  # §10/§12: consumed by the headless wall-clock retry ceiling
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
+    project_facts: dict[str, str] | None = None,
+    guidance: str = "",
 ) -> tuple[Action, str | None, dict[str, object]]:
     # step.file is guaranteed non-None: loader requires file:/prompt:, and
     # _v_agent_has_file rejects inline prompt: agents this milestone.
@@ -614,7 +624,8 @@ async def _route_agent(
             balance_on_resume=balance,
             initial_messages=initial, is_resume=is_resume,
             verify_command=verify_command, non_interactive=non_interactive,
-            sandbox_policy=sandbox_policy)
+            sandbox_policy=sandbox_policy,
+            project_facts=project_facts, guidance=guidance)
         if result.delay is None:
             break
         # §10/§12 headless backstop: an unattended run has no human to Ctrl-C, so
@@ -683,7 +694,8 @@ async def _route_agent(
                                   is_resume=is_resume, verify_command=verify_command,
                                   non_interactive=non_interactive,
                                   sandbox_policy=sandbox_policy,
-                                  seed_opening=seed_opening)
+                                  seed_opening=seed_opening,
+                                  project_facts=project_facts, guidance=guidance)
 
     state.step_attempt = 0
     match = evaluate_rules(step.rules, vars=state.vars, output=result.output)
@@ -731,6 +743,8 @@ async def _run_agent_invocation(
     verify_command: str | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
+    project_facts: dict[str, str] | None = None,
+    guidance: str = "",
 ) -> AgentRunResult:
     """Run one top-level agent step to a terminal AgentRunResult.
 
@@ -759,6 +773,7 @@ async def _run_agent_invocation(
             agent_def.prompt_template_source, build_context(
                 change_id=change.id, change_slug=change.slug, change_title=change.title,
                 event_log=log, vars=state.vars,
+                project_facts=project_facts, guidance=guidance,
             ),
         )
         system_prompt_override = None
@@ -796,6 +811,7 @@ async def _run_agent_invocation(
         change_context=ChangeContext(
             id=change.id, slug=change.slug, title=change.title,
             project_root=change.project_root, workflow_dir=change.workflow_dir,
+            project_facts=project_facts or {}, guidance=guidance,
         ),
         user_chat_input_fn=user_chat_input_fn,
         transcript_dir=transcript_dir,

@@ -98,6 +98,7 @@ class Change:
             workflow = load_workflow(
                 wt_path / "imp" / "workflows" / "default",
                 configured_tiers=config.tier_names(),
+                project_keys=frozenset(config.project_facts),
             )
         except (LoadError, LoadErrors):
             # Validation now runs post-create_worktree, so a base branch lacking a
