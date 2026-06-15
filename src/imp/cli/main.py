@@ -1426,15 +1426,10 @@ async def _pick_log_target(control: Path) -> str | int:
     selected_index = next(
         (i for i, r in enumerate(rows) if r[0] == default_id), 0)
 
-    def _on_non_tty(_rows: list[_Row]) -> str | int:
-        assert default_id is not None
-        return default_id
-
     return await _pick_change_target(
         rows=rows,
         header="Show log for which change?  (↑/↓ to move · enter to select · q to cancel)",
         on_empty=_log_picker_empty,
-        on_non_tty=_on_non_tty,
         selected_index=selected_index,
     )
 
@@ -1736,13 +1731,14 @@ def _resume_picker_non_tty(rows: list[_Row]) -> str | int:
 async def _pick_change_target(
     *, rows: list[_Row], header: str,
     on_empty: Callable[[], int],
-    on_non_tty: Callable[[list[_Row]], str | int],
+    on_non_tty: Callable[[list[_Row]], str | int] | None = None,
     selected_index: int = 0,
     non_interactive: bool = False,
 ) -> str | int:
     if not rows:
         return on_empty()
     if non_interactive or not _interactive():
+        assert on_non_tty is not None
         return on_non_tty(rows)
     if len(rows) == 1:
         return rows[0][0]
