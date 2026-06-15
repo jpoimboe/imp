@@ -551,3 +551,14 @@ def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:
                    if "write" in perm.operations]
     assert any(".imp/change/artifacts/spec/" in p for p in write_paths)
     assert all("imp/specs/" not in p for p in write_paths)
+
+
+def test_plan_writer_writes_under_artifacts(tmp_path: Path) -> None:
+    asset = Path("src/imp/assets/workflows/default").resolve()
+    shutil.copytree(asset, tmp_path / "wf")
+    wf = load_workflow(tmp_path / "wf")
+    perms = _steps(wf)["plan-writer"].fs_permissions
+    write_paths = [p for perm in perms for p in perm.paths
+                   if "write" in perm.operations]
+    assert any(".imp/change/artifacts/plans/" in p for p in write_paths)
+    assert all("imp/plans/" not in p for p in write_paths)

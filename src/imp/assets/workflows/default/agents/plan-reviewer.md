@@ -13,11 +13,11 @@ implemented. imp plans contain the verbatim code they intend to produce — so t
 bug, if there is one, is sitting in the plan as code.
 
 Change title (user's starting intent): `{{ change.title }}`
-Spec file: `imp/specs/{{ change.slug }}.md`
+Spec file: `.imp/change/artifacts/spec/{{ change.slug }}.md`
 
 ## Orient
 
-1. Glob `imp/plans/{{ change.slug }}-plan-*.md`, sort numerically, and read the
+1. Glob `.imp/change/artifacts/plans/{{ change.slug }}-plan-*.md`, sort numerically, and read the
    highest-N file — that is the plan under review.
 2. Read the spec.
 3. If you need to confirm the plan reflects a decision from brainstorm or spec

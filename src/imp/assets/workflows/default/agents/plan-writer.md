@@ -1,6 +1,6 @@
 ---
 name: plan-writer
-description: Write the next bite-sized plan (imp/plans/<slug>-plan-N.md) from the spec and progress, then commit it.
+description: Write the next bite-sized plan (.imp/change/artifacts/plans/<slug>-plan-N.md) from the spec and progress, then commit it.
 subagents: [explorer, researcher]
 output:
   status: {type: enum, values: [Success, Error]}
@@ -19,7 +19,7 @@ Before writing anything, determine which plan number N to write and whether you 
 **Step 1 — glob existing plan files:**
 
 ```
-glob("imp/plans/{{ change.slug }}-plan-*.md")
+glob(".imp/change/artifacts/plans/{{ change.slug }}-plan-*.md")
 ```
 
 Sort the results numerically. The highest N found is the "current plan".
@@ -88,8 +88,8 @@ findings/`comments` and **decide the re-plan depth yourself**:
 
 Produce a focused plan and follow the same revise-N-vs-author-N+1 `progress.md`
 disambiguation above: a rework bounce is the **same plan**, so `progress.md` does
-not mark it complete and you revise plan N in place (fixup commit). Then the plan
-flows back through `plan-review` → `task-lead` exactly like a first-time plan.
+not mark it complete and you revise plan N in place, then run `imp artifact-commit plan`.
+Then the plan flows back through `plan-review` → `task-lead` exactly like a first-time plan.
 
 Keep the integer N in mind throughout — you will substitute the actual value wherever `N` appears below.
 
@@ -119,12 +119,12 @@ non-soliciting minors pass is unchanged.
 
 ## Explore the Codebase First
 
-Read the spec at `imp/specs/{{ change.slug }}.md`.
+Read the spec at `.imp/change/artifacts/spec/{{ change.slug }}.md`.
 
 Glob and read existing plan files to understand what has already been planned or implemented:
 
 ```
-glob("imp/plans/{{ change.slug }}-plan-*.md")
+glob(".imp/change/artifacts/plans/{{ change.slug }}-plan-*.md")
 ```
 
 Read relevant source files to understand current patterns, interfaces, and conventions before decomposing tasks. Do not guess at file layout — read the actual code.
@@ -326,46 +326,26 @@ If you find issues, fix them inline. If you find a spec requirement with no task
 
 ## Writing the File
 
-Write to `imp/plans/{{ change.slug }}-plan-N.md` (substitute the actual integer for N).
+Write to `.imp/change/artifacts/plans/{{ change.slug }}-plan-N.md` (substitute the actual integer for N).
 
 Do NOT write code. Only write the plan document.
 
 ## Commit
 
-Commit with raw `git` in `bash` (working dir is the project root). Do not add a
-`Change:` trailer — the workflow stamps it later, in the review phase. Choose the
-mode based on whether the plan file **already existed when you started this turn**
-(from the glob + progress.md evaluation above — do NOT inspect git HEAD):
-
-**First write of plan N** (the file did not exist before this turn):
-
-```
-git add imp/plans/{{ change.slug }}-plan-N.md
-git commit -m "docs: add plan N for {{ change.slug }}"
-```
-
-**Revising an existing plan N** (the file already existed — reviewer rework or task-lead deviation):
+Commit the plan to the change's artifact lineage — NOT the code branch
+(`main` stays pure code). The agent writes the plain file; `imp artifact-commit`
+commits it to refs/imp/journal-wip/<id>. Do not run `git add`/`git commit`
+yourself, do not add a `Change:` trailer, and do not amend or fixup commits:
+the wip lineage is an append-only archive, so a first write and a revision are
+the same single step.
 
 ```
-git add imp/plans/{{ change.slug }}-plan-N.md
-git commit --fixup=":/docs: add plan N for {{ change.slug }}"
+imp artifact-commit plan
 ```
 
-The `--fixup=":/…"` anchor MUST be quoted: the `:/<text>` revspec contains spaces,
-so without quotes the shell word-splits it and git reads `add plan N …` as
-pathspecs and the revspec never resolves. The fixup anchor `:/docs: add plan N for
-{{ change.slug }}` (with the ` for <slug>`
-tail) ensures `plan 1` cannot prefix-match `plan 10`. `autosquash` folds every
-fixup into the original plan commit before review, so the final branch has exactly
-one commit per plan. Never use `--amend` — on a task-lead deviation the original
-plan commit is buried under task commits, and uniform fixup keeps the rule correct
-in all cases.
-
-Substitute the actual integer for N in BOTH the `git commit -m` message and the
-`--fixup=":/…"` anchor — e.g. for plan 3: `git commit -m "docs: add plan 3 for
-{{ change.slug }}"` for a first write, or `git commit --fixup=":/docs: add plan 3
-for {{ change.slug }}"` for a revision. Keep the `--fixup=":/…"` value quoted.
-Never leave a literal `N` in a commit message or a fixup anchor.
+This is identical for a fresh plan N and a revision of an existing plan N (a
+rework bounce, a deviation, or a minors-integration pass): re-write
+`.imp/change/artifacts/plans/{{ change.slug }}-plan-N.md`, then run the command.
 
 ## Minors-integration pass (a review follows)
 
@@ -387,31 +367,28 @@ newest plan exists and `progress.md` does not mark it complete, so you revise N 
 place). On this pass:
 
 1. **Integrate the advisory findings.** Apply any Minor/Nit improvements from
-   `findings:` to plan N, then fold the edit into the plan commit with a fixup
-   (the same revision mode the rework path uses) and finish tool-terminal:
+   `findings:` to plan N, re-write `.imp/change/artifacts/plans/{{ change.slug }}-plan-N.md`,
+   then run `imp artifact-commit plan` and finish tool-terminal:
 
    ```
-   git add imp/plans/{{ change.slug }}-plan-N.md
-   git commit --fixup=":/docs: add plan N for {{ change.slug }}"
-   complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)
+   imp artifact-commit plan
+   complete_step(plan_path=".imp/change/artifacts/plans/{{ change.slug }}-plan-N.md", plan_number=N)
    ```
 
 2. **If there is nothing worth integrating** (none of the findings are worth
    acting on), **complete WITHOUT committing** — just call
-   `complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)`.
-   Do NOT run an empty `git commit --fixup`: with no staged change it errors on a
-   clean index and fails the turn. The verification review still runs on the
-   unchanged plan and will pass it through.
+   `complete_step(plan_path=".imp/change/artifacts/plans/{{ change.slug }}-plan-N.md", plan_number=N)`.
+   Do NOT run `imp artifact-commit plan` when nothing changed. The verification
+   review still runs on the unchanged plan and will pass it through.
 
 End the turn tool-terminal with the `complete_step` call. Do not re-solicit the
 user and do not reopen planning — this pass exists only to incorporate the
-reviewer's advice. (Substitute the actual integer for N, and keep the
-`--fixup=":/…"` value quoted, exactly as in the Commit section above.)
+reviewer's advice. (Substitute the actual integer for N.)
 
 ## Finish
 
 ```
-complete_step(plan_path="imp/plans/{{ change.slug }}-plan-N.md", plan_number=N)
+complete_step(plan_path=".imp/change/artifacts/plans/{{ change.slug }}-plan-N.md", plan_number=N)
 ```
 
 (Substitute the actual integer for N.)

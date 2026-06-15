@@ -27,3 +27,21 @@ def test_spec_writer_writes_to_artifacts_and_uses_commit_script() -> None:
     # The old code-branch path and git-commit machinery are gone.
     assert "imp/specs/" not in body
     assert "git commit --amend" not in body
+
+
+def test_plan_writer_writes_to_artifacts_and_uses_commit_script() -> None:
+    body = _agent_prompt("plan-writer")
+    assert ".imp/change/artifacts/plans/" in body
+    assert "imp artifact-commit plan" in body
+    # No plan fixup / amend machinery survives.
+    assert "--fixup" not in body
+    assert "git commit --amend" not in body
+    assert "imp/plans/" not in body
+
+
+def test_no_agent_prompt_references_code_branch_artifact_paths() -> None:
+    wf = load_workflow(default_workflow_dir())
+    for name, agent in wf.agents.items():
+        body = agent.prompt_template_source
+        assert "imp/specs/" not in body, f"{name} still references imp/specs/"
+        assert "imp/plans/" not in body, f"{name} still references imp/plans/"

@@ -73,7 +73,7 @@ phases:
         tier: high
         fs_permissions:
           - {operations: [read],  paths: ["**"], mode: allow}
-          - {operations: [write], paths: ["imp/plans/**"], mode: allow}
+          - {operations: [write], paths: [".imp/change/artifacts/plans/**"], mode: allow}
 
       - name: plan-verify-commit
         quiet: true
