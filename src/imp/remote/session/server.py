@@ -35,6 +35,7 @@ class SessionServer:
         self._hibernate = hibernate
         self.abandoned = False
         self._serve_scope: anyio.CancelScope | None = None
+        self._pending_prompt: dict[str, Any] | None = None
         # Initialized in open() because anyio.Event needs a running event loop.
         self._attach_changed: anyio.Event | None = None
         self._socket = SessionSocket(
@@ -134,8 +135,20 @@ class SessionServer:
             evt.set()
             self._attach_changed = anyio.Event()
 
+    async def wait_for_attach_change(self) -> None:
+        """Wait for the next attach or detach event."""
+        evt = self._attach_changed
+        if evt is not None:
+            await evt.wait()
+
+    def set_pending_prompt(self, event: dict[str, Any] | None) -> None:
+        """Track a prompt event to re-emit to clients that connect after it fires."""
+        self._pending_prompt = event
+
     def _on_attach_pulse(self, _attach: Any) -> None:
         self._pulse_attach_change()
+        if self._pending_prompt is not None:
+            self._emit(self._pending_prompt)
 
     def _on_detach_pulse(self) -> None:
         self._pulse_attach_change()

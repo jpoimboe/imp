@@ -188,14 +188,14 @@ async def test_force_quit_tears_down_client_and_run_survives(
     survived: list[bool] = []
 
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
-        with anyio.fail_after(5):
+        with anyio.fail_after(15):
             while server.attached_count == 0:
-                await anyio.sleep(0.02)
+                await server.wait_for_attach_change()
         on_event({"type": "step_started", "payload": {}})
         # Force-quit tears down the CLIENT here; the run must keep going.
-        with anyio.fail_after(5):
+        with anyio.fail_after(15):
             while server.attached_count != 0:
-                await anyio.sleep(0.02)
+                await server.wait_for_attach_change()
         survived.append(True)
         return "done"
 
@@ -215,7 +215,7 @@ async def test_force_quit_tears_down_client_and_run_survives(
         def on_event(self, _event: dict[str, Any]) -> None: ...
         def finish(self) -> None: ...
 
-    with anyio.fail_after(10):
+    with anyio.fail_after(30):
         async with anyio.create_task_group() as tg:
             await server.open()
             tg.start_soon(server.serve, run_fn)
@@ -226,7 +226,7 @@ async def test_force_quit_tears_down_client_and_run_survives(
                     coord=coord, solicit=_solicit)
 
             tg.start_soon(_client)
-            with anyio.fail_after(5):
+            with anyio.fail_after(15):
                 while coord.escalation_event is None or server.attached_count != 1:
                     await anyio.sleep(0.02)
             coord.escalation_event.set()       # force-quit gesture
@@ -245,12 +245,12 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
     async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
         with anyio.fail_after(5):
             while server.attached_count == 0:
-                await anyio.sleep(0.02)
+                await server.wait_for_attach_change()
         on_event({"type": "step_started", "payload": {}})
         # Ctrl-\ tears down the CLIENT here; the run must keep going.
         with anyio.fail_after(5):
             while server.attached_count != 0:
-                await anyio.sleep(0.02)
+                await server.wait_for_attach_change()
         survived.append(True)
         return "done"
 

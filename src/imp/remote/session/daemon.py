@@ -45,12 +45,35 @@ async def serve_change_session(
     await server.open()
 
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
-        return await run_fn(
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+        result = await run_fn(
             change,
             on_event=on_event,
             user_chat_input_fn=user_chat_input_fn,
             coordinator=coordinator,
         )
+        while _is_interrupt_pause(result, coordinator):
+            prompt_event = {"type": "awaiting_user_input",
+                            "payload": {"prompt": _RESUME_PROMPT}}
+            server.set_pending_prompt(prompt_event)
+            on_event(prompt_event)
+            try:
+                reply = await user_chat_input_fn("")
+            except AwaitingUserInput:
+                return result
+            finally:
+                server.set_pending_prompt(None)
+            coordinator.reset()
+            if reply.strip():
+                coordinator.enqueue_interject(reply)
+            result = await run_fn(
+                change,
+                on_event=on_event,
+                user_chat_input_fn=user_chat_input_fn,
+                coordinator=coordinator,
+            )
+        return result
 
     result = await server.serve(_bound)
     if server.abandoned:

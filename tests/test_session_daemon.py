@@ -236,3 +236,55 @@ def test_is_interrupt_pause_true_only_for_paused_with_should_pause() -> None:
     assert _is_interrupt_pause(RunResult.PAUSED, paused_interrupt) is True
     assert _is_interrupt_pause(RunResult.PAUSED, paused_workflow) is False
     assert _is_interrupt_pause(RunResult.COMPLETED, paused_interrupt) is False
+
+
+@pytest.mark.anyio
+async def test_interrupt_pause_reprompts_and_resumes_in_place(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-rzm")
+    sock = str(session_socket_path(change.control_root, change.id))
+    calls = {"n": 0}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            await coordinator.signal_pause(reason="ctrl-c")
+            return RunResult.PAUSED
+        assert not coordinator.should_pause  # reset() must have cleared this
+        on_event({"type": "agent_output",
+                  "payload": {"redirect": coordinator.drain_interject()}})
+        return RunResult.COMPLETED
+
+    async with anyio.create_task_group() as tg:
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await serve_change_session(
+                change, run_fn=fake_run, hibernate=False)
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        received: list[dict[str, Any]] = []
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=received.append)
+        await client.connect()
+        tg.start_soon(client.receive_events)
+        with anyio.fail_after(5):
+            while not any(
+                    e.get("type") == "awaiting_user_input" for e in received):
+                await anyio.sleep(0.02)
+        await anyio.sleep(0.05)  # let the resume gate open (next_input is awaiting)
+        await client.send_input("go left")
+        with anyio.fail_after(5):
+            while "r" not in result:
+                await anyio.sleep(0.02)
+        assert result["r"] is RunResult.COMPLETED
+        assert calls["n"] == 2
+        assert {"type": "agent_output",
+                "payload": {"redirect": "go left"}} in received
+        await client.aclose()
+        tg.cancel_scope.cancel()
