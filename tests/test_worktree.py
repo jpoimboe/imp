@@ -430,7 +430,6 @@ def test_fold_wip_into_journal_carries_artifacts_and_runtime(tmp_path: Path) -> 
                 "refs/imp/journal:feat/events.jsonl").stdout == '{"e":1}\n'
     assert _git(tmp_path, "show",
                 "refs/imp/journal:feat/state.json").stdout == '{"status":"completed"}'
-    # ONE journal commit.
     assert _git(tmp_path, "log", "--oneline", "refs/imp/journal").stdout.count("\n") == 1
     # The wip ref is deleted after the fold.
     assert _git(tmp_path, "rev-parse", "--verify", "--quiet",
@@ -451,7 +450,7 @@ def test_fold_without_wip_ref_journals_runtime_only(tmp_path: Path) -> None:
                 "refs/imp/journal:bare").returncode == 0
 
 
-def test_fold_wip_idempotent_on_second_call(tmp_path: Path) -> None:
+def test_fold_wip_idempotent_on_crash_retry(tmp_path: Path) -> None:
     # Simulate a crash-then-retry: first call succeeds; second call must not error
     # and the journal content must remain correct (no duplicate subtree).
     _init_repo(tmp_path)
