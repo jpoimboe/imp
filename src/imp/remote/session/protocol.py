@@ -57,15 +57,18 @@ def encode_event(event: dict[str, Any]) -> str:
 def parse_client_message(line: str) -> ClientMessage:
     obj = json.loads(line)
     kind = obj.get("kind")
-    if kind == "attach":
-        return Attach(obj["change_id"], obj["title"])
-    if kind == "input":
-        return Input(obj["text"])
-    if kind == "control":
-        action = obj["action"]
-        if action not in _CONTROL_ACTIONS:
-            raise ValueError(f"unknown control action {action!r}")
-        return Control(action)
+    try:
+        if kind == "attach":
+            return Attach(obj["change_id"], obj["title"])
+        if kind == "input":
+            return Input(obj["text"])
+        if kind == "control":
+            action = obj["action"]
+            if action not in _CONTROL_ACTIONS:
+                raise ValueError(f"unknown control action {action!r}")
+            return Control(action)
+    except KeyError as exc:
+        raise ValueError(f"missing required field {exc}") from exc
     raise ValueError(f"unknown client message kind {kind!r}")
 
 
@@ -73,4 +76,7 @@ def parse_event(line: str) -> dict[str, Any]:
     obj = json.loads(line)
     if obj.get("kind") != "event":
         raise ValueError(f"expected event frame, got {obj.get('kind')!r}")
-    return cast(dict[str, Any], obj["event"])
+    try:
+        return cast(dict[str, Any], obj["event"])
+    except KeyError:
+        raise ValueError("missing required field 'event'") from None
