@@ -8,6 +8,7 @@ from typing import Any
 
 import anyio
 
+from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.executor import run_change
 from imp.engine.state import ProjectLock
@@ -22,6 +23,7 @@ async def serve_change_session(
     *,
     run_fn: RunFn = run_change,
     hibernate: bool = True,
+    tear_down: Callable[[Change], None] = tear_down_change,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -44,7 +46,11 @@ async def serve_change_session(
             coordinator=coordinator,
         )
 
-    return await server.serve(_bound)
+    result = await server.serve(_bound)
+    if server.abandoned:
+        # cwd is control_root, not the worktree, so worktree removal is safe
+        await anyio.to_thread.run_sync(tear_down, change)
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

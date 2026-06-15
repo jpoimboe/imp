@@ -10,6 +10,7 @@ from imp.engine.change import Change
 from imp.remote.session.client import SessionClient
 from imp.remote.session.daemon import serve_change_session
 from imp.remote.session.discover import session_socket_path
+from imp.remote.session.protocol import CONTROL_ABANDON
 
 
 @pytest.fixture
@@ -192,3 +193,36 @@ def test_main_loads_named_change_and_serves_it(
     assert rc == 0
     assert calls["load"] == (tmp_path, "2026-06-15-abc")
     assert calls["run"] == (daemon.serve_change_session, loaded)
+
+
+@pytest.mark.anyio
+async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
+    change = _make_change(tmp_path, "2026-06-15-aba")
+    sock = str(session_socket_path(change.control_root, change.id))
+    torn: list[Change] = []
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> str:
+        await anyio.sleep_forever()   # only an abandon-cancel ends this run
+        return "x"
+
+    async with anyio.create_task_group() as tg:
+        async def _serve() -> None:
+            await serve_change_session(
+                change, run_fn=fake_run, hibernate=False,
+                tear_down=lambda ch: torn.append(ch))
+
+        tg.start_soon(_serve)
+        await _wait_for_socket(sock)
+        client = SessionClient(sock, change.id, change.title,
+                               on_event=lambda _e: None)
+        await client.connect()
+        await client.send_control(CONTROL_ABANDON)
+        with anyio.fail_after(5):
+            while not torn:
+                await anyio.sleep(0.02)
+        assert torn == [change]
+        await client.aclose()
+        tg.cancel_scope.cancel()
