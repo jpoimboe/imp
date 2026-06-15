@@ -324,7 +324,8 @@ async def run_daemon(
     env: Mapping[str, str] | None = None,
     make_adapter: Callable[
         [Mapping[str, str], Callable[[Command], None], Focus],
-        Any] = _make_telegram_adapter,
+        Any,
+    ] = _make_telegram_adapter,
     resume: Callable[[str, str], None] | None = None,
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], int] | None = None,
