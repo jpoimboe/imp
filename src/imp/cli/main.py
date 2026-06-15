@@ -42,6 +42,7 @@ from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.tui_app import TuiApp
 from imp.engine import backlog, journal, recovery, worktree
+from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
@@ -55,6 +56,8 @@ from imp.engine.workflow_lifecycle import (
     workflow_update_notice,
 )
 from imp.providers.config import parse_default_workflow
+from imp.remote.daemon.directory import session_is_resident
+from imp.remote.session.attach import build_session_attach
 
 
 class ReplyInterjectRouter:
@@ -2005,6 +2008,24 @@ async def _pick_playbook(control: Path, *, non_interactive: bool) -> str | int:
     return chosen.name if chosen is not None else 2
 
 
+def _deliver_abandon_resident(control: Path, change_id: str) -> None:
+    from imp.remote.session.client import SessionClient
+    from imp.remote.session.discover import session_socket_path
+    from imp.remote.session.protocol import CONTROL_ABANDON
+
+    async def _run() -> None:
+        path = str(session_socket_path(control, change_id))
+        client = SessionClient(path, change_id, "", on_event=lambda _: None)
+        await client.connect()
+        try:
+            await client.send_control(CONTROL_ABANDON)
+            await client.receive_events()
+        finally:
+            await client.aclose()
+
+    anyio.run(_run)
+
+
 def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
              interactive: bool | None = None,
              input_fn: Callable[[str], str] = input) -> int:
@@ -2042,28 +2063,20 @@ def _abandon(control: Path, change_id: str, *, assume_yes: bool = False,
             print(f"Abandon cancelled; {token} left intact.")
             return 1
 
+    if session_is_resident(control, change_id):
+        try:
+            _deliver_abandon_resident(control, change_id)
+        except OSError:
+            pass  # daemon exited between check and connect; fall through to direct teardown
+        else:
+            print(f"Abandoned {token}.")
+            return 0
     try:
-        with ProjectLock(change.change_dir / "lock").acquire():  # timeout=0
-            state = State.load(change.state_dir)
-            state.status = "abandoned"
-            state.save(change.state_dir)                          # (a)
-            change.event_log().append(                            # (b)
-                agent_id=None, type="change_abandoned", payload={})
-            worktree.fold_wip_into_journal(control, change_id, {   # (c)
-                "events.jsonl": change.events_path,
-                "change.json": change.change_dir / "change.json",
-                "state.json": change.state_dir / "state.json",
-            })
-        # lock released here (after c, before d): nothing below needs it, and
-        # the persisted status="abandoned" blocks any concurrent resume —
-        # _async_cmd_resume re-reads status under the lock and refuses.
+        tear_down_change(change)
     except LockHeld as e:
         print(f"imp: Change {change_id} is running (pid {e.held_by_pid or '?'}); "
               f"stop it before abandoning", file=sys.stderr)
         return 2
-
-    worktree.remove_worktree(control, change_id, force=True)      # (d)
-    worktree.delete_branch(control, change_id)                    # (e)
     print(f"Abandoned {token}.")
     return 0
 

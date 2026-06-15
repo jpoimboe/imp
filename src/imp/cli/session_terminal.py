@@ -58,12 +58,15 @@ async def run_terminal_client(
             if sigquit is not None else None)
         client = await attach(_on_event)
         try:
-            # Constructed for its side effect: binds the interrupt-forward runner onto coord.
-            SessionControls(client, coord)
+            controls = SessionControls(client, coord)
             async with anyio.create_task_group() as tg:
                 async def _answer_gates() -> None:
                     async for prompt in gate_recv:
-                        await client.send_input(await solicit(prompt))
+                        reply = await solicit(prompt)
+                        if reply.strip() == "/abandon":
+                            await controls.abandon()
+                            break
+                        await client.send_input(reply)
 
                 async def _watch_force_quit() -> None:
                     # cancel scope → finally → client.aclose; daemon detaches and runs on

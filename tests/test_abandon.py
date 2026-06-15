@@ -4,6 +4,7 @@ import pytest
 
 from imp.cli.main import _abandon, _completed_rows, _status_rows
 from imp.engine import journal, worktree
+from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.state import ProjectLock, State
 from tests.conftest import _git, _seed_control
@@ -175,3 +176,33 @@ def test_abandon_confirmation_uses_short_token(
     assert rc == 0
     assert "Abandoned yaitd7." in out
     assert "2026-06-13-yaitd7" not in out
+
+
+def test_abandon_resident_routes_through_daemon(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import imp.cli.main as _m
+    _seed_control(tmp_path)
+    Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    delivered: list[str] = []
+    monkeypatch.setattr(_m, "session_is_resident", lambda _ctrl, cid: True)
+    monkeypatch.setattr(_m, "_deliver_abandon_resident",
+                        lambda _ctrl, cid: delivered.append(cid))
+    rc = _abandon(tmp_path, "feat", assume_yes=True)
+    assert rc == 0
+    assert delivered == ["feat"]
+
+
+def test_tear_down_change_destroys_worktree_branch_and_journals(
+    tmp_path: Path,
+) -> None:
+    _seed_control(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+
+    tear_down_change(ch)
+
+    assert not (tmp_path / ".imp" / "worktrees" / "feat").exists()       # worktree gone
+    assert _git(tmp_path, "branch", "--list", "imp/feat").stdout.strip() == ""  # branch gone
+    state_json = journal.journal_show(tmp_path, "feat", "state.json")
+    assert state_json is not None and b'"abandoned"' in state_json
+    events = journal.journal_show(tmp_path, "feat", "events.jsonl")
+    assert events is not None and b"change_abandoned" in events
