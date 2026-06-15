@@ -1,4 +1,4 @@
-"""Prompt template rendering: 3 namespaces (change/events/vars)."""
+"""Tests for render_prompt / build_context (4 namespaces: change, events, vars, project)."""
 
 from __future__ import annotations
 
@@ -136,3 +136,58 @@ def test_events_render_skips_torn_trailing_line(tmp_path: Path) -> None:
     assert render_prompt(
         "Prev: {{ events['spec-writer'].summary }}", ctx,
     ) == "Prev: good"
+
+
+def test_renders_project_facts(tmp_path: Path) -> None:
+    ctx = build_context(
+        change_slug="t", change_title="t",
+        event_log=_log(tmp_path / "events.jsonl", []),
+        project_facts={"test_command": "make test"}, guidance="be careful",
+    )
+    assert render_prompt("{{ project.test_command }}", ctx) == "make test"
+    assert render_prompt("{{ project.guidance }}", ctx) == "be careful"
+
+
+def test_guidance_defaults_empty(tmp_path: Path) -> None:
+    ctx = build_context(
+        change_slug="t", change_title="t",
+        event_log=_log(tmp_path / "events.jsonl", []),
+    )
+    assert render_prompt("{{ project.guidance }}", ctx) == ""
+
+
+def test_missing_fact_attr_raises(tmp_path: Path) -> None:
+    ctx = build_context(
+        change_slug="t", change_title="t",
+        event_log=_log(tmp_path / "events.jsonl", []),
+        project_facts={"a": "1"},
+    )
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ project.absent }}", ctx)
+
+
+def test_missing_fact_item_raises(tmp_path: Path) -> None:
+    ctx = build_context(
+        change_slug="t", change_title="t",
+        event_log=_log(tmp_path / "events.jsonl", []),
+        project_facts={"a": "1"},
+    )
+    with pytest.raises(PromptRenderError):
+        render_prompt('{{ project["absent"] }}', ctx)
+
+
+def test_default_filter_does_not_rescue_strict_namespace(tmp_path: Path) -> None:
+    ctx = build_context(
+        change_slug="t", change_title="t",
+        event_log=_log(tmp_path / "events.jsonl", []),
+        project_facts={"a": "1"},
+    )
+    with pytest.raises(PromptRenderError):
+        render_prompt("{{ project.absent | default('x') }}", ctx)
+
+
+def test_dunder_raises_attributeerror() -> None:
+    from imp.agents.prompts import _ProjectNamespace
+    ns = _ProjectNamespace({"a": "1", "guidance": ""})
+    with pytest.raises(AttributeError):
+        _ = ns.__html__

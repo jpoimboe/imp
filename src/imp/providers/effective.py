@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from imp.engine.types import SourceLoc
-from imp.providers.config import Config, parse_config_layer
+from imp.providers.config import Config, parse_config_layer, parse_project_facts
 from imp.providers.resolve import iter_provider_defaults
 
 # A synthetic source for floor leaves. The string is what `imp config` prints.
@@ -87,7 +87,9 @@ def merge_layers(
     return out, prov
 
 
-def _to_config(merged: dict[str, Any]) -> Config:
+def _to_config(
+    merged: dict[str, Any], project_facts: dict[str, str], guidance: str,
+) -> Config:
     return Config(
         providers=tuple(merged.get("providers", ())),
         tiers=merged.get("tiers", {}),
@@ -99,6 +101,8 @@ def _to_config(merged: dict[str, Any]) -> Config:
         theme=merged.get("theme", "ansi"),
         sandbox=merged.get("sandbox", {}),
         remote=merged.get("remote", {}),
+        project_facts=project_facts,
+        guidance=guidance,
     )
 
 
@@ -115,10 +119,14 @@ def load_effective_config(
       when control_root is None.
     """
     layers: list[tuple[dict[str, Any], SourceLoc]] = [_floor_layer()]
+    project_facts: dict[str, str] = {}
+    guidance = ""
     if project_root is not None:
-        p = parse_config_layer(project_root / "imp" / "project.yaml")
+        proj_path = project_root / "imp" / "project.yaml"
+        p = parse_config_layer(proj_path)
         if p is not None:
             layers.append(p)
+        project_facts, guidance = parse_project_facts(proj_path)
     u = parse_config_layer(user_config_path())
     if u is not None:
         layers.append(u)
@@ -127,4 +135,4 @@ def load_effective_config(
         if local is not None:
             layers.append(local)
     merged, prov = merge_layers(layers)
-    return EffectiveConfig(config=_to_config(merged), provenance=prov)
+    return EffectiveConfig(config=_to_config(merged, project_facts, guidance), provenance=prov)

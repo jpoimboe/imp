@@ -15,13 +15,14 @@ Schema (post 2026-06-04-roles-to-tiers):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from imp.engine._yaml import items
+from imp.engine._yaml import LineLoader, items, key_loc, loc
 from imp.engine.errors import LoadError
 from imp.engine.expr import ExprType
 from imp.engine.types import SourceLoc, Vars
@@ -50,6 +51,8 @@ class Config:
     theme: str = field(hash=False, default="ansi")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
     remote: dict[str, Any] = field(hash=False, default_factory=dict)
+    project_facts: dict[str, str] = field(hash=False, default_factory=dict)
+    guidance: str = field(hash=False, default="")
 
     def tier_names(self) -> frozenset[str]:
         return frozenset(self.tiers)
@@ -58,6 +61,66 @@ class Config:
         """Env-var name for `provider` — `provider_envs[provider]` if present,
         else `<PROVIDER>_API_KEY`."""
         return self.provider_envs.get(provider, f"{provider.upper()}_API_KEY")
+
+
+_FACT_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*\Z")
+_FACT_SCALARS = (str, int, float, bool)
+
+
+def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
+    """Read imp/project.yaml `facts:` and `guidance:` into (facts, guidance)."""
+    if not path.exists():
+        return {}, ""
+    try:
+        raw: Any = yaml.load(path.read_text(), Loader=LineLoader) or {}
+    except yaml.YAMLError as e:
+        raise LoadError(
+            f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)
+        ) from e
+    if not isinstance(raw, dict):
+        raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
+
+    guidance_raw = raw.get("guidance")
+    if guidance_raw is None:
+        guidance = ""
+    elif not isinstance(guidance_raw, _FACT_SCALARS):
+        raise LoadError(
+            "'guidance:' must be a string scalar",
+            key_loc(path, raw, "guidance"),
+        )
+    else:
+        guidance = str(guidance_raw)
+
+    facts: dict[str, str] = {}
+    facts_raw = raw.get("facts")
+    if facts_raw is None:
+        return facts, guidance
+    if not isinstance(facts_raw, dict):
+        raise LoadError(
+            "'facts:' must be a mapping of name to scalar value",
+            key_loc(path, raw, "facts"),
+        )
+    facts_src = loc(path, facts_raw)
+    for key, value in items(facts_raw):
+        if not isinstance(key, str) or not _FACT_KEY_RE.match(key):
+            raise LoadError(
+                f"facts key {key!r} is not a valid identifier "
+                "([A-Za-z][A-Za-z0-9_]*)",
+                facts_src,
+            )
+        if key == "guidance":
+            raise LoadError(
+                "facts key 'guidance' is reserved (it is the sibling top-level "
+                "'guidance:' field)",
+                facts_src,
+            )
+        if not isinstance(value, _FACT_SCALARS):
+            raise LoadError(
+                f"facts.{key}: value must be a scalar, not {type(value).__name__}",
+                loc(path, value) if isinstance(value, dict) else facts_src,
+            )
+        facts[key] = ("true" if value else "false") if isinstance(value, bool) else str(value)
+    return facts, guidance
 
 
 def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
