@@ -26,6 +26,10 @@ class LoadError(Exception):
             parts.append(f"  hint: {self.hint}")
         return "\n".join(parts)
 
+    @property
+    def errors(self) -> "list[LoadError]":
+        return [self]
+
 
 @dataclass
 class LoadErrors(Exception):
