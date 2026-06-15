@@ -1,3 +1,4 @@
+"""Attach to or spawn a per-change session daemon."""
 from __future__ import annotations
 
 import os
