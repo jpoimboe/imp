@@ -35,3 +35,37 @@ def test_true_false_still_parse_as_booleans() -> None:
         assert parsed["val"] is expected, (
             f"{word!r} parsed as {parsed['val']!r} (type {type(parsed['val']).__name__})"
         )
+
+
+def test_key_loc_returns_each_keys_line() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    from imp.engine._yaml import LineLoader, key_loc
+    parsed = yaml.load("alpha: 1\nbeta: 2\n", Loader=LineLoader)
+    p = Path("x.yaml")
+    assert key_loc(p, parsed, "alpha").line == 1
+    assert key_loc(p, parsed, "beta").line == 2
+
+
+def test_key_loc_falls_back_to_mapping_line_for_unknown_key() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    from imp.engine._yaml import LineLoader, key_loc
+
+    # Sub-mapping "inner" starts at line 2; fallback must return line 2, not 1.
+    parsed = yaml.load("outer:\n  alpha: 1\n", Loader=LineLoader)
+    inner = parsed["outer"]
+    assert key_loc(Path("x.yaml"), inner, "missing").line == 2
+
+
+def test_items_skips_key_lines_marker() -> None:
+    import yaml
+
+    from imp.engine._yaml import LineLoader, items
+    parsed = yaml.load("alpha: 1\n", Loader=LineLoader)
+    assert "__key_lines__" in parsed
+    assert [k for k, _ in items(parsed)] == ["alpha"]

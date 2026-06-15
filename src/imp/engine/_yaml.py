@@ -27,6 +27,10 @@ class LineLoader(yaml.SafeLoader):
 def _construct_mapping(loader: LineLoader, node: yaml.MappingNode) -> dict[str, Any]:
     mapping = cast(dict[str, Any], loader.construct_mapping(node, deep=True))
     mapping["__line__"] = node.start_mark.line + 1  # 1-indexed
+    key_lines: dict[Any, int] = {}
+    for key_node, _value_node in node.value:
+        key_lines[loader.construct_object(key_node)] = key_node.start_mark.line + 1
+    mapping["__key_lines__"] = key_lines
     return mapping
 
 
@@ -69,6 +73,16 @@ def loc(yaml_path: Path, node: dict[str, Any] | None) -> SourceLoc:
     if isinstance(node, dict) and "__line__" in node:
         return SourceLoc(file=yaml_path, line=int(node["__line__"]))
     return SourceLoc(file=yaml_path, line=1)
+
+
+def key_loc(yaml_path: Path, mapping: dict[str, Any] | None, key: str) -> SourceLoc:
+    """SourceLoc for a specific KEY within a parsed mapping. Falls back to the
+    mapping's own line (then line 1) when the key has no recorded position."""
+    if isinstance(mapping, dict):
+        key_lines = mapping.get("__key_lines__")
+        if isinstance(key_lines, dict) and key in key_lines:
+            return SourceLoc(file=yaml_path, line=int(key_lines[key]))
+    return loc(yaml_path, mapping)
 
 
 def items(d: dict[str, Any]) -> Iterator[tuple[str, Any]]:
