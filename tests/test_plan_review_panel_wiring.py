@@ -19,7 +19,7 @@ AGENTS = Path("src/imp/assets/workflows/default/agents")
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False,
-    "plan_panel_done": False, "multi_plan": False, "review_scope": "plan",
+    "panel_done": False, "plan_panel_done": False, "multi_plan": False, "review_scope": "plan",
 }
 
 
