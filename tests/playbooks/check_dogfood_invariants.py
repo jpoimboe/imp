@@ -84,7 +84,8 @@ def check_artifacts_in_journal(repo: str) -> Result:
     cid = ids[0]
     spec = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal:{cid}/spec")
     plans = _git(repo, "ls-tree", "--name-only", f"refs/imp/journal:{cid}/plans")
-    ok = (spec.returncode == 0 and spec.stdout.strip().endswith(".md")
+    ok = (spec.returncode == 0
+          and spec.stdout.strip().splitlines()[-1].endswith(".md")
           and plans.returncode == 0 and "-plan-" in plans.stdout)
     return Result("artifacts_in_journal", ok,
                   f"journal {cid}/ carries spec + plan(s)" if ok else
