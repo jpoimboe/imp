@@ -86,20 +86,33 @@ def test_review_parse_contract_routes_declared_schema() -> None:
     wf = _wf()
     schema = wf.agents["review-panel"].output_schema
     rules = _steps(wf)["review"].rules
-    for verdict in ("approve", "rework"):
+    for verdict in ("approve", "task_gap", "plan_gap"):
         payload = {"status": "Success", "verdict": verdict, "findings": "x"}
         validate_agent_output(payload, schema)           # must not raise
         assert evaluate_rules(rules, vars=_BASE_VARS, output=payload).action is not None
 
 
-def test_review_panel_verdict_enum_is_collapsed() -> None:
+def test_review_panel_verdict_enum_is_three_way() -> None:
     schema = _wf().agents["review-panel"].output_schema
     verdict_field = next(f for f in schema.fields if f.name == "verdict")
-    assert set(verdict_field.values) == {"approve", "rework"}
-    for gap in ("task_gap", "plan_gap"):
-        with pytest.raises(LoadError):
-            validate_agent_output(
-                {"status": "Success", "verdict": gap, "findings": "x"}, schema)
+    assert set(verdict_field.values) == {"approve", "task_gap", "plan_gap"}
+    with pytest.raises(LoadError):
+        validate_agent_output(
+            {"status": "Success", "verdict": "rework", "findings": "x"}, schema)
+
+
+def test_review_panel_adjudicates_not_tallies() -> None:
+    text = (AGENTS / "review-panel.md").read_text()
+    assert "COMPUTE, do not judge" not in text
+    assert "receiving-code-review" in text
+    low = text.lower()
+    # §2 guardrail
+    assert "non-dismissable" in low
+    assert "misclassification" in low
+    assert "downward" in low
+    # §3 routing taxonomy + tie-breaker
+    assert "default to defer" in low
+    assert "task_gap" in text and "plan_gap" in text
 
 
 def test_no_gap_verdict_in_workflow_yaml() -> None:
