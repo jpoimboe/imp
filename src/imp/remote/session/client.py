@@ -30,6 +30,7 @@ class SessionClient:
         self._title = title
         self._on_event = on_event
         self._stream: SocketStream | None = None
+        self._send_lock = anyio.Lock()
 
     async def connect(self) -> None:
         stream = await anyio.connect_unix(self._path)
@@ -57,12 +58,14 @@ class SessionClient:
     async def send_input(self, text: str) -> None:
         if self._stream is None:
             raise RuntimeError("call connect() before send_input()")
-        await self._stream.send((encode_input(text) + "\n").encode("utf-8"))
+        async with self._send_lock:
+            await self._stream.send((encode_input(text) + "\n").encode("utf-8"))
 
     async def send_control(self, action: str) -> None:
         if self._stream is None:
             raise RuntimeError("call connect() before send_control()")
-        await self._stream.send((encode_control(action) + "\n").encode("utf-8"))
+        async with self._send_lock:
+            await self._stream.send((encode_control(action) + "\n").encode("utf-8"))
 
     async def aclose(self) -> None:
         if self._stream is not None:

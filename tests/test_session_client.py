@@ -6,7 +6,7 @@ import anyio
 import pytest
 
 from imp.remote.session.client import SessionClient
-from imp.remote.session.protocol import Attach
+from imp.remote.session.protocol import CONTROL_INTERRUPT, Attach
 from imp.remote.session.socket_server import SessionSocket
 
 
@@ -174,6 +174,57 @@ async def test_client_send_control_rejects_unknown_action(tmp_path: Path) -> Non
                 await anyio.sleep(0.02)
         with pytest.raises(ValueError, match="unknown control action"):
             await client.send_control("explode")
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_concurrent_send_input_and_control_do_not_collide(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    actions: list[str] = []
+    inputs: list[str] = []
+    server = SessionSocket(sock, on_control=actions.append)
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+
+        real_send = client._stream.send  # type: ignore[union-attr]
+        block = anyio.Event()
+        max_concurrent = 0
+        current_concurrent = 0
+
+        async def _slow_send(data: bytes) -> None:
+            nonlocal current_concurrent, max_concurrent
+            current_concurrent += 1
+            max_concurrent = max(max_concurrent, current_concurrent)
+            await block.wait()
+            current_concurrent -= 1
+            await real_send(data)
+
+        client._stream.send = _slow_send  # type: ignore[method-assign, union-attr]
+
+        async def _gate() -> None:
+            inputs.append(await server.next_input())
+
+        tg.start_soon(_gate)
+        await anyio.sleep(0.05)
+        async with anyio.create_task_group() as send_tg:
+            send_tg.start_soon(client.send_input, "reply")
+            send_tg.start_soon(client.send_control, CONTROL_INTERRUPT)
+            await anyio.sleep(0.05)
+            block.set()
+        with anyio.fail_after(5):
+            while not (inputs and actions):
+                await anyio.sleep(0.02)
+        assert max_concurrent == 1, "lock must serialize concurrent sends"
+        assert inputs == ["reply"]
+        assert actions == ["interrupt"]
         await client.aclose()
         await server.close()
         tg.cancel_scope.cancel()
