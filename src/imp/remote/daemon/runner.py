@@ -377,16 +377,20 @@ async def run_daemon(
                           _sender_worker, adapter, outbound, responses, stop)
             if install_signals:
                 tg.start_soon(_await_shutdown_signals, shutdown)
-            await shutdown.wait()
-            stop.set()
-            await hub.close()       # triggers ClosedResourceError in hub.serve
-            await anyio.sleep(0)    # let the hub.serve task see it before we cancel
-            tg.cancel_scope.cancel()
+            try:
+                await shutdown.wait()
+            finally:
+                stop.set()
+                with anyio.CancelScope(shield=True):
+                    await hub.close()       # triggers ClosedResourceError in hub.serve
+                    await anyio.sleep(0)    # let the hub.serve task see it before we cancel
+                tg.cancel_scope.cancel()
     except Exception:
         _log.exception("remote-control daemon crashed")
         raise
     finally:
-        await hub.close()
+        with anyio.CancelScope(shield=True):
+            await hub.close()
         with contextlib.suppress(FileNotFoundError):
             spath.unlink()
         remove_pid(control_root)

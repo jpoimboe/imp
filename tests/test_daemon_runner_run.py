@@ -109,3 +109,34 @@ async def test_run_daemon_logs_start_and_routed_command_to_file(tmp_path: Path) 
     text = log_path.read_text()
     assert "remote-control daemon starting" in text
     assert "routing command" in text
+
+
+@pytest.mark.anyio
+async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) -> None:
+    _seed_control(tmp_path)
+    adapter = FakeAdapter()
+    shutdown = anyio.Event()        # never set: only cancellation can stop the daemon
+    spath = socket_path(tmp_path)
+
+    start = time.monotonic()
+    cancel_time: float = 0.0
+    with anyio.fail_after(10):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(functools.partial(
+                run_daemon, tmp_path, env={},
+                make_adapter=lambda env, submit, focus: adapter,
+                install_signals=False, shutdown=shutdown))
+
+            with anyio.fail_after(5):              # socket comes up
+                while not socket_is_live(spath):
+                    await anyio.sleep(0.02)
+            assert pid_path(tmp_path).exists()
+
+            cancel_time = time.monotonic()
+            tg.cancel_scope.cancel()               # external cancel — the Defect-1 path
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 3
+    assert time.monotonic() - cancel_time < 1.5
+    assert not socket_is_live(spath)
+    assert not pid_path(tmp_path).exists()
