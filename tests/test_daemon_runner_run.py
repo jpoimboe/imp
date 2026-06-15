@@ -45,7 +45,7 @@ async def test_run_daemon_binds_relays_a_south_event_and_cleans_up(tmp_path: Pat
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit: adapter,
+            make_adapter=lambda env, submit, focus: adapter,
             install_signals=False, shutdown=shutdown))
 
         with anyio.fail_after(5):              # socket comes up
@@ -98,7 +98,7 @@ async def test_run_daemon_logs_start_and_routed_command_to_file(tmp_path: Path) 
     async with anyio.create_task_group() as tg:
         tg.start_soon(functools.partial(
             run_daemon, tmp_path, env={},
-            make_adapter=lambda env, submit: SubmitOnceAdapter(submit),
+            make_adapter=lambda env, submit, focus: SubmitOnceAdapter(submit),
             install_signals=False, shutdown=shutdown))
 
         with anyio.fail_after(5):

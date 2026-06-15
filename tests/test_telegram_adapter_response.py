@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from imp.remote.daemon.commands import ListResult, Notice
 from imp.remote.daemon.discover import ChangeInfo
+from imp.remote.daemon.focus import Focus
 from imp.remote.daemon.telegram_adapter import (
     TelegramNorthAdapter,
     render_response,
@@ -12,7 +13,7 @@ def _adapter(sent: list) -> TelegramNorthAdapter:
     return TelegramNorthAdapter(
         chat_id=4242, submit=lambda command: None,
         send=lambda text, silent: (sent.append((text, silent)) or 1),
-        get_updates=lambda offset: {"result": []})
+        get_updates=lambda offset: {"result": []}, focus=Focus())
 
 
 def test_render_listresult_one_line_per_change() -> None:
@@ -48,3 +49,14 @@ def test_render_listresult_multiple_changes_joined_with_newlines() -> None:
         ChangeInfo(id="2026-06-13-bbbbbb", title="Beta", status="running", step="implement"),
     ]))
     assert out == "@aaaaaa  Alpha — paused · plan\n@bbbbbb  Beta — running · implement"
+
+
+def test_render_listresult_marks_the_focused_change() -> None:
+    out = render_response(ListResult([
+        ChangeInfo(id="2026-06-13-aaaaaa", title="Alpha", status="paused", step="plan"),
+        ChangeInfo(id="2026-06-13-bbbbbb", title="Beta", status="running",
+                   step="implement"),
+    ]), focused_id="2026-06-13-bbbbbb")
+    assert out == (
+        "@aaaaaa  Alpha — paused · plan\n"
+        "● @bbbbbb  Beta — running · implement")

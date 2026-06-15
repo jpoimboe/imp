@@ -153,10 +153,10 @@ def check_not_running(control_root: Path) -> None:
 
 
 def _make_telegram_adapter(
-    env: Mapping[str, str], submit: Callable[[Command], None],
+    env: Mapping[str, str], submit: Callable[[Command], None], focus: Focus,
 ) -> TelegramNorthAdapter:
     """Default north adapter — Telegram, refusing without an allowlist."""
-    return TelegramNorthAdapter.from_env(dict(env), submit)
+    return TelegramNorthAdapter.from_env(dict(env), submit, focus=focus)
 
 
 _WORKER_GAP = 1.0
@@ -323,7 +323,8 @@ async def run_daemon(
     *,
     env: Mapping[str, str] | None = None,
     make_adapter: Callable[
-        [Mapping[str, str], Callable[[Command], None]], Any] = _make_telegram_adapter,
+        [Mapping[str, str], Callable[[Command], None], Focus],
+        Any] = _make_telegram_adapter,
     resume: Callable[[str, str], None] | None = None,
     create: Callable[[str], None] | None = None,
     abandon: Callable[[str], int] | None = None,
@@ -346,7 +347,10 @@ async def run_daemon(
     stop = threading.Event()
     focus = Focus()
 
-    hub = SouthHub(str(spath), on_event=lambda cid, line: outbound.put(line))
+    hub = SouthHub(
+        str(spath), on_event=lambda cid, line: outbound.put(line),
+        on_attach=lambda cid, autosubscribe: focus.set(cid) if autosubscribe else None,
+        on_detach=lambda cid: focus.clear_if(cid))
     control = ControlPlane(
         hub=hub, resume=resume, create=create,
         abandon=abandon, list_changes=list_changes,
@@ -354,7 +358,7 @@ async def run_daemon(
         snapshot=lambda cid: discover.snapshot(control_root, cid),
         recent_narrative=lambda cid, n: discover.recent_narrative(
             control_root, cid, n))
-    adapter = make_adapter(env, inbound.put)
+    adapter = make_adapter(env, inbound.put, focus)
 
     log_handlers = _install_file_logging(control_root, env)
     _log.info("remote-control daemon starting (control_root=%s)", control_root)
