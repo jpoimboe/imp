@@ -284,13 +284,9 @@ async def test_ctrl_backslash_deliberately_detaches_and_run_survives(
             with anyio.fail_after(5):
                 while server.attached_count != 1:
                     await anyio.sleep(0.02)
-            # Safety + readiness gate: the client arms its SIGQUIT trap BEFORE it
-            # attaches, so attached_count == 1 implies the trap is installed and
-            # SIGQUIT's default core-dump disposition has been replaced. Asserting
-            # this before os.kill guarantees the signal is never delivered to a
-            # SIG_DFL disposition (which would abort the whole test process); it
-            # also fails the test cleanly when the trap is absent (the
-            # not-yet-implemented state), so the kill is never reached in red.
+            # The client installs its SIGQUIT trap before attaching, so
+            # attached_count == 1 proves the trap is live — SIG_DFL here would
+            # core-dump the test process; in red (no trap), the assert fires first.
             assert signal.getsignal(signal.SIGQUIT) != signal.SIG_DFL
             os.kill(os.getpid(), signal.SIGQUIT)   # Ctrl-\ deliberate-detach gesture
 
