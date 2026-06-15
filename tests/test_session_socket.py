@@ -160,15 +160,16 @@ async def test_first_input_wins_and_loser_is_not_redelivered(tmp_path: Path) -> 
 
         tg.start_soon(_gate)
         await anyio.sleep(0.05)
-        await a.send((encode_input("alpha") + "\n").encode())
-        await b.send((encode_input("beta") + "\n").encode())
+        async with anyio.create_task_group() as send_tg:
+            send_tg.start_soon(a.send, (encode_input("alpha") + "\n").encode())
+            send_tg.start_soon(b.send, (encode_input("beta") + "\n").encode())
         with anyio.fail_after(5):
             while not won:
                 await anyio.sleep(0.02)
         assert won[0] in {"alpha", "beta"}
 
         leftover: list[str] = []
-        with anyio.move_on_after(0.3):
+        with anyio.move_on_after(1.0):
             leftover.append(await session.next_input())
         assert leftover == []
 
