@@ -215,6 +215,21 @@ def test_merge_detached_conflict_cleans_scratch(tmp_path: Path) -> None:
     assert (tmp_path / ".imp" / "worktrees" / "feat").is_dir()             # branch worktree intact
 
 
+def test_merge_detached_body_threads_into_commit(tmp_path: Path) -> None:
+    _init_repo(tmp_path)
+    wt.create_worktree(tmp_path, "feat", "main")
+    _commit_on_branch(tmp_path, "imp/feat", "feature.txt", "hi")
+    # Park control root so main is checked out nowhere — forces _merge_detached.
+    _git(tmp_path, "checkout", "-q", "-b", "parking")
+    body = "We chose X over Y because Z."
+    result = wt.merge_to_base(tmp_path, "feat", "main", title="My Feature", body=body)
+    assert result.status == "MERGED"
+    msg = _git(tmp_path, "log", "-1", "--format=%B", "main").stdout
+    assert "Merge My Feature" in msg
+    assert "We chose X over Y because Z." in msg
+    assert "(imp/feat)" in msg
+
+
 def test_merge_conflict_aborts_and_preserves(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     # Conflict: both base and branch edit README.md differently.
