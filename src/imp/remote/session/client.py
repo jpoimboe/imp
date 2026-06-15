@@ -7,7 +7,12 @@ import anyio
 from anyio.abc import SocketStream
 from anyio.streams.buffered import BufferedByteReceiveStream
 
-from imp.remote.session.protocol import encode_attach, parse_event
+from imp.remote.session.protocol import (
+    encode_attach,
+    encode_control,
+    encode_input,
+    parse_event,
+)
 
 _MAX_FRAME = 1 << 20
 
@@ -44,6 +49,16 @@ class SessionClient:
                 anyio.ClosedResourceError, anyio.BrokenResourceError,
                 anyio.DelimiterNotFound, ValueError):
             pass
+
+    async def send_input(self, text: str) -> None:
+        if self._stream is None:
+            raise RuntimeError("call connect() before send_input()")
+        await self._stream.send((encode_input(text) + "\n").encode("utf-8"))
+
+    async def send_control(self, action: str) -> None:
+        if self._stream is None:
+            raise RuntimeError("call connect() before send_control()")
+        await self._stream.send((encode_control(action) + "\n").encode("utf-8"))
 
     async def aclose(self) -> None:
         if self._stream is not None:

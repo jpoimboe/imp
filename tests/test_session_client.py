@@ -106,3 +106,74 @@ async def test_client_aclose_is_seen_as_detach(tmp_path: Path) -> None:
         assert server.attached_count == 0
         await server.close()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_client_input_satisfies_server_gate(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionSocket(sock)
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        got: list[str] = []
+
+        async def _gate() -> None:
+            got.append(await server.next_input())
+
+        tg.start_soon(_gate)
+        await anyio.sleep(0.05)  # let the gate open (next_input is awaiting)
+        await client.send_input("ship it")
+        with anyio.fail_after(5):
+            while not got:
+                await anyio.sleep(0.02)
+        assert got == ["ship it"]
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_client_control_invokes_server_on_control(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    actions: list[str] = []
+    server = SessionSocket(sock, on_control=actions.append)
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        await client.send_control("interrupt")
+        with anyio.fail_after(5):
+            while not actions:
+                await anyio.sleep(0.02)
+        assert actions == ["interrupt"]
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_client_send_control_rejects_unknown_action(tmp_path: Path) -> None:
+    sock = str(tmp_path / "s.sock")
+    server = SessionSocket(sock)
+    client = SessionClient(sock, "c1", "T", on_event=lambda _e: None)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+        await client.connect()
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        with pytest.raises(ValueError, match="unknown control action"):
+            await client.send_control("explode")
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()
