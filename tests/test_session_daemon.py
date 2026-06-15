@@ -288,3 +288,25 @@ async def test_interrupt_pause_reprompts_and_resumes_in_place(
                 "payload": {"redirect": "go left"}} in received
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_interrupt_pause_hibernates_with_zero_clients(
+    tmp_path: Path,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-rzh")
+    calls = {"n": 0}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        calls["n"] += 1
+        await coordinator.signal_pause(reason="ctrl-c")
+        return RunResult.PAUSED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=True)
+    assert result is RunResult.PAUSED
+    assert calls["n"] == 1
