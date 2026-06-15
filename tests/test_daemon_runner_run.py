@@ -124,7 +124,7 @@ async def test_run_daemon_returns_promptly_under_cancellation(tmp_path: Path) ->
         async with anyio.create_task_group() as tg:
             tg.start_soon(functools.partial(
                 run_daemon, tmp_path, env={},
-                make_adapter=lambda env, submit: adapter,
+                make_adapter=lambda env, submit, focus: adapter,
                 install_signals=False, shutdown=shutdown))
 
             with anyio.fail_after(5):              # socket comes up
