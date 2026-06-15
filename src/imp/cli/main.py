@@ -1809,8 +1809,33 @@ def _cmd_remote_control_stop(args: argparse.Namespace) -> int:
     return stop_daemon(_control_root())
 
 
+def _abandon_picker_empty() -> int:
+    print("Nothing to abandon.")
+    return 2
+
+
+def _abandon_picker_non_tty(rows: list[_Row]) -> int:
+    print("imp: abandon needs a change token on a non-interactive terminal",
+          file=sys.stderr)
+    return 2
+
+
+async def _pick_abandon_target(control: Path) -> str | int:
+    return await _pick_change_target(
+        rows=_sort_rows_newest_first(_status_rows(control)),
+        header="Abandon which change?  (↑/↓ to move · enter to select · q to cancel)",
+        on_empty=_abandon_picker_empty,
+        on_non_tty=_abandon_picker_non_tty,
+    )
+
+
 def _cmd_abandon(args: argparse.Namespace) -> int:
     control = _control_root()
+    if args.token is None:
+        target = anyio.run(_pick_abandon_target, control)
+        if isinstance(target, int):
+            return target
+        return _abandon(control, target, assume_yes=args.yes)
     try:
         change_id = _resolve_id(control, args.token)
     except SystemExit:
@@ -2030,8 +2055,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Tear down a Change's worktree, branch, and state (logged).",
     )
     p_abandon.add_argument(
-        "token",
-        help="Change id or short token identifying which Change to abandon.")
+        "token", nargs="?",
+        help="Change id or short token identifying which Change to abandon "
+             "(omit on a tty to pick from a list).")
     p_abandon.add_argument(
         "-y", "--yes", action="store_true",
         help="Skip the confirmation prompt (also skipped on a non-interactive stdin).")
