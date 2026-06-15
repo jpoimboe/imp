@@ -155,5 +155,6 @@ class SessionServer:
             self.abandoned = True
             if self._on_abandon is not None:
                 self._on_abandon()
-            assert self._serve_scope is not None
+            if self._serve_scope is None:
+                raise RuntimeError("abandon dispatched outside serve()")
             self._serve_scope.cancel()
