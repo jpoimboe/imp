@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import anyio
 import pytest
 
 from imp.engine.change import Change
+from imp.engine.executor import RunResult
 from imp.remote.session.client import SessionClient
-from imp.remote.session.daemon import serve_change_session
+from imp.remote.session.daemon import _is_interrupt_pause, serve_change_session
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.protocol import CONTROL_ABANDON
 
@@ -226,3 +228,11 @@ async def test_resident_abandon_runs_teardown(tmp_path: Path) -> None:
         assert torn == [change]
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+def test_is_interrupt_pause_true_only_for_paused_with_should_pause() -> None:
+    paused_interrupt = SimpleNamespace(should_pause=True)
+    paused_workflow = SimpleNamespace(should_pause=False)
+    assert _is_interrupt_pause(RunResult.PAUSED, paused_interrupt) is True
+    assert _is_interrupt_pause(RunResult.PAUSED, paused_workflow) is False
+    assert _is_interrupt_pause(RunResult.COMPLETED, paused_interrupt) is False

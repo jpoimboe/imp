@@ -10,12 +10,18 @@ import anyio
 
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
-from imp.engine.executor import run_change
+from imp.engine.executor import RunResult, run_change
 from imp.engine.state import ProjectLock
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 
 RunFn = Callable[..., Awaitable[Any]]
+
+_RESUME_PROMPT = "paused — type a message to redirect, or detach to leave it paused"
+
+
+def _is_interrupt_pause(result: Any, coordinator: Any) -> bool:
+    return result is RunResult.PAUSED and coordinator.should_pause
 
 
 async def serve_change_session(
