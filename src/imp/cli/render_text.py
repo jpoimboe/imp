@@ -432,6 +432,9 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         yield from _render_children(node.children, depth=depth, full=full,
                                     color=color, width=width, gutters=gutters,
                                     prime=True, live_viewer=live_viewer)
+        if full and node.agent_output:
+            yield from _render_output_args(node.agent_output, depth=depth,
+                                           color=color, width=width, gutters=gutters)
         return
 
     if isinstance(node, nv.AgentTextNode):
@@ -458,12 +461,6 @@ def _render(node: Any, *, depth: int, full: bool, color: bool,
         # content (not the indent): the caret returns to default fg (39), NOT a
         # full reset, so the bg keeps painting under the text; one reset closes it.
         indent = _gutter_indent(depth, gutters, color)
-        # M3: the pending-input question (from the awaiting_user_input event)
-        # renders as a quiet line ABOVE the reply caret, so the recorded
-        # transcript shows what the human was asked before what they typed.
-        if node.pending_question:
-            yield from render_question_block(
-                node.pending_question, width, depth, color, gutters)
         bg = pal.user_bg_open(enabled=color)
         if color:
             caret = pal.sgr(*pal.NODE_COLORS["user"], enabled=True) + pal.CARET + "\x1b[39m"
@@ -669,6 +666,19 @@ def _burst_summary(burst: nv.ToolBurstFold) -> str | None:
     # No leading marker — a tool burst is sub-detail of the agent's turn and is
     # indented (by _render_burst) under the turn's words. Internal `·` stay.
     return f"{count} · {shown}{more}{secs}"
+
+
+def _render_output_args(args: dict[str, Any], *, depth: int, color: bool,
+                        width: int, gutters: tuple[int, ...] = ()) -> Iterator[str]:
+    prose = [(k, v) for k, v in args.items()
+             if nv.is_prose_field(k, v) and v.strip()]
+    if not prose:
+        return
+    yield _line(f"{pal.fold_glyph(expanded=True)} complete_step", depth, color,
+                *pal.NODE_COLORS["tools"], gutters=gutters)
+    for k, v in prose:
+        yield from _wrap(f"{k}: {v}", width, depth + 1, color,
+                         *pal.NODE_COLORS["tools"], gutters=gutters)
 
 
 def _render_burst(burst: nv.ToolBurstFold, *, depth: int, full: bool,

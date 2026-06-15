@@ -151,7 +151,8 @@ async def run_parallel_task_turn(provider: str) -> list[dict]:
     _worker_prompt = (
         "Call complete_step immediately with status='Success'. "
         "To finish this step you MUST call the `complete_step` tool with: "
-        "`status` (Success). Do not answer in prose — call the tool."
+        "`status` (Success). Structured arguments are not shown to the user, so "
+        "state your conclusion in your turn text as prose; then call the tool."
     )
     worker_a = AgentDef(
         name="worker_a", description="trivial stub worker",

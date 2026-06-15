@@ -63,13 +63,6 @@ def test_status_text_present_during_activity() -> None:
     assert "bash ls" in txt
 
 
-def test_pending_question_surfaced_after_awaiting_event() -> None:
-    drv = _drv()
-    drv.on_event(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    drv.on_event(ev("2", "awaiting_user_input", agent_id="step:p/s",
-                    prompt="Deploy to prod?"))
-    assert drv.pending_question() == "Deploy to prod?"
-
 
 def test_render_full_suppresses_system_prompt_in_live_viewer() -> None:
     drv = _drv()

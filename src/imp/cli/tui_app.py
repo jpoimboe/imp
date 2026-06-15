@@ -284,7 +284,7 @@ class TuiApp:
     async def solicit(self, change: Any) -> str:
         self._change = change
         self._slash_lines = []
-        self._solicit_question = self._driver.pending_question()
+        self._solicit_question = ""
         self._buffer.completer = SlashCompleter(change.workflow_dir / "skills")
         self._prompt_future = asyncio.get_running_loop().create_future()
         self._prompt_visible = True

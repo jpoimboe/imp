@@ -38,16 +38,6 @@ def test_tokentotals_add_usage_tolerates_missing_keys() -> None:
     assert (tt.input, tt.output, tt.cache_read, tt.cache_creation) == (15, 3, 2, 1)
 
 
-def test_pending_question_exposes_awaiting_prompt() -> None:
-    from imp.cli.narrative import NarrativeBuilder
-    from tests._event_fixtures import ev
-
-    b = NarrativeBuilder()
-    assert b.pending_question() == ""                 # idle
-    b.add(ev("1", "step_started", step="s", kind="agent", phase="p"))
-    b.add(ev("2", "awaiting_user_input", agent_id="step:p/s", prompt="Ship it?"))
-    assert b.pending_question() == "Ship it?"
-
 
 def test_build_tree_empty_yields_root_only() -> None:
     tree = nv.build_tree([])
@@ -721,25 +711,26 @@ def test_step_started_stashes_start_ts_normal_and_resume() -> None:
     assert reused.start_ts == "2026-05-30T10:05:00+00:00"
 
 
-def test_agent_output_stashes_args_and_emits_prose_for_long_fields() -> None:
+def test_agent_output_stashes_args_without_emitting_prose_node() -> None:
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
-    # agent_output fires before step_completed; long summary -> prose node,
-    # short scalar + path -> NOT prose (folded later into the breadcrumb).
+    # agent_output fires before step_completed; its long free-text field is
+    # stashed for the breadcrumb/--full view, NEVER promoted to a prose block.
     b.add(_ev("2", "agent_output", agent_id="step:build/coder",
               summary="A long summary. " * 10, status="Success",
               plan_path="docs/plan.md"))
     step = b._step_stack[-1]
     assert step.agent_output["status"] == "Success"
+    assert step.agent_output["summary"].startswith("A long summary.")
     lits = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
-    assert len(lits) == 1
-    assert lits[0].text.startswith("A long summary.")
+    assert lits == []          # output fields are not prose blocks (E1)
 
 
 def test_agent_output_skips_whitespace_only_prose_field() -> None:
     # A whitespace-only multi-line field passes _is_prose_field (it contains a
-    # newline) but must NOT emit a blank LiteralTextNode — the `v.strip()` guard.
+    # newline) but must NOT promote to _render_output_args output — the v.strip()
+    # guard in _render_output_args skips empty/whitespace values.
     b = nv.NarrativeBuilder()
     b.add(_ev("0", "change_created", change_id=1, title="x"))
     b.add(_ev("1", "step_started", step="coder", kind="agent", phase="build"))
@@ -1138,7 +1129,6 @@ def test_wfu_pairing_synthesizes_user_turn_and_splits_burst():       # [I1][I2][
     user = next(k for k in kids if isinstance(k, nv.UserMessageNode))
     assert user.interactive is True
     assert user.text == "yes please"
-    assert user.pending_question == "continue?"
     assert b.current_burst is None        # no siblings → no fresh burst, cursor cleared
 
 
@@ -1200,9 +1190,9 @@ def test_wfu_orphan_net_synthesizes_when_pairing_missed():          # [I1][I3]
     assert "w1" not in b._pending_wfu        # id discarded after net synthesis
 
 
-def test_double_wfu_each_synthesis_gets_own_question():             # [I1][I4] double-wfu
-    """Two sequential wait_for_user calls in the same burst; each reply attributed
-    to its own call's prompt. I1 (no reply lost), I4 (per-call question attribution)."""
+def test_double_wfu_each_synthesis_gets_own_reply():                # [I1] double-wfu
+    """Two sequential wait_for_user calls in the same burst; each reply captured
+    separately. I1: no reply is lost."""
     b = nv.NarrativeBuilder()
     _wfu_step(b)
     b.add(ev("t0", "tool_call", agent_id="a", id="b1", name="bash",
@@ -1214,12 +1204,12 @@ def test_double_wfu_each_synthesis_gets_own_question():             # [I1][I4] d
     b.add(ev("t2", "tool_call", agent_id="a", id="w2", name="wait_for_user",
              input={"prompt": "Q2?"}, timestamp="2026-06-10T00:00:03"))
     b.add(ev("r2", "tool_result", agent_id="a", id="w2", content="A2"))
-    # Two UserMessageNodes must exist; each attributed to its own prompt
+    # Two UserMessageNodes must exist
     step = _step_node(b)
     users = [k for k in step.children if isinstance(k, nv.UserMessageNode)]
     assert len(users) == 2                          # [I1] neither reply lost
-    assert users[0].text == "A1" and users[0].pending_question == "Q1?"   # [I4]
-    assert users[1].text == "A2" and users[1].pending_question == "Q2?"   # [I4]
+    assert users[0].text == "A1"
+    assert users[1].text == "A2"
     # bash is still unresulted; it should be in the final fresh burst
     assert b.current_burst is not None
     assert b.current_burst.calls[0].call_id == "b1"
@@ -1236,7 +1226,6 @@ def test_resume_tool_result_shaped_user_message_renders_reply():    # [I1]
     user = next(k for k in step.children if isinstance(k, nv.UserMessageNode))
     assert user.interactive is True
     assert user.text == "the human reply"
-    assert user.pending_question == "continue?"
 
 
 def test_resume_unarmed_balance_injection_renders_nothing():         # [I1] negative
@@ -1614,7 +1603,10 @@ def _reviewer_conclusion(narration: str, findings: str) -> nv.NarrativeTree:
     ])
 
 
-def test_near_duplicate_trailing_narration_is_dropped() -> None:
+def test_trailing_narration_kept_and_findings_not_promoted() -> None:
+    # E1: the agent's prose narration is the single rendered copy. The complete_step
+    # `findings` arg is plumbing, never promoted to a LiteralTextNode, and the
+    # (now-deleted) near-duplicate guard no longer drops the narration behind it.
     tree = _reviewer_conclusion(
         narration="No findings. Spec is complete and ready for planning.",
         findings=("No findings. Spec is complete and ready for planning. "
@@ -1624,21 +1616,8 @@ def test_near_duplicate_trailing_narration_is_dropped() -> None:
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
     bursts = [c for c in step.children if isinstance(c, nv.ToolBurstFold)]
     assert len(bursts) == 1           # the trailing complete_step burst is present
-    assert agent_texts == []          # the duplicate narration (behind it) is gone
-    assert len(literals) == 1         # exactly one conclusion remains
-    assert literals[0].text.startswith("No findings.")
-
-
-def test_distinct_trailing_narration_is_kept() -> None:
-    tree = _reviewer_conclusion(
-        narration="Let me know if you would like any changes before we proceed.",
-        findings=("No findings. Spec is complete and verified clean against the "
-                  "codebase, every claim checked."))
-    step = tree.root.children[0].children[0]
-    agent_texts = [c for c in step.children if isinstance(c, nv.AgentTextNode)]
-    literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
-    assert len(agent_texts) == 1      # a genuinely different narration survives
-    assert len(literals) == 1
+    assert len(agent_texts) == 1      # the narration renders once (not dropped)
+    assert literals == []             # findings is not a prose block (E1)
 
 
 def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
@@ -1654,7 +1633,7 @@ def _panel_member(eid: str, verdict: str, findings: str = "") -> list[dict]:
     ]
 
 
-def test_clean_panel_renders_findings_prose_generically() -> None:
+def test_clean_panel_findings_not_promoted_to_prose() -> None:
     events = [
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
@@ -1675,11 +1654,11 @@ def test_clean_panel_renders_findings_prose_generically() -> None:
     folds = [c for c in step.children if isinstance(c, nv.SubagentFold)]
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
     assert len(folds) == 4
-    assert any("two nits were noted" in lit.text for lit in literals)
+    assert literals == []                  # findings arg is not a prose block (E1)
     assert not hasattr(nv, "PanelSummaryNode")
 
 
-def test_blocking_panel_keeps_findings_prose() -> None:
+def test_blocking_panel_findings_not_promoted_to_prose() -> None:
     events = [
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
@@ -1697,5 +1676,4 @@ def test_blocking_panel_keeps_findings_prose() -> None:
     tree = nv.build_tree(events)
     step = tree.root.children[0].children[0]
     literals = [c for c in step.children if isinstance(c, nv.LiteralTextNode)]
-    assert len(literals) == 1                              # findings prose expands inline
-    assert "missing handler" in literals[0].text
+    assert literals == []                  # findings arg is not a prose block (E1)

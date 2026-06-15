@@ -102,3 +102,43 @@ def test_silent_unfocused_event_populates_handle_map_without_sending() -> None:
     assert adapter._handle_to_change.get("aabbcc") == CHANGE_ID
     assert sent == []
     assert adapter._msg_to_change == {}
+
+
+def _narration(text: str) -> dict:
+    return {"type": "llm_response",
+            "change": {"id": "2026-06-13-k3f9qa", "title": "t"},
+            "payload": {"raw": {"content": [{"type": "text", "text": text}]}}}
+
+
+def _prompt_less_await() -> dict:
+    return {"type": "awaiting_user_input",
+            "change": {"id": "2026-06-13-k3f9qa", "title": "t"},
+            "payload": {"prompt": ""}}
+
+
+def test_prompt_less_await_falls_back_to_preceding_narration() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_event(_narration("Should I merge the branch?"))
+    adapter.on_event(_prompt_less_await())
+    loud = [text for text, silent in sent if not silent]
+    assert any("Should I merge the branch?" in text for text in loud)
+
+
+def test_prompt_less_await_with_no_narration_sends_header_only() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_event(_prompt_less_await())
+    loud = [text for text, silent in sent if not silent]
+    assert len(loud) == 1
+
+
+def test_consecutive_prompt_less_awaits_reuse_last_narration() -> None:
+    sent: list = []
+    adapter = _adapter(sent)
+    adapter.on_event(_narration("Proceed with the merge?"))
+    adapter.on_event(_prompt_less_await())
+    adapter.on_event(_prompt_less_await())
+    loud = [text for text, silent in sent if not silent]
+    assert len(loud) == 2
+    assert all("Proceed with the merge?" in text for text in loud)

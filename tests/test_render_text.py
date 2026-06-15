@@ -339,8 +339,6 @@ def test_interjected_user_message_renders_as_human_turn() -> None:
     assert isinstance(step, nv.StepNode)
     um = next(c for c in step.children if isinstance(c, nv.UserMessageNode))
     assert um.interactive is True
-    # Unsolicited: no question was asked, so no pending-question line synthesized.
-    assert um.pending_question == ""
 
 
 def test_step_interactive_sourced_from_awaiting_event_not_step_started() -> None:
@@ -372,51 +370,6 @@ def test_step_interactive_sourced_from_awaiting_event_not_step_started() -> None
     assert isinstance(step2, nv.StepNode)
     assert step2.interactive is False
 
-
-def test_awaiting_user_input_prompt_rendered_as_pending_question() -> None:
-    # M3: a non-empty prompt from the awaiting_user_input event renders as the
-    # pending-input question, above the human-reply caret.
-    out = "\n".join(_lines([
-        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
-        _ev("2", "awaiting_user_input", agent_id="step:p/s",
-            prompt="Should I merge the branch?"),
-        _ev("3", "user_message", agent_id="step:p/s",
-            content=[{"type": "text", "text": "yes please"}]),
-    ]))
-    q_i = next(i for i, ln in enumerate(out.splitlines())
-               if "Should I merge the branch?" in ln)
-    reply_i = next(i for i, ln in enumerate(out.splitlines())
-                   if "> yes please" in ln)
-    assert q_i < reply_i                     # question sits above the reply caret
-
-
-def test_pending_question_suppressed_when_duplicates_preceding_agent_prose() -> None:
-    # M3 suppression path: when the awaiting_user_input prompt text is identical
-    # to the agent's most recent prose turn (the usual attended case), the
-    # UserMessageNode.pending_question is set to "" to avoid duplicating it on
-    # screen.  The `_last_prose_text` helper in _h_user_message drives this.
-    question = "Should I proceed with the merge?"
-    tree = nv.build_tree([
-        _ev("1", "step_started", step="s", kind="agent", phase="p", model="m"),
-        # Agent speaks the question as its final prose turn.
-        _ev("2", "llm_response", agent_id="step:p/s", provider="anthropic", model="m",
-            stop_reason="end_turn", usage={},
-            raw={"content": [{"type": "text", "text": question}]}),
-        # Engine then solicits with the same text as the prompt.
-        _ev("3", "awaiting_user_input", agent_id="step:p/s", prompt=question),
-        # Human replies.
-        _ev("4", "user_message", agent_id="step:p/s",
-            content=[{"type": "text", "text": "yes, proceed"}]),
-    ])
-    step = tree.root.children[0].children[0]
-    assert isinstance(step, nv.StepNode)
-    # Find the UserMessageNode among the step's children.
-    um = next(c for c in step.children if isinstance(c, nv.UserMessageNode))
-    # The question matches the preceding agent prose → suppressed (not echoed).
-    assert um.pending_question == ""
-    # Sanity: the reply itself is captured correctly.
-    assert um.text == "yes, proceed"
-    assert um.interactive is True
 
 
 def test_resumed_step_reemit_awaiting_user_input_shows_caret() -> None:
@@ -1293,7 +1246,23 @@ def test_merged_node_renders_friendly_footer() -> None:
     assert pal._ANSI["green"] in colored
 
 
-def test_clean_review_panel_renders_findings_no_panel_chrome() -> None:
+def test_complete_step_findings_hidden_lean_visible_full() -> None:
+    events = [
+        _ev("1", "step_started", step="rev", kind="agent", phase="review",
+            model="m", provider="anthropic"),
+        _ev("2", "agent_output", agent_id="step:review/rev",
+            verdict="rework",
+            findings="Line 1 is wrong.\nLine 2 needs a guard.\nLine 3 leaks."),
+        _ev("3", "step_completed", step="rev", kind="agent",
+            action={"verb": "continue"}, var_mutations={}),
+    ]
+    lean = "\n".join(_lines(events, full=False))
+    full = "\n".join(_lines(events, full=True))
+    assert "Line 2 needs a guard." not in lean    # hidden by default
+    assert "Line 2 needs a guard." in full         # surfaced under --full
+
+
+def test_clean_review_panel_findings_hidden_by_default() -> None:
     events = [
         _ev("1", "step_started", step="review", kind="agent", phase="review",
             model="m", provider="anthropic"),
@@ -1309,10 +1278,12 @@ def test_clean_review_panel_renders_findings_no_panel_chrome() -> None:
         _ev("sc", "step_completed", step="review", kind="agent",
             action={"verb": "goto", "target": "integrate-rebase"}, var_mutations={}),
     ]
-    out = "\n".join(_lines(events))
-    assert "panel:" not in out
-    assert "code-reviewer" in out
-    assert "one nit" in out
+    lean = "\n".join(_lines(events))
+    full = "\n".join(_lines(events, full=True))
+    assert "panel:" not in lean
+    assert "code-reviewer" in lean          # the subagent fold still renders
+    assert "one nit" not in lean            # findings hidden by default (E1)
+    assert "one nit" in full                # surfaced under --full
 
 
 def test_display_tool_name_strips_mcp_namespace() -> None:
@@ -1400,18 +1371,6 @@ def test_parallel_same_name_subagents_not_marked_retrying() -> None:
     ]))
     assert "retrying" not in out
 
-
-def test_pending_question_renders_markdown_above_the_reply() -> None:
-    from imp.cli import narrative as nv
-    from imp.cli import render_text as rt
-
-    node = nv.UserMessageNode(
-        text="merge", interactive=True,
-        pending_question="Reply **merge** to merge.")
-    out = "\n".join(rt._render(node, depth=0, full=False, color=True, width=80))
-    assert "\x1b[1m" in out      # bold for **merge** in the question line
-    assert "**" not in out       # asterisks consumed by markdown
-    assert out.count("merge") >= 2   # once in the question, once as the reply text
 
 
 def test_live_viewer_suppresses_step_context_block_even_in_full() -> None:

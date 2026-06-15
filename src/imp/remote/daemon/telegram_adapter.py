@@ -10,6 +10,7 @@ from typing import Any
 from imp.remote.daemon.commands import Command, ListResult, Response, parse
 from imp.remote.daemon.focus import Focus
 from imp.remote.drivers.telegram import (
+    _compose_message,
     api_call,
     clamp_text,
     curate,
@@ -87,9 +88,12 @@ def resolve_change_id(
     return None, inbound.text
 
 
-def format_outbound(event: dict[str, Any], handle: str) -> str:
-    """Render one event as outbound chat text, appending the reply handle."""
-    return f"{format_event_message(event)}\n↩ @{handle}"
+def format_outbound(event: dict[str, Any], handle: str, body: str | None = None) -> str:
+    """Render one event as outbound chat text, appending the reply handle. A given
+    `body` overrides the event's own body (e.g. an empty awaiting_user_input prompt
+    that fell back to the preceding narration)."""
+    message = format_event_message(event) if body is None else _compose_message(event, body)
+    return f"{message}\n↩ @{handle}"
 
 
 def render_response(response: Response, focused_id: str | None = None) -> str:
@@ -132,6 +136,7 @@ class TelegramNorthAdapter:
         self._get_updates = get_updates
         self._focus = focus
         self._offset = 0
+        self._last_narration = ""
         self._msg_to_change: dict[int, str] = {}
         self._handle_to_change: dict[str, str] = {}
         # The reply maps below are WRITTEN by on_event (sender thread) and READ by
@@ -158,11 +163,22 @@ class TelegramNorthAdapter:
                    send=send, get_updates=get_updates, focus=focus)
 
     def on_event(self, event: dict[str, Any]) -> None:
-        """Curate one event, send it with its handle, and record the reply maps."""
-        kind = curate(event.get("type"))
+        """Curate one event, send it with its handle, and record the reply maps.
+
+        A prompt-less awaiting_user_input falls back to the preceding llm_response
+        narration: "needs your input" alone is uninformative on a phone, so carry
+        the last thing imp said as the body. last_narration is sender-thread-only,
+        like _offset, so it needs no lock."""
+        etype = event.get("type")
+        kind = curate(etype)
         if kind is None:
             return
-        body = event_body(event.get("type"), event.get("payload") or {})
+        body = event_body(etype, event.get("payload") or {})
+        override: str | None = None
+        if etype == "llm_response" and body.strip():
+            self._last_narration = body
+        elif etype == "awaiting_user_input" and not body.strip():
+            body = override = self._last_narration
         if kind == "silent" and not body.strip():
             return
         change = event.get("change") or {}
@@ -174,7 +190,7 @@ class TelegramNorthAdapter:
             self._handle_to_change[handle] = change_id
         if kind == "silent" and self._focus.current() != change_id:
             return
-        message_id = self._send(format_outbound(event, handle), kind == "silent")
+        message_id = self._send(format_outbound(event, handle, override), kind == "silent")
         with self._lock:
             if message_id is not None:
                 self._msg_to_change[message_id] = change_id

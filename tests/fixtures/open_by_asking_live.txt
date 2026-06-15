@@ -128,34 +128,6 @@ spec
     importlib.metadata.version to keep the fallback test patchable — an
     implementation detail, not a blocker.
   
-  • No Critical/Major findings. Spec is complete, consistent, and ready for
-    planning.
-  
-    All load-bearing claims about existing code were verified against source:
-  
-     • main.py main() uses a top-level argparse parser (prog="imp"); the exact
-       cited line sub = parser.add_subparsers(dest="cmd", required=True) is
-       present.
-     • Subcommand list (init, new, resume, log, status, abandon, eval) matches
-       the actual parsers.
-     • pyproject.toml has [project].name="imp", version="0.0.1", and entry point
-       imp=imp.cli.main:main — confirming importlib.metadata.version("imp") is
-       the correct distribution name.
-     • A CLI test suite exists (tests/test_cli_*.py).
-     • The argparse behavior the design relies on (version action exits during
-       parse_args before the required-subparser check; prints to stdout, exit 0)
-       is correct.
-  
-    Acceptance criteria are concrete and testable; scope in/out boundaries are
-    explicit; no TODOs/placeholders/contradictions; no YAGNI (the
-    PackageNotFoundError fallback is justified robustness, not smuggled scope).
-  
-    Nit (advisory, non-blocking): For AC #6's fallback test to work, the version
-    helper should call importlib.metadata.version() at call time (so patching
-    importlib.metadata.version takes effect) rather than binding the name via
-    from importlib.metadata import version; this is an implementation detail,
-    not a spec defect.
-  
   spec-reviewer complete · → reworking · 1m 2s
   
   spec-writer · opus
@@ -280,41 +252,6 @@ plan
     --strict) isn't run by either task (though the code is fully annotated), and
     a Nit about PackageNotFoundError instantiation (which works fine in 3.11).
   
-  • No Critical or Major findings. The single plan (plan-1) fully covers all 7
-    acceptance criteria of the spec, and every load-bearing claim about existing
-    code was verified against source:
-  
-     • main.py path, main(argv: list[str] | None = None) -> int signature, and
-       the exact two-line parser/subparser block all match the actual file.
-     • Import-order claim verified: actual imports are import argparse then
-       import json, so inserting import importlib.metadata between them is
-       correct for ruff's isort (I) rule.
-     • Distribution name imp and version 0.0.1 confirmed in pyproject
-       ([project].name/version); the spec's imp 0.0.1 example is consistent.
-     • ruff config is line-length 100 / target py311 (plan lints with python -m
-       ruff check); the three regression test files cited in Task 2 Step 5 all
-       exist; test_cli_version.py correctly does not yet exist.
-     • Subcommand set (init/new/resume/log/status/abandon/eval) matches AC #5.
-     • argparse action="version" firing before the required-subparser check is
-       correct behavior; the call-time resolution design makes the
-       monkeypatch-based fallback test (AC #4/#6) effective, and the success
-       test uses a patched sentinel value so it is non-tautological.
-  
-    All steps are bite-sized with complete code blocks and exact
-    commands+expected output; no placeholders/TBD/TODO; type usage
-    (_resolve_version() -> str) is consistent between definition (Task 1) and
-    call site (Task 2). No scope creep — pyproject is untouched (AC #7).
-  
-    Minor (non-blocking): The project configures mypy in --strict mode, but
-    neither task runs mypy (only ruff). The added code and tests are fully
-    type-annotated, so this is unlikely to surface an issue; an explicit python
-    -m mypy step would be a small robustness improvement but is not required to
-    build correctly.
-  
-    Nit (non-blocking): importlib.metadata.PackageNotFoundError(dist) is
-    instantiated with a single positional arg in the fallback tests; this works
-    in 3.11, so no action needed.
-  
   plan-review complete · → reworking · 1m 11s
   
   plan-writer · opus
@@ -420,24 +357,10 @@ implement
   
     load skill verification-before-completion
   
+  • All 5 tests pass. Both plan tasks are committed and verified. The plan is
+    fully implemented.
+  
     1 call · complete_step · 0s
-  
-  • Both plan tasks implemented and verified.
-  
-    Task 1 (commit 0e1b4c2 "feat: add _resolve_version helper for imp
-    --version"): Added import importlib.metadata and _resolve_version() helper
-    to src/imp/cli/main.py, plus tests/test_cli_version.py with 2 unit tests
-    covering the success and PackageNotFoundError fallback paths.
-  
-    Task 2 (commit 7dd20b8 "feat: add --version/-V flag to imp CLI top-level
-    parser"): Wired --version/-V into the top-level argparse parser using
-    action="version" with version=f"imp {_resolve_version()}", and added 3 CLI
-    integration tests covering AC1 (--version), AC2 (-V), and AC4 (fallback to
-    "imp unknown").
-  
-    All 5 tests pass. No blocking reviewer findings. Carried followups: one
-    Minor (test could assert dist name "imp" is passed) and one Nit (eager
-    evaluation on every main() call is harmless).
   
   task-lead complete · 9m 36s
   
@@ -471,15 +394,6 @@ implement
   
     1 call · complete_step · 0s
   
-  • The single plan (plan-1) fully covers the entire spec. Both tasks are
-    committed: Task 1 adds the _resolve_version() helper in src/imp/cli/main.py
-    (using importlib.metadata at call time, with PackageNotFoundError fallback
-    to "unknown"), and Task 2 wires --version/-V onto the top-level argparse
-    parser via action="version". The test file tests/test_cli_version.py
-    contains all 5 tests covering ACs 1–4 and 6. AC 5 (top-level only,
-    subcommands unchanged) and AC 7 (pyproject.toml unmodified) are satisfied by
-    the implementation. No spec scope remains uncovered.
-  
   plan-cycle-check complete · 41s
 
 implement complete · 10m 17s
@@ -497,51 +411,6 @@ review
   code-reviewer · gpt-5.5
   
     13 calls · read_file · glob · bash · grep +1 · 40s
-  
-  • Strengths
-  
-     • Implementation satisfies the core spec: src/imp/cli/main.py imports
-       importlib.metadata, adds _resolve_version() that calls
-       importlib.metadata.version("imp") at call time, and falls back to
-       "unknown" on PackageNotFoundError.
-     • The version flag is wired on the top-level parser only, before
-       add_subparsers(required=True), using argparse's action="version" with
-       output format imp <version>. This allows imp --version and imp -V to exit
-       0 without a subcommand.
-     • The diff is tightly scoped to src/imp/cli/main.py and
-       tests/test_cli_version.py; pyproject.toml remains unchanged.
-     • Tests cover the helper success/fallback paths and CLI behavior for
-       --version, -V, and metadata-missing fallback. I spot-checked python -m
-       pytest tests/test_cli_version.py -q, python -m ruff check
-       src/imp/cli/main.py tests/test_cli_version.py, and python -m mypy
-       src/imp/cli/main.py tests/test_cli_version.py; all passed.
-  
-    Issues
-  
-    Critical (Must Fix)
-  
-    None.
-  
-    Important (Should Fix)
-  
-    None.
-  
-    Minor / Nit
-  
-     • Existing carried followup remains:
-       test_resolve_version_reads_package_metadata and the CLI success tests
-       patch importlib.metadata.version with lambdas that ignore the dist
-       argument. The implementation correctly uses "imp", so this is not
-       blocking, but asserting dist == "imp" in the fake would make the tests
-       catch wrong-distribution regressions more directly.
-     • Existing carried followup remains: _resolve_version() is evaluated when
-       main() builds the parser, even for non-version invocations. This is
-       acceptable for a small CLI metadata lookup and keeps the code simple.
-  
-    Verdict
-  
-    approve — the implementation meets the acceptance criteria, is well scoped,
-    and the behavior is covered by passing tests.
   
   code-reviewer complete · 59s
   
@@ -566,59 +435,6 @@ review
     planned tasks landed cleanly on HEAD, the --version/-V flag works end-to-end
     (imp 0.0.1, exit 0), and all version tests, ruff, and mypy pass. Two
     non-blocking Minor/Nit followups remain noted for optional cleanup.
-  
-  • Added a top-level --version / -V flag to the imp CLI, delivered across the
-    two tasks of plan 1, both landed.
-  
-    Task 1 — Version-resolution helper (SHA 0b30278, "feat: add _resolve_version
-    helper for imp --version"): added a module-level _resolve_version() to
-    src/imp/cli/main.py that reads importlib.metadata.version("imp") at call
-    time (with a new import importlib.metadata) so the printed version stays in
-    sync with packaged metadata, and returns "unknown" on PackageNotFoundError
-    so the flag never crashes on an uninstalled source checkout. The function
-    deliberately references the lookup via the importlib.metadata module
-    attribute (not an eager from … import version) so the fallback path is
-    patchable in tests. Created tests/test_cli_version.py with two unit tests
-    covering the success and fallback paths.
-  
-    Task 2 — Wire --version/-V into the top-level parser (HEAD 5db7b46, "feat:
-    add --version/-V flag to imp CLI top-level parser"): added
-    parser.add_argument("--version", "-V", action="version", version=f"imp
-    {_resolve_version()}") to the top-level argparse parser in main(), placed
-    before add_subparsers(..., required=True). argparse's version action fires
-    during parse_args and exits 0 before the required-subparser check, so imp
-    --version / imp -V work with no subcommand. Appended three CLI tests to
-    tests/test_cli_version.py asserting the printed line and exit-0 for the long
-    flag, the short flag, and the fallback. No subparser or pyproject.toml
-    change; the version value remains sourced solely from package metadata. All
-    7 acceptance criteria are satisfied.
-  
-  • Verified clean (no code changes made during summary). python -m pytest
-    tests/test_cli_version.py -q → 5 passed. python -m ruff check
-    src/imp/cli/main.py tests/test_cli_version.py → All checks passed. python -m
-    mypy src/imp/cli/main.py tests/test_cli_version.py → Success: no issues
-    found in 2 source files. End-to-end smoke: imp --version and imp -V both
-    print imp 0.0.1 and exit 0. Working tree is clean (both task commits present
-    on HEAD). The broader suite (e.g. test_cli_smoke / test_cli_status) was not
-    re-run during this summary step, but the change is additive and subparser
-    wiring is untouched.
-  
-  • Two carried followups from progress.md, both non-blocking:
-  
-     • Minor (quality-reviewer): test_resolve_version_reads_package_metadata
-       uses lambda dist: "9.9.9-test", ignoring the dist arg; could assert dist
-       == "imp" to catch a wrong-package-name regression.
-     • Nit (quality-reviewer): _resolve_version() is evaluated eagerly on every
-       main() invocation via the f-string in add_argument. Functionally harmless
-       (fast, short-lived process); no fix needed.
-  
-  
-  •  • Optionally tighten the helper success test to assert the requested
-       distribution name (dist == "imp") per the carried Minor finding.
-     • Consider documenting the new --version/-V flag in user-facing CLI
-       docs/README if one enumerates global flags.
-     • If eager evaluation ever matters, the version= string could be computed
-       lazily, but this is purely cosmetic and not warranted now.
   
   summarizer complete · 1m 15s
   
@@ -684,11 +500,5 @@ review
     1 call · complete_step · 0s
   
   • Merged! The 2026-06-06-add-version-flag change is done. 🎉
-  
-  • User approved merge. The change is clean: all 7 acceptance criteria
-    satisfied, 5 tests pass, ruff and mypy clean, smoke test confirmed. The two
-    open items (asserting dist name in unit test, eager _resolve_version()
-    evaluation) are acknowledged non-blocking nits and do not require follow-up
-    action.
   
   final-review complete · 42s
