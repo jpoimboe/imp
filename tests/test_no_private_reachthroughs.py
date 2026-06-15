@@ -32,8 +32,6 @@ def test_no_private_reachthrough_across_providers() -> None:
     pattern = "|".join(PRIVATE_PATTERNS)
     proc = subprocess.run(
         # This guard enforces a *Python* contract, so scan only Python source.
-        # Eval fixtures under src/imp/evals/data/ (mined/curated *.patch, *.json)
-        # legitimately contain `._client`/`._model` text and must not be matched.
         ["grep", "-rn", "-E",
          "--include", "*.py",
          "--exclude", this_file,

@@ -2021,8 +2021,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "stop", help="Stop the running remote-control daemon (SIGTERM).")
     p_rc_stop.set_defaults(func=_cmd_remote_control_stop)
 
-    from imp.evals.cli import add_eval_parser
-    add_eval_parser(sub)
     return parser
 
 

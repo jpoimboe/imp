@@ -180,17 +180,6 @@ def test_integrator_is_a_rebase_conflict_resolver() -> None:
     assert "wait_for_user" in text
 
 
-def test_slices_resolve_from_asset_dir() -> None:
-    from imp.evals.driver import baseline_agent_path
-    for name in ("completeness-slice", "spec-compliance-slice", "boundaries-slice"):
-        resolved = baseline_agent_path(name).resolve()
-        assert resolved == (AGENTS / f"{name}.md").resolve()   # resolve both sides: cwd-independent
-        assert resolved.exists()
-    evals_agents = Path("src/imp/evals/data/agents")
-    for name in ("completeness-slice", "spec-compliance-slice", "boundaries-slice"):
-        assert not (evals_agents / f"{name}.md").exists()
-
-
 def _render_panel(tmp_path, *, panel_done: bool, fast_path: bool,
                   review_scope: str = "plan") -> str:
     wf = _wf()
