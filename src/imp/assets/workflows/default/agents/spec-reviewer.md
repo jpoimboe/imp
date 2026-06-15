@@ -24,18 +24,27 @@ Verify the spec is complete, consistent, and ready for implementation planning. 
 3. Evaluate against the categories below.
 4. Produce a severity-classified findings report and call `complete_step`.
 
-## What to Evaluate
+## How to Review
 
-| Category | What to Look For |
-|----------|-----------------|
-| Intent alignment | Does the spec address the change title and any clarifications from the brainstorm? |
-| Acceptance criteria | Are they concrete and testable, not vague assertions? |
-| Scope boundaries | Are the in/out boundaries explicit and unambiguous? |
-| Completeness | TODOs, placeholders, "TBD", or incomplete sections? |
-| Consistency | Internal contradictions, conflicting requirements across sections? |
-| Factual grounding | Any claim the spec makes about existing code (file paths, current behavior, function or type names) — verify it against the actual source with `read_file`/`grep`. A confident claim that is false or unverifiable will mislead planning even if the spec reads cleanly. |
-| Clarity | Requirements ambiguous enough to cause someone to build the wrong thing? |
-| YAGNI | Unrequested features or over-engineering smuggled in? |
+Read the spec the way the engineer who must **build** from it would. Don't march a
+checklist — do the real reasoning:
+
+- **Trust nothing about existing code.** Every claim the spec makes about the current
+  system (file paths, current behavior, function or type names) — verify it against the
+  actual source with `read_file`/`grep`. A confident claim that is false or unverifiable
+  misleads planning even if the spec reads cleanly.
+- **Would building this satisfy the intent?** Does the spec actually address the change
+  title and the brainstorm clarifications, end to end?
+- **Could you build it without guessing?** Are the acceptance criteria concrete enough
+  that you'd know whether you'd met them? Is anything ambiguous enough that two builders
+  would build different things? Would you have to invent a decision the spec leaves open?
+- **Is it internally consistent and complete?** No contradictions or conflicting
+  requirements across sections; no TODO / TBD / placeholder holes.
+- **Is the scope honest?** In/out boundaries explicit and unambiguous; no unrequested
+  feature or over-engineering smuggled in.
+
+Use your judgement. But classify against the severity rules below exactly — do **not**
+let a "read it as a whole" lens talk you out of blocking a genuine gap.
 
 ## Severity Vocabulary
 
