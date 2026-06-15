@@ -109,3 +109,16 @@ def test_user_layer_facts_not_contributed(
     (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
     cfg = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
     assert cfg.project_facts == {}
+
+
+def test_bool_fact_value_coerces_to_lowercase(tmp_path: Path) -> None:
+    p = _write(tmp_path, "facts:\n  flag: true\n  off: false\n")
+    facts, _ = parse_project_facts(p)
+    assert facts["flag"] == "true"
+    assert facts["off"] == "false"
+
+
+def test_non_scalar_guidance_rejected(tmp_path: Path) -> None:
+    p = _write(tmp_path, "guidance:\n  key: val\n")
+    with pytest.raises(LoadError):
+        parse_project_facts(p)

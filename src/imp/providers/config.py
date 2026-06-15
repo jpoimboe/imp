@@ -81,7 +81,15 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
         raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
 
     guidance_raw = raw.get("guidance")
-    guidance = "" if guidance_raw is None else str(guidance_raw)
+    if guidance_raw is None:
+        guidance = ""
+    elif not isinstance(guidance_raw, _FACT_SCALARS):
+        raise LoadError(
+            "'guidance:' must be a string scalar",
+            loc(path, raw),
+        )
+    else:
+        guidance = str(guidance_raw)
 
     facts: dict[str, str] = {}
     facts_raw = raw.get("facts")
@@ -110,7 +118,7 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
                 f"facts.{key}: value must be a scalar, not {type(value).__name__}",
                 loc(path, value) if isinstance(value, dict) else facts_src,
             )
-        facts[key] = str(value)
+        facts[key] = ("true" if value else "false") if isinstance(value, bool) else str(value)
     return facts, guidance
 
 
