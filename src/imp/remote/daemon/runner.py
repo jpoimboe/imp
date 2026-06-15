@@ -32,9 +32,9 @@ from imp.remote.daemon.commands import (
     Subscribe,
     Unsubscribe,
 )
-from imp.remote.daemon.focus import Focus
 from imp.remote.daemon.control import ControlPlane
 from imp.remote.daemon.discover import socket_is_live, socket_path
+from imp.remote.daemon.focus import Focus
 from imp.remote.daemon.server import SouthHub
 from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
 

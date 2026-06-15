@@ -10,7 +10,9 @@ EVENT = {
 }
 
 
-def _adapter(sent: list, *, message_id: int | None = 42, focus: Focus | None = None) -> TelegramNorthAdapter:
+def _adapter(
+    sent: list, *, message_id: int | None = 42, focus: Focus | None = None
+) -> TelegramNorthAdapter:
     def send(text: str, silent: bool) -> int | None:
         sent.append((text, silent))
         return message_id

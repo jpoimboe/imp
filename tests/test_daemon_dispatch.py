@@ -7,6 +7,7 @@ import pytest
 
 from imp.remote.daemon.commands import (
     HELP_TEXT,
+    ROUTE_HINT,
     Abandon,
     Create,
     Help,
@@ -17,7 +18,6 @@ from imp.remote.daemon.commands import (
     Reply,
     Subscribe,
     Unsubscribe,
-    ROUTE_HINT,
 )
 from imp.remote.daemon.discover import ChangeInfo
 from imp.remote.daemon.focus import Focus
