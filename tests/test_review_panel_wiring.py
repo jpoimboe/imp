@@ -19,7 +19,7 @@ _TIERS = frozenset({"low", "medium", "high"})
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False, "panel_done": False,
-    "multi_plan": False, "spec_confirm": True, "spec_unseen_changes": False,
+    "multi_plan": False,
     "review_scope": "plan",
 }
 

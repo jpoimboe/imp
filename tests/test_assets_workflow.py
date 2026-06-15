@@ -17,7 +17,7 @@ def _steps(wf):
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
     "plan_minors_integrated": False, "panel_done": False,
-    "multi_plan": False, "spec_confirm": True, "spec_unseen_changes": False,
+    "multi_plan": False,
     "review_scope": "plan",
 }
 
@@ -210,23 +210,22 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
     )
     assert isinstance(m.action, Goto)
     assert m.action.target == "plan-writer" and m.action.resume is False
-    assert m.var_mutations == {"spec_minors_integrated": False, "spec_unseen_changes": False}
+    assert m.var_mutations == {"spec_minors_integrated": False}
 
 
 def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     rules = _steps(wf)["spec-writer"].rules
-    # _BASE_VARS already has spec_unseen_changes/gate flags False and spec_confirm
-    # True, which is exactly the trivial-written precondition — no overrides needed.
+    # The spec-writer rule sets fast_path from output.complexity only.
     m = evaluate_rules(rules, vars=_BASE_VARS,
                        output={"phase": "written", "complexity": "trivial",
-                               "status": "Success", "unseen_changes": False})
+                               "status": "Success"})
     assert m.var_mutations["fast_path"] is True
 
     m2 = evaluate_rules(rules, vars=_BASE_VARS,
                         output={"phase": "written", "complexity": "standard",
-                                "status": "Success", "unseen_changes": False})
+                                "status": "Success"})
     assert m2.var_mutations["fast_path"] is False
 
 
@@ -475,48 +474,14 @@ def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
     )
 
 
-def test_spec_verify_commit_fast_path_no_unseen_skips_to_plan_writer() -> None:
+def test_spec_verify_commit_fast_path_skips_to_plan_writer() -> None:
     from imp.assets import default_workflow_dir
     wf = load_workflow(default_workflow_dir())
     rules = _steps(wf)["spec-verify-commit"].rules
-    # Clean commit, fast path, no unseen spec change -> straight to planning,
-    # skipping spec-reviewer entirely.
+    # Clean commit on the fast path -> straight to planning, skipping spec-reviewer.
     m = evaluate_rules(
         rules,
-        vars={**_BASE_VARS, "fast_path": True, "spec_unseen_changes": False},
-        output={"exit": 0, "stdout": "", "stderr": ""},
-    )
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "plan-writer" and m.action.resume is False
-
-
-def test_spec_verify_commit_fast_path_unseen_change_forwards_confirm_gate() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    rules = _steps(wf)["spec-verify-commit"].rules
-    # Fast path, confirm enabled, an undirected spec change pending -> still routes
-    # through spec-confirm (preserving spec-reviewer's gate), clearing the flag.
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "fast_path": True, "spec_confirm": True,
-              "spec_unseen_changes": True},
-        output={"exit": 0, "stdout": "", "stderr": ""},
-    )
-    assert isinstance(m.action, Goto)
-    assert m.action.target == "spec-confirm" and m.action.resume is False
-    assert m.var_mutations["spec_unseen_changes"] is False
-
-
-def test_spec_verify_commit_fast_path_confirm_disabled_skips_to_plan_writer() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
-    rules = _steps(wf)["spec-verify-commit"].rules
-    # Fast path with confirm DISABLED: even an unseen change goes straight to
-    # planning -- the user opted out of the confirm gate.
-    m = evaluate_rules(
-        rules,
-        vars={**_BASE_VARS, "fast_path": True, "spec_confirm": False,
-              "spec_unseen_changes": True},
+        vars={**_BASE_VARS, "fast_path": True},
         output={"exit": 0, "stdout": "", "stderr": ""},
     )
     assert isinstance(m.action, Goto)

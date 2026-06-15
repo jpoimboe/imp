@@ -15,11 +15,11 @@ def test_gate_steps_in_span_review_phase() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
     wf = _wf()
-    # Span [17..20] = integrate-rebase, integrator, integrate-verify, finalize.
+    # Span [16..19] = integrate-rebase, integrator, integrate-verify, finalize.
     # Gates: integrate-rebase (pause), integrate-verify (resume: integrator, backward),
     # finalize (pause + goto implement backward).
     # integrator (no rules / continue-only) is NOT a gate.
-    assert gate_steps_in_span(wf, 17, 20) == (
+    assert gate_steps_in_span(wf, 16, 19) == (
         "integrate-rebase", "integrate-verify", "finalize",
     )
 
@@ -27,9 +27,9 @@ def test_gate_steps_in_span_review_phase() -> None:
 def test_gate_steps_in_span_detects_pause_only_gates() -> None:
     from imp.engine.recovery import gate_steps_in_span
 
-    # autosquash(10) and stamp-trailers(15) gate via `pause: true` (no goto).
-    assert gate_steps_in_span(_wf(), 10, 10) == ("autosquash",)
-    assert gate_steps_in_span(_wf(), 15, 15) == ("stamp-trailers",)
+    # autosquash(9) and stamp-trailers(14) gate via `pause: true` (no goto).
+    assert gate_steps_in_span(_wf(), 9, 9) == ("autosquash",)
+    assert gate_steps_in_span(_wf(), 14, 14) == ("stamp-trailers",)
 
 
 def test_gate_steps_in_span_empty_when_lo_gt_hi() -> None:
@@ -63,7 +63,7 @@ def test_plan_rewind_backward_to_step() -> None:
 
     plan = plan_rewind(_wf(), _state("review"), "review")
     assert plan.to_step == "review"
-    assert plan.target_idx == 12
+    assert plan.target_idx == 11
     assert plan.from_step == "review"
 
 
@@ -95,7 +95,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
     from imp.engine.recovery import apply_rewind, plan_rewind
 
     wf = _wf()
-    # review (12) maxed; task-lead (7) upstream; finalize (20) downstream.
+    # review (11) maxed; task-lead (6) upstream; finalize (19) downstream.
     st = _state("review",
                 loop_counts={"task-lead": 2, "review": 6, "finalize": 1})
     log = InMemoryEventLog()
@@ -119,7 +119,7 @@ def test_apply_rewind_resets_downstream_loop_counts_and_emits() -> None:
 def test_plan_rewind_forward_no_gate_allowed() -> None:
     from imp.engine.recovery import plan_rewind
 
-    # integrator (18) -> integrate-verify (19): span [18,18] = integrator,
+    # integrator (17) -> integrate-verify (18): span [17,17] = integrator,
     # a non-gate (no rules / continue-only) -> a forward jump bypassing no gate.
     plan = plan_rewind(_wf(), _state("integrator"), "integrate-verify")
     assert plan.to_step == "integrate-verify"
