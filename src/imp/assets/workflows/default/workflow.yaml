@@ -189,7 +189,8 @@ phases:
       - name: plan-cycle-check
         file: agents/plan-cycle-check.md
         tier: medium        # Sonnet coverage judgment
-        max_loops: 10                # plans-per-spec bound
+        # No plans-per-spec cap: a spec needs as many plans as it needs. Falls back
+        # to the default max_loops backstop, which catches a genuinely runaway state.
         rules:
           - {if: {more_plans: true}, set: {panel_done: false, multi_plan: true}, goto: plan-writer, feedback: "More plans are needed for this spec. Coverage assessment:"}   # supercycle
           - {if: {multi_plan: true, review_scope: plan}, set: {review_scope: "'change'", panel_done: false}, goto: review}   # one whole-change review pass over the full diff
