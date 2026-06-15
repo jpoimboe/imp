@@ -105,8 +105,13 @@ def _wait_for_daemon(stdin_fd: int, gap: float) -> bool:
         # data arrived while down → discard and keep waiting out the gap
 
 
+def _wants_autosubscribe(env: Mapping[str, str]) -> bool:
+    return env.get("IMP_REMOTE_AUTOSUBSCRIBE") == "1"
+
+
 def _bridge(
-    sock: socket.socket, stdin_fd: int, change_id: str, title: str, stdout: Any
+    sock: socket.socket, stdin_fd: int, change_id: str, title: str, stdout: Any,
+    autosubscribe: bool = False,
 ) -> bool:
     """Bridge one live connection until the socket drops or stdin EOFs. Returns
     True iff stdin reached EOF (imp gone → stop); False if the socket dropped
@@ -121,7 +126,7 @@ def _bridge(
         args=(sock, stdin_fd, cancel_r, stdin_eof), daemon=True,
     )
     try:
-        sock.sendall((make_hello(change_id, title) + "\n").encode("utf-8"))
+        sock.sendall((make_hello(change_id, title, autosubscribe) + "\n").encode("utf-8"))
         reader.start()
         writer.start()
         reader.join()  # return when socket closes (daemon drop or normal shutdown)
@@ -157,6 +162,7 @@ def main(
         return 0
     change_id = env.get("IMP_REMOTE_CONTROL_CHANGE_ID", "")
     title = env.get("IMP_REMOTE_CONTROL_TITLE", "")
+    autosubscribe = _wants_autosubscribe(env)
     stdin_fd = stdin.fileno()
 
     waiting_logged = False
@@ -165,7 +171,7 @@ def main(
         if sock is not None:
             waiting_logged = False
             _log("attached to daemon socket")
-            if _bridge(sock, stdin_fd, change_id, title, stdout):
+            if _bridge(sock, stdin_fd, change_id, title, stdout, autosubscribe):
                 return 0   # stdin EOF during the bridge: imp tore us down
             # socket dropped (daemon stop/crash) → fall through to the poll gap
         elif not waiting_logged:
