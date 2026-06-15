@@ -19,6 +19,7 @@ import yaml
 from imp.engine._yaml import LineLoader, loc
 from imp.engine._yaml import items as _items
 from imp.engine.differ_graph import find_differ_from_cycle
+from imp.engine.drivers import KNOWN_DRIVERS
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.expr import (
     Binary,
@@ -122,6 +123,20 @@ def parse_agent_file(path: Path) -> AgentDef:
         )
     subagents = tuple(fm.get("subagents") or [])
 
+    drivers_raw = fm.get("drivers")
+    if drivers_raw is not None and not (
+        isinstance(drivers_raw, list) and all(isinstance(x, str) for x in drivers_raw)
+    ):
+        raise LoadError("'drivers' must be a list of strings", source)
+    drivers = frozenset(drivers_raw or [])
+    unknown_drivers = drivers - KNOWN_DRIVERS
+    if unknown_drivers:
+        raise LoadError(
+            f"'drivers' names unknown drivers {sorted(unknown_drivers)}; "
+            f"known drivers are {sorted(KNOWN_DRIVERS)}",
+            source,
+        )
+
     mtc_raw = fm.get("max_tool_calls")
     if mtc_raw is not None and (
         not isinstance(mtc_raw, int) or isinstance(mtc_raw, bool) or mtc_raw <= 0
@@ -147,6 +162,7 @@ def parse_agent_file(path: Path) -> AgentDef:
         tier=tier,
         explicit_tools=explicit_tools,
         deny_tools=deny_tools,
+        drivers=drivers,
     )
 
 
