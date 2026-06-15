@@ -372,3 +372,46 @@ async def test_gate_hibernates_when_two_clients_detach(tmp_path: Path) -> None:
                 await anyio.sleep(0.02)
         assert result["r"] == "hibernated"
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_pending_prompt_is_redelivered_to_late_connecting_client(
+    tmp_path: Path,
+) -> None:
+    sock = str(tmp_path / "s.sock")
+    gate_reached = anyio.Event()
+    prompt_event = {"type": "awaiting_user_input", "payload": {"prompt": "paused"}}
+    server = SessionServer(sock, hibernate=True)
+
+    async def run_fn(*, on_event: Any, user_chat_input_fn: Any) -> str:
+        from imp.agents.tools.wait_for_user import AwaitingUserInput
+
+        with anyio.fail_after(5):
+            while server.attached_count < 1:
+                await anyio.sleep(0.02)
+        server.set_pending_prompt(prompt_event)
+        on_event(prompt_event)
+        gate_reached.set()
+        try:
+            return await user_chat_input_fn("")
+        except AwaitingUserInput:
+            return "hibernated"
+
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        result: dict[str, Any] = {}
+
+        async def _serve() -> None:
+            result["r"] = await server.serve(run_fn)
+
+        tg.start_soon(_serve)
+        client1 = await _attach(sock, "c1")
+        await gate_reached.wait()
+        client2 = await _attach(sock, "c2")
+        buf2 = BufferedByteReceiveStream(client2)
+        with anyio.fail_after(5):
+            line = (await buf2.receive_until(b"\n", 1 << 20)).decode()
+        assert parse_event(line) == prompt_event
+        await client1.aclose()
+        await client2.aclose()
+        tg.cancel_scope.cancel()
