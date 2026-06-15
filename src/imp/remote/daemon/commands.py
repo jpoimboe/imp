@@ -64,8 +64,8 @@ class ListResult:
 
 
 Command = (
-    Reply | Create | Abandon | ListChanges | Help | Notice
-    | Subscribe | Unsubscribe | Replay)
+    Reply | Create | Abandon | ListChanges | Help | Notice |
+    Subscribe | Unsubscribe | Replay)
 Response = ListResult | Notice
 
 NEW_USAGE = "Usage: /new <what to build>"
