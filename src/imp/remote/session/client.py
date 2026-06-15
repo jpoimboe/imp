@@ -32,9 +32,14 @@ class SessionClient:
         self._stream: SocketStream | None = None
 
     async def connect(self) -> None:
-        self._stream = await anyio.connect_unix(self._path)
-        await self._stream.send(
-            (encode_attach(self._change_id, self._title) + "\n").encode("utf-8"))
+        stream = await anyio.connect_unix(self._path)
+        try:
+            await stream.send(
+                (encode_attach(self._change_id, self._title) + "\n").encode("utf-8"))
+        except BaseException:
+            await stream.aclose()
+            raise
+        self._stream = stream
 
     async def receive_events(self) -> None:
         if self._stream is None:
