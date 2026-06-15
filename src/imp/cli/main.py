@@ -1414,6 +1414,31 @@ def _resolve_default_id(control: Path) -> str | None:
 _NO_CHANGES_MESSAGE = "No Changes."
 
 
+def _log_picker_empty() -> int:
+    print("No changes.")
+    return 2
+
+
+async def _pick_log_target(control: Path) -> str | int:
+    rows = _sort_rows_newest_first(
+        _status_rows(control) + _completed_rows(control))
+    default_id = _resolve_default_id(control)
+    selected_index = next(
+        (i for i, r in enumerate(rows) if r[0] == default_id), 0)
+
+    def _on_non_tty(_rows: list[_Row]) -> str | int:
+        assert default_id is not None
+        return default_id
+
+    return await _pick_change_target(
+        rows=rows,
+        header="Show log for which change?  (↑/↓ to move · enter to select · q to cancel)",
+        on_empty=_log_picker_empty,
+        on_non_tty=_on_non_tty,
+        selected_index=selected_index,
+    )
+
+
 def _cmd_log(args: argparse.Namespace) -> int:
     from imp.cli import narrative
     from imp.cli.render_text import render_tree
@@ -1425,6 +1450,11 @@ def _cmd_log(args: argparse.Namespace) -> int:
             change_id = _resolve_id(control, args.token)
         except SystemExit:
             return 2
+    elif _interactive():
+        target = anyio.run(_pick_log_target, control)
+        if isinstance(target, int):
+            return target
+        change_id = target
     else:
         change_id = _resolve_default_id(control)
     if change_id is None:

@@ -75,7 +75,7 @@ async def test_explicit_non_interactive_flag_skips_picker_even_on_a_tty(
     monkeypatch.setattr(m, "_resumable_rows", lambda c: rows)
     monkeypatch.setattr(m, "_interactive", lambda: True)   # tty present, but flag wins
 
-    async def boom_picker(candidates, *, now, color, header, selected_index=0):      # must never be drawn
+    async def boom_picker(candidates, *, now, color, header, selected_index=0):
         raise AssertionError("picker drawn despite --non-interactive")
 
     monkeypatch.setattr(m.resume_select, "run_picker", boom_picker)
