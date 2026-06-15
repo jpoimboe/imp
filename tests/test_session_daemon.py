@@ -165,3 +165,29 @@ async def test_interrupt_control_pauses_the_shared_coordinator(
         assert result["r"] == "paused"
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+def test_main_loads_named_change_and_serves_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    calls: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        calls["load"] = (control_root, change_id)
+        return loaded
+
+    def fake_run(fn: Any, arg: Any) -> None:
+        calls["run"] = (fn, arg)
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main(
+        ["--control-root", str(tmp_path), "--change-id", "2026-06-15-abc"])
+
+    assert rc == 0
+    assert calls["load"] == (tmp_path, "2026-06-15-abc")
+    assert calls["run"] == (daemon.serve_change_session, loaded)

@@ -1,8 +1,12 @@
 """Per-change session-daemon: bind run_change behind a SessionServer."""
 from __future__ import annotations
 
+import argparse
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
+
+import anyio
 
 from imp.engine.change import Change
 from imp.engine.executor import run_change
@@ -41,3 +45,17 @@ async def serve_change_session(
         )
 
     return await server.serve(_bound)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="imp-session-daemon")
+    parser.add_argument("--control-root", required=True)
+    parser.add_argument("--change-id", required=True)
+    ns = parser.parse_args(argv)
+    change = Change.load(Path(ns.control_root), ns.change_id)
+    anyio.run(serve_change_session, change)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
