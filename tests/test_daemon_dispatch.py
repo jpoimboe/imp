@@ -182,7 +182,7 @@ async def test_subscribe_with_unknown_change_emits_handle_only_header() -> None:
 @pytest.mark.anyio
 async def test_unsubscribe_clears_focus_and_confirms() -> None:
     control = FakeControl()
-    control.focus.set("2026-06-14-k3f9qa")
+    control.focus.focus_on("2026-06-14-k3f9qa")
     responses: queue.Queue = queue.Queue()
     await _handle_command(Unsubscribe(), control, responses)
     assert control.focus.current() is None
@@ -203,7 +203,7 @@ async def test_replay_resends_each_message_oldest_first() -> None:
 @pytest.mark.anyio
 async def test_replay_falls_back_to_current_focus() -> None:
     control = FakeControl(narratives={"2026-06-14-k3f9qa": ["only"]})
-    control.focus.set("2026-06-14-k3f9qa")
+    control.focus.focus_on("2026-06-14-k3f9qa")
     responses: queue.Queue = queue.Queue()
     await _handle_command(Replay(None, 5), control, responses)
     assert responses.get_nowait() == Notice("only")
@@ -220,7 +220,7 @@ async def test_replay_with_no_target_and_no_focus_is_route_hint() -> None:
 @pytest.mark.anyio
 async def test_replay_with_no_narrative_notes_nothing_to_replay() -> None:
     control = FakeControl()
-    control.focus.set("2026-06-14-k3f9qa")
+    control.focus.focus_on("2026-06-14-k3f9qa")
     responses: queue.Queue = queue.Queue()
     await _handle_command(Replay(None, 5), control, responses)
     notice = responses.get_nowait()

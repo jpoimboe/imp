@@ -12,7 +12,7 @@ class Focus:
         with self._lock:
             return self._change_id
 
-    def set(self, change_id: str) -> None:
+    def focus_on(self, change_id: str) -> None:
         with self._lock:
             self._change_id = change_id
 

@@ -52,7 +52,7 @@ def test_on_event_records_handle_mapping_for_the_at_fallback() -> None:
 def test_on_event_drops_a_silent_event_with_an_empty_body() -> None:
     sent: list = []
     focus = Focus()
-    focus.set("2026-06-13-k3f9qa")   # focus matches the event — only empty-body guard drops it
+    focus.focus_on("2026-06-13-k3f9qa")   # focus matches the event — only empty-body guard drops it
     adapter = _adapter(sent, focus=focus)
     adapter.on_event({"type": "llm_response", "payload": {},
                       "change": {"id": "2026-06-13-k3f9qa", "title": "X"}})

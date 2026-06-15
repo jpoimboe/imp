@@ -238,9 +238,9 @@ async def _handle_command(
 ) -> None:
     if isinstance(command, Reply):
         await control.reply(command.change_id, command.text)
-        control.focus.set(command.change_id)
+        control.focus.focus_on(command.change_id)
     elif isinstance(command, Subscribe):
-        control.focus.set(command.change_id)
+        control.focus.focus_on(command.change_id)
         handle = handle_for(command.change_id)
         snap = await anyio.to_thread.run_sync(control.snapshot, command.change_id)
         bodies = await anyio.to_thread.run_sync(
@@ -349,7 +349,7 @@ async def run_daemon(
 
     hub = SouthHub(
         str(spath), on_event=lambda cid, line: outbound.put(line),
-        on_attach=lambda cid, autosubscribe: focus.set(cid) if autosubscribe else None,
+        on_attach=lambda cid, autosubscribe: focus.focus_on(cid) if autosubscribe else None,
         on_detach=lambda cid: focus.clear_if(cid))
     control = ControlPlane(
         hub=hub, resume=resume, create=create,
