@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 import impty.mcp as mcp_mod
 from impty.driver import ImptyDriver
@@ -44,5 +45,5 @@ def test_build_server_registers_thread_offloaded_tools_that_are_callable() -> No
     # FastMCP call path; a no-session call surfaces the driver's RuntimeError as a
     # ToolError carrying its message — proof the registered tool really runs the
     # driver method, not a stub.
-    with pytest.raises(Exception, match="no session"):
+    with pytest.raises(ToolError, match="no session"):
         asyncio.run(server.call_tool("view", {}))
