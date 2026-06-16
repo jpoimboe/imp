@@ -40,7 +40,7 @@ from imp.cli.remote_channel import (
 from imp.cli.signals import EscKeyReader, install_process_group, pause_and_exit
 from imp.cli.slash import ask_line_with_slash
 from imp.cli.tui_app import TuiApp
-from imp.engine import journal, recovery, worktree
+from imp.engine import backlog, journal, recovery, worktree
 from imp.engine.change import Change
 from imp.engine.errors import LoadError, LoadErrors
 from imp.engine.executor import RunResult, run_change
@@ -975,9 +975,62 @@ def _record_backlog(args: argparse.Namespace, control: Path) -> int:
     return 0
 
 
+async def _run_fresh_session(
+    change: Change, *, args: argparse.Namespace, seed_opening: str | None,
+) -> int:
+    from imp.cli.signals import InterruptCoordinator
+
+    try:
+        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
+            print(_run_header_line(
+                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
+            non_interactive = bool(getattr(args, "non_interactive", False))
+            _warn_if_tui_unavailable(args, sys.stdout)
+            if _tui_requested(args) and not non_interactive:
+                return await _run_tui_session(
+                    change, args=args, seed_opening=seed_opening)
+            status = LiveStatus(sys.stdout)
+            driver = LiveDriver(stream=sys.stdout,
+                                color=should_use_color(sys.stdout),
+                                width=_term_width(), status=status)
+            coord = InterruptCoordinator()
+            channel = _maybe_build_channel(change)
+            rc = 0
+            esc_reader: EscKeyReader | None = None
+            if non_interactive:
+                reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
+                    args.message)
+            else:
+                esc_reader = EscKeyReader(coord)
+                _router, reply_input_fn = _build_interactive_input(
+                    change, status, coord, esc_reader, driver)
+
+            try:
+                with _benign_interrupt_loop_handler(coord):
+                    async with anyio.create_task_group() as tg:
+                        tg.start_soon(coord.run_signal_receiver)
+                        if not non_interactive:
+                            tg.start_soon(status.tick)
+                            assert esc_reader is not None
+                            await tg.start(esc_reader.run)
+                        rc = await _run_change_session(
+                            change, coord=coord, driver=driver, status=status,
+                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
+                            non_interactive=non_interactive, tg=tg, channel=channel,
+                            seed_opening=seed_opening)
+            except* (LoadError, LoadErrors) as eg:
+                driver.finish()
+                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
+                rc = 2
+            return rc
+    except LockHeld as e:
+        print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
+              file=sys.stderr)
+        return 2
+
+
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
-    from imp.cli.signals import InterruptCoordinator
 
     try:
         control = _control_root()
@@ -1057,63 +1110,7 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
 
-    try:
-        with ProjectLock(change.change_dir / "lock").acquire():  # per-Change single-runner
-            print(_run_header_line(
-                change.slug, change.id, "new", color=should_use_color(sys.stdout)))
-            non_interactive = bool(getattr(args, "non_interactive", False))
-            _warn_if_tui_unavailable(args, sys.stdout)
-            if _tui_requested(args) and not non_interactive:
-                return await _run_tui_session(
-                    change, args=args, seed_opening=opening_text)
-            status = LiveStatus(sys.stdout)
-            driver = LiveDriver(stream=sys.stdout,
-                                color=should_use_color(sys.stdout),
-                                width=_term_width(), status=status)
-            coord = InterruptCoordinator()
-            channel = _maybe_build_channel(change)
-            rc = 0
-            esc_reader: EscKeyReader | None = None
-            if non_interactive:
-                reply_input_fn: Callable[[], Awaitable[str]] = make_message_reply_fn(
-                    args.message)
-            else:
-                esc_reader = EscKeyReader(coord)
-                # Task 11: the ESC reader (sole /dev/tty owner during thinking)
-                # also captures interject lines; the solicit/reply prompt is the
-                # router-flagged reply_input_fn. See _build_interactive_input.
-                _router, reply_input_fn = _build_interactive_input(
-                    change, status, coord, esc_reader, driver)
-
-            try:
-                with _benign_interrupt_loop_handler(coord):
-                    async with anyio.create_task_group() as tg:
-                        tg.start_soon(coord.run_signal_receiver)
-                        if not non_interactive:
-                            tg.start_soon(status.tick)
-                            assert esc_reader is not None
-                            # Block until the reader has armed (or given up): a
-                            # workflow whose first step is interactive must not start
-                            # its prompt before the ESC reader holds /dev/tty, or the
-                            # prompt and the reader race for the terminal's termios.
-                            await tg.start(esc_reader.run)
-                        rc = await _run_change_session(
-                            change, coord=coord, driver=driver, status=status,
-                            esc_reader=esc_reader, reply_input_fn=reply_input_fn,
-                            non_interactive=non_interactive, tg=tg, channel=channel,
-                            seed_opening=opening_text)
-            except* (LoadError, LoadErrors) as eg:
-                # A bad workflow/config raised on the FIRST run_change (it never
-                # reaches the loop). _run_change_session has already cleaned up
-                # (status.reset) in its finally; surface the error as rc 2.
-                driver.finish()
-                print(f"imp: {eg.exceptions[0]}", file=sys.stderr)
-                rc = 2
-            return rc
-    except LockHeld as e:
-        print(f"imp: Change {change.id} is already running (pid {e.held_by_pid})",
-              file=sys.stderr)
-        return 2
+    return await _run_fresh_session(change, args=args, seed_opening=opening_text)
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
@@ -1149,6 +1146,34 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return anyio.run(_async_cmd_run, args)
 
 
+async def _maybe_resume_backlog(
+    args: argparse.Namespace, control: Path, change_id: str,
+) -> int | None:
+    """If `change_id` names a backlog record, materialize it off the current
+    target branch (warning on unmerged deps but starting anyway) and run it as a
+    fresh session seeded with the brief. Returns the rc, or None if not a backlog
+    record (the caller continues with the normal resume path)."""
+    rec = backlog.read_record(control, change_id)
+    if rec is None:
+        return None
+    base = worktree.current_branch(control)
+    ready, unmerged = backlog.readiness(control, rec["depends_on"])
+    if not ready:
+        print(f"imp: backlog Change {change_id} is blocked on unmerged dep(s): "
+              f"{', '.join(unmerged)}; starting anyway.", file=sys.stderr)
+    try:
+        change = backlog.materialize_record(control, change_id, base_branch=base)
+    except (LoadError, LoadErrors) as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    except worktree.BranchExists:
+        print(f"imp: Change {change_id!r} already has a live branch but its backlog "
+              f"record was left behind; delete `.imp/backlog/{change_id}.json` and "
+              f"resume the existing Change", file=sys.stderr)
+        return 2
+    return await _run_fresh_session(change, args=args, seed_opening=rec["brief"])
+
+
 async def _async_cmd_resume(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -1165,6 +1190,9 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             change_id = _resolve_id(control, args.token)
         except SystemExit:
             return 2
+    rc = await _maybe_resume_backlog(args, control, change_id)
+    if rc is not None:
+        return rc
     try:
         change = Change.load(control, change_id)
     except (LoadError, LoadErrors):
@@ -1358,7 +1386,8 @@ def _list_change_worktrees(control: Path) -> list[str]:
 
 
 def _iter_change_ids(control: Path) -> list[str]:
-    """All known Change ids: live worktrees first, then journaled ids not live."""
+    """All known Change ids: live worktrees first, then journaled ids not live,
+    then backlog ids not yet seen."""
     live = _list_change_worktrees(control)
     seen = set(live)
     out = list(live)
@@ -1366,11 +1395,15 @@ def _iter_change_ids(control: Path) -> list[str]:
         if cid not in seen:
             out.append(cid)
             seen.add(cid)
+    for cid in backlog.list_ids(control):
+        if cid not in seen:
+            out.append(cid)
+            seen.add(cid)
     return out
 
 
 def _title_for_id(control: Path, change_id: str) -> str | None:
-    """Read a Change's current title (worktree first, journal second)."""
+    """Read a Change's current title (worktree first, journal second, backlog third)."""
     cdir = control / ".imp" / "worktrees" / change_id / ".imp" / "change"
     cj = cdir / "change.json"
     if cj.exists():
@@ -1378,6 +1411,9 @@ def _title_for_id(control: Path, change_id: str) -> str | None:
             return str(json.loads(cj.read_bytes())["title"])
         except (json.JSONDecodeError, KeyError):
             return None
+    rec = backlog.read_record(control, change_id)
+    if rec is not None:
+        return str(rec["title"])
     raw = journal.journal_show(control, change_id, "change.json")
     if raw is None:
         return None
