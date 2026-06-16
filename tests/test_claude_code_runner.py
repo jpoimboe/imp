@@ -1231,3 +1231,95 @@ async def test_interrupt_without_live_client_is_safe(tmp_path: Path) -> None:
 
 
 
+
+@pytest.mark.anyio
+async def test_result_is_error_emits_terminated_not_nudge(tmp_path: Path) -> None:
+    """A ResultMessage flagged is_error is a termination: emit a typed `terminated`
+    error with the structured fields in the detail, BEFORE any nudge — even when a
+    continuation_fn is installed."""
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("Something went wrong and the agent stopped.")),
+        result(is_error=True, subtype="error_during_execution", stop_reason="error"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    inv = _inv(tmp_path)
+    inv = replace(inv, continuation_fn=lambda _last: "please call complete_step")
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+
+    events = [e async for e in runner.run(inv)]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1
+    payload = errs[0]["payload"]
+    assert payload["category"] == "terminated"
+    assert payload["detail"]["is_error"] is True
+    assert payload["detail"]["subtype"] == "error_during_execution"
+    assert payload["detail"]["stop_reason"] == "error"
+    # Never routed through the benign nudge path.
+    assert payload["kind"] != "no_complete_step_after_nudges"
+
+
+@pytest.mark.anyio
+async def test_result_is_error_reports_quota_wording_independent(tmp_path: Path) -> None:
+    """A spend-limit termination is reported regardless of wording: 'monthly spend
+    limit' is in no pattern list, so it is the generic `terminated` type, with the
+    wording captured in the detail."""
+    (tmp_path / "art").mkdir()
+    wording = "You've hit your monthly spend limit · raise it at claude.ai/settings/usage"
+    scripted = [assistant(text(wording)), result(is_error=True)]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    events = [e async for e in runner.run(_inv(tmp_path))]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1
+    assert errs[0]["payload"]["category"] == "terminated"
+    assert wording in errs[0]["payload"]["detail"]["last_agent_text"]
+
+
+@pytest.mark.anyio
+async def test_result_is_error_with_known_quota_text_labels_quota(tmp_path: Path) -> None:
+    """A recognized usage-limit wording is labeled QuotaError (category quota), and
+    still carries the structured fields in the detail."""
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("You have reached your usage limit for today.")),
+        result(is_error=True),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    events = [e async for e in runner.run(_inv(tmp_path))]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1
+    assert errs[0]["payload"]["category"] == "quota"
+    assert errs[0]["payload"]["detail"]["is_error"] is True
+
+
+@pytest.mark.anyio
+async def test_clean_no_complete_step_still_nudges(tmp_path: Path) -> None:
+    """is_error=False keeps today's benign behavior: a continuation_fn that gives
+    up routes to agent_incomplete / no_complete_step_after_nudges, NOT terminated."""
+    (tmp_path / "art").mkdir()
+    scripted = [assistant(text("I'm still thinking about it.")), result()]   # is_error False
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    inv = _inv(tmp_path)
+    inv = replace(inv, continuation_fn=lambda _last: None)
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+
+    events = [e async for e in runner.run(inv)]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1
+    payload = errs[0]["payload"]
+    assert payload["category"] == "agent_incomplete"
+    assert payload["kind"] == "no_complete_step_after_nudges"
