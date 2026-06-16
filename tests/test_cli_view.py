@@ -452,7 +452,7 @@ def test_new_renders_through_live_driver(tmp_path, monkeypatch) -> None:
     from imp.engine.executor import RunResult
     from tests.conftest import _seed_control
 
-    # _seed_control initialises a git repo and commits imp/workflows/default +
+    # _seed_control initialises a git repo and commits imp/workflows/imp +
     # imp/config.yaml — the layout Change.create now expects.
     _seed_control(tmp_path)
 

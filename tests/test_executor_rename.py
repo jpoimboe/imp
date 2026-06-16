@@ -74,7 +74,7 @@ class _FakeProvider:
 def _seed_two_step_control(root: Path) -> None:
     from tests.conftest import _init_repo, write_agent_md
     _init_repo(root)
-    src = root / "imp" / "workflows" / "default"
+    src = root / "imp" / "workflows" / "imp"
     (src / "agents").mkdir(parents=True)
     for stem in ("a", "b"):
         write_agent_md(
@@ -98,7 +98,7 @@ def _seed_two_step_control(root: Path) -> None:
         "  high: {anthropic: x}\n"
     )
     # Config layers: committed marker + gitignored local layer.
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_cfg)
     _git(root, "add", "-A")

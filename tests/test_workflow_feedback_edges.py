@@ -27,7 +27,7 @@ def _gotos(workflow):
 
 def test_every_findings_edge_has_a_preamble():
     wf = load_workflow(
-        pathlib.Path("src/imp/assets/workflows/default"),
+        pathlib.Path("src/imp/assets/workflows/imp"),
     )
     seen = set()
     for src, g in _gotos(wf):

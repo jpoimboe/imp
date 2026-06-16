@@ -63,17 +63,17 @@ def _seed_run_repo(root: Path, script_path: Path) -> None:
     _git_q(root, "config", "user.name", "t")
     (root / ".gitignore").write_text(".imp/\n")
     (root / "README.md").write_text("seed\n")
-    src = root / "imp" / "workflows" / "default" / "agents"
+    src = root / "imp" / "workflows" / "imp" / "agents"
     src.mkdir(parents=True)
     (src / "coder.md").write_text(
         "---\nname: coder\ntools: [bash, complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nprompt body\n")
-    (root / "imp" / "workflows" / "default" / "workflow.yaml").write_text(
+    (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: p\n    steps:\n"
         "      - {name: s, file: agents/coder.md}\n")
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [scripted]\n"

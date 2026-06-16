@@ -47,6 +47,13 @@ from imp.engine.executor import RunResult, run_change
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import dated_slug, new_change_id, slugify
 from imp.engine.state import LockHeld, ProjectLock, State
+from imp.engine.workflow_lifecycle import (
+    DriftState,
+    classify_drift,
+    perform_workflow_update,
+    workflow_update_notice,
+)
+from imp.providers.config import parse_default_workflow
 
 
 class ReplyInterjectRouter:
@@ -990,6 +997,10 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     if block is not None:
         print(f"imp: {block}", file=sys.stderr)
         return 2
+
+    _notice = workflow_update_notice(control)
+    if _notice is not None:
+        print(f"imp: {_notice}")
 
     _verify_command_nudge(
         project_root=control, control_root=control,
@@ -2083,6 +2094,9 @@ def _cmd_status(args: argparse.Namespace) -> int:
     except worktree.PreconditionError:
         print(_NO_CHANGES_MESSAGE)
         return 0
+    _notice = workflow_update_notice(control)
+    if _notice is not None:
+        print(f"imp: {_notice}")
     inflight = _sort_rows_newest_first(_status_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
     if not inflight and not past:
@@ -2102,6 +2116,73 @@ def _cmd_status(args: argparse.Namespace) -> int:
             print(change_row.format_change_line(
                 change_id=r[0], title=r[4], status=r[1], step=r[2],
                 last_iso=r[3], now=now, color=color, dim=True))
+    return 0
+
+
+def _cmd_update_workflow(args: argparse.Namespace) -> int:
+    try:
+        control = _control_root()
+    except worktree.PreconditionError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    try:
+        explicit = getattr(args, "name", None)
+        name = explicit or parse_default_workflow(control / "imp" / "project.yaml")
+    except (LoadError, LoadErrors) as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    mirror = control / "imp" / "workflows" / name
+    drift = classify_drift(name, mirror)
+    if drift is None:
+        print(
+            f"imp: '{name}' is not a managed workflow"
+            " — use your version control to update it.",
+            file=sys.stderr,
+        )
+        return 1
+    if drift is DriftState.LOCALLY_MODIFIED:
+        print(
+            f"imp: the {name} workflow is locally modified"
+            " — update manually or restore from the bundled source.",
+            file=sys.stderr,
+        )
+        return 1
+    if drift is DriftState.UP_TO_DATE:
+        print(f"imp: {name} workflow is already up-to-date.")
+        return 0
+    # UPDATE_AVAILABLE: copy files, stamp, commit scoped to mirror
+    perform_workflow_update(name, mirror)
+    with worktree.RepoGitLock(control).acquire():
+        try:
+            subprocess.run(["git", "add", str(mirror)], cwd=control, check=True)
+            subprocess.run(
+                [
+                    "git", "commit",
+                    "-m", f"chore: update {name} workflow to current imp version",
+                    "--", str(mirror),
+                ],
+                cwd=control,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"imp: {e}", file=sys.stderr)
+            r = subprocess.run(
+                ["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", str(mirror)],
+                cwd=control,
+            )
+            if r.returncode != 0:
+                print(
+                    f"imp: warning: failed to restore {mirror.name}; "
+                    "check git status before retrying.",
+                    file=sys.stderr,
+                )
+            subprocess.run(["git", "clean", "-fd", "--", str(mirror)], cwd=control)
+            return 2
+    diff = subprocess.run(
+        ["git", "show", "HEAD"],
+        cwd=control, capture_output=True, text=True,
+    )
+    print(diff.stdout, end="")
     return 0
 
 
@@ -2297,6 +2378,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Also list completed and abandoned Changes (default: in-flight only).",
     )
     p_status.set_defaults(func=_cmd_status)
+
+    p_update_workflow = sub.add_parser(
+        "update-workflow",
+        help="Update the imp-managed workflow to the current bundled version.",
+    )
+    p_update_workflow.add_argument(
+        "name", nargs="?", default=None, metavar="NAME",
+        help="workflow to update (default: the project's default-workflow)",
+    )
+    p_update_workflow.set_defaults(func=_cmd_update_workflow)
 
     p_config = sub.add_parser(
         "config",

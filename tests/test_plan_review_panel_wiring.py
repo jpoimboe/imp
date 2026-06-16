@@ -8,13 +8,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.agents.prompts import build_context, render_prompt
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import Goto
 
-AGENTS = Path("src/imp/assets/workflows/default/agents")
+AGENTS = Path("src/imp/assets/workflows/imp/agents")
 
 _BASE_VARS = {
     "fast_path": False, "spec_minors_integrated": False,
@@ -24,7 +24,7 @@ _BASE_VARS = {
 
 
 def _wf():
-    return load_workflow(default_workflow_dir())
+    return load_workflow(bundled_workflow_dir("imp"))
 
 
 def _steps(wf):

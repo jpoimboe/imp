@@ -28,9 +28,9 @@ def test_fresh_machine_already_initialized_project(
     # machine config yet → wrote_user_config=True path.
     imp_dir = tmp_path / "imp"
     imp_dir.mkdir()
-    (imp_dir / "project.yaml").write_text("workflow: default\nvars: {}\n")
+    (imp_dir / "project.yaml").write_text("default-workflow: imp\nvars: {}\n")
     (imp_dir / "workflows").mkdir()
-    (imp_dir / "workflows" / "default").mkdir()
+    (imp_dir / "workflows" / "imp").mkdir()
 
     lines: list[str] = []
     _run(tmp_path, monkeypatch, lines)

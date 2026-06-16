@@ -7,7 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 
-SCRIPT = Path("src/imp/assets/workflows/default/scripts/base-fresh-check.sh").resolve()
+SCRIPT = Path("src/imp/assets/workflows/imp/scripts/base-fresh-check.sh").resolve()
 
 
 def _git(cwd: Path, *a: str) -> subprocess.CompletedProcess[str]:

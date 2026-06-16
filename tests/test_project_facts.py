@@ -89,7 +89,7 @@ def test_facts_reach_config_from_project_layer(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     (tmp_path / "imp").mkdir()
     (tmp_path / "imp" / "project.yaml").write_text(
-        "workflow: default\nfacts:\n  test_command: make test\nguidance: hi\n"
+        "default-workflow: imp\nfacts:\n  test_command: make test\nguidance: hi\n"
     )
     cfg = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
     assert cfg.project_facts == {"test_command": "make test"}
@@ -106,7 +106,7 @@ def test_user_layer_facts_not_contributed(
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     cfg = load_effective_config(project_root=tmp_path, control_root=tmp_path).config
     assert cfg.project_facts == {}
 

@@ -47,7 +47,9 @@ class Change:
 
     @property
     def live_workflow_dir(self) -> Path:
-        return self.project_root / "imp" / "workflows" / "default"
+        from imp.providers.config import parse_default_workflow
+        name = parse_default_workflow(self.project_root / "imp" / "project.yaml")
+        return self.project_root / "imp" / "workflows" / name
 
     @property
     def workflow_dir(self) -> Path:
@@ -95,14 +97,17 @@ class Change:
         # LoadErrors when the workflow parses but fails validation (e.g. a step
         # references a model_tier not present in the merged config).
         try:
+            from imp.providers.config import parse_default_workflow
+            wf_name = parse_default_workflow(wt_path / "imp" / "project.yaml")
             workflow = load_workflow(
-                wt_path / "imp" / "workflows" / "default",
+                wt_path / "imp" / "workflows" / wf_name,
                 configured_tiers=config.tier_names(),
                 project_keys=frozenset(config.project_facts),
             )
         except (LoadError, LoadErrors):
             # Validation now runs post-create_worktree, so a base branch lacking a
-            # readable imp/workflows/default would otherwise leak the just-created
+            # readable imp/workflows/<name> (or carrying a malformed
+            # default-workflow: value) would otherwise leak the just-created
             # branch+worktree. Roll both back so a failed create leaves nothing.
             worktree.destroy_worktree(control_root, change_id)
             raise

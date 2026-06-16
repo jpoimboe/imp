@@ -16,7 +16,7 @@ def test_absent_file_returns_none(tmp_path: Path) -> None:
 
 def test_tiers_less_layer_is_valid(tmp_path: Path) -> None:
     p = tmp_path / "project.yaml"
-    p.write_text("workflow: default\nverify_command: make check\n")
+    p.write_text("default-workflow: imp\nverify_command: make check\n")
     layer, src = parse_config_layer(p)  # type: ignore[misc]
     assert "tiers" not in layer
     assert "providers" not in layer
@@ -43,7 +43,7 @@ def test_valueless_providers_treated_as_absent(tmp_path: Path) -> None:
     # must treat it as absent (floor fills it), NOT raise a config.yaml message
     # from a project.yaml file (finding M1).
     p = tmp_path / "project.yaml"
-    p.write_text("providers:\ntiers:\nworkflow: default\n")
+    p.write_text("providers:\ntiers:\ndefault-workflow: imp\n")
     layer, _src = parse_config_layer(p)  # type: ignore[misc]
     assert "providers" not in layer
     assert "tiers" not in layer
@@ -62,7 +62,7 @@ def test_vars_key_normalized_to_present_dict(tmp_path: Path) -> None:
 def test_parse_sandbox_block(tmp_path: Path) -> None:
     p = tmp_path / "project.yaml"
     p.write_text(
-        "workflow: default\n"
+        "default-workflow: imp\n"
         "sandbox:\n"
         "  network: false\n"
         "  secret_paths: ['.mykeys']\n"
@@ -92,27 +92,27 @@ def test_config_exposes_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 def test_sandbox_unknown_key_rejected(tmp_path: Path) -> None:
     p = tmp_path / "c.yaml"
-    p.write_text("workflow: default\nsandbox:\n  bogus_key: 1\n")
+    p.write_text("default-workflow: imp\nsandbox:\n  bogus_key: 1\n")
     with pytest.raises(LoadError, match="not a known sandbox setting"):
         parse_config_layer(p)
 
 
 def test_sandbox_bad_bool_rejected(tmp_path: Path) -> None:
     p = tmp_path / "c.yaml"
-    p.write_text("workflow: default\nsandbox:\n  enabled: yes-please\n")
+    p.write_text("default-workflow: imp\nsandbox:\n  enabled: yes-please\n")
     with pytest.raises(LoadError, match="must be a boolean"):
         parse_config_layer(p)
 
 
 def test_sandbox_bad_list_rejected(tmp_path: Path) -> None:
     p = tmp_path / "c.yaml"
-    p.write_text("workflow: default\nsandbox:\n  secret_paths: /etc/shadow\n")
+    p.write_text("default-workflow: imp\nsandbox:\n  secret_paths: /etc/shadow\n")
     with pytest.raises(LoadError, match="must be a list of strings"):
         parse_config_layer(p)
 
 
 def test_sandbox_non_mapping_rejected(tmp_path: Path) -> None:
     p = tmp_path / "c.yaml"
-    p.write_text("workflow: default\nsandbox: flat-string\n")
+    p.write_text("default-workflow: imp\nsandbox: flat-string\n")
     with pytest.raises(LoadError, match="must be a mapping"):
         parse_config_layer(p)

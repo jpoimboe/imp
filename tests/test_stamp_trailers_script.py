@@ -10,7 +10,7 @@ import os
 import subprocess
 from pathlib import Path
 
-STAMP = Path("src/imp/assets/workflows/default/scripts/stamp-trailers.sh").resolve()
+STAMP = Path("src/imp/assets/workflows/imp/scripts/stamp-trailers.sh").resolve()
 SLUG = "2026-06-11-stamp-test"
 
 

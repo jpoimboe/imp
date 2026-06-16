@@ -7,6 +7,15 @@ output:
   blocking: {type: bool}
 ---
 
+{% if project.guidance %}
+## Project guidance
+
+The project maintainer set this guidance for this codebase — follow it unless it conflicts with a hard correctness or safety requirement:
+
+{{ project.guidance }}
+
+{% endif %}
+
 You are reviewing the code quality of a just-committed task.
 
 The task-lead's dispatch message contains the task text and spec. In `bash`, run `git show HEAD` to see what changed.

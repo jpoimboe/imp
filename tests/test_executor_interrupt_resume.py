@@ -23,7 +23,7 @@ def _make_change(root: Path, *, slug: str = "c", title: str = "t") -> Change:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
-    src_wf = root / "imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "imp"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
@@ -55,7 +55,7 @@ def _make_change(root: Path, *, slug: str = "c", title: str = "t") -> Change:
 
 
 def _seed_single_agent(root: Path) -> Change:
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -71,7 +71,7 @@ def _seed_single_agent(root: Path) -> Change:
     )
     # run_change reads via load_effective_config: project marker + local layer.
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n"
@@ -117,7 +117,7 @@ async def test_mid_turn_interrupt_sets_resume_pending(tmp_path: Path) -> None:
 async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Path) -> None:
     """Two-step workflow. Interrupt fires as step 1 completes (Continue). The
     cursor must advance to step 2, THEN pause — re-entry starts step 2 fresh."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "a.md").write_text(
         "---\nname: a\ntools: [complete_step]\n"
@@ -127,7 +127,7 @@ async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Pat
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: s1, file: agents/a.md, tier: medium}\n"
         "      - {name: s2, file: agents/a.md, tier: medium}\n")
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")
@@ -176,7 +176,7 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
     """A review→agent resume-goto sets resume_pending=target. An interrupt on
     that navigation must KEEP resume_pending=target (not force it to None), so
     the target resumes its transcript."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
         "---\nname: coder\ntools: [complete_step]\n"
@@ -193,7 +193,7 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
         "        rules:\n"
         "          - {if: {verdict: rework}, resume: code}\n"
         "          - {else: true, continue: true}\n")
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")

@@ -123,6 +123,33 @@ def parse_project_facts(path: Path) -> tuple[dict[str, str], str]:
     return facts, guidance
 
 
+def parse_default_workflow(path: Path) -> str:
+    """Read imp/project.yaml `default-workflow:` field. Absent → 'imp'. Read
+    directly from the project layer, not merged into the layered Config.
+    The value is a single path segment (no separators / parent escapes)."""
+    if not path.exists():
+        return "imp"
+    try:
+        raw: Any = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as e:
+        raise LoadError(
+            f"invalid YAML in {path.name}: {e}", SourceLoc(file=path, line=1)
+        ) from e
+    if not isinstance(raw, dict):
+        raise LoadError(f"{path.name} root must be a mapping", SourceLoc(file=path, line=1))
+    name = raw.get("default-workflow")
+    if name is None:
+        return "imp"
+    if (not isinstance(name, str) or not name.strip() or "/" in name or "\\" in name
+            or name.startswith(".")):
+        raise LoadError(
+            "'default-workflow' must be a single workflow name "
+            "(no path separators)",
+            SourceLoc(file=path, line=1),
+        )
+    return name
+
+
 def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
     """Parse ONE config-layer file into a dict of only the keys it sets (spec §2
     merge). Returns None if the file is absent. Tiers/providers may be omitted —

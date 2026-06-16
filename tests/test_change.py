@@ -10,7 +10,7 @@ from tests.conftest import _git, _init_repo, _seed_control
 
 
 def _seed_control_without_workflow(root: Path) -> None:
-    """A repo with committed imp/config.yaml but NO imp/workflows/default — so
+    """A repo with committed imp/config.yaml but NO imp/workflows/imp — so
     Change.create gets past create_worktree and config load, then fails the seed
     workflow load."""
     _init_repo(root)
@@ -36,7 +36,7 @@ def test_create_change_makes_worktree_and_state(tmp_path: Path) -> None:
     # create() does not take a snapshot; no .imp/change/workflow/ dir yet.
     assert not (wtpath / ".imp" / "change" / "workflow").exists()
     # workflow_dir IS the branch's own tracked workflow dir.
-    assert ch.workflow_dir == wtpath / "imp" / "workflows" / "default"
+    assert ch.workflow_dir == wtpath / "imp" / "workflows" / "imp"
     assert (ch.workflow_dir / "workflow.yaml").exists()
     state = State.load(wtpath / ".imp" / "change" / "state")
     assert state.id == "2026-06-04-abc123" and state.step == "s" and state.status == "running"
@@ -61,7 +61,7 @@ def test_workflow_dir_is_live_dir_when_no_snapshot_exists(tmp_path: Path) -> Non
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", change_id="2026-06-04-isolat", base_branch="main")
     # The executed workflow lives in the worktree's tracked tree...
-    assert ch.workflow_dir == ch.project_root / "imp" / "workflows" / "default"
+    assert ch.workflow_dir == ch.project_root / "imp" / "workflows" / "imp"
     assert "phases:" in (ch.workflow_dir / "workflow.yaml").read_text()
     # ...and there is no gitignored second copy.
     assert not (ch.change_dir / "workflow").exists()
@@ -87,7 +87,7 @@ def test_create_with_invalid_workflow_raises_and_leaves_no_orphan(
     # parses (no LoadError), but _v_step_tier_configured fires and LoadErrors
     # is raised.
     _seed_control(tmp_path)
-    workflow_yaml = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
+    workflow_yaml = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
     workflow_yaml.write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: p\n    steps:\n"
@@ -123,7 +123,7 @@ def test_live_workflow_dir_ignores_the_snapshot(tmp_path: Path) -> None:
     snapshot.mkdir()
     (snapshot / "workflow.yaml").write_text("name: frozen\n")
     # live_workflow_dir always points at the branch dir, even with a snapshot present.
-    assert ch.live_workflow_dir == ch.project_root / "imp" / "workflows" / "default"
+    assert ch.live_workflow_dir == ch.project_root / "imp" / "workflows" / "imp"
     assert ch.workflow_dir == snapshot
 
 

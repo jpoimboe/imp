@@ -49,14 +49,14 @@ def _seed_project(tmp_path: Path) -> None:
 
     imp new needs >=1 commit with HEAD on a branch (worktree.check_preconditions)
     and reads the workflow + config from the control root's WORKING TREE
-    (Change.create copies imp/workflows/default; the runtime reads the merged
+    (Change.create copies imp/workflows/imp; the runtime reads the merged
     config from imp/project.yaml — the project layer of load_effective_config).
     Committing them is the clean choice. _init_repo already commits a README +
     .gitignore with `.imp/`, so .imp/ is durably ignored and `imp new` won't add
     an extra gitignore commit.
     """
     _init_repo(tmp_path)
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(textwrap.dedent("""\
         ---
@@ -80,7 +80,7 @@ def _seed_project(tmp_path: Path) -> None:
               - {name: w, file: agents/writer.md, tier: medium}
     """))
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
-        workflow: default
+        default-workflow: imp
         providers: [anthropic]
         tiers:
           low: {anthropic: claude-haiku-4-5-20251001}
@@ -226,7 +226,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_openai(
     # the subprocess `imp new` worktree (project layer read from the committed
     # tree) carries the openai pin.
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
-        workflow: default
+        default-workflow: imp
         providers: [openai]
         tiers:
           low: {openai: gpt-4o-mini}
@@ -300,7 +300,7 @@ def test_ctrl_c_during_bash_pauses_then_resume_completes_claude_code(
     # the subprocess `imp new` worktree (project layer read from the committed
     # tree) carries the claude_code pin.
     (tmp_path / "imp" / "project.yaml").write_text(textwrap.dedent("""\
-        workflow: default
+        default-workflow: imp
         providers: [claude_code]
         tiers:
           low: {claude_code: claude-haiku-4-5-20251001}

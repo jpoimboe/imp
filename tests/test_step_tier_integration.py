@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 from imp.providers import resolve
 from imp.providers.config import Config
@@ -49,7 +49,7 @@ def test_default_workflow_loads_and_resolves_review_steps() -> None:
     review steps inherit the medium tier (sonnet) and do NOT appear in
     resolved_steps (which holds only diverged steps)."""
     _OPENAI[0] = True
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     resolved_tiers, resolved_steps, _details = resolve.resolve_run(wf, _config())
     assert resolved_tiers["medium"].provider == "claude_code"
     assert resolved_tiers["medium"].model == "sonnet"
@@ -63,7 +63,7 @@ def test_review_steps_resolve_same_vendor_single_provider() -> None:
     """With only claude_code env-available, the medium tier still resolves to
     sonnet — no error, no cross-vendor requirement, no diverged review steps."""
     _OPENAI[0] = False
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     resolved_tiers, resolved_steps, _details = resolve.resolve_run(wf, _config())
     assert resolved_tiers["medium"].provider == "claude_code"
     assert resolved_tiers["medium"].model == "sonnet"

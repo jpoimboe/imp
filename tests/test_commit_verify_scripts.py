@@ -6,9 +6,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 
-SCRIPTS = default_workflow_dir() / "scripts"
+SCRIPTS = bundled_workflow_dir("imp") / "scripts"
 
 
 def _git(cwd: Path, *args: str) -> None:

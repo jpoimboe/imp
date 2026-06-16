@@ -1,6 +1,6 @@
 """Static assets shipped with imp (workflows, agent definitions, scripts).
 
-Resolved via importlib.resources so the default workflow is findable inside
+Resolved via importlib.resources so the bundled workflow is findable inside
 both editable installs and wheel installs.
 """
 
@@ -10,19 +10,24 @@ from importlib.resources import files
 from pathlib import Path
 
 
-def default_workflow_dir() -> Path:
-    """Return a real filesystem Path to the shipped default workflow.
+def is_bundled_workflow(name: str) -> bool:
+    """True iff imp bundles a workflow named `name` (the 'managed' predicate)."""
+    resource = files("imp.assets").joinpath("workflows", name)
+    return Path(str(resource)).is_dir()
+
+
+def bundled_workflow_dir(name: str) -> Path:
+    """Return a real filesystem Path to a bundled workflow by name.
 
     Editable installs return a real source path; wheel installs return a
-    Traversable that we coerce to Path via str(). For V0 we only support
-    sources that resolve to real paths (no zipapp shipping); raise if not.
+    Traversable coerced to Path via str(). V0 supports only sources that resolve
+    to real paths (no zipapp shipping); raise if the named workflow is absent.
     """
-    resource = files("imp.assets").joinpath("workflows", "default")
-    p = Path(str(resource))
+    p = Path(str(files("imp.assets").joinpath("workflows", name)))
     if not p.is_dir():
         raise RuntimeError(
-            f"default workflow not found at {p}; was the package installed "
-            f"without its assets? Try `pip install -e .` from a checkout."
+            f"bundled workflow {name!r} not found at {p}; was the package "
+            f"installed without its assets? Try `pip install -e .` from a checkout."
         )
     return p
 

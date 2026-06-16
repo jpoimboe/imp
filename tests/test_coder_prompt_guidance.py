@@ -15,7 +15,7 @@ from imp.engine.agent_run import _BASH_VIRTUAL_PATHS_NOTE
 
 IMPLEMENTER = (
     Path(__file__).resolve().parents[1]
-    / "src" / "imp" / "assets" / "workflows" / "default" / "agents" / "implementer.md"
+    / "src" / "imp" / "assets" / "workflows" / "imp" / "agents" / "implementer.md"
 )
 
 

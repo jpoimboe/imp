@@ -381,7 +381,7 @@ def test_new_non_interactive_channel_delivers_seed(
 
 def test_spec_writer_opening_conditioned_on_message() -> None:
     root = Path(__file__).resolve().parent.parent
-    prompt = (root / "src" / "imp" / "assets" / "workflows" / "default"
+    prompt = (root / "src" / "imp" / "assets" / "workflows" / "imp"
               / "agents" / "spec-writer.md").read_text()
     # Opening behavior must branch on the opening message: the unseeded branch
     # keys on the begin token, the seeded branch on the seed marker.
@@ -390,7 +390,7 @@ def test_spec_writer_opening_conditioned_on_message() -> None:
 
 def test_spec_writer_prompt_has_verbatim_opening_branch() -> None:
     root = Path(__file__).resolve().parent.parent
-    prompt = (root / "src" / "imp" / "assets" / "workflows" / "default"
+    prompt = (root / "src" / "imp" / "assets" / "workflows" / "imp"
               / "agents" / "spec-writer.md").read_text()
     assert "verbatim opening intent" in prompt
     # The bare positional no longer delivers a spec-seed FILE; only --spec-file does.
@@ -402,7 +402,7 @@ def test_spec_writer_prompt_has_seed_branch() -> None:
     # tests/ sits directly under the repo root, so resolve the prompt relative
     # to this file rather than depending on project-root discovery.
     root = Path(__file__).resolve().parent.parent
-    prompt = (root / "src" / "imp" / "assets" / "workflows" / "default"
+    prompt = (root / "src" / "imp" / "assets" / "workflows" / "imp"
               / "agents" / "spec-writer.md").read_text()
     # Seed-marker invariant: the adopt branch must key on the SAME phrase the CLI
     # prefixes (_build_seed). The marker must live INSIDE the seeded section.

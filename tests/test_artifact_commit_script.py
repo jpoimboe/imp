@@ -4,9 +4,9 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 
-SCRIPT = default_workflow_dir() / "scripts" / "artifact-commit.sh"
+SCRIPT = bundled_workflow_dir("imp") / "scripts" / "artifact-commit.sh"
 
 
 def _fake_imp(bin_dir: Path, marker: Path) -> None:

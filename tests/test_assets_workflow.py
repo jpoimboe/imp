@@ -23,7 +23,7 @@ _BASE_VARS = {
 
 
 def test_shipped_default_workflow_loads(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/default").resolve()
+    asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     assert wf.name
@@ -39,7 +39,7 @@ def test_shipped_default_workflow_loads(tmp_path: Path) -> None:
 
 def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) -> None:
     from imp.engine.loader import BASE_CAPS
-    asset = Path("src/imp/assets/workflows/default").resolve()
+    asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
 
@@ -69,7 +69,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
 
 
 def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/default").resolve()
+    asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     spec_writer = wf.agents["spec-writer"]
@@ -78,9 +78,9 @@ def test_spec_writer_does_not_declare_ask_user(tmp_path: Path) -> None:
 
 
 def test_bundled_workflow_loads_and_producers_resume() -> None:
-    from imp.assets import default_workflow_dir
+    from imp.assets import bundled_workflow_dir
     from imp.engine.types import Goto
-    wf_dir = default_workflow_dir()
+    wf_dir = bundled_workflow_dir("imp")
     wf = load_workflow(wf_dir)
     by = {s.name: s for s in wf.flat_steps()}
     # producer back-edges resume their target's conversation
@@ -102,33 +102,33 @@ def test_bundled_workflow_loads_and_producers_resume() -> None:
 
 
 def test_review_step_has_no_differ_from():
-    from imp.assets import default_workflow_dir
+    from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
     assert by["review"].differ_from is None
 
 
 def test_review_step_declares_medium_tier():
-    from imp.assets import default_workflow_dir
+    from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
     assert by["review"].tier == "medium"
 
 
 def test_default_workflow_loads() -> None:
     # Verify the default workflow loads without errors.
-    from imp.assets import default_workflow_dir
+    from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     assert wf.name == "feature"
     assert len(wf.flat_steps()) > 0
 
 
 def test_spec_writer_declares_complexity_output() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     spec_writer = wf.agents["spec-writer"]
     assert "complexity" in spec_writer.output_schema.field_names()
     # Pin the enum shape too: the downstream fast_path set: gates on the exact
@@ -140,28 +140,28 @@ def test_spec_writer_declares_complexity_output() -> None:
 
 
 def test_fast_path_var_declared_default_false() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     assert wf.vars.defaults()["fast_path"] is False
 
 
 def test_minors_integrated_vars_declared_default_false() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     defaults = wf.vars.defaults()
     assert defaults["spec_minors_integrated"] is False
     assert defaults["plan_minors_integrated"] is False
 
 
 def test_plan_panel_done_var_declared_default_false() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     assert wf.vars.defaults()["plan_panel_done"] is False
 
 
 def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-reviewer"].rules
     # Critical/Major -> rework to spec-writer; clear the minors-integrated flag so a
     # real fix re-opens the one minors pass.
@@ -176,8 +176,8 @@ def test_spec_reviewer_blocking_reworks_and_clears_flag() -> None:
 
 
 def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-reviewer"].rules
     # Clean + actionable minors, not yet integrated -> resume writer to integrate and
     # set the flag, so the next (clean) review terminates.
@@ -192,8 +192,8 @@ def test_spec_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
 
 
 def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-reviewer"].rules
     # The owed verification review (minors already integrated): a clean review stops
     # and advances to plan-writer even if it surfaced fresh minors (those are dropped).
@@ -208,8 +208,8 @@ def test_spec_reviewer_verification_pass_stops_and_drops_minors() -> None:
 
 
 def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-reviewer"].rules
     # Clean with nothing actionable -> advance to plan-writer, no minors pass.
     m = evaluate_rules(
@@ -223,8 +223,8 @@ def test_spec_reviewer_clean_no_minors_stops_immediately() -> None:
 
 
 def test_spec_writer_sets_fast_path_on_trivial_written() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-writer"].rules
     # The spec-writer rule sets fast_path from output.complexity only.
     m = evaluate_rules(rules, vars=_BASE_VARS,
@@ -246,8 +246,8 @@ def test_commit_tool_is_removed_from_registry() -> None:
 
 
 def test_implement_phase_stamps_trailers_after_sweep_verify() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     impl = next(p for p in wf.phases if p.name == "implement")
     names = [s.name for s in impl.steps]
     assert names.index("sweep-verify") < names.index("stamp-trailers"), names
@@ -255,23 +255,23 @@ def test_implement_phase_stamps_trailers_after_sweep_verify() -> None:
 
 
 def test_no_agent_declares_the_commit_tool() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     for agent in wf.agents.values():
         assert "commit" not in agent.tools, f"{agent.name} still declares commit"
 
 
 def test_committing_agents_declare_bash() -> None:
     # implementer/task-lead/spec-writer/plan-writer commit with raw git via bash.
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     for name in ("implementer", "task-lead", "spec-writer", "plan-writer"):
         assert "bash" in wf.agents[name].tools, f"{name} missing bash"
 
 
 def test_plan_verify_commit_fast_path_skips_plan_review() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["plan-verify-commit"].rules
     m = evaluate_rules(rules, vars={**_BASE_VARS, "fast_path": True},
                        output={"exit": 0, "stdout": "", "stderr": ""})
@@ -279,8 +279,8 @@ def test_plan_verify_commit_fast_path_skips_plan_review() -> None:
 
 
 def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["plan-review"].rules
     m = evaluate_rules(
         rules,
@@ -294,8 +294,8 @@ def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
 
 
 def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["plan-review"].rules
     m = evaluate_rules(
         rules,
@@ -309,8 +309,8 @@ def test_plan_reviewer_clean_with_minors_integrates_then_owes_review() -> None:
 
 
 def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["plan-review"].rules
     m = evaluate_rules(
         rules,
@@ -324,8 +324,8 @@ def test_plan_reviewer_verification_pass_stops_and_drops_minors() -> None:
 
 
 def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["plan-review"].rules
     m = evaluate_rules(
         rules,
@@ -338,8 +338,8 @@ def test_plan_reviewer_clean_no_minors_stops_immediately() -> None:
 
 
 def test_spec_writer_prompt_has_minors_integration_branch() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["spec-writer"].prompt_template_source
     # The clean-review branch keys on the injected `blocking:` line and integrates minors.
     assert "blocking: false" in body
@@ -348,8 +348,8 @@ def test_spec_writer_prompt_has_minors_integration_branch() -> None:
 
 
 def test_plan_writer_prompt_has_minors_integration_branch() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["plan-writer"].prompt_template_source
     assert "blocking: false" in body
     assert "minors" in body.lower()
@@ -360,8 +360,8 @@ def test_spec_writer_prompt_drops_title_and_auto_titled() -> None:
     # Acceptance #1: the spec-writer system prompt no longer surfaces the
     # change title or auto_titled flag anywhere in its body. The agent learns
     # the user's intent from the first user reply, not from the prompt.
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["spec-writer"].prompt_template_source
     assert "{{ change.title }}" not in body
     assert "{{ change.auto_titled }}" not in body
@@ -370,8 +370,8 @@ def test_spec_writer_prompt_drops_title_and_auto_titled() -> None:
 def test_spec_writer_prompt_drops_auto_titled_conditional() -> None:
     # Acceptance #2: the {% if change.auto_titled %} / {% else %} / {% endif %}
     # split is gone; slug-settling guidance is a single unconditional section.
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["spec-writer"].prompt_template_source
     assert "change.auto_titled" not in body
     assert "{% if change.auto_titled" not in body
@@ -382,8 +382,8 @@ def test_spec_writer_prompt_mandates_opening_question() -> None:
     # Acceptance #3: the prompt explicitly instructs the agent to open the
     # change by calling wait_for_user (not via a bare turn-end), with no
     # codebase exploration before the user answers.
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
     assert "open by asking" in lowered
@@ -399,8 +399,8 @@ def test_spec_writer_prompt_mandates_proactive_rename() -> None:
     # Acceptance #4: the agent renames proactively via rename_change as soon
     # as intent is clear, ANNOUNCING the name in prose WITHOUT asking the
     # user. The new guidance (name-on-intent) instructs rename+commit same turn.
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
     assert "without asking the user" in lowered
@@ -414,8 +414,8 @@ def test_spec_writer_prompt_mandates_proactive_rename() -> None:
 def test_spec_writer_prompt_drops_skip_reflexive_paragraph() -> None:
     # Acceptance #5 (part 1): the "Skip reflexive questions on fully-specified
     # requests" paragraph is incompatible with always-ask and must be removed.
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["spec-writer"].prompt_template_source
     assert "Skip reflexive questions" not in body
     assert "fully-specified requests" not in body
@@ -425,8 +425,8 @@ def test_spec_writer_prompt_has_trivial_carveout() -> None:
     # Acceptance #5 (part 2): criterion 1 of the complexity rubric gains a
     # carve-out clarifying that the mandatory opening question does not count
     # against `trivial`.
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["spec-writer"].prompt_template_source
     lowered = body.lower()
     # "opening question" appears as both the discipline name and the carve-out.
@@ -437,7 +437,7 @@ def test_spec_writer_prompt_has_trivial_carveout() -> None:
 
 def test_spec_writer_prompt_has_no_slug_interpolation() -> None:
     from pathlib import Path
-    src = Path("src/imp/assets/workflows/default/agents/spec-writer.md")
+    src = Path("src/imp/assets/workflows/imp/agents/spec-writer.md")
     text = src.read_text()
     assert "{{ change.slug }}" not in text
     assert "{{change.slug}}" not in text
@@ -447,7 +447,7 @@ def test_spec_writer_prompt_has_no_slug_interpolation() -> None:
 
 def test_no_goto_spec_writer_edge() -> None:
     from pathlib import Path
-    wf = Path("src/imp/assets/workflows/default/workflow.yaml").read_text()
+    wf = Path("src/imp/assets/workflows/imp/workflow.yaml").read_text()
     # Every edge back into spec-writer must be a `resume:` (transcript kept), so a
     # resumed spec-writer always has its rename_change result in history and never
     # needs the slug from the system prompt. A fresh `goto: spec-writer` would
@@ -457,28 +457,28 @@ def test_no_goto_spec_writer_edge() -> None:
 
 
 def test_plan_writer_declares_wait_for_user() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     assert "wait_for_user" in wf.agents["plan-writer"].tools
 
 
 def test_review_scope_declared_default_plan() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     assert wf.vars.defaults()["multi_plan"] is False
     assert wf.vars.defaults()["review_scope"] == "plan"
 
 
 def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
-    # Acceptance #1/#2/#6: in this repo, imp/workflows/default must be a
-    # symlink whose resolved target equals src/imp/assets/workflows/default.
+    # Acceptance #1/#2/#6: in this repo, imp/workflows/imp must be a
+    # symlink whose resolved target equals src/imp/assets/workflows/imp.
     # This pins the dogfood install against silent drift from the bundled
     # assets — if someone re-materializes the directory, this test fails.
     repo_root = Path(__file__).resolve().parents[1]
-    link = repo_root / "imp" / "workflows" / "default"
-    target = repo_root / "src" / "imp" / "assets" / "workflows" / "default"
+    link = repo_root / "imp" / "workflows" / "imp"
+    target = repo_root / "src" / "imp" / "assets" / "workflows" / "imp"
     assert link.is_symlink(), f"{link} is not a symlink"
-    assert os.readlink(link) == "../../src/imp/assets/workflows/default", (
+    assert os.readlink(link) == "../../src/imp/assets/workflows/imp", (
         f"unexpected symlink literal target: {os.readlink(link)!r}"
     )
     assert link.resolve() == target.resolve(), (
@@ -487,8 +487,8 @@ def test_dogfood_workflow_install_is_symlink_to_assets() -> None:
 
 
 def test_spec_verify_commit_fast_path_skips_to_plan_writer() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-verify-commit"].rules
     # Clean commit on the fast path -> straight to planning, skipping spec-reviewer.
     m = evaluate_rules(
@@ -501,8 +501,8 @@ def test_spec_verify_commit_fast_path_skips_to_plan_writer() -> None:
 
 
 def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["spec-verify-commit"].rules
     # Non-fast path, clean commit -> continue (falls through to spec-reviewer).
     m = evaluate_rules(
@@ -514,8 +514,8 @@ def test_spec_verify_commit_non_fast_path_continues_to_spec_reviewer() -> None:
 
 
 def test_autosquash_fast_path_skips_review_to_stamp_trailers() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["autosquash"].rules
     # Clean fold on the fast path -> stamp-trailers, skipping
     # review/deferred-sweep/sweep-verify.
@@ -529,8 +529,8 @@ def test_autosquash_fast_path_skips_review_to_stamp_trailers() -> None:
 
 
 def test_autosquash_non_fast_path_goes_to_review() -> None:
-    from imp.assets import default_workflow_dir
-    wf = load_workflow(default_workflow_dir())
+    from imp.assets import bundled_workflow_dir
+    wf = load_workflow(bundled_workflow_dir("imp"))
     rules = _steps(wf)["autosquash"].rules
     # Clean fold on the standard path -> the review panel, unchanged.
     m = evaluate_rules(
@@ -543,7 +543,7 @@ def test_autosquash_non_fast_path_goes_to_review() -> None:
 
 
 def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/default").resolve()
+    asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     perms = _steps(wf)["spec-writer"].fs_permissions
@@ -554,7 +554,7 @@ def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:
 
 
 def test_plan_writer_writes_under_artifacts(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/default").resolve()
+    asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     perms = _steps(wf)["plan-writer"].fs_permissions

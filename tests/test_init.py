@@ -47,14 +47,15 @@ def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
     data = yaml.safe_load(proj.read_text())
     # The committed project file carries the workflow ref + project settings —
     # NO bindings (the floor owns tiers), NO providers/theme (user-homed).
-    assert data["workflow"] == "default"
+    assert data["default-workflow"] == "imp"
+    assert "workflow" not in data
     assert "tiers" not in data
     assert "providers" not in data
     assert "provider_envs" not in data
     assert "theme" not in data
     assert "roles" not in data
 
-    wf = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
+    wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
     assert wf.is_file()
     # No per-.imp .gitignore anymore; .imp/ is ignored wholesale.
     assert not (tmp_path / ".imp").exists()
@@ -99,14 +100,14 @@ def test_init_idempotent_on_existing_clone(tmp_path: Path) -> None:
     # A clone that already carries the committed project file must NOT raise —
     # init just bootstraps the machine's user config.
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     run_init(
         project_root=tmp_path, picker_fn=_picks("anthropic"),
         input_fn=_inputs(),
         output_fn=lambda _msg: None,
     )
     # Project file untouched; user config bootstrapped.
-    assert (tmp_path / "imp" / "project.yaml").read_text() == "workflow: default\n"
+    assert (tmp_path / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
     assert (tmp_path / "xdg" / "imp" / "config.yaml").exists()
 
 
@@ -274,7 +275,7 @@ def test_already_initialized_with_existing_user_config_claims_no_write(
 ) -> None:
     # Both the committed project file AND the machine user config already exist.
     (tmp_path / "imp").mkdir()
-    (tmp_path / "imp" / "project.yaml").write_text("workflow: default\n")
+    (tmp_path / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     imp_config_dir = tmp_path / "xdg" / "imp"
     imp_config_dir.mkdir(parents=True)
     (imp_config_dir / "config.yaml").write_text("providers: [anthropic]\n")

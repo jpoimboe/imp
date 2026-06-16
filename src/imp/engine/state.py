@@ -56,6 +56,8 @@ class State:
     resume_pending: str | None = None
     resolved_tiers: dict[str, ProviderModel] | None = None
     resolved_steps: dict[str, ProviderModel] | None = None
+    project_facts: dict[str, str] | None = None
+    guidance: str | None = None
     merge_commit: str | None = None
     completion_pending: bool = False  # §3: navigation ran off the end under an
     # in-flight interrupt; re-entry finalizes via _complete (no dispatch/wipe).
@@ -122,6 +124,8 @@ class State:
                  for s, pm in self.resolved_steps.items()}
                 if self.resolved_steps is not None else None
             ),
+            "project_facts": self.project_facts,
+            "guidance": self.guidance,
             "merge_commit": self.merge_commit,
             "completion_pending": self.completion_pending,
         }

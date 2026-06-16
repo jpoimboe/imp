@@ -37,7 +37,7 @@ def test_serialized_merges_second_against_advanced_base(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     wf = load_workflow(
         Path(__file__).resolve().parents[1]
-        / "src" / "imp" / "assets" / "workflows" / "default")
+        / "src" / "imp" / "assets" / "workflows" / "imp")
     merge_step = next(s for s in wf.flat_steps() if s.name == "merge-to-base")
 
     a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
@@ -93,7 +93,7 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
     provider_registry("anthropic", lambda: True, lambda model: _FakeProvider(model))  # type: ignore[call-arg]
     _seed_two_step_control(tmp_path)
     # Append a merge phase so the run exercises the real engine-native merge.
-    src_wf = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
+    src_wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
     src_wf.write_text(
         src_wf.read_text()
         + "  - name: merge\n    steps:\n"
@@ -126,7 +126,7 @@ def test_full_run_to_merge_spine(tmp_path: Path, provider_registry: object) -> N
 
 def test_workflow_edits_isolated_between_changes(tmp_path: Path) -> None:
     """Editing Change A's workflow agent leaves Change B's copy untouched —
-    each worktree resolves imp/workflows/default to its own checkout."""
+    each worktree resolves imp/workflows/imp to its own checkout."""
     _seed_control(tmp_path)
     a = Change.create(tmp_path, title="A", change_id="alpha", base_branch="main")
     b = Change.create(tmp_path, title="B", change_id="beta", base_branch="main")
@@ -143,9 +143,9 @@ def test_workflow_edits_isolated_between_changes(tmp_path: Path) -> None:
 
 def test_committed_workflow_edit_is_tracked_on_branch(tmp_path: Path) -> None:
     """Editing + committing a Change's workflow agent produces a real tracked
-    diff on imp/<slug>. (In imp's own repo imp/workflows/default is a symlink, so
-    the tracked path is src/imp/assets/workflows/default/...; the test fixture
-    uses a real dir, so the path here is imp/workflows/default/...)."""
+    diff on imp/<slug>. (In imp's own repo imp/workflows/imp is a symlink, so
+    the tracked path is src/imp/assets/workflows/imp/...; the test fixture
+    uses a real dir, so the path here is imp/workflows/imp/...)."""
     _seed_control(tmp_path)
     ch = Change.create(tmp_path, title="X", change_id="ver", base_branch="main")
 
@@ -155,8 +155,8 @@ def test_committed_workflow_edit_is_tracked_on_branch(tmp_path: Path) -> None:
     _git(ch.project_root, "commit", "-qm", "improve stub agent")
 
     # The edit is a committed diff on the Change's branch...
-    show = _git(tmp_path, "show", "imp/ver:imp/workflows/default/agents/stub.md")
+    show = _git(tmp_path, "show", "imp/ver:imp/workflows/imp/agents/stub.md")
     assert "VERSIONED EDIT" in show.stdout
     # ...and is NOT on base.
-    base = _git(tmp_path, "show", "main:imp/workflows/default/agents/stub.md")
+    base = _git(tmp_path, "show", "main:imp/workflows/imp/agents/stub.md")
     assert "VERSIONED EDIT" not in base.stdout

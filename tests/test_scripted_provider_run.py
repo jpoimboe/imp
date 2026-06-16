@@ -13,7 +13,7 @@ from tests.conftest import _git, _init_repo, write_agent_md
 
 def _seed_scripted_repo(root: Path, script_path: Path) -> None:
     _init_repo(root)
-    src = root / "imp" / "workflows" / "default"
+    src = root / "imp" / "workflows" / "imp"
     (src / "agents").mkdir(parents=True)
     write_agent_md(
         src / "agents" / "coder.md",
@@ -27,7 +27,7 @@ def _seed_scripted_repo(root: Path, script_path: Path) -> None:
         "phases:\n  - name: p\n    steps:\n"
         "      - {name: s, file: agents/coder.md}\n"
     )
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [scripted]\n"

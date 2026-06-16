@@ -65,7 +65,7 @@ def anyio_backend() -> str:
 def _seed_single_agent(root: Path) -> Change:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -75,7 +75,7 @@ def _seed_single_agent(root: Path) -> Change:
         "defaults: {max_retries: 3, max_loops: 6, on_max_retries: {pause: true}}\n"
         "phases:\n  - name: only\n    steps:\n"
         "      - {name: w, file: agents/writer.md, tier: medium}\n")
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [fake]\ntiers:\n  low: {fake: m}\n  medium: {fake: m}\n  high: {fake: m}\n")

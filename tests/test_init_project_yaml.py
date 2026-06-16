@@ -32,7 +32,9 @@ def test_init_writes_project_yaml_without_bindings(
     assert "tiers" not in proj      # bindings come from the code floor
     assert "providers" not in proj  # providers are user-homed
     assert "theme" not in proj
-    assert proj["workflow"] == "default"
+    assert proj["default-workflow"] == "imp"
+    assert "workflow" not in proj
+    assert (root / "imp" / "workflows" / "imp" / ".pristine").is_file()
 
 
 def test_init_bootstraps_user_config(
@@ -57,12 +59,13 @@ def test_init_idempotent_on_existing_clone(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
     root = tmp_path / "repo"
     (root / "imp").mkdir(parents=True)
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     # A teammate's clone has the committed project file but no user config yet.
     _run(root, xdg, ["openai"])  # must NOT raise FileExistsError
     # Project file left untouched; user config now bootstrapped.
-    assert (root / "imp" / "project.yaml").read_text() == "workflow: default\n"
+    assert (root / "imp" / "project.yaml").read_text() == "default-workflow: imp\n"
     assert (xdg / "imp" / "config.yaml").exists()
+    assert (root / "imp" / "workflows" / "imp" / ".pristine").is_file()
 
 
 def test_init_leaves_existing_user_config(

@@ -22,13 +22,14 @@ from typing import Any
 
 import yaml
 
-from imp.assets import default_workflow_dir, playbooks_dir
+from imp.assets import bundled_workflow_dir, playbooks_dir
 from imp.cli.verify_detect import (
     detect_verify_command,
     format_verify_command_yaml,
     resolve_verify_choice,
 )
 from imp.engine.sandbox import sandbox_available
+from imp.engine.workflow_lifecycle import write_pristine
 from imp.remote.drivers import REGISTRY
 
 # The order providers are presented in the picker. Bindings (tier→model) are
@@ -56,7 +57,7 @@ def _default_detect_theme() -> str:
 def _build_project_config() -> dict[str, Any]:
     """The committed imp/project.yaml: workflow ref + empty vars. No bindings
     (the provider-code floor supplies tiers); no theme (user-homed)."""
-    return {"workflow": "default", "vars": {}}
+    return {"default-workflow": "imp", "vars": {}}
 
 
 def _build_user_config(
@@ -262,7 +263,8 @@ def run_init(
     if not already_initialized:
         imp_dir.mkdir(parents=True, exist_ok=True)
         (imp_dir / "workflows").mkdir(exist_ok=True)
-        shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
+        shutil.copytree(bundled_workflow_dir("imp"), imp_dir / "workflows" / "imp")
+        write_pristine(imp_dir / "workflows" / "imp")
         body = yaml.safe_dump(
             _build_project_config(), sort_keys=False, default_flow_style=False)
         verify_detect = detect_verify_fn or detect_verify_command
@@ -276,13 +278,14 @@ def run_init(
                 + format_verify_command_yaml(chosen)
             )
         project_file.write_text(body + verify_block + _facts_hint())
-    elif not (imp_dir / "workflows" / "default").is_dir():
+    elif not (imp_dir / "workflows" / "imp").is_dir():
         # Belt-and-suspenders (finding L2): a real teammate clone has project.yaml
         # AND workflows committed together, so the gate above is correct. But a
         # *partially* initialized tree (project.yaml present, workflows missing)
         # would otherwise silently skip workflow creation. Backfill them.
         (imp_dir / "workflows").mkdir(parents=True, exist_ok=True)
-        shutil.copytree(default_workflow_dir(), imp_dir / "workflows" / "default")
+        shutil.copytree(bundled_workflow_dir("imp"), imp_dir / "workflows" / "imp")
+        write_pristine(imp_dir / "workflows" / "imp")
 
     backfilled_playbooks = not (imp_dir / "playbooks").is_dir()
     if backfilled_playbooks:
@@ -319,7 +322,7 @@ def run_init(
     else:
         output_fn("Created:")
         output_fn("  imp/project.yaml     (track in git — workflow + project settings)")
-        output_fn("  imp/workflows/default/")
+        output_fn("  imp/workflows/imp/")
         output_fn("  imp/playbooks/")
     output_fn(f"  {user_path}  (your machine: providers, theme)")
     output_fn("")
