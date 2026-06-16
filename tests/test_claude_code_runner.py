@@ -1367,3 +1367,109 @@ def test_termination_from_result_nonzero_exit_is_terminated() -> None:
     # Falsifiability: a clean exit with is_error False is benign (no termination),
     # so the result above is driven by the nonzero-exit branch, not by is_error.
     assert cc._termination_from_result(result(is_error=False), benign, {"exit": 0}) is None
+
+
+def test_termination_preserves_text_5xx_as_network() -> None:
+    """An is_error ResultMessage whose last text is `API Error: 500 …` keeps the
+    NetworkError category (network → RetryWithBackoff), not TerminatedError."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True), "API Error: 500 server error", {})
+    assert isinstance(term, perr.NetworkError)
+    assert term.category == "network"
+    # Falsifiability: structured detail still flows through onto the preserved label.
+    assert term.detail["is_error"] is True
+
+
+def test_termination_preserves_text_429_as_rate_limit() -> None:
+    """`API Error: 429 …` is the only 429 path; it keeps the RateLimitError category."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True), "API Error: 429 rate limited", {})
+    assert isinstance(term, perr.RateLimitError)
+    assert term.category == "rate_limit"
+
+
+def test_termination_quota_and_auth_still_pause() -> None:
+    """Terminal causes keep their pausing categories, unchanged."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    quota = cc._termination_from_result(
+        result(is_error=True), "You have reached your usage limit", {})
+    assert isinstance(quota, perr.QuotaError)
+    auth = cc._termination_from_result(
+        result(is_error=True), "Invalid API key", {})
+    assert isinstance(auth, perr.AuthError)
+
+
+def test_termination_unrecognized_text_is_terminated() -> None:
+    """is_error with unrecognized text and null status stays TerminatedError (pauses)."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True), "I finished editing the file.", {})
+    assert isinstance(term, perr.TerminatedError)
+
+
+def test_termination_4xx_non_429_is_terminated() -> None:
+    """A 4xx (non-429) api_error_status collapses to TerminatedError — ApiError
+    is intentionally not in the preserved-type set, so 4xx stays as a pause."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True), "API Error: 400 bad request", {})
+    assert isinstance(term, perr.TerminatedError)
+
+
+def test_termination_api_error_status_5xx_is_network() -> None:
+    """A 5xx api_error_status with code-less text classifies as NetworkError."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=500), "the request failed", {})
+    assert isinstance(term, perr.NetworkError)
+    assert term.category == "network"
+    assert term.detail["api_error_status"] == 500
+
+
+def test_termination_api_error_status_429_is_not_rate_limit() -> None:
+    """There is no api_error_status=429 branch: a 429 status with code-less text
+    stays TerminatedError (the only 429 retry path is the text classifier)."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=429), "the request failed", {})
+    assert isinstance(term, perr.TerminatedError)
+
+
+def test_termination_text_label_wins_over_api_error_status() -> None:
+    """Text classification wins over api_error_status: if _classify_agent_text
+    returns a label, the 5xx status fallback does not override it."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=500), "API Error: 429 rate limited", {})
+    assert isinstance(term, perr.RateLimitError)
+    assert term.category == "rate_limit"
+
+
+def test_termination_codeless_phrase_null_status_is_network() -> None:
+    """A code-less `API Error: Internal server error` with null status survives
+    as NetworkError through _termination_from_result."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True), "API Error: Internal server error", {})
+    assert isinstance(term, perr.NetworkError)
+    assert term.category == "network"

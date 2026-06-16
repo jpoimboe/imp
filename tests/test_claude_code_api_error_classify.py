@@ -61,3 +61,47 @@ def test_four_digit_code_not_misclassified() -> None:
 def test_3xx_code_not_classified() -> None:
     # 3xx falls through both the 429 and 4xx branches -> None.
     assert _classify_agent_text("API Error: 301 moved") is None
+
+
+def test_codeless_internal_server_error_is_network() -> None:
+    err = _classify_agent_text("API Error: Internal server error")
+    assert isinstance(err, perr.NetworkError)
+
+
+def test_codeless_overloaded_is_network() -> None:
+    err = _classify_agent_text("API Error: Overloaded")
+    assert isinstance(err, perr.NetworkError)
+
+
+def test_codeless_phrase_without_api_error_prefix_is_none() -> None:
+    # The same words in ordinary prose (no `API Error:` anchor) must NOT classify.
+    assert _classify_agent_text("Internal server error: retrying the build now") is None
+    assert _classify_agent_text("The job was Overloaded with work, so I split it") is None
+
+
+def test_auth_still_wins_over_codeless_phrase() -> None:
+    # Auth patterns are checked first even when an API Error transient phrase co-occurs.
+    err = _classify_agent_text("Invalid API key — API Error: Overloaded")
+    assert isinstance(err, perr.AuthError)
+
+
+def test_quota_still_wins_over_codeless_phrase() -> None:
+    # Quota patterns are checked first, same as auth — they win even when a
+    # code-less transient phrase co-occurs.
+    err = _classify_agent_text("Credit balance is too low — API Error: Overloaded")
+    assert isinstance(err, perr.QuotaError)
+
+
+def test_codeless_phrase_on_different_line_is_none() -> None:
+    # Regression: an API Error: line with an unrelated body, plus the transient
+    # word only in prose on a DIFFERENT line, must NOT classify — it pauses.
+    multiline = (
+        "API Error: the request did not complete\n"
+        "Earlier the build server was Overloaded with traffic."
+    )
+    assert _classify_agent_text(multiline) is None
+    multiline2 = (
+        "API Error: connection reset by peer\n"
+        "An Internal server error happened to a coworker last week."
+    )
+    assert _classify_agent_text(multiline2) is None

@@ -102,6 +102,11 @@ _QUOTA_PATTERNS = (
 # were treated as agent text → wrong nudge loop).
 _API_ERROR_RE = re.compile(r"API Error:\s*(\d{3})(?!\d)")
 
+_TRANSIENT_PHRASES = (
+    "Internal server error",
+    "Overloaded",
+)
+
 
 def _classify_agent_text(text: str) -> perr.ProviderError | None:
     """Detect known claude CLI terminal-error patterns in agent text.
@@ -140,6 +145,9 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
             # SDK providers use for an InternalServerError). Previously fell through
             # to `return None` → treated as agent text → wrong nudge loop.
             return perr.NetworkError(f"claude CLI: {text[:200]}")
+    for line in text.splitlines():
+        if "API Error:" in line and any(p in line for p in _TRANSIENT_PHRASES):
+            return perr.NetworkError(f"claude CLI: {text[:200]}")
     return None
 
 
@@ -171,7 +179,11 @@ def _termination_from_result(
         "errors": getattr(sdk_msg, "errors", None),
     }
     labeled = _classify_agent_text(last_text)
-    if isinstance(labeled, (perr.QuotaError, perr.AuthError)):
+    status = detail["api_error_status"]
+    if labeled is None and isinstance(status, int) and 500 <= status < 600:
+        labeled = perr.NetworkError(f"claude_code: api_error_status={status}")
+    if isinstance(labeled, (perr.QuotaError, perr.AuthError,
+                            perr.NetworkError, perr.RateLimitError)):
         labeled.detail.update(detail)
         return labeled
     return perr.TerminatedError(
