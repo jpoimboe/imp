@@ -1352,3 +1352,18 @@ async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Pa
     msgs = t.load()
     assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
                for m in msgs for b in m.content)
+
+
+def test_termination_from_result_nonzero_exit_is_terminated() -> None:
+    """Nonzero subprocess exit triggers TerminatedError independent of is_error."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    benign = "The build finished but complete_step was never called."
+    term = cc._termination_from_result(result(is_error=False), benign, {"exit": 1})
+    assert isinstance(term, perr.TerminatedError)
+    assert term.detail["exit_code"] == 1
+    assert term.detail["is_error"] is False
+    # Falsifiability: a clean exit with is_error False is benign (no termination),
+    # so the result above is driven by the nonzero-exit branch, not by is_error.
+    assert cc._termination_from_result(result(is_error=False), benign, {"exit": 0}) is None
