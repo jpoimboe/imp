@@ -238,7 +238,7 @@ async def test_codex_teardown_closes_impty_session(
         patch("impty.driver.ImptyDriver",
               new=lambda: fake_driver),
     ):
-        events = [ev async for ev in runner.run(inv)]
+        [ev async for ev in runner.run(inv)]
 
     assert shutdown_calls == [1], "impty_handle.shutdown() must be called in teardown"
     assert close_calls == [1], "impty_driver.close() must be called in teardown"
