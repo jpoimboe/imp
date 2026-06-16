@@ -178,6 +178,36 @@ async def test_run_session_client_starts_status_tick_when_provided(
 
 
 @pytest.mark.anyio
+async def test_run_session_client_returns_130_when_user_interrupted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-interrupted")
+    # Worktree exists + paused status → infer_session_result returns PAUSED.
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step="plan", step_attempt=0, status="paused").save(
+        change.state_dir)
+
+    async def _noop(**_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 1)
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _solicit(_prompt: str) -> str:  # pragma: no cover
+        return ""
+
+    coord = InterruptCoordinator()
+    coord._should_pause = True  # simulate Ctrl-C/ESC forwarded to daemon
+    rc = await run_session_client(
+        change, driver=_Driver(), coord=coord, solicit=_solicit)
+    assert rc == 130
+
+
+@pytest.mark.anyio
 async def test_make_headless_solicit_delivers_message_once_then_signals_detach() -> None:
     coord = InterruptCoordinator()
     coord.escalation_event = anyio.Event()  # run_terminal_client sets this before any gate
