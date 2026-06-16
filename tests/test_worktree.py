@@ -61,7 +61,7 @@ def test_repo_git_lock_serializes(tmp_path: Path) -> None:
     _init_repo(tmp_path)
     lock = wt.RepoGitLock(tmp_path)
     with lock.acquire():
-        assert (tmp_path / ".imp" / "repo.lock").exists()
+        assert (tmp_path / ".git" / "imp" / "repo.lock").exists()
     with lock.acquire():  # re-acquire after release
         pass
 

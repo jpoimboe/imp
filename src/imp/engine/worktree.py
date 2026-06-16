@@ -162,9 +162,14 @@ class RepoGitLock:
     shared-repo mutation (spec §4, §7). NOT held for the duration of a run."""
 
     def __init__(self, control_root: Path) -> None:
-        self.path = control_root / ".imp" / "repo.lock"
-        # Create .imp/ up front so correctness doesn't rely on filelock creating
-        # parent dirs (version-dependent behavior).
+        # Lives under .git (the git common dir), NOT .imp: artifact_commit
+        # acquires this lock from inside the bwrap sandbox, whose writable set
+        # binds back the worktree and <control>/.git but leaves the control
+        # root's top-level .imp/ read-only. .git is already rw-bound and is the
+        # right scope for a repo-wide lock guarding writes to refs/imp/*.
+        self.path = control_root / ".git" / "imp" / "repo.lock"
+        # Create the parent up front so correctness doesn't rely on filelock
+        # creating parent dirs (version-dependent behavior).
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fl = filelock.FileLock(str(self.path) + ".filelock")
 
@@ -307,12 +312,16 @@ def _merge_detached(control_root: Path, change_id: str, branch: str, base: str,
 
 @contextmanager
 def _temp_index(control_root: Path):  # type: ignore[no-untyped-def]
-    """Yield a throwaway GIT_INDEX_FILE env dict (file lives under .imp/).
+    """Yield a throwaway GIT_INDEX_FILE env dict (file lives under .git/imp/,
+    the sandbox-writable git common dir — NOT the read-only .imp/; see
+    RepoGitLock).
     Do NOT simplify the unlink dance: a 0-byte index makes `git update-index`
     fail; a *missing* GIT_INDEX_FILE is treated as an empty index — exactly
     what the no-parent bootstrap needs."""
     env = dict(os.environ)
-    with tempfile.NamedTemporaryFile(dir=control_root / ".imp", delete=False) as tf:
+    scratch = control_root / ".git" / "imp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=scratch, delete=False) as tf:
         index_file = tf.name
     os.unlink(index_file)
     env["GIT_INDEX_FILE"] = index_file
