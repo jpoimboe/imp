@@ -337,7 +337,6 @@ def _pause_lines(
 
 
 def _recover_phase(change: Change) -> str | None:
-    from imp.engine.executor import _resume_replays_transcript
     try:
         state = State.load(change.state_dir)
     except FileNotFoundError:
@@ -349,12 +348,11 @@ def _recover_phase(change: Change) -> str | None:
         return None
     transcript_dir = change.change_dir / "steps" / phase / state.step
     from imp.agents.transcript import Transcript
-    # Never-ran step (empty/absent transcript): a plain `imp resume` re-runs it
-    # fresh, so no `--from <phase>` recovery hint is needed. Only a non-empty but
-    # unreplayable transcript (truncated/MISSING_COMPLETE_STEP) warrants --from.
+    # A plain `imp resume` now replays-and-continues any kept transcript.
+    # Offer `--from <phase>` as the force-a-fresh-re-run escape hatch whenever
+    # such a transcript exists; a never-ran step (empty/absent transcript) still
+    # re-runs fresh on a plain resume, so it needs no hint.
     if not Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty():
-        return None
-    if _resume_replays_transcript(transcript_dir):
         return None
     return phase
 
@@ -1232,6 +1230,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # (design "Resume — no replay").
             change.event_log().append(
                 agent_id=None, type="workflow_resumed", payload={})
+            # P1 crash recovery: a crashed run (status still "running" on disk)
+            # never set resume_pending, so the executor would enter the current
+            # step fresh and re-burn its work/quota. Keep and replay the current
+            # step's transcript. A never-ran step (empty transcript) still starts
+            # fresh via _resume_replays_transcript. Skipped on a --from rewind,
+            # which manages resume_pending through apply_rewind.
+            if from_target is None and state.status == "running":
+                state.resume_pending = state.step
             state.status = "running"
             # Apply the rewind AFTER the resume marker so step_rewound follows
             # workflow_resumed in the append-only log.

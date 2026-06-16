@@ -207,3 +207,48 @@ def test_derive_send_to_llm_when_complete_step_present(tmp_path: Path) -> None:
     ])
     state, _ = derive_codex_resume_state(ev, "step:t")
     assert state is ResumeState.SEND_TO_LLM
+
+
+@pytest.mark.anyio
+async def test_resume_missing_complete_step_continues_with_nudge(tmp_path: Path) -> None:
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+    _seed_git_and_auth(tmp_path)
+    tx = tmp_path / "tx"
+    rel = "sessions/2026/06/05/rollout-2026-06-05T00-00-00-thr-cont-1.jsonl"
+    (tx / "codex_thread.json").write_text(
+        json.dumps({"thread_id": "thr-cont-1", "rollout_relpath": rel}))
+    saved = tx / "codex_rollout" / rel
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_text('{"id": "thr-cont-1"}\n')
+
+    # events.jsonl that derives MISSING_COMPLETE_STEP (llm_response, no complete_step).
+    _write_events(tmp_path / "events.jsonl", [
+        {"agent_id": "step:t", "type": "llm_response",
+         "payload": {"raw": {"content": [{"type": "text", "text": "stopped before finishing"}]}}},
+    ])
+
+    elog = InMemoryEventLog()
+    scripted = [[
+        thread_started("thr-cont-1"),
+        agent_message("resumed; calling complete_step"),
+        mcp_call(name="complete_step", args={"answer": "42"}, result="ok", item_id="cs-1"),
+        turn_completed(input_tokens=1, output_tokens=1),
+    ]]
+    fake = FakeCodex(scripted_turns=scripted)
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5", client_factory=lambda options=None: fake)
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = _build_invocation(tmp_path, event_log=elog, balance_on_resume=True)
+    events = [ev async for ev in runner.run(inv)]
+
+    # No missing_complete_step error; the run continued and completed.
+    assert not any(e.get("type") == "error"
+                   and e["payload"].get("kind") == "missing_complete_step"
+                   for e in events)
+    assert any(e.get("type") == "agent_output" for e in events)
+    # The continue nudge was journaled as the resumed user message.
+    assert any(e.get("type") == "user_message"
+               and RESUME_CONTINUE_NUDGE in json.dumps(e.get("payload", {}),
+                                                       ensure_ascii=False)
+               for e in elog.read())

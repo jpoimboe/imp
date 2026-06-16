@@ -463,11 +463,11 @@ class CodexAgentRunner:
         # via the journaled awaiting_user_input event) solicits the human reply
         # via user_input_fn and injects it as the FIRST resumed prompt instead of
         # the system prompt; MISSING_COMPLETE_STEP (autonomous, no complete_step)
-        # is a terminal error.
+        # triggers replay-and-continue (nudge injected as the resumed prompt).
         if invocation.balance_on_resume:
             from imp.agents.classify import ResumeState
             from imp.providers.codex_resume import derive_codex_resume_state
-            rstate, last_text = derive_codex_resume_state(
+            rstate, _ = derive_codex_resume_state(
                 invocation.events_path, aid)
             if rstate is ResumeState.AWAITING_USER:
                 if invocation.user_input_fn is None:
@@ -491,12 +491,12 @@ class CodexAgentRunner:
                 elog.append_user_message(agent_id=aid, message=user_msg)
                 next_prompt = reply
             elif rstate is ResumeState.MISSING_COMPLETE_STEP:
-                yield {"type": "error", "payload": {
-                    "category": "agent_output_missing",
-                    "kind": "missing_complete_step",
-                    "message": "codex resume: turn ended without complete_step",
-                    "detail": {"last_agent_text": last_text[:500]}}}
-                return
+                # Replay-and-continue: nudge is the resumed prompt; journal for audit trail.
+                from imp.agents.transcript import RESUME_CONTINUE_NUDGE
+                nudge_msg = Message(
+                    role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
+                elog.append_user_message(agent_id=aid, message=nudge_msg)
+                next_prompt = RESUME_CONTINUE_NUDGE
         # §2 resume-entry drain: fold pending interject texts into the first
         # resumed prompt (codex re-prompts with a string). AWAITING_USER already
         # folded the reply above, so skip it here. Only runs on resume

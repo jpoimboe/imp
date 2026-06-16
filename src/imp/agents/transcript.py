@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from imp.agents.classify import ResumeState, classify_resume
 from imp.agents.runner import (
     Message,
     TextBlock,
@@ -36,6 +37,11 @@ if TYPE_CHECKING:
     from imp.engine.state import EventLog
 
 RESUME_SUPERSEDED_NOTE = "previous step output recorded; superseded by the feedback below"
+
+RESUME_CONTINUE_NUDGE = (
+    "You stopped before calling complete_step. Continue exactly where you left "
+    "off and finish the step — call complete_step when the work is done."
+)
 
 # Injected once onto every synthesized resume turn. On resume the transcript is
 # replayed to the provider, and reconstructed tool_results can surface to the
@@ -270,6 +276,26 @@ def resolve_wait_for_user_on_resume(
         return None
     block = ToolResultBlock(tool_use_id=wfu.id, content=reply, is_error=False)
     injected = Message(role="user", content=(block,))
+    messages.append(injected)
+    transcript.append(injected)
+    elog.append_user_message(agent_id=agent_id, message=injected)
+    return injected
+
+
+def inject_continue_nudge_on_resume(
+    messages: list[Message], transcript: Transcript, elog: EventLog,
+    agent_id: str,
+) -> Message | None:
+    """Append a synthetic user nudge when the transcript ends without complete_step.
+
+    When a resumed transcript classifies as MISSING_COMPLETE_STEP (autonomous turn
+    ended without complete_step), inject a user turn carrying RESUME_CONTINUE_NUDGE
+    so the shape becomes the already-working SEND_TO_LLM case. Returns the injected
+    Message, or None when no nudge is needed.
+    """
+    if classify_resume(messages) is not ResumeState.MISSING_COMPLETE_STEP:
+        return None
+    injected = Message(role="user", content=(TextBlock(text=RESUME_CONTINUE_NUDGE),))
     messages.append(injected)
     transcript.append(injected)
     elog.append_user_message(agent_id=agent_id, message=injected)

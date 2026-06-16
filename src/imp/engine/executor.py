@@ -109,21 +109,17 @@ def _resume_system_prompt(
 
 
 def _resume_replays_transcript(transcript_dir: Any) -> bool:
-    """True when a resumed agent step's kept transcript can be replayed.
-    False when the transcript ended without complete_step (MISSING_COMPLETE_STEP)
-    — replaying it only re-fails with agent_output_missing, so the step
-    re-runs fresh. Also False when the transcript is empty/absent: a `resume:`
-    edge can target a step that never ran (e.g. a clean reintegration rebase
-    skips the integrator, then integrate-verify fails and resumes it). Keeping
-    an empty transcript routes the step through the resume branch with
-    initial_messages=(), and the provider's empty-transcript fallback then
-    builds an empty query that hangs receive_response() forever. Run it fresh."""
-    from imp.agents.classify import ResumeState, classify_resume
+    """True when a resumed step's kept transcript should be replayed. Every
+    non-empty transcript is replayed and continued — a MISSING_COMPLETE_STEP
+    transcript (autonomous turn ended without complete_step) is no longer wiped;
+    the provider injects a synthetic `continue` user turn so it resumes as the
+    ordinary SEND_TO_LLM case. Only an empty/absent transcript starts fresh: a
+    `resume:` edge can target a step that never ran (e.g. a clean reintegration
+    rebase skips the integrator, then integrate-verify fails and resumes it), and
+    passively replaying nothing builds an empty query that hangs
+    receive_response() forever."""
     from imp.agents.transcript import Transcript
-    t = Transcript(transcript_dir / "transcript.jsonl")
-    if not t.exists_and_nonempty():
-        return False
-    return classify_resume(t.load()) is not ResumeState.MISSING_COMPLETE_STEP
+    return Transcript(transcript_dir / "transcript.jsonl").exists_and_nonempty()
 
 
 def _seed_messages(change: Change, wrapper_text: str | None) -> tuple[Message, ...]:
@@ -262,9 +258,12 @@ async def run_change(
 
             # §3 case 1 — mid-flight Pause: pause BEFORE navigation (as today).
             if isinstance(action, Pause):
-                if coordinator.should_pause and step.kind == "agent":
-                    # User interrupt mid-step → keep the transcript on re-entry,
-                    # regardless of the provider's error classification.
+                if step.kind == "agent":
+                    # Any agent-step pause (quota, agent_incomplete, a fatal
+                    # provider error, OR a user interrupt) keeps the current
+                    # step's transcript so resume replays and continues it, not
+                    # re-runs fresh. The replay decision is driven by whether the
+                    # step has a kept transcript, not by how the run stopped.
                     state.resume_pending = state.step
                 reason = action.reason or "interrupt"
                 state.status = (
@@ -615,10 +614,10 @@ async def _route_agent(
     agent_def = workflow.agents[step.file.stem]
     transcript_dir = change.change_dir / "steps" / step.phase / step.name
 
-    # Keep (replay) the transcript only when this entry was reached via a
-    # `resume:` edge AND the kept transcript is actually replayable. A resumed
-    # autonomous step whose transcript ended before complete_step is re-run
-    # fresh instead — replaying it only re-fails with agent_output_missing.
+    # Keep (replay) the transcript on every `resume:` entry that has a non-empty
+    # one. A transcript that ended before complete_step is replayed and
+    # continued (the provider injects a `continue` nudge), not re-run fresh; only
+    # an empty/absent transcript starts fresh.
     keep = is_resume and _resume_replays_transcript(transcript_dir)
     if not keep:
         shutil.rmtree(transcript_dir, ignore_errors=True)

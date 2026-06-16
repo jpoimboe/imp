@@ -1231,3 +1231,139 @@ async def test_interrupt_without_live_client_is_safe(tmp_path: Path) -> None:
 
 
 
+
+@pytest.mark.anyio
+async def test_result_is_error_emits_terminated_not_nudge(tmp_path: Path) -> None:
+    """A ResultMessage flagged is_error is a termination: emit a typed `terminated`
+    error with the structured fields in the detail, BEFORE any nudge — even when a
+    continuation_fn is installed."""
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("Something went wrong and the agent stopped.")),
+        result(is_error=True, subtype="error_during_execution", stop_reason="error"),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    inv = _inv(tmp_path)
+    inv = replace(inv, continuation_fn=lambda _last: "please call complete_step")
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+
+    events = [e async for e in runner.run(inv)]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1
+    payload = errs[0]["payload"]
+    assert payload["category"] == "terminated"
+    assert payload["detail"]["is_error"] is True
+    assert payload["detail"]["subtype"] == "error_during_execution"
+    assert payload["detail"]["stop_reason"] == "error"
+    # Never routed through the benign nudge path.
+    assert payload["kind"] != "no_complete_step_after_nudges"
+
+
+@pytest.mark.anyio
+async def test_result_is_error_reports_quota_wording_independent(tmp_path: Path) -> None:
+    """A spend-limit termination is reported regardless of wording: 'monthly spend
+    limit' is in no pattern list, so it is the generic `terminated` type, with the
+    wording captured in the detail."""
+    (tmp_path / "art").mkdir()
+    wording = "You've hit your monthly spend limit · raise it at claude.ai/settings/usage"
+    scripted = [assistant(text(wording)), result(is_error=True)]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    events = [e async for e in runner.run(_inv(tmp_path))]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1
+    assert errs[0]["payload"]["category"] == "terminated"
+    assert wording in errs[0]["payload"]["detail"]["last_agent_text"]
+
+
+@pytest.mark.anyio
+async def test_result_is_error_with_known_quota_text_labels_quota(tmp_path: Path) -> None:
+    """A recognized usage-limit wording is labeled QuotaError (category quota), and
+    still carries the structured fields in the detail."""
+    (tmp_path / "art").mkdir()
+    scripted = [
+        assistant(text("You have reached your usage limit for today.")),
+        result(is_error=True),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    events = [e async for e in runner.run(_inv(tmp_path))]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1
+    assert errs[0]["payload"]["category"] == "quota"
+    assert errs[0]["payload"]["detail"]["is_error"] is True
+
+
+@pytest.mark.anyio
+async def test_clean_no_complete_step_still_nudges(tmp_path: Path) -> None:
+    """is_error=False keeps today's benign behavior: a continuation_fn that gives
+    up routes to agent_incomplete / no_complete_step_after_nudges, NOT terminated."""
+    (tmp_path / "art").mkdir()
+    scripted = [assistant(text("I'm still thinking about it.")), result()]   # is_error False
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    inv = _inv(tmp_path)
+    inv = replace(inv, continuation_fn=lambda _last: None)
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+
+    events = [e async for e in runner.run(inv)]
+    errs = [e for e in events if e.get("type") == "error"]
+    assert len(errs) == 1
+    payload = errs[0]["payload"]
+    assert payload["category"] == "agent_incomplete"
+    assert payload["kind"] == "no_complete_step_after_nudges"
+
+
+@pytest.mark.anyio
+async def test_resume_bare_assistant_injects_continue_and_completes(tmp_path: Path) -> None:
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import RESUME_CONTINUE_NUDGE, Transcript
+    inv = _inv(tmp_path)
+    # MISSING_COMPLETE_STEP shape on disk at the step's transcript dir.
+    t = Transcript(inv.transcript_dir / "transcript.jsonl")
+    t.append(Message(role="user", content=(TextBlock(text="begin"),)))
+    t.append(Message(role="assistant",
+                     content=(TextBlock(text="You've hit your monthly spend limit"),)))
+
+    scripted = [
+        assistant(tool_use("c1", "complete_step", {"status": "Success"})), result(),
+    ]
+
+    def factory(opts: Any) -> FakeClaudeSDKClient:
+        return FakeClaudeSDKClient(opts, scripted_messages=scripted)
+
+    inv = replace(inv, balance_on_resume=True)
+    runner = ClaudeCodeAgentRunner(model_name="claude-sonnet-4-6", client_factory=factory)
+    events = [e async for e in runner.run(inv)]
+
+    assert events[-1]["type"] == "agent_output"
+    assert not any(e.get("type") == "error" for e in events)
+    msgs = t.load()
+    assert any(isinstance(b, TextBlock) and b.text == RESUME_CONTINUE_NUDGE
+               for m in msgs for b in m.content)
+
+
+def test_termination_from_result_nonzero_exit_is_terminated() -> None:
+    """Nonzero subprocess exit triggers TerminatedError independent of is_error."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    benign = "The build finished but complete_step was never called."
+    term = cc._termination_from_result(result(is_error=False), benign, {"exit": 1})
+    assert isinstance(term, perr.TerminatedError)
+    assert term.detail["exit_code"] == 1
+    assert term.detail["is_error"] is False
+    # Falsifiability: a clean exit with is_error False is benign (no termination),
+    # so the result above is driven by the nonzero-exit branch, not by is_error.
+    assert cc._termination_from_result(result(is_error=False), benign, {"exit": 0}) is None

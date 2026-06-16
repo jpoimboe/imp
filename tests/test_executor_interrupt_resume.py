@@ -246,7 +246,7 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
 
 
 @pytest.mark.anyio
-async def test_genuine_fatal_no_interrupt_keeps_fresh_restart(tmp_path: Path) -> None:
+async def test_genuine_fatal_no_interrupt_keeps_transcript_for_replay(tmp_path: Path) -> None:
     change = _seed_single_agent(tmp_path)
     from imp.providers import resolve
     resolve.reset_providers_for_tests()
@@ -268,7 +268,9 @@ async def test_genuine_fatal_no_interrupt_keeps_fresh_restart(tmp_path: Path) ->
     result = await run_change(change)  # no coordinator interrupt
     assert result is RunResult.PAUSED
     state = State.load(change.state_dir)
-    assert state.resume_pending is None  # fatal, not an interrupt → fresh restart
+    # P1: a fatal agent-step pause keeps the current step's transcript so resume
+    # replays and continues instead of re-running fresh and re-burning work/quota.
+    assert state.resume_pending == state.step
 
 
 @pytest.mark.anyio

@@ -67,6 +67,7 @@ from imp.agents.tools.wait_for_user import AwaitingUserInput, make_wait_for_user
 from imp.agents.transcript import (
     Transcript,
     balance_success_on_resume,
+    inject_continue_nudge_on_resume,
     repair_dangling_tool_use_on_resume,
     resolve_wait_for_user_on_resume,
 )
@@ -140,6 +141,43 @@ def _classify_agent_text(text: str) -> perr.ProviderError | None:
             # to `return None` → treated as agent text → wrong nudge loop.
             return perr.NetworkError(f"claude CLI: {text[:200]}")
     return None
+
+
+def _termination_from_result(
+    sdk_msg: Any, last_text: str, diag: dict[str, Any],
+) -> perr.ProviderError | None:
+    """P2: a ResultMessage flagged is_error (or a nonzero subprocess exit) is a
+    real termination — return a typed-or-unknown ProviderError carrying every
+    available structured field in the detail. Returns None when there is no
+    termination signal, so the caller falls through to the benign nudge path.
+
+    Detection keys on is_error / exit code, never on the wording, so a usage
+    limit reports regardless of its exact phrasing. The substring classifier is
+    only the last-resort labeler: a recognized quota/auth keeps its type;
+    anything else is the generic TerminatedError."""
+    is_error = bool(getattr(sdk_msg, "is_error", False))
+    exit_code = diag.get("exit")
+    nonzero_exit = isinstance(exit_code, int) and exit_code != 0
+    if not (is_error or nonzero_exit):
+        return None
+    detail: dict[str, object] = {
+        "is_error": is_error,
+        "subtype": getattr(sdk_msg, "subtype", None),
+        "api_error_status": getattr(sdk_msg, "api_error_status", None),
+        "stop_reason": getattr(sdk_msg, "stop_reason", None),
+        "last_agent_text": last_text[:500],
+        "exit_code": exit_code,
+        "stderr_tail": diag.get("stderr_tail"),
+        "errors": getattr(sdk_msg, "errors", None),
+    }
+    labeled = _classify_agent_text(last_text)
+    if isinstance(labeled, (perr.QuotaError, perr.AuthError)):
+        labeled.detail.update(detail)
+        return labeled
+    return perr.TerminatedError(
+        "claude_code agent terminated with an error (cause unknown)",
+        detail=detail,
+    )
 
 
 def _text_of(message: Any) -> str:
@@ -1022,28 +1060,13 @@ class ClaudeCodeAgentRunner:
                 if synth is not None:
                     for rb in synth:
                         elog.append_tool_result(agent_id=aid, block=rb)
+            inject_continue_nudge_on_resume(messages, transcript, elog, aid)
             resume_state = classify_resume(messages)
             if resume_state is ResumeState.DANGLING_TOOL_USE:
                 yield {"type": "error", "payload": {
                     "category": "config",
                     "kind": "transcript_invalid",
                     "message": "transcript ended with dangling tool_use",
-                }}
-                return
-            if resume_state is ResumeState.MISSING_COMPLETE_STEP:
-                last_text = ""
-                if messages and messages[-1].role == "assistant":
-                    last_text = _text_of(messages[-1])
-                classified = _classify_agent_text(last_text)
-                if classified is not None:
-                    yield perr.make_error_event(
-                        classified, kind=getattr(classified, "kind", ""))
-                    return
-                yield {"type": "error", "payload": {
-                    "category": "agent_output_missing",
-                    "kind": "missing_complete_step",
-                    "message": "autonomous agent transcript ended without complete_step",
-                    "detail": {"last_agent_text": last_text[:500]},
                 }}
                 return
             if resume_state is ResumeState.AWAITING_USER:
@@ -1387,6 +1410,18 @@ class ClaudeCodeAgentRunner:
                             if prev.role == "assistant":
                                 last_text = _text_of(prev)
                                 break
+
+                        # P2: a ResultMessage flagged is_error (or a nonzero
+                        # subprocess exit) is a termination, not a benign
+                        # missing-complete_step. Report it typed-or-unknown with
+                        # every structured field — before the substring fallback
+                        # and never through the nudge path.
+                        term = _termination_from_result(
+                            sdk_msg, last_text, _subprocess_diag(client))
+                        if term is not None:
+                            yield perr.make_error_event(
+                                term, kind=getattr(term, "kind", ""))
+                            return
 
                         # Classify before the nudge: a surfaced provider error
                         # (auth/quota) must win over a pointless nudge. This runs

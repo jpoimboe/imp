@@ -77,10 +77,14 @@ FakeUserMessage.__name__ = "UserMessage"
 @dataclass
 class FakeResultMessage:
     """End-of-turn marker. The runner reacts to this by checking
-    state.complete_step_called and breaking the loop."""
+    state.complete_step_called and breaking the loop. is_error / api_error_status
+    / stop_reason mirror the SDK fields the P2 termination path reads."""
     subtype: str = "end_turn"
     duration_ms: int = 0
     usage: dict[str, Any] | None = None
+    is_error: bool = False
+    api_error_status: Any = None
+    stop_reason: Any = None
 
 
 FakeResultMessage.__name__ = "ResultMessage"
@@ -141,8 +145,13 @@ def user(*blocks: Any) -> FakeUserMessage:
     return FakeUserMessage(content=list(blocks))
 
 
-def result() -> FakeResultMessage:
-    return FakeResultMessage()
+def result(
+    *, is_error: bool = False, subtype: str = "end_turn",
+    api_error_status: Any = None, stop_reason: Any = None,
+) -> FakeResultMessage:
+    return FakeResultMessage(
+        subtype=subtype, is_error=is_error,
+        api_error_status=api_error_status, stop_reason=stop_reason)
 
 
 def text(t: str) -> FakeTextBlock:
