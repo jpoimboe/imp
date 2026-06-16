@@ -4,6 +4,7 @@ update notice, and the update-workflow mechanics (design §2-§4c)."""
 from __future__ import annotations
 
 import hashlib
+import shutil
 from enum import Enum
 from pathlib import Path
 
@@ -68,6 +69,18 @@ def classify_drift(name: str, mirror_dir: Path) -> DriftState | None:
     if b != p:
         return DriftState.UPDATE_AVAILABLE
     return DriftState.UP_TO_DATE
+
+
+def perform_workflow_update(name: str, mirror_dir: Path, *, write_stamp: bool = True) -> None:
+    """Copy the bundled `name` workflow over `mirror_dir` and re-stamp .pristine.
+    Caller must classify before calling (should not be called on a LOCALLY_MODIFIED
+    or non-managed mirror)."""
+    src = bundled_workflow_dir(name)
+    if mirror_dir.exists():
+        shutil.rmtree(mirror_dir)
+    shutil.copytree(src, mirror_dir)
+    if write_stamp:
+        write_pristine(mirror_dir)
 
 
 def workflow_update_notice(project_root: Path) -> str | None:

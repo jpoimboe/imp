@@ -47,7 +47,14 @@ from imp.engine.executor import RunResult, run_change
 from imp.engine.project_root import find_project_root
 from imp.engine.slug import dated_slug, new_change_id, slugify
 from imp.engine.state import LockHeld, ProjectLock, State
-from imp.engine.workflow_lifecycle import workflow_update_notice
+from imp.engine.workflow_lifecycle import (
+    DriftState,
+    classify_drift,
+    perform_workflow_update,
+    workflow_update_notice,
+    write_pristine,
+)
+from imp.providers.config import parse_default_workflow
 
 
 class ReplyInterjectRouter:
@@ -2113,6 +2120,60 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_update_workflow(args: argparse.Namespace) -> int:
+    import subprocess
+    try:
+        control = _control_root()
+    except worktree.PreconditionError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    try:
+        name = parse_default_workflow(control / "imp" / "project.yaml")
+    except (LoadError, LoadErrors) as e:
+        print(f"imp: {e}", file=sys.stderr)
+        return 2
+    mirror = control / "imp" / "workflows" / name
+    drift = classify_drift(name, mirror)
+    if drift is None:
+        print(f"imp: '{name}' is not a managed workflow — use your version control to update it.", file=sys.stderr)
+        return 1
+    if drift is DriftState.LOCALLY_MODIFIED:
+        print(f"imp: the {name} workflow is locally modified — update manually or restore from the bundled source.", file=sys.stderr)
+        return 1
+    if drift is DriftState.UP_TO_DATE:
+        print(f"imp: {name} workflow is already up-to-date.")
+        return 0
+    # UPDATE_AVAILABLE: copy files, stamp, commit scoped to mirror
+    perform_workflow_update(name, mirror, write_stamp=False)
+    write_pristine(mirror)
+    try:
+        subprocess.run(["git", "add", str(mirror)], cwd=control, check=True)
+        subprocess.run(
+            [
+                "git", "commit",
+                "-m", f"chore: update {name} workflow to current imp version",
+                "--", str(mirror),
+            ],
+            cwd=control,
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"imp: {e}", file=sys.stderr)
+        r = subprocess.run(
+            ["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", str(mirror)],
+            cwd=control,
+        )
+        if r.returncode != 0:
+            print(
+                f"imp: warning: failed to restore {mirror.name}; "
+                "check git status before retrying.",
+                file=sys.stderr,
+            )
+        return 2
+    print(f"imp: updated the {name} workflow and committed.")
+    return 0
+
+
 def _cmd_config(args: argparse.Namespace) -> int:
     from imp.cli.config_cmd import render_config, render_explain
     from imp.providers.effective import load_effective_config
@@ -2305,6 +2366,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Also list completed and abandoned Changes (default: in-flight only).",
     )
     p_status.set_defaults(func=_cmd_status)
+
+    p_update_workflow = sub.add_parser(
+        "update-workflow",
+        help="Update the imp-managed workflow to the current bundled version.",
+    )
+    p_update_workflow.set_defaults(func=_cmd_update_workflow)
 
     p_config = sub.add_parser(
         "config",
