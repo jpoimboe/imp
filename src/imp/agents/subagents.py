@@ -10,6 +10,8 @@ deadlock that would otherwise hit.
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 from imp.agents.parallel import emit_parallelism_warning_once
@@ -105,6 +107,36 @@ def make_task_tool(tiers: tuple[str, ...] = ()) -> Tool:
     )
 
 
+_SUBAGENT_ID_RE = re.compile(r"-(\d+)$")
+
+
+def _seed_subagent_counter(ctx: ToolContext) -> None:
+    """No id aliasing across resume: a resume re-drives with a fresh ToolContext
+    (counter 0) but the same parent_transcript_dir, whose subagents/ subdir still
+    holds the pre-pause dispatch dirs. Seed past the max numeric suffix — the
+    counter is one global sequence shared across subagent names — so a post-resume
+    dispatch never re-targets an existing dir. Mirrors bg._seed_counter."""
+    if ctx._subagent_counter != 0:
+        return
+    assert ctx.parent_transcript_dir is not None
+    d = ctx.parent_transcript_dir / "subagents"
+    if not d.is_dir():
+        return
+    ids = [int(m.group(1)) for p in d.iterdir()
+           if (m := _SUBAGENT_ID_RE.search(p.name))]
+    ctx._subagent_counter = max(ids, default=0)
+
+
+def _allocate_subagent_dir(ctx: ToolContext, subagent_name: str) -> tuple[int, Path]:
+    """Seed the counter from disk, then allocate the next invocation id and its
+    transcript dir."""
+    _seed_subagent_counter(ctx)
+    assert ctx.parent_transcript_dir is not None  # re-narrow (see helper above)
+    invocation_id = ctx.next_subagent_invocation_id()
+    base = ctx.parent_transcript_dir / "subagents"
+    return invocation_id, base / f"{subagent_name}-{invocation_id}"
+
+
 async def dispatch_task(
     ctx: ToolContext, subagent_name: str, task_description: str,
     *, tool_call_event_id: str = "", tier: str | None = None,
@@ -128,7 +160,7 @@ async def dispatch_task(
         )
 
     subagent_def = ctx.subagent_defs[subagent_name]
-    invocation_id = ctx.next_subagent_invocation_id()
+    _, target_dir = _allocate_subagent_dir(ctx, subagent_name)
 
     from imp.providers.config import parse_default_workflow  # lazy: breaks import cycle
 
@@ -193,8 +225,7 @@ async def dispatch_task(
             role="user", content=(TextBlock(text=task_description),)),),
         change_context=cc,
         user_chat_input_fn=None,
-        transcript_dir=ctx.parent_transcript_dir / "subagents"
-        / f"{subagent_name}-{invocation_id}",
+        transcript_dir=target_dir,
         fs_permissions=ctx.fs_permissions,
         events_path=ctx.events_path,
         subagent_defs=child_subagent_defs,
