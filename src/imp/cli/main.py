@@ -1411,7 +1411,7 @@ def _resolve_default_id(control: Path) -> str | None:
     return max(journaled, key=lambda s: _journal_last_iso(control, s) or "")
 
 
-_NO_CHANGES_MESSAGE = "No Changes."
+_NO_CHANGES_MESSAGE = "No changes."
 
 
 def _log_picker_empty() -> int:

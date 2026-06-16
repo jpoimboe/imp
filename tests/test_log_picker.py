@@ -72,7 +72,7 @@ def test_cmd_log_non_tty_keeps_resolve_default(
     rc = m._cmd_log(argparse.Namespace(token=None, full=False))
     out = capsys.readouterr().out
     assert rc == 0
-    assert "No Changes." in out
+    assert "No changes." in out
 
 
 def test_cmd_log_tty_no_token_routes_to_picker(
