@@ -41,7 +41,7 @@ if [[ -n "$tree" && -f "$cache" && "$(cat "$cache")" == "$tree" ]]; then
   exit 0
 fi
 
-verify_timeout="${IMP_VERIFY_TIMEOUT:-300}"
+verify_timeout="${IMP_VERIFY_TIMEOUT:-600}"
 rc=0
 # -k 30: SIGKILL stragglers that ignore the TERM.
 timeout -k 30 "$verify_timeout" bash -c "$IMP_VERIFY_COMMAND" || rc=$?
