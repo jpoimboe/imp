@@ -36,9 +36,11 @@ async def run_session_client(
     solicit: Callable[[str], Awaitable[str]],
     seed_opening: str | None = None,
     status: Any = None,
+    resume: bool = False,
 ) -> int:
     """Attach to the session daemon, render events, answer gates, and return the exit code."""
-    attach = build_session_attach(change, seed_opening=seed_opening)
+    attach = build_session_attach(
+        change, seed_opening=seed_opening, resume=resume)
     async with anyio.create_task_group() as tg:
         tg.start_soon(coord.run_signal_receiver)
         if status is not None:

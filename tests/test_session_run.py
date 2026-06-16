@@ -282,3 +282,48 @@ async def test_make_interactive_solicit_returns_typed_line_and_threads_run_objec
     assert captured["status"] is status
     assert captured["driver"] is driver
     assert captured["coord"] is coord
+
+
+@pytest.mark.anyio
+async def test_run_session_client_threads_resume_into_attach(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-resume")
+    # On-disk terminal state read after the (stubbed) daemon "exits".
+    (tmp_path / ".imp" / "worktrees" / change.id).mkdir(parents=True)
+    State(id=change.id, step=None, step_attempt=0, status="completed").save(
+        change.state_dir)
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(
+        ch: Change, *, seed_opening: str | None = None, resume: bool = False,
+    ) -> Any:
+        captured["resume"] = resume
+
+        async def _attach(_on_event: Any) -> Any:  # pragma: no cover - never run
+            raise AssertionError("attach must not be invoked in this test")
+
+        return _attach
+
+    monkeypatch.setattr("imp.cli.session_run.build_session_attach", _fake_build)
+
+    async def _noop(**_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr("imp.cli.session_run.run_terminal_client", _noop)
+    monkeypatch.setattr("imp.cli.main._handle_terminal_outcome", lambda *_: 0)
+
+    class _Driver:
+        def on_event(self, _event: dict[str, Any]) -> None: ...
+        def finish(self) -> None: ...
+
+    async def _solicit(_prompt: str) -> str:  # pragma: no cover
+        return ""
+
+    coord = InterruptCoordinator()
+    rc = await run_session_client(
+        change, driver=_Driver(), coord=coord, solicit=_solicit, resume=True)
+
+    assert captured["resume"] is True
+    assert rc == 0
