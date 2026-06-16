@@ -6,6 +6,8 @@ import signal
 import sys
 import time
 
+from pathlib import Path
+
 import pytest
 
 from impty.driver import ImptyDriver, _decode_keys
@@ -157,3 +159,41 @@ def test_send_numeric_wait_settles_fixed_time_on_animating_app() -> None:
 
 def test_stop_with_no_session_is_a_noop_message() -> None:
     assert ImptyDriver().stop() == "[no session]"
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_wait_returns_still_busy_after_hard_cap() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        d.wait(idle=0.2, hard=0.3)  # wait for READY
+        result = d.wait(idle=5.0, hard=0.4)  # hard cap fires: never settles
+        assert result.startswith("[still busy after hard cap]")
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_snapshot_writes_png(tmp_path: Path) -> None:
+    out = tmp_path / "snap.png"
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        result = d.snapshot(path=str(out))
+        assert out.exists() and out.stat().st_size > 0
+        assert str(out) in result
+    finally:
+        d.stop()
+
+
+@pytest.mark.skipif(not can_pty(), reason="pty not available")
+def test_send_wait_true_returns_screen_not_sent_marker() -> None:
+    d = ImptyDriver()
+    d.start([sys.executable, "-c", _ANIMATING_CHILD])
+    try:
+        d.wait(idle=0.2, hard=5.0)  # wait for READY
+        result = d.send("x", wait=True)
+        assert result != "[sent]"
+        assert result.startswith("[")  # status header
+    finally:
+        d.stop()
