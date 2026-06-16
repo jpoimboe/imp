@@ -2127,7 +2127,7 @@ def _cmd_update_workflow(args: argparse.Namespace) -> int:
         print(f"imp: {e}", file=sys.stderr)
         return 2
     try:
-        name = parse_default_workflow(control / "imp" / "project.yaml")
+        name = args.name or parse_default_workflow(control / "imp" / "project.yaml")
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
@@ -2152,31 +2152,36 @@ def _cmd_update_workflow(args: argparse.Namespace) -> int:
         return 0
     # UPDATE_AVAILABLE: copy files, stamp, commit scoped to mirror
     perform_workflow_update(name, mirror)
-    try:
-        subprocess.run(["git", "add", str(mirror)], cwd=control, check=True)
-        subprocess.run(
-            [
-                "git", "commit",
-                "-m", f"chore: update {name} workflow to current imp version",
-                "--", str(mirror),
-            ],
-            cwd=control,
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"imp: {e}", file=sys.stderr)
-        r = subprocess.run(
-            ["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", str(mirror)],
-            cwd=control,
-        )
-        if r.returncode != 0:
-            print(
-                f"imp: warning: failed to restore {mirror.name}; "
-                "check git status before retrying.",
-                file=sys.stderr,
+    with worktree.RepoGitLock(control).acquire():
+        try:
+            subprocess.run(["git", "add", str(mirror)], cwd=control, check=True)
+            subprocess.run(
+                [
+                    "git", "commit",
+                    "-m", f"chore: update {name} workflow to current imp version",
+                    "--", str(mirror),
+                ],
+                cwd=control,
+                check=True,
             )
-        return 2
-    print(f"imp: updated the {name} workflow and committed.")
+        except subprocess.CalledProcessError as e:
+            print(f"imp: {e}", file=sys.stderr)
+            r = subprocess.run(
+                ["git", "restore", "--source=HEAD", "--staged", "--worktree", "--", str(mirror)],
+                cwd=control,
+            )
+            if r.returncode != 0:
+                print(
+                    f"imp: warning: failed to restore {mirror.name}; "
+                    "check git status before retrying.",
+                    file=sys.stderr,
+                )
+            return 2
+    diff = subprocess.run(
+        ["git", "show", "HEAD"],
+        cwd=control, capture_output=True, text=True,
+    )
+    print(diff.stdout, end="")
     return 0
 
 
@@ -2376,6 +2381,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_update_workflow = sub.add_parser(
         "update-workflow",
         help="Update the imp-managed workflow to the current bundled version.",
+    )
+    p_update_workflow.add_argument(
+        "name", nargs="?", default=None, metavar="NAME",
+        help="workflow to update (default: the project's default-workflow)",
     )
     p_update_workflow.set_defaults(func=_cmd_update_workflow)
 
