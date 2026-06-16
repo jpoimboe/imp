@@ -858,7 +858,8 @@ class ClaudeCodeAgentRunner:
         disallowed = [t for t in ALL_CLAUDE_CODE_BUILTIN_TOOLS if t not in exempt]
         drivers = invocation.agent_def.drivers
         mcp_servers: dict[str, Any] = {"imp": mcp_server}
-        mcp_servers.update(driver_stdio_servers(drivers))
+        mcp_servers.update(driver_stdio_servers(
+            drivers, project_root=invocation.change_context.project_root))
         return ClaudeAgentOptions(
             model=self.model,
             # The claude_code provider drives the `claude` CLI, which
