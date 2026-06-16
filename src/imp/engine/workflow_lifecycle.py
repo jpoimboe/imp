@@ -14,9 +14,7 @@ PRISTINE_FILENAME = ".pristine"
 
 
 def hash_workflow_dir(d: Path) -> str:
-    """sha256 over the dir's files in sorted relative-path order — each file's
-    posix relative path, then its bytes — skipping the .pristine stamp and any
-    non-file entries. The stamp cannot hash itself."""
+    """sha256 over sorted workflow files (path + bytes), skipping .pristine."""
     h = hashlib.sha256()
     files = sorted(
         (
@@ -34,8 +32,7 @@ def hash_workflow_dir(d: Path) -> str:
 
 
 def write_pristine(d: Path) -> None:
-    """Record the content hash of `d` into <d>/.pristine (computed excluding the
-    stamp itself, so a re-stamp is idempotent)."""
+    """Write the content hash of d to <d>/.pristine, excluding the stamp itself."""
     (d / PRISTINE_FILENAME).write_text(hash_workflow_dir(d) + "\n")
 
 
@@ -54,11 +51,7 @@ class DriftState(Enum):
 
 
 def classify_drift(name: str, mirror_dir: Path) -> DriftState | None:
-    """Classify a managed workflow mirror from the bundled (B), pristine (P), and
-    on-disk (M) hashes. Returns None when `name` is NOT managed (no bundled twin),
-    so a user fork is never a candidate. A managed mirror with no/mismatched
-    stamp is locally-modified: we refuse to prove it clean, so it is never offered
-    a clobbering update."""
+    """Return drift state for a managed workflow mirror; None if name is not managed."""
     if not is_bundled_workflow(name):
         return None
     b = hash_workflow_dir(bundled_workflow_dir(name))
@@ -72,9 +65,7 @@ def classify_drift(name: str, mirror_dir: Path) -> DriftState | None:
 
 
 def perform_workflow_update(name: str, mirror_dir: Path, *, write_stamp: bool = True) -> None:
-    """Copy the bundled `name` workflow over `mirror_dir` and re-stamp .pristine.
-    Caller must classify before calling (should not be called on a LOCALLY_MODIFIED
-    or non-managed mirror)."""
+    """Overwrite mirror_dir with the bundled workflow and re-stamp .pristine."""
     src = bundled_workflow_dir(name)
     if mirror_dir.exists():
         shutil.rmtree(mirror_dir)
@@ -84,8 +75,7 @@ def perform_workflow_update(name: str, mirror_dir: Path, *, write_stamp: bool = 
 
 
 def workflow_update_notice(project_root: Path) -> str | None:
-    """One-line surface for `imp new`/`imp status`: the message to print when the
-    project's default-workflow mirror is update-available, else None."""
+    """Return an update-available notice string for imp new/status, or None."""
     from imp.providers.config import parse_default_workflow
 
     name = parse_default_workflow(project_root / "imp" / "project.yaml")
