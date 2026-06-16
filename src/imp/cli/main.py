@@ -961,6 +961,20 @@ async def _run_tui_session(
     return _handle_terminal_outcome(change, result, coord)
 
 
+def _record_backlog(args: argparse.Namespace, control: Path) -> int:
+    from imp.engine import backlog
+    change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
+    backlog.write_record(
+        control, change_id=change_id,
+        title=getattr(args, "title", None) or "",
+        brief=args.backlog,
+        depends_on=list(getattr(args, "depends_on", None) or []),
+        created_by="human")
+    print(f"imp: recorded backlog Change {change_id} "
+          f"(start it with `imp resume {change_id}`)")
+    return 0
+
+
 async def _async_cmd_new(args: argparse.Namespace) -> int:
     install_process_group()
     from imp.cli.signals import InterruptCoordinator
@@ -973,6 +987,9 @@ async def _async_cmd_new(args: argparse.Namespace) -> int:
     except worktree.PreconditionError as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
+
+    if getattr(args, "backlog", None) is not None:
+        return _record_backlog(args, control)
 
     try:
         playbook_name = getattr(args, "playbook", None)
@@ -2290,6 +2307,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--tui", action="store_true",
                        help="Render the run in a full-screen, scrollable viewer "
                             "(expanded steps); falls back to streaming on a non-tty.")
+    p_new.add_argument("--backlog", metavar="BRIEF", default=None,
+                       help="Record a backlog Change with this brief WITHOUT "
+                            "starting it; prints its id. Start it later with "
+                            "`imp resume <id>`.")
+    p_new.add_argument("--depends-on", metavar="ID", action="append",
+                       default=None, dest="depends_on",
+                       help="A change id this backlog Change depends on "
+                            "(repeatable). Gates ready/blocked; never changes the "
+                            "base branch.")
     p_new.set_defaults(func=_cmd_new)
 
     p_run = sub.add_parser(
