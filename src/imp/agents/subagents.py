@@ -113,11 +113,7 @@ _SUBAGENT_ID_RE = re.compile(r"-(\d+)$")
 
 
 def _seed_subagent_counter(ctx: ToolContext) -> None:
-    """No id aliasing across resume: a resume re-drives with a fresh ToolContext
-    (counter 0) but the same parent_transcript_dir, whose subagents/ subdir still
-    holds the pre-pause dispatch dirs. Seed past the max numeric suffix — the
-    counter is one global sequence shared across subagent names — so a post-resume
-    dispatch never re-targets an existing dir. Mirrors bg._seed_counter."""
+    """Seed counter past pre-pause dirs so a resumed dispatch never reuses an existing dir."""
     if ctx._subagent_counter != 0:
         return
     assert ctx.parent_transcript_dir is not None
@@ -130,12 +126,7 @@ def _seed_subagent_counter(ctx: ToolContext) -> None:
 
 
 def _allocate_subagent_dir(ctx: ToolContext, subagent_name: str) -> tuple[int, Path]:
-    """Seed the counter from disk, allocate the next invocation id and its
-    transcript dir, then re-allocate past any target whose transcript is
-    non-empty — the runner's exact resume condition
-    (Transcript(target / "transcript.jsonl").load() truthy). A fresh dispatch
-    therefore never lands on a stale transcript the runner would misread as a
-    resume. Emits one runner_warning per re-allocation."""
+    """Allocate next invocation dir, bumping past dirs with non-empty transcripts."""
     _seed_subagent_counter(ctx)
     assert ctx.parent_transcript_dir is not None  # re-narrow (see helper above)
     base = ctx.parent_transcript_dir / "subagents"
@@ -156,9 +147,7 @@ def _allocate_subagent_dir(ctx: ToolContext, subagent_name: str) -> tuple[int, P
 def _emit_collision_warning(
     ctx: ToolContext, colliding: Path, attempted_id: int, reallocated_id: int,
 ) -> None:
-    """Best-effort notification of a re-allocation (the re-allocation itself is the
-    safety; this is notification only). Mirrors bg's runner_warning emit shape —
-    message is REQUIRED (the UI consumer renders payload.get("message", "?"))."""
+    """Warn on dir re-allocation; message key is REQUIRED (UI renders payload["message"])."""
     if ctx.event_log is None:
         return
     with contextlib.suppress(Exception):
