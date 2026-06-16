@@ -130,10 +130,15 @@ async def dispatch_task(
     subagent_def = ctx.subagent_defs[subagent_name]
     invocation_id = ctx.next_subagent_invocation_id()
 
+    from imp.providers.config import parse_default_workflow  # lazy: breaks import cycle
+
     cc = ctx.change_context or ChangeContext(
         id="", slug="", title="", project_root=ctx.project_root,
         # No change context → no change_dir, no snapshot; live dir is the only option.
-        workflow_dir=ctx.project_root / "imp" / "workflows" / "default",
+        workflow_dir=(
+            ctx.project_root / "imp" / "workflows"
+            / parse_default_workflow(ctx.project_root / "imp" / "project.yaml")
+        ),
     )
 
     # Render the subagent's Jinja template. A SEPARATE read-only JsonlEventLog

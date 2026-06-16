@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow, parse_agent_file
 
-AGENTS = Path("src/imp/assets/workflows/default/agents")
+AGENTS = Path("src/imp/assets/workflows/imp/agents")
 SWEEP = AGENTS / "deferred-sweep.md"
 
 
@@ -18,7 +18,7 @@ def test_deferred_sweep_parses_with_expected_contract() -> None:
 
 
 def test_deferred_sweep_resolves_to_dispatcher_tools() -> None:
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     agent = wf.agents["deferred-sweep"]
     for tool in ("read_file", "write_file", "edit_file", "bash", "task"):
         assert tool in agent.tools, f"missing tool {tool}"
@@ -26,7 +26,7 @@ def test_deferred_sweep_resolves_to_dispatcher_tools() -> None:
 
 
 def test_deferred_sweep_loads_as_part_of_the_workflow() -> None:
-    wf = load_workflow(default_workflow_dir(),
+    wf = load_workflow(bundled_workflow_dir("imp"),
                        configured_tiers=frozenset({"low", "medium", "high"}))
     assert "deferred-sweep" in wf.agents
 

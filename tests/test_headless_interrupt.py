@@ -127,7 +127,7 @@ def _make_change(root: Path, *, slug: str = "c", title: str = "t") -> Change:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
-    src_wf = root / "imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "imp"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
@@ -160,7 +160,7 @@ def _make_change(root: Path, *, slug: str = "c", title: str = "t") -> Change:
 
 def _seed_blocking_agent(root: Path) -> Change:
     """Seed a workflow with a single agent that blocks until interrupted."""
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "blocker.md").write_text(
         "---\nname: blocker\ntools: [complete_step]\n"

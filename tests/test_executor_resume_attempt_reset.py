@@ -21,7 +21,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
-    src_wf = root / "imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "imp"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
@@ -113,7 +113,7 @@ def _seed_resume_loop_workflow(root: Path) -> Change:
     itself. That is the genuine stale-count scenario: a change paused with a
     nonzero step_attempt whose next move is a `resume:` edge re-entering a
     step."""
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -211,7 +211,7 @@ async def test_resumed_step_persistent_error_still_terminates(
     invocations and raises if exceeded, so a per-retry-reset regression fails
     loudly (bounded) instead of looping.
     """
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     # writer succeeds once (drives a resume edge into reviewer-style loop); the
     # SECOND step is resumed into and then persistently fails.

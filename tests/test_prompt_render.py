@@ -91,10 +91,10 @@ def test_implementer_prompt_gates_tdd_on_fast_path(tmp_path: Path) -> None:
     """The shipped implementer template must render two branches: fast_path
     waives tests; else loads TDD. StrictUndefined means both renders pass
     fast_path explicitly (there is no undefined->else fallback)."""
-    from imp.assets import default_workflow_dir
+    from imp.assets import bundled_workflow_dir
     from imp.engine.loader import load_workflow
 
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     body = wf.agents["implementer"].prompt_template_source
     log = _log(tmp_path / "events.jsonl", [])
 

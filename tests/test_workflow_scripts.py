@@ -11,12 +11,12 @@ import os
 import subprocess
 from pathlib import Path
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 
 
 def _scripts_dir() -> Path:
-    return default_workflow_dir() / "scripts"
+    return bundled_workflow_dir("imp") / "scripts"
 
 
 def _run(script: str, *args: str, env_extra: dict[str, str] | None = None,
@@ -124,7 +124,7 @@ def test_run_verify_skips_on_unchanged_tree(tmp_path: Path) -> None:
 
 def test_verify_and_sweep_verify_share_tree_skip_cache(tmp_path: Path) -> None:
     # Both verify and sweep-verify call the same script, so they share the tree-skip cache.
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     by = {s.name: s for s in wf.flat_steps()}
     assert by["verify"].command == "./scripts/run-verify.sh"
     assert by["sweep-verify"].command == "./scripts/run-verify.sh"

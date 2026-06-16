@@ -90,7 +90,7 @@ def test_parse_layer_vars_must_be_mapping(tmp_path: Path) -> None:
 def test_override_lands_in_state_at_change_creation(tmp_path: Path) -> None:
     _seed_control(tmp_path)
     # Give the workflow a declared var, then override it in config.
-    wf = tmp_path / "imp" / "workflows" / "default" / "workflow.yaml"
+    wf = tmp_path / "imp" / "workflows" / "imp" / "workflow.yaml"
     wf.write_text(
         'name: t\ndescription: ""\n'
         "vars:\n  flag_var: {type: bool, default: true}\n"

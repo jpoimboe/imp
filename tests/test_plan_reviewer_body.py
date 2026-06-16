@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 
 
 def _body() -> str:
-    wf = load_workflow(default_workflow_dir())
+    wf = load_workflow(bundled_workflow_dir("imp"))
     return wf.agents["plan-reviewer"].prompt_template_source
 
 

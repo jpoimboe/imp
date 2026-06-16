@@ -127,7 +127,7 @@ def _seed_single_step(root: Path) -> Change:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"

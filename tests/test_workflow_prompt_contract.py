@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-AGENTS_DIR = Path("src/imp/assets/workflows/default/agents")
+AGENTS_DIR = Path("src/imp/assets/workflows/imp/agents")
 
 # Subagents (non-interactive, dispatched via `task`): the contract under test.
 SUBAGENT_FILES = ["implementer.md", "quality-reviewer.md"]
@@ -12,7 +12,7 @@ SUBAGENT_FILES = ["implementer.md", "quality-reviewer.md"]
 # question is correct for them. Exempt from the no-bare-question rule.
 INTERACTIVE_STEP_FILES = ["spec-writer.md", "finalize.md"]
 
-SKILLS_DIR = Path("src/imp/assets/workflows/default/skills")
+SKILLS_DIR = Path("src/imp/assets/workflows/imp/skills")
 
 # Falsifiability-hardening guards: each component's edit leaves a marker in a
 # specific file. These are per-(path, marker) pairs spanning skills/ and direct

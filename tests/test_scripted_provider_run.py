@@ -13,7 +13,7 @@ from tests.conftest import _git, _init_repo, write_agent_md
 
 def _seed_scripted_repo(root: Path, script_path: Path) -> None:
     _init_repo(root)
-    src = root / "imp" / "workflows" / "default"
+    src = root / "imp" / "workflows" / "imp"
     (src / "agents").mkdir(parents=True)
     write_agent_md(
         src / "agents" / "coder.md",

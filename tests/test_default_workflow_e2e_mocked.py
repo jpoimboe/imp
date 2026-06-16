@@ -57,7 +57,7 @@ def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> 
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
-    src_wf = root / "imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "imp"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
@@ -106,8 +106,8 @@ def _seed_default_workflow(tmp_path: Path) -> Change:
     Also initializes a bare-minimum git repo so the merge gate
     can run `git status --porcelain` without failing.
     """
-    src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "default"
-    dst = tmp_path / "imp" / "workflows" / "default"
+    src = Path(__file__).resolve().parents[1] / "src" / "imp" / "assets" / "workflows" / "imp"
+    dst = tmp_path / "imp" / "workflows" / "imp"
     shutil.copytree(src, dst)
     # Replace script gates with always-pass stubs.
     for shell in (dst / "scripts").glob("*.sh"):
@@ -607,7 +607,7 @@ async def test_conflict_rebase_routes_through_integrator(tmp_path: Path) -> None
     """A conflict rebase (integrate-rebase.sh exits 6) routes through the
     integrator before integrate-verify and finalize."""
     change = _seed_default_workflow(tmp_path)
-    ir = (change.project_root / "imp" / "workflows" / "default"
+    ir = (change.project_root / "imp" / "workflows" / "imp"
           / "scripts" / "integrate-rebase.sh")
     ir.write_text("#!/usr/bin/env bash\nexit 6\n")
     ir.chmod(0o755)
@@ -771,7 +771,7 @@ async def test_base_advance_triggers_reintegration_then_merges(tmp_path: Path) -
     change = _seed_default_workflow(tmp_path)
     # Overwrite the (shimmed) base-fresh-check with one that exits 10 on its first
     # call and 0 thereafter, via a call-count file under the gitignored .imp/.
-    bfc = (change.project_root / "imp" / "workflows" / "default"
+    bfc = (change.project_root / "imp" / "workflows" / "imp"
            / "scripts" / "base-fresh-check.sh")
     bfc.write_text(
         "#!/usr/bin/env bash\n"

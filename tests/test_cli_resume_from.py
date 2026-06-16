@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.cli.main import main
 from imp.engine.change import Change
 from imp.engine.state import State
@@ -12,11 +12,11 @@ from tests.conftest import _git, _init_repo, _seed_control
 
 def _seed_control_default(root: Path) -> None:
     """Like conftest._seed_control, but commits the REAL shipped default
-    workflow at imp/workflows/default plus a config defining every tier it
+    workflow at imp/workflows/imp plus a config defining every tier it
     uses — so Change.create copies the real workflow (with the per-plan review +
     deferred-sweep, gates, a merge phase) into the worktree."""
     _init_repo(root)
-    shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
+    shutil.copytree(bundled_workflow_dir("imp"), root / "imp" / "workflows" / "imp")
     (root / "imp" / "project.yaml").write_text("workflow: default\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.change import Change
 from imp.providers import register_builtin_providers, resolve
 
@@ -40,7 +40,7 @@ def test_change_create_uses_floor_tiers_without_a_tiers_block(
     (xdg / "config.yaml").write_text("providers: [openai]\n")
     # Minimal default workflow so load_workflow succeeds.
     (root / "imp" / "workflows").mkdir()
-    shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
+    shutil.copytree(bundled_workflow_dir("imp"), root / "imp" / "workflows" / "imp")
     (root / ".gitignore").write_text(".imp/\n")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "seed")

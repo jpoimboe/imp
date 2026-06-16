@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-PROMPT = Path("src/imp/assets/workflows/default/agents/autosquash-resolve.md")
+PROMPT = Path("src/imp/assets/workflows/imp/agents/autosquash-resolve.md")
 
 
 @pytest.mark.parametrize("needle,case_fold", [

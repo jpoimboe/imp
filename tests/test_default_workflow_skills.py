@@ -4,7 +4,7 @@ loadable via the skills mechanism, with no YAML frontmatter (Profile B)."""
 from __future__ import annotations
 
 from imp.agents.skills import list_skill_names, load_skill_body
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 
 _SKILLS = [
     "test-driven-development",
@@ -15,7 +15,7 @@ _SKILLS = [
 
 
 def _skills_dir():
-    return default_workflow_dir() / "skills"
+    return bundled_workflow_dir("imp") / "skills"
 
 
 def test_all_four_skills_present() -> None:

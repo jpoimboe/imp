@@ -58,13 +58,13 @@ def seed_minimal_repo(root: Path, *, script: dict[str, Any]) -> Path:
     _git(root, "config", "user.name", "t")
     (root / ".gitignore").write_text(".imp/\n")
     (root / "README.md").write_text("seed\n")
-    agents = root / "imp" / "workflows" / "default" / "agents"
+    agents = root / "imp" / "workflows" / "imp" / "agents"
     agents.mkdir(parents=True)
     (agents / "coder.md").write_text(
         "---\nname: coder\ntools: [bash, complete_step]\n"
         "output:\n  status: {type: enum, values: [Success, Error]}\n"
         "---\nprompt body\n")
-    (root / "imp" / "workflows" / "default" / "workflow.yaml").write_text(
+    (root / "imp" / "workflows" / "imp" / "workflow.yaml").write_text(
         "name: t\ndescription: \"\"\n"
         "phases:\n  - name: work\n    steps:\n"
         "      - name: coder\n        file: agents/coder.md\n"
@@ -145,7 +145,7 @@ def default_workflow_script(sentinel: str) -> dict[str, Any]:
 
 def seed_default_repo(root: Path, *, script: dict[str, Any]) -> Path:
     """Like seed_minimal_repo, but installs the REAL shipped default workflow."""
-    from imp.assets import default_workflow_dir
+    from imp.assets import bundled_workflow_dir
 
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
@@ -153,8 +153,8 @@ def seed_default_repo(root: Path, *, script: dict[str, Any]) -> Path:
     (root / ".gitignore").write_text(".imp/\n")
     (root / "README.md").write_text("seed\n")
     (root / "imp" / "workflows").mkdir(parents=True)
-    shutil.copytree(default_workflow_dir(),
-                    root / "imp" / "workflows" / "default")
+    shutil.copytree(bundled_workflow_dir("imp"),
+                    root / "imp" / "workflows" / "imp")
     (root / "imp" / "project.yaml").write_text("workflow: default\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_MINIMAL_CONFIG)

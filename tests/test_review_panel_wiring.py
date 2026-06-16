@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from imp.agents.prompts import build_context, render_prompt
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.errors import LoadError
 from imp.engine.gates import evaluate_rules
 from imp.engine.loader import load_workflow
@@ -18,7 +18,7 @@ from imp.engine.schema import validate_agent_output
 from imp.engine.state import JsonlEventLog
 from imp.engine.types import Continue, Goto
 
-AGENTS = Path("src/imp/assets/workflows/default/agents")
+AGENTS = Path("src/imp/assets/workflows/imp/agents")
 _TIERS = frozenset({"low", "medium", "high"})
 
 _BASE_VARS = {
@@ -30,7 +30,7 @@ _BASE_VARS = {
 
 
 def _wf():
-    return load_workflow(default_workflow_dir(), configured_tiers=_TIERS)
+    return load_workflow(bundled_workflow_dir("imp"), configured_tiers=_TIERS)
 
 
 def _steps(wf):

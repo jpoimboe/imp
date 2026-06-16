@@ -23,7 +23,7 @@ def _make_change(root: Path, *, slug: str = "c", title: str = "t") -> Change:
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
-    src_wf = root / "imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "imp"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
@@ -55,7 +55,7 @@ def _make_change(root: Path, *, slug: str = "c", title: str = "t") -> Change:
 
 
 def _seed_single_agent(root: Path) -> Change:
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -117,7 +117,7 @@ async def test_mid_turn_interrupt_sets_resume_pending(tmp_path: Path) -> None:
 async def test_interrupt_after_step_completed_advances_then_pauses(tmp_path: Path) -> None:
     """Two-step workflow. Interrupt fires as step 1 completes (Continue). The
     cursor must advance to step 2, THEN pause — re-entry starts step 2 fresh."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "a.md").write_text(
         "---\nname: a\ntools: [complete_step]\n"
@@ -176,7 +176,7 @@ async def test_interrupt_does_not_override_resume_goto_target(tmp_path: Path) ->
     """A review→agent resume-goto sets resume_pending=target. An interrupt on
     that navigation must KEEP resume_pending=target (not force it to None), so
     the target resumes its transcript."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
         "---\nname: coder\ntools: [complete_step]\n"

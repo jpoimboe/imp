@@ -16,7 +16,7 @@ import os
 import subprocess
 from pathlib import Path
 
-AUTOSQUASH = Path("src/imp/assets/workflows/default/scripts/autosquash.sh").resolve()
+AUTOSQUASH = Path("src/imp/assets/workflows/imp/scripts/autosquash.sh").resolve()
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 
 
 def _prompt(name: str) -> str:
-    return load_workflow(default_workflow_dir()).agents[name].prompt_template_source
+    return load_workflow(bundled_workflow_dir("imp")).agents[name].prompt_template_source
 
 
 def test_spec_writer_forbids_tool_loading_narration() -> None:

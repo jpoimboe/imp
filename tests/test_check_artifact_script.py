@@ -5,11 +5,11 @@ plan-commit-verify.sh (see test_commit_verify_scripts.py for their tests).
 This file verifies those replacement scripts are present and executable.
 """
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 
 
 def test_commit_verify_scripts_exist() -> None:
-    scripts = default_workflow_dir() / "scripts"
+    scripts = bundled_workflow_dir("imp") / "scripts"
     for name in ("spec-commit-verify.sh", "plan-commit-verify.sh"):
         p = scripts / name
         assert p.exists(), f"missing script: {p}"

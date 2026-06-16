@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 
 
 def _wf():
-    return load_workflow(default_workflow_dir())
+    return load_workflow(bundled_workflow_dir("imp"))
 
 
 def test_explorer_agent_is_read_only_leaf() -> None:
@@ -31,7 +31,7 @@ def test_researcher_agent_has_web_tools_read_only() -> None:
 
 
 def test_subagents_have_no_static_tier() -> None:
-    agents_dir = default_workflow_dir() / "agents"
+    agents_dir = bundled_workflow_dir("imp") / "agents"
     for name in ("explorer", "researcher"):
         text = (agents_dir / f"{name}.md").read_text()
         # No frontmatter tier: each inherits the dispatching agent's model.

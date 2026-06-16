@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.errors import LoadErrors
 from imp.engine.executor import RunResult, run_change
 from imp.engine.loader import load_workflow
@@ -49,8 +49,8 @@ def _event_types(change) -> list[str]:
     return [e.get("type") for e in change.event_log().read()]
 
 
-def test_default_workflow_dir_exists() -> None:
-    wf = default_workflow_dir()
+def test_bundled_workflow_dir_exists() -> None:
+    wf = bundled_workflow_dir("imp")
     assert (wf / "workflow.yaml").is_file()
     assert (wf / "agents").is_dir()
     assert (wf / "scripts").is_dir()
@@ -59,7 +59,7 @@ def test_default_workflow_dir_exists() -> None:
 def test_default_workflow_loads_with_default_roles(tmp_path: Path) -> None:
     # Stage the workflow into a tmp dir to ensure no .imp/ ambient leakage
     staged = tmp_path / "wf"
-    shutil.copytree(default_workflow_dir(), staged)
+    shutil.copytree(bundled_workflow_dir("imp"), staged)
     # Tiers referenced by the default workflow
     configured = {"low", "medium", "high"}
     workflow = load_workflow(staged, configured_tiers=configured)
@@ -71,7 +71,7 @@ def test_default_workflow_loads_with_default_roles(tmp_path: Path) -> None:
 
 def test_default_workflow_fails_with_missing_role(tmp_path: Path) -> None:
     staged = tmp_path / "wf"
-    shutil.copytree(default_workflow_dir(), staged)
+    shutil.copytree(bundled_workflow_dir("imp"), staged)
     with pytest.raises(LoadErrors) as exc:
         load_workflow(staged, configured_tiers=frozenset({"medium"}))
     msg = str(exc.value)
@@ -88,7 +88,7 @@ async def test_approved_clean_reintegration_merges_without_second_finalize(
     clean re-integration auto-proceeds to merge-to-base instead of routing back
     to finalize."""
     change = _seed_default_workflow(tmp_path)
-    scripts = (change.project_root / "imp" / "workflows" / "default" / "scripts")
+    scripts = (change.project_root / "imp" / "workflows" / "imp" / "scripts")
 
     bfc = scripts / "base-fresh-check.sh"
     bfc.write_text(
@@ -128,7 +128,7 @@ async def test_approved_nothing_to_integrate_merges_without_second_finalize(
     finds nothing to integrate (exit 2, base became an ancestor), the change
     routes to base-fresh-check and merges — no second human prompt."""
     change = _seed_default_workflow(tmp_path)
-    scripts = (change.project_root / "imp" / "workflows" / "default" / "scripts")
+    scripts = (change.project_root / "imp" / "workflows" / "imp" / "scripts")
 
     bfc = scripts / "base-fresh-check.sh"
     bfc.write_text(
@@ -162,7 +162,7 @@ async def test_approved_conflict_reintegration_routes_back_to_finalize(
     review — one re-ask per conflict round. integrate-rebase is clean on the
     pre-approval pass (call 1) and conflicts on the re-integration (call 2)."""
     change = _seed_default_workflow(tmp_path)
-    scripts = (change.project_root / "imp" / "workflows" / "default" / "scripts")
+    scripts = (change.project_root / "imp" / "workflows" / "imp" / "scripts")
 
     bfc = scripts / "base-fresh-check.sh"
     bfc.write_text(
@@ -206,7 +206,7 @@ async def test_preapproval_first_pass_reaches_finalize(
     integrator -> integrate-verify -> finalize). No base drift here
     (base-fresh-check stays exit 0), so finalize runs exactly once."""
     change = _seed_default_workflow(tmp_path)
-    scripts = (change.project_root / "imp" / "workflows" / "default" / "scripts")
+    scripts = (change.project_root / "imp" / "workflows" / "imp" / "scripts")
     ir = scripts / "integrate-rebase.sh"
     ir.write_text(f"#!/usr/bin/env bash\nexit {rebase_exit}\n")
     ir.chmod(0o755)
@@ -233,7 +233,7 @@ async def test_post_approval_clean_loop_is_bounded(tmp_path) -> None:
     11th backward goto trips the bound (n > 10) and the engine pauses with
     reason max_loops rather than looping forever."""
     change = _seed_default_workflow(tmp_path)
-    scripts = (change.project_root / "imp" / "workflows" / "default" / "scripts")
+    scripts = (change.project_root / "imp" / "workflows" / "imp" / "scripts")
     bfc = scripts / "base-fresh-check.sh"
     bfc.write_text("#!/usr/bin/env bash\nexit 10\n")
     bfc.chmod(0o755)

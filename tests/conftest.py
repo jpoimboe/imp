@@ -175,10 +175,10 @@ def _init_repo(root: Path) -> None:
 
 
 def _seed_control(root: Path) -> None:
-    """A git repo with committed imp/project.yaml marker + imp/workflows/default
+    """A git repo with committed imp/project.yaml marker + imp/workflows/imp
     and a gitignored .imp/config.yaml local layer (read by load_effective_config)."""
     _init_repo(root)
-    src = root / "imp" / "workflows" / "default"
+    src = root / "imp" / "workflows" / "imp"
     (src / "agents").mkdir(parents=True)
     write_agent_md(
         src / "agents" / "stub.md",
@@ -190,7 +190,7 @@ def _seed_control(root: Path) -> None:
         "phases:\n  - name: p\n    steps:\n      - {name: s, file: agents/stub.md}\n"
     )
     # Config layers: committed marker + gitignored local layer.
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(
         "providers: [anthropic]\n"

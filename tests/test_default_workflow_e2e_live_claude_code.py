@@ -45,7 +45,7 @@ async def test_one_step_walk_against_claude_code(tmp_path: Path) -> None:
     _git(tmp_path, "config", "user.email", "t@t")
     _git(tmp_path, "config", "user.name", "t")
     (tmp_path / ".gitignore").write_text(".imp/\n")
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"

@@ -25,12 +25,12 @@ from imp.engine.state import State
 
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees. The workflow is
-    read from root/imp/workflows/default (the branch-dir model — workflow_dir =
-    project_root/imp/workflows/default), so there is no snapshot copy to make."""
+    read from root/imp/workflows/imp (the branch-dir model — workflow_dir =
+    project_root/imp/workflows/imp), so there is no snapshot copy to make."""
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
-    wf_dir = root / "imp" / "workflows" / "default"
+    wf_dir = root / "imp" / "workflows" / "imp"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
@@ -83,7 +83,7 @@ async def test_exhausted_step_emits_single_pause_completion(tmp_path: Path) -> N
     """Characterization lock: exhausted step emits exactly one step_completed
     with action.verb == 'pause' (the on_max_retries action) and no spurious
     exhaustion events. workflow_paused is the only visible side-effect."""
-    wf_dir = tmp_path / "imp" / "workflows" / "default"
+    wf_dir = tmp_path / "imp" / "workflows" / "imp"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / "worker.md").write_text(
         "---\nname: worker\ntools: [complete_step]\n"

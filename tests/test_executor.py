@@ -40,15 +40,15 @@ def _persist_initial(invocation: AgentInvocation) -> None:
 def _make_change(root: Path, *, slug: str = "test-change", title: str = "t") -> Change:
     """Construct a Change directly on disk without git worktrees.
 
-    The test sets up the workflow under root/imp/workflows/default BEFORE
+    The test sets up the workflow under root/imp/workflows/imp BEFORE
     calling _make_change; this helper seeds the State so run_change can be
     invoked immediately (no snapshot copy needed — workflow_dir resolves to
-    root/imp/workflows/default directly).
+    root/imp/workflows/imp directly).
     """
     from imp.engine.loader import load_workflow
     from imp.providers.effective import load_effective_config
 
-    src_wf = root / "imp" / "workflows" / "default"
+    src_wf = root / "imp" / "workflows" / "imp"
     change_dir = root / ".imp" / "change"
     change_dir.mkdir(parents=True, exist_ok=True)
     (change_dir / "state").mkdir(exist_ok=True)
@@ -165,7 +165,7 @@ def _write_fake_config(root: Path) -> None:
     load_effective_config reads: imp/project.yaml marker + .imp/config.yaml
     local layer."""
     (root / "imp").mkdir(parents=True, exist_ok=True)
-    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / "imp" / "project.yaml").write_text("default-workflow: imp\n")
     (root / ".imp").mkdir(parents=True, exist_ok=True)
     (root / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
 
@@ -179,7 +179,7 @@ def _seed_minimal_workflow(
 ) -> tuple[Change, str, str]:
     """Create a minimal single-step workflow on disk and snapshot it into a
     Change. Returns ``(change, phase_name, step_name)``."""
-    wf_dir = root / "imp" / "workflows" / "default"
+    wf_dir = root / "imp" / "workflows" / "imp"
     (wf_dir / "agents").mkdir(parents=True)
     (wf_dir / "agents" / f"{agent_stem}.md").write_text(
         f"---\nname: {agent_stem}\ntools: [complete_step]\n"
@@ -234,7 +234,7 @@ async def test_continue_off_last_step_completes(tmp_path: Path) -> None:
 async def test_set_mutation_persists_to_state_vars(tmp_path: Path) -> None:
     """A rule with `set: {review_done: true}` updates state.vars; reload State
     and confirm the mutation persisted."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -271,7 +271,7 @@ def _seed_branch_loop_workflow(root: Path) -> Change:
     """writer(agent); the branch loops back via resume: writer. writer sets
     review_done=true; a branch step continues while review_done is false, and
     gotos the trailing `done` phase once it's true."""
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -329,7 +329,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
     """A reviewer agent that always gotos backward to the writer, with
     max_loops: 2 → after exhausting, the run PAUSES and loop_counts reflects
     the cap."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -401,7 +401,7 @@ async def test_backward_goto_increments_loop_count_and_trips_max_loops(
 @pytest.mark.anyio
 async def test_goto_empty_trailing_phase_completes(tmp_path: Path) -> None:
     """The last real step gotos a trailing empty phase → COMPLETED."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -769,7 +769,7 @@ async def test_system_prompt_carries_completion_instruction_and_continuation(
 ) -> None:
     from imp.providers import resolve
 
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -835,7 +835,7 @@ async def test_goto_feedback_resumes_target_with_wrapper(tmp_path: Path) -> None
     """A reviewer agent that resumes backward with a feedback: preamble string
     makes the coder's NEXT invocation carry the composed feedback text.
     The reviewer flips to approve on its 2nd pass so the run completes."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
         "---\nname: coder\ntools: [complete_step]\n"
@@ -1020,7 +1020,7 @@ def _seed_back_edge_workflow(
     """coder(agent) -> reviewer(agent). reviewer rules: on rework, <verb>: coder;
     else continue. `verb` is 'goto' or 'resume'. `feedback` is an optional
     preamble string for the back edge (§6); None means bare (forwards nothing)."""
-    wf = root / "imp" / "workflows" / "default"
+    wf = root / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "coder.md").write_text(
         "---\nname: coder\ntools: [complete_step]\n"
@@ -1327,7 +1327,7 @@ async def test_script_pause_emits_script_blocked_event(tmp_path: Path) -> None:
     rule must journal a script_blocked event carrying the step name, exit code,
     and stderr text.  Previously the pause was bare (no reason) and all stderr
     was silently discarded."""
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     wf.mkdir(parents=True)
     # A single script step: exit 7 with stderr text; the else-rule pauses.
     (wf / "workflow.yaml").write_text(
@@ -1451,7 +1451,7 @@ async def test_resume_runs_frozen_snapshot_after_live_workflow_deleted(
     import shutil
     import subprocess
 
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "scripts").mkdir(parents=True)
     (wf / "scripts" / "probe.sh").write_text("echo frozen >&2\nexit 7\n")
     (wf / "workflow.yaml").write_text(
@@ -1540,7 +1540,7 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
     git ops act on the change's real tree. Exit 0 -> continue -> COMPLETED."""
     import subprocess
 
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     wf.mkdir(parents=True)
     (wf / "workflow.yaml").write_text(
         "name: t\ndescription: t\n"
@@ -1567,7 +1567,7 @@ async def test_frozen_script_runs_from_snapshot_cwd_with_live_project_root(
 
 @pytest.mark.anyio
 async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
-    wf = tmp_path / "imp" / "workflows" / "default"
+    wf = tmp_path / "imp" / "workflows" / "imp"
     (wf / "agents").mkdir(parents=True)
     (wf / "agents" / "writer.md").write_text(
         "---\nname: writer\ntools: [complete_step]\n"
@@ -1583,7 +1583,7 @@ async def test_facts_render_into_main_agent_prompt(tmp_path: Path) -> None:
     (tmp_path / ".imp").mkdir(parents=True, exist_ok=True)
     (tmp_path / ".imp" / "config.yaml").write_text(_FAKE_CONFIG)
     (tmp_path / "imp" / "project.yaml").write_text(
-        "workflow: default\nfacts:\n  test_command: make check\n"
+        "default-workflow: imp\nfacts:\n  test_command: make check\n"
     )
     change = _make_change(tmp_path)
     sink: list[str] = []

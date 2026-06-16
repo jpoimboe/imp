@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 
 # Match a ROOT-level virtual path `/project` or `/scratch`:
 #   - trailing edge: word-boundary (not followed by an alnum/underscore/hyphen) —
@@ -21,7 +21,7 @@ _FORBIDDEN = re.compile(r"(?<![~\w])/(?:project|scratch)(?![A-Za-z0-9_-])")
 
 
 def test_no_virtual_paths_in_default_workflow_assets():
-    root = Path(default_workflow_dir())
+    root = Path(bundled_workflow_dir("imp"))
     offenders: list[str] = []
     for f in root.rglob("*"):
         if not f.is_file() or f.suffix not in (".md", ".yaml", ".yml"):

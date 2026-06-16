@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 from imp.engine.loader import load_workflow
 
-AGENTS = Path("src/imp/assets/workflows/default/agents")
+AGENTS = Path("src/imp/assets/workflows/imp/agents")
 
 
 def _task_lead():
-    return load_workflow(default_workflow_dir()).agents["task-lead"]
+    return load_workflow(bundled_workflow_dir("imp")).agents["task-lead"]
 
 
 def test_task_lead_subagents_drop_spec_task_reviewer() -> None:
