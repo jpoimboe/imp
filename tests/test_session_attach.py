@@ -169,7 +169,9 @@ async def test_build_session_attach_threads_seed_into_spawn(
             holder["server"] = server
             await server.serve()
 
-        def fake_spawn(ch: Change, *, seed_opening: str | None = None) -> None:
+        def fake_spawn(
+            ch: Change, *, seed_opening: str | None = None, resume: bool = False,
+        ) -> None:
             captured["change"] = ch
             captured["seed_opening"] = seed_opening
             tg.start_soon(_start_server)
@@ -270,3 +272,41 @@ def test_spawn_session_daemon_seed_before_resume_when_both_set(
         "--seed-opening=hello",
         "--resume",
     ]
+
+
+@pytest.mark.anyio
+async def test_build_session_attach_threads_resume_into_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.remote.session import attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-rsm")
+    sock = str(session_socket_path(change.control_root, change.id))
+    captured: dict[str, Any] = {}
+    holder: dict[str, SessionSocket] = {}
+
+    async with anyio.create_task_group() as tg:
+        async def _start_server() -> None:
+            server = SessionSocket(sock)
+            await server.open()
+            holder["server"] = server
+            await server.serve()
+
+        def fake_spawn(
+            ch: Change, *, seed_opening: str | None = None, resume: bool = False,
+        ) -> None:
+            captured["resume"] = resume
+            tg.start_soon(_start_server)
+
+        monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
+
+        attach = attach_mod.build_session_attach(change, resume=True)
+        client = await attach(lambda _e: None)
+
+        assert captured["resume"] is True
+        with anyio.fail_after(5):
+            while holder.get("server") is None or holder["server"].attached_count != 1:
+                await anyio.sleep(0.02)
+        await client.aclose()
+        await holder["server"].close()
+        tg.cancel_scope.cancel()
