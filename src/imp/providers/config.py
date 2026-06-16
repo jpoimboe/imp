@@ -140,7 +140,7 @@ def parse_default_workflow(path: Path) -> str:
     name = raw.get("default-workflow")
     if name is None:
         return "imp"
-    if (not isinstance(name, str) or not name or "/" in name or "\\" in name
+    if (not isinstance(name, str) or not name.strip() or "/" in name or "\\" in name
             or name.startswith(".")):
         raise LoadError(
             "'default-workflow' must be a single workflow name "
