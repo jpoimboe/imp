@@ -463,11 +463,11 @@ class CodexAgentRunner:
         # via the journaled awaiting_user_input event) solicits the human reply
         # via user_input_fn and injects it as the FIRST resumed prompt instead of
         # the system prompt; MISSING_COMPLETE_STEP (autonomous, no complete_step)
-        # is a terminal error.
+        # triggers replay-and-continue (nudge injected as the resumed prompt).
         if invocation.balance_on_resume:
             from imp.agents.classify import ResumeState
             from imp.providers.codex_resume import derive_codex_resume_state
-            rstate, last_text = derive_codex_resume_state(
+            rstate, _ = derive_codex_resume_state(
                 invocation.events_path, aid)
             if rstate is ResumeState.AWAITING_USER:
                 if invocation.user_input_fn is None:
