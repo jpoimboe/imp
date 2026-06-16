@@ -149,3 +149,79 @@ async def test_raises_when_spawn_never_creates_the_socket(tmp_path: Path) -> Non
         await attach_or_spawn(
             change, on_event=lambda _e: None,
             spawn_fn=lambda _ch: None, connect_timeout=0.3)
+
+
+@pytest.mark.anyio
+async def test_build_session_attach_threads_seed_into_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.remote.session import attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-seed")
+    sock = str(session_socket_path(change.control_root, change.id))
+    captured: dict[str, Any] = {}
+    holder: dict[str, SessionSocket] = {}
+
+    async with anyio.create_task_group() as tg:
+        async def _start_server() -> None:
+            server = SessionSocket(sock)
+            await server.open()
+            holder["server"] = server
+            await server.serve()
+
+        def fake_spawn(ch: Change, *, seed_opening: str | None = None) -> None:
+            captured["change"] = ch
+            captured["seed_opening"] = seed_opening
+            tg.start_soon(_start_server)
+
+        monkeypatch.setattr(attach_mod, "spawn_session_daemon", fake_spawn)
+
+        attach = attach_mod.build_session_attach(change, seed_opening="ship it")
+        client = await attach(lambda _e: None)
+
+        assert captured["change"] is change
+        assert captured["seed_opening"] == "ship it"
+        with anyio.fail_after(5):
+            while holder.get("server") is None or holder["server"].attached_count != 1:
+                await anyio.sleep(0.02)
+        await client.aclose()
+        await holder["server"].close()
+        tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_build_session_attach_uses_resident_daemon_without_spawning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from imp.remote.session import attach as attach_mod
+
+    change = _make_change(tmp_path, "2026-06-15-warm")
+    sock = str(session_socket_path(change.control_root, change.id))
+    spawned: list[Change] = []
+    monkeypatch.setattr(
+        attach_mod, "spawn_session_daemon",
+        lambda ch, *, seed_opening=None: spawned.append(ch))
+
+    received: list[dict[str, Any]] = []
+    server = SessionSocket(sock)
+    async with anyio.create_task_group() as tg:
+        await server.open()
+        tg.start_soon(server.serve)
+
+        attach = attach_mod.build_session_attach(change)
+        client = await attach(received.append)
+        with anyio.fail_after(5):
+            while server.attached_count != 1:
+                await anyio.sleep(0.02)
+        assert spawned == []        # resident daemon attached, never respawned
+
+        tg.start_soon(client.receive_events)
+        await server.broadcast({"type": "step_started", "payload": {"step": "plan"}})
+        with anyio.fail_after(5):
+            while not received:
+                await anyio.sleep(0.02)
+        assert received == [{"type": "step_started", "payload": {"step": "plan"}}]
+
+        await client.aclose()
+        await server.close()
+        tg.cancel_scope.cancel()

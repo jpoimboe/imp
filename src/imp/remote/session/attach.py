@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import anyio
@@ -60,3 +60,18 @@ async def attach_or_spawn(
                 return client
             except OSError:
                 await anyio.sleep(0.05)
+
+
+def build_session_attach(
+    change: Change,
+    *,
+    seed_opening: str | None = None,
+) -> Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]:
+    async def attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
+        return await attach_or_spawn(
+            change,
+            on_event=on_event,
+            spawn_fn=lambda ch: spawn_session_daemon(ch, seed_opening=seed_opening),
+        )
+
+    return attach
