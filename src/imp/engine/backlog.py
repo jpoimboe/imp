@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from imp.engine.change import Change
@@ -38,7 +38,7 @@ def read_record(control_root: Path, change_id: str) -> dict[str, Any] | None:
     path = record_path(control_root, change_id)
     if not path.exists():
         return None
-    return json.loads(path.read_text())
+    return cast(dict[str, Any], json.loads(path.read_text()))
 
 
 def list_ids(control_root: Path) -> list[str]:
