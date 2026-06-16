@@ -26,6 +26,7 @@ Category = Literal[
     "loop",
     "agent_output_missing",
     "agent_incomplete",
+    "terminated",
     "unknown",
 ]
 
@@ -79,6 +80,14 @@ class LoopError(ProviderError):
     """The loop_guard detected a repeated-failure or no-progress loop within a
     single agent invocation. Maps to Pause."""
     category: Category = "loop"
+
+
+class TerminatedError(ProviderError):
+    """An agent terminated with an error whose specific cause could not be typed
+    (no recognized quota/auth signal). Reported at the headline with all available
+    structured fields in the detail; distinct from the benign agent_incomplete
+    nudge path. Maps to Pause."""
+    category: Category = "terminated"
 
 
 def make_error_event(exc: ProviderError, *, kind: str = "") -> dict[str, object]:

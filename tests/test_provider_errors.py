@@ -52,3 +52,19 @@ def test_make_unknown_error_event_shape() -> None:
     assert "ka-boom" in p["message"]
     assert "unclassified" in p["message"]
     assert p["detail"] == {}
+
+
+def test_terminated_error_is_first_class_pause_category() -> None:
+    from typing import get_args
+
+    from imp.engine import error_policy as ep
+
+    err = perr.TerminatedError("agent terminated", detail={"is_error": True})
+    assert err.category == "terminated"
+    assert err.detail == {"is_error": True}
+    # Distinct, Pause-policy, and covered by the policy table.
+    assert "terminated" in get_args(perr.Category)
+    assert isinstance(ep.decide("terminated", prior_backoff_attempts=0), ep.Pause)
+    event = perr.make_error_event(err, kind="terminated")
+    assert event["payload"]["category"] == "terminated"
+    assert event["payload"]["detail"] == {"is_error": True}
