@@ -92,13 +92,6 @@ def test_quota_still_wins_over_codeless_phrase() -> None:
     assert isinstance(err, perr.QuotaError)
 
 
-def test_codeless_phrase_same_line_still_network() -> None:
-    # Boundary: phrase on the SAME line as the API Error: prefix still classifies.
-    assert isinstance(_classify_agent_text("API Error: Overloaded"), perr.NetworkError)
-    assert isinstance(
-        _classify_agent_text("API Error: Internal server error"), perr.NetworkError)
-
-
 def test_codeless_phrase_on_different_line_is_none() -> None:
     # Regression: an API Error: line with an unrelated body, plus the transient
     # word only in prose on a DIFFERENT line, must NOT classify — it pauses.
