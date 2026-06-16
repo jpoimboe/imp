@@ -9,6 +9,7 @@ Schema (post 2026-06-04-roles-to-tiers):
     provider_envs:                        # optional; default <PROVIDER>_API_KEY
       openai: {env: OPENAI_API_KEY}
     verify_command: "..."                 # optional combined verify gate (tests+lint+typecheck)
+    verify_timeout: 1200                  # optional verify-gate ceiling, seconds (default 300)
     editing_mode: emacs                   # vi | emacs (default emacs)
     vars: {...}                           # optional scalar overrides
 """
@@ -47,6 +48,7 @@ class Config:
     )
     var_overrides: dict[str, object] = field(hash=False, default_factory=dict)
     verify_command: str | None = field(hash=False, default=None)
+    verify_timeout: int | None = field(hash=False, default=None)
     editing_mode: str = field(hash=False, default="emacs")
     theme: str = field(hash=False, default="ansi")
     sandbox: dict[str, Any] = field(hash=False, default_factory=dict)
@@ -183,6 +185,13 @@ def parse_config_layer(path: Path) -> tuple[dict[str, Any], SourceLoc] | None:
         if not isinstance(v, str):
             raise LoadError("'verify_command' must be a string (e.g. \"make check\")", src)
         out["verify_command"] = v
+    if "verify_timeout" in raw:
+        v = raw["verify_timeout"]
+        # bool is an int subclass; reject it so `verify_timeout: true` isn't read as 1.
+        if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+            raise LoadError(
+                "'verify_timeout' must be a positive integer (seconds, e.g. 1200)", src)
+        out["verify_timeout"] = v
     if "editing_mode" in raw:
         v = raw["editing_mode"]
         if v not in ("vi", "emacs"):

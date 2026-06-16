@@ -60,6 +60,38 @@ def test_overlay_configured_verify_command_overrides_inherited() -> None:
     assert env["IMP_VERIFY_COMMAND"] == "make check"
 
 
+def test_engine_env_injects_verify_timeout_as_string_when_set() -> None:
+    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                     change_title="t", verify_timeout=1200)
+    assert env["IMP_VERIFY_TIMEOUT"] == "1200"   # run-verify.sh reads a string
+
+
+def test_engine_env_omits_verify_timeout_when_none() -> None:
+    # Absent => run-verify.sh falls back to its own 300s default.
+    env = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                     change_title="t")
+    assert "IMP_VERIFY_TIMEOUT" not in env
+
+
+def test_overlay_strips_inherited_verify_timeout_when_unset() -> None:
+    # A stale ambient IMP_VERIFY_TIMEOUT (e.g. imp-on-imp) must not leak past an
+    # unset config — else a parent's ceiling would silently govern the child gate.
+    parent = {"IMP_VERIFY_TIMEOUT": "60", "FOO": "bar"}
+    overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555",
+                         change_slug="s", change_title="t")
+    env = overlay_engine_env(parent, overlay)
+    assert "IMP_VERIFY_TIMEOUT" not in env
+    assert env["FOO"] == "bar"
+
+
+def test_overlay_configured_verify_timeout_overrides_inherited() -> None:
+    parent = {"IMP_VERIFY_TIMEOUT": "60"}
+    overlay = engine_env(project_root=Path("/wt"), change_id="2026-06-04-eee555", change_slug="s",
+                         change_title="t", verify_timeout=1200)
+    env = overlay_engine_env(parent, overlay)
+    assert env["IMP_VERIFY_TIMEOUT"] == "1200"
+
+
 def test_engine_env_injects_worktree_src_on_pythonpath_for_imp_checkout(
     tmp_path: Path,
 ) -> None:

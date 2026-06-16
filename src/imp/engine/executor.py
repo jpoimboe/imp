@@ -248,6 +248,7 @@ async def run_change(
                 step, workflow, change, state, log, is_resume=is_resume,
                 user_chat_input_fn=user_chat_input_fn, coordinator=coordinator,
                 verify_command=config.verify_command,
+                verify_timeout=config.verify_timeout,
                 non_interactive=non_interactive,
                 sandbox_policy=sandbox_policy,
                 seed_opening=seed_for_step,
@@ -398,6 +399,7 @@ async def _dispatch_step(
     state: State, log: EventLog, *, is_resume: bool,
     user_chat_input_fn: Callable[[str], str | Awaitable[str]] | None,
     coordinator: Any, verify_command: str | None = None,
+    verify_timeout: int | None = None,
     non_interactive: bool = False,
     sandbox_policy: Any = None,
     seed_opening: str | None = None,
@@ -419,6 +421,7 @@ async def _dispatch_step(
     if step.kind == "script":
         return await _route_script(step, change, state, log,
                                    verify_command=verify_command,
+                                   verify_timeout=verify_timeout,
                                    sandbox_policy=sandbox_policy)
     return await _route_agent(
         step, workflow, change, state, log,
@@ -462,7 +465,7 @@ def _route_branch(
 
 async def _route_script(
     step: Step, change: Change, state: State, log: EventLog,
-    *, verify_command: str | None = None,
+    *, verify_command: str | None = None, verify_timeout: int | None = None,
     sandbox_policy: Any = None,
 ) -> tuple[Action, str | None, dict[str, object]]:
     _emit_started(log, step)
@@ -480,7 +483,8 @@ async def _route_script(
                                  change_id=change.id,
                                  change_slug=change.slug,
                                  change_title=change.title,
-                                 verify_command=verify_command),
+                                 verify_command=verify_command,
+                                 verify_timeout=verify_timeout),
             policy=sandbox_policy))
     match = evaluate_rules(step.rules, vars=state.vars, output=out)
     state.vars.update(match.var_mutations)
@@ -910,7 +914,8 @@ def _build_sandbox_policy(change: Change, config: Any, log: EventLog) -> Any:
         os.environ,
         engine_env(project_root=change.project_root, change_id=change.id,
                    change_slug=change.slug, change_title=change.title,
-                   verify_command=config.verify_command),
+                   verify_command=config.verify_command,
+                   verify_timeout=config.verify_timeout),
     )
     try:
         policy = resolve_policy(

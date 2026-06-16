@@ -119,6 +119,23 @@ def test_verify_command_not_string_raises(tmp_path: Path) -> None:
         _layer(tmp_path, "verify_command: [make, check]\n" + _OK_BODY)
 
 
+def test_parses_verify_timeout(tmp_path: Path) -> None:
+    layer = _layer(tmp_path, "verify_timeout: 1200\n" + _OK_BODY)
+    assert layer["verify_timeout"] == 1200
+
+
+def test_verify_timeout_absent_omitted(tmp_path: Path) -> None:
+    assert "verify_timeout" not in _layer(tmp_path, _OK_BODY)
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "\"1200\"", "1.5", "true"])
+def test_verify_timeout_invalid_raises(tmp_path: Path, bad: str) -> None:
+    # Zero/negative, strings, floats, and bool (an int subclass) are all rejected —
+    # only a positive integer number of seconds is a meaningful gate ceiling.
+    with pytest.raises(LoadError, match="verify_timeout"):
+        _layer(tmp_path, f"verify_timeout: {bad}\n" + _OK_BODY)
+
+
 def test_editing_mode_absent_omitted(tmp_path: Path) -> None:
     assert "editing_mode" not in _layer(tmp_path, _OK_BODY)
 

@@ -340,7 +340,7 @@ def _fake_change(tmp_path):
 
 
 def _fake_config(**over):
-    base = dict(sandbox={}, verify_command=None)
+    base = dict(sandbox={}, verify_command=None, verify_timeout=None)
     base.update(over)
     return _types.SimpleNamespace(**base)
 

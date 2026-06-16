@@ -27,6 +27,7 @@ ENGINE_ENV_VARS = frozenset({
     "IMP_CHANGE_SLUG",
     "IMP_CHANGE_TITLE",
     "IMP_VERIFY_COMMAND",
+    "IMP_VERIFY_TIMEOUT",
 })
 
 
@@ -63,7 +64,7 @@ def overlay_engine_env(
 
 def engine_env(
     *, project_root: Path, change_id: str, change_slug: str, change_title: str,
-    verify_command: str | None = None,
+    verify_command: str | None = None, verify_timeout: int | None = None,
 ) -> dict[str, str]:
     """Return the environment variables the engine injects into every subprocess.
 
@@ -79,6 +80,11 @@ def engine_env(
                             injected only when configured. A falsy command (None or
                             empty string) is treated as absent => no verify gate, so
                             the var is omitted.
+        IMP_VERIFY_TIMEOUT — optional wall-clock ceiling (seconds) for the verify gate,
+                            from the `verify_timeout` config key. Injected only when set;
+                            absent => run-verify.sh applies its own 300s default. IMP_-
+                            prefixed, so the sandbox allowlist passes it through with no
+                            edit (a bare ambient value would be cleared by --clearenv).
         PYTHONPATH        — prefix pointing at `<project_root>/src`, injected only
                             for an imp source checkout (imp-on-imp dogfooding), so
                             unrelated projects' subprocesses are never perturbed.
@@ -97,6 +103,8 @@ def engine_env(
     }
     if verify_command:
         env["IMP_VERIFY_COMMAND"] = verify_command
+    if verify_timeout is not None:
+        env["IMP_VERIFY_TIMEOUT"] = str(verify_timeout)
     # imp-on-imp only: when the project being changed is itself an imp source
     # checkout, an editable install (pip install -e) pins `import imp` to the
     # parent repo, so a worktree's agent would import the parent's code, not the
