@@ -47,7 +47,7 @@ async def run_session_client(
             await run_terminal_client(
                 attach=attach, driver=driver, coord=coord, solicit=solicit)
         tg.cancel_scope.cancel()
-    # Lazy import: the CLI-flip plan makes imp.cli.main import this module, so a
+    # Lazy import: imp.cli.main imports this module, so a
     # module-level import of _handle_terminal_outcome would be circular.
     from imp.cli.main import _handle_terminal_outcome
     result = infer_session_result(change)
@@ -88,7 +88,7 @@ def make_interactive_solicit(
     coord: InterruptCoordinator,
 ) -> Callable[[str], Awaitable[str]]:
     """Return a solicit callback that reads one slash-aware line from the tty as the gate reply."""
-    # Lazy import: imp.cli.main imports this module (the CLI-flip plan), so a
+    # Lazy import: imp.cli.main imports this module, so a
     # module-level import of these helpers would be circular.
     from imp.cli.main import _editing_mode, _term_width
 
