@@ -74,13 +74,15 @@ def build_session_attach(
     *,
     seed_opening: str | None = None,
     resume: bool = False,
+    from_target: str | None = None,
 ) -> Callable[[Callable[[dict[str, Any]], None]], Awaitable[SessionClient]]:
     async def attach(on_event: Callable[[dict[str, Any]], None]) -> SessionClient:
         return await attach_or_spawn(
             change,
             on_event=on_event,
             spawn_fn=lambda ch: spawn_session_daemon(
-                ch, seed_opening=seed_opening, resume=resume),
+                ch, seed_opening=seed_opening, resume=resume,
+                from_target=from_target),
         )
 
     return attach
