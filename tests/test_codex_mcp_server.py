@@ -195,3 +195,25 @@ async def test_start_server_raises_off_the_runner_loop(tmp_path: Path) -> None:
                 bearer_token="secret-token-123", host="127.0.0.1")
     finally:
         foreign.close()
+
+
+@pytest.mark.anyio
+async def test_impty_server_binds_its_own_port_and_requires_bearer() -> None:
+    from imp.providers.codex_mcp import start_impty_server
+    from impty.driver import ImptyDriver
+
+    driver = ImptyDriver()
+    handle = await start_impty_server(
+        driver=driver, bearer_token="impty-secret", host="127.0.0.1")
+    try:
+        assert handle.port > 0
+        assert handle.url.startswith("http://127.0.0.1:")
+        assert not handle.task.done()
+        async with httpx.AsyncClient() as client:
+            r = await client.post(handle.url, json={"jsonrpc": "2.0", "id": 1,
+                                                    "method": "initialize",
+                                                    "params": {}})
+            assert r.status_code == 401  # no bearer → rejected
+    finally:
+        await handle.shutdown()
+        driver.close()

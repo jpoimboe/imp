@@ -171,3 +171,74 @@ async def test_server_shutdown_runs_when_provisioning_fails(
     # No codex_home was created, so teardown_codex_home must be skipped.
     assert not td.called, (
         "teardown_codex_home must not run when codex_home was never created")
+
+
+@pytest.mark.anyio
+async def test_codex_teardown_closes_impty_session(
+    tmp_path: Path,
+) -> None:
+    """Codex runner's finally block must call impty_handle.shutdown() and
+    impty_driver.close() when impty is in the agent's drivers."""
+    _seed_git_and_auth(tmp_path)
+
+    shutdown_calls: list[int] = []
+    close_calls: list[int] = []
+
+    class _FakeHandle:
+        url = "http://127.0.0.1:19999"
+        host = "127.0.0.1"
+        port = 19999
+
+        async def shutdown(self) -> None:
+            shutdown_calls.append(1)
+
+    class _FakeDriver:
+        def close(self) -> None:
+            close_calls.append(1)
+
+    fake_driver = _FakeDriver()
+
+    async def _fake_start_impty(**kwargs: Any) -> _FakeHandle:
+        return _FakeHandle()
+
+    scripted = [[thread_started(), turn_completed()]]
+    runner = CodexAgentRunner(
+        model_name="gpt-5.5",
+        client_factory=lambda options=None: FakeCodex(scripted_turns=scripted),
+    )
+    runner._canonical_auth_override = tmp_path / "auth.json"
+
+    inv = AgentInvocation(
+        agent_def=AgentDef(
+            name="t",
+            description="",
+            tools=frozenset({"complete_step"}),
+            subagents=(),
+            output_schema=_agent_def().output_schema,
+            prompt_template_source="",
+            source_path=Path("a.md"),
+            source=_SRC,
+            tier=None,
+            drivers=frozenset({"impty"}),
+        ),
+        provider_name="codex",
+        model_name="gpt-5.5",
+        system_prompt="you are a test agent",
+        initial_messages=(),
+        change_context=_inv(tmp_path).change_context,
+        transcript_dir=tmp_path / "tx",
+        fs_permissions=_inv(tmp_path).fs_permissions,
+        events_path=tmp_path / "events.jsonl",
+        agent_id="step:t",
+    )
+
+    with (
+        patch("imp.providers.codex_runner.start_impty_server",
+              new=_fake_start_impty),
+        patch("impty.driver.ImptyDriver",
+              new=lambda: fake_driver),
+    ):
+        [ev async for ev in runner.run(inv)]
+
+    assert shutdown_calls == [1], "impty_handle.shutdown() must be called in teardown"
+    assert close_calls == [1], "impty_driver.close() must be called in teardown"

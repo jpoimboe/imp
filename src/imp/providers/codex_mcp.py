@@ -210,36 +210,19 @@ def _reserve_socket(host: str) -> tuple[socket.socket, int]:
     return s, port
 
 
-async def start_server(
-    *, tools: dict[str, Tool], ctx: ToolContext, state: RunState,
-    bearer_token: str, host: str = "127.0.0.1",
+async def _serve_fastmcp(
+    mcp_app: Any, *, bearer_token: str, host: str, runner_loop: Any = None,
+    name: str,
 ) -> ServerHandle:
-    """Start the FastMCP/uvicorn server as an asyncio task on the CURRENT
-    event loop (design "Concurrency / threading model — VALIDATED").
-
-    Key invariants:
-      - uvicorn's `capture_signals()` is replaced with a no-op context manager
-        so signal handlers are never installed on a non-main-thread event loop.
-      - Bearer-token auth gate on the streamable-HTTP endpoint; an unauth'd
-        request returns 401 *before* a tool is dispatched (cross-UID defense
-        — same-UID is in-trust-boundary).
-    """
+    """Serve a FastMCP app over bearer-auth'd streamable-HTTP on an ephemeral port,
+    as an asyncio task on the CURRENT event loop (the same-loop topology pin)."""
     import uvicorn
-    from mcp.server.fastmcp import FastMCP
 
-    if (state.runner_loop is not None
-            and asyncio.get_running_loop() is not state.runner_loop):
+    if (runner_loop is not None
+            and asyncio.get_running_loop() is not runner_loop):
         raise RuntimeError(
             "codex MCP server must start on the runner's event loop "
             "(same-loop topology pin); refusing to start on a foreign loop")
-
-    mcp_app = FastMCP("imp")
-
-    # Register each tool as a FastMCP tool. The wrapper goes through
-    # `dispatch_tool` so the cap counter + complete_step capture are
-    # uniform with the unit-test path.
-    for tool in tools.values():
-        _register_tool(mcp_app, tool, ctx=ctx, state=state)
 
     # streamable-HTTP transport on FastMCP returns a Starlette app suitable
     # for uvicorn. The mount path defaults to `/mcp`.
@@ -251,28 +234,17 @@ async def start_server(
     config = uvicorn.Config(
         asgi_app, host=host, port=port, log_level="warning",
         # lifespan MUST be on: FastMCP's streamable-HTTP app attaches its
-        # `StreamableHTTPSessionManager.run()` as the ASGI lifespan (mcp's
-        # server.py: `lifespan=lambda app: self.session_manager.run()`). That
-        # is what initializes the manager's task group; with lifespan="off"
-        # every request raises "Task group is not initialized" and codex sees
-        # zero imp tools (no complete_step). The bearer middleware forwards the
-        # lifespan scope through to the wrapped app, so auth is unaffected.
+        # `StreamableHTTPSessionManager.run()` as the ASGI lifespan; with
+        # lifespan="off" every request raises "Task group is not initialized".
         access_log=False, lifespan="on",
     )
     server = uvicorn.Server(config)
     # MUST disable signal handler installation: signal handlers can only be
     # installed on the main-thread event loop; we run as a child task on the
     # runner's loop which may be on any thread.
-    # In uvicorn 0.46+, `Server.serve()` uses `with self.capture_signals():`
-    # so we replace it with a no-op context manager.
     server.capture_signals = contextlib.nullcontext  # type: ignore[method-assign,assignment]
-    task = asyncio.create_task(
-        server.serve(sockets=[sock]), name="imp-codex-mcp-server"
-    )
-    # Do NOT close `sock` here — asyncio's create_server does not detach the
-    # fd; calling sock.close() would close the fd that asyncio is about to use,
-    # causing EBADF.  The asyncio Server object holds a reference and closes it
-    # when the server shuts down.
+    task = asyncio.create_task(server.serve(sockets=[sock]), name=name)
+    # Do NOT close `sock` here — asyncio holds it and closes it on shutdown.
 
     # Give uvicorn a moment to bind and start accepting connections.
     await asyncio.sleep(0.2)
@@ -290,6 +262,46 @@ async def start_server(
         host=host, port=port, url=f"http://{host}:{port}/mcp",
         task=task, _shutdown_cb=_shutdown,
     )
+
+
+async def start_server(
+    *, tools: dict[str, Tool], ctx: ToolContext, state: RunState,
+    bearer_token: str, host: str = "127.0.0.1",
+) -> ServerHandle:
+    """Start the imp FastMCP/uvicorn server as an asyncio task on the CURRENT
+    event loop (design "Concurrency / threading model — VALIDATED").
+
+    Key invariants:
+      - uvicorn's `capture_signals()` is replaced with a no-op context manager
+        so signal handlers are never installed on a non-main-thread event loop.
+      - Bearer-token auth gate on the streamable-HTTP endpoint; an unauth'd
+        request returns 401 *before* a tool is dispatched (cross-UID defense
+        — same-UID is in-trust-boundary).
+    """
+    from mcp.server.fastmcp import FastMCP
+
+    mcp_app = FastMCP("imp")
+    # Register each tool as a FastMCP tool. The wrapper goes through
+    # `dispatch_tool` so the cap counter + complete_step capture are
+    # uniform with the unit-test path.
+    for tool in tools.values():
+        _register_tool(mcp_app, tool, ctx=ctx, state=state)
+    return await _serve_fastmcp(
+        mcp_app, bearer_token=bearer_token, host=host,
+        runner_loop=state.runner_loop, name="imp-codex-mcp-server")
+
+
+async def start_impty_server(
+    *, driver: Any, bearer_token: str, host: str = "127.0.0.1",
+    runner_loop: Any = None,
+) -> ServerHandle:
+    """Start a second FastMCP("impty") hosting the ImptyDriver's tools on its own
+    ephemeral port + bearer token, reusing the imp server's uvicorn machinery."""
+    from impty.mcp import build_server
+
+    return await _serve_fastmcp(
+        build_server(driver), bearer_token=bearer_token, host=host,
+        runner_loop=runner_loop, name="imp-codex-impty-server")
 
 
 def _register_tool(

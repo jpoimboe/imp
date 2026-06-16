@@ -50,6 +50,8 @@ from imp.providers.codex_config import (
 from imp.providers.codex_mcp import (
     CODEX_APPROVAL_POLICY,
     RunState,
+    ServerHandle,
+    start_impty_server,
     start_server,
 )
 
@@ -294,6 +296,8 @@ class CodexAgentRunner:
         # is ALWAYS torn down — even if the ping, provision, or seed_auth step
         # raises (Task 31: close the provision/seed teardown leak window).
         codex_home: Path | None = None
+        impty_handle: ServerHandle | None = None
+        impty_driver: Any = None
         try:
             # 5a. Imp-side server-start ping: a single bearer-auth'd HTTP probe
             # against `server_handle.url` to fail fast before provisioning if
@@ -319,21 +323,33 @@ class CodexAgentRunner:
             #    controlled via config.toml's top-level key (the deprecated SDK
             #    flag no longer disables it on codex >=0.137), so it must be
             #    decided here, at provision time, from the agent's declared tools.
+            impty_bearer: str | None = None
+            if "impty" in invocation.agent_def.drivers:
+                from impty.driver import ImptyDriver
+                impty_bearer = secrets.token_urlsafe(24)
+                impty_driver = ImptyDriver()
+                impty_handle = await start_impty_server(
+                    driver=impty_driver, bearer_token=impty_bearer,
+                    host="127.0.0.1", runner_loop=state.runner_loop,
+                )
             from imp.providers.web_native import declared_web_tools
             web_enabled = "web_search" in declared_web_tools(invocation.agent_def)
             codex_home = provision_codex_home(
                 tmp_root=tmp_root, host=server_handle.host,
                 port=server_handle.port, bearer_env_var="IMP_MCP_TOKEN",
                 web_search_enabled=web_enabled,
-                drivers=invocation.agent_def.drivers,
-                project_root=cwd,
+                impty_url=impty_handle.url if impty_handle is not None else None,
+                impty_bearer_env_var=(
+                    "IMP_IMPTY_TOKEN" if impty_handle is not None else None),
             )
             seed_auth(mode=auth_mode, canonical_path=canonical_auth,
                       codex_home=codex_home, env=os.environ)
 
             # 7. Run the SDK turn(s) and consume events.
-            client = self._build_client(codex_home=codex_home,
-                                        bearer_token=bearer_token)
+            client = self._build_client(
+                codex_home=codex_home, bearer_token=bearer_token,
+                impty_bearer_token=(impty_bearer if impty_handle is not None
+                                    else None))
             async for ev in self._drive_turns(
                 client=client, invocation=invocation, elog=elog,
                 aid=aid, ctx=ctx, state=state, proc_state=proc_state,
@@ -346,6 +362,12 @@ class CodexAgentRunner:
             #    abort, interrupt, AND a ping/provision/seed failure). The
             #    server shutdown ALWAYS runs; CODEX_HOME teardown runs only when
             #    a codex_home was actually provisioned.
+            if impty_handle is not None:
+                with contextlib.suppress(Exception):
+                    await impty_handle.shutdown()
+            if impty_driver is not None:
+                with contextlib.suppress(Exception):
+                    impty_driver.close()
             await server_handle.shutdown()
             if codex_home is not None:
                 # Own codex's native rollout across the pause BEFORE teardown
@@ -378,7 +400,10 @@ class CodexAgentRunner:
             return Path(override)
         return Path.home() / ".codex" / "auth.json"
 
-    def _build_client(self, *, codex_home: Path, bearer_token: str) -> Any:
+    def _build_client(
+        self, *, codex_home: Path, bearer_token: str,
+        impty_bearer_token: str | None = None,
+    ) -> Any:
         """Construct the SDK `Codex` client. Tests inject a `client_factory`
         callable that takes `options=` and returns a FakeCodex."""
         if self._client_factory is not None:
@@ -396,10 +421,13 @@ class CodexAgentRunner:
         from openai_codex_sdk.types import CodexOptions
 
         from imp.engine.env import overlay_engine_env
-        env = overlay_engine_env(os.environ, {
+        overrides = {
             "CODEX_HOME": str(codex_home),
             "IMP_MCP_TOKEN": bearer_token,
-        })
+        }
+        if impty_bearer_token is not None:
+            overrides["IMP_IMPTY_TOKEN"] = impty_bearer_token
+        env = overlay_engine_env(os.environ, overrides)
         return Codex(CodexOptions(env=env))
 
     async def _drive_turns(
