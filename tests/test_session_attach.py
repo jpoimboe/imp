@@ -274,6 +274,51 @@ def test_spawn_session_daemon_seed_before_resume_when_both_set(
     ]
 
 
+def test_spawn_session_daemon_includes_from_target_after_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+
+    def fake_popen(argv: list[str], **kwargs: Any) -> object:
+        captured["argv"] = argv
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    spawn_session_daemon(change, resume=True, from_target="review")
+
+    assert captured["argv"] == [
+        sys.executable, "-m", "imp.remote.session.daemon",
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--resume",
+        "--from=review",
+    ]
+
+
+def test_spawn_session_daemon_includes_from_target_without_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    change = _make_change(tmp_path, "2026-06-15-abc")
+    captured: dict[str, Any] = {}
+
+    def fake_popen(argv: list[str], **kwargs: Any) -> object:
+        captured["argv"] = argv
+        return object()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    spawn_session_daemon(change, from_target="review")
+
+    assert captured["argv"] == [
+        sys.executable, "-m", "imp.remote.session.daemon",
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--from=review",
+    ]
+
+
 @pytest.mark.anyio
 async def test_build_session_attach_threads_resume_into_spawn(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
