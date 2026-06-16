@@ -124,8 +124,8 @@ def _default_on_error(message: str) -> None:
 
 class RemoteChannel:
     """imp's host for one external driver process. on_event is the synchronous
-    event tap (allowlist -> augment -> one best-effort NDJSON line); start/next_reply/
-    stop own the subprocess + reply stream (Tasks 5-6)."""
+    event tap (allowlist -> augment -> one best-effort NDJSON line); start/stop own
+    the subprocess lifecycle (Tasks 5-6)."""
 
     def __init__(
         self, *, command: tuple[str, ...], events: tuple[str, ...],
@@ -143,9 +143,6 @@ class RemoteChannel:
         self._proc: Any = None
         self._step: str | None = None
         self._status = "running"
-        send, recv = anyio.create_memory_object_stream[str](max_buffer_size=256)
-        self._reply_send = send
-        self._reply_recv = recv
 
     @classmethod
     def from_driver_config(
@@ -208,7 +205,7 @@ class RemoteChannel:
 
     # -- lifecycle -----------------------------------------------------------
     async def start(self, tg: Any) -> bool:
-        """Spawn the driver and start its reader task. Returns False (best-effort,
+        """Spawn the driver and start its stderr drain task. Returns False (best-effort,
         run continues) if the command can't spawn or the process exits during the
         crash-probe grace (capped at startup_timeout). Healthy drivers return as
         soon as the grace confirms the process is alive — never blocked for the
@@ -216,7 +213,8 @@ class RemoteChannel:
         try:
             self._proc = subprocess.Popen(
                 list(self._command),
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                # stdout unused; DEVNULL so an undrained pipe can't wedge the driver.
+                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE)
         except FileNotFoundError:
             _log.debug("remote driver %r not found; notifications disabled",
@@ -234,7 +232,6 @@ class RemoteChannel:
                 f"driver exited during startup (rc {self._proc.returncode})")
             self._proc = None
             return False
-        tg.start_soon(self._reader_loop)
         tg.start_soon(self._stderr_drain)
         return True
 
@@ -264,46 +261,10 @@ class RemoteChannel:
             with contextlib.suppress(Exception):
                 proc.stderr.close()
 
-    async def _reader_loop(self) -> None:
-        """Read driver stdout lines for the channel's lifetime and push each onto
-        the reply stream. Outside a solicit window a buffered line simply waits in
-        the stream (spec: outside a window, driver stdout is buffered/ignored). The
-        blocking readline runs in a worker thread; teardown closes stdout (EOF) so
-        the thread ends. On EOF the send side closes so next_reply sees a dead
-        channel."""
-        proc = self._proc
-        if proc is None or proc.stdout is None:
-            return
-        try:
-            while True:
-                raw = await anyio.to_thread.run_sync(proc.stdout.readline)
-                if raw == b"":
-                    return
-                line = raw.decode("utf-8", "replace").rstrip("\r\n")
-                with contextlib.suppress(anyio.WouldBlock):
-                    self._reply_send.send_nowait(line)
-                    # buffer full → silently drop this (newest) incoming line
-        finally:
-            self._reply_send.close()
-
-    async def next_reply(self, *, timeout: float | None = None) -> str:
-        """Await one driver reply line. `timeout` (phone-only's reply_timeout) or a
-        dead/closed channel raises AwaitingUserInput, which the caller maps to a
-        normal pause (spec AC 8). With timeout=None and a live channel it waits
-        indefinitely, like a local prompt."""
-        from imp.agents.tools.wait_for_user import AwaitingUserInput
-        try:
-            if timeout is None:
-                return await self._reply_recv.receive()
-            with anyio.fail_after(timeout):
-                return await self._reply_recv.receive()
-        except (TimeoutError, anyio.EndOfStream, anyio.ClosedResourceError):
-            raise AwaitingUserInput() from None
-
     async def stop(self) -> None:
         """Tear the driver down: SIGTERM, a short grace, then SIGKILL (spec AC 9).
-        No-op when never spawned or already exited (idempotent). Closing stdout via
-        termination ends the reader thread's blocked readline.
+        No-op when never spawned or already exited (idempotent). Closing stderr via
+        termination ends the stderr-drain thread's blocked readline.
         Uses abandon_on_cancel=True so the grace window is honoured even if the
         process ignores SIGTERM — the abandoned thread is safe; Popen.wait() is
         internally locked."""

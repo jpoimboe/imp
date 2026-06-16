@@ -1,10 +1,10 @@
 # tests/_remote_fakes.py
 """A real, minimal fake driver process for RemoteChannel lifecycle tests.
 
-It logs each NDJSON stdin line to --log, optionally emits --reply on stdout once
-at startup (so next_reply has something to read), and exits with code 1 when
---exit 1 is given (the "fails to come up" case). Reading stdin to EOF lets a
-clean teardown (imp closes stdin) end the process by itself."""
+It logs each NDJSON stdin line to --log, optionally floods --stderr-bytes to stderr
+before reading stdin, and exits with code 1 when --exit 1 is given (the "fails to
+come up" case). Reading stdin to EOF lets a clean teardown (imp closes stdin) end
+the process by itself."""
 from __future__ import annotations
 
 import sys
@@ -22,14 +22,10 @@ if args.get("--ignore-sigterm") == "1":
 log = args.get("--log")
 stderr_bytes = args.get("--stderr-bytes")
 if stderr_bytes:
-    # Flood stderr BEFORE the reply: past a pipe buffer (~64KiB) this blocks
-    # unless imp captures *and* drains the driver's stderr.
+    # Flood stderr BEFORE reading stdin: past a pipe buffer (~64KiB) this blocks
+    # unless imp captures *and* drains the driver\'s stderr.
     sys.stderr.write("x" * int(stderr_bytes) + "\\n")
     sys.stderr.flush()
-reply = args.get("--reply")
-if reply:
-    sys.stdout.write(reply + "\\n")
-    sys.stdout.flush()
 for line in sys.stdin:
     if log:
         with open(log, "a") as f:
@@ -38,7 +34,7 @@ for line in sys.stdin:
 
 
 def fake_driver_command(
-    tmp_path: Path, *, log: Path | None = None, reply: str | None = None,
+    tmp_path: Path, *, log: Path | None = None,
     exit_immediately: bool = False, ignore_sigterm: bool = False,
     stderr_bytes: int | None = None,
 ) -> list[str]:
@@ -47,8 +43,6 @@ def fake_driver_command(
     cmd = [sys.executable, str(script)]
     if log is not None:
         cmd += ["--log", str(log)]
-    if reply is not None:
-        cmd += ["--reply", reply]
     if exit_immediately:
         cmd += ["--exit", "1"]
     if ignore_sigterm:

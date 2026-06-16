@@ -23,15 +23,11 @@ def _channel(cmd: list[str]) -> RemoteChannel:
 
 
 @pytest.mark.anyio
-async def test_start_spawns_feeds_events_and_reads_reply(tmp_path: Path) -> None:
+async def test_start_spawns_and_feeds_events(tmp_path: Path) -> None:
     log = tmp_path / "events.log"
-    ch = _channel(fake_driver_command(tmp_path, log=log, reply="do the thing"))
+    ch = _channel(fake_driver_command(tmp_path, log=log))
     async with anyio.create_task_group() as tg:
-        up = await ch.start(tg)
-        assert up is True
-        # The driver's startup reply is read back through next_reply.
-        with anyio.fail_after(5):
-            assert await ch.next_reply() == "do the thing"
+        assert await ch.start(tg) is True
         # An allowlisted event reaches the driver and is logged (NDJSON framed).
         ch.on_event({"id": "e1", "type": "agent_output", "payload": {"k": "v"}})
         with anyio.fail_after(5):
@@ -45,19 +41,21 @@ async def test_start_spawns_feeds_events_and_reads_reply(tmp_path: Path) -> None
 
 
 @pytest.mark.anyio
-async def test_start_captures_and_drains_driver_stderr(tmp_path: Path) -> None:
-    # The driver's stderr must NOT be inherited onto imp's controlling terminal
-    # (it corrupts a --tui alt-screen / interleaves with streaming output). The
-    # driver floods 200KiB to stderr — past a pipe buffer — *before* its reply: a
-    # captured-but-undrained pipe would block the driver there and the reply would
-    # never arrive. Captured (proc.stderr is a pipe, not None) + drained → reply flows.
-    ch = _channel(fake_driver_command(
-        tmp_path, reply="after-flood", stderr_bytes=200_000))
+async def test_start_drains_stderr_so_driver_stays_unblocked(tmp_path: Path) -> None:
+    # The driver floods 200KiB to stderr (past a pipe buffer) BEFORE reading any
+    # stdin. A captured-but-undrained stderr pipe would wedge the driver there, so
+    # the event we feed below would never be logged. Captured + drained → the driver
+    # gets past the flood, reads stdin, and logs the event.
+    log = tmp_path / "events.log"
+    ch = _channel(fake_driver_command(tmp_path, log=log, stderr_bytes=200_000))
     async with anyio.create_task_group() as tg:
         assert await ch.start(tg) is True
         assert ch._proc.stderr is not None       # captured, not inherited onto the tty
+        ch.on_event({"id": "e1", "type": "agent_output", "payload": {"k": "v"}})
         with anyio.fail_after(5):
-            assert await ch.next_reply() == "after-flood"   # drain kept the driver unblocked
+            while not (log.exists() and log.read_text().strip()):
+                await anyio.sleep(0.02)
+        assert json.loads(log.read_text().splitlines()[0])["type"] == "agent_output"
         await ch.stop()
         tg.cancel_scope.cancel()
 
@@ -105,34 +103,3 @@ async def test_start_emits_error_on_permission_denied(tmp_path: Path) -> None:
             assert await ch.start(tg) is False
             assert any("spawn" in m for m in errors)   # banner emitted
             tg.cancel_scope.cancel()
-
-
-@pytest.mark.anyio
-async def test_next_reply_timeout_raises_awaiting_user_input(tmp_path: Path) -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-    ch = _channel(fake_driver_command(tmp_path))  # no reply configured
-    async with anyio.create_task_group() as tg:
-        assert await ch.start(tg) is True
-        with pytest.raises(AwaitingUserInput):
-            with anyio.fail_after(5):
-                await ch.next_reply(timeout=0.05)  # short timeout, no reply → raise
-        await ch.stop()
-        tg.cancel_scope.cancel()
-
-
-@pytest.mark.anyio
-async def test_next_reply_raises_when_driver_dies(tmp_path: Path) -> None:
-    from imp.agents.tools.wait_for_user import AwaitingUserInput
-    # Driver sends one reply then exits (no more stdin to read from → EOF on stdout)
-    ch = _channel(fake_driver_command(tmp_path, reply="only-one"))
-    async with anyio.create_task_group() as tg:
-        assert await ch.start(tg) is True
-        with anyio.fail_after(5):
-            assert await ch.next_reply() == "only-one"
-        # Driver process exits naturally after receiving EOF on its stdin.
-        # next_reply on a dead/closed channel should raise AwaitingUserInput.
-        await ch.stop()
-        with anyio.fail_after(5):
-            with pytest.raises(AwaitingUserInput):
-                await ch.next_reply()
-        tg.cancel_scope.cancel()
