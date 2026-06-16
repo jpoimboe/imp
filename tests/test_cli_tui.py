@@ -201,12 +201,8 @@ async def test_run_tui_session_streams_no_esc_reader_then_handles_outcome(
                   "payload": {"slug": "s", "title": "t"}})
         return RunResult.COMPLETED
 
-    def _boom_esc_reader(*a, **k):
-        raise AssertionError("EscKeyReader must not be started in --tui mode")
-
     monkeypatch.setattr(m, "TuiApp", _CapturingApp)
     monkeypatch.setattr(m, "run_change", _fake_run_change)
-    monkeypatch.setattr(m, "EscKeyReader", _boom_esc_reader)
     monkeypatch.setattr(m, "_maybe_build_channel", lambda change: None)
     monkeypatch.setattr(m, "_handle_terminal_outcome",
                         lambda change, result, coord: outcomes.append(result) or 0)

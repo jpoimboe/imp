@@ -122,17 +122,6 @@ def test_resume_interactive_routes_through_session_client(
     st.save(ch.state_dir)
     monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
 
-    seen: list[str] = []
-    real_reader = m.EscKeyReader
-
-    class _RecordingReader(real_reader):
-        async def run(self, *, task_status=anyio.TASK_STATUS_IGNORED) -> None:
-            seen.append("esc_reader.run")
-            task_status.started()
-            return
-
-    monkeypatch.setattr(m, "EscKeyReader", _RecordingReader)
-
     async def _fail_run_change(*_a, **_k):
         raise AssertionError(
             "run_change must not run in-process for interactive resume")
@@ -169,7 +158,6 @@ def test_resume_interactive_routes_through_session_client(
         token="feat", from_target=None))
 
     assert rc == 5
-    assert seen == []                                   # no in-process ESC reader
     assert made["change_id"] == captured["change_id"]   # solicit bound to the same change
     assert captured["resume"] is True
     assert captured["from_target"] is None

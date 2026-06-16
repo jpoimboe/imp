@@ -27,15 +27,6 @@ def test_new_non_interactive_routes_through_session_client(
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    seen: list[str] = []
-
-    class _RecordingReader:
-        def __init__(self, _coord: object) -> None: ...
-        async def run(self) -> None:
-            seen.append("esc_reader.run")
-
-    monkeypatch.setattr(cli_main, "EscKeyReader", _RecordingReader)
-
     async def _fail_run_change(*_a: object, **_k: object) -> object:
         raise AssertionError("run_change must not run in-process for headless new")
 
@@ -72,7 +63,6 @@ def test_new_non_interactive_routes_through_session_client(
         title="ni", non_interactive=True, message="do it"))
 
     assert rc == 7
-    assert seen == []
     assert made["message"] == "do it"
     assert captured["seed_opening"] is None
 
@@ -84,17 +74,6 @@ def test_new_interactive_routes_through_session_client(
     """Interactive imp new routes through run_session_client, not run_change."""
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
-
-    seen: list[str] = []
-
-    class _RecordingReader:
-        def __init__(self, _coord: object) -> None: ...
-
-        async def run(self, *, task_status: object = anyio.TASK_STATUS_IGNORED) -> None:
-            seen.append("esc_reader.run")
-            task_status.started()  # type: ignore[attr-defined]
-
-    monkeypatch.setattr(cli_main, "EscKeyReader", _RecordingReader)
 
     async def _fail_run_change(*_a: object, **_k: object) -> object:
         raise AssertionError("run_change must not run in-process for interactive new")
@@ -141,6 +120,5 @@ def test_new_interactive_routes_through_session_client(
         sys.stdout.isatty = orig_out  # type: ignore[method-assign]
 
     assert rc == 5
-    assert seen == []                                   # no ESC reader spawned
     assert made["change_id"] == captured["change_id"]   # solicit bound to the same change
     assert captured["seed_opening"] == "add a thing"    # the opening seed threaded through
