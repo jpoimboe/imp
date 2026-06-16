@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from imp.engine import backlog
+from imp.engine import journal
 
 
 def test_write_read_roundtrip(tmp_path: Path) -> None:
@@ -48,9 +49,6 @@ def test_remove_record_nonexistent_is_safe(tmp_path: Path) -> None:
     backlog.remove_record(tmp_path, "2026-06-16-nope00")  # must not raise
 
 
-from imp.engine import journal
-
-
 def test_readiness_all_deps_merged(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         journal, "journal_ids",
@@ -69,6 +67,5 @@ def test_readiness_blocked_names_absent_deps(tmp_path: Path, monkeypatch) -> Non
     assert unmerged == ["2026-06-16-missing"]
 
 
-def test_readiness_no_deps_is_ready(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(journal, "journal_ids", lambda cr: [])
+def test_readiness_no_deps_is_ready(tmp_path: Path) -> None:
     assert backlog.readiness(tmp_path, []) == (True, [])
