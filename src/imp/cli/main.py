@@ -924,7 +924,6 @@ async def _run_tui_session(
         change: Change, *, args: argparse.Namespace, seed_opening: str | None = None) -> int:
     from imp.cli.signals import InterruptCoordinator
 
-    # No EscKeyReader — TuiApp owns the tty exclusively.
     coord = InterruptCoordinator()
     app = TuiApp(coord=coord, color=should_use_color(sys.stdout), width=_term_width())
     channel = _maybe_build_channel(change)
