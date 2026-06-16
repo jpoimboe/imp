@@ -209,7 +209,6 @@ def test_finalize_walks_open_items_one_at_a_time() -> None:
     # Per-item walk with a recommendation, one item per solicit.
     assert "one at a time" in low or "one item per" in low
     assert "recommendation" in low
-    # The three per-item dispositions and their terminal markers.
     assert "fix now" in low
     assert "create_change" in low
     assert "seeded" in low
