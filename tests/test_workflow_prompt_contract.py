@@ -165,6 +165,17 @@ def test_task_lead_pins_deferred_followups_line_format() -> None:
     assert "deferred-sweep" in low      # the sweep, not the human, is the consumer
 
 
+def test_task_lead_defers_to_empowered_sweep() -> None:
+    low = TASK_LEAD.read_text().lower()
+    # The defer rationale routes to the empowered sweep, not the human (AC 5).
+    assert "empowered" in low, "missing 'empowered' in task-lead defer bullet"
+    assert "may fix" in low, "missing 'may fix' in task-lead defer bullet"
+    # The existing defer properties stay — the sweep is the consumer that takes
+    # them up.
+    for defer in ("out of scope", "non-local"):
+        assert defer in low, f"missing defer property: {defer}"
+
+
 FINALIZE = AGENTS_DIR / "finalize.md"
 
 
