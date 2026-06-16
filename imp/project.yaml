@@ -4,3 +4,7 @@ default-workflow: imp
 # commit (separate from the test suite). Absent => no lint gate.
 # lint_command: "make lint"
 verify_command: "make check"
+# `make check` (lint + typecheck + the full test suite) runs well past the 300s
+# default verify ceiling, so give it room. On timeout the verify gate pauses to a
+# human (exit 124) rather than looping the implementer against an unwinnable clock.
+verify_timeout: 1200

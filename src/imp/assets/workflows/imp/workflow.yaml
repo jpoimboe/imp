@@ -125,6 +125,7 @@ phases:
         command: ./scripts/run-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
+          - {if: {exit: 124}, pause: true}   # timeout (run-verify.sh kill): suite is slower than the gate; re-running can't fix it — escalate to a human, don't loop task-lead
           - {else: true, resume: task-lead}
 
       # ── autosquash runs INSIDE the per-plan loop so each panel reviews folded,
@@ -178,6 +179,7 @@ phases:
         command: ./scripts/run-verify.sh
         rules:
           - {if: {exit: 0}, continue: true}
+          - {if: {exit: 124}, pause: true}   # timeout: re-running can't fix a too-slow suite — escalate to a human
           - {else: true, resume: deferred-sweep}
 
       # One idempotent stamp of all run commits — task commits AND the sweep commits
@@ -228,6 +230,7 @@ phases:
         rules:
           - {if: {exit: 0, merge_approved: true, reintegrate_clean: true}, goto: base-fresh-check}
           - {if: {exit: 0}, continue: true}
+          - {if: {exit: 124}, pause: true}   # timeout: re-running can't fix a too-slow suite — escalate to a human
           - {else: true, resume: integrator}
 
       - name: finalize

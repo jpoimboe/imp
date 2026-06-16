@@ -8,7 +8,9 @@
 #   - IMP_VERIFY_COMMAND set and non-empty → run it via `bash -c` under a timeout
 #     (IMP_VERIFY_TIMEOUT seconds, default 300); propagate its exit code. On
 #     timeout (exit 124) print an explicit diagnosis to stderr — truncated output
-#     otherwise reads as a hang at whatever check happened to be printing.
+#     otherwise reads as a hang at whatever check happened to be printing. The
+#     workflow routes exit 124 to a human pause (re-running can't beat the clock),
+#     distinct from a real non-zero failure which bounces back to the implementer.
 #   - IMP_VERIFY_COMMAND unset or empty → print an informational message and exit 0
 #     (no verify gate; project hasn't wired / has opted out of verify_command).
 #
@@ -17,8 +19,10 @@
 # green tree, skip (exit 0) — identical tree ⇒ identical result. Logged explicitly,
 # never silent.
 #
-# IMP_VERIFY_COMMAND is surfaced from the `verify_command` project config key by
-# overlay_engine_env and injected into script-gate env by the engine.
+# IMP_VERIFY_COMMAND / IMP_VERIFY_TIMEOUT are surfaced from the `verify_command` /
+# `verify_timeout` project config keys by overlay_engine_env and injected into
+# script-gate env by the engine (both IMP_-prefixed, so the sandbox allowlist
+# passes them through unchanged).
 #
 # Script gates run with cwd set to the Change's tracked workflow dir; cd into the
 # project tree (IMP_PROJECT_ROOT, set by the engine) first.
@@ -46,6 +50,7 @@ if (( rc == 124 )); then
   echo "imp: the output above is truncated mid-run — verification did not fail" >&2
   echo "imp: at the last printed line; it ran out of time. Do not hunt for a" >&2
   echo "imp: hanging test. The command is slower than the gate timeout." >&2
+  echo "imp: raise the ceiling with the 'verify_timeout' config key (seconds)." >&2
 fi
 
 if (( rc == 0 )) && [[ -n "$tree" ]]; then

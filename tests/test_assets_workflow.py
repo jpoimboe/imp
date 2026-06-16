@@ -278,6 +278,28 @@ def test_plan_verify_commit_fast_path_skips_plan_review() -> None:
     assert isinstance(m.action, Goto) and m.action.target == "task-lead"
 
 
+def test_verify_gate_timeout_pauses_not_loops() -> None:
+    # run-verify.sh emits 124 (GNU timeout) when the suite outruns the ceiling.
+    # Re-running can't beat the clock, so every step that runs it must escalate to a
+    # human pause — never bounce the agent back into another doomed run.
+    from imp.assets import bundled_workflow_dir
+    from imp.engine.types import Pause
+    wf = load_workflow(bundled_workflow_dir("imp"))
+    steps = _steps(wf)
+    vars_ = {**_BASE_VARS, "merge_approved": True, "reintegrate_clean": True}
+    for name in ("verify", "sweep-verify", "integrate-verify"):
+        rules = steps[name].rules
+        timed_out = evaluate_rules(rules, vars=vars_,
+                                   output={"exit": 124, "stdout": "", "stderr": ""})
+        assert isinstance(timed_out.action, Pause), f"{name} must pause on exit 124"
+        # A real failure (non-zero, non-124) still routes back to the implementer.
+        failed = evaluate_rules(rules, vars=vars_,
+                                output={"exit": 1, "stdout": "", "stderr": ""})
+        assert not isinstance(failed.action, Pause), (
+            f"{name} must NOT pause on an ordinary failure"
+        )
+
+
 def test_plan_reviewer_blocking_reworks_and_clears_flag() -> None:
     from imp.assets import bundled_workflow_dir
     wf = load_workflow(bundled_workflow_dir("imp"))
