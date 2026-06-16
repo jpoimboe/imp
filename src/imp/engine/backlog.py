@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from imp.engine.change import Change
 
 from imp.engine import journal
 
@@ -63,3 +66,19 @@ def readiness(control_root: Path, depends_on: list[str]) -> tuple[bool, list[str
     journaled = set(journal.journal_ids(control_root))
     unmerged = [d for d in depends_on if d not in journaled]
     return (not unmerged, unmerged)
+
+
+def materialize_record(
+    control_root: Path, change_id: str, *, base_branch: str,
+) -> "Change":
+    # Runtime import avoids circular dependency (change.py imports nothing from backlog).
+    from imp.engine.change import Change
+
+    rec = read_record(control_root, change_id)
+    if rec is None:
+        raise FileNotFoundError(f"no backlog record {change_id!r}")
+    change = Change.create(
+        control_root, title=rec["title"], change_id=change_id,
+        base_branch=base_branch, depends_on=rec["depends_on"])
+    remove_record(control_root, change_id)
+    return change
