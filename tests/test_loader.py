@@ -910,7 +910,7 @@ def test_resolution_assigns_position_appropriate_tools(tmp_path: Path) -> None:
         })
     w = load_workflow(wf)
 
-    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change"}
+    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change", "create_change"}
     assert w.agents["worker"].tools == BASE_CAPS                     # subagent
     assert w.agents["leaf"].tools == top_leaf                       # top-level leaf
     assert w.agents["lead"].tools == top_leaf | {"task"}           # declares subagents

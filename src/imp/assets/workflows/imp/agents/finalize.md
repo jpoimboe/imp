@@ -65,6 +65,10 @@ only if cheap; do NOT make code changes). Populate:
   concerns here too.
 - `next_steps`: suggested follow-on work.
 
+These four fields (`built` / `verify_status` / `open_items` / `next_steps`) are
+the **audit record** — emitted on `complete_step` and queryable via `imp log` —
+not the script you read at the gate. Present them as prose in §3.
+
 ## Before/after UX capture — only when this change touched a UI surface
 
 This runs for ANY change (no playbook required) — the trigger is what the change
@@ -95,39 +99,71 @@ Carry both PNG paths into the merge-gate `wait_for_user` prompt (below), labelle
 driver is unavailable or a capture fails, say so in one line and proceed — a
 missing capture never blocks the merge.
 
-## 3. Decide — present, then route
+## 3. Present in prose, then walk the open items one at a time
 
-Present the summary and call `wait_for_user` with a `prompt` that makes the
-merge-vs-rework affordance explicit: state this is the final **merge gate**; list
-the **needs-decision** items (the ones the sweep left for a human call) and the
-one-line rollup of opportunistic fixes carried in `built`; tell the user to reply
-**merge** to merge into the base branch, or describe the **rework** to send the
-change back for re-planning. The sweep's fixes are trusted and re-reviewed — do not
-ask the human to bless them one by one.
+This is the final **merge gate**, and a human reads it. Speak in **prose**, never
+a labelled **field-dump**.
 
-When a human asks for rework and the request is underspecified, use `wait_for_user`
-to clarify the desired outcome and scope before returning a rework decision — settle
-the details first (a brainstorming-like posture), then hand a crisp, actionable
-brief to the plan-writer. An agent-detected `review` rework does NOT solicit here;
-this clarify step applies only to human-originated reworks.
-Separate sections with short labels or blank lines — do **not** draw full-width horizontal rules (`---` / `===`). Do not end your turn with plain text and no tool
-call (a bare turn-end is treated as a bug and will nudge you). In a headless run
-`wait_for_user` pauses for a human; only call it when you genuinely need one.
+Open with a concise human-readable summary of what changed: what was built (by
+plan/task), the verification state in plain terms, the one-line rollup of
+opportunistic improvements carried in `built`, and any **before/after** captures
+from the section above. Name genuinely controversial decisions **only when there
+were any** — do not manufacture controversy. The structured fields are the audit
+record (§2); your prose is what the human reads.
 
-When the user has decided (their reply is the `wait_for_user` tool result), and the
-merge-resolution review (if any) is sound:
-- Merge -> `complete_step(decision="merge", comments="<notes>", built=…, verify_status=…, open_items=…, next_steps=…)`.
-- Rework -> `complete_step(decision="rework", comments="<the user's feedback OR the
-  resolution problem, verbatim and actionable>", built=…, verify_status=…, open_items=…, next_steps=…)`.
-  Your `comments` are carried to the plan-writer as authoritative feedback — be
-  specific (name the task/behavior/file to change).
-- Cannot proceed without a human and none is available, or an unrecoverable problem
-  -> `complete_step(decision="pause", comments="<why>", built=…, verify_status=…, open_items=…, next_steps=…)`.
+Then walk the **needs-decision** items ONE AT A TIME — these are the
+`— needs-decision: <why>` lines the `deferred-sweep` left in
+`.imp/change/progress.md`, plus any flagged-uncertain merge resolutions or
+semantic concerns from §1. For EACH item, in its own `wait_for_user` solicit (one
+item per solicit):
+
+- Present the item in detail and give your **recommendation** — what you would do,
+  and why.
+- Ask the human to pick one of three dispositions:
+  - **fix now** — fix before merge. Collect the item into the rework brief and
+    leave its `progress.md` line `needs-decision` (it rides the rework and is
+    re-evaluated next pass).
+  - **hand to a follow-up** — defer it to a new backlog Change. Call
+    `create_change(title="<short title>", brief="<self-contained brief that needs
+    no other context>", depends_on=["{{ change.id }}"])`, then rewrite the item's
+    line to `- [x] DEFERRED <src>: <desc> [scope: …] — seeded <new-change-id>`,
+    and tell the human it is startable via `imp resume <new-change-id>` once this
+    change merges.
+  - **ignore** — drop it. Rewrite the line to
+    `- [x] DEFERRED <src>: <desc> [scope: …] — ignored-at-gate`.
+
+Both `seeded <id>` and `ignored-at-gate` are **terminal**: a later
+`deferred-sweep` or `finalize` pass treats them like `dismissed` and never
+re-raises them, so a rework pass re-surfaces only the fix-now work — no
+double-seeding, no re-asking.
+
+If there are no needs-decision items, present the prose summary and solicit a
+single decision via `wait_for_user`: reply **merge** to merge into the base
+branch, or describe the **rework** to send the change back for re-planning.
+
+When a human-requested rework is underspecified, settle the details first (a
+brainstorming-like posture) — use `wait_for_user` to clarify the desired outcome and scope before returning a rework decision — then hand a crisp brief to the
+plan-writer. An agent-detected `review` rework does NOT solicit here. Separate
+sections with short labels or blank lines — do **not** draw full-width horizontal rules (`---` / `===`). Do not end your turn with plain text and no tool call. In a
+headless run `wait_for_user` pauses for a human; only call it when you genuinely
+need one.
+
+Then route on the dispositions:
+- At least one **fix now** -> `complete_step(decision="rework", comments="<ONLY
+  the fix-now items as an actionable brief — name the task/behavior/file>",
+  built=…, verify_status=…, open_items=…, next_steps=…)`. Your `comments` are
+  carried to the plan-writer as authoritative feedback.
+- Otherwise -> `complete_step(decision="merge", comments="<notes>", built=…,
+  verify_status=…, open_items=…, next_steps=…)`. Close with a short summary
+  listing any follow-ups created, each with its `imp resume <id>` command.
+- Cannot proceed without a human and none is available, or an unrecoverable
+  problem -> `complete_step(decision="pause", comments="<why>", built=…,
+  verify_status=…, open_items=…, next_steps=…)`.
 
 Always emit the summary fields (`built` / `verify_status` / `open_items` /
 `next_steps`) on every `complete_step`, whichever decision you make — they land in
-the event log and are queryable via `imp log {{ change.slug }}`. Do not write files;
-do not commit.
+the event log and are queryable via `imp log {{ change.slug }}`. Do not write
+files (other than the `progress.md` line rewrites above); do not commit.
 
 ---
 

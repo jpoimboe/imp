@@ -563,6 +563,8 @@ def build_tree(events: Iterable[dict[str, Any]]) -> NarrativeTree:
 # Handlers populate this in subsequent tasks; change_created lives here so the
 # skeleton test passes.
 def _h_change_created(self: NarrativeBuilder, event: dict[str, Any], p: dict[str, Any]) -> None:
+    if p.get("kind") == "backlog":
+        return
     self._root.slug = p.get("slug")
     self._root.title = p.get("title", "")
     self._root.change_id = p.get("id")

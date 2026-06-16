@@ -32,6 +32,12 @@ never silently dropped). Do not reformat or delete lines you cannot parse. The
 `[scope: …]` tag is preserved metadata, not a ceiling — it does not constrain what
 you may fix.
 
+Two further terminal markers can appear on already-checked lines, written by the
+`finalize` merge gate: `— seeded <change-id>` (handed to a follow-up backlog
+Change) and `— ignored-at-gate` (dropped by a human). Like `— dismissed`, they
+are **inert** to this sweep — they sit on `- [x]` lines, so the `- [ ] DEFERRED `
+parse already skips them. Leave them untouched.
+
 ## Per item — gate on risk, not scope
 
 Load the receiving-code-review discipline

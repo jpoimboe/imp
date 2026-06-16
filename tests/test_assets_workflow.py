@@ -43,7 +43,7 @@ def test_default_agents_resolve_to_position_appropriate_tools(tmp_path: Path) ->
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
 
-    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change"}
+    top_leaf = BASE_CAPS | {"wait_for_user", "rename_change", "create_change"}
     top_dispatcher = top_leaf | {"task"}
     subagents = {
         "implementer", "quality-reviewer", "code-reviewer",
