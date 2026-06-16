@@ -202,3 +202,24 @@ def test_finalize_prompt_states_merge_gate_affordance() -> None:
     assert "merge gate" in low
     assert "rework" in low
     assert "reply" in low
+
+
+def test_finalize_walks_open_items_one_at_a_time() -> None:
+    low = FINALIZE.read_text().lower()
+    # Per-item walk with a recommendation, one item per solicit.
+    assert "one at a time" in low or "one item per" in low
+    assert "recommendation" in low
+    # The three per-item dispositions and their terminal markers.
+    assert "fix now" in low
+    assert "create_change" in low
+    assert "seeded" in low
+    assert "ignored-at-gate" in low
+    # Prose, not a labelled field-dump.
+    assert "prose" in low
+    assert "field-dump" in low
+
+
+def test_finalize_has_no_fyi_or_veto_vocabulary() -> None:
+    low = FINALIZE.read_text().lower()
+    for stale in ("fyi", "veto", "fyi-fixed", "silent-fixed", "still-deferred"):
+        assert stale not in low, f"reintroduced stale finalize vocabulary: {stale!r}"
