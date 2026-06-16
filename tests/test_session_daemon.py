@@ -520,3 +520,58 @@ def test_main_forwards_both_seed_and_resume_via_partial(
     assert fn.func is daemon.serve_change_session
     assert fn.args == (loaded,)
     assert fn.keywords == {"seed_opening": "hello seed", "resume": True}
+
+
+def _seed_control_default(root: Path) -> None:
+    import shutil
+
+    from imp.assets import default_workflow_dir
+    from tests.conftest import _git, _init_repo
+
+    _init_repo(root)
+    shutil.copytree(default_workflow_dir(), root / "imp" / "workflows" / "default")
+    (root / "imp" / "project.yaml").write_text("workflow: default\n")
+    (root / ".imp").mkdir(exist_ok=True)
+    (root / ".imp" / "config.yaml").write_text(
+        "providers: [anthropic]\n"
+        "tiers:\n  low: {anthropic: m}\n  medium: {anthropic: m}\n  high: {anthropic: m}\n"
+    )
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "imp setup (default workflow)")
+
+
+@pytest.mark.anyio
+async def test_resume_from_applies_rewind_under_the_daemon_lock(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.state import State
+
+    _seed_control_default(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(change.state_dir)
+    st.step = "review"
+    st.status = "paused"
+    st.loop_counts = {"task-lead": 2, "review": 6}
+    st.save(change.state_dir)
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False,
+            resume=True, from_target="review")
+
+    assert result is RunResult.COMPLETED
+
+    types = [e["type"] for e in change.event_log().read()]
+    assert "workflow_resumed" in types and "step_rewound" in types
+    assert types.index("workflow_resumed") < types.index("step_rewound")
+    assert "gates_bypassed" not in types
+
+    final = State.load(change.state_dir)
+
+    assert final.loop_counts == {"task-lead": 2}   # review reset, upstream kept

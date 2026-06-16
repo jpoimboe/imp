@@ -33,6 +33,7 @@ async def serve_change_session(
     tear_down: Callable[[Change], None] = tear_down_change,
     seed_opening: str | None = None,
     resume: bool = False,
+    from_target: str | None = None,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -56,6 +57,20 @@ async def serve_change_session(
                 agent_id=None, type="workflow_resumed", payload={})
             state = State.load(change.state_dir)
             state.status = "running"
+            # Callers must validate from_target; a raise here orphans the workflow_resumed entry.
+            if from_target is not None:
+                from imp.engine.loader import load_workflow
+                from imp.engine.recovery import apply_rewind, plan_rewind
+                from imp.providers.effective import load_effective_config
+
+                cfg = load_effective_config(
+                    project_root=change.project_root,
+                    control_root=change.control_root).config
+                workflow = load_workflow(
+                    change.workflow_dir, configured_tiers=cfg.tier_names())
+                # step_rewound follows workflow_resumed in the append-only log.
+                plan = plan_rewind(workflow, state, from_target)
+                apply_rewind(plan, workflow, state, change.event_log())
             state.save(change.state_dir)
         first_kwargs = (
             {"seed_opening": seed_opening} if seed_opening is not None else {})
