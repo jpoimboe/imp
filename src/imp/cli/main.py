@@ -2176,6 +2176,7 @@ def _cmd_update_workflow(args: argparse.Namespace) -> int:
                     "check git status before retrying.",
                     file=sys.stderr,
                 )
+            subprocess.run(["git", "clean", "-fd", "--", str(mirror)], cwd=control)
             return 2
     diff = subprocess.run(
         ["git", "show", "HEAD"],
