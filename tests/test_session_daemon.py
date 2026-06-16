@@ -391,3 +391,65 @@ async def test_seed_opening_is_forwarded_to_the_first_run_only(
         assert seeds == ["open the door", None]
         await client.aclose()
         tg.cancel_scope.cancel()
+
+
+@pytest.mark.anyio
+async def test_resume_marks_running_and_journals_workflow_resumed(
+    tmp_path: Path,
+) -> None:
+    from imp.engine.state import State
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(change.state_dir)
+    st.status = "paused"
+    st.save(change.state_dir)
+
+    seen: dict[str, str] = {}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        # The prep must already be visible to the run: status flipped to running.
+        seen["status"] = State.load(change.state_dir).status
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False, resume=True)
+
+    assert result is RunResult.COMPLETED
+    assert seen["status"] == "running"          # status flipped before the run
+    assert change.events_path.exists() and "workflow_resumed" in change.events_path.read_text()
+
+
+@pytest.mark.anyio
+async def test_default_spawn_does_no_resume_prep(tmp_path: Path) -> None:
+    from imp.engine.state import State
+    from tests.conftest import _seed_control
+
+    _seed_control(tmp_path)
+    change = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(change.state_dir)
+    st.status = "paused"
+    st.save(change.state_dir)
+
+    seen: dict[str, str] = {}
+
+    async def fake_run(
+        change: Change, *, on_event: Any, user_chat_input_fn: Any,
+        coordinator: Any,
+    ) -> RunResult:
+        seen["status"] = State.load(change.state_dir).status
+        return RunResult.COMPLETED
+
+    with anyio.fail_after(5):
+        result = await serve_change_session(
+            change, run_fn=fake_run, hibernate=False)  # resume defaults False
+
+    assert result is RunResult.COMPLETED
+    assert seen["status"] == "paused"           # untouched: no resume prep ran
+    assert not change.events_path.exists() or (
+        "workflow_resumed" not in change.events_path.read_text())

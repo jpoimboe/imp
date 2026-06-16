@@ -12,7 +12,7 @@ import anyio
 from imp.engine.abandon import tear_down_change
 from imp.engine.change import Change
 from imp.engine.executor import RunResult, run_change
-from imp.engine.state import ProjectLock
+from imp.engine.state import ProjectLock, State
 from imp.remote.session.discover import session_socket_path
 from imp.remote.session.server import SessionServer
 
@@ -32,6 +32,7 @@ async def serve_change_session(
     hibernate: bool = True,
     tear_down: Callable[[Change], None] = tear_down_change,
     seed_opening: str | None = None,
+    resume: bool = False,
 ) -> Any:
     # Shared coordinator: socket `interrupt` control frame → run_change's pause check.
     from imp.cli.signals import InterruptCoordinator
@@ -49,6 +50,13 @@ async def serve_change_session(
     async def _bound(*, on_event: Any, user_chat_input_fn: Any) -> Any:
         from imp.agents.tools.wait_for_user import AwaitingUserInput
 
+        if resume:
+            # Runs once under the daemon lock before the first run.
+            change.event_log().append(
+                agent_id=None, type="workflow_resumed", payload={})
+            state = State.load(change.state_dir)
+            state.status = "running"
+            state.save(change.state_dir)
         first_kwargs = (
             {"seed_opening": seed_opening} if seed_opening is not None else {})
         result = await run_fn(
