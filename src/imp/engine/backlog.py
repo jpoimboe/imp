@@ -70,7 +70,7 @@ def readiness(control_root: Path, depends_on: list[str]) -> tuple[bool, list[str
 
 def materialize_record(
     control_root: Path, change_id: str, *, base_branch: str,
-) -> "Change":
+) -> Change:
     # Runtime import avoids circular dependency (change.py imports nothing from backlog).
     from imp.engine.change import Change
 
