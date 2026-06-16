@@ -47,7 +47,8 @@ def test_writes_project_yaml_workflows_gitignore(tmp_path: Path) -> None:
     data = yaml.safe_load(proj.read_text())
     # The committed project file carries the workflow ref + project settings —
     # NO bindings (the floor owns tiers), NO providers/theme (user-homed).
-    assert data["workflow"] == "default"
+    assert data["default-workflow"] == "imp"
+    assert "workflow" not in data
     assert "tiers" not in data
     assert "providers" not in data
     assert "provider_envs" not in data
