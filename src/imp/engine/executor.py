@@ -258,9 +258,12 @@ async def run_change(
 
             # §3 case 1 — mid-flight Pause: pause BEFORE navigation (as today).
             if isinstance(action, Pause):
-                if coordinator.should_pause and step.kind == "agent":
-                    # User interrupt mid-step → keep the transcript on re-entry,
-                    # regardless of the provider's error classification.
+                if step.kind == "agent":
+                    # P1: any agent-step pause (quota, agent_incomplete, a fatal
+                    # provider error, OR a user interrupt) keeps the current
+                    # step's transcript so resume replays and continues it, not
+                    # re-runs fresh. The replay decision is driven by whether the
+                    # step has a kept transcript, not by how the run stopped.
                     state.resume_pending = state.step
                 reason = action.reason or "interrupt"
                 state.status = (
