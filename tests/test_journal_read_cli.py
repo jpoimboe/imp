@@ -219,7 +219,7 @@ def test_status_empty_prints_no_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """No in-flight worktrees + empty journal → exactly `No Changes.\\n`."""
+    """No in-flight worktrees + empty journal → exactly `No changes.\\n`."""
     import imp.cli.main as m
 
     _seed_control(tmp_path)
@@ -228,7 +228,7 @@ def test_status_empty_prints_no_changes(
 
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
-    assert capsys.readouterr().out == "No Changes.\n"
+    assert capsys.readouterr().out == "No changes.\n"
 
 
 def test_status_precondition_error_prints_no_changes(
@@ -247,7 +247,7 @@ def test_status_precondition_error_prints_no_changes(
 
     rc = m._cmd_status(type("NS", (), {"all": True})())
     assert rc == 0
-    assert capsys.readouterr().out == "No Changes.\n"
+    assert capsys.readouterr().out == "No changes.\n"
 
 
 def test_status_column_alignment_under_long_slug(

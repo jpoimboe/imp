@@ -10,6 +10,7 @@ from prompt_toolkit.output import DummyOutput
 from imp.cli.resume_select import Candidate, ResumePicker, run_picker
 
 _NOW = datetime(2026, 6, 11, 12, 0, 0, tzinfo=UTC)
+_HEADER = "Resume which change?"
 
 
 def _cands() -> list[Candidate]:
@@ -22,13 +23,13 @@ def _cands() -> list[Candidate]:
 
 
 def test_newest_is_preselected() -> None:
-    p = ResumePicker(_cands(), now=_NOW, color=False)
+    p = ResumePicker(_cands(), now=_NOW, color=False, header=_HEADER)
     assert p.index == 0
     assert p.selected().change_id == "2026-06-11-aaa111"
 
 
 def test_move_clamps_at_both_ends() -> None:
-    p = ResumePicker(_cands(), now=_NOW, color=False)
+    p = ResumePicker(_cands(), now=_NOW, color=False, header=_HEADER)
     p.move_up()                                  # already top → clamp
     assert p.index == 0
     p.move_down()
@@ -39,7 +40,7 @@ def test_move_clamps_at_both_ends() -> None:
 
 
 def test_render_marks_selection_and_uses_shared_formatter() -> None:
-    lines = ResumePicker(_cands(), now=_NOW, color=False).render().splitlines()
+    lines = ResumePicker(_cands(), now=_NOW, color=False, header=_HEADER).render().splitlines()
     assert lines[0].startswith("▸ ")             # selected (newest) gets the marker
     assert lines[1].startswith("  ")             # unselected gets blank gutter
     assert "Add version flag" in lines[0]        # TITLE via change_row formatter
@@ -48,7 +49,7 @@ def test_render_marks_selection_and_uses_shared_formatter() -> None:
 
 
 def test_render_marker_moves_after_navigation() -> None:
-    p = ResumePicker(_cands(), now=_NOW, color=False)
+    p = ResumePicker(_cands(), now=_NOW, color=False, header=_HEADER)
     p.move_down()
     lines = p.render().splitlines()
     assert lines[0].startswith("  ")             # first row no longer selected
@@ -64,7 +65,7 @@ def anyio_backend() -> str:
 async def test_picker_enter_resumes_preselected_newest() -> None:
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         pipe.send_text("\r")                     # enter at once → newest (index 0)
-        chosen = await run_picker(_cands(), now=_NOW, color=False)
+        chosen = await run_picker(_cands(), now=_NOW, color=False, header=_HEADER)
     assert chosen == "2026-06-11-aaa111"
 
 
@@ -73,7 +74,7 @@ async def test_picker_down_then_enter_selects_second() -> None:
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         pipe.send_text("\x1b[B")                 # down arrow
         pipe.send_text("\r")                     # enter
-        chosen = await run_picker(_cands(), now=_NOW, color=False)
+        chosen = await run_picker(_cands(), now=_NOW, color=False, header=_HEADER)
     assert chosen == "2026-06-10-bbb222"
 
 
@@ -81,7 +82,7 @@ async def test_picker_down_then_enter_selects_second() -> None:
 async def test_picker_q_cancels_to_none() -> None:
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         pipe.send_text("q")
-        chosen = await run_picker(_cands(), now=_NOW, color=False)
+        chosen = await run_picker(_cands(), now=_NOW, color=False, header=_HEADER)
     assert chosen is None
 
 
@@ -89,7 +90,7 @@ async def test_picker_q_cancels_to_none() -> None:
 async def test_picker_escape_cancels_to_none() -> None:
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         pipe.send_text("\x1b")                   # bare ESC
-        chosen = await run_picker(_cands(), now=_NOW, color=False)
+        chosen = await run_picker(_cands(), now=_NOW, color=False, header=_HEADER)
     assert chosen is None
 
 
@@ -97,5 +98,22 @@ async def test_picker_escape_cancels_to_none() -> None:
 async def test_picker_ctrl_c_cancels_to_none() -> None:
     with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
         pipe.send_text("\x03")                   # ctrl-c (a key here, not an OS signal)
-        chosen = await run_picker(_cands(), now=_NOW, color=False)
+        chosen = await run_picker(_cands(), now=_NOW, color=False, header=_HEADER)
     assert chosen is None
+
+
+def test_picker_stores_header_and_preselected_index() -> None:
+    p = ResumePicker(_cands(), now=_NOW, color=False,
+                     header="Abandon which change?", selected_index=1)
+    assert p.header == "Abandon which change?"
+    assert p.index == 1
+    assert p.selected().change_id == "2026-06-10-bbb222"
+
+
+@pytest.mark.anyio
+async def test_picker_enter_with_preselect_returns_that_index() -> None:
+    with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+        pipe.send_text("\r")                     # enter at once → the pre-selected row
+        chosen = await run_picker(_cands(), now=_NOW, color=False,
+                                  header="Show log for which change?", selected_index=1)
+    assert chosen == "2026-06-10-bbb222"
