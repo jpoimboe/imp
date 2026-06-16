@@ -962,7 +962,6 @@ async def _run_tui_session(
 
 
 def _record_backlog(args: argparse.Namespace, control: Path) -> int:
-    from imp.engine import backlog
     change_id = new_change_id(date=datetime.now(UTC).strftime("%Y-%m-%d"))
     backlog.write_record(
         control, change_id=change_id,
