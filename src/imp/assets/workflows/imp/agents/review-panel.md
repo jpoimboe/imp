@@ -114,7 +114,7 @@ For each finding you keep (after dismissing noise), ask two questions.
 **Q1 — block, or defer?**
 - **Block** ⇔ correctness is genuinely at stake **AND** the fix must be re-reviewed
   and gated before merge (not punt-able). → ask Q2.
-- **Defer** ⇔ a single best-effort sweep pass (fix-or-surface) is good enough. →
+- **Defer** ⇔ a single best-effort sweep pass (fixed / needs-decision / dismissed) is good enough. →
   append to `## Deferred Followups` (see below); it routes to `deferred-sweep`.
 
 The distinction is **not** "now vs later" (the sweep also runs before merge) but
