@@ -23,7 +23,6 @@ from typing import Any
 import yaml
 
 from imp.assets import bundled_workflow_dir, playbooks_dir
-from imp.engine.workflow_lifecycle import write_pristine
 from imp.cli.verify_detect import (
     detect_verify_command,
     format_verify_command_yaml,

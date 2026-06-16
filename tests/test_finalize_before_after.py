@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from imp.assets import default_workflow_dir
+from imp.assets import bundled_workflow_dir
 
 
 def _finalize_body() -> str:
-    return (default_workflow_dir() / "agents" / "finalize.md").read_text(
+    return (bundled_workflow_dir("imp") / "agents" / "finalize.md").read_text(
         encoding="utf-8")
 
 
