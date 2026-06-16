@@ -170,7 +170,7 @@ BASE_CAPS: frozenset[str] = frozenset({
     "read_file", "glob", "grep", "query_events", "bash",
     "edit_file", "write_file", "web_search", "web_fetch",
 })
-TOP_LEVEL_CAPS: frozenset[str] = frozenset({"wait_for_user", "rename_change"})
+TOP_LEVEL_CAPS: frozenset[str] = frozenset({"wait_for_user", "rename_change", "create_change"})
 
 # The maximal default grant any agent can receive. deny_tools only ever
 # subtracts from this set, so a deny entry outside it is a silent no-op
