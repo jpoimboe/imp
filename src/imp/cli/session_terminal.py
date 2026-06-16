@@ -57,6 +57,11 @@ async def run_terminal_client(
             stack.enter_context(anyio.open_signal_receiver(sigquit))
             if sigquit is not None else None)
         client = await attach(_on_event)
+        # Snapshot should_pause AFTER attach but BEFORE binding the runner.
+        # An interrupt that arrived during attach() found fn=None in signal_pause
+        # and wasn't forwarded to the daemon. Detect it here so the flush task
+        # can re-send CONTROL_INTERRUPT once the runner is bound.
+        _interrupt_before_runner = coord.should_pause
         try:
             controls = SessionControls(client, coord)
             async with anyio.create_task_group() as tg:
@@ -85,9 +90,15 @@ async def run_terminal_client(
                         coord.escalation_event.set()
                         break
 
+                async def _flush_pending_interrupt() -> None:
+                    if _interrupt_before_runner:
+                        from imp.remote.session.protocol import CONTROL_INTERRUPT
+                        await client.send_control(CONTROL_INTERRUPT)
+
                 tg.start_soon(_answer_gates)
                 tg.start_soon(_watch_force_quit)
                 tg.start_soon(_watch_sigquit)
+                tg.start_soon(_flush_pending_interrupt)
                 await client.receive_events()
                 tg.cancel_scope.cancel()
         finally:
