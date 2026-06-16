@@ -522,6 +522,71 @@ def test_main_forwards_both_seed_and_resume_via_partial(
     assert fn.keywords == {"seed_opening": "hello seed", "resume": True}
 
 
+def test_main_forwards_from_target_via_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--resume",
+        "--from=review",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.func is daemon.serve_change_session
+    assert fn.args == (loaded,)
+    assert fn.keywords == {"resume": True, "from_target": "review"}
+
+
+def test_main_forwards_from_target_without_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import functools
+
+    import imp.remote.session.daemon as daemon
+
+    loaded = object()
+    captured: dict[str, Any] = {}
+
+    def fake_load(control_root: Path, change_id: str) -> object:
+        return loaded
+
+    def fake_run(fn: Any) -> None:
+        captured["fn"] = fn
+
+    monkeypatch.setattr(daemon.Change, "load", staticmethod(fake_load))
+    monkeypatch.setattr(daemon.anyio, "run", fake_run)
+
+    rc = daemon.main([
+        "--control-root", str(tmp_path),
+        "--change-id", "2026-06-15-abc",
+        "--from=review",
+    ])
+
+    assert rc == 0
+    fn = captured["fn"]
+    assert isinstance(fn, functools.partial)
+    assert fn.keywords == {"from_target": "review"}
+
+
 def _seed_control_default(root: Path) -> None:
     import shutil
 

@@ -116,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--change-id", required=True)
     parser.add_argument("--seed-opening", default=None)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--from", dest="from_target", default=None)
     ns = parser.parse_args(argv)
     change = Change.load(Path(ns.control_root), ns.change_id)
     kwargs: dict[str, Any] = {}
@@ -123,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
         kwargs["seed_opening"] = ns.seed_opening
     if ns.resume:
         kwargs["resume"] = True
+    if ns.from_target is not None:
+        kwargs["from_target"] = ns.from_target
     if kwargs:
         anyio.run(functools.partial(serve_change_session, change, **kwargs))
     else:
