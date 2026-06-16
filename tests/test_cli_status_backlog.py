@@ -46,7 +46,7 @@ def test_cmd_status_prints_backlog_section(tmp_path: Path, monkeypatch, capsys) 
     assert "2026-06-16-rdy111" in out
 
 
-def test_cmd_status_no_changes_no_backlog_prints_message(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_cmd_status_empty_prints_no_backlog(tmp_path: Path, monkeypatch, capsys) -> None:
     _seed_control(tmp_path)
     monkeypatch.chdir(tmp_path)
     import argparse
