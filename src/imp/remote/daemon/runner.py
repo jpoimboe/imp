@@ -16,6 +16,7 @@ from typing import Any
 
 import anyio
 
+from imp.engine.change import Change
 from imp.remote.daemon import discover, spawn
 from imp.remote.daemon.commands import (
     HELP_TEXT,
@@ -38,6 +39,7 @@ from imp.remote.daemon.discover import socket_is_live, socket_path
 from imp.remote.daemon.focus import Focus
 from imp.remote.daemon.server import SouthHub
 from imp.remote.daemon.telegram_adapter import TelegramNorthAdapter, handle_for
+from imp.remote.session.reply import deliver_session_reply
 
 _log = logging.getLogger("imp.daemon")
 
@@ -330,6 +332,14 @@ async def _await_shutdown_signals(shutdown: anyio.Event) -> None:
         async for _signum in signals:
             shutdown.set()
             return
+
+
+async def deliver_to_session(
+    control_root: Path, change_id: str, text: str,
+) -> None:
+    """Deliver one reply into change_id's session daemon, rehydrating if hibernated."""
+    change = await anyio.to_thread.run_sync(Change.load, control_root, change_id)
+    await deliver_session_reply(change, text)
 
 
 async def run_daemon(
