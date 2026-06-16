@@ -95,7 +95,7 @@ async def test_run_closes_the_impty_session_in_teardown(
             self._closed = True
             closed.append(True)
 
-    monkeypatch.setattr("imp.providers.claude_code.ImptyDriver", _SpyDriver)
+    monkeypatch.setattr("impty.driver.ImptyDriver", _SpyDriver)
 
     scripted = [
         assistant(text("done"),

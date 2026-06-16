@@ -11,7 +11,6 @@ import pytest
 from impty.driver import ImptyDriver, _decode_keys
 from tests.impty.e2e_support import can_pty
 
-
 _SIGINT_CHILD = (
     "import os, signal, sys, time, tty\n"
     "def _handler(signum, frame):\n"

@@ -54,7 +54,6 @@ from imp.providers.codex_mcp import (
     start_impty_server,
     start_server,
 )
-from impty.driver import ImptyDriver
 
 _logger = logging.getLogger(__name__)
 
@@ -298,7 +297,7 @@ class CodexAgentRunner:
         # raises (Task 31: close the provision/seed teardown leak window).
         codex_home: Path | None = None
         impty_handle: ServerHandle | None = None
-        impty_driver: ImptyDriver | None = None
+        impty_driver: Any = None
         try:
             # 5a. Imp-side server-start ping: a single bearer-auth'd HTTP probe
             # against `server_handle.url` to fail fast before provisioning if
@@ -326,6 +325,7 @@ class CodexAgentRunner:
             #    decided here, at provision time, from the agent's declared tools.
             impty_bearer = secrets.token_urlsafe(24)
             if "impty" in invocation.agent_def.drivers:
+                from impty.driver import ImptyDriver
                 impty_driver = ImptyDriver()
                 impty_handle = await start_impty_server(
                     driver=impty_driver, bearer_token=impty_bearer,

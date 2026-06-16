@@ -2,7 +2,7 @@ from imp.engine.drivers import KNOWN_DRIVERS, driver_allowed_tools
 
 
 def test_impty_is_the_known_driver() -> None:
-    assert KNOWN_DRIVERS == frozenset({"impty"})
+    assert frozenset({"impty"}) == KNOWN_DRIVERS
 
 
 def test_allowed_tools_emits_sorted_wildcards() -> None:

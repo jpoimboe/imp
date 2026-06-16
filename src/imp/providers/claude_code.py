@@ -74,8 +74,6 @@ from imp.agents.transcript import (
 from imp.engine.agent_run import _resolve_wait_reply, drain_all_interjects_at_resume
 from imp.engine.drivers import driver_allowed_tools
 from imp.engine.schema import validate_agent_output
-from impty.driver import ImptyDriver
-from impty.mcp import impty_tool_specs
 from imp.providers import errors as perr
 from imp.providers._cc_builtins import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from imp.providers.base import Provider
@@ -570,9 +568,11 @@ def _wrap_one(
     return sdk_tool(name, t.description, schema, annotations=annotations)(_impl)
 
 
-async def _make_impty_sdk_tools(driver: ImptyDriver) -> list[Any]:
+async def _make_impty_sdk_tools(driver: Any) -> list[Any]:
     """Build SDK MCP tools for each ImptyDriver method, sourced from impty_tool_specs."""
     from claude_agent_sdk import tool as sdk_tool
+
+    from impty.mcp import impty_tool_specs
 
     specs = await impty_tool_specs(driver)
     return [_wrap_impty_one(spec, sdk_tool) for spec in specs]
@@ -581,7 +581,6 @@ async def _make_impty_sdk_tools(driver: ImptyDriver) -> list[Any]:
 def _wrap_impty_one(spec: Any, sdk_tool: Any) -> Any:
     allowed = set(spec.input_schema.get("properties", {}))
 
-    @sdk_tool(spec.name, spec.description, spec.input_schema)
     async def _impl(args: dict[str, Any]) -> dict[str, Any]:
         # Strip SDK-injected extras (e.g. __tool_use_id__); the driver methods take
         # only their declared params. Offload the blocking pty work to a thread so
@@ -593,7 +592,7 @@ def _wrap_impty_one(spec: Any, sdk_tool: Any) -> Any:
         except Exception as exc:
             return _tool_response(str(exc), is_error=True)
 
-    return _impl
+    return sdk_tool(spec.name, spec.description, spec.input_schema)(_impl)
 
 
 def _tool_response(text: str, *, is_error: bool) -> dict[str, Any]:
@@ -918,7 +917,7 @@ class ClaudeCodeAgentRunner:
         # kill the CLI subprocess (the only effect that breaks a stalled
         # receive_response()). None outside an active `async with client_ctx`.
         self._client: Any = None
-        self._impty_driver: ImptyDriver | None = None
+        self._impty_driver: Any = None
 
     def _build_options(self, invocation: AgentInvocation, mcp_server: Any,
                        tool_names: list[str], impty_server: Any = None) -> Any:
@@ -1085,6 +1084,7 @@ class ClaudeCodeAgentRunner:
         # the session no matter how the turn ends.
         impty_server = None
         if mcp_server is not None and "impty" in invocation.agent_def.drivers:
+            from impty.driver import ImptyDriver
             self._impty_driver = ImptyDriver()
             impty_tools = await _make_impty_sdk_tools(self._impty_driver)
             impty_server = create_sdk_mcp_server(name="impty", tools=impty_tools)

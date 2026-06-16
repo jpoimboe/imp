@@ -35,7 +35,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
-
 _logger = logging.getLogger(__name__)
 
 # ── render_config_toml ──────────────────────────────────────────────────────
