@@ -171,6 +171,9 @@ def _termination_from_result(
         "errors": getattr(sdk_msg, "errors", None),
     }
     labeled = _classify_agent_text(last_text)
+    status = detail["api_error_status"]
+    if labeled is None and isinstance(status, int) and 500 <= status < 600:
+        labeled = perr.NetworkError(f"claude_code: api_error_status={status}")
     if isinstance(labeled, (perr.QuotaError, perr.AuthError,
                             perr.NetworkError, perr.RateLimitError)):
         labeled.detail.update(detail)

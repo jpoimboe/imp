@@ -1426,3 +1426,38 @@ def test_termination_4xx_non_429_is_terminated() -> None:
     term = cc._termination_from_result(
         result(is_error=True), "API Error: 400 bad request", {})
     assert isinstance(term, perr.TerminatedError)
+
+
+def test_termination_api_error_status_5xx_is_network() -> None:
+    """A 5xx api_error_status with code-less text classifies as NetworkError."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=500), "the request failed", {})
+    assert isinstance(term, perr.NetworkError)
+    assert term.category == "network"
+    assert term.detail["api_error_status"] == 500
+
+
+def test_termination_api_error_status_429_is_not_rate_limit() -> None:
+    """There is no api_error_status=429 branch: a 429 status with code-less text
+    stays TerminatedError (the only 429 retry path is the text classifier)."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=429), "the request failed", {})
+    assert isinstance(term, perr.TerminatedError)
+
+
+def test_termination_text_label_wins_over_api_error_status() -> None:
+    """Text classification wins over api_error_status: if _classify_agent_text
+    returns a label, the 5xx status fallback does not override it."""
+    from imp.providers import claude_code as cc
+    from imp.providers import errors as perr
+
+    term = cc._termination_from_result(
+        result(is_error=True, api_error_status=500), "API Error: 429 rate limited", {})
+    assert isinstance(term, perr.RateLimitError)
+    assert term.category == "rate_limit"
