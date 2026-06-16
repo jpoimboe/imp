@@ -45,6 +45,14 @@ def test_hash_changes_when_a_file_is_removed(tmp_path: Path) -> None:
     assert hash_workflow_dir(d) != h1
 
 
+def test_hash_changes_when_a_file_is_renamed(tmp_path: Path) -> None:
+    d = tmp_path / "wf"
+    _mk(d)
+    h1 = hash_workflow_dir(d)
+    (d / "agents" / "a.md").rename(d / "agents" / "z.md")
+    assert hash_workflow_dir(d) != h1
+
+
 def test_hash_ignores_the_pristine_stamp(tmp_path: Path) -> None:
     d = tmp_path / "wf"
     _mk(d)
