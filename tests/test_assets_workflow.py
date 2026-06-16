@@ -543,7 +543,7 @@ def test_autosquash_non_fast_path_goes_to_review() -> None:
 
 
 def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/default").resolve()
+    asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     perms = _steps(wf)["spec-writer"].fs_permissions
@@ -554,7 +554,7 @@ def test_spec_writer_writes_under_artifacts(tmp_path: Path) -> None:
 
 
 def test_plan_writer_writes_under_artifacts(tmp_path: Path) -> None:
-    asset = Path("src/imp/assets/workflows/default").resolve()
+    asset = Path("src/imp/assets/workflows/imp").resolve()
     shutil.copytree(asset, tmp_path / "wf")
     wf = load_workflow(tmp_path / "wf")
     perms = _steps(wf)["plan-writer"].fs_permissions
