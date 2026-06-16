@@ -75,3 +75,67 @@ def test_allocate_returns_seeded_fresh_dir(tmp_path: Path) -> None:
     inv_id, target = _allocate_subagent_dir(ctx, "implementer")
     assert inv_id == 2
     assert target == base / "implementer-2"
+
+
+class _RecLog:
+    """Minimal capturing EventLog stand-in (matches the append(**kw) shape)."""
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def append(self, **kw: object) -> None:
+        self.events.append(kw)
+
+
+def _write_stale_transcript(target_dir: Path) -> None:
+    """A non-empty transcript.jsonl — the exact shape the runner's resume branch
+    keys on (Transcript(...).load() truthy)."""
+    from imp.agents.runner import Message, TextBlock
+    from imp.agents.transcript import Transcript
+    Transcript(target_dir / "transcript.jsonl").append(
+        Message(role="user", content=(TextBlock(text="stale pre-pause turn"),)))
+
+
+# --- C2: fresh-dir invariant + re-allocation --------------------------------
+
+def test_collision_reallocates_and_warns(tmp_path: Path) -> None:
+    """When the allocated id lands on an existing non-empty transcript (a C1
+    under-count regression, simulated by pre-setting the counter past the seed
+    guard), the allocator re-allocates to a fresh dir and emits exactly one
+    runner_warning carrying the colliding path and both ids."""
+    from imp.agents.subagents import _allocate_subagent_dir
+    from imp.agents.transcript import Transcript
+    ctx = _ctx(tmp_path)
+    ctx.event_log = _RecLog()
+    ctx._subagent_counter = 1   # seed guard skips; next id (2) will collide
+    base = ctx.parent_transcript_dir / "subagents"
+    _write_stale_transcript(base / "implementer-2")
+
+    inv_id, target = _allocate_subagent_dir(ctx, "implementer")
+
+    assert inv_id == 3
+    assert target == base / "implementer-3"
+    assert Transcript(target / "transcript.jsonl").load() == []   # fresh/empty
+
+    warns = [e for e in ctx.event_log.events if e["type"] == "runner_warning"]
+    assert len(warns) == 1
+    payload = warns[0]["payload"]
+    assert payload["attempted_id"] == 2
+    assert payload["reallocated_id"] == 3
+    assert payload["colliding_path"] == str(base / "implementer-2")
+    assert "message" in payload
+
+
+def test_no_warning_when_no_collision(tmp_path: Path) -> None:
+    """An empty/absent dir is NOT a collision (the runner only resumes a non-empty
+    transcript): no re-allocation, no warning."""
+    from imp.agents.subagents import _allocate_subagent_dir
+    ctx = _ctx(tmp_path)
+    ctx.event_log = _RecLog()
+    base = ctx.parent_transcript_dir / "subagents"
+    (base / "implementer-1").mkdir(parents=True)   # empty dir, no transcript.jsonl
+
+    inv_id, target = _allocate_subagent_dir(ctx, "implementer")
+
+    assert inv_id == 2
+    assert target == base / "implementer-2"
+    assert ctx.event_log.events == []

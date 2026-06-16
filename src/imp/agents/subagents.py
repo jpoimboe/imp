@@ -9,6 +9,7 @@ deadlock that would otherwise hit.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 from pathlib import Path
@@ -19,6 +20,7 @@ from imp.agents.prompts import build_context, render_prompt
 from imp.agents.runner import ChangeContext, Message, TextBlock
 from imp.agents.tools import Tool
 from imp.agents.tools.context import ToolContext
+from imp.agents.transcript import Transcript
 from imp.engine.agent_run import (
     SubagentSuspended as SubagentSuspended,
 )
@@ -128,13 +130,49 @@ def _seed_subagent_counter(ctx: ToolContext) -> None:
 
 
 def _allocate_subagent_dir(ctx: ToolContext, subagent_name: str) -> tuple[int, Path]:
-    """Seed the counter from disk, then allocate the next invocation id and its
-    transcript dir."""
+    """Seed the counter from disk, allocate the next invocation id and its
+    transcript dir, then re-allocate past any target whose transcript is
+    non-empty — the runner's exact resume condition
+    (Transcript(target / "transcript.jsonl").load() truthy). A fresh dispatch
+    therefore never lands on a stale transcript the runner would misread as a
+    resume. Emits one runner_warning per re-allocation."""
     _seed_subagent_counter(ctx)
     assert ctx.parent_transcript_dir is not None  # re-narrow (see helper above)
-    invocation_id = ctx.next_subagent_invocation_id()
     base = ctx.parent_transcript_dir / "subagents"
-    return invocation_id, base / f"{subagent_name}-{invocation_id}"
+    invocation_id = ctx.next_subagent_invocation_id()
+    target = base / f"{subagent_name}-{invocation_id}"
+    attempted_id = invocation_id
+    collided: Path | None = None
+    while Transcript(target / "transcript.jsonl").load():
+        if collided is None:
+            collided = target
+        invocation_id = ctx.next_subagent_invocation_id()
+        target = base / f"{subagent_name}-{invocation_id}"
+    if collided is not None:
+        _emit_collision_warning(ctx, collided, attempted_id, invocation_id)
+    return invocation_id, target
+
+
+def _emit_collision_warning(
+    ctx: ToolContext, colliding: Path, attempted_id: int, reallocated_id: int,
+) -> None:
+    """Best-effort notification of a re-allocation (the re-allocation itself is the
+    safety; this is notification only). Mirrors bg's runner_warning emit shape —
+    message is REQUIRED (the UI consumer renders payload.get("message", "?"))."""
+    if ctx.event_log is None:
+        return
+    with contextlib.suppress(Exception):
+        ctx.event_log.append(
+            agent_id=ctx.agent_id, type="runner_warning",
+            payload={
+                "message": (
+                    f"subagent transcript dir collision: id {attempted_id} would "
+                    f"resume the stale transcript at {colliding}; re-allocated to "
+                    f"id {reallocated_id}"),
+                "colliding_path": str(colliding),
+                "attempted_id": attempted_id,
+                "reallocated_id": reallocated_id,
+            })
 
 
 async def dispatch_task(
