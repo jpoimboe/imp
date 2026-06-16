@@ -323,9 +323,10 @@ class CodexAgentRunner:
             #    controlled via config.toml's top-level key (the deprecated SDK
             #    flag no longer disables it on codex >=0.137), so it must be
             #    decided here, at provision time, from the agent's declared tools.
-            impty_bearer = secrets.token_urlsafe(24)
+            impty_bearer: str | None = None
             if "impty" in invocation.agent_def.drivers:
                 from impty.driver import ImptyDriver
+                impty_bearer = secrets.token_urlsafe(24)
                 impty_driver = ImptyDriver()
                 impty_handle = await start_impty_server(
                     driver=impty_driver, bearer_token=impty_bearer,
