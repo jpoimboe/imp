@@ -2145,6 +2145,21 @@ def _cmd_artifact_commit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _backlog_status_lines(control: Path, *, now: datetime) -> list[str]:
+    """One line per backlog Change: id, ready/blocked, age, created_by, title."""
+    recs = sorted(backlog.list_records(control),
+                  key=lambda r: r.get("created_at", ""), reverse=True)
+    lines: list[str] = []
+    for rec in recs:
+        ready, unmerged = backlog.readiness(control, rec["depends_on"])
+        state = "ready" if ready else f"blocked on {', '.join(unmerged)}"
+        age = change_row.relative_age(rec.get("created_at"), now=now)
+        lines.append(
+            f"  {rec['id']}  {state}  {age}  {rec['created_by']}  "
+            f"{rec['title'] or '(unnamed)'}")
+    return lines
+
+
 def _cmd_status(args: argparse.Namespace) -> int:
     try:
         control = _control_root()
@@ -2154,13 +2169,14 @@ def _cmd_status(args: argparse.Namespace) -> int:
     _notice = workflow_update_notice(control)
     if _notice is not None:
         print(f"imp: {_notice}")
+    now = datetime.now(UTC)
     inflight = _sort_rows_newest_first(_status_rows(control))
     past = _sort_rows_newest_first(_completed_rows(control)) if args.all else []
-    if not inflight and not past:
+    backlog_lines = _backlog_status_lines(control, now=now)
+    if not inflight and not past and not backlog_lines:
         print(_NO_CHANGES_MESSAGE)
         return 0
     color = should_use_color(sys.stdout)
-    now = datetime.now(UTC)
     print(change_row.header_line(color=color))
     for r in inflight:
         print(change_row.format_change_line(
@@ -2173,6 +2189,12 @@ def _cmd_status(args: argparse.Namespace) -> int:
             print(change_row.format_change_line(
                 change_id=r[0], title=r[4], status=r[1], step=r[2],
                 last_iso=r[3], now=now, color=color, dim=True))
+    if backlog_lines:
+        if inflight or past:
+            print()
+        print("Backlog")
+        for line in backlog_lines:
+            print(line)
     return 0
 
 
