@@ -5,6 +5,7 @@ import os
 import queue
 import socket
 import threading
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,32 @@ def test_worker_gate_logs_once_then_suppresses_until_a_success(
     debugs = [r for r in caplog.records if r.levelno == logging.DEBUG]
     assert len(warnings) == 2
     assert len(debugs) == 1
+
+
+def test_worker_gate_omits_traceback_for_transient_network_errors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A connection reset on the Telegram long-poll is routine and self-healing:
+    # one concise WARNING line, no alarming traceback.
+    transient = urllib.error.URLError(ConnectionResetError(104, "Connection reset by peer"))
+    with caplog.at_level(logging.WARNING, logger="imp.daemon"):
+        runner._WorkerGate().fail(transient)
+    (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "transient network error" in record.message
+    assert record.exc_info is None
+
+
+def test_worker_gate_keeps_traceback_for_unexpected_errors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # An HTTPError (bad token / conflict) is persistent config, not a blip — it
+    # keeps the full traceback so the operator can see what is actually wrong.
+    http_error = urllib.error.HTTPError("u", 401, "Unauthorized", {}, None)  # type: ignore[arg-type]
+    with caplog.at_level(logging.WARNING, logger="imp.daemon"):
+        runner._WorkerGate().fail(http_error)
+    (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "transient network error" not in record.message
+    assert record.exc_info is not None
 
 
 class _RaiseThenStopAdapter:
