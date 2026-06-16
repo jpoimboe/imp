@@ -2126,7 +2126,8 @@ def _cmd_update_workflow(args: argparse.Namespace) -> int:
         print(f"imp: {e}", file=sys.stderr)
         return 2
     try:
-        name = args.name or parse_default_workflow(control / "imp" / "project.yaml")
+        explicit = getattr(args, "name", None)
+        name = explicit or parse_default_workflow(control / "imp" / "project.yaml")
     except (LoadError, LoadErrors) as e:
         print(f"imp: {e}", file=sys.stderr)
         return 2
