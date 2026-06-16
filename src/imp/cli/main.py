@@ -1230,6 +1230,14 @@ async def _async_cmd_resume(args: argparse.Namespace) -> int:
             # (design "Resume — no replay").
             change.event_log().append(
                 agent_id=None, type="workflow_resumed", payload={})
+            # P1 crash recovery: a crashed run (status still "running" on disk)
+            # never set resume_pending, so the executor would enter the current
+            # step fresh and re-burn its work/quota. Keep and replay the current
+            # step's transcript. A never-ran step (empty transcript) still starts
+            # fresh via _resume_replays_transcript. Skipped on a --from rewind,
+            # which manages resume_pending through apply_rewind.
+            if from_target is None and state.status == "running":
+                state.resume_pending = state.step
             state.status = "running"
             # Apply the rewind AFTER the resume marker so step_rewound follows
             # workflow_resumed in the append-only log.

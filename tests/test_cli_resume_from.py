@@ -207,6 +207,42 @@ def test_rewind_note_line_states_from_and_to() -> None:
         "rewound from start to spec"
 
 
+def test_crash_recovery_sets_resume_pending_to_current_step(tmp_path, monkeypatch) -> None:
+    """A hard-killed run leaves status='running' on disk and never set
+    resume_pending. P1: crash recovery must keep and replay the CURRENT step's
+    transcript, so resume_pending is set to the cursor before run_change."""
+    import argparse
+
+    import anyio
+
+    import imp.cli.main as m
+    from imp.engine.change import Change
+    from imp.engine.executor import RunResult
+    from imp.engine.state import State
+
+    _seed_control_default(tmp_path)
+    ch = Change.create(tmp_path, title="x", change_id="feat", base_branch="main")
+    st = State.load(ch.state_dir)
+    st.step = "review"
+    st.status = "running"          # crashed: status on disk, lock freed by the OS
+    st.resume_pending = None
+    st.save(ch.state_dir)
+
+    captured: dict[str, object] = {}
+
+    async def fake_run_change(change, **kwargs):
+        captured["resume_pending"] = State.load(change.state_dir).resume_pending
+        return RunResult.COMPLETED
+
+    monkeypatch.setattr(m, "_control_root", lambda: tmp_path)
+    monkeypatch.setattr(m, "run_change", fake_run_change)
+
+    args = argparse.Namespace(token="feat", from_target=None)
+    rc = anyio.run(m._async_cmd_resume, args)
+    assert rc == 0
+    assert captured["resume_pending"] == "review"
+
+
 def test_async_cmd_resume_installs_benign_loop_handler(tmp_path, monkeypatch) -> None:
     import argparse
     import contextlib
