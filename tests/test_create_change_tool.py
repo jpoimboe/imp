@@ -50,6 +50,7 @@ def test_create_change_writes_record_and_emits_event(tmp_path: Path) -> None:
     new_id = rec_ids[0]
     assert new_id in msg
     rec = backlog.read_record(ch.control_root, new_id)
+    assert rec is not None
     assert rec["title"] == "Follow-up: extract helper"
     assert rec["brief"] == "extract the duplicated parser into one function"
     assert rec["depends_on"] == [ch.id]
