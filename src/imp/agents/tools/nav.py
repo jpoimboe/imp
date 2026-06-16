@@ -27,20 +27,26 @@ from imp.agents.tools.limits import (
     OUTPUT_TRUNCATION_MARKER,
     TOOL_OUTPUT_CAP_BYTES,
     TOOL_WALLCLOCK_TIMEOUT_S,
+    leads_to_or_within_artifacts,
     read_text_capped,
     tool_checkpoint,
+    within_artifacts,
 )
 from imp.agents.tools.lines import file_is_cap_truncated, split_lines, truncate_line
 
 
-def _iter_files(target: Path, policy: Any = None) -> Iterator[Path]:
+def _iter_files(target: Path, policy: Any = None,
+                root: Path | None = None) -> Iterator[Path]:
     """Files under `target`, never descending into an excluded control/VCS dir
-    (A3). `os.walk` with in-place `dirnames` pruning means the walk does not even
-    *enumerate* inside `.imp/`/`.git/`. When `policy` is an active SandboxPolicy,
-    additionally prune directories and drop files whose resolved path fails
-    `policy.allows_read` — the in-process mirror of the bwrap secret masks, so the
-    search tool never out-reads `bash`-under-bwrap (a symlink into a masked dir is
-    dropped by resolving before the check)."""
+    (A3) — EXCEPT the per-change artifact subtree .imp/change/artifacts/, which is
+    surfaced (passed via `root`, the worktree root, so the carve-out is anchored
+    there; `root=None` for external targets keeps the old exclude-everything
+    behavior). `os.walk` with in-place `dirnames` pruning means the walk does not
+    even *enumerate* inside `.imp/`/`.git/` beyond the carve-out. When `policy` is
+    an active SandboxPolicy, additionally prune directories and drop files whose
+    resolved path fails `policy.allows_read` — the in-process mirror of the bwrap
+    secret masks, so the search tool never out-reads `bash`-under-bwrap (a symlink
+    into a masked dir is dropped by resolving before the check)."""
     if target.is_file():
         yield target
         return
@@ -54,7 +60,14 @@ def _iter_files(target: Path, policy: Any = None) -> Iterator[Path]:
         # filesystem's whim. Prunes excluded control/VCS dirs (A3) and, under
         # an active policy, secret-masked dirs (pruned in place: never enumerated
         # inside).
-        keep = sorted(d for d in dirnames if d not in EXCLUDED_DIRS)
+        keep: list[str] = []
+        for d in sorted(dirnames):
+            if d in EXCLUDED_DIRS:
+                child = Path(dirpath) / d
+                if not (root is not None and child.is_relative_to(root)
+                        and leads_to_or_within_artifacts(child.relative_to(root))):
+                    continue
+            keep.append(d)
         if masking:
             keep = [d for d in keep
                     if policy.allows_read((Path(dirpath) / d).resolve())]
@@ -70,6 +83,13 @@ def _iter_files(target: Path, policy: Any = None) -> Iterator[Path]:
             # explicit intent.)
             if not p.is_file():
                 continue
+            # A file directly under an excluded dir (e.g. .imp/events.jsonl) stays
+            # hidden even though the walk descended .imp to reach the artifact subtree.
+            if root is not None and p.is_relative_to(root):
+                rel = p.relative_to(root)
+                if (any(part in EXCLUDED_DIRS for part in rel.parts)
+                        and not within_artifacts(rel)):
+                    continue
             if masking and not policy.allows_read(p.resolve()):
                 continue
             yield p
@@ -82,7 +102,8 @@ def _iter_files(target: Path, policy: Any = None) -> Iterator[Path]:
         "src/**/*.ts) under an optional `path` base (default '.'). Absolute "
         "and out-of-worktree bases are accepted, bounded by the sandbox like "
         "bash; in-worktree matches are reported relative to the root, external "
-        "matches as absolute paths. Skips .imp/ and .git/. Uses pathlib glob "
+        "matches as absolute paths. Skips .imp/ and .git/ except the change's "
+        ".imp/change/artifacts/ subtree. Uses pathlib glob "
         "semantics — a bare *.py matches top-level files only; this differs "
         "from grep's `glob` parameter, where * and ** cross /. The `pattern` "
         "stays relative; search elsewhere via `path`, not an absolute pattern."
@@ -108,7 +129,8 @@ async def glob(ctx: ToolContext, pattern: str, path: str = ".") -> str:
                 continue
         elif masking and not policy.allows_read(resolved):
             continue                            # masked secret behind a symlink/in-tree
-        if any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts):
+        if (any(part in EXCLUDED_DIRS for part in p.relative_to(base).parts)
+                and not (inside and within_artifacts(resolved.relative_to(root)))):
             continue
         out.append(p.relative_to(root).as_posix() if inside else p.as_posix())
     return "\n".join(out) if out else "(no matches)"
@@ -171,7 +193,8 @@ _GREP_MODES = ("files_with_matches", "content", "count")
         "content (`…[truncated]` on >2000-char lines, U+FFFD for invalid "
         "bytes) plus the invisible trailing \\r that IS content on CRLF "
         "lines — never paste rows into edit_file/write_file. "
-        "Skips .imp/ and .git/; scans the first 5 MB per file; output capped "
+        "Skips .imp/ and .git/ except the change's .imp/change/artifacts/ subtree; "
+        "scans the first 5 MB per file; output capped "
         "at 50 KB. Absolute and out-of-worktree paths are accepted, bounded by "
         "the sandbox like bash (in-worktree matches reported relative, external "
         "matches as absolute paths); an external-directory search stops after a "
@@ -255,7 +278,7 @@ async def grep(
 
     files_scanned = 0
     walk_capped = False
-    for f in _iter_files(target, policy):
+    for f in _iter_files(target, policy, root if inside else None):
         if capped or limit_hit:
             break
         if external and files_scanned >= EXTERNAL_WALK_FILE_CAP:

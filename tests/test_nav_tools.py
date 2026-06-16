@@ -335,3 +335,33 @@ def test_grep_description_notes_sandbox_and_walk_cap() -> None:
     desc = get_registry()["grep"].description
     assert "bounded by the sandbox like bash" in desc
     assert "external" in desc and "cap" in desc
+
+
+def test_glob_surfaces_artifact_subtree_but_not_rest_of_imp(tmp_path: Path) -> None:
+    plans = tmp_path / ".imp" / "change" / "artifacts" / "plans"
+    plans.mkdir(parents=True)
+    (plans / "feat-plan-1.md").write_text("# plan 1\n")
+    (plans / "feat-plan-2.md").write_text("# plan 2\n")
+    (tmp_path / ".imp" / "events.jsonl").write_text("runtime log\n")  # must stay hidden
+
+    out = _glob(_ctx(tmp_path),
+                pattern=".imp/change/artifacts/plans/feat-plan-*.md")
+    assert ".imp/change/artifacts/plans/feat-plan-1.md" in out
+    assert ".imp/change/artifacts/plans/feat-plan-2.md" in out
+
+    # A wildcard sweep surfaces the artifacts but never the runtime files.
+    out_all = _glob(_ctx(tmp_path), pattern="**/*")
+    assert ".imp/change/artifacts/plans/feat-plan-1.md" in out_all
+    assert "events.jsonl" not in out_all
+
+
+def test_grep_surfaces_artifact_subtree_but_not_rest_of_imp(tmp_path: Path) -> None:
+    art = tmp_path / ".imp" / "change" / "artifacts" / "spec"
+    art.mkdir(parents=True)
+    (art / "feat.md").write_text("the DECISION is X\n")
+    # A runtime file with the same needle: it must remain excluded.
+    (tmp_path / ".imp" / "events.jsonl").write_text("the DECISION leaked\n")
+
+    out = _grep(_ctx(tmp_path), pattern="DECISION", path=".")
+    assert ".imp/change/artifacts/spec/feat.md" in out
+    assert "events.jsonl" not in out
