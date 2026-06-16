@@ -89,16 +89,21 @@ class SessionServer:
         return result
 
     def _emit(self, event: dict[str, Any]) -> None:
+        if event.get("type") == "awaiting_user_input":
+            self.set_pending_prompt(event)
         self._event_send.send_nowait(event)
 
     async def _pump(self) -> None:
         async for event in self._event_recv:
             await self._socket.broadcast(event)
 
-    def _chat(self, _query: str) -> Awaitable[str]:
-        if self._hibernate:
-            return self._hibernation_gate()
-        return self._socket.next_input()
+    async def _chat(self, _query: str) -> str:
+        try:
+            if self._hibernate:
+                return await self._hibernation_gate()
+            return await self._socket.next_input()
+        finally:
+            self.set_pending_prompt(None)
 
     async def _hibernation_gate(self) -> str:
         from imp.agents.tools.wait_for_user import AwaitingUserInput
