@@ -66,15 +66,15 @@ async def impty_tool_specs(driver: ImptyDriver) -> list[ImptyToolSpec]:
     in `tool_methods()` order. Introspected from a FastMCP build so the schema and
     description match the codex/standalone hosts exactly."""
     server = build_server(driver)
-    by_name = {m.__name__: m for m in driver.tool_methods()}
+    tools_by_name = {t.name: t for t in await server.list_tools()}
     return [
         ImptyToolSpec(
-            name=t.name,
-            description=t.description or "",
-            input_schema=t.inputSchema,
-            method=by_name[t.name],
+            name=m.__name__,
+            description=tools_by_name[m.__name__].description or "",
+            input_schema=tools_by_name[m.__name__].inputSchema,
+            method=m,
         )
-        for t in await server.list_tools()
+        for m in driver.tool_methods()
     ]
 
 
